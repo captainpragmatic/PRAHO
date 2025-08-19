@@ -138,9 +138,8 @@ STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
 # ===============================================================================
 
 # Test company info for development
-ROMANIA_COMPANY_INFO.update({
-    'name': 'PragmaticHost Dev SRL',
-    'cui': 'RO99999999',
-    'reg_com': 'J40/9999/2024',
+ROMANIAN_BUSINESS_CONTEXT.update({
+    'company_name': 'PragmaticHost Dev SRL',
+    'company_cui': 'RO99999999',
     'email': 'dev@pragmatichost.com',
 })
