@@ -5,7 +5,7 @@
 
 [![Django 5.x](https://img.shields.io/badge/Django-5.x-green.svg)](https://www.djangoproject.com/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16+-blue.svg)](https://www.postgresql.org/)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE.md)
 [![Code Quality](https://img.shields.io/badge/code%20quality-excellent-green.svg)]()
 
 ## 📋 Overview
@@ -317,7 +317,9 @@ Professional support and customization available for Romanian hosting providers.
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later) - see the [LICENSE.md](LICENSE.md) file for details.
+
+**Attribution Requirements**: If you deploy this software (including over a network), you must preserve the attribution notice in the "About" or similar screen as specified in the license.
 
 ## 📋 TODO: Missing Critical Features
 
