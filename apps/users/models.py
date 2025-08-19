@@ -1,0 +1,403 @@
+"""
+User models for PRAHO Platform
+Romanian hosting provider authentication with multi-customer support.
+"""
+
+from django.contrib.auth.models import AbstractUser, BaseUserManager
+from django.db import models
+from django.core.validators import RegexValidator
+from django.utils.translation import gettext_lazy as _
+
+from apps.common.types import validate_email, validate_romanian_phone
+
+
+class UserManager(BaseUserManager):
+    """Custom user manager for email-based authentication"""
+    
+    def create_user(self, email, password=None, **extra_fields):
+        """Create and return a regular user with email and password"""
+        if not email:
+            raise ValueError('The Email field must be set')
+        email = self.normalize_email(email)
+        user = self.model(email=email, **extra_fields)
+        user.set_password(password)
+        user.save(using=self._db)
+        return user
+    
+    def create_superuser(self, email, password=None, **extra_fields):
+        """Create and return a superuser with email and password"""
+        extra_fields.setdefault('is_staff', True)
+        extra_fields.setdefault('is_superuser', True)
+        
+        if extra_fields.get('is_staff') is not True:
+            raise ValueError('Superuser must have is_staff=True.')
+        if extra_fields.get('is_superuser') is not True:
+            raise ValueError('Superuser must have is_superuser=True.')
+        
+        return self.create_user(email, password, **extra_fields)
+
+
+class User(AbstractUser):
+    """
+    Extended user model for Romanian hosting provider.
+    Supports both system users (staff) and customer users with hybrid approach.
+    """
+    
+    # Staff roles for internal staff (nullable for customer users)
+    STAFF_ROLE_CHOICES = [
+        ('admin', _('System Administrator')),
+        ('support', _('Support Agent')),
+        ('billing', _('Billing Staff')),
+        ('manager', _('Manager')),
+    ]
+    
+    # Basic information
+    username = None  # Remove username field, using email instead
+    email = models.EmailField(_('email address'), unique=True)
+    phone = models.CharField(
+        max_length=20, 
+        blank=True,
+        validators=[RegexValidator(r'^(\+40|0)[0-9]{9,10}$', _('Invalid Romanian phone number'))]
+    )
+    
+    # Staff role for internal staff users (null for customer users)
+    staff_role = models.CharField(
+        max_length=20, 
+        choices=STAFF_ROLE_CHOICES, 
+        null=True, 
+        blank=True,
+        help_text=_('Staff role for internal staff. Leave empty for customer users.')
+    )
+    
+    # Two-factor authentication
+    two_factor_enabled = models.BooleanField(default=False)
+    two_factor_secret = models.CharField(max_length=32, blank=True)
+    backup_tokens = models.JSONField(default=list, blank=True)
+    
+    # Customer relationships (replaces primary_customer + additional_customers)
+    customers = models.ManyToManyField(
+        'customers.Customer',
+        through='CustomerMembership',
+        through_fields=('user', 'customer'),
+        related_name='members',
+        blank=True
+    )
+    
+    # Romanian compliance
+    accepts_marketing = models.BooleanField(default=False)
+    gdpr_consent_date = models.DateTimeField(null=True, blank=True)
+    last_privacy_policy_accepted = models.DateTimeField(null=True, blank=True)
+    
+    # Login tracking
+    last_login_ip = models.GenericIPAddressField(null=True, blank=True)
+    failed_login_attempts = models.PositiveIntegerField(default=0)
+    account_locked_until = models.DateTimeField(null=True, blank=True)
+    
+    # Audit fields
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(
+        'self', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name='created_users'
+    )
+    
+    # Custom manager
+    objects = UserManager()
+    
+    USERNAME_FIELD = 'email'
+    REQUIRED_FIELDS = []
+    
+    class Meta:
+        db_table = 'users'
+        verbose_name = _('User')
+        verbose_name_plural = _('Users')
+        indexes = [
+            models.Index(fields=['email']),
+            models.Index(fields=['staff_role']),
+            models.Index(fields=['is_staff']),
+        ]
+    
+    def __str__(self) -> str:
+        return f"{self.get_full_name()} ({self.email})"
+    
+    def get_full_name(self) -> str:
+        """Get user's full name or email if name not available"""
+        full_name = super().get_full_name()
+        return full_name if full_name.strip() else self.email
+    
+    @property
+    def is_staff_user(self) -> bool:
+        """Check if user is internal staff"""
+        return self.staff_role is not None
+    
+    @property
+    def is_customer_user(self) -> bool:
+        """Check if user belongs to customer organizations"""
+        return CustomerMembership.objects.filter(user=self).exists()
+    
+    @property
+    def primary_customer(self):
+        """Get user's primary customer organization"""
+        membership = CustomerMembership.objects.filter(user=self, is_primary=True).first()
+        return membership.customer if membership else None
+    
+    
+    def get_accessible_customers(self):
+        """Get all customers this user can access"""
+        from apps.customers.models import Customer
+        
+        accessible = []
+        
+        # Staff can see all customers
+        if self.is_staff or self.staff_role:
+            return Customer.objects.all()
+        
+        # Customer users see their customers through memberships
+        for membership in CustomerMembership.objects.filter(user=self):
+            accessible.append(membership.customer)
+        
+        return accessible
+    
+    def can_access_customer(self, customer) -> bool:
+        """Check if user can access specific customer"""
+        if self.is_staff or self.staff_role:
+            return True
+        
+        return CustomerMembership.objects.filter(user=self, customer=customer).exists()
+    
+    def get_role_for_customer(self, customer):
+        """Get user's role within specific customer organization"""
+        membership = CustomerMembership.objects.filter(user=self, customer=customer).first()
+        return membership.role if membership else None
+    
+    def is_account_locked(self) -> bool:
+        """Check if account is currently locked"""
+        if not self.account_locked_until:
+            return False
+        
+        from django.utils import timezone
+        return timezone.now() < self.account_locked_until
+    
+    def get_staff_role_display(self) -> str:
+        """Get display name for staff role"""
+        if not self.staff_role:
+            return _('Customer User')
+        
+        role_map = {
+            'admin': _('System Administrator'),
+            'support': _('Support Agent'),
+            'billing': _('Billing Staff'),
+            'manager': _('Manager'),
+        }
+        
+        return role_map.get(self.staff_role, self.staff_role)
+
+
+class CustomerMembership(models.Model):
+    """
+    Junction table for user-customer relationships with roles.
+    Aligns with PostgreSQL customer_membership table.
+    """
+    
+    # PostgreSQL-aligned role choices
+    CUSTOMER_ROLE_CHOICES = [
+        ('owner', _('Owner')),         # Full control of customer organization
+        ('billing', _('Billing')),     # Invoices, payments, billing info
+        ('tech', _('Technical')),      # Service management, support tickets
+        ('viewer', _('Viewer')),       # Read-only access
+    ]
+    
+    customer = models.ForeignKey(
+        'customers.Customer',
+        on_delete=models.CASCADE,
+        related_name='memberships'
+    )
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='customer_memberships'  # Use consistent related name
+    )
+    
+    # Role within this customer organization
+    role = models.CharField(
+        max_length=20, 
+        choices=CUSTOMER_ROLE_CHOICES,
+        help_text=_('User role within this customer organization')
+    )
+    
+    # Primary customer flag (replaces User.primary_customer)
+    is_primary = models.BooleanField(
+        default=False,
+        help_text=_('Primary customer for this user (used for default context)')
+    )
+    
+    # ===============================================================================
+    # NOTIFICATION PREFERENCES (Enhanced CustomerMembership)
+    # ===============================================================================
+    
+    # Email Notifications
+    email_billing = models.BooleanField(
+        default=True,
+        verbose_name=_('Email billing notifications')
+    )
+    email_technical = models.BooleanField(
+        default=True,
+        verbose_name=_('Email technical notifications')
+    )
+    email_marketing = models.BooleanField(
+        default=False,
+        verbose_name=_('Email marketing notifications')
+    )
+    
+    # Notification Language
+    notification_language = models.CharField(
+        max_length=5,
+        choices=[('ro', 'Română'), ('en', 'English')],
+        default='ro',
+        verbose_name=_('Notification language')
+    )
+    
+    # Contact preferences
+    preferred_contact_method = models.CharField(
+        max_length=20,
+        choices=[
+            ('email', _('Email')),
+            ('phone', _('Phone')),
+            ('both', _('Email and phone')),
+        ],
+        default='email',
+        verbose_name=_('Preferred contact method')
+    )
+    
+    # Audit
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='granted_memberships'
+    )
+    
+    class Meta:
+        db_table = 'customer_membership'  # Match PostgreSQL schema
+        unique_together = [['customer', 'user']]
+        verbose_name = _('Customer Membership')
+        verbose_name_plural = _('Customer Memberships')
+        indexes = [
+            models.Index(fields=['user', 'is_primary']),      # Fast primary lookup
+            models.Index(fields=['customer', 'role']),        # Role-based queries
+            models.Index(fields=['user', 'created_at']),      # User history
+        ]
+    
+    def __str__(self) -> str:
+        primary_flag = " (Primary)" if self.is_primary else ""
+        return f"{self.user.email} → {self.customer.name} ({self.get_role_display()}){primary_flag}"
+    
+    def get_role_display(self) -> str:
+        """Get role display"""
+        role_map = {
+            'owner': _('Owner'),
+            'billing': _('Billing'), 
+            'tech': _('Technical'),
+            'viewer': _('Viewer'),
+        }
+        return role_map.get(self.role, self.role)
+
+
+# Remove the old UserCustomerAccess model - will be handled by migration
+# This will be replaced by CustomerMembership above
+
+
+class UserProfile(models.Model):
+    """Extended user profile information"""
+    
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name='profile'
+    )
+    
+    # Language specific
+    preferred_language = models.CharField(
+        max_length=5,
+        choices=[('en', _('English')), ('ro', _('Romanian'))],
+        default='en'
+    )
+    
+    # Preferences
+    timezone = models.CharField(max_length=50, default='Europe/Bucharest')
+    date_format = models.CharField(
+        max_length=20,
+        choices=[
+            ('%d.%m.%Y', 'DD.MM.YYYY'),
+            ('%Y-%m-%d', 'YYYY-MM-DD'),
+        ],
+        default='%d.%m.%Y'
+    )
+    
+    # Notifications
+    email_notifications = models.BooleanField(default=True)
+    sms_notifications = models.BooleanField(default=False)
+    marketing_emails = models.BooleanField(default=False)
+    
+    # Emergency contact
+    emergency_contact_name = models.CharField(max_length=100, blank=True)
+    emergency_contact_phone = models.CharField(max_length=20, blank=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'user_profiles'
+        verbose_name = _('User Profile')
+        verbose_name_plural = _('User Profiles')
+    
+    def __str__(self) -> str:
+        return f"Profile for {self.user.email}"
+
+
+class UserLoginLog(models.Model):
+    """Track user login attempts for security"""
+    
+    LOGIN_STATUS_CHOICES = [
+        ('success', _('Success')),
+        ('failed_password', _('Failed Password')),
+        ('failed_2fa', _('Failed 2FA')),
+        ('account_locked', _('Account Locked')),
+        ('account_disabled', _('Account Disabled')),
+    ]
+    
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='login_logs',
+        null=True # Allow null for failed logins of non-existent users
+    )
+    
+    # Login details
+    timestamp = models.DateTimeField(auto_now_add=True)
+    ip_address = models.GenericIPAddressField()
+    user_agent = models.TextField()
+    status = models.CharField(max_length=20, choices=LOGIN_STATUS_CHOICES)
+    
+    # Geographic info (optional)
+    country = models.CharField(max_length=100, blank=True)
+    city = models.CharField(max_length=100, blank=True)
+    
+    class Meta:
+        db_table = 'user_login_logs'
+        verbose_name = _('User Login Log')
+        verbose_name_plural = _('User Login Logs')
+        indexes = [
+            models.Index(fields=['user', 'timestamp']),
+            models.Index(fields=['ip_address', 'timestamp']),
+            models.Index(fields=['status', 'timestamp']),
+        ]
+    
+    def __str__(self) -> str:
+        user_display = self.user.email if self.user else "Unknown User"
+        return f"{user_display} - {self.status} at {self.timestamp}"

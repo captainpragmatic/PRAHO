@@ -1,0 +1,601 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}
+{% if proforma %}
+{% trans "Edit Proforma" %} {{ proforma.number }} - PRAHO Platform
+{% else %}
+{% trans "Create Proforma" %} - PRAHO Platform
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto">
+  <!-- Header -->
+  <div class="sm:flex sm:items-center mb-6">
+    <div class="sm:flex-auto">
+      <div class="flex items-center space-x-4">
+        <a href="{% url 'billing:invoice_list' %}" class="text-slate-400 hover:text-white">
+          ← {% trans 'Back to Billing' %}
+        </a>
+      </div>
+      <h1 class="text-3xl font-bold text-white mt-4">
+        {% if proforma %}
+        ✏️ {% trans "Edit Proforma" %} {{ proforma.number }}
+        {% else %}
+        📄 {% trans "Create New Proforma" %}
+        {% endif %}
+      </h1>
+      <p class="mt-2 text-slate-400">
+        {% if proforma %}
+        {% trans "Edit the existing proforma invoice details and line items" %}
+        {% else %}
+        {% trans "Create a new proforma invoice (Romanian business practice - invoices are generated automatically when
+        paid)" %}
+        {% endif %}
+      </p>
+    </div>
+  </div>
+
+  <!-- Romanian Business Notice -->
+  <div class="bg-blue-900 border border-blue-700 rounded-lg p-4 mb-6">
+    <div class="flex items-start">
+      <div class="flex-shrink-0">
+        <span class="text-blue-300 text-xl">🇷🇴</span>
+      </div>
+      <div class="ml-3">
+        <h3 class="text-sm font-medium text-blue-200">{% trans 'Romanian Business Practice' %}</h3>
+        <div class="mt-1 text-sm text-blue-300">
+          <p>{% trans 'Only proformas can be created manually. Actual invoices are automatically generated when
+            proformas are paid or manually converted.' %}</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Proforma Form -->
+  <form method="post" class="space-y-8" id="proforma-form">
+    {% csrf_token %}
+
+    <!-- Form Errors -->
+    {% if form.non_field_errors %}
+    <div class="bg-red-900 border border-red-700 rounded-md p-4">
+      {% for error in form.non_field_errors %}
+      <p class="text-red-100 text-sm">❌ {{ error }}</p>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <!-- Left Column: Customer & Proforma Details -->
+      <div class="lg:col-span-2 space-y-8">
+
+        <!-- Customer Selection -->
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+          <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
+            👤 {% trans 'Customer Information' %}
+          </h3>
+
+          <div class="space-y-4">
+            <div>
+              <label class="block text-sm font-medium text-slate-300 mb-2">
+                {% trans 'Select Customer' %} <span class="text-red-500">*</span>
+              </label>
+              <select name="customer" required
+                class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:ring-2 focus:ring-blue-500"
+                id="customer-select">
+                <option value="">{% trans 'Choose a customer...' %}</option>
+                {% for customer in customers %}
+                <option value="{{ customer.id }}" {% if proforma and customer.id == proforma.customer.id %}selected{% endif %} 
+                  data-company="{{ customer.company_name|default:customer.name }}"
+                  data-vat="{{ customer.tax_profile.vat_number|default:'N/A' }}"
+                  data-email="{{ customer.billing_profile.email|default:customer.primary_email|default:'N/A' }}"
+                  data-terms="{{ customer.billing_profile.payment_terms|default:'30' }} days">
+                  {{ customer.company_name|default:customer.name }}{% if customer.tax_profile.vat_number %} ({{
+                  customer.tax_profile.vat_number }}){% endif %}
+                </option>
+                {% empty %}
+                <option value="" disabled>{% trans 'No customers available' %}</option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <!-- Customer Details Preview -->
+            <div id="customer-preview" class="hidden mt-4 p-4 bg-slate-900 rounded-lg border border-slate-600">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                <div>
+                  <span class="text-slate-400">{% trans 'Company:' %}</span>
+                  <span class="text-white ml-2" id="customer-company"></span>
+                </div>
+                <div>
+                  <span class="text-slate-400">{% trans 'VAT Number:' %}</span>
+                  <span class="text-white ml-2" id="customer-vat"></span>
+                </div>
+                <div>
+                  <span class="text-slate-400">{% trans 'Email:' %}</span>
+                  <span class="text-white ml-2" id="customer-email"></span>
+                </div>
+                <div>
+                  <span class="text-slate-400">{% trans 'Payment Terms:' %}</span>
+                  <span class="text-white ml-2" id="customer-terms"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Proforma Details -->
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+          <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
+            📄 {% trans 'Proforma Details' %}
+          </h3>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <div>
+              <label class="block text-sm font-medium text-slate-300 mb-2">
+                {% trans 'Proforma Number' %}
+              </label>
+              <input type="text" readonly
+                class="w-full px-3 py-2 bg-slate-600 border border-slate-600 rounded-md text-slate-300"
+                value="{% trans 'Auto-generated (PRO-XXXXXX)' %}">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-300 mb-2">
+                {% trans 'Valid Until' %} <span class="text-red-500">*</span>
+              </label>
+              <input type="date" name="valid_until" required
+                {% if proforma %}value="{{ proforma.valid_until|date:'Y-m-d' }}"{% endif %}
+                class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-slate-300 mb-2">
+                {% trans 'Currency' %} <span class="text-red-500">*</span>
+              </label>
+              <select name="currency" required
+                class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:ring-2 focus:ring-blue-500">
+                <option value="RON" selected>RON - Romanian Leu</option>
+                <option value="EUR">EUR - Euro</option>
+                <option value="USD">USD - US Dollar</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-300 mb-2">
+                {% trans 'Status' %}
+              </label>
+              <input type="text" readonly
+                class="w-full px-3 py-2 bg-slate-600 border border-slate-600 rounded-md text-slate-300"
+                value="{% trans 'Draft' %}">
+            </div>
+          </div>
+        </div>
+
+        <!-- Line Items Section -->
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+          <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
+            📋 {% trans 'Proforma Lines' %}
+          </h3>
+
+          <div class="space-y-4">
+            <!-- Header Row -->
+            <div class="grid grid-cols-12 gap-3 text-sm font-medium text-slate-400 border-b border-slate-600 pb-2">
+              <div class="col-span-4">{% trans 'Description' %}</div>
+              <div class="col-span-2">{% trans 'Quantity' %}</div>
+              <div class="col-span-2">{% trans 'Unit Price (RON)' %}</div>
+              <div class="col-span-2">{% trans 'VAT Rate' %}</div>
+              <div class="col-span-2">{% trans 'Total' %}</div>
+            </div>
+
+            <!-- Dynamic Line Items -->
+            <div id="proforma-lines" class="space-y-3">
+              {% if proforma and lines %}
+                <!-- Existing lines for editing -->
+                {% for line in lines %}
+                <div class="proforma-line grid grid-cols-12 gap-3 items-center" data-line="{{ forloop.counter0 }}">
+                  <div class="col-span-4">
+                    <input type="text" name="line_{{ forloop.counter0 }}_description" value="{{ line.description }}" placeholder="e.g. Web hosting package" class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
+                  </div>
+                  <div class="col-span-2">
+                    <input type="number" name="line_{{ forloop.counter0 }}_quantity" value="{{ line.quantity }}" class="line-quantity w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
+                  </div>
+                  <div class="col-span-2">
+                    <input type="number" name="line_{{ forloop.counter0 }}_unit_price" step="0.01" value="{{ line.unit_price }}" class="line-price w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
+                  </div>
+                  <div class="col-span-2">
+                    <select name="line_{{ forloop.counter0 }}_vat_rate"
+                      class="line-vat w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+                      <option value="19" {% if line.tax_rate|floatformat:2 == "0.19" %}selected{% endif %}>19% ({% trans 'Standard' %})</option>
+                      <option value="9" {% if line.tax_rate|floatformat:2 == "0.09" %}selected{% endif %}>9% ({% trans 'Reduced' %})</option>
+                      <option value="5" {% if line.tax_rate|floatformat:2 == "0.05" %}selected{% endif %}>5% ({% trans 'Super Reduced' %})</option>
+                      <option value="0" {% if line.tax_rate|floatformat:2 == "0.00" %}selected{% endif %}>0% ({% trans 'Exempt' %})</option>
+                    </select>
+                  </div>
+                  <div class="col-span-1">
+                    <div class="line-total px-3 py-2 bg-slate-600 rounded-md text-white font-medium text-right">
+                      {{ line.line_total }} RON
+                    </div>
+                  </div>
+                  <div class="col-span-1">
+                    <button type="button" class="remove-line bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md font-medium transition-colors">🗑️</button>
+                  </div>
+                </div>
+                {% endfor %}
+              {% else %}
+                <!-- Initial empty line for new proformas -->
+                <div class="proforma-line grid grid-cols-12 gap-3 items-center" data-line="0">
+                  <div class="col-span-4">
+                    <input type="text" name="line_0_description" placeholder="e.g. Web hosting package" class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
+                  </div>
+                  <div class="col-span-2">
+                    <input type="number" name="line_0_quantity" value="1" class="line-quantity w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
+                  </div>
+                  <div class="col-span-2">
+                    <input type="number" name="line_0_unit_price" step="0.01" placeholder="0.00" class="line-price w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
+                  </div>
+                  <div class="col-span-2">
+                    <select name="line_0_vat_rate"
+                      class="line-vat w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+                      <option value="19">19% ({% trans 'Standard' %})</option>
+                      <option value="9">9% ({% trans 'Reduced' %})</option>
+                      <option value="5">5% ({% trans 'Super Reduced' %})</option>
+                      <option value="0">0% ({% trans 'Exempt' %})</option>
+                    </select>
+                  </div>
+                  <div class="col-span-1">
+                    <div class="line-total px-3 py-2 bg-slate-600 rounded-md text-white font-medium text-right">
+                      0.00 RON
+                    </div>
+                  </div>
+                  <div class="col-span-1">
+                    <button type="button" class="remove-line bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md font-medium transition-colors opacity-50 cursor-not-allowed" disabled>🗑️</button>
+                  </div>
+                </div>
+              {% endif %}
+            </div>
+
+            <!-- Add Line Button -->
+            <div class="pt-4">
+              {% button "➕ Add Line Item" variant="secondary" class_="add-line-btn" %}
+            </div>
+          </div>
+        </div>
+
+        <!-- Additional Information -->
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+          <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
+            📝 {% trans 'Additional Information' %}
+          </h3>
+
+          <div class="space-y-4">
+            <div>
+              <label class="block text-sm font-medium text-slate-300 mb-2">
+                {% trans 'Public Notes' %} <span class="text-slate-500">({% trans 'shown on proforma' %})</span>
+              </label>
+              <textarea name="public_notes" rows="3"
+                class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
+                placeholder="{% trans 'Thank you for your interest! Payment due upon invoice issuance.' %}"></textarea>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-slate-300 mb-2">
+                {% trans 'Internal Notes' %} <span class="text-slate-500">({% trans 'not shown on proforma' %})</span>
+              </label>
+              <textarea name="internal_notes" rows="2"
+                class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
+                placeholder="{% trans 'Internal notes for accounting or follow-up' %}"></textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column: Summary & Actions -->
+      <div class="space-y-6">
+
+        <!-- Proforma Summary -->
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-6 sticky top-4">
+          <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
+            💰 {% trans 'Proforma Summary' %}
+          </h3>
+
+          <div class="space-y-3">
+            <div class="flex justify-between text-slate-300">
+              <span>{% trans 'Subtotal:' %}</span>
+              <span id="summary-subtotal" class="font-medium">0.00 RON</span>
+            </div>
+
+            <div class="flex justify-between text-slate-300">
+              <span>{% trans 'VAT (19%):' %}</span>
+              <span id="summary-vat" class="font-medium">0.00 RON</span>
+            </div>
+
+            <div class="border-t border-slate-600 pt-3">
+              <div class="flex justify-between text-lg font-bold text-white">
+                <span>{% trans 'Total:' %}</span>
+                <span id="summary-total">0.00 RON</span>
+              </div>
+            </div>
+
+            <!-- Line item count -->
+            <div class="text-xs text-slate-400 pt-2 border-t border-slate-700">
+              <span id="line-count">1</span> {% trans 'line item(s)' %}
+            </div>
+          </div>
+        </div>
+
+        <!-- Romanian Compliance Info -->
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+          <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
+            🇷🇴 {% trans 'Proforma Benefits' %}
+          </h3>
+
+          <div class="space-y-3 text-sm">
+            <div class="flex items-center space-x-2">
+              <span class="text-green-400">✅</span>
+              <span class="text-slate-300">{% trans 'Customer preview & approval' %}</span>
+            </div>
+            <div class="flex items-center space-x-2">
+              <span class="text-green-400">✅</span>
+              <span class="text-slate-300">{% trans 'Auto-converts to invoice when paid' %}</span>
+            </div>
+            <div class="flex items-center space-x-2">
+              <span class="text-green-400">✅</span>
+              <span class="text-slate-300">{% trans 'Sequential numbering (PRO-XXXXXX)' %}</span>
+            </div>
+            <div class="flex items-center space-x-2">
+              <span class="text-green-400">✅</span>
+              <span class="text-slate-300">{% trans 'Romanian VAT compliance' %}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+          <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
+            ⚡ {% trans 'Actions' %}
+          </h3>
+
+          <div class="space-y-3">
+            {% if proforma %}
+            {% button "💾 Update Proforma" variant="primary" type="submit" css_class="w-full" %}
+            {% else %}
+            {% button "💾 Create Proforma" variant="primary" type="submit" css_class="w-full" %}
+            {% endif %}
+
+            <hr class="border-slate-600">
+
+            <a href="{% url 'billing:invoice_list' %}"
+              class="block w-full text-center px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-md font-medium transition-colors">
+              ❌ {% trans 'Cancel' %}
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </form>
+</div>
+
+<script>
+  // Initialize lineCounter based on existing lines
+  {% if proforma and lines %}
+  let lineCounter = {{ lines|length }};
+  {% else %}
+  let lineCounter = 1;
+  {% endif %}
+
+  // Enhanced calculation function
+  function calculateTotals() {
+    let subtotal = 0;
+    let totalVat = 0;
+
+    document.querySelectorAll('.proforma-line').forEach(function (line) {
+      const quantity = parseFloat(line.querySelector('.line-quantity').value) || 0;
+      const unitPrice = parseFloat(line.querySelector('.line-price').value) || 0;
+      const vatRate = parseFloat(line.querySelector('.line-vat').value) || 0;
+
+      const lineSubtotal = quantity * unitPrice;
+      const lineVat = lineSubtotal * (vatRate / 100);
+      const lineTotal = lineSubtotal + lineVat;
+
+      // Update line total display
+      line.querySelector('.line-total').textContent = lineTotal.toFixed(2) + ' RON';
+
+      subtotal += lineSubtotal;
+      totalVat += lineVat;
+    });
+
+    const grandTotal = subtotal + totalVat;
+
+    // Update summary
+    document.getElementById('summary-subtotal').textContent = subtotal.toFixed(2) + ' RON';
+    document.getElementById('summary-vat').textContent = totalVat.toFixed(2) + ' RON';
+    document.getElementById('summary-total').textContent = grandTotal.toFixed(2) + ' RON';
+
+    // Update line count
+    document.getElementById('line-count').textContent = document.querySelectorAll('.proforma-line').length;
+  }
+
+  // Add new line item
+  function addLineItem() {
+    const container = document.getElementById('proforma-lines');
+    const lineHtml = `
+        <div class="proforma-line grid grid-cols-12 gap-3 items-center" data-line="${lineCounter}">
+            <div class="col-span-4">
+                <input type="text" name="line_${lineCounter}_description" placeholder="{% trans 'Service description' %}" 
+                       class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div class="col-span-2">
+                <input type="number" name="line_${lineCounter}_quantity" value="1" min="0" step="1" 
+                       class="line-quantity w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div class="col-span-2">
+                <input type="number" name="line_${lineCounter}_unit_price" step="0.01" min="0" placeholder="0.00"
+                       class="line-price w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div class="col-span-2">
+                <select name="line_${lineCounter}_vat_rate" class="line-vat w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+                    <option value="19">19% ({% trans 'Standard' %})</option>
+                    <option value="9">9% ({% trans 'Reduced' %})</option>
+                    <option value="5">5% ({% trans 'Super Reduced' %})</option>
+                    <option value="0">0% ({% trans 'Exempt' %})</option>
+                </select>
+            </div>
+            <div class="col-span-1">
+                <div class="line-total px-3 py-2 bg-slate-600 rounded-md text-white font-medium text-right">0.00 RON</div>
+            </div>
+            <div class="col-span-1">
+                <button type="button" class="remove-line bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md font-medium transition-colors">🗑️</button>
+            </div>
+        </div>`;
+
+    container.insertAdjacentHTML('beforeend', lineHtml);
+    lineCounter++;
+
+    // Add event listeners to new line
+    const newLine = container.lastElementChild;
+    newLine.querySelectorAll('.line-quantity, .line-price, .line-vat').forEach(input => {
+      input.addEventListener('input', calculateTotals);
+    });
+
+    newLine.querySelector('.remove-line').addEventListener('click', function () {
+      if (document.querySelectorAll('.proforma-line').length > 1) {
+        newLine.remove();
+        renumberLines(); // 🔄 Renumber lines after removal
+        calculateTotals();
+        updateRemoveButtons();
+      }
+    });
+
+    calculateTotals();
+    updateRemoveButtons();
+  }
+
+  // Update remove button states
+  function updateRemoveButtons() {
+    const lines = document.querySelectorAll('.proforma-line');
+    lines.forEach((line, index) => {
+      const removeBtn = line.querySelector('.remove-line');
+      if (removeBtn) { // Check if button exists
+        if (lines.length === 1) {
+          // Disable the button if it's a button element
+          if (removeBtn.tagName === 'BUTTON') {
+            removeBtn.disabled = true;
+          }
+          removeBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        } else {
+          // Enable the button if it's a button element
+          if (removeBtn.tagName === 'BUTTON') {
+            removeBtn.disabled = false;
+          }
+          removeBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
+      }
+    });
+  }
+
+  // 🔄 Renumber all lines to ensure consecutive numbering (0, 1, 2, ...)
+  function renumberLines() {
+    const lines = document.querySelectorAll('.proforma-line');
+    lines.forEach((line, index) => {
+      // Update data-line attribute
+      line.setAttribute('data-line', index);
+      
+      // Update all input field names within this line
+      const description = line.querySelector('input[name*="_description"]');
+      const quantity = line.querySelector('input[name*="_quantity"]');
+      const unitPrice = line.querySelector('input[name*="_unit_price"]');
+      const vatRate = line.querySelector('select[name*="_vat_rate"]');
+      
+      if (description) description.name = `line_${index}_description`;
+      if (quantity) quantity.name = `line_${index}_quantity`;
+      if (unitPrice) unitPrice.name = `line_${index}_unit_price`;
+      if (vatRate) vatRate.name = `line_${index}_vat_rate`;
+    });
+    
+    // Update lineCounter to the next available number
+    lineCounter = lines.length;
+  }
+
+  // Initialize when page loads
+  document.addEventListener('DOMContentLoaded', function () {
+    // Calculate initial totals and set up event listeners
+    calculateTotals();
+    
+    // Add event listeners to all existing line inputs
+    document.querySelectorAll('.line-quantity, .line-price, .line-vat').forEach(input => {
+      input.addEventListener('input', calculateTotals);
+    });
+
+  // Add line button
+  document.querySelector('.add-line-btn').addEventListener('click', function (e) {
+    e.preventDefault();
+    addLineItem();
+  });
+
+  // Remove line buttons (initial line)
+  document.querySelectorAll('.remove-line').forEach(btn => {
+    btn.addEventListener('click', function () {
+      if (document.querySelectorAll('.proforma-line').length > 1) {
+        btn.closest('.proforma-line').remove();
+        renumberLines(); // 🔄 Renumber lines after removal
+        calculateTotals();
+        updateRemoveButtons();
+      }
+    });
+  });
+
+  // Set default valid until date (30 days from today) - only for new proformas
+  {% if not proforma %}
+  const today = new Date();
+  const validUntil = new Date(today);
+  validUntil.setDate(validUntil.getDate() + 30);
+
+  document.querySelector('input[name="valid_until"]').value = validUntil.toISOString().split('T')[0];
+  {% endif %}
+
+  // Customer selection preview
+  document.getElementById('customer-select').addEventListener('change', function () {
+    const preview = document.getElementById('customer-preview');
+    const selectedOption = this.options[this.selectedIndex];
+
+    if (this.value && selectedOption.dataset.company) {
+      // Get data from the selected option's data attributes
+      document.getElementById('customer-company').textContent = selectedOption.dataset.company;
+      document.getElementById('customer-vat').textContent = selectedOption.dataset.vat;
+      document.getElementById('customer-email').textContent = selectedOption.dataset.email;
+      document.getElementById('customer-terms').textContent = selectedOption.dataset.terms;
+      preview.classList.remove('hidden');
+    } else {
+      preview.classList.add('hidden');
+    }
+  });
+
+  updateRemoveButtons();
+});
+</script>
+
+<style>
+  .sticky {
+    position: sticky;
+  }
+
+  /* Enhanced form styling */
+  .proforma-line:hover {
+    background-color: rgba(51, 65, 85, 0.3);
+    border-radius: 0.5rem;
+    padding: 0.5rem;
+    margin: -0.5rem;
+  }
+
+  /* Loading states */
+  .htmx-request .htmx-indicator {
+    display: inline !important;
+  }
+
+  .htmx-request .htmx-indicator-text {
+    display: none !important;
+  }
+</style>
+{% endblock %}

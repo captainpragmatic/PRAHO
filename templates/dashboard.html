@@ -1,0 +1,393 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans 'Dashboard' %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6">
+  <!-- Header -->
+  <div class="mb-8">
+    <h1 class="text-3xl font-bold text-white">
+      {% if user.is_staff %}
+      🚀 {% trans 'Dashboard PragmaticHost' %}
+      {% else %}
+      👋 {% trans 'Welcome to PragmaticHost' %}
+      {% endif %}
+    </h1>
+    <p class="mt-2 text-slate-400">
+      {% if user.is_staff %}
+      {% blocktrans %}Hello, {{ user.first_name|default:user.username }}! Here is an overview of your business
+      activity.{% endblocktrans %}
+      {% else %}
+      {% blocktrans %}Hello, {{ user.first_name|default:user.username }}! Here is an overview of your hosting services
+      and account.{% endblocktrans %}
+      {% endif %}
+    </p>
+  </div>
+
+  <!-- Stats Cards -->
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+    {% if user.is_staff %}
+    <!-- Staff View: Business Metrics -->
+    <!-- Total Customers -->
+    <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+      <div class="flex items-center">
+        <div class="flex-shrink-0">
+          <div class="w-8 h-8 text-2xl">👥</div>
+        </div>
+        <div class="ml-4">
+          <p class="text-sm font-medium text-slate-400">{% trans 'Active Customers' %}</p>
+          <p class="text-2xl font-semibold text-white">{{ stats.total_customers }}</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Monthly Revenue -->
+    <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+      <div class="flex items-center">
+        <div class="flex-shrink-0">
+          <div class="w-8 h-8 text-2xl">💰</div>
+        </div>
+        <div class="ml-4">
+          <p class="text-sm font-medium text-slate-400">{% trans 'Monthly Revenue' %}</p>
+          <p class="text-2xl font-semibold text-white">{{ stats.monthly_revenue|floatformat:0 }} RON</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Open Tickets -->
+    <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+      <div class="flex items-center">
+        <div class="flex-shrink-0">
+          <div class="w-8 h-8 text-2xl">🎫</div>
+        </div>
+        <div class="ml-4">
+          <p class="text-sm font-medium text-slate-400">{% trans 'Open Tickets' %}</p>
+          <p class="text-2xl font-semibold text-white">{{ stats.open_tickets }}</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Active Services -->
+    <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+      <div class="flex items-center">
+        <div class="flex-shrink-0">
+          <div class="w-8 h-8 text-2xl">🚀</div>
+        </div>
+        <div class="ml-4">
+          <p class="text-sm font-medium text-slate-400">{% trans 'Active Services' %}</p>
+          <p class="text-2xl font-semibold text-white">{{ stats.active_services }}</p>
+        </div>
+      </div>
+    </div>
+    {% else %}
+    <!-- Customer View: Their Account Metrics -->
+    <!-- My Services -->
+    <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+      <div class="flex items-center">
+        <div class="flex-shrink-0">
+          <div class="w-8 h-8 text-2xl">🚀</div>
+        </div>
+        <div class="ml-4">
+          <p class="text-sm font-medium text-slate-400">{% trans 'My Services' %}</p>
+          <p class="text-2xl font-semibold text-white">{{ stats.active_services }}</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- My Tickets -->
+    <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+      <div class="flex items-center">
+        <div class="flex-shrink-0">
+          <div class="w-8 h-8 text-2xl">🎫</div>
+        </div>
+        <div class="ml-4">
+          <p class="text-sm font-medium text-slate-400">{% trans 'My Open Tickets' %}</p>
+          <p class="text-2xl font-semibold text-white">{{ stats.open_tickets }}</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Account Status -->
+    <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+      <div class="flex items-center">
+        <div class="flex-shrink-0">
+          <div class="w-8 h-8 text-2xl">✅</div>
+        </div>
+        <div class="ml-4">
+          <p class="text-sm font-medium text-slate-400">{% trans 'Account Status' %}</p>
+          <p class="text-2xl font-semibold text-green-400">{% trans 'Active' %}</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Next Invoice -->
+    <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+      <div class="flex items-center">
+        <div class="flex-shrink-0">
+          <div class="w-8 h-8 text-2xl">📋</div>
+        </div>
+        <div class="ml-4">
+          <p class="text-sm font-medium text-slate-400">{% trans 'Next Billing' %}</p>
+          <p class="text-sm font-semibold text-white">{% trans 'End of Month' %}</p>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Main Content Grid -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+    <!-- Recent Invoices -->
+    <div class="bg-slate-800 rounded-lg border border-slate-700">
+      <div class="p-6">
+        <h3 class="text-lg font-medium text-white mb-4">
+          {% if user.is_staff %}
+          🧾 {% trans 'Recent Invoices' %}
+          {% else %}
+          🧾 {% trans 'My Recent Invoices' %}
+          {% endif %}
+        </h3>
+
+        <div class="space-y-3">
+          {% for invoice in recent_invoices %}
+          <div class="flex items-center justify-between p-3 bg-slate-700 rounded-md">
+            <div>
+              {% if user.is_staff %}
+              <p class="text-white font-medium">{{ invoice.customer.company_name }}</p>
+              <p class="text-slate-400 text-sm">
+                {% trans 'Invoice' %} #{{ invoice.number }} - {{ invoice.created_at|date:"d.m.Y" }}
+              </p>
+              {% else %}
+              <p class="text-white font-medium">{% trans 'Invoice' %} #{{ invoice.number }}</p>
+              <p class="text-slate-400 text-sm">
+                {{ invoice.created_at|date:"d.m.Y" }}
+              </p>
+              {% endif %}
+            </div>
+            <div class="text-right">
+              <p class="text-white font-medium">{{ invoice.total|floatformat:2 }} RON</p>
+              <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+                                {% if invoice.status == 'paid' %}bg-green-900 text-green-200
+                                {% elif invoice.status == 'overdue' %}bg-red-900 text-red-200
+                                {% else %}bg-yellow-900 text-yellow-200{% endif %}">
+                {% if invoice.status == 'paid' %}✅ {% trans 'Paid' %}
+                {% elif invoice.status == 'overdue' %}❌ {% trans 'Overdue' %}
+                {% else %}⏳ {% trans 'Pending' %}{% endif %}
+              </span>
+            </div>
+          </div>
+          {% empty %}
+          <p class="text-slate-400 text-center py-4">
+            {% if user.is_staff %}
+            {% trans 'No recent invoices' %}
+            {% else %}
+            {% trans 'No recent invoices found' %}
+            {% endif %}
+          </p>
+          {% endfor %}
+        </div>
+
+        <div class="mt-4 text-center">
+          <a href="{% url 'billing:invoice_list' %}" class="inline-flex items-center text-blue-400 hover:text-blue-300">
+            {% if user.is_staff %}
+            {% trans 'View all invoices' %} →
+            {% else %}
+            {% trans 'View my invoices' %} →
+            {% endif %}
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recent Tickets -->
+    <div class="bg-slate-800 rounded-lg border border-slate-700">
+      <div class="p-6">
+        <h3 class="text-lg font-medium text-white mb-4">
+          {% if user.is_staff %}
+          🎫 {% trans 'Recent Tickets' %}
+          {% else %}
+          🎫 {% trans 'My Recent Tickets' %}
+          {% endif %}
+        </h3>
+
+        <div class="space-y-3">
+          {% for ticket in recent_tickets %}
+          <div class="flex items-center justify-between p-3 bg-slate-700 rounded-md">
+            <div>
+              <p class="text-white font-medium">{{ ticket.subject|truncatechars:40 }}</p>
+              <p class="text-slate-400 text-sm">
+                {% if user.is_staff %}
+                {{ ticket.customer.company_name }} - {{ ticket.created_at|date:"d.m.Y" }}
+                {% else %}
+                {{ ticket.created_at|date:"d.m.Y" }}
+                {% endif %}
+              </p>
+            </div>
+            <div class="text-right">
+              <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+                                {% if ticket.priority == 'high' %}bg-red-900 text-red-200
+                                {% elif ticket.priority == 'medium' %}bg-yellow-900 text-yellow-200
+                                {% else %}bg-green-900 text-green-200{% endif %}">
+                {% if ticket.priority == 'high' %}🔴 {% trans 'Urgent' %}
+                {% elif ticket.priority == 'medium' %}🟡 {% trans 'Medium' %}
+                {% else %}🟢 {% trans 'Low' %}{% endif %}
+              </span>
+            </div>
+          </div>
+          {% empty %}
+          <p class="text-slate-400 text-center py-4">
+            {% if user.is_staff %}
+            {% trans 'No recent tickets' %}
+            {% else %}
+            {% trans 'No recent support tickets' %}
+            {% endif %}
+          </p>
+          {% endfor %}
+        </div>
+
+        <div class="mt-4 text-center">
+          <a href="{% url 'tickets:list' %}" class="inline-flex items-center text-blue-400 hover:text-blue-300">
+            {% if user.is_staff %}
+            {% trans 'View all tickets' %} →
+            {% else %}
+            {% trans 'View my tickets' %} →
+            {% endif %}
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="bg-slate-800 rounded-lg border border-slate-700">
+      <div class="p-6">
+        <h3 class="text-lg font-medium text-white mb-4">
+          ⚡ {% trans 'Quick Actions' %}
+        </h3>
+
+        {% if user.is_staff %}
+        <!-- Staff Actions: Business Management -->
+        <div class="grid grid-cols-2 gap-3">
+          {% url 'customers:create' as create_customer_url %}
+          {% url 'billing:proforma_create' as create_proforma_url %}
+          {% url 'tickets:create' as create_ticket_url %}
+          {% url 'provisioning:service_create' as create_service_url %}
+
+          {% button "👤 New Customer" variant="primary" href=create_customer_url %}
+          {% button "📄 New Proforma" variant="success" href=create_proforma_url %}
+          {% button "🎫 New Ticket" variant="secondary" href=create_ticket_url %}
+          {% button "🚀 New Service" variant="warning" href=create_service_url %}
+        </div>
+        {% else %}
+        <!-- Customer Actions: Self-Service -->
+        <div class="grid grid-cols-2 gap-3">
+          {% url 'tickets:create' as create_ticket_url %}
+          {% url 'billing:invoice_list' as invoice_list_url %}
+          {% url 'provisioning:services' as services_url %}
+          {% url 'users:user_profile' as profile_url %}
+
+          {% button "🎫 New Ticket" variant="primary" href=create_ticket_url %}
+          {% button "📄 View Invoices" variant="success" href=invoice_list_url %}
+          {% button "🚀 My Services" variant="secondary" href=services_url %}
+          {% button "👤 My Profile" variant="warning" href=profile_url %}
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- System Status / Account Information -->
+    <div class="bg-slate-800 rounded-lg border border-slate-700">
+      <div class="p-6">
+        <h3 class="text-lg font-medium text-white mb-4">
+          {% if user.is_staff %}
+          📊 {% trans 'System Status' %}
+          {% else %}
+          🏢 {% trans 'Account Information' %}
+          {% endif %}
+        </h3>
+
+        {% if user.is_staff %}
+        <!-- Staff: System Status -->
+        <div class="space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-slate-300">{% trans 'Server Status' %}</span>
+            <span class="inline-flex items-center text-green-400">
+              ✅ {% trans 'Online' %}
+            </span>
+          </div>
+
+          <div class="flex items-center justify-between">
+            <span class="text-slate-300">{% trans 'Backup Status' %}</span>
+            <span class="inline-flex items-center text-green-400">
+              ✅ {% trans 'Up-to-date' %}
+            </span>
+          </div>
+
+          <div class="flex items-center justify-between">
+            <span class="text-slate-300">e-Factura API</span>
+            <span class="inline-flex items-center text-green-400">
+              ✅ {% trans 'Connected' %}
+            </span>
+          </div>
+
+          <div class="flex items-center justify-between">
+            <span class="text-slate-300">{% trans 'Payment Gateway' %}</span>
+            <span class="inline-flex items-center text-green-400">
+              ✅ {% trans 'Functional' %}
+            </span>
+          </div>
+        </div>
+
+        <div class="mt-4 pt-4 border-t border-slate-700">
+          <p class="text-slate-400 text-xs">
+            {% trans 'Last update' %}: {{ current_time|date:"d.m.Y H:i" }}
+          </p>
+        </div>
+        {% else %}
+        <!-- Customer: Account Information -->
+        <div class="space-y-3">
+          {% if user.primary_customer %}
+          <div class="flex items-center justify-between">
+            <span class="text-slate-300">{% trans 'Company' %}</span>
+            <span class="text-white font-medium">{{ user.primary_customer.company_name }}</span>
+          </div>
+
+          {% if user.primary_customer.tax_profile.vat_number %}
+          <div class="flex items-center justify-between">
+            <span class="text-slate-300">{% trans 'VAT Number' %}</span>
+            <span class="text-white">{{ user.primary_customer.tax_profile.vat_number }}</span>
+          </div>
+          {% endif %}
+
+          <div class="flex items-center justify-between">
+            <span class="text-slate-300">{% trans 'Customer Since' %}</span>
+            <span class="text-white">{{ user.primary_customer.created_at|date:"M Y" }}</span>
+          </div>
+          {% endif %}
+
+          <div class="flex items-center justify-between">
+            <span class="text-slate-300">{% trans 'Support Level' %}</span>
+            <span class="inline-flex items-center text-green-400">
+              ✅ {% trans 'Standard' %}
+            </span>
+          </div>
+        </div>
+
+        <div class="mt-4 pt-4 border-t border-slate-700">
+          <p class="text-slate-400 text-xs">
+            {% trans 'Need help?' %}
+            <a href="{% url 'tickets:create' %}" class="text-blue-400 hover:text-blue-300">
+              {% trans 'Contact Support' %}
+            </a>
+          </p>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  </div>
+
+</div>
+</div>
+{% endblock %}

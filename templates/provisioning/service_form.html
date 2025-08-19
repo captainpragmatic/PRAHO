@@ -1,0 +1,444 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Create Service" %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto">
+  <!-- Header -->
+  <div class="sm:flex sm:items-center mb-6">
+    <div class="sm:flex-auto">
+      <div class="flex items-center space-x-4">
+        <a href="{% url 'provisioning:services' %}" class="text-slate-400 hover:text-white">
+          ← {% trans 'Back to Services' %}
+        </a>
+      </div>
+      <h1 class="text-2xl font-semibold text-white mt-4 romanian-flag">
+        {% trans "Create New Service" %}
+      </h1>
+      <p class="mt-2 text-sm text-slate-400">
+        {% trans "Provision a new hosting service for a customer" %}
+      </p>
+    </div>
+  </div>
+
+  <!-- Service Form -->
+  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg overflow-hidden">
+    <div class="p-8">
+      <form method="post" class="space-y-8">
+        {% csrf_token %}
+
+        <!-- Form Errors -->
+        {% if form.non_field_errors %}
+        <div class="bg-red-900 border border-red-700 rounded-md p-3">
+          {% for error in form.non_field_errors %}
+          <p class="text-red-100 text-sm">❌ {{ error }}</p>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        <!-- Customer & Basic Info -->
+        <div class="space-y-4">
+          <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
+            👤 {% trans 'Customer & Service Information' %}
+          </h3>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Customer -->
+            <div>
+              <label for="{{ form.customer.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                {{ form.customer.label }}
+              </label>
+              {{ form.customer }}
+              {% if form.customer.help_text %}
+              <p class="mt-1 text-xs text-slate-400">{{ form.customer.help_text }}</p>
+              {% endif %}
+              {% if form.customer.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.customer.errors.0 }}</p>
+              {% endif %}
+            </div>
+
+            <!-- Service Name -->
+            <div>
+              <label for="{{ form.name.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                {{ form.name.label }}
+              </label>
+              <input type="text" name="name" 
+                     class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
+                     placeholder="{% trans 'Web Hosting Premium' %}">
+              {% if form.name.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.name.errors.0 }}</p>
+              {% endif %}
+            </div>
+          </div>
+
+          <!-- Service Type -->
+          <div>
+            <label for="{{ form.service_type.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+              {{ form.service_type.label }}
+            </label>
+            <select name="service_type" 
+                    class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+              <option value="">{% trans 'Select service type' %}</option>
+              <option value="web_hosting">🌐 {% trans 'Web Hosting' %}</option>
+              <option value="vps">🖥️ {% trans 'VPS Server' %}</option>
+              <option value="dedicated">🔧 {% trans 'Dedicated Server' %}</option>
+              <option value="domain">🌍 {% trans 'Domain Registration' %}</option>
+              <option value="ssl">🔒 {% trans 'SSL Certificate' %}</option>
+              <option value="email">📧 {% trans 'Email Hosting' %}</option>
+              <option value="backup">💾 {% trans 'Backup Service' %}</option>
+              <option value="other">⚙️ {% trans 'Other' %}</option>
+            </select>
+            {% if form.service_type.errors %}
+            <p class="mt-1 text-sm text-red-400">{{ form.service_type.errors.0 }}</p>
+            {% endif %}
+          </div>
+
+          <!-- Description -->
+          <div>
+            <label for="{{ form.description.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+              {{ form.description.label }}
+            </label>
+            <textarea name="description" rows="3"
+                      class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
+                      placeholder="{% trans 'Detailed service description' %}"></textarea>
+            {% if form.description.errors %}
+            <p class="mt-1 text-sm text-red-400">{{ form.description.errors.0 }}</p>
+            {% endif %}
+          </div>
+        </div>
+
+        <!-- Technical Specifications -->
+        <div class="space-y-4">
+          <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
+            ⚙️ {% trans 'Technical Specifications' %}
+          </h3>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <!-- Server Location -->
+            <div>
+              <label for="server_location" class="block text-sm font-medium text-slate-300 mb-1">
+                {% trans 'Server Location' %}
+              </label>
+              <select name="server_location" 
+                      class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+                <option value="">{% trans 'Select location' %}</option>
+                <option value="bucharest">🇷🇴 {% trans 'Bucharest, Romania' %}</option>
+                <option value="cluj">🇷🇴 {% trans 'Cluj-Napoca, Romania' %}</option>
+                <option value="frankfurt">🇩🇪 {% trans 'Frankfurt, Germany' %}</option>
+                <option value="amsterdam">🇳🇱 {% trans 'Amsterdam, Netherlands' %}</option>
+                <option value="london">🇬🇧 {% trans 'London, UK' %}</option>
+              </select>
+            </div>
+
+            <!-- Disk Space -->
+            <div>
+              <label for="disk_space" class="block text-sm font-medium text-slate-300 mb-1">
+                {% trans 'Disk Space (GB)' %}
+              </label>
+              <input type="number" name="disk_space" min="1" step="1"
+                     class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
+                     placeholder="10">
+            </div>
+
+            <!-- Bandwidth -->
+            <div>
+              <label for="bandwidth" class="block text-sm font-medium text-slate-300 mb-1">
+                {% trans 'Bandwidth (GB/month)' %}
+              </label>
+              <input type="number" name="bandwidth" min="1" step="1"
+                     class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
+                     placeholder="100">
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <!-- CPU Cores -->
+            <div>
+              <label for="cpu_cores" class="block text-sm font-medium text-slate-300 mb-1">
+                {% trans 'CPU Cores' %}
+              </label>
+              <select name="cpu_cores" 
+                      class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+                <option value="1">1 Core</option>
+                <option value="2">2 Cores</option>
+                <option value="4">4 Cores</option>
+                <option value="8">8 Cores</option>
+                <option value="16">16 Cores</option>
+              </select>
+            </div>
+
+            <!-- RAM -->
+            <div>
+              <label for="ram" class="block text-sm font-medium text-slate-300 mb-1">
+                {% trans 'RAM (GB)' %}
+              </label>
+              <select name="ram" 
+                      class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+                <option value="1">1 GB</option>
+                <option value="2">2 GB</option>
+                <option value="4">4 GB</option>
+                <option value="8">8 GB</option>
+                <option value="16">16 GB</option>
+                <option value="32">32 GB</option>
+                <option value="64">64 GB</option>
+              </select>
+            </div>
+
+            <!-- Operating System -->
+            <div>
+              <label for="os" class="block text-sm font-medium text-slate-300 mb-1">
+                {% trans 'Operating System' %}
+              </label>
+              <select name="os" 
+                      class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+                <option value="">{% trans 'Select OS' %}</option>
+                <option value="ubuntu-22.04">Ubuntu 22.04 LTS</option>
+                <option value="ubuntu-20.04">Ubuntu 20.04 LTS</option>
+                <option value="centos-8">CentOS 8</option>
+                <option value="debian-11">Debian 11</option>
+                <option value="windows-2019">Windows Server 2019</option>
+                <option value="windows-2022">Windows Server 2022</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Domain & Access -->
+        <div class="space-y-4">
+          <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
+            🌐 {% trans 'Domain & Access' %}
+          </h3>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Domain Name -->
+            <div>
+              <label for="domain" class="block text-sm font-medium text-slate-300 mb-1">
+                {% trans 'Primary Domain' %}
+              </label>
+              <input type="text" name="domain"
+                     class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
+                     placeholder="example.com">
+            </div>
+
+            <!-- IP Address -->
+            <div>
+              <label for="ip_address" class="block text-sm font-medium text-slate-300 mb-1">
+                {% trans 'IP Address' %}
+              </label>
+              <input type="text" name="ip_address"
+                     class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
+                     placeholder="192.168.1.100">
+            </div>
+          </div>
+
+          <!-- Control Panel -->
+          <div>
+            <label for="control_panel" class="block text-sm font-medium text-slate-300 mb-1">
+              {% trans 'Control Panel' %}
+            </label>
+            <select name="control_panel" 
+                    class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+              <option value="">{% trans 'No control panel' %}</option>
+              <option value="cpanel">cPanel</option>
+              <option value="plesk">Plesk</option>
+              <option value="directadmin">DirectAdmin</option>
+              <option value="webmin">Webmin</option>
+              <option value="custom">{% trans 'Custom Panel' %}</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Billing Information -->
+        <div class="space-y-4">
+          <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
+            💰 {% trans 'Billing Information' %}
+          </h3>
+
+          <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <!-- Price -->
+            <div>
+              <label for="price" class="block text-sm font-medium text-slate-300 mb-1">
+                {% trans 'Price (RON)' %}
+              </label>
+              <input type="number" name="price" step="0.01" min="0"
+                     class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
+                     placeholder="49.99">
+            </div>
+
+            <!-- Billing Cycle -->
+            <div>
+              <label for="billing_cycle" class="block text-sm font-medium text-slate-300 mb-1">
+                {% trans 'Billing Cycle' %}
+              </label>
+              <select name="billing_cycle" 
+                      class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+                <option value="monthly">{% trans 'Monthly' %}</option>
+                <option value="quarterly">{% trans 'Quarterly' %}</option>
+                <option value="semi_annual">{% trans 'Semi-Annual' %}</option>
+                <option value="annual">{% trans 'Annual' %}</option>
+                <option value="biennial">{% trans 'Biennial' %}</option>
+              </select>
+            </div>
+
+            <!-- Setup Fee -->
+            <div>
+              <label for="setup_fee" class="block text-sm font-medium text-slate-300 mb-1">
+                {% trans 'Setup Fee (RON)' %}
+              </label>
+              <input type="number" name="setup_fee" step="0.01" min="0" value="0"
+                     class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
+            </div>
+
+            <!-- Currency -->
+            <div>
+              <label for="currency" class="block text-sm font-medium text-slate-300 mb-1">
+                {% trans 'Currency' %}
+              </label>
+              <select name="currency" 
+                      class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+                <option value="RON" selected>RON</option>
+                <option value="EUR">EUR</option>
+                <option value="USD">USD</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Service Dates -->
+        <div class="space-y-4">
+          <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
+            📅 {% trans 'Service Timeline' %}
+          </h3>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <!-- Start Date -->
+            <div>
+              <label for="start_date" class="block text-sm font-medium text-slate-300 mb-1">
+                {% trans 'Start Date' %}
+              </label>
+              <input type="date" name="start_date"
+                     class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+            </div>
+
+            <!-- End Date -->
+            <div>
+              <label for="end_date" class="block text-sm font-medium text-slate-300 mb-1">
+                {% trans 'End Date' %}
+              </label>
+              <input type="date" name="end_date"
+                     class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+            </div>
+
+            <!-- Status -->
+            <div>
+              <label for="status" class="block text-sm font-medium text-slate-300 mb-1">
+                {% trans 'Status' %}
+              </label>
+              <select name="status" 
+                      class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+                <option value="pending">{% trans 'Pending' %}</option>
+                <option value="active" selected>{% trans 'Active' %}</option>
+                <option value="suspended">{% trans 'Suspended' %}</option>
+                <option value="cancelled">{% trans 'Cancelled' %}</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Additional Notes -->
+        <div class="space-y-4">
+          <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
+            📝 {% trans 'Additional Information' %}
+          </h3>
+
+          <div>
+            <label for="notes" class="block text-sm font-medium text-slate-300 mb-1">
+              {% trans 'Internal Notes' %}
+            </label>
+            <textarea name="notes" rows="4"
+                      class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
+                      placeholder="{% trans 'Internal notes about this service (not visible to customer)' %}"></textarea>
+          </div>
+        </div>
+
+        <!-- Submit Actions -->
+        <div class="pt-6 border-t border-slate-600 flex justify-end space-x-4">
+          <a href="{% url 'provisioning:services' %}"
+             class="bg-slate-600 hover:bg-slate-700 text-white px-6 py-2 rounded-md font-medium transition-colors">
+            {% trans 'Cancel' %}
+          </a>
+
+          <button type="submit" name="action" value="save"
+                  class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md font-medium transition-colors">
+            {% trans 'Create Service' %}
+          </button>
+
+          <button type="submit" name="action" value="save_and_provision"
+                  class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-md font-medium transition-colors">
+            🚀 {% trans 'Create & Provision' %}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+// Auto-calculate end date based on billing cycle
+document.querySelector('select[name="billing_cycle"]').addEventListener('change', function() {
+    const startDateInput = document.querySelector('input[name="start_date"]');
+    const endDateInput = document.querySelector('input[name="end_date"]');
+    
+    if (startDateInput.value && this.value) {
+        const startDate = new Date(startDateInput.value);
+        let endDate = new Date(startDate);
+        
+        switch(this.value) {
+            case 'monthly':
+                endDate.setMonth(endDate.getMonth() + 1);
+                break;
+            case 'quarterly':
+                endDate.setMonth(endDate.getMonth() + 3);
+                break;
+            case 'semi_annual':
+                endDate.setMonth(endDate.getMonth() + 6);
+                break;
+            case 'annual':
+                endDate.setFullYear(endDate.getFullYear() + 1);
+                break;
+            case 'biennial':
+                endDate.setFullYear(endDate.getFullYear() + 2);
+                break;
+        }
+        
+        endDateInput.value = endDate.toISOString().split('T')[0];
+    }
+});
+
+// Auto-set start date to today when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    const startDateInput = document.querySelector('input[name="start_date"]');
+    if (!startDateInput.value) {
+        const today = new Date().toISOString().split('T')[0];
+        startDateInput.value = today;
+    }
+});
+
+// Service type specific field adjustments
+document.querySelector('select[name="service_type"]').addEventListener('change', function() {
+    const serviceType = this.value;
+    
+    // Show/hide fields based on service type
+    // This could be expanded to dynamically show/hide relevant sections
+    
+    if (serviceType === 'domain') {
+        // For domain registration, hide server specs
+        document.querySelector('input[name="disk_space"]').value = '';
+        document.querySelector('input[name="bandwidth"]').value = '';
+        document.querySelector('select[name="cpu_cores"]').value = '';
+        document.querySelector('select[name="ram"]').value = '';
+    }
+});
+</script>
+{% endblock %}

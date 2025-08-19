@@ -1,0 +1,158 @@
+{# =============================================================================== #}
+{# 🇷🇴 PRAHO PLATFORM - MODAL COMPONENT #}
+{# =============================================================================== #}
+{# HTMX-powered modal dialog with Romanian hosting provider theming #}
+
+{% load static %}
+
+{# Modal backdrop and container #}
+<div {% if html_id %}id="{{ html_id }}" {% else %}id="modal-{{ modal_id|default:'default' }}" {% endif %}
+  class="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true"
+  style="{% if not show|default:False %}display: none;{% endif %}" {# HTMX attributes for dynamic loading #} {% if
+  hx_get %}hx-get="{{ hx_get }}" {% endif %} {% if hx_post %}hx-post="{{ hx_post }}" {% endif %} {% if hx_trigger
+  %}hx-trigger="{{ hx_trigger }}" {% endif %} {% if hx_target %}hx-target="{{ hx_target }}" {% endif %} {% if hx_swap
+  %}hx-swap="{{ hx_swap }}" {% endif %}>
+  {# Background overlay #}
+  <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+    <div class="fixed inset-0 bg-slate-500 bg-opacity-75 transition-opacity" aria-hidden="true"
+      onclick="closeModal('{{ html_id|default:'modal-default' }}')"></div>
+
+    {# Center alignment trick #}
+    <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+
+    {# Modal panel #}
+    <div
+      class="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle {% if size == 'sm' %}sm:max-w-sm{% elif size == 'lg' %}sm:max-w-4xl{% elif size == 'xl' %}sm:max-w-6xl{% elif size == 'full' %}sm:max-w-7xl{% else %}sm:max-w-lg{% endif %} sm:w-full sm:p-6 dark:bg-slate-900">
+
+      {# Modal header #}
+      {% if title or closeable|default:True %}
+      <div class="flex items-center justify-between {% if title %}mb-4{% endif %}">
+        {% if title %}
+        <h3 class="text-lg font-medium leading-6 text-slate-900 dark:text-slate-100" id="modal-title">
+          {{ title }}
+        </h3>
+        {% endif %}
+
+        {% if closeable|default:True %}
+        <button type="button"
+          class="rounded-md bg-white text-slate-400 hover:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 dark:bg-slate-900 dark:text-slate-500 dark:hover:text-slate-400"
+          onclick="closeModal('{{ html_id|default:'modal-default' }}')" aria-label="Închide">
+          <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {# Modal content #}
+      <div class="{% if content_class %}{{ content_class }}{% endif %}">
+        {% if content %}
+        {{ content|safe }}
+        {% endif %}
+
+        {# Content will be inserted here by HTMX or template inheritance #}
+        {% block modal_content %}{% endblock %}
+      </div>
+
+      {# Modal footer #}
+      {% if show_footer|default:True %}
+      <div
+        class="mt-5 sm:mt-6 {% if footer_class %}{{ footer_class }}{% else %}flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2 space-y-2 space-y-reverse sm:space-y-0{% endif %}">
+
+        {# Custom footer content #}
+        {% if footer_content %}
+        {{ footer_content|safe }}
+        {% endif %}
+
+        {# Default footer buttons #}
+        {% if not footer_content %}
+        {# Cancel button #}
+        {% if show_cancel|default:True %}
+        <button type="button"
+          class="mt-3 w-full inline-flex justify-center rounded-md border border-slate-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 sm:mt-0 sm:w-auto sm:text-sm dark:bg-slate-800 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+          onclick="closeModal('{{ html_id|default:'modal-default' }}')">
+          {{ cancel_text|default:"Anulează" }}
+        </button>
+        {% endif %}
+
+        {# Primary action button #}
+        {% if primary_action %}
+        <button type="button"
+          class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-primary-600 text-base font-medium text-white hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 sm:w-auto sm:text-sm"
+          {% if primary_action.hx_get %}hx-get="{{ primary_action.hx_get }}" {% endif %} {% if primary_action.hx_post
+          %}hx-post="{{ primary_action.hx_post }}" {% endif %} {% if primary_action.hx_target
+          %}hx-target="{{ primary_action.hx_target }}" {% endif %} {% if primary_action.hx_swap
+          %}hx-swap="{{ primary_action.hx_swap }}" {% endif %} {% if primary_action.onclick
+          %}onclick="{{ primary_action.onclick }}" {% endif %} {% if primary_action.form
+          %}form="{{ primary_action.form }}" {% endif %} {% if primary_action.type %}type="{{ primary_action.type }}" {%
+          endif %}>
+          {{ primary_action.text|default:"Confirmă" }}
+        </button>
+        {% endif %}
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{# JavaScript for modal management #}
+<script>
+  function openModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+      modal.style.display = 'block';
+      document.body.style.overflow = 'hidden';
+
+      // Focus management for accessibility
+      const firstFocusable = modal.querySelector('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+      if (firstFocusable) {
+        firstFocusable.focus();
+      }
+    }
+  }
+
+  function closeModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+      modal.style.display = 'none';
+      document.body.style.overflow = '';
+    }
+  }
+
+  // Close modal on Escape key
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') {
+      const visibleModals = document.querySelectorAll('[role="dialog"][style*="display: block"], [role="dialog"]:not([style*="display: none"])');
+      visibleModals.forEach(modal => {
+        if (modal.id) {
+          closeModal(modal.id);
+        }
+      });
+    }
+  });
+
+  // HTMX integration - auto-open modals with hx-trigger
+  document.addEventListener('htmx:afterSwap', function (evt) {
+    if (evt.detail.target.matches('[role="dialog"]')) {
+      openModal(evt.detail.target.id);
+    }
+  });
+
+  // HTMX integration - close modal after successful form submission
+  document.addEventListener('htmx:responseError', function (evt) {
+    // Keep modal open on error
+  });
+
+  document.addEventListener('htmx:afterRequest', function (evt) {
+    // Close modal on successful request if specified
+    if (evt.detail.xhr.status >= 200 && evt.detail.xhr.status < 300) {
+      const target = evt.detail.target;
+      if (target.hasAttribute('data-close-modal-on-success')) {
+        const modalId = target.getAttribute('data-close-modal-on-success');
+        closeModal(modalId);
+      }
+    }
+  });
+</script>

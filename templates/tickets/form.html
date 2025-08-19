@@ -1,0 +1,175 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans 'Create New Ticket' %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 max-w-3xl mx-auto">
+  <!-- Header -->
+  <div class="mb-6">
+    <div class="flex items-center space-x-4">
+      {% url 'tickets:list' as tickets_url %}
+      {% button "← Back to Tickets" variant="secondary" href=tickets_url size="sm" %}
+    </div>
+    <h1 class="text-2xl font-bold text-white mt-4 romanian-flag">
+      {% trans 'Create New Ticket' %}
+    </h1>
+  </div>
+
+  <!-- Ticket Form -->
+  <div class="bg-slate-800 rounded-lg border border-slate-700">
+    <div class="p-6">
+      <form method="post" class="space-y-6">
+        {% csrf_token %}
+
+        <!-- Customer Selection -->
+        <div>
+          <label for="customer_id" class="block text-sm font-medium text-slate-300 mb-2">
+            {% trans 'Customer' %}
+          </label>
+          <select name="customer_id" id="customer_id"
+            class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+            <option value="">{% trans 'Select a customer' %}</option>
+            {% for customer in customers %}
+            <option value="{{ customer.id }}">{{ customer.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <!-- Ticket Type & Priority -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label for="ticket_type" class="block text-sm font-medium text-slate-300 mb-2">
+              {% trans 'Type' %}
+            </label>
+            <select name="ticket_type" id="ticket_type"
+              class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+              <option value="support">🛠️ {% trans 'Technical Support' %}</option>
+              <option value="billing">💰 {% trans 'Billing Issue' %}</option>
+              <option value="feature">✨ {% trans 'Feature Request' %}</option>
+              <option value="bug">🐛 {% trans 'Bug Report' %}</option>
+              <option value="general">💬 {% trans 'General Inquiry' %}</option>
+            </select>
+          </div>
+
+          <div>
+            <label for="priority" class="block text-sm font-medium text-slate-300 mb-2">
+              {% trans 'Priority' %}
+            </label>
+            <select name="priority" id="priority"
+              class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+              <option value="low">🟢 {% trans 'Low' %}</option>
+              <option value="medium" selected>🟡 {% trans 'Medium' %}</option>
+              <option value="high">🟠 {% trans 'High' %}</option>
+              <option value="urgent">🔴 {% trans 'Urgent' %}</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Subject -->
+        <div>
+          <label for="subject" class="block text-sm font-medium text-slate-300 mb-2">
+            {% trans 'Subject' %}
+          </label>
+          {% input_field name="subject" placeholder="Brief description of the issue" required=True %}
+        </div>
+
+        <!-- Service Selection -->
+        <div>
+          <label for="service" class="block text-sm font-medium text-slate-300 mb-2">
+            {% trans 'Related Service' %} <span class="text-slate-500">({% trans 'optional' %})</span>
+          </label>
+          <select name="service" id="service"
+            class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+            <option value="">{% trans 'Select a service (if applicable)' %}</option>
+          </select>
+        </div>
+
+        <!-- Description -->
+        <div>
+          <label for="description" class="block text-sm font-medium text-slate-300 mb-2">
+            {% trans 'Description' %}
+          </label>
+          <textarea name="description" id="description" rows="6" required
+            class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
+            placeholder="{% trans 'Please provide detailed information about your request or issue...' %}"></textarea>
+          <p class="mt-1 text-xs text-slate-400">
+            {% trans 'Be as specific as possible. Include error messages, steps to reproduce, etc.' %}
+          </p>
+        </div>
+
+        <!-- Form Actions -->
+        <div class="flex justify-end space-x-4 pt-4 border-t border-slate-600">
+          {% url 'tickets:list' as tickets_url %}
+          {% button "Cancel" variant="secondary" href=tickets_url %}
+          {% button "Create Ticket" variant="primary" type="submit" icon="ticket" %}
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Load customer services dynamically
+  document.getElementById('customer_id').addEventListener('change', function () {
+    const customerId = this.value;
+    const serviceSelect = document.getElementById('service');
+
+    // Clear existing options
+    serviceSelect.innerHTML = '<option value="">{% trans "Loading services..." %}</option>';
+
+    if (!customerId) {
+      serviceSelect.innerHTML = '<option value="">{% trans "Select a service (if applicable)" %}</option>';
+      return;
+    }
+
+    // Simple AJAX to load customer services
+    fetch(`/api/customers/${customerId}/services/`)
+      .then(response => response.json())
+      .then(services => {
+        serviceSelect.innerHTML = '<option value="">{% trans "Select a service (if applicable)" %}</option>';
+        services.forEach(service => {
+          const option = document.createElement('option');
+          option.value = service.id;
+          option.textContent = `${service.service_type} - ${service.name}`;
+          serviceSelect.appendChild(option);
+        });
+      })
+      .catch(() => {
+        serviceSelect.innerHTML = '<option value="">{% trans "No services found" %}</option>';
+      });
+  });
+
+  // Auto-populate subject based on ticket type
+  document.getElementById('ticket_type').addEventListener('change', function () {
+    const subjectField = document.getElementById('subject');
+    const type = this.value;
+
+    if (!subjectField.value) {
+      const templates = {
+        'support': '{% trans "Technical issue with" %} ',
+        'billing': '{% trans "Billing question about" %} ',
+        'feature': '{% trans "Feature request:" %} ',
+        'bug': '{% trans "Bug report:" %} ',
+        'general': '{% trans "Question about" %} '
+      };
+
+      if (templates[type]) {
+        subjectField.placeholder = templates[type];
+      }
+    }
+  });
+
+  // Character counter for description
+  document.getElementById('description').addEventListener('input', function () {
+    const maxLength = 2000;
+    const currentLength = this.value.length;
+
+    if (currentLength > maxLength * 0.8) {
+      // Show warning when approaching limit
+      console.log(`${currentLength}/${maxLength} characters`);
+    }
+  });
+</script>
+{% endblock %}

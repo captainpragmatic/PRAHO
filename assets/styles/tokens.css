@@ -1,0 +1,255 @@
+/* ===============================================================================
+   PRAHO PLATFORM - DESIGN TOKENS
+   ===============================================================================
+   Romanian hosting provider brand colors and design system
+   These tokens are portable to Hugo static site migration
+*/
+
+:root {
+  /* ===============================================================================
+     🇷🇴 ROMANIAN BRAND COLORS
+     =============================================================================== */
+
+  /* Primary brand colors - Romanian inspired palette */
+  --brand-h: 220;
+  /* Blue hue for trust and technology */
+  --brand-s: 90%;
+  /* High saturation for vibrancy */
+  --brand-l: 56%;
+  /* Balanced lightness */
+
+  --primary: hsl(var(--brand-h) var(--brand-s) var(--brand-l));
+  --primary-50: hsl(var(--brand-h) var(--brand-s) 97%);
+  --primary-100: hsl(var(--brand-h) var(--brand-s) 94%);
+  --primary-200: hsl(var(--brand-h) var(--brand-s) 87%);
+  --primary-300: hsl(var(--brand-h) var(--brand-s) 78%);
+  --primary-400: hsl(var(--brand-h) var(--brand-s) 67%);
+  --primary-500: hsl(var(--brand-h) var(--brand-s) var(--brand-l));
+  --primary-600: hsl(var(--brand-h) var(--brand-s) 45%);
+  --primary-700: hsl(var(--brand-h) var(--brand-s) 36%);
+  --primary-800: hsl(var(--brand-h) var(--brand-s) 28%);
+  --primary-900: hsl(var(--brand-h) var(--brand-s) 22%);
+  --primary-950: hsl(var(--brand-h) var(--brand-s) 14%);
+
+  /* Romanian flag colors as accent */
+  --accent-red: #ce1126;
+  /* Romanian flag red */
+  --accent-blue: #002b7f;
+  /* Romanian flag blue */
+  --accent-yellow: #fcd116;
+  /* Romanian flag yellow */
+
+  /* ===============================================================================
+     🎨 SEMANTIC COLORS
+     =============================================================================== */
+
+  /* Background colors for Romanian hosting dashboard */
+  --bg: #0b0c10;
+  /* Dark primary background */
+  --bg-subtle: #111217;
+  /* Slightly lighter for cards */
+  --bg-muted: #1a1b23;
+  /* Even lighter for hover states */
+  --bg-elevated: #24252d;
+  /* Elevated surfaces like modals */
+
+  /* Content colors */
+  --content: #e6e8eb;
+  /* Primary text - high contrast */
+  --content-subtle: #b8bcc8;
+  /* Secondary text */
+  --content-muted: #9ca0ab;
+  /* Tertiary text */
+  --content-inverse: #0b0c10;
+  /* Text on light backgrounds */
+
+  /* Border colors */
+  --border: #313449;
+  /* Default border */
+  --border-subtle: #24252d;
+  /* Subtle border */
+  --border-strong: #404354;
+  /* Strong border */
+
+  /* ===============================================================================
+     🚨 STATUS COLORS (Romanian Business Context)
+     =============================================================================== */
+
+  /* Success - Romanian green for payments, approvals */
+  --success: #10b981;
+  --success-bg: #064e3b;
+  --success-border: #065f46;
+  --success-content: #d1fae5;
+
+  /* Warning - Romanian amber for pending items */
+  --warning: #f59e0b;
+  --warning-bg: #78350f;
+  --warning-border: #92400e;
+  --warning-content: #fef3c7;
+
+  /* Error - Romanian red for failures, unpaid invoices */
+  --error: #ef4444;
+  --error-bg: #7f1d1d;
+  --error-border: #991b1b;
+  --error-content: #fee2e2;
+
+  /* Info - Romanian blue for notifications */
+  --info: #3b82f6;
+  --info-bg: #1e3a8a;
+  --info-border: #1d4ed8;
+  --info-content: #dbeafe;
+
+  /* ===============================================================================
+     📏 SPACING & SIZING
+     =============================================================================== */
+
+  /* Spacing scale (rem units for accessibility) */
+  --space-1: 0.25rem;
+  /* 4px */
+  --space-2: 0.5rem;
+  /* 8px */
+  --space-3: 0.75rem;
+  /* 12px */
+  --space-4: 1rem;
+  /* 16px */
+  --space-5: 1.25rem;
+  /* 20px */
+  --space-6: 1.5rem;
+  /* 24px */
+  --space-8: 2rem;
+  /* 32px */
+  --space-10: 2.5rem;
+  /* 40px */
+  --space-12: 3rem;
+  /* 48px */
+  --space-16: 4rem;
+  /* 64px */
+  --space-20: 5rem;
+  /* 80px */
+  --space-24: 6rem;
+  /* 96px */
+
+  /* ===============================================================================
+     🎯 TYPOGRAPHY (Romanian Language Optimized)
+     =============================================================================== */
+
+  /* Font families - Romanian diacritics support */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans", Ubuntu, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", Consolas, "Liberation Mono", Menlo, monospace;
+
+  /* Font sizes - optimized for Romanian text */
+  --text-xs: 0.75rem;
+  /* 12px */
+  --text-sm: 0.875rem;
+  /* 14px */
+  --text-base: 1rem;
+  /* 16px */
+  --text-lg: 1.125rem;
+  /* 18px */
+  --text-xl: 1.25rem;
+  /* 20px */
+  --text-2xl: 1.5rem;
+  /* 24px */
+  --text-3xl: 1.875rem;
+  /* 30px */
+  --text-4xl: 2.25rem;
+  /* 36px */
+
+  /* Line heights for Romanian readability */
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.625;
+
+  /* Font weights */
+  --font-normal: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+
+  /* ===============================================================================
+     🔲 LAYOUT & COMPONENTS
+     =============================================================================== */
+
+  /* Border radius for Romanian design language */
+  --radius-sm: 0.375rem;
+  /* 6px */
+  --radius: 0.75rem;
+  /* 12px */
+  --radius-lg: 1rem;
+  /* 16px */
+  --radius-xl: 1.5rem;
+  /* 24px */
+
+  /* Shadows for depth in Romanian UI */
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.1);
+  --shadow: 0 4px 6px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px rgb(0 0 0 / 0.1);
+  --shadow-xl: 0 20px 25px rgb(0 0 0 / 0.1);
+
+  /* Z-index scale for layering */
+  --z-dropdown: 1000;
+  --z-sticky: 1020;
+  --z-fixed: 1030;
+  --z-modal-backdrop: 1040;
+  --z-modal: 1050;
+  --z-popover: 1060;
+  --z-tooltip: 1070;
+  --z-toast: 1080;
+
+  /* ===============================================================================
+     📱 RESPONSIVE BREAKPOINTS
+     =============================================================================== */
+
+  /* Tailwind-compatible breakpoints */
+  --breakpoint-sm: 640px;
+  /* Mobile */
+  --breakpoint-md: 768px;
+  /* Tablet */
+  --breakpoint-lg: 1024px;
+  /* Desktop */
+  --breakpoint-xl: 1280px;
+  /* Large desktop */
+  --breakpoint-2xl: 1536px;
+  /* Extra large */
+
+  /* ===============================================================================
+     🚀 ANIMATION & TRANSITIONS
+     =============================================================================== */
+
+  /* Duration for Romanian UX (slightly slower for clarity) */
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+  --duration-slow: 500ms;
+
+  /* Easing curves */
+  --ease-linear: linear;
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ===============================================================================
+     💰 ROMANIAN BUSINESS SPECIFIC
+     =============================================================================== */
+
+  /* Currency colors */
+  --currency-ron: var(--primary);
+  --currency-eur: #0066cc;
+  --currency-usd: #10b981;
+
+  /* VAT status colors */
+  --vat-valid: var(--success);
+  --vat-invalid: var(--error);
+  --vat-pending: var(--warning);
+
+  /* Payment status colors */
+  --payment-paid: var(--success);
+  --payment-pending: var(--warning);
+  --payment-failed: var(--error);
+  --payment-refunded: var(--info);
+
+  /* Server status colors */
+  --server-online: var(--success);
+  --server-offline: var(--error);
+  --server-maintenance: var(--warning);
+  --server-provisioning: var(--info);
+}

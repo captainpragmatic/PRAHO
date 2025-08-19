@@ -1,0 +1,404 @@
+/* ===============================================================================
+   PRAHO PLATFORM - MAIN APPLICATION STYLES
+   ===============================================================================
+   Tailwind CSS directives + Romanian hosting provider specific styles
+*/
+
+/* Import design tokens first */
+@import './tokens.css';
+
+/* Tailwind CSS directives */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===============================================================================
+   🇷🇴 BASE STYLES (Romanian Localization)
+   =============================================================================== */
+
+@layer base {
+
+  /* Root font settings optimized for Romanian diacritics */
+  html {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Romanian text rendering improvements */
+  body {
+    background-color: var(--bg);
+    color: var(--content);
+    line-height: var(--leading-normal);
+  }
+
+  /* Focus styles for accessibility */
+  *:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  /* Romanian currency formatting */
+  .currency-ron::after {
+    content: " lei";
+    font-weight: var(--font-normal);
+    color: var(--content-subtle);
+  }
+
+  .currency-eur::before {
+    content: "€";
+    margin-right: 0.125rem;
+  }
+
+  /* Scrollbar styling for Romanian UI */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: var(--bg-subtle);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: var(--radius);
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--border-strong);
+  }
+}
+
+/* ===============================================================================
+   🧩 COMPONENT STYLES (Romanian Business Components)
+   =============================================================================== */
+
+@layer components {
+
+  /* Button variants for Romanian hosting interface */
+  .btn {
+    @apply inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-primary {
+    @apply btn bg-[var(--primary)] text-white hover:bg-[var(--primary-600)] focus:ring-[var(--primary-500)];
+  }
+
+  .btn-secondary {
+    @apply btn bg-[var(--bg-elevated)] text-[var(--content)] border border-[var(--border)] hover:bg-[var(--bg-muted)] focus:ring-[var(--primary-500)];
+  }
+
+  .btn-danger {
+    @apply btn bg-[var(--error)] text-white hover:bg-red-700 focus:ring-red-500;
+  }
+
+  .btn-success {
+    @apply btn bg-[var(--success)] text-white hover:bg-green-700 focus:ring-green-500;
+  }
+
+  /* Romanian form elements */
+  .form-input {
+    @apply block w-full rounded-lg border border-[var(--border)] bg-[var(--bg-subtle)] px-3 py-2 text-[var(--content)] placeholder-[var(--content-muted)] focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] sm:text-sm;
+  }
+
+  .form-label {
+    @apply block text-sm font-medium text-[var(--content)] mb-1;
+  }
+
+  .form-error {
+    @apply text-sm text-[var(--error)] mt-1;
+  }
+
+  .form-help {
+    @apply text-sm text-[var(--content-muted)] mt-1;
+  }
+
+  /* Romanian business cards */
+  .card {
+    @apply bg-[var(--bg-elevated)] border border-[var(--border)] rounded-lg shadow-[var(--shadow)] overflow-hidden;
+  }
+
+  .card-header {
+    @apply px-6 py-4 border-b border-[var(--border-subtle)];
+  }
+
+  .card-body {
+    @apply px-6 py-4;
+  }
+
+  .card-footer {
+    @apply px-6 py-4 border-t border-[var(--border-subtle)] bg-[var(--bg-subtle)];
+  }
+
+  /* Romanian status badges */
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .badge-success {
+    @apply badge bg-[var(--success-bg)] text-[var(--success-content)] border border-[var(--success-border)];
+  }
+
+  .badge-warning {
+    @apply badge bg-[var(--warning-bg)] text-[var(--warning-content)] border border-[var(--warning-border)];
+  }
+
+  .badge-error {
+    @apply badge bg-[var(--error-bg)] text-[var(--error-content)] border border-[var(--error-border)];
+  }
+
+  .badge-info {
+    @apply badge bg-[var(--info-bg)] text-[var(--info-content)] border border-[var(--info-border)];
+  }
+
+  /* Romanian data tables */
+  .table {
+    @apply w-full text-sm text-left text-[var(--content)];
+  }
+
+  .table-header {
+    @apply bg-[var(--bg-subtle)] border-b border-[var(--border)];
+  }
+
+  .table-header th {
+    @apply px-6 py-3 font-medium text-[var(--content-subtle)] uppercase tracking-wider;
+  }
+
+  .table-row {
+    @apply border-b border-[var(--border-subtle)] hover:bg-[var(--bg-muted)] transition-colors;
+  }
+
+  .table-cell {
+    @apply px-6 py-4 whitespace-nowrap;
+  }
+
+  /* Romanian invoice styles */
+  .invoice-header {
+    @apply flex justify-between items-start mb-8 pb-6 border-b-2 border-[var(--border)];
+  }
+
+  .invoice-company {
+    @apply text-2xl font-bold text-[var(--primary)];
+  }
+
+  .invoice-number {
+    @apply text-lg font-mono text-[var(--content-subtle)];
+  }
+
+  .invoice-table {
+    @apply table border-collapse border border-[var(--border)] mt-6;
+  }
+
+  .invoice-table th,
+  .invoice-table td {
+    @apply border border-[var(--border)] px-4 py-2 text-left;
+  }
+
+  .invoice-total {
+    @apply text-xl font-bold text-[var(--primary)] bg-[var(--bg-elevated)] p-4 rounded-lg mt-4;
+  }
+
+  /* Romanian VAT display */
+  .vat-info {
+    @apply text-sm text-[var(--content-muted)] italic;
+  }
+
+  .vat-valid {
+    @apply text-[var(--success)] font-medium;
+  }
+
+  .vat-invalid {
+    @apply text-[var(--error)] font-medium;
+  }
+
+  /* Romanian hosting specific indicators */
+  .server-status {
+    @apply inline-flex items-center text-sm font-medium;
+  }
+
+  .server-online {
+    @apply server-status text-[var(--success)];
+  }
+
+  .server-offline {
+    @apply server-status text-[var(--error)];
+  }
+
+  .server-maintenance {
+    @apply server-status text-[var(--warning)];
+  }
+
+  /* Romanian loading states */
+  .loading-spinner {
+    @apply inline-block w-4 h-4 border-2 border-[var(--content-muted)] border-t-[var(--primary)] rounded-full animate-spin;
+  }
+
+  .loading-skeleton {
+    @apply bg-[var(--bg-muted)] animate-pulse rounded;
+  }
+
+  /* Romanian notification toasts */
+  .toast {
+    @apply fixed top-4 right-4 max-w-sm bg-[var(--bg-elevated)] border border-[var(--border)] rounded-lg shadow-lg p-4 z-50;
+  }
+
+  .toast-success {
+    @apply toast border-[var(--success)] bg-[var(--success-bg)];
+  }
+
+  .toast-error {
+    @apply toast border-[var(--error)] bg-[var(--error-bg)];
+  }
+
+  .toast-warning {
+    @apply toast border-[var(--warning)] bg-[var(--warning-bg)];
+  }
+}
+
+/* ===============================================================================
+   🎯 UTILITY STYLES (Romanian Business Utilities)
+   =============================================================================== */
+
+@layer utilities {
+
+  /* Romanian text utilities */
+  .text-currency {
+    @apply font-mono font-medium;
+  }
+
+  .text-vat {
+    @apply text-xs uppercase tracking-wider;
+  }
+
+  .text-invoice-number {
+    @apply font-mono text-[var(--content-subtle)];
+  }
+
+  /* Romanian spacing utilities */
+  .space-romanian {
+    @apply space-y-4;
+  }
+
+  /* Romanian hover states */
+  .hover-romanian {
+    @apply hover:bg-[var(--bg-muted)] hover:border-[var(--primary)] transition-all duration-200;
+  }
+
+  /* Romanian focus states */
+  .focus-romanian {
+    @apply focus:ring-2 focus:ring-[var(--primary)] focus:border-[var(--primary)];
+  }
+
+  /* Romanian animation utilities */
+  .animate-romanian-fade-in {
+    animation: romanian-fade-in 0.3s ease-out;
+  }
+
+  .animate-romanian-slide-up {
+    animation: romanian-slide-up 0.3s ease-out;
+  }
+
+  /* Romanian print styles */
+  @media print {
+    .print-hidden {
+      @apply hidden;
+    }
+
+    .print-invoice {
+      @apply text-black bg-white;
+    }
+
+    .print-no-break {
+      page-break-inside: avoid;
+    }
+  }
+}
+
+/* ===============================================================================
+   🎬 ANIMATIONS (Romanian UX)
+   =============================================================================== */
+
+@keyframes romanian-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes romanian-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ===============================================================================
+   📱 RESPONSIVE ROMANIAN ADJUSTMENTS
+   =============================================================================== */
+
+/* Mobile-first Romanian responsive design */
+@media (max-width: 640px) {
+  .invoice-header {
+    @apply flex-col space-y-4;
+  }
+
+  .table-cell {
+    @apply px-3 py-2 text-xs;
+  }
+
+  .btn {
+    @apply w-full justify-center;
+  }
+}
+
+/* Tablet adjustments for Romanian content */
+@media (min-width: 768px) and (max-width: 1024px) {
+  .table-cell {
+    @apply px-4 py-3;
+  }
+}
+
+/* ===============================================================================
+   🔧 HTMX INTEGRATION STYLES
+   =============================================================================== */
+
+/* HTMX loading states for Romanian UX */
+.htmx-request {
+  @apply opacity-75 pointer-events-none;
+}
+
+.htmx-request .loading-spinner {
+  @apply inline-block;
+}
+
+/* HTMX swapping animations */
+.htmx-swapping {
+  @apply opacity-0 transition-opacity duration-200;
+}
+
+.htmx-settling {
+  @apply opacity-100 transition-opacity duration-200;
+}
+
+/* Romanian form submission states */
+.htmx-request .btn {
+  @apply opacity-75 cursor-not-allowed;
+}
+
+.htmx-request .btn::after {
+  content: '';
+  @apply inline-block w-4 h-4 ml-2 border-2 border-white border-t-transparent rounded-full animate-spin;
+}

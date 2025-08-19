@@ -1,0 +1,194 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans 'Customers' %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6">
+  <!-- Header with Search and Actions -->
+  <div class="flex justify-between items-center mb-6">
+    <div>
+      <h1 class="text-2xl font-bold text-white">👥 {% trans 'Customers' %}</h1>
+      <p class="text-slate-400 mt-1">{% trans 'Manage your companies and contacts.' %}</p>
+    </div>
+
+    {% url 'customers:create' as create_url %}
+    {% button "New Customer" variant="primary" href=create_url icon="plus" %}
+  </div>
+
+  <!-- Search and Filters -->
+  <div class="bg-slate-800 rounded-lg p-4 mb-6 border border-slate-700">
+    <form method="get" class="flex gap-4 items-end">
+      <div class="flex-1">
+        <label for="search" class="block text-sm font-medium text-slate-300 mb-1">
+          🔍 {% trans 'Search' %}
+        </label>
+        {% input_field name="search" value=search_query placeholder="Company name, CUI, email..." %}
+      </div>
+
+      {% button "Search" variant="primary" type="submit" %}
+
+      {% if search_query %}
+      {% url 'customers:list' as list_url %}
+      {% button "Reset" variant="secondary" href=list_url %}
+      {% endif %}
+    </form>
+  </div>
+
+  <!-- Results Stats -->
+  <div class="mb-4">
+    <p class="text-slate-400 text-sm">
+      {% if search_query %}
+      {% blocktrans count total_customers=total_customers %}
+      {{ total_customers }} result for "{{ search_query }}"
+      {% plural %}
+      {{ total_customers }} results for "{{ search_query }}"
+      {% endblocktrans %}
+      {% else %}
+      {% blocktrans count total_customers=total_customers %}
+      {{ total_customers }} customer in total
+      {% plural %}
+      {{ total_customers }} customers in total
+      {% endblocktrans %}
+      {% endif %}
+    </p>
+  </div>
+
+  <!-- Customers List -->
+  <div class="bg-slate-800 rounded-lg border border-slate-700">
+    <div class="overflow-x-auto">
+      <table class="w-full">
+        <thead class="bg-slate-700">
+          <tr>
+            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+              {% trans 'Company' %}
+            </th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+              {% trans 'Contact' %}
+            </th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+              {% trans 'CUI / VAT' %}
+            </th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+              {% trans 'Status' %}
+            </th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+              {% trans 'Actions' %}
+            </th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-700">
+          {% for customer in customers %}
+          <tr class="hover:bg-slate-700/50 transition-colors">
+            <td class="px-6 py-4">
+              <div>
+                <div class="text-white font-medium">
+                  <a href="{% url 'customers:detail' customer.pk %}" class="hover:text-blue-400">
+                    {{ customer.company_name }}
+                  </a>
+                </div>
+                <div class="text-slate-400 text-sm">
+                  {{ customer.legal_address|truncatechars:40 }}
+                </div>
+              </div>
+            </td>
+
+            <td class="px-6 py-4">
+              <div>
+                <div class="text-white">{{ customer.contact_person }}</div>
+                <div class="text-slate-400 text-sm">
+                  <div>📧 {{ customer.contact_email }}</div>
+                  <div>📞 {{ customer.contact_phone }}</div>
+                </div>
+              </div>
+            </td>
+
+            <td class="px-6 py-4">
+              <div>
+                <div class="text-white font-mono">
+                  🇷🇴 {{ customer.cui }}
+                </div>
+                {% if customer.vat_number %}
+                <div class="text-slate-400 text-sm">
+                  💰 {{ customer.vat_number }}
+                </div>
+                {% endif %}
+              </div>
+            </td>
+
+            <td class="px-6 py-4">
+              <span
+                class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-900 text-green-200">
+                ✅ {% trans 'Active' %}
+              </span>
+            </td>
+
+            <td class="px-6 py-4">
+              <div class="flex items-center space-x-2">
+                {% url 'customers:detail' customer.pk as detail_url %}
+                {% url 'customers:edit' customer.pk as edit_url %}
+                {% button "View" variant="info" href=detail_url size="sm" %}
+                {% button "Edit" variant="success" href=edit_url size="sm" %}
+              </div>
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="5" class="px-6 py-12 text-center">
+              <div class="text-slate-400">
+                {% if search_query %}
+                <div class="text-4xl mb-4">🔍</div>
+                <p>{% blocktrans %}No customers found for search "{{ search_query }}"{% endblocktrans %}</p>
+                {% else %}
+                <div class="text-4xl mb-4">👥</div>
+                <p>{% trans 'No customers yet' %}</p>
+                <p class="mt-2">
+                  <a href="{% url 'customers:create' %}" class="text-blue-400 hover:text-blue-300">
+                    {% trans 'Create the first customer' %} →
+                  </a>
+                </p>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Pagination -->
+    {% if customers.has_other_pages %}
+    <div class="bg-slate-700 px-6 py-3 border-t border-slate-600">
+      <div class="flex items-center justify-between">
+        <div class="text-sm text-slate-400">
+          {% blocktrans with page_obj.number as page_number and paginator.num_pages as num_pages %}
+          Page {{ page_number }} of {{ num_pages }}
+          {% endblocktrans %}
+        </div>
+
+        <div class="flex space-x-1">
+          {% if customers.has_previous %}
+          {% if search_query %}
+          {% button "Previous" variant="secondary" href="?page={{ customers.previous_page_number }}&search={{
+          search_query }}" size="sm" %}
+          {% else %}
+          {% button "Previous" variant="secondary" href="?page={{ customers.previous_page_number }}" size="sm" %}
+          {% endif %}
+          {% endif %}
+
+          {% if customers.has_next %}
+          {% if search_query %}
+          {% button "Next" variant="secondary" href="?page={{ customers.next_page_number }}&search={{ search_query }}"
+          size="sm" %}
+          {% else %}
+          {% button "Next" variant="secondary" href="?page={{ customers.next_page_number }}" size="sm" %}
+          {% endif %}
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

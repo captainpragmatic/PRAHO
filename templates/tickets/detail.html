@@ -1,0 +1,108 @@
+{% extends 'base.html' %}
+{% load i18n %}
+
+{% block title %}{% trans 'Ticket Details' %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6">
+    <h1 class="text-3xl font-bold text-white mb-6">{% trans 'Ticket' %} #{{ ticket.ticket_number }}</h1>
+
+    <div class="bg-slate-800 rounded-lg p-6 border border-slate-700 mb-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <p class="text-slate-400 text-sm">{% trans 'Subject' %}:</p>
+                <p class="text-white font-medium text-lg">{{ ticket.title }}</p>
+            </div>
+            <div>
+                <p class="text-slate-400 text-sm">{% trans 'Customer' %}:</p>
+                <p class="text-white font-medium text-lg">{{ ticket.customer.get_display_name }}</p>
+            </div>
+            <div>
+                <p class="text-slate-400 text-sm">{% trans 'Status' %}:</p>
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium" style="background-color: {{ ticket.get_status_color }}; color: white;">
+                    {{ ticket.get_status_display }}
+                </span>
+            </div>
+            <div>
+                <p class="text-slate-400 text-sm">{% trans 'Priority' %}:</p>
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium" style="background-color: {{ ticket.get_priority_color }}; color: white;">
+                    {{ ticket.get_priority_display }}
+                </span>
+            </div>
+            <div>
+                <p class="text-slate-400 text-sm">{% trans 'Created At' %}:</p>
+                <p class="text-white font-medium">{{ ticket.created_at|date:"d.m.Y H:i" }}</p>
+            </div>
+            <div>
+                <p class="text-slate-400 text-sm">{% trans 'Created By' %}:</p>
+                <p class="text-white font-medium">{{ ticket.created_by.get_full_name }}</p>
+            </div>
+        </div>
+
+        <div class="mt-6 border-t border-slate-700 pt-6">
+            <p class="text-slate-400 text-sm mb-2">{% trans 'Description' %}:</p>
+            <div class="bg-slate-700 p-4 rounded-md text-white prose prose-invert max-w-none">
+                {{ ticket.description|linebreaksbr }}
+            </div>
+        </div>
+    </div>
+
+    <!-- Ticket Replies/Comments -->
+    <div class="bg-slate-800 rounded-lg p-6 border border-slate-700 mb-6">
+        <h3 class="text-lg font-medium text-white mb-4">{% trans 'Replies' %}</h3>
+        <div class="space-y-4">
+            {% comment %}
+            {% for comment in ticket.comments.all %}
+            <div class="bg-slate-700 p-4 rounded-md">
+                <div class="flex justify-between items-center mb-2">
+                    <p class="text-white font-medium">{{ comment.get_author_name }}</p>
+                    <p class="text-slate-400 text-sm">{{ comment.created_at|date:"d.m.Y H:i" }}</p>
+                </div>
+                <div class="text-slate-300 prose prose-invert max-w-none">
+                    {{ comment.content|linebreaksbr }}
+                </div>
+            </div>
+            {% empty %}
+            <p class="text-slate-400 text-center">{% trans 'No replies yet.' %}</p>
+            {% endfor %}
+            {% endcomment %}
+            <p class="text-slate-400 text-center">{% trans 'Replies section coming soon.' %}</p>
+        </div>
+
+        {% if can_edit %}
+        <div class="mt-6 border-t border-slate-700 pt-6">
+            <h3 class="text-lg font-medium text-white mb-4">{% trans 'Add Reply' %}</h3>
+            <form method="post" action="{% url 'tickets:reply' pk=ticket.pk %}">
+                {% csrf_token %}
+                <textarea name="reply" rows="4" class="shadow appearance-none border rounded w-full py-2 px-3 text-slate-700 leading-tight focus:outline-none focus:shadow-outline bg-slate-700 border-slate-600 mb-4" placeholder="{% trans 'Type your reply here...' %}" required></textarea>
+                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
+                    {% trans 'Submit Reply' %}
+                </button>
+            </form>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="flex justify-between items-center mt-6">
+        <a href="{% url 'tickets:list' %}" class="inline-block align-baseline font-bold text-sm text-blue-400 hover:text-blue-300">
+            ← {% trans 'Back to Tickets' %}
+        </a>
+        {% if can_edit %}
+            <div class="space-x-2">
+                <form method="post" action="{% url 'tickets:close' pk=ticket.pk %}" class="inline-block">
+                    {% csrf_token %}
+                    <button type="submit" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
+                        {% trans 'Close Ticket' %} 
+                    </button>
+                </form>
+                <form method="post" action="{% url 'tickets:reopen' pk=ticket.pk %}" class="inline-block">
+                    {% csrf_token %}
+                    <button type="submit" class="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
+                        {% trans 'Reopen Ticket' %}
+                    </button>
+                </form>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,207 @@
+{% load i18n %}
+{% load ui_components %}
+{% load formatting %}
+<!DOCTYPE html>
+<html lang="{{ LANGUAGE_CODE }}" class="h-full bg-slate-900">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}PRAHO Platform{% endblock %}</title>
+
+  <!-- Security Headers -->
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+  <meta http-equiv="X-Frame-Options" content="DENY">
+  <meta http-equiv="X-XSS-Protection" content="1; mode=block">
+
+  <!-- Romanian Branding -->
+  <meta name="description" content="{% trans 'PRAHO Platform System for Romanian Hosting Providers' %}">
+  <meta name="author" content="PragmaticHost">
+
+  <!-- Styles -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+
+  <style>
+    /* Romanian Hosting Brand Colors */
+    :root {
+      --brand-h: 220;
+      --brand-s: 90%;
+      --brand-l: 56%;
+      --bg: #0b0c10;
+      --bg-elev: #111217;
+      --content: #e6e8eb;
+      --primary: hsl(var(--brand-h) var(--brand-s) var(--brand-l));
+    }
+
+    .brand-gradient {
+      background: linear-gradient(135deg, #3b82f6 0%, #1e40af 100%);
+    }
+
+    .romanian-flag::before {
+      content: "🇷🇴";
+      margin-right: 0.5rem;
+    }
+  </style>
+</head>
+
+<body class="h-full bg-slate-900 text-slate-100">
+  <div class="min-h-full">
+    <!-- Navigation -->
+    {% if user.is_authenticated %}
+    <nav class="bg-slate-800 border-b border-slate-700">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex justify-between h-16">
+          <div class="flex items-center min-w-0 flex-1">
+            <!-- Logo -->
+            <div class="flex-shrink-0">
+              <h1 class="text-xl font-bold text-blue-400 romanian-flag">
+                PRAHO Platform
+              </h1>
+            </div>
+
+            <!-- Navigation Links -->
+            <div class="hidden lg:ml-6 lg:flex lg:space-x-4">
+              <!-- Dashboard is always available -->
+              <a href="{% url 'dashboard' %}"
+                class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
+                <span class="mr-2">📊</span> {% trans 'Dashboard' %}
+              </a>
+
+              <!-- Staff/Admin Navigation -->
+              {% if user.is_staff or user.staff_role %}
+              <a href="{% url 'customers:list' %}"
+                class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
+                <span class="mr-2">👥</span> {% trans 'Customers' %}
+              </a>
+              <a href="{% url 'billing:invoice_list' %}"
+                class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
+                <span class="mr-2">🧾</span> {% trans 'Invoices' %}
+              </a>
+              <a href="{% url 'tickets:list' %}"
+                class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
+                <span class="mr-2">🎫</span> {% trans 'Tickets' %}
+              </a>
+              <a href="{% url 'provisioning:services' %}"
+                class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
+                <span class="mr-2">🚀</span> {% trans 'Services' %}
+              </a>
+              {% else %}
+              <!-- Customer User Navigation -->
+              {% if user.is_customer_user %}
+              <a href="{% url 'tickets:list' %}"
+                class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
+                <span class="mr-2">🎫</span> {% trans 'My Tickets' %}
+              </a>
+              <a href="{% url 'billing:invoice_list' %}"
+                class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
+                <span class="mr-2">🧾</span> {% trans 'My Invoices' %}
+              </a>
+              <a href="{% url 'provisioning:services' %}"
+                class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
+                <span class="mr-2">🚀</span> {% trans 'My Services' %}
+              </a>
+              {% else %}
+              <!-- User with no customer access -->
+              <span class="text-slate-500 px-3 py-2 text-sm">
+                {% trans 'No customer access assigned' %}
+              </span>
+              {% endif %}
+              {% endif %}
+            </div>
+          </div>
+
+          <!-- User Menu -->
+          <div class="flex items-center space-x-3 flex-shrink-0">
+            <span class="text-slate-400 text-sm whitespace-nowrap">
+              {% trans 'Hello' %}, {{ user.first_name|default:user.username }}
+            </span>
+            <a href="{% url 'users:user_profile' %}"
+              class="text-slate-300 hover:text-white flex items-center px-2 py-1 whitespace-nowrap">
+              <span class="mr-1">⚙️</span> {% trans 'Profile' %}
+            </a>
+            <form action="/i18n/setlang/" method="post" class="inline">
+              {% csrf_token %}
+              <input name="next" type="hidden" value="{{ request.get_full_path|slice:':-1' }}" />
+              <select name="language" onchange="this.form.submit()"
+                class="bg-slate-700 text-white rounded-md text-sm font-medium">
+                {% get_current_language as LANGUAGE_CODE %}
+                {% get_available_languages as LANGUAGES %}
+                {% get_language_info_list for LANGUAGES as languages %}
+                {% for language in languages %}
+                <option value="{{ language.code }}" {% if language.code == LANGUAGE_CODE %}selected{% endif %}>
+                  {{ language.name_local }} ({{ language.code }})
+                </option>
+                {% endfor %}
+              </select>
+            </form>
+            {% url 'users:logout' as logout_url %}
+            {% button "Logout" variant="danger" href=logout_url size="sm" %}
+          </div>
+        </div>
+      </div>
+    </nav>
+    {% endif %}
+
+    <!-- Flash Messages -->
+    {% if messages %}
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-4">
+      {% for message in messages %}
+      {% alert message.message variant=message.tags dismissible=True %}
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+      {% block content %}
+      {% endblock %}
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-slate-800 border-t border-slate-700 mt-12">
+      <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+        <div class="text-center text-slate-400 text-sm">
+          <p class="romanian-flag">
+            © {{ current_year }} PRAHO Platform - {% trans 'PRAHO Really Automates Hosting Operations' %}
+          </p>
+          <p class="mt-2 text-xs">
+            {% trans 'Compliance' %}: {% trans 'VAT Romania' %} | e-Factura | GDPR |
+            <span class="text-blue-400">{% trans 'Version' %} {{ app_version|default:"1.0.0" }}</span>
+          </p>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Scripts -->
+  <script>
+    // Romanian number formatting
+    function formatRomanianCurrency(amount) {
+      return new Intl.NumberFormat('ro-RO', {
+        style: 'currency',
+        currency: 'RON'
+      }).format(amount);
+    }
+
+    // HTMX Error Handling
+    document.body.addEventListener('htmx:responseError', function (event) {
+      console.error('🚨 HTMX Error:', event.detail);
+      alert('{% trans "An error occurred. Please try again." %}');
+    });
+
+    // Auto-hide flash messages
+    setTimeout(function () {
+      const messages = document.querySelectorAll('.max-w-7xl .mb-4[class*="bg-"][class*="border"]');
+      messages.forEach(function (msg) {
+        msg.style.transition = 'opacity 0.5s';
+        msg.style.opacity = '0';
+        setTimeout(() => msg.remove(), 500);
+      });
+    }, 5000);
+  </script>
+
+  {% block extra_js %}{% endblock %}
+</body>
+
+</html>

@@ -1,0 +1,42 @@
+# ===============================================================================
+# EDITORCONFIG - PRAHO PLATFORM
+# ===============================================================================
+# Prevents IDE auto-formatting from breaking Django templates
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.py]
+indent_style = space
+indent_size = 4
+max_line_length = 88
+
+[*.{js,ts,json,yml,yaml}]
+indent_style = space
+indent_size = 2
+
+[*.{html,htm}]
+# 🚨 IMPORTANT: Django templates should NOT be auto-formatted
+# Auto-formatting can remove spaces around comparison operators
+# which breaks Django template syntax
+indent_style = space
+indent_size = 2
+# Disable auto-formatting for HTML files (they contain Django templates)
+trim_trailing_whitespace = false
+insert_final_newline = false
+
+[*.{css,scss,sass}]
+indent_style = space
+indent_size = 2
+
+[Makefile]
+indent_style = tab
+
+[*.md]
+trim_trailing_whitespace = false
+max_line_length = 120

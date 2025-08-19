@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load formatting %}
+
+{% block title %}{% trans "Invoice" %} {{ invoice.number }} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="px-4 sm:px-6 lg:px-8">
+  <!-- Header -->
+  <div class="sm:flex sm:items-center">
+    <div class="sm:flex-auto">
+      <h1 class="text-2xl font-semibold text-white romanian-flag">
+        {% trans "Invoice" %} {{ invoice.number }}
+      </h1>
+      <p class="mt-2 text-sm text-slate-400">
+        {% trans "Invoice details and line items" %}
+      </p>
+    </div>
+    <div class="mt-4 sm:mt-0 sm:ml-16 sm:flex-none">
+      <a href="{% url 'billing:invoice_list' %}"
+         class="inline-flex items-center justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700">
+        ← {% trans "Back to Invoices" %}
+      </a>
+    </div>
+  </div>
+
+  <!-- Invoice Information -->
+  <div class="mt-8 bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg overflow-hidden">
+    <div class="px-4 py-5 sm:p-6">
+      <div class="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-3">
+        <!-- Customer -->
+        <div>
+          <dt class="text-sm font-medium text-slate-400">{% trans "Customer" %}</dt>
+          <dd class="mt-1 text-sm text-white">
+            {{ invoice.customer.name }}
+          </dd>
+        </div>
+
+        <!-- Status -->
+        <div>
+          <dt class="text-sm font-medium text-slate-400">{% trans "Status" %}</dt>
+          <dd class="mt-1">
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+              {% if invoice.status == 'paid' %}bg-green-100 text-green-800
+              {% elif invoice.status == 'issued' %}bg-blue-100 text-blue-800
+              {% elif invoice.status == 'overdue' %}bg-red-100 text-red-800
+              {% elif invoice.status == 'draft' %}bg-gray-100 text-gray-800
+              {% else %}bg-yellow-100 text-yellow-800{% endif %}">
+              {{ invoice.get_status_display }}
+            </span>
+          </dd>
+        </div>
+
+        <!-- Amount -->
+        <div>
+          <dt class="text-sm font-medium text-slate-400">{% trans "Total Amount" %}</dt>
+          <dd class="mt-1 text-lg font-semibold text-white">
+            {{ invoice.total_cents|cents_to_currency|romanian_currency:invoice.currency.code }}
+          </dd>
+        </div>
+
+        <!-- Issue Date -->
+        <div>
+          <dt class="text-sm font-medium text-slate-400">{% trans "Issue Date" %}</dt>
+          <dd class="mt-1 text-sm text-white">
+            {{ invoice.issued_at|date:"d.m.Y" }}
+          </dd>
+        </div>
+
+        <!-- Due Date -->
+        <div>
+          <dt class="text-sm font-medium text-slate-400">{% trans "Due Date" %}</dt>
+          <dd class="mt-1 text-sm text-white">
+            {{ invoice.due_at|date:"d.m.Y" }}
+          </dd>
+        </div>
+
+        <!-- Payment Status -->
+        <div>
+          <dt class="text-sm font-medium text-slate-400">{% trans "Payment Date" %}</dt>
+          <dd class="mt-1 text-sm text-white">
+            {% if invoice.paid_at %}
+              {{ invoice.paid_at|date:"d.m.Y H:i" }}
+            {% else %}
+              <span class="text-slate-500">{% trans "Not paid" %}</span>
+            {% endif %}
+          </dd>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Invoice Lines -->
+  <div class="mt-8">
+    <h2 class="text-lg font-medium text-white mb-4">{% trans "Invoice Lines" %}</h2>
+    <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg overflow-hidden">
+      <table class="min-w-full divide-y divide-slate-700">
+        <thead class="bg-slate-900">
+          <tr>
+            <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+              {% trans "Description" %}
+            </th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+              {% trans "Type" %}
+            </th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">
+              {% trans "Quantity" %}
+            </th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">
+              {% trans "Unit Price" %}
+            </th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">
+              {% trans "Total" %}
+            </th>
+          </tr>
+        </thead>
+        <tbody class="bg-slate-800 divide-y divide-slate-700">
+          {% for item in items %}
+          <tr>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-white">
+              {{ item.description }}
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
+              {{ item.get_kind_display }}
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-white text-right">
+              {{ item.quantity }}
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-white text-right">
+              {{ item.unit_price_cents|cents_to_currency|romanian_currency:invoice.currency.code }}
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-white text-right">
+              {{ item.total_cents|cents_to_currency|romanian_currency:invoice.currency.code }}
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="5" class="px-6 py-4 text-center text-sm text-slate-500">
+              {% trans "No invoice lines found" %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot class="bg-slate-900">
+          <tr>
+            <td colspan="4" class="px-6 py-4 text-right text-sm font-medium text-slate-400">
+              {% trans "Subtotal:" %}
+            </td>
+            <td class="px-6 py-4 text-right text-sm font-medium text-white">
+              {{ invoice.subtotal_cents|cents_to_currency|romanian_currency:invoice.currency.code }}
+            </td>
+          </tr>
+          <tr>
+            <td colspan="4" class="px-6 py-4 text-right text-sm font-medium text-slate-400">
+              {% trans "VAT:" %}
+            </td>
+            <td class="px-6 py-4 text-right text-sm font-medium text-white">
+              {{ invoice.tax_cents|cents_to_currency|romanian_currency:invoice.currency.code }}
+            </td>
+          </tr>
+          <tr class="border-t border-slate-600">
+            <td colspan="4" class="px-6 py-4 text-right text-lg font-bold text-slate-300">
+              {% trans "Total:" %}
+            </td>
+            <td class="px-6 py-4 text-right text-lg font-bold text-white">
+              {{ invoice.total_cents|cents_to_currency|romanian_currency:invoice.currency.code }}
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </div>
+
+  <!-- Payments -->
+  {% if payments %}
+  <div class="mt-8">
+    <h2 class="text-lg font-medium text-white mb-4">{% trans "Payments" %}</h2>
+    <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg overflow-hidden">
+      <table class="min-w-full divide-y divide-slate-700">
+        <thead class="bg-slate-900">
+          <tr>
+            <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+              {% trans "Date" %}
+            </th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+              {% trans "Method" %}
+            </th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">
+              {% trans "Amount" %}
+            </th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+              {% trans "Reference" %}
+            </th>
+          </tr>
+        </thead>
+        <tbody class="bg-slate-800 divide-y divide-slate-700">
+          {% for payment in payments %}
+          <tr>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-white">
+              {{ payment.created_at|date:"d.m.Y H:i" }}
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
+              {{ payment.get_method_display }}
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-green-400 text-right">
+              {{ payment.amount|romanian_currency:payment.currency.code }}
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
+              {{ payment.reference|default:"-" }}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

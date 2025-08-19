@@ -1,0 +1,297 @@
+{% extends 'base.html' %}
+{% load i18n %}
+
+{% block title %}{% trans 'Create Account' %} - PragmaticHost{% endblock %}
+
+{% block content %}
+<div
+  class="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 to-slate-800 py-12 px-4 sm:px-6 lg:px-8">
+  <div class="max-w-2xl w-full space-y-8">
+    <!-- Header -->
+    <div class="text-center">
+      <h2 class="mt-6 text-3xl font-extrabold text-white">
+        🚀 {% trans 'Create Your PragmaticHost Account' %}
+      </h2>
+      <p class="mt-2 text-sm text-slate-400">
+        {% trans 'Start your hosting journey with Romanian compliance built-in' %}
+      </p>
+    </div>
+
+    <!-- Registration Form -->
+    <div class="bg-slate-800 rounded-lg shadow-xl p-8 border border-slate-700">
+      <form method="post" class="space-y-6">
+        {% csrf_token %}
+
+        <!-- Messages -->
+        {% if messages %}
+        <div class="space-y-2">
+          {% for message in messages %}
+          <div class="bg-red-500/10 border border-red-500/20 text-red-300 px-4 py-3 rounded-lg text-sm">
+            {{ message }}
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        <!-- Form Errors -->
+        {% if form.non_field_errors %}
+        <div class="bg-red-500/10 border border-red-500/20 text-red-300 px-4 py-3 rounded-lg text-sm">
+          {% for error in form.non_field_errors %}
+          {{ error }}
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        <!-- Step 1: Personal Information -->
+        <div class="space-y-4">
+          <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
+            👤 {% trans 'Personal Information' %}
+          </h3>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- First Name -->
+            <div>
+              <label for="{{ form.first_name.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                {{ form.first_name.label }}
+              </label>
+              {{ form.first_name }}
+              {% if form.first_name.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.first_name.errors.0 }}</p>
+              {% endif %}
+            </div>
+
+            <!-- Last Name -->
+            <div>
+              <label for="{{ form.last_name.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                {{ form.last_name.label }}
+              </label>
+              {{ form.last_name }}
+              {% if form.last_name.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.last_name.errors.0 }}</p>
+              {% endif %}
+            </div>
+          </div>
+
+          <!-- Email -->
+          <div>
+            <label for="{{ form.email.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+              {{ form.email.label }}
+            </label>
+            {{ form.email }}
+            {% if form.email.help_text %}
+            <p class="mt-1 text-xs text-slate-400">{{ form.email.help_text }}</p>
+            {% endif %}
+            {% if form.email.errors %}
+            <p class="mt-1 text-sm text-red-400">{{ form.email.errors.0 }}</p>
+            {% endif %}
+          </div>
+
+          <!-- Phone -->
+          <div>
+            <label for="{{ form.phone.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+              {{ form.phone.label }}
+            </label>
+            {{ form.phone }}
+            {% if form.phone.help_text %}
+            <p class="mt-1 text-xs text-slate-400">{{ form.phone.help_text }}</p>
+            {% endif %}
+            {% if form.phone.errors %}
+            <p class="mt-1 text-sm text-red-400">{{ form.phone.errors.0 }}</p>
+            {% endif %}
+          </div>
+        </div>
+
+        <!-- Step 2: Business Information -->
+        <div class="space-y-4">
+          <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
+            🏢 {% trans 'Business Information' %}
+          </h3>
+
+          <!-- Customer Type -->
+          <div>
+            <label for="{{ form.customer_type.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+              {{ form.customer_type.label }}
+            </label>
+            {{ form.customer_type }}
+            {% if form.customer_type.help_text %}
+            <p class="mt-1 text-xs text-slate-400">{{ form.customer_type.help_text }}</p>
+            {% endif %}
+            {% if form.customer_type.errors %}
+            <p class="mt-1 text-sm text-red-400">{{ form.customer_type.errors.0 }}</p>
+            {% endif %}
+          </div>
+
+          <!-- Company Name -->
+          <div>
+            <label for="{{ form.company_name.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+              {{ form.company_name.label }}
+            </label>
+            {{ form.company_name }}
+            {% if form.company_name.help_text %}
+            <p class="mt-1 text-xs text-slate-400">{{ form.company_name.help_text }}</p>
+            {% endif %}
+            {% if form.company_name.errors %}
+            <p class="mt-1 text-sm text-red-400">{{ form.company_name.errors.0 }}</p>
+            {% endif %}
+          </div>
+
+          <!-- VAT Number -->
+          <div>
+            <label for="{{ form.vat_number.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+              {{ form.vat_number.label }}
+            </label>
+            {{ form.vat_number }}
+            {% if form.vat_number.help_text %}
+            <p class="mt-1 text-xs text-slate-400">{{ form.vat_number.help_text }}</p>
+            {% endif %}
+            {% if form.vat_number.errors %}
+            <p class="mt-1 text-sm text-red-400">{{ form.vat_number.errors.0 }}</p>
+            {% endif %}
+          </div>
+        </div>
+
+        <!-- Step 3: Address Information -->
+        <div class="space-y-4">
+          <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
+            📍 {% trans 'Address Information' %}
+          </h3>
+
+          <!-- Address -->
+          <div>
+            <label for="{{ form.address_line1.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+              {{ form.address_line1.label }}
+            </label>
+            {{ form.address_line1 }}
+            {% if form.address_line1.help_text %}
+            <p class="mt-1 text-xs text-slate-400">{{ form.address_line1.help_text }}</p>
+            {% endif %}
+            {% if form.address_line1.errors %}
+            <p class="mt-1 text-sm text-red-400">{{ form.address_line1.errors.0 }}</p>
+            {% endif %}
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- City -->
+            <div>
+              <label for="{{ form.city.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                {{ form.city.label }}
+              </label>
+              {{ form.city }}
+              {% if form.city.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.city.errors.0 }}</p>
+              {% endif %}
+            </div>
+
+            <!-- County -->
+            <div>
+              <label for="{{ form.county.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                {{ form.county.label }}
+              </label>
+              {{ form.county }}
+              {% if form.county.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.county.errors.0 }}</p>
+              {% endif %}
+            </div>
+          </div>
+
+          <!-- Postal Code -->
+          <div class="md:w-1/2">
+            <label for="{{ form.postal_code.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+              {{ form.postal_code.label }}
+            </label>
+            {{ form.postal_code }}
+            {% if form.postal_code.errors %}
+            <p class="mt-1 text-sm text-red-400">{{ form.postal_code.errors.0 }}</p>
+            {% endif %}
+          </div>
+        </div>
+
+        <!-- Step 4: Password -->
+        <div class="space-y-4">
+          <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
+            🔒 {% trans 'Account Security' %}
+          </h3>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Password -->
+            <div>
+              <label for="{{ form.password1.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                {{ form.password1.label }}
+              </label>
+              {{ form.password1 }}
+              {% if form.password1.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.password1.errors.0 }}</p>
+              {% endif %}
+            </div>
+
+            <!-- Confirm Password -->
+            <div>
+              <label for="{{ form.password2.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                {{ form.password2.label }}
+              </label>
+              {{ form.password2 }}
+              {% if form.password2.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.password2.errors.0 }}</p>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 5: GDPR Compliance -->
+        <div class="space-y-4">
+          <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
+            🛡️ {% trans 'Privacy & Consent' %}
+          </h3>
+
+          <!-- Data Processing Consent -->
+          <div class="flex items-start space-x-3">
+            {{ form.data_processing_consent }}
+            <div class="flex-1">
+              <label for="{{ form.data_processing_consent.id_for_label }}" class="text-sm text-slate-300">
+                {{ form.data_processing_consent.label }}
+              </label>
+              {% if form.data_processing_consent.help_text %}
+              <p class="text-xs text-slate-400">{{ form.data_processing_consent.help_text }}</p>
+              {% endif %}
+              {% if form.data_processing_consent.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.data_processing_consent.errors.0 }}</p>
+              {% endif %}
+            </div>
+          </div>
+
+          <!-- Marketing Consent -->
+          <div class="flex items-start space-x-3">
+            {{ form.marketing_consent }}
+            <div class="flex-1">
+              <label for="{{ form.marketing_consent.id_for_label }}" class="text-sm text-slate-300">
+                {{ form.marketing_consent.label }}
+              </label>
+              {% if form.marketing_consent.help_text %}
+              <p class="text-xs text-slate-400">{{ form.marketing_consent.help_text }}</p>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <!-- Submit Button -->
+        <div class="pt-6">
+          <button type="submit"
+            class="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 focus:ring-offset-slate-800 transition-colors">
+            🚀 {% trans 'Create Account' %}
+          </button>
+        </div>
+
+        <!-- Login Link -->
+        <div class="text-center">
+          <p class="text-sm text-slate-400">
+            {% trans 'Already have an account?' %}
+            <a href="{% url 'users:login' %}" class="font-medium text-blue-400 hover:text-blue-300 transition-colors">
+              {% trans 'Sign in here' %}
+            </a>
+          </p>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

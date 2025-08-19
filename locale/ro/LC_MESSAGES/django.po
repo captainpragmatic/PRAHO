@@ -1,0 +1,1998 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2025-08-19 14:58+0300\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: ro\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n==1?0:(((n%100>19)||((n%100==0)&&(n!=0)))?2:1));\n"
+
+#: apps/billing/models.py:19 templates/billing/invoice_list.html:173
+msgid "Draft"
+msgstr "Proformă"
+
+#: apps/billing/models.py:20 templates/billing/invoice_list.html:172
+msgid "Sent"
+msgstr "Trimis"
+
+#: apps/billing/models.py:21 templates/billing/invoice_list.html:170
+#: templates/dashboard.html:97
+msgid "Paid"
+msgstr "Plătit"
+
+#: apps/billing/models.py:22 templates/billing/invoice_list.html:171
+#: templates/dashboard.html:98
+msgid "Overdue"
+msgstr "Restant"
+
+#: apps/billing/models.py:23 apps/billing/models.py:370
+#: apps/tickets/models.py:67 templates/provisioning/service_list.html:35
+#: templates/provisioning/service_list.html:150 templates/tickets/list.html:169
+msgid "Cancelled"
+msgstr "Anulat"
+
+#: apps/billing/models.py:24 apps/billing/models.py:292
+#: apps/billing/models.py:491
+msgid "Refunded"
+msgstr "Rambursat"
+
+#: apps/billing/models.py:28 apps/billing/models.py:495
+msgid "Bank Transfer"
+msgstr "Transfer bancar"
+
+#: apps/billing/models.py:29 apps/billing/models.py:496
+msgid "Bank Card"
+msgstr "Card bancar"
+
+#: apps/billing/models.py:30 apps/billing/models.py:497
+msgid "Cash"
+msgstr "Numerar"
+
+#: apps/billing/models.py:31 apps/billing/models.py:498
+msgid "PayPal"
+msgstr "PayPal"
+
+#: apps/billing/models.py:32 apps/billing/models.py:499
+msgid "Stripe"
+msgstr "Stripe"
+
+#: apps/billing/models.py:39
+msgid "Invoice Number"
+msgstr "Număr factură"
+
+#: apps/billing/models.py:44
+msgid "Series"
+msgstr "Serie"
+
+#: apps/billing/models.py:52 apps/billing/models.py:378
+#: apps/billing/models.py:515 apps/customers/models.py:175
+#: apps/customers/models_backup.py:153 apps/provisioning/models.py:305
+#: apps/tickets/models.py:103 apps/tickets/models.py:311
+#: templates/billing/invoice_list.html:107
+#: templates/provisioning/service_list.html:96 templates/tickets/list.html:95
+msgid "Customer"
+msgstr "Client"
+
+#: apps/billing/models.py:56
+msgid "Issue Date"
+msgstr "Data emiterii"
+
+#: apps/billing/models.py:57
+msgid "Due Date"
+msgstr "Data scadentă"
+
+#: apps/billing/models.py:58 apps/billing/models.py:309
+#: apps/billing/models.py:525
+msgid "Currency"
+msgstr "Monedă"
+
+#: apps/billing/models.py:65
+msgid "Subtotal (Without VAT)"
+msgstr "Subtotal (fără TVA)"
+
+#: apps/billing/models.py:71
+msgid "VAT Rate (%)"
+msgstr "Cotă TVA (%)"
+
+#: apps/billing/models.py:77
+msgid "VAT Amount"
+msgstr "Valoare TVA"
+
+#: apps/billing/models.py:83
+msgid "Total with VAT"
+msgstr "Total cu TVA"
+
+#: apps/billing/models.py:91 apps/billing/models.py:319
+#: apps/billing/models.py:405 apps/billing/models.py:536
+#: apps/provisioning/models.py:177 apps/provisioning/models.py:345
+#: apps/provisioning/models.py:491 apps/tickets/models.py:130
+#: templates/billing/invoice_list.html:38
+#: templates/billing/invoice_list.html:116 templates/customers/list.html:81
+#: templates/provisioning/service_list.html:28
+#: templates/provisioning/service_list.html:102 templates/tickets/list.html:101
+msgid "Status"
+msgstr "Stare"
+
+#: apps/billing/models.py:97 apps/billing/models.py:313
+#: apps/billing/models.py:530
+msgid "Payment Method"
+msgstr "Metodă de plată"
+
+#: apps/billing/models.py:99 apps/billing/models.py:334
+msgid "Payment Date"
+msgstr "Data plății"
+
+#: apps/billing/models.py:104
+msgid "Paid Amount"
+msgstr "Suma plătita"
+
+#: apps/billing/models.py:112
+msgid "Exchange Rate"
+msgstr "Curs valutar"
+
+#: apps/billing/models.py:116 apps/billing/models.py:232
+#: apps/billing/models.py:382 apps/provisioning/models.py:35
+#: apps/tickets/models.py:17 apps/tickets/models.py:96
+msgid "Description"
+msgstr "Descriere"
+
+#: apps/billing/models.py:117
+msgid "Internal Notes"
+msgstr "Note interne"
+
+#: apps/billing/models.py:120
+msgid "e-Invoice ID"
+msgstr "ID e-Factură"
+
+#: apps/billing/models.py:121
+msgid "Sent to e-Invoice"
+msgstr "Trimis la e-Factură"
+
+#: apps/billing/models.py:130
+msgid "PDF File"
+msgstr "Fișier PDF"
+
+#: apps/billing/models.py:136
+msgid "XML File (e-Invoice)"
+msgstr "Fișier XML (e-Factură)"
+
+#: apps/billing/models.py:151 apps/billing/models.py:228
+#: apps/billing/models.py:299 apps/billing/models.py:510
+#: templates/billing/invoice_list.html:104 templates/dashboard.html:88
+msgid "Invoice"
+msgstr "Factură"
+
+#: apps/billing/models.py:152 templates/base.html:73
+#: templates/billing/invoice_list.html:4 templates/billing/invoice_list.html:11
+msgid "Invoices"
+msgstr "Facturi"
+
+#: apps/billing/models.py:238
+msgid "Quantity"
+msgstr "Cantitate"
+
+#: apps/billing/models.py:244
+msgid "Unit Price"
+msgstr "Preț unitar"
+
+#: apps/billing/models.py:249
+msgid "Line Total"
+msgstr "Total linie"
+
+#: apps/billing/models.py:256
+msgid "Unit of Measure"
+msgstr "Unitate de măsură"
+
+#: apps/billing/models.py:260
+msgid "Product Code"
+msgstr "Cod produs"
+
+#: apps/billing/models.py:267 apps/billing/models.py:413
+#: apps/provisioning/models.py:382 apps/provisioning/models.py:479
+#: templates/provisioning/service_list.html:93
+msgid "Service"
+msgstr "Serviciu"
+
+#: apps/billing/models.py:272
+msgid "Invoice Item"
+msgstr "Linie factură"
+
+#: apps/billing/models.py:273
+msgid "Invoice Items"
+msgstr "Linii factură"
+
+#: apps/billing/models.py:289 apps/billing/models.py:488
+#: apps/provisioning/models.py:285 apps/provisioning/models.py:459
+#: apps/tickets/models.py:64 templates/billing/invoice_list.html:174
+#: templates/dashboard.html:99 templates/provisioning/service_list.html:36
+#: templates/provisioning/service_list.html:151 templates/tickets/list.html:77
+#: templates/tickets/list.html:166
+msgid "Pending"
+msgstr "În așteptare"
+
+#: apps/billing/models.py:290 apps/billing/models.py:489
+#: apps/provisioning/models.py:461
+msgid "Completed"
+msgstr "Finalizat"
+
+#: apps/billing/models.py:291 apps/billing/models.py:490
+#: apps/provisioning/models.py:462
+msgid "Failed"
+msgstr "Eșuat"
+
+#: apps/billing/models.py:323
+msgid "Transaction ID"
+msgstr "ID tranzacție"
+
+#: apps/billing/models.py:324
+msgid "Reference Number"
+msgstr "Număr de referință"
+
+#: apps/billing/models.py:331 apps/billing/models.py:548
+msgid "Notes"
+msgstr "Note"
+
+#: apps/billing/models.py:339
+msgid "Recorded By"
+msgstr "Înregistrat de"
+
+#: apps/billing/models.py:344
+msgid "Invoice Payment"
+msgstr "Plată factură"
+
+#: apps/billing/models.py:345
+msgid "Invoice Payments"
+msgstr "Plăți facturi"
+
+#: apps/billing/models.py:361 apps/provisioning/models.py:294
+msgid "Monthly"
+msgstr "Lunar"
+
+#: apps/billing/models.py:362 apps/provisioning/models.py:295
+msgid "Quarterly"
+msgstr "Trimestrial"
+
+#: apps/billing/models.py:363 apps/provisioning/models.py:296
+msgid "Semi-Annual"
+msgstr "Semestrial"
+
+#: apps/billing/models.py:364 apps/provisioning/models.py:297
+msgid "Annual"
+msgstr "Anual"
+
+#: apps/billing/models.py:368 apps/customers/models.py:103
+#: apps/customers/models_backup.py:24 apps/provisioning/models.py:91
+#: apps/provisioning/models.py:144 apps/provisioning/models.py:230
+#: apps/provisioning/models.py:287 apps/tickets/models.py:43
+#: templates/customers/list.html:130
+#: templates/provisioning/service_list.html:33
+#: templates/provisioning/service_list.html:148
+#: templates/users/profile.html:113 templates/users/profile.html:141
+msgid "Active"
+msgstr "Activ"
+
+#: apps/billing/models.py:369
+msgid "Paused"
+msgstr "Pauză"
+
+#: apps/billing/models.py:371 apps/provisioning/models.py:290
+msgid "Expired"
+msgstr "Expirat"
+
+#: apps/billing/models.py:387 apps/billing/models.py:523
+#: templates/billing/invoice_list.html:113
+msgid "Amount"
+msgstr "Sumă"
+
+#: apps/billing/models.py:392
+msgid "Frequency"
+msgstr "Frecvență"
+
+#: apps/billing/models.py:396
+msgid "Start Date"
+msgstr "Data de început"
+
+#: apps/billing/models.py:397
+msgid "Next Billing Date"
+msgstr "Următoarea dată de facturare"
+
+#: apps/billing/models.py:398
+msgid "End Date"
+msgstr "Data de sfârșit"
+
+#: apps/billing/models.py:427 apps/billing/models.py:428
+msgid "Recurring Billing"
+msgstr "Facturare recurentă"
+
+#: apps/billing/models.py:540
+msgid "External ID"
+msgstr "ID extern"
+
+#: apps/billing/models.py:553
+msgid "Payment"
+msgstr "Plată"
+
+#: apps/billing/models.py:554
+msgid "Payments"
+msgstr "Plăți"
+
+#: apps/billing/views.py:92 apps/billing/views.py:197
+msgid "❌ You do not have permission to access this invoice."
+msgstr "❌ Nu aveți permisiunea de a accesa această factură."
+
+#: apps/billing/views.py:122
+msgid "❌ You do not have permission to create invoices for this customer."
+msgstr "❌ Nu aveți permisiunea de a crea facturi pentru acest client."
+
+#: apps/billing/views.py:136
+#, python-brace-format
+msgid "✅ Invoice #{invoice_number} has been created!"
+msgstr "✅ Factura #{invoice_number} a fost creată!"
+
+#: apps/billing/views.py:168
+msgid "❌ You do not have permission to edit this invoice."
+msgstr "❌ Nu aveți permisiunea de a edita această factură."
+
+#: apps/billing/views.py:172
+msgid "❌ Only draft invoices can be edited."
+msgstr "❌ Doar facturile proforme pot fi editate."
+
+#: apps/billing/views.py:177
+#, python-brace-format
+msgid "✅ Invoice #{invoice_number} has been updated!"
+msgstr "✅ Factura #{invoice_number} a fost actualizată!"
+
+#: apps/billing/views.py:229
+#, python-brace-format
+msgid "✅ Invoice #{invoice_number} has been sent successfully!"
+msgstr "✅ Factura #{invoice_number} a fost trimisă cu succes!"
+
+#: apps/billing/views.py:244
+msgid "❌ You do not have permission to generate e-Invoice for this invoice."
+msgstr "❌ Nu aveți permisiunea de a genera e-Factura pentru această factură."
+
+#: apps/billing/views.py:318
+#, python-brace-format
+msgid "✅ Payment of {amount} RON has been registered!"
+msgstr "✅ Plata de {amount} RON a fost înregistrată!"
+
+#: apps/customers/forms.py:47
+msgid "Customer name/designation"
+msgstr "Nume/denumire client"
+
+#: apps/customers/forms.py:51
+msgid "SC EXAMPLE SRL"
+msgstr "SC EXEMPLU SRL"
+
+#: apps/customers/forms.py:55
+msgid "contact@example.com"
+msgstr "contact@exemplu.ro"
+
+#: apps/customers/forms.py:59
+msgid "+40 721 123 456"
+msgstr "+40 721 123 456"
+
+#: apps/customers/forms.py:63
+msgid "IT & Software"
+msgstr "IT & Software"
+
+#: apps/customers/forms.py:67
+msgid "https://example.com"
+msgstr "https://exemplu.ro"
+
+#: apps/customers/forms.py:77 apps/customers/forms.py:335
+msgid "Company name is required for companies"
+msgstr "Numele companiei este obligatoriu pentru companii"
+
+#: apps/customers/forms.py:105 apps/customers/forms.py:109
+msgid "RO12345678"
+msgstr "RO12345678"
+
+#: apps/customers/forms.py:113
+msgid "J40/1234/2023"
+msgstr "J40/1234/2023"
+
+#: apps/customers/forms.py:127
+msgid "CUI must be in format RO followed by 2-10 digits"
+msgstr "CUI trebuie să fie în formatul RO urmat de 2-10 cifre"
+
+#: apps/customers/forms.py:136
+msgid "VAT number is required for VAT payers"
+msgstr "Numărul de TVA este obligatoriu pentru plătitorii de TVA"
+
+#: apps/customers/forms.py:139
+msgid "VAT number must be in format RO followed by 2-10 digits"
+msgstr "Numărul de TVA trebuie să fie în formatul RO urmat de 2-10 cifre"
+
+#: apps/customers/forms.py:180
+msgid "Credit limit cannot be negative"
+msgstr "Limita de credit nu poate fi negativă"
+
+#: apps/customers/forms.py:208
+msgid "Example Street, no. 123"
+msgstr "Strada Exemplu, nr. 123"
+
+#: apps/customers/forms.py:212
+msgid "Block A, Apt. 45 (optional)"
+msgstr "Bloc A, Apt. 45 (opțional)"
+
+#: apps/customers/forms.py:216
+msgid "Bucharest"
+msgstr "București"
+
+#: apps/customers/forms.py:220
+msgid "Sector 1 / Cluj"
+msgstr "Sector 1 / Cluj"
+
+#: apps/customers/forms.py:224
+msgid "010101"
+msgstr "010101"
+
+#: apps/customers/forms.py:228
+msgid "Romania"
+msgstr "România"
+
+#: apps/customers/forms.py:239
+msgid "Romanian postal codes must be 6 digits"
+msgstr "Codurile poștale românești trebuie să aibă 6 cifre"
+
+#: apps/customers/forms.py:266
+msgid "Note Title"
+msgstr "Titlu notă"
+
+#: apps/customers/forms.py:271
+msgid "Details..."
+msgstr "Detalii..."
+
+#: apps/customers/forms.py:287
+msgid "Name"
+msgstr "Nume"
+
+#: apps/customers/forms.py:290
+msgid "Customer Type"
+msgstr "Tip client"
+
+#: apps/customers/forms.py:295
+msgid "Company Name"
+msgstr "Nume companie"
+
+#: apps/customers/forms.py:297
+msgid "Primary Email"
+msgstr "Email principal"
+
+#: apps/customers/forms.py:298
+msgid "Primary Phone"
+msgstr "Telefon principal"
+
+#: apps/customers/forms.py:301
+msgid "CUI"
+msgstr "CUI"
+
+#: apps/customers/forms.py:302
+msgid "VAT Payer"
+msgstr "Plătitor de TVA"
+
+#: apps/customers/forms.py:303
+msgid "VAT Number"
+msgstr "Număr TVA"
+
+#: apps/customers/forms.py:306
+msgid "Address Line 1"
+msgstr "Adresa linia 1"
+
+#: apps/customers/forms.py:307
+msgid "Address Line 2"
+msgstr "Adresa linia 2"
+
+#: apps/customers/forms.py:308
+msgid "City"
+msgstr "Oraș"
+
+#: apps/customers/forms.py:309
+msgid "County"
+msgstr "Județ"
+
+#: apps/customers/forms.py:310
+msgid "Postal Code"
+msgstr "Cod poștal"
+
+#: apps/customers/forms.py:313
+msgid "Payment Terms (days)"
+msgstr "Termen de plată (zile)"
+
+#: apps/customers/forms.py:318
+msgid "Credit Limit"
+msgstr "Limită de credit"
+
+#: apps/customers/forms.py:324
+msgid "Data Processing Consent"
+msgstr "Consimțământ pentru prelucrarea datelor"
+
+#: apps/customers/models.py:96 apps/customers/models_backup.py:18
+msgid "Individual"
+msgstr "Persoană fizică"
+
+#: apps/customers/models.py:97 apps/customers/models_backup.py:19
+#: templates/customers/list.html:72
+msgid "Company"
+msgstr "Companie"
+
+#: apps/customers/models.py:98 apps/customers/models_backup.py:20
+msgid "PFA/SRL"
+msgstr "PFA/SRL"
+
+#: apps/customers/models.py:99
+msgid "NGO/Association"
+msgstr "ONG/Asociație"
+
+#: apps/customers/models.py:104 apps/customers/models_backup.py:26
+#: templates/users/profile.html:115
+msgid "Inactive"
+msgstr "Inactiv"
+
+#: apps/customers/models.py:105 apps/customers/models_backup.py:25
+#: apps/provisioning/models.py:288 templates/provisioning/service_list.html:34
+#: templates/provisioning/service_list.html:149
+msgid "Suspended"
+msgstr "Suspendat"
+
+#: apps/customers/models.py:106 apps/customers/models_backup.py:27
+msgid "Prospect"
+msgstr "Prospect"
+
+#: apps/customers/models.py:176 apps/customers/models_backup.py:154
+#: templates/base.html:69 templates/customers/list.html:4
+#: templates/customers/list.html:11
+msgid "Customers"
+msgstr "Clienți"
+
+#: apps/customers/models.py:275
+msgid "Customer Tax Profile"
+msgstr "Profil fiscal client"
+
+#: apps/customers/models.py:276
+msgid "Customer Tax Profiles"
+msgstr "Profile fiscale clienți"
+
+#: apps/customers/models.py:350
+msgid "Customer Billing Profile"
+msgstr "Profil de facturare client"
+
+#: apps/customers/models.py:351
+msgid "Customer Billing Profiles"
+msgstr "Profile de facturare clienți"
+
+#: apps/customers/models.py:417
+msgid "Customer Address"
+msgstr "Adresă client"
+
+#: apps/customers/models.py:418
+msgid "Customer Addresses"
+msgstr "Adrese clienți"
+
+#: apps/customers/models.py:492
+msgid "Customer Payment Method"
+msgstr "Metodă de plată client"
+
+#: apps/customers/models.py:493
+msgid "Customer Payment Methods"
+msgstr "Metode de plată clienți"
+
+#: apps/customers/models.py:548 apps/customers/models_backup.py:339
+msgid "Customer Note"
+msgstr "Notă client"
+
+#: apps/customers/models.py:549 apps/customers/models_backup.py:340
+msgid "Customer Notes"
+msgstr "Note clienți"
+
+#: apps/customers/models_backup.py:31
+msgid "Name/Company Name"
+msgstr "Nume/Denumire companie"
+
+#: apps/customers/models_backup.py:286
+msgid "Customer Contact"
+msgstr "Contact client"
+
+#: apps/customers/models_backup.py:287
+msgid "Customer Contacts"
+msgstr "Contacte clienți"
+
+#: apps/customers/views.py:90 apps/customers/views.py:154
+#: apps/customers/views.py:186 apps/customers/views.py:222
+#: apps/customers/views.py:258 apps/customers/views.py:306
+#: apps/customers/views.py:341
+msgid "Access denied to this customer"
+msgstr "Acces refuzat la acest client"
+
+#: apps/customers/views.py:126
+#, python-brace-format
+msgid "✅ Customer \"{customer_name}\" created successfully"
+msgstr "✅ Clientul \"{customer_name}\" a fost creat cu succes"
+
+#: apps/customers/views.py:130
+#, python-brace-format
+msgid "❌ Error creating customer: {error}"
+msgstr "❌ Eroare la crearea clientului: {error}"
+
+#: apps/customers/views.py:132 apps/customers/views.py:164
+#: apps/customers/views.py:199 apps/customers/views.py:235
+#: apps/customers/views.py:284 apps/customers/views.py:319
+msgid "❌ Please correct the errors below"
+msgstr "❌ Vă rugăm să corectați erorile de mai jos"
+
+#: apps/customers/views.py:138
+msgid "Create"
+msgstr "Creare"
+
+#: apps/customers/views.py:161
+#, python-brace-format
+msgid "✅ Customer \"{customer_name}\" updated"
+msgstr "✅ Clientul \"{customer_name}\" a fost actualizat"
+
+#: apps/customers/views.py:171 templates/billing/invoice_list.html:188
+#: templates/customers/list.html:141
+#: templates/provisioning/service_list.html:183
+msgid "Edit"
+msgstr "Editare"
+
+#: apps/customers/views.py:196
+msgid "✅ Tax profile updated successfully"
+msgstr "✅ Profilul fiscal a fost actualizat cu succes"
+
+#: apps/customers/views.py:207
+msgid "Tax Profile"
+msgstr "Profil fiscal"
+
+#: apps/customers/views.py:232
+msgid "✅ Billing profile updated successfully"
+msgstr "✅ Profilul de facturare a fost actualizat cu succes"
+
+#: apps/customers/views.py:243
+msgid "Billing Profile"
+msgstr "Profil de facturare"
+
+#: apps/customers/views.py:281
+#, python-brace-format
+msgid "✅ {address_type} address added"
+msgstr "✅ Adresa de tip {address_type} a fost adăugată"
+
+#: apps/customers/views.py:291
+msgid "Add Address"
+msgstr "Adăugare adresă"
+
+#: apps/customers/views.py:316
+msgid "✅ Note added successfully"
+msgstr "✅ Notă adăugată cu succes"
+
+#: apps/customers/views.py:326
+msgid "Add Note"
+msgstr "Adăugare notă"
+
+#: apps/customers/views.py:349
+#, python-brace-format
+msgid "🗑️ Customer \"{customer_name}\" deleted successfully"
+msgstr "🗑️ Clientul \"{customer_name}\" a fost șters cu succes"
+
+#: apps/provisioning/models.py:17
+msgid "Shared Web Hosting"
+msgstr "Găzduire web partajată"
+
+#: apps/provisioning/models.py:18
+msgid "VPS"
+msgstr "VPS"
+
+#: apps/provisioning/models.py:19 apps/provisioning/models.py:139
+msgid "Dedicated Server"
+msgstr "Server dedicat"
+
+#: apps/provisioning/models.py:20
+msgid "Cloud Hosting"
+msgstr "Găzduire cloud"
+
+#: apps/provisioning/models.py:21
+msgid "Domain"
+msgstr "Domeniu"
+
+#: apps/provisioning/models.py:22
+msgid "SSL Certificate"
+msgstr "Certificat SSL"
+
+#: apps/provisioning/models.py:23
+msgid "Email Hosting"
+msgstr "Găzduire email"
+
+#: apps/provisioning/models.py:24
+msgid "Backup"
+msgstr "Backup"
+
+#: apps/provisioning/models.py:25
+msgid "Maintenance"
+msgstr "Mentenanță"
+
+#: apps/provisioning/models.py:29
+msgid "Plan Name"
+msgstr "Nume plan"
+
+#: apps/provisioning/models.py:33
+msgid "Plan Type"
+msgstr "Tip plan"
+
+#: apps/provisioning/models.py:42
+msgid "Monthly Price (RON)"
+msgstr "Preț lunar (RON)"
+
+#: apps/provisioning/models.py:50
+msgid "Quarterly Price (RON)"
+msgstr "Preț trimestrial (RON)"
+
+#: apps/provisioning/models.py:58
+msgid "Annual Price (RON)"
+msgstr "Preț anual (RON)"
+
+#: apps/provisioning/models.py:66
+msgid "Setup Fee (RON)"
+msgstr "Taxă de instalare (RON)"
+
+#: apps/provisioning/models.py:72
+msgid "Technical specifications and features in JSON format"
+msgstr "Specificații tehnice și caracteristici în format JSON"
+
+#: apps/provisioning/models.py:73
+msgid "Features"
+msgstr "Caracteristici"
+
+#: apps/provisioning/models.py:77
+msgid "Disk Space (GB)"
+msgstr "Spațiu disc (GB)"
+
+#: apps/provisioning/models.py:78
+msgid "Monthly Traffic (GB)"
+msgstr "Trafic lunar (GB)"
+
+#: apps/provisioning/models.py:79
+msgid "Email Accounts"
+msgstr "Conturi de email"
+
+#: apps/provisioning/models.py:80
+msgid "Databases"
+msgstr "Baze de date"
+
+#: apps/provisioning/models.py:81
+msgid "Domains"
+msgstr "Domenii"
+
+#: apps/provisioning/models.py:84 apps/provisioning/models.py:167
+msgid "CPU Cores"
+msgstr "Nuclee CPU"
+
+#: apps/provisioning/models.py:85 apps/provisioning/models.py:168
+msgid "RAM (GB)"
+msgstr "RAM (GB)"
+
+#: apps/provisioning/models.py:88
+msgid "Price Includes VAT"
+msgstr "Prețul include TVA"
+
+#: apps/provisioning/models.py:92
+msgid "Public on Website"
+msgstr "Public pe site"
+
+#: apps/provisioning/models.py:93 apps/tickets/models.py:44
+msgid "Sort Order"
+msgstr "Ordine de sortare"
+
+#: apps/provisioning/models.py:96
+msgid "Auto Provision"
+msgstr "Aprovizionare automată"
+
+#: apps/provisioning/models.py:97
+msgid "Provisioning Script"
+msgstr "Script de aprovizionare"
+
+#: apps/provisioning/models.py:104 apps/provisioning/models.py:310
+msgid "Service Plan"
+msgstr "Plan de servicii"
+
+#: apps/provisioning/models.py:105
+msgid "Service Plans"
+msgstr "Planuri de servicii"
+
+#: apps/provisioning/models.py:137
+msgid "Shared Server"
+msgstr "Server partajat"
+
+#: apps/provisioning/models.py:138
+msgid "VPS Host"
+msgstr "Gazdă VPS"
+
+#: apps/provisioning/models.py:140
+msgid "Cloud Node"
+msgstr "Nod cloud"
+
+#: apps/provisioning/models.py:145
+msgid "Under Maintenance"
+msgstr "În mentenanță"
+
+#: apps/provisioning/models.py:146
+msgid "Offline"
+msgstr "Offline"
+
+#: apps/provisioning/models.py:147
+msgid "Decommissioned"
+msgstr "Dezafectat"
+
+#: apps/provisioning/models.py:151
+msgid "Server Name"
+msgstr "Nume server"
+
+#: apps/provisioning/models.py:152
+msgid "Hostname"
+msgstr "Hostname"
+
+#: apps/provisioning/models.py:156
+msgid "Server Type"
+msgstr "Tip server"
+
+#: apps/provisioning/models.py:160
+msgid "Primary IP"
+msgstr "IP principal"
+
+#: apps/provisioning/models.py:161
+msgid "Secondary IPs"
+msgstr "IP-uri secundare"
+
+#: apps/provisioning/models.py:162
+msgid "Location"
+msgstr "Locație"
+
+#: apps/provisioning/models.py:163
+msgid "Datacenter"
+msgstr "Datacenter"
+
+#: apps/provisioning/models.py:166
+msgid "CPU Model"
+msgstr "Model CPU"
+
+#: apps/provisioning/models.py:169
+msgid "Disk Type"
+msgstr "Tip disc"
+
+#: apps/provisioning/models.py:170
+msgid "Disk Capacity (GB)"
+msgstr "Capacitate disc (GB)"
+
+#: apps/provisioning/models.py:186
+msgid "CPU Usage (%)"
+msgstr "Utilizare CPU (%)"
+
+#: apps/provisioning/models.py:193
+msgid "RAM Usage (%)"
+msgstr "Utilizare RAM (%)"
+
+#: apps/provisioning/models.py:200
+msgid "Disk Usage (%)"
+msgstr "Utilizare disc (%)"
+
+#: apps/provisioning/models.py:207
+msgid "Maximum Services"
+msgstr "Număr maxim de servicii"
+
+#: apps/provisioning/models.py:211
+msgid "Operating System"
+msgstr "Sistem de operare"
+
+#: apps/provisioning/models.py:212
+msgid "Control Panel"
+msgstr "Panou de control"
+
+#: apps/provisioning/models.py:215
+msgid "Provider"
+msgstr "Furnizor"
+
+#: apps/provisioning/models.py:216
+msgid "Instance ID"
+msgstr "ID instanță"
+
+#: apps/provisioning/models.py:223
+msgid "Monthly Cost (RON)"
+msgstr "Cost lunar (RON)"
+
+#: apps/provisioning/models.py:227
+msgid "Last Maintenance"
+msgstr "Ultima mentenanță"
+
+#: apps/provisioning/models.py:228
+msgid "Next Maintenance"
+msgstr "Următoarea mentenanță"
+
+#: apps/provisioning/models.py:236
+msgid "Server"
+msgstr "Server"
+
+#: apps/provisioning/models.py:237 templates/provisioning/service_list.html:247
+msgid "Servers"
+msgstr "Servere"
+
+#: apps/provisioning/models.py:286
+msgid "Provisioning"
+msgstr "Aprovizionare"
+
+#: apps/provisioning/models.py:289
+msgid "Terminated"
+msgstr "Terminat"
+
+#: apps/provisioning/models.py:322
+msgid "Service Name"
+msgstr "Nume serviciu"
+
+#: apps/provisioning/models.py:323
+msgid "Primary Domain"
+msgstr "Domeniu principal"
+
+#: apps/provisioning/models.py:324
+msgid "System Username"
+msgstr "Nume de utilizator sistem"
+
+#: apps/provisioning/models.py:331
+msgid "Billing Cycle"
+msgstr "Ciclu de facturare"
+
+#: apps/provisioning/models.py:336
+msgid "Price (RON)"
+msgstr "Preț (RON)"
+
+#: apps/provisioning/models.py:338
+msgid "Setup Fee Paid"
+msgstr "Taxă de instalare plătită"
+
+#: apps/provisioning/models.py:347 apps/tickets/models.py:204
+#: apps/tickets/models.py:359
+msgid "Created At"
+msgstr "Creat la"
+
+#: apps/provisioning/models.py:348
+msgid "Activated At"
+msgstr "Activat la"
+
+#: apps/provisioning/models.py:349
+msgid "Suspended At"
+msgstr "Suspendat la"
+
+#: apps/provisioning/models.py:350
+msgid "Expires At"
+msgstr "Expiră la"
+
+#: apps/provisioning/models.py:356
+msgid "Provisioning Data"
+msgstr "Date de aprovizionare"
+
+#: apps/provisioning/models.py:361
+msgid "Last Provisioning Attempt"
+msgstr "Ultima încercare de aprovizionare"
+
+#: apps/provisioning/models.py:363
+msgid "Provisioning Errors"
+msgstr "Erori de aprovizionare"
+
+#: apps/provisioning/models.py:366
+msgid "Disk Usage (MB)"
+msgstr "Utilizare disc (MB)"
+
+#: apps/provisioning/models.py:367
+msgid "Bandwidth Used (MB)"
+msgstr "Lățime de bandă utilizată (MB)"
+
+#: apps/provisioning/models.py:368
+msgid "Email Accounts Used"
+msgstr "Conturi de email utilizate"
+
+#: apps/provisioning/models.py:369
+msgid "Databases Used"
+msgstr "Baze de date utilizate"
+
+#: apps/provisioning/models.py:372
+msgid "Auto Renew"
+msgstr "Reînnoire automată"
+
+#: apps/provisioning/models.py:375
+msgid "Admin Notes"
+msgstr "Note admin"
+
+#: apps/provisioning/models.py:376
+msgid "Suspension Reason"
+msgstr "Motiv suspendare"
+
+#: apps/provisioning/models.py:383 templates/base.html:81
+#: templates/provisioning/service_list.html:4
+msgid "Services"
+msgstr "Servicii"
+
+#: apps/provisioning/models.py:460
+msgid "Running"
+msgstr "În curs de execuție"
+
+#: apps/provisioning/models.py:463
+msgid "Retrying"
+msgstr "Se reîncearcă"
+
+#: apps/provisioning/models.py:467
+msgid "Create Service"
+msgstr "Creare serviciu"
+
+#: apps/provisioning/models.py:468
+msgid "Suspend Service"
+msgstr "Suspendare serviciu"
+
+#: apps/provisioning/models.py:469
+msgid "Unsuspend Service"
+msgstr "Anulare suspendare serviciu"
+
+#: apps/provisioning/models.py:470
+msgid "Terminate Service"
+msgstr "Terminare serviciu"
+
+#: apps/provisioning/models.py:471
+msgid "Update Service"
+msgstr "Actualizare serviciu"
+
+#: apps/provisioning/models.py:472
+msgid "Backup Service"
+msgstr "Backup serviciu"
+
+#: apps/provisioning/models.py:485
+msgid "Task Type"
+msgstr "Tip sarcină"
+
+#: apps/provisioning/models.py:495
+msgid "Parameters"
+msgstr "Parametri"
+
+#: apps/provisioning/models.py:498
+msgid "Started At"
+msgstr "Început la"
+
+#: apps/provisioning/models.py:499
+msgid "Completed At"
+msgstr "Finalizat la"
+
+#: apps/provisioning/models.py:502
+msgid "Result"
+msgstr "Rezultat"
+
+#: apps/provisioning/models.py:503
+msgid "Error Message"
+msgstr "Mesaj de eroare"
+
+#: apps/provisioning/models.py:506
+msgid "Retry Count"
+msgstr "Număr de reîncercări"
+
+#: apps/provisioning/models.py:507
+msgid "Max Retries"
+msgstr "Număr maxim de reîncercări"
+
+#: apps/provisioning/models.py:508
+msgid "Next Retry At"
+msgstr "Următoarea reîncercare la"
+
+#: apps/provisioning/models.py:515
+msgid "Provisioning Task"
+msgstr "Sarcină de aprovizionare"
+
+#: apps/provisioning/models.py:516
+msgid "Provisioning Tasks"
+msgstr "Sarcini de aprovizionare"
+
+#: apps/provisioning/views.py:59
+msgid "❌ You do not have permission to access this service."
+msgstr "❌ Nu aveți permisiunea de a accesa acest serviciu."
+
+#: apps/provisioning/views.py:96
+msgid "❌ You do not have permission to create services for this customer."
+msgstr "❌ Nu aveți permisiunea de a crea servicii pentru acest client."
+
+#: apps/provisioning/views.py:107
+#, python-brace-format
+msgid "✅ Service for {domain} has been created!"
+msgstr "✅ Serviciul pentru {domain} a fost creat!"
+
+#: apps/provisioning/views.py:110 apps/tickets/views.py:92
+msgid "❌ All fields are required."
+msgstr "❌ Toate câmpurile sunt obligatorii."
+
+#: apps/provisioning/views.py:127
+msgid "❌ You do not have permission to suspend this service."
+msgstr "❌ Nu aveți permisiunea de a suspenda acest serviciu."
+
+#: apps/provisioning/views.py:134
+#, python-brace-format
+msgid "⏸️ Service {domain} has been suspended!"
+msgstr "⏸️ Serviciul {domain} a fost suspendat!"
+
+#: apps/provisioning/views.py:147
+msgid "❌ You do not have permission to activate this service."
+msgstr "❌ Nu aveți permisiunea de a activa acest serviciu."
+
+#: apps/provisioning/views.py:153
+#, python-brace-format
+msgid "▶️ Service {domain} has been activated!"
+msgstr "▶️ Serviciul {domain} a fost activat!"
+
+#: apps/tickets/models.py:15
+msgid "Category Name"
+msgstr "Nume categorie"
+
+#: apps/tickets/models.py:16
+msgid "Name (EN)"
+msgstr "Nume (EN)"
+
+#: apps/tickets/models.py:20
+msgid "Icon"
+msgstr "Pictogramă"
+
+#: apps/tickets/models.py:21
+msgid "Color"
+msgstr "Culoare"
+
+#: apps/tickets/models.py:26
+msgid "SLA Response (hours)"
+msgstr "SLA Răspuns (ore)"
+
+#: apps/tickets/models.py:30
+msgid "SLA Resolution (hours)"
+msgstr "SLA Rezolvare (ore)"
+
+#: apps/tickets/models.py:40
+msgid "Auto Assign To"
+msgstr "Alocare automată către"
+
+#: apps/tickets/models.py:50
+msgid "Support Category"
+msgstr "Categorie suport"
+
+#: apps/tickets/models.py:51
+msgid "Support Categories"
+msgstr "Categorii suport"
+
+#: apps/tickets/models.py:62 templates/tickets/list.html:75
+#: templates/tickets/list.html:164
+msgid "New"
+msgstr "Nou"
+
+#: apps/tickets/models.py:63 templates/tickets/list.html:76
+#: templates/tickets/list.html:165
+msgid "Open"
+msgstr "Deschis"
+
+#: apps/tickets/models.py:65 templates/tickets/list.html:78
+#: templates/tickets/list.html:167
+msgid "Resolved"
+msgstr "Rezolvat"
+
+#: apps/tickets/models.py:66 templates/tickets/list.html:79
+#: templates/tickets/list.html:168
+msgid "Closed"
+msgstr "Închis"
+
+#: apps/tickets/models.py:71 templates/dashboard.html:139
+#: templates/tickets/list.html:70 templates/tickets/list.html:156
+msgid "Low"
+msgstr "Scăzut"
+
+#: apps/tickets/models.py:72 templates/tickets/list.html:69
+#: templates/tickets/list.html:155
+msgid "Normal"
+msgstr "Normal"
+
+#: apps/tickets/models.py:73 templates/tickets/list.html:68
+#: templates/tickets/list.html:154
+msgid "High"
+msgstr "Ridicat"
+
+#: apps/tickets/models.py:74 templates/dashboard.html:137
+#: templates/tickets/list.html:67 templates/tickets/list.html:153
+msgid "Urgent"
+msgstr "Urgent"
+
+#: apps/tickets/models.py:75 templates/tickets/list.html:66
+#: templates/tickets/list.html:152
+msgid "Critical"
+msgstr "Critic"
+
+#: apps/tickets/models.py:79
+msgid "Website"
+msgstr "Site web"
+
+#: apps/tickets/models.py:80 apps/users/forms.py:18 apps/users/forms.py:43
+#: apps/users/forms.py:281 apps/users/models.py:236
+#: templates/users/profile.html:39 templates/users/register.html:49
+msgid "Email"
+msgstr "Email"
+
+#: apps/tickets/models.py:81 apps/users/forms.py:70 apps/users/forms.py:158
+#: apps/users/models.py:237 templates/users/profile.html:51
+msgid "Phone"
+msgstr "Telefon"
+
+#: apps/tickets/models.py:82
+msgid "Chat"
+msgstr "Chat"
+
+#: apps/tickets/models.py:83
+msgid "API"
+msgstr "API"
+
+#: apps/tickets/models.py:84 apps/tickets/models.py:313
+msgid "Internal"
+msgstr "Intern"
+
+#: apps/tickets/models.py:91
+msgid "Ticket Number"
+msgstr "Număr tichet"
+
+#: apps/tickets/models.py:95
+msgid "Title"
+msgstr "Titlu"
+
+#: apps/tickets/models.py:108
+msgid "Contact Person"
+msgstr "Persoană de contact"
+
+#: apps/tickets/models.py:110
+msgid "Contact Email"
+msgstr "Email de contact"
+
+#: apps/tickets/models.py:111
+msgid "Contact Phone"
+msgstr "Telefon de contact"
+
+#: apps/tickets/models.py:118
+msgid "Category"
+msgstr "Categorie"
+
+#: apps/tickets/models.py:124 templates/tickets/list.html:98
+msgid "Priority"
+msgstr "Prioritate"
+
+#: apps/tickets/models.py:136
+msgid "Source"
+msgstr "Sursă"
+
+#: apps/tickets/models.py:147
+msgid "Assigned To"
+msgstr "Alocat către"
+
+#: apps/tickets/models.py:149
+msgid "Assigned At"
+msgstr "Alocat la"
+
+#: apps/tickets/models.py:158
+msgid "Related Service"
+msgstr "Serviciu asociat"
+
+#: apps/tickets/models.py:178
+msgid "Estimated Hours"
+msgstr "Ore estimate"
+
+#: apps/tickets/models.py:184
+msgid "Actual Hours"
+msgstr "Ore reale"
+
+#: apps/tickets/models.py:191
+msgid "Satisfaction Rating (1-5)"
+msgstr "Rating satisfacție (1-5)"
+
+#: apps/tickets/models.py:193
+msgid "Satisfaction Comment"
+msgstr "Comentariu satisfacție"
+
+#: apps/tickets/models.py:196
+msgid "Escalated"
+msgstr "Escalat"
+
+#: apps/tickets/models.py:197
+msgid "Public for Customer"
+msgstr "Public pentru client"
+
+#: apps/tickets/models.py:200
+msgid "Requires Customer Response"
+msgstr "Necesită răspuns de la client"
+
+#: apps/tickets/models.py:205 apps/tickets/models.py:360
+msgid "Updated At"
+msgstr "Actualizat la"
+
+#: apps/tickets/models.py:215
+msgid "Support Ticket"
+msgstr "Tichet de suport"
+
+#: apps/tickets/models.py:216 templates/tickets/list.html:4
+#: templates/tickets/list.html:12
+msgid "Support Tickets"
+msgstr "Tichete de suport"
+
+#: apps/tickets/models.py:312 apps/users/forms.py:311
+msgid "Support"
+msgstr "Suport"
+
+#: apps/tickets/models.py:314
+msgid "System"
+msgstr "Sistem"
+
+#: apps/tickets/models.py:321 apps/tickets/models.py:390
+#: apps/tickets/models.py:451 templates/tickets/list.html:92
+msgid "Ticket"
+msgstr "Tichet"
+
+#: apps/tickets/models.py:324
+msgid "Content"
+msgstr "Conținut"
+
+#: apps/tickets/models.py:329
+msgid "Comment Type"
+msgstr "Tip comentariu"
+
+#: apps/tickets/models.py:338
+msgid "Author"
+msgstr "Autor"
+
+#: apps/tickets/models.py:343
+msgid "Author Name"
+msgstr "Nume autor"
+
+#: apps/tickets/models.py:345
+msgid "Author Email"
+msgstr "Email autor"
+
+#: apps/tickets/models.py:348
+msgid "Public"
+msgstr "Public"
+
+#: apps/tickets/models.py:349
+msgid "Is Solution"
+msgstr "Este soluție"
+
+#: apps/tickets/models.py:356 apps/tickets/models.py:464
+msgid "Time Spent (hours)"
+msgstr "Timp petrecut (ore)"
+
+#: apps/tickets/models.py:364
+msgid "Ticket Comment"
+msgstr "Comentariu tichet"
+
+#: apps/tickets/models.py:365
+msgid "Ticket Comments"
+msgstr "Comentarii tichet"
+
+#: apps/tickets/models.py:398
+msgid "Comment"
+msgstr "Comentariu"
+
+#: apps/tickets/models.py:403
+msgid "File"
+msgstr "Fișier"
+
+#: apps/tickets/models.py:405
+msgid "Filename"
+msgstr "Nume fișier"
+
+#: apps/tickets/models.py:406
+msgid "File Size"
+msgstr "Dimensiune fișier"
+
+#: apps/tickets/models.py:407
+msgid "Content Type"
+msgstr "Tip conținut"
+
+#: apps/tickets/models.py:410
+msgid "Safe"
+msgstr "Sigur"
+
+#: apps/tickets/models.py:417
+msgid "Uploaded By"
+msgstr "Încărcat de"
+
+#: apps/tickets/models.py:419
+msgid "Uploaded At"
+msgstr "Încărcat la"
+
+#: apps/tickets/models.py:423
+msgid "Ticket Attachment"
+msgstr "Atașament tichet"
+
+#: apps/tickets/models.py:424
+msgid "Ticket Attachments"
+msgstr "Atașamente tichet"
+
+#: apps/tickets/models.py:457 apps/users/forms.py:302 apps/users/models.py:85
+msgid "User"
+msgstr "Utilizator"
+
+#: apps/tickets/models.py:460
+msgid "Activity Description"
+msgstr "Descriere activitate"
+
+#: apps/tickets/models.py:468
+msgid "Billable"
+msgstr "Facturabil"
+
+#: apps/tickets/models.py:474
+msgid "Hourly Rate"
+msgstr "Tarif orar"
+
+#: apps/tickets/models.py:477
+msgid "Work Date"
+msgstr "Data lucrării"
+
+#: apps/tickets/models.py:482
+msgid "Ticket Worklog"
+msgstr "Pontaj tichet"
+
+#: apps/tickets/models.py:483
+msgid "Ticket Worklogs"
+msgstr "Pontaje tichet"
+
+#: apps/tickets/views.py:44
+msgid "❌ You do not have permission to access this ticket."
+msgstr "❌ Nu aveți permisiunea de a accesa acest tichet."
+
+#: apps/tickets/views.py:77
+msgid "❌ You do not have permission to create tickets for this customer."
+msgstr "❌ Nu aveți permisiunea de a crea tichete pentru acest client."
+
+#: apps/tickets/views.py:89
+#, python-brace-format
+msgid "✅ Ticket #{ticket_pk} has been created!"
+msgstr "✅ Tichetul #{ticket_pk} a fost creat!"
+
+#: apps/tickets/views.py:110
+msgid "❌ You do not have permission to reply to this ticket."
+msgstr "❌ Nu aveți permisiunea de a răspunde la acest tichet."
+
+#: apps/tickets/views.py:117
+msgid "✅ Your reply has been added!"
+msgstr "✅ Răspunsul a fost adăugat!"
+
+#: apps/tickets/views.py:119
+msgid "❌ The reply cannot be empty."
+msgstr "❌ Răspunsul nu poate fi gol."
+
+#: apps/tickets/views.py:133
+msgid "❌ You do not have permission to close this ticket."
+msgstr "❌ Nu aveți permisiunea de a închide acest tichet."
+
+#: apps/tickets/views.py:139
+#, python-brace-format
+msgid "✅ Ticket #{ticket_pk} has been closed!"
+msgstr "✅ Tichetul #{ticket_pk} a fost închis!"
+
+#: apps/tickets/views.py:152
+msgid "❌ You do not have permission to reopen this ticket."
+msgstr "❌ Nu aveți permisiunea de a redeschide acest tichet."
+
+#: apps/tickets/views.py:158
+#, python-brace-format
+msgid "✅ Ticket #{ticket_pk} has been reopened!"
+msgstr "✅ Tichetul #{ticket_pk} a fost redeschis!"
+
+#: apps/users/forms.py:21 apps/users/forms.py:47 apps/users/forms.py:284
+msgid "name@example.com"
+msgstr "nume@exemplu.ro"
+
+#: apps/users/forms.py:26 apps/users/forms.py:102 templates/users/login.html:43
+#: templates/users/register.html:112
+msgid "Password"
+msgstr "Parolă"
+
+#: apps/users/forms.py:29
+msgid "Your password"
+msgstr "Parola dvs."
+
+#: apps/users/forms.py:33
+msgid "Remember me"
+msgstr "Ține-mă minte"
+
+#: apps/users/forms.py:44
+msgid "The email address will be used for authentication."
+msgstr "Adresa de email va fi folosită pentru autentificare."
+
+#: apps/users/forms.py:52 apps/users/forms.py:146
+#: templates/users/profile.html:21 templates/users/register.html:70
+msgid "First Name"
+msgstr "Prenume"
+
+#: apps/users/forms.py:56
+msgid "John"
+msgstr "Ion"
+
+#: apps/users/forms.py:61 apps/users/forms.py:152
+#: templates/users/profile.html:30 templates/users/register.html:91
+msgid "Last Name"
+msgstr "Nume"
+
+#: apps/users/forms.py:65
+msgid "Doe"
+msgstr "Popescu"
+
+#: apps/users/forms.py:72
+msgid "Romanian phone number (+40.XX.XXX.XXXX)"
+msgstr "Număr de telefon românesc (+40.XX.XXX.XXXX)"
+
+#: apps/users/forms.py:80
+msgid "I agree to receive commercial offers by email"
+msgstr "Accept să primesc oferte comerciale prin email"
+
+#: apps/users/forms.py:86
+msgid "I accept the processing of personal data according to GDPR"
+msgstr "Accept prelucrarea datelor personale conform GDPR"
+
+#: apps/users/forms.py:105
+msgid "Minimum 12 characters"
+msgstr "Minimum 12 caractere"
+
+#: apps/users/forms.py:108
+msgid "Confirm password"
+msgstr "Confirmă parola"
+
+#: apps/users/forms.py:111
+msgid "Repeat password"
+msgstr "Repetă parola"
+
+#: apps/users/forms.py:121
+msgid "An account with this email address already exists."
+msgstr "Un cont cu această adresă de email există deja."
+
+#: apps/users/forms.py:183 apps/users/forms.py:198
+msgid "Emergency contact name"
+msgstr "Nume contact urgență"
+
+#: apps/users/forms.py:192
+msgid "Preferred language"
+msgstr "Limbă preferată"
+
+#: apps/users/forms.py:193
+msgid "Timezone"
+msgstr "Fus orar"
+
+#: apps/users/forms.py:194
+msgid "Date format"
+msgstr "Format dată"
+
+#: apps/users/forms.py:195
+msgid "Email notifications"
+msgstr "Notificări email"
+
+#: apps/users/forms.py:196
+msgid "SMS notifications"
+msgstr "Notificări SMS"
+
+#: apps/users/forms.py:197
+msgid "Marketing emails"
+msgstr "Emailuri comerciale"
+
+#: apps/users/forms.py:199
+msgid "Emergency contact phone"
+msgstr "Telefon contact urgență"
+
+#: apps/users/forms.py:232
+msgid "Verification code"
+msgstr "Cod de verificare"
+
+#: apps/users/forms.py:242 apps/users/forms.py:267
+msgid "Enter the code from the authenticator app"
+msgstr "Introduceți codul din aplicația de autentificare"
+
+#: apps/users/forms.py:248 apps/users/forms.py:273
+msgid "The code must contain only digits."
+msgstr "Codul trebuie să conțină doar cifre."
+
+#: apps/users/forms.py:256
+msgid "2FA Code"
+msgstr "Cod 2FA"
+
+#: apps/users/forms.py:287
+msgid "Enter the email associated with your account."
+msgstr "Introduceți emailul asociat contului dvs."
+
+#: apps/users/forms.py:293
+msgid "There is no account with this email address."
+msgstr "Nu există niciun cont cu această adresă de email."
+
+#: apps/users/forms.py:308 templates/billing/invoice_list.html:182
+#: templates/customers/list.html:137
+#: templates/provisioning/service_list.html:165
+msgid "View"
+msgstr "Vizualizare"
+
+#: apps/users/forms.py:309
+msgid "Manage"
+msgstr "Administrare"
+
+#: apps/users/forms.py:310 apps/users/models.py:177 apps/users/models.py:273
+msgid "Billing"
+msgstr "Facturare"
+
+#: apps/users/forms.py:314
+msgid "Permissions"
+msgstr "Permisiuni"
+
+#: apps/users/models.py:22 apps/users/models.py:160
+msgid "System Administrator"
+msgstr "Administrator de sistem"
+
+#: apps/users/models.py:23 apps/users/models.py:162
+msgid "Support Agent"
+msgstr "Agent de suport"
+
+#: apps/users/models.py:24
+msgid "Billing Staff"
+msgstr "Personal facturare"
+
+#: apps/users/models.py:25 apps/users/models.py:161
+msgid "Manager"
+msgstr "Manager"
+
+#: apps/users/models.py:29
+msgid "email address"
+msgstr "adresă de email"
+
+#: apps/users/models.py:33
+msgid "Invalid Romanian phone number"
+msgstr "Număr de telefon românesc invalid"
+
+#: apps/users/models.py:42
+msgid "System role for internal staff. Leave empty for customer users."
+msgstr "Rol de sistem pentru personalul intern. Lăsați necompletat pentru utilizatorii clienți."
+
+#: apps/users/models.py:86
+msgid "Users"
+msgstr "Utilizatori"
+
+#: apps/users/models.py:157
+msgid "Client"
+msgstr "Client"
+
+#: apps/users/models.py:163
+msgid "Billing Specialist"
+msgstr "Specialist facturare"
+
+#: apps/users/models.py:176 apps/users/models.py:272
+msgid "Owner"
+msgstr "Proprietar"
+
+#: apps/users/models.py:178 apps/users/models.py:274
+msgid "Technical"
+msgstr "Tehnic"
+
+#: apps/users/models.py:179 apps/users/models.py:275
+msgid "Viewer"
+msgstr "Vizualizator"
+
+#: apps/users/models.py:197
+msgid "User role within this customer organization"
+msgstr "Rolul utilizatorului în cadrul acestei organizații client"
+
+#: apps/users/models.py:203
+msgid "Primary customer for this user (used for default context)"
+msgstr "Client principal pentru acest utilizator (utilizat pentru contextul implicit)"
+
+#: apps/users/models.py:213
+msgid "Email billing notifications"
+msgstr "Notificări de facturare prin email"
+
+#: apps/users/models.py:217
+msgid "Email technical notifications"
+msgstr "Notificări tehnice prin email"
+
+#: apps/users/models.py:221
+msgid "Email marketing notifications"
+msgstr "Notificări de marketing prin email"
+
+#: apps/users/models.py:229
+msgid "Notification language"
+msgstr "Limba notificărilor"
+
+#: apps/users/models.py:238
+msgid "Email and phone"
+msgstr "Email și telefon"
+
+#: apps/users/models.py:241
+msgid "Preferred contact method"
+msgstr "Metodă de contact preferată"
+
+#: apps/users/models.py:257
+msgid "Customer Membership"
+msgstr "Membru client"
+
+#: apps/users/models.py:258
+msgid "Customer Memberships"
+msgstr "Membri clienți"
+
+#: apps/users/models.py:296
+msgid "English"
+msgstr "Engleză"
+
+#: apps/users/models.py:296
+msgid "Romanian"
+msgstr "Română"
+
+#: apps/users/models.py:325 templates/users/profile.html:4
+#: templates/users/profile.html:10
+msgid "User Profile"
+msgstr "Profil utilizator"
+
+#: apps/users/models.py:326
+msgid "User Profiles"
+msgstr "Profile utilizator"
+
+#: apps/users/models.py:336
+msgid "Success"
+msgstr "Succes"
+
+#: apps/users/models.py:337
+msgid "Failed Password"
+msgstr "Parolă greșită"
+
+#: apps/users/models.py:338
+msgid "Failed 2FA"
+msgstr "2FA eșuat"
+
+#: apps/users/models.py:339
+msgid "Account Locked"
+msgstr "Cont blocat"
+
+#: apps/users/models.py:340
+msgid "Account Disabled"
+msgstr "Cont dezactivat"
+
+#: apps/users/models.py:361
+msgid "User Login Log"
+msgstr "Jurnal de autentificare utilizator"
+
+#: apps/users/models.py:362
+msgid "User Login Logs"
+msgstr "Jurnale de autentificare utilizator"
+
+#: apps/users/views.py:58
+msgid "Account temporarily locked for security reasons."
+msgstr "Cont blocat temporar din motive de securitate."
+
+#: apps/users/views.py:71 apps/users/views.py:221
+#, python-brace-format
+msgid "Welcome, {user_full_name}!"
+msgstr "Bun venit, {user_full_name}!"
+
+#: apps/users/views.py:76
+msgid "Incorrect email or password."
+msgstr "Email sau parolă incorectă."
+
+#: apps/users/views.py:92
+msgid "Account created successfully! You can now log in."
+msgstr "Contul a fost creat cu succes! Vă puteți autentifica acum."
+
+#: apps/users/views.py:103
+msgid "You have been successfully logged out."
+msgstr "Ați fost deconectat cu succes."
+
+#: apps/users/views.py:115
+msgid "Password reset - under development!"
+msgstr "Resetare parolă - în dezvoltare!"
+
+#: apps/users/views.py:120
+msgid "Password reset email sent!"
+msgstr "Email de resetare parolă trimis!"
+
+#: apps/users/views.py:125
+msgid "Password reset confirmation - under development!"
+msgstr "Confirmare resetare parolă - în dezvoltare!"
+
+#: apps/users/views.py:130
+msgid "Password reset successfully!"
+msgstr "Parola a fost resetată cu succes!"
+
+#: apps/users/views.py:143
+msgid "2FA is already enabled for your account."
+msgstr "2FA este deja activat pentru contul dvs."
+
+#: apps/users/views.py:164
+msgid "Two-factor authentication has been successfully enabled!"
+msgstr "Autentificarea în doi pași a fost activată cu succes!"
+
+#: apps/users/views.py:168
+msgid "The entered code is invalid."
+msgstr "Codul introdus este invalid."
+
+#: apps/users/views.py:227
+msgid "The 2FA code is invalid."
+msgstr "Codul 2FA este invalid."
+
+#: apps/users/views.py:250
+msgid "Profile updated successfully."
+msgstr "Profilul a fost actualizat cu succes."
+
+#: apps/users/views.py:282 apps/users/views.py:314
+msgid "You do not have permission to access this page."
+msgstr "Nu aveți permisiuni pentru această pagină."
+
+#: apps/users/views.py:348
+msgid "Email is required"
+msgstr "Emailul este obligatoriu"
+
+#: apps/users/views.py:355
+msgid "Email available"
+msgstr "Email disponibil"
+
+#: apps/users/views.py:355
+msgid "Email already in use"
+msgstr "Email deja folosit"
+
+#: templates/base.html:16
+msgid "CRM System for Romanian Hosting Providers"
+msgstr "Sistem CRM pentru furnizorii de hosting din România"
+
+#: templates/base.html:65 templates/dashboard.html:4
+msgid "Dashboard"
+msgstr "Panou de control"
+
+#: templates/base.html:77
+msgid "Tickets"
+msgstr "Tichete"
+
+#: templates/base.html:89
+msgid "Hello"
+msgstr "Salut"
+
+#: templates/base.html:92
+msgid "Profile"
+msgstr "Profil"
+
+#: templates/base.html:96
+msgid "Logout"
+msgstr "Deconectare"
+
+#: templates/base.html:135 templates/users/login.html:16
+msgid "Management system for Romanian hosting providers"
+msgstr "Sistem de management pentru furnizorii de hosting din România"
+
+#: templates/base.html:138
+msgid "Compliance"
+msgstr "Conformitate"
+
+#: templates/base.html:138
+msgid "VAT Romania"
+msgstr "TVA România"
+
+#: templates/base.html:139
+msgid "Version"
+msgstr "Versiune"
+
+#: templates/base.html:159
+msgid "An error occurred. Please try again."
+msgstr "A apărut o eroare. Vă rugăm să încercați din nou."
+
+#: templates/billing/invoice_list.html:12
+msgid "Manage invoices and payments with Romanian VAT compliance"
+msgstr "Gestionați facturile și plățile cu conformitate TVA România"
+
+#: templates/billing/invoice_list.html:18 templates/dashboard.html:173
+msgid "New Invoice"
+msgstr "Factură nouă"
+
+#: templates/billing/invoice_list.html:28 templates/customers/list.html:27
+#: templates/customers/list.html:35 templates/tickets/list.html:50
+msgid "Search"
+msgstr "Căutare"
+
+#: templates/billing/invoice_list.html:31
+msgid "Invoice number, company name..."
+msgstr "Număr factură, nume companie..."
+
+#: templates/billing/invoice_list.html:42
+#: templates/provisioning/service_list.html:32
+msgid "All"
+msgstr "Toate"
+
+#: templates/billing/invoice_list.html:52
+#: templates/provisioning/service_list.html:41
+msgid "Filter"
+msgstr "Filtrare"
+
+#: templates/billing/invoice_list.html:58 templates/customers/list.html:40
+#: templates/provisioning/service_list.html:47
+msgid "Reset"
+msgstr "Resetare"
+
+#: templates/billing/invoice_list.html:70
+msgid "Total Amount"
+msgstr "Valoare totală"
+
+#: templates/billing/invoice_list.html:80
+msgid "Total Invoices"
+msgstr "Total facturi"
+
+#: templates/billing/invoice_list.html:90
+msgid "Romanian VAT"
+msgstr "TVA România"
+
+#: templates/billing/invoice_list.html:110 templates/users/profile.html:164
+msgid "Date"
+msgstr "Data"
+
+#: templates/billing/invoice_list.html:119 templates/customers/list.html:84
+#: templates/provisioning/service_list.html:108 templates/tickets/list.html:107
+msgid "Actions"
+msgstr "Acțiuni"
+
+#: templates/billing/invoice_list.html:135
+msgid "Due"
+msgstr "Scadent"
+
+#: templates/billing/invoice_list.html:158
+msgid "VAT"
+msgstr "TVA"
+
+#: templates/billing/invoice_list.html:198
+msgid "Mark as paid?"
+msgstr "Marcați ca plătit?"
+
+#: templates/billing/invoice_list.html:200
+msgid "Pay"
+msgstr "Plătește"
+
+#: templates/billing/invoice_list.html:212
+msgid "No invoices found for the selected filters"
+msgstr "Nu s-au găsit facturi pentru filtrele selectate"
+
+#: templates/billing/invoice_list.html:215
+msgid "No invoices yet"
+msgstr "Nicio factură încă"
+
+#: templates/billing/invoice_list.html:218
+msgid "Create the first invoice"
+msgstr "Creează prima factură"
+
+#: templates/billing/invoice_list.html:235 templates/customers/list.html:175
+#: templates/provisioning/service_list.html:217
+#, python-format
+msgid "\n          Page %(page_number)s of %(num_pages)s\n          "
+msgstr "\n          Pagina %(page_number)s din %(num_pages)s\n          "
+
+#: templates/billing/invoice_list.html:244 templates/customers/list.html:184
+#: templates/provisioning/service_list.html:226 templates/tickets/list.html:196
+#: templates/tickets/list.html:219
+msgid "Previous"
+msgstr "Anterior"
+
+#: templates/billing/invoice_list.html:251 templates/customers/list.html:191
+#: templates/provisioning/service_list.html:233 templates/tickets/list.html:202
+#: templates/tickets/list.html:245
+msgid "Next"
+msgstr "Următor"
+
+#: templates/billing/invoice_list.html:265
+msgid "Reports"
+msgstr "Rapoarte"
+
+#: templates/billing/invoice_list.html:271
+msgid "VAT Report"
+msgstr "Raport TVA"
+
+#: templates/customers/form.html:12
+msgid "Back to customers"
+msgstr "Înapoi la clienți"
+
+#: templates/customers/form.html:31
+msgid "Company Information"
+msgstr "Informații companie"

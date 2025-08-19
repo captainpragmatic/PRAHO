@@ -1,0 +1,420 @@
+/* ===============================================================================
+   PRAHO PLATFORM - EMAIL STYLES
+   ===============================================================================
+   Email-specific styles with inline CSS compatibility for Romanian emails
+*/
+
+/* Import design tokens for consistency */
+@import './tokens.css';
+
+/* ===============================================================================
+   📧 EMAIL BASE STYLES (Romanian Email Templates)
+   =============================================================================== */
+
+/* Email container - safe for all clients */
+.email-container {
+  max-width: 600px;
+  margin: 0 auto;
+  background-color: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  color: #1a1a1a;
+}
+
+/* Romanian email header */
+.email-header {
+  background-color: #1e40af;
+  padding: 32px 24px;
+  text-align: center;
+}
+
+.email-logo {
+  max-width: 200px;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+}
+
+.email-company-name {
+  color: #ffffff;
+  font-size: 24px;
+  font-weight: 700;
+  margin: 16px 0 0 0;
+  text-decoration: none;
+}
+
+/* Email body content */
+.email-body {
+  padding: 32px 24px;
+  background-color: #ffffff;
+}
+
+.email-greeting {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  color: #1a1a1a;
+}
+
+.email-content {
+  margin-bottom: 24px;
+  color: #4a5568;
+  line-height: 1.7;
+}
+
+/* Romanian business email buttons */
+.email-button {
+  display: inline-block;
+  background-color: #1e40af;
+  color: #ffffff !important;
+  text-decoration: none;
+  padding: 14px 28px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 16px;
+  text-align: center;
+  margin: 16px 0;
+  border: none;
+  cursor: pointer;
+}
+
+.email-button:hover {
+  background-color: #1d4ed8;
+}
+
+.email-button-secondary {
+  background-color: #6b7280;
+  color: #ffffff !important;
+}
+
+.email-button-secondary:hover {
+  background-color: #4b5563;
+}
+
+.email-button-success {
+  background-color: #10b981;
+  color: #ffffff !important;
+}
+
+.email-button-danger {
+  background-color: #ef4444;
+  color: #ffffff !important;
+}
+
+/* Romanian invoice email styles */
+.email-invoice-header {
+  background-color: #f9fafb;
+  padding: 24px;
+  border-radius: 8px;
+  margin-bottom: 24px;
+  border: 2px solid #e5e7eb;
+}
+
+.email-invoice-number {
+  font-size: 20px;
+  font-weight: 700;
+  color: #1e40af;
+  margin-bottom: 8px;
+}
+
+.email-invoice-date {
+  color: #6b7280;
+  font-size: 14px;
+}
+
+.email-invoice-amount {
+  font-size: 24px;
+  font-weight: 700;
+  color: #1a1a1a;
+  text-align: center;
+  margin: 16px 0;
+}
+
+.email-invoice-currency {
+  font-size: 18px;
+  color: #6b7280;
+  font-weight: 400;
+}
+
+/* Romanian email table styles */
+.email-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 24px 0;
+  background-color: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.email-table th {
+  background-color: #f9fafb;
+  padding: 12px 16px;
+  text-align: left;
+  font-weight: 600;
+  color: #374151;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 14px;
+}
+
+.email-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid #f3f4f6;
+  color: #4a5568;
+  font-size: 14px;
+}
+
+.email-table tr:last-child td {
+  border-bottom: none;
+}
+
+.email-table-total {
+  font-weight: 700;
+  background-color: #f9fafb;
+}
+
+/* Romanian VAT information in emails */
+.email-vat-info {
+  background-color: #eff6ff;
+  border: 1px solid #dbeafe;
+  border-radius: 6px;
+  padding: 16px;
+  margin: 16px 0;
+}
+
+.email-vat-title {
+  font-weight: 600;
+  color: #1e40af;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.email-vat-details {
+  font-size: 13px;
+  color: #475569;
+  line-height: 1.5;
+}
+
+/* Romanian support ticket email styles */
+.email-ticket-status {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.email-ticket-open {
+  background-color: #dbeafe;
+  color: #1e40af;
+}
+
+.email-ticket-in-progress {
+  background-color: #fef3c7;
+  color: #d97706;
+}
+
+.email-ticket-resolved {
+  background-color: #d1fae5;
+  color: #065f46;
+}
+
+.email-ticket-closed {
+  background-color: #f3f4f6;
+  color: #374151;
+}
+
+/* Romanian email footer */
+.email-footer {
+  background-color: #f9fafb;
+  padding: 32px 24px;
+  text-align: center;
+  border-top: 1px solid #e5e7eb;
+}
+
+.email-footer-logo {
+  max-width: 120px;
+  height: auto;
+  opacity: 0.7;
+  margin-bottom: 16px;
+}
+
+.email-footer-text {
+  font-size: 13px;
+  color: #6b7280;
+  line-height: 1.6;
+  margin-bottom: 8px;
+}
+
+.email-footer-link {
+  color: #1e40af;
+  text-decoration: underline;
+}
+
+.email-footer-unsubscribe {
+  font-size: 12px;
+  color: #9ca3af;
+  margin-top: 16px;
+}
+
+/* Romanian business information in footer */
+.email-business-info {
+  background-color: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 16px;
+  margin: 16px 0;
+  font-size: 12px;
+  color: #6b7280;
+  text-align: center;
+}
+
+.email-business-info strong {
+  color: #374151;
+}
+
+/* ===============================================================================
+   📱 EMAIL RESPONSIVE DESIGN (Romanian Mobile)
+   =============================================================================== */
+
+/* Mobile email styles for Romanian users */
+@media only screen and (max-width: 480px) {
+  .email-container {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  .email-header,
+  .email-body,
+  .email-footer {
+    padding: 20px 16px !important;
+  }
+
+  .email-company-name {
+    font-size: 20px !important;
+  }
+
+  .email-greeting {
+    font-size: 16px !important;
+  }
+
+  .email-button {
+    display: block !important;
+    width: 100% !important;
+    max-width: 280px !important;
+    margin: 16px auto !important;
+    text-align: center !important;
+  }
+
+  .email-table {
+    font-size: 12px !important;
+  }
+
+  .email-table th,
+  .email-table td {
+    padding: 8px 12px !important;
+  }
+
+  .email-invoice-amount {
+    font-size: 20px !important;
+  }
+
+  .email-invoice-number {
+    font-size: 18px !important;
+  }
+}
+
+/* ===============================================================================
+   🎨 DARK MODE EMAIL SUPPORT (Romanian Preference)
+   =============================================================================== */
+
+/* Dark mode styles for email clients that support it */
+@media (prefers-color-scheme: dark) {
+  .email-container {
+    background-color: #1a1a1a !important;
+    color: #e5e5e5 !important;
+  }
+
+  .email-body {
+    background-color: #1a1a1a !important;
+  }
+
+  .email-content {
+    color: #d1d5db !important;
+  }
+
+  .email-greeting {
+    color: #f9fafb !important;
+  }
+
+  .email-table {
+    background-color: #1a1a1a !important;
+    border-color: #374151 !important;
+  }
+
+  .email-table th {
+    background-color: #2d3748 !important;
+    color: #e2e8f0 !important;
+    border-color: #4a5568 !important;
+  }
+
+  .email-table td {
+    color: #d1d5db !important;
+    border-color: #2d3748 !important;
+  }
+
+  .email-footer {
+    background-color: #2d3748 !important;
+    border-color: #4a5568 !important;
+  }
+
+  .email-business-info {
+    background-color: #2d3748 !important;
+    border-color: #4a5568 !important;
+    color: #d1d5db !important;
+  }
+}
+
+/* ===============================================================================
+   🖨️ EMAIL PRINT STYLES (Romanian Invoices)
+   =============================================================================== */
+
+@media print {
+  .email-container {
+    max-width: none !important;
+    background-color: white !important;
+    color: black !important;
+  }
+
+  .email-header {
+    background-color: white !important;
+    color: black !important;
+    border-bottom: 2px solid black;
+  }
+
+  .email-company-name {
+    color: black !important;
+  }
+
+  .email-button {
+    display: none !important;
+  }
+
+  .email-footer-unsubscribe {
+    display: none !important;
+  }
+
+  .email-table {
+    border: 1px solid black !important;
+  }
+
+  .email-table th,
+  .email-table td {
+    border: 1px solid black !important;
+    background-color: white !important;
+    color: black !important;
+  }
+}

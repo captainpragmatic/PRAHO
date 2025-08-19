@@ -1,0 +1,30 @@
+# ===============================================================================
+# PRETTIER IGNORE - PRAHO PLATFORM  
+# ===============================================================================
+# Prevents Prettier from breaking Django templates
+
+# Django Templates - NEVER format these!
+templates/
+*.html
+**/*.html
+
+# Generated/Build files
+staticfiles/
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Database
+*.sqlite3
+db.sqlite3
+
+# Logs
+*.log
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo

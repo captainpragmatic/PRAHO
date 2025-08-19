@@ -1,0 +1,113 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans 'Login' %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+  <div class="max-w-md w-full space-y-8">
+    <!-- Header -->
+    <div class="text-center">
+      <div class="mx-auto h-12 w-12 text-4xl">🇷🇴</div>
+      <h2 class="mt-6 text-3xl font-extrabold text-white">
+        {% trans 'PRAHO Platform Login' %}
+      </h2>
+      <p class="mt-2 text-sm text-slate-400">
+        {% trans 'PRAHO Really Automates Hosting Operations' %}
+      </p>
+    </div>
+
+    <!-- Login Form -->
+    <form class="mt-8 space-y-6" method="post" hx-post="{% url 'users:login' %}" hx-swap="outerHTML">
+      {% csrf_token %}
+
+      <div class="rounded-lg bg-slate-800 p-6 space-y-4">
+        <!-- Email Field -->
+        <div>
+          <label for="email" class="block text-sm font-medium text-slate-300">
+            📧 {% trans 'Email Address' %}
+          </label>
+          <div class="mt-1">
+            {% input_field name="email" input_type="email" placeholder="example@pragmatichost.com" required=True %}
+          </div>
+          {% if form.email.errors %}
+          <p class="mt-1 text-sm text-red-400">{{ form.email.errors.0 }}</p>
+          {% endif %}
+        </div>
+
+        <!-- Password Field -->
+        <div>
+          <label for="password" class="block text-sm font-medium text-slate-300">
+            🔐 {% trans 'Password' %}
+          </label>
+          <div class="mt-1">
+            {% input_field name="password" input_type="password" placeholder="Enter password" required=True %}
+          </div>
+          {% if form.password.errors %}
+          <p class="mt-1 text-sm text-red-400">{{ form.password.errors.0 }}</p>
+          {% endif %}
+        </div>
+
+        <!-- Remember Me -->
+        <div class="flex items-center justify-between">
+          <div class="flex items-center">
+            <input id="remember-me" name="remember-me" type="checkbox"
+              class="h-4 w-4 text-blue-600 bg-slate-700 border-slate-600 rounded focus:ring-blue-500">
+            <label for="remember-me" class="ml-2 block text-sm text-slate-300">
+              {% trans 'Keep me logged in' %}
+            </label>
+          </div>
+
+          <div class="text-sm">
+            <a href="{% url 'users:password_reset' %}" class="text-blue-400 hover:text-blue-300">
+              {% trans 'Forgot password?' %}
+            </a>
+          </div>
+        </div>
+
+        <!-- Form Errors -->
+        {% if form.non_field_errors %}
+        <div class="bg-red-900 border border-red-700 rounded-md p-3">
+          {% for error in form.non_field_errors %}
+          <p class="text-red-100 text-sm">❌ {{ error }}</p>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        <!-- Submit Button -->
+        <div>
+          {% button "Login" variant="primary" type="submit" size="lg" loading=True %}
+        </div>
+
+        <!-- Register Link -->
+        <div class="text-center pt-4 border-t border-slate-700">
+          <p class="text-slate-400 text-sm">
+            {% trans 'Don\'t have an account?' %}
+            <a href="{% url 'users:register' %}" class="text-blue-400 hover:text-blue-300 font-medium">
+              {% trans 'Register here' %}
+            </a>
+          </p>
+        </div>
+      </div>
+    </form>
+
+    <!-- Security Notice -->
+    <div class="text-center text-xs text-slate-500">
+      <p>🔒 {% trans 'Secure Connection' %} | {% trans 'GDPR Compliance' %} | {% trans '2FA Available' %}</p>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.body.addEventListener('htmx:afterRequest', function (event) {
+    if (event.detail.successful) {
+      // Show loading state
+      const spinner = document.querySelector('.login-spinner');
+      const text = document.querySelector('.login-text');
+      spinner.style.display = 'inline';
+      text.style.display = 'none';
+    }
+  });
+</script>
+{% endblock %}

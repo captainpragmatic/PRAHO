@@ -1,0 +1,66 @@
+{
+  // ===============================================================================
+  // VS CODE SETTINGS - PRAHO PLATFORM
+  // ===============================================================================
+  // Prevents auto-formatting from breaking Django templates
+  // Django template-specific settings
+  "[django-html]": {
+    "editor.formatOnSave": false,
+    "editor.formatOnPaste": false,
+    "editor.formatOnType": false,
+    "prettier.enable": false,
+    "beautify.ignore": [
+      "django-html"
+    ]
+  },
+  "[html]": {
+    "editor.formatOnSave": false,
+    "editor.formatOnPaste": false,
+    "editor.formatOnType": false,
+    "prettier.enable": false
+  },
+  // Python-specific settings (safe to format)
+  "[python]": {
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "ms-python.python"
+  },
+  // JavaScript/CSS (safe to format)  
+  "[javascript]": {
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "vscode.typescript-language-features"
+  },
+  "[css]": {
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "vscode.css-language-features"
+  },
+  // General editor settings
+  "editor.insertSpaces": true,
+  "editor.tabSize": 2,
+  "editor.detectIndentation": true,
+  // File associations
+  "files.associations": {
+    "*.html": "django-html",
+    "**/templates/**/*.html": "django-html"
+  },
+  // Extensions recommendations
+  "extensions.recommendations": [
+    "ms-python.python",
+    "ms-python.black-formatter",
+    "batisteo.vscode-django",
+    "wholroyd.jinja"
+  ],
+  // HTML validation (but don't auto-fix)
+  "html.validate.styles": false,
+  "html.validate.scripts": false,
+  // Prettier configuration
+  "prettier.documentSelectors": [
+    "!**/*.html"
+  ],
+  // Emmet (but careful with Django templates)
+  "emmet.includeLanguages": {
+    "django-html": "html"
+  },
+  "emmet.excludeLanguages": [
+    "html"
+  ]
+}

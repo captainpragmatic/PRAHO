@@ -1,0 +1,249 @@
+# ===============================================================================
+# PRAHO PLATFORM - PYTHON PROJECT CONFIGURATION
+# ===============================================================================
+
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "praho-platform"
+version = "0.3.0"
+description = "PRAHO Platform - PRAHO Really Automates Hosting Operations"
+authors = [
+    {name = "PragmaticHost Development Team", email = "dev@pragmatichost.com"}
+]
+license = {text = "AGPL-3.0-or-later"}
+requires-python = ">=3.11"
+keywords = ["hosting", "praho platform", "billing", "web hosting", "django", "htmx", "tailwindcss", "platform"]
+classifiers = [
+    # Development Phase
+    "Development Status :: 3 - Alpha",
+    
+    # Target Audience
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators", 
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: End Users/Desktop",
+    
+    # Framework & Environment
+    "Framework :: Django :: 5.0",
+    "Environment :: Web Environment",
+    "Environment :: Console",
+    
+    # License
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    
+    # Operating System
+    "Operating System :: OS Independent",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    
+    # Programming Language
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: JavaScript",
+    
+    # Topic Categories
+    "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
+    "Topic :: Internet :: WWW/HTTP :: WSGI :: Application",
+    "Topic :: Office/Business :: Financial",
+    "Topic :: Office/Business :: Financial :: Accounting",
+    "Topic :: System :: Systems Administration",
+    "Topic :: System :: Networking",
+    "Topic :: System :: Monitoring",
+    "Topic :: Communications :: Email",
+    "Topic :: Database",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    
+    # Natural Language
+    "Natural Language :: English",
+    "Natural Language :: Romanian",
+]
+
+# ===============================================================================
+# CODE QUALITY CONFIGURATION
+# ===============================================================================
+
+[tool.ruff]
+# Romanian coding standards - strict quality enforcement
+line-length = 88
+target-version = "py311"
+exclude = [
+    ".venv",
+    "migrations",
+    "__pycache__",
+    ".git",
+    "static",
+    "htmlcov",
+]
+
+[tool.ruff.lint]
+# Enable comprehensive linting for Romanian business compliance
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings  
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "S",   # bandit security
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "DTZ", # flake8-datetimez
+    "T20", # flake8-print
+    "PIE", # flake8-pie
+    "SIM", # flake8-simplify
+    "TID", # flake8-tidy-imports
+]
+
+ignore = [
+    "E501",   # Line too long (handled by formatter)
+    "S101",   # Use of assert (allowed in tests)
+    "S104",   # Hardcoded bind to all interfaces (dev server)
+    "DTZ005", # timezone-naive datetime (Django handles this)
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Relax rules for specific file types
+"tests/**/*.py" = ["S101", "S106", "PLR2004"]
+"manage.py" = ["T201"]
+"**/migrations/*.py" = ["E501", "N806"]
+
+[tool.ruff.lint.isort]
+# Import organization for Romanian project structure
+known-first-party = ["apps", "config", "ui"]
+section-order = [
+    "future",
+    "standard-library", 
+    "third-party",
+    "first-party",
+    "local-folder"
+]
+
+# ===============================================================================
+# TYPE CHECKING CONFIGURATION
+# ===============================================================================
+
+[tool.mypy]
+# Strict typing for compliance and security
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+
+# Django-specific configuration
+plugins = ["mypy_django_plugin.main"]
+
+[[tool.mypy.overrides]]
+module = "apps.*.migrations.*"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+
+[tool.django-stubs]
+django_settings_module = "config.settings.dev"
+
+# ===============================================================================
+# TEST CONFIGURATION
+# ===============================================================================
+
+[tool.pytest.ini_options]
+# Romanian business compliance testing
+DJANGO_SETTINGS_MODULE = "config.settings.test"
+addopts = [
+    "--verbose",
+    "--tb=short",
+    "--strict-markers",
+    "--disable-warnings",
+    "--reuse-db",
+]
+testpaths = ["tests", "apps"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "e2e: marks tests as end-to-end tests",
+    "romanian_compliance: marks tests for Romanian regulations",
+    "security: marks security-related tests",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+# ===============================================================================
+# COVERAGE CONFIGURATION  
+# ===============================================================================
+
+[tool.coverage.run]
+# compliance requires high test coverage
+source = ["apps", "config", "ui"]
+omit = [
+    "*/migrations/*",
+    "*/tests/*", 
+    "*/venv/*",
+    "*/env/*",
+    "*/.venv/*",
+    "manage.py",
+    "*/settings/*",
+    "*/wsgi.py",
+    "*/asgi.py",
+]
+branch = true
+
+[tool.coverage.report]
+# Enforce 90% diff coverage for business compliance
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+show_missing = true
+skip_covered = false
+precision = 2
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+# ===============================================================================
+# DEVELOPMENT TOOLS
+# ===============================================================================
+
+[tool.djlint]
+# Template linting for HTMX + Tailwind templates
+profile = "django"
+extension = "html"
+indent = 2
+max_line_length = 100
+format_attribute_template_tags = true
+
+[tool.djlint.rules]
+# template standards
+ignore = "H006,H030,H031"  # Allow img without alt, allow raw text, allow Meta tag
+
+# ===============================================================================
+# DEPLOYMENT CONFIGURATION
+# ===============================================================================
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["apps*", "config*", "ui*"]
+exclude = ["tests*", "*.tests*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.html", "*.css", "*.js", "*.json", "*.txt", "*.md"]

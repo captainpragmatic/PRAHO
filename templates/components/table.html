@@ -1,0 +1,239 @@
+{# =============================================================================== #}
+{# 🇷🇴 PRAHO PLATFORM - TABLE COMPONENT #}
+{# =============================================================================== #}
+{# HTMX-powered data table with Romanian hosting provider theming #}
+
+{% load static %}
+
+{# Table container with responsive wrapper #}
+<div
+  class="{% if container_class %}{{ container_class }}{% else %}overflow-hidden shadow ring-1 ring-black ring-opacity-5 md:rounded-lg{% endif %}">
+  <table class="min-w-full divide-y divide-slate-300 dark:divide-slate-700">
+
+    {# Table header #}
+    {% if headers %}
+    <thead class="bg-slate-50 dark:bg-slate-800">
+      <tr>
+        {% for header in headers %}
+        <th scope="col"
+          class="{% if header.class %}{{ header.class }}{% else %}px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider dark:text-slate-400{% endif %}">
+          {% if header.sortable %}
+          <button type="button" class="group inline-flex items-center hover:text-slate-900 dark:hover:text-slate-100" {%
+            if header.sort_url %} hx-get="{{ header.sort_url }}"
+            hx-target="{{ sort_target|default:'#table-container' }}" hx-swap="{{ sort_swap|default:'outerHTML' }}" {%
+            endif %}>
+            {{ header.label }}
+            {% if header.sort_direction %}
+            {% if header.sort_direction == "asc" %}
+            <svg class="ml-2 h-4 w-4 text-slate-400" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd"
+                d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z"
+                clip-rule="evenodd" />
+            </svg>
+            {% elif header.sort_direction == "desc" %}
+            <svg class="ml-2 h-4 w-4 text-slate-400" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd"
+                d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+                clip-rule="evenodd" />
+            </svg>
+            {% endif %}
+            {% else %}
+            <svg class="ml-2 h-4 w-4 text-slate-300 group-hover:text-slate-400" fill="currentColor" viewBox="0 0 20 20">
+              <path
+                d="M5 12a1 1 0 102 0V6.414l1.293 1.293a1 1 0 001.414-1.414l-3-3a1 1 0 00-1.414 0l-3 3a1 1 0 001.414 1.414L5 6.414V12zM15 8a1 1 0 10-2 0v5.586l-1.293-1.293a1 1 0 00-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L15 13.586V8z" />
+            </svg>
+            {% endif %}
+          </button>
+          {% else %}
+          {{ header.label }}
+          {% endif %}
+        </th>
+        {% endfor %}
+
+        {# Actions column #}
+        {% if show_actions|default:True %}
+        <th scope="col" class="relative px-6 py-3">
+          <span class="sr-only">Acțiuni</span>
+        </th>
+        {% endif %}
+      </tr>
+    </thead>
+    {% endif %}
+
+    {# Table body #}
+    <tbody class="bg-white divide-y divide-slate-200 dark:bg-slate-900 dark:divide-slate-700">
+      {% if rows %}
+      {% for row in rows %}
+      <tr
+        class="{% if row.css_class %}{{ row.css_class }}{% else %}hover:bg-slate-50 dark:hover:bg-slate-800{% endif %}"
+        {% if row.hx_get %}hx-get="{{ row.hx_get }}" {% endif %} {% if row.hx_target %}hx-target="{{ row.hx_target }}"
+        {% endif %} {% if row.onclick %}onclick="{{ row.onclick }}" {% endif %}>
+        {% for cell in row.cells %}
+        <td
+          class="{% if cell.class %}{{ cell.class }}{% else %}px-6 py-4 whitespace-nowrap text-sm text-slate-900 dark:text-slate-100{% endif %}">
+          {% if cell.html %}
+          {{ cell.html|safe }}
+          {% else %}
+          {{ cell.value|default:"-" }}
+          {% endif %}
+        </td>
+        {% endfor %}
+
+        {# Row actions #}
+        {% if show_actions|default:True and row.actions %}
+        <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+          <div class="flex items-center justify-end space-x-2">
+            {% for action in row.actions %}
+            {% if action.type == "button" %}
+            <button type="button"
+              class="{% if action.class %}{{ action.class }}{% else %}text-primary-600 hover:text-primary-900 dark:text-primary-400 dark:hover:text-primary-300{% endif %}"
+              {% if action.hx_get %}hx-get="{{ action.hx_get }}" {% endif %} {% if action.hx_post
+              %}hx-post="{{ action.hx_post }}" {% endif %} {% if action.hx_delete %}hx-delete="{{ action.hx_delete }}"
+              {% endif %} {% if action.hx_target %}hx-target="{{ action.hx_target }}" {% endif %} {% if action.hx_swap
+              %}hx-swap="{{ action.hx_swap }}" {% endif %} {% if action.hx_confirm
+              %}hx-confirm="{{ action.hx_confirm }}" {% endif %} {% if action.onclick %}onclick="{{ action.onclick }}"
+              {% endif %} title="{{ action.title|default:action.label }}">
+              {{ action.label }}
+            </button>
+            {% elif action.type == "link" %}
+            <a href="{{ action.url }}"
+              class="{% if action.class %}{{ action.class }}{% else %}text-primary-600 hover:text-primary-900 dark:text-primary-400 dark:hover:text-primary-300{% endif %}"
+              {% if action.target %}target="{{ action.target }}" {% endif %}
+              title="{{ action.title|default:action.label }}">
+              {{ action.label }}
+            </a>
+            {% endif %}
+            {% endfor %}
+          </div>
+        </td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+      {% else %}
+      {# Empty state #}
+      <tr>
+        <td
+          colspan="{% if headers %}{{ headers|length }}{% if show_actions|default:True %}{% widthratio headers|length 1 1 %}{% endif %}{% else %}3{% endif %}"
+          class="px-6 py-12 text-center text-sm text-slate-500 dark:text-slate-400">
+          {% if empty_message %}
+          {{ empty_message }}
+          {% else %}
+          <div class="text-center">
+            <svg class="mx-auto h-12 w-12 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            <h3 class="mt-2 text-sm font-medium text-slate-900 dark:text-slate-100">Nu există date</h3>
+            <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Încă nu au fost adăugate înregistrări.</p>
+            {% if empty_action %}
+            <div class="mt-6">
+              <button type="button"
+                class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
+                {% if empty_action.hx_get %}hx-get="{{ empty_action.hx_get }}" {% endif %} {% if empty_action.onclick
+                %}onclick="{{ empty_action.onclick }}" {% endif %}>
+                {{ empty_action.label }}
+              </button>
+            </div>
+            {% endif %}
+          </div>
+          {% endif %}
+        </td>
+      </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+{# Pagination (if provided) #}
+{% if pagination %}
+<div
+  class="bg-white px-4 py-3 flex items-center justify-between border-t border-slate-200 sm:px-6 dark:bg-slate-900 dark:border-slate-700">
+  <div class="flex-1 flex justify-between sm:hidden">
+    {# Mobile pagination #}
+    {% if pagination.has_previous %}
+    <button type="button"
+      class="relative inline-flex items-center px-4 py-2 border border-slate-300 text-sm font-medium rounded-md text-slate-700 bg-white hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700"
+      hx-get="{{ pagination.previous_url }}" hx-target="{{ pagination.target|default:'#table-container' }}"
+      hx-swap="{{ pagination.swap|default:'outerHTML' }}">
+      Anterior
+    </button>
+    {% endif %}
+    {% if pagination.has_next %}
+    <button type="button"
+      class="ml-3 relative inline-flex items-center px-4 py-2 border border-slate-300 text-sm font-medium rounded-md text-slate-700 bg-white hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700"
+      hx-get="{{ pagination.next_url }}" hx-target="{{ pagination.target|default:'#table-container' }}"
+      hx-swap="{{ pagination.swap|default:'outerHTML' }}">
+      Următor
+    </button>
+    {% endif %}
+  </div>
+
+  <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+    {# Results info #}
+    <div>
+      <p class="text-sm text-slate-700 dark:text-slate-300">
+        Afișând
+        <span class="font-medium">{{ pagination.start_index }}</span>
+        -
+        <span class="font-medium">{{ pagination.end_index }}</span>
+        din
+        <span class="font-medium">{{ pagination.total_count }}</span>
+        rezultate
+      </p>
+    </div>
+
+    {# Page numbers #}
+    <div>
+      <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+        {% if pagination.has_previous %}
+        <button type="button"
+          class="relative inline-flex items-center px-2 py-2 rounded-l-md border border-slate-300 bg-white text-sm font-medium text-slate-500 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700"
+          hx-get="{{ pagination.previous_url }}" hx-target="{{ pagination.target|default:'#table-container' }}"
+          hx-swap="{{ pagination.swap|default:'outerHTML' }}">
+          <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd"
+              d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
+              clip-rule="evenodd" />
+          </svg>
+        </button>
+        {% endif %}
+
+        {% for page in pagination.page_range %}
+        {% if page == pagination.current_page %}
+        <span
+          class="relative inline-flex items-center px-4 py-2 border border-primary-500 bg-primary-50 text-sm font-medium text-primary-600 dark:border-primary-600 dark:bg-primary-900 dark:text-primary-300">
+          {{ page }}
+        </span>
+        {% elif page == "..." %}
+        <span
+          class="relative inline-flex items-center px-4 py-2 border border-slate-300 bg-white text-sm font-medium text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300">
+          ...
+        </span>
+        {% else %}
+        <button type="button"
+          class="relative inline-flex items-center px-4 py-2 border border-slate-300 bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+          hx-get="{{ pagination.page_url }}?page={{ page }}"
+          hx-target="{{ pagination.target|default:'#table-container' }}"
+          hx-swap="{{ pagination.swap|default:'outerHTML' }}">
+          {{ page }}
+        </button>
+        {% endif %}
+        {% endfor %}
+
+        {% if pagination.has_next %}
+        <button type="button"
+          class="relative inline-flex items-center px-2 py-2 rounded-r-md border border-slate-300 bg-white text-sm font-medium text-slate-500 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700"
+          hx-get="{{ pagination.next_url }}" hx-target="{{ pagination.target|default:'#table-container' }}"
+          hx-swap="{{ pagination.swap|default:'outerHTML' }}">
+          <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd"
+              d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
+              clip-rule="evenodd" />
+          </svg>
+        </button>
+        {% endif %}
+      </nav>
+    </div>
+  </div>
+</div>
+{% endif %}
