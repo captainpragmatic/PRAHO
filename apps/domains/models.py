@@ -399,6 +399,16 @@ class Domain(models.Model):
                 fields=['registrar', 'status'],
                 name='domain_registrar_idx'
             ),
+            # 🚀 Performance: Auto-renewal processing optimization
+            models.Index(
+                fields=['auto_renew', 'expires_at', 'status'],
+                name='domain_auto_renew_idx'
+            ),
+            # 🚀 Performance: Registrar management queries
+            models.Index(
+                fields=['registrar', 'status', '-expires_at'],
+                name='domain_registrar_expiry_idx'
+            ),
         ]
     
     def __str__(self):

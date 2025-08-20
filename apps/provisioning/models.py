@@ -389,6 +389,12 @@ class Service(models.Model):
             models.Index(fields=['status', 'expires_at']),
             models.Index(fields=['domain']),
             models.Index(fields=['username']),
+            # 🚀 Performance: Auto-renewal processing optimization
+            models.Index(fields=['auto_renew', 'expires_at', 'status']),
+            # 🚀 Performance: Plan usage analytics
+            models.Index(fields=['service_plan', 'status']),
+            # 🚀 Performance: Billing cycle reporting
+            models.Index(fields=['billing_cycle', 'status', '-created_at']),
         ]
     
     def __str__(self) -> str:
@@ -520,6 +526,10 @@ class ProvisioningTask(models.Model):
             models.Index(fields=['status', 'created_at']),
             models.Index(fields=['service', 'task_type']),
             models.Index(fields=['next_retry_at']),
+            # 🚀 Performance: Failed task retry processing
+            models.Index(fields=['status', 'next_retry_at']),
+            # 🚀 Performance: Task type analytics and monitoring
+            models.Index(fields=['task_type', 'status', '-created_at']),
         ]
     
     def __str__(self) -> str:

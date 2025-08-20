@@ -210,6 +210,10 @@ class Order(models.Model):
             models.Index(fields=['order_number']),
             models.Index(fields=['customer_email']),
             models.Index(fields=['-created_at']),
+            # 🚀 Performance: Payment status filtering for admin dashboard
+            models.Index(fields=['status', 'payment_method', '-created_at']),
+            # 🚀 Performance: Customer order history with status
+            models.Index(fields=['customer', 'status']),
         ]
     
     @property
@@ -437,6 +441,10 @@ class OrderItem(models.Model):
             models.Index(fields=['order', 'created_at']),
             models.Index(fields=['product']),
             models.Index(fields=['provisioning_status']),
+            # 🚀 Performance: Provisioning queue optimization
+            models.Index(fields=['provisioning_status', '-created_at']),
+            # 🚀 Performance: Product and order tracking
+            models.Index(fields=['product', 'provisioning_status']),
         ]
     
     @property

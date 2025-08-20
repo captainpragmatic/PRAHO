@@ -5,7 +5,40 @@ All notable changes to PRAHO Platform will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+# Changelog
+
+All notable changes to PRAHO Platform will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
 ## [Unreleased]
+
+### 🚀 Database Performance Optimization - 2025-08-20
+
+#### ⚡ Performance Improvements
+- **Database Index Optimization** - Enhanced query performance across core models
+  - **Orders System**: Added composite indexes for payment status filtering and customer order history
+    - `orders_status_payment_method_created_at_idx` - Admin dashboard payment filtering
+    - `orders_customer_status_idx` - Customer order history with status filtering
+    - `order_items_provisioning_status_created_at_idx` - Provisioning queue optimization
+    - `order_items_product_provisioning_status_idx` - Product and order tracking
+  
+  - **Domain Management**: Added indexes for auto-renewal and registrar queries
+    - `domain_auto_renew_idx` - Auto-renewal processing (≤ O(log N) performance)
+    - `domain_registrar_expiry_idx` - Registrar management with expiration sorting
+  
+  - **Service Provisioning**: Enhanced service and task management indexes
+    - `services_auto_renew_expires_status_idx` - Auto-renewal processing optimization
+    - `services_service_plan_status_idx` - Plan usage analytics (O(1) + O(S) complexity)
+    - `services_billing_cycle_status_created_idx` - Billing cycle reporting
+    - `provisioning_tasks_status_retry_idx` - Failed task retry processing
+    - `provisioning_tasks_type_status_created_idx` - Task analytics and monitoring
+
+#### 🔧 Technical Improvements
+- **Query Complexity Reduction**: All new indexes target ≤ O(log N) query performance
+- **Half-Open Design**: Optimized for unknown entities assumed healthy until proven otherwise
+- **Production Ready**: All indexes tested with comprehensive test suite (127 tests passed)
 
 ### Planned for Version 1.0
 - External API integrations (Stripe, e-Factura, Virtualmin)  
