@@ -127,6 +127,50 @@ def ticket_reply(request, pk):
                 is_public=not is_internal
             )
             
+            # Handle file attachments
+            if request.FILES:
+                from apps.tickets.models import TicketAttachment
+                import mimetypes
+                
+                for uploaded_file in request.FILES.getlist('attachments'):
+                    # Basic security checks
+                    if uploaded_file.size > 10 * 1024 * 1024:  # 10MB limit
+                        messages.warning(request, f"❌ File {uploaded_file.name} is too large (max 10MB).")
+                        continue
+                    
+                    # Get content type
+                    content_type, _unused = mimetypes.guess_type(uploaded_file.name)
+                    if not content_type:
+                        content_type = 'application/octet-stream'
+                    
+                    # Check allowed file types
+                    allowed_types = [
+                        'application/pdf',
+                        'application/msword',
+                        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                        'text/plain',
+                        'image/png',
+                        'image/jpeg',
+                        'image/jpg',
+                        'application/zip',
+                        'application/x-rar-compressed'
+                    ]
+                    
+                    if content_type not in allowed_types:
+                        messages.warning(request, f"❌ File type not allowed for {uploaded_file.name}.")
+                        continue
+                    
+                    # Create attachment
+                    TicketAttachment.objects.create(
+                        ticket=ticket,
+                        comment=comment,
+                        file=uploaded_file,
+                        filename=uploaded_file.name,
+                        file_size=uploaded_file.size,
+                        content_type=content_type,
+                        uploaded_by=request.user
+                    )
+            
             # Update ticket status if it was new
             if ticket.status == 'new':
                 ticket.status = 'open'
@@ -204,3 +248,37 @@ def ticket_reopen(request, pk):
     
     messages.success(request, _("✅ Ticket #{ticket_pk} has been reopened!").format(ticket_pk=ticket.pk))
     return redirect('tickets:detail', pk=pk)
+
+
+@login_required
+def download_attachment(request, attachment_id):
+    """📎 Download ticket attachment"""
+    from django.http import HttpResponse, Http404
+    from django.core.exceptions import PermissionDenied
+    from apps.tickets.models import TicketAttachment
+    import os
+    
+    try:
+        attachment = TicketAttachment.objects.select_related('ticket__customer').get(id=attachment_id)
+    except TicketAttachment.DoesNotExist:
+        raise Http404("Attachment not found")
+    
+    # Security check - verify user has access to this customer's ticket
+    accessible_customers = request.user.get_accessible_customers()
+    accessible_customer_ids = [customer.id for customer in accessible_customers]
+    if attachment.ticket.customer.id not in accessible_customer_ids:
+        raise PermissionDenied("You do not have permission to access this attachment.")
+    
+    # Check if file exists
+    if not attachment.file or not os.path.exists(attachment.file.path):
+        raise Http404("File not found")
+    
+    # Return file response
+    try:
+        with open(attachment.file.path, 'rb') as f:
+            response = HttpResponse(f.read(), content_type=attachment.content_type)
+            response['Content-Disposition'] = f'attachment; filename="{attachment.filename}"'
+            response['Content-Length'] = attachment.file_size
+            return response
+    except IOError:
+        raise Http404("File could not be read")
