@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2025-08-19 14:58+0300\n"
+"POT-Creation-Date: 2025-08-24 08:30+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -18,384 +18,905 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: apps/billing/models.py:19 templates/billing/invoice_list.html:173
-msgid "Draft"
+#: apps/audit/admin.py:61
+msgid "Event Information"
 msgstr ""
 
-#: apps/billing/models.py:20 templates/billing/invoice_list.html:172
-msgid "Sent"
+#: apps/audit/admin.py:69
+msgid "User & Session"
 msgstr ""
 
-#: apps/billing/models.py:21 templates/billing/invoice_list.html:170
-#: templates/dashboard.html:97
-msgid "Paid"
+#: apps/audit/admin.py:79
+msgid "Target Object"
 msgstr ""
 
-#: apps/billing/models.py:22 templates/billing/invoice_list.html:171
-#: templates/dashboard.html:98
-msgid "Overdue"
+#: apps/audit/admin.py:86
+msgid "Changes"
 msgstr ""
 
-#: apps/billing/models.py:23 apps/billing/models.py:370
-#: apps/tickets/models.py:67 templates/provisioning/service_list.html:35
-#: templates/provisioning/service_list.html:150 templates/tickets/list.html:169
-msgid "Cancelled"
+#: apps/audit/admin.py:105 apps/audit/admin.py:319 apps/tickets/models.py:457
+#: apps/users/forms.py:303 apps/users/models.py:115
+#: templates/customers/detail.html:149 templates/users/profile.html:147
+msgid "User"
 msgstr ""
 
-#: apps/billing/models.py:24 apps/billing/models.py:292
-#: apps/billing/models.py:491
-msgid "Refunded"
+#: apps/audit/admin.py:159
+msgid "Export Request"
 msgstr ""
 
-#: apps/billing/models.py:28 apps/billing/models.py:495
-msgid "Bank Transfer"
+#: apps/audit/admin.py:168 apps/billing/models.py:944 apps/orders/models.py:47
+msgid "Processing"
 msgstr ""
 
-#: apps/billing/models.py:29 apps/billing/models.py:496
-msgid "Bank Card"
+#: apps/audit/admin.py:176 apps/notifications/admin.py:179
+#: apps/provisioning/admin.py:536
+msgid "Results"
 msgstr ""
 
-#: apps/billing/models.py:30 apps/billing/models.py:497
-msgid "Cash"
+#: apps/audit/admin.py:184 apps/tickets/admin.py:594
+msgid "Security"
 msgstr ""
 
-#: apps/billing/models.py:31 apps/billing/models.py:498
-msgid "PayPal"
+#: apps/audit/admin.py:202 apps/tickets/admin.py:614 apps/tickets/models.py:406
+msgid "File Size"
 msgstr ""
 
-#: apps/billing/models.py:32 apps/billing/models.py:499
-msgid "Stripe"
+#: apps/audit/admin.py:250
+msgid "Compliance Event"
 msgstr ""
 
-#: apps/billing/models.py:39
-msgid "Invoice Number"
+#: apps/audit/admin.py:259
+msgid "Details"
 msgstr ""
 
-#: apps/billing/models.py:44
-msgid "Series"
+#: apps/audit/admin.py:265
+msgid "Evidence & Metadata"
 msgstr ""
 
-#: apps/billing/models.py:52 apps/billing/models.py:378
-#: apps/billing/models.py:515 apps/customers/models.py:175
-#: apps/customers/models_backup.py:153 apps/provisioning/models.py:305
-#: apps/tickets/models.py:103 apps/tickets/models.py:311
-#: templates/billing/invoice_list.html:107
-#: templates/provisioning/service_list.html:96 templates/tickets/list.html:95
-msgid "Customer"
+#: apps/audit/admin.py:290 templates/billing/billing_list.html:141
+#: templates/billing/invoice_detail.html:104 templates/tickets/form.html:44
+msgid "Type"
 msgstr ""
 
-#: apps/billing/models.py:56
-msgid "Issue Date"
-msgstr ""
-
-#: apps/billing/models.py:57
-msgid "Due Date"
-msgstr ""
-
-#: apps/billing/models.py:58 apps/billing/models.py:309
-#: apps/billing/models.py:525
-msgid "Currency"
-msgstr ""
-
-#: apps/billing/models.py:65
-msgid "Subtotal (Without VAT)"
-msgstr ""
-
-#: apps/billing/models.py:71
-msgid "VAT Rate (%)"
-msgstr ""
-
-#: apps/billing/models.py:77
-msgid "VAT Amount"
-msgstr ""
-
-#: apps/billing/models.py:83
-msgid "Total with VAT"
-msgstr ""
-
-#: apps/billing/models.py:91 apps/billing/models.py:319
-#: apps/billing/models.py:405 apps/billing/models.py:536
-#: apps/provisioning/models.py:177 apps/provisioning/models.py:345
-#: apps/provisioning/models.py:491 apps/tickets/models.py:130
-#: templates/billing/invoice_list.html:38
-#: templates/billing/invoice_list.html:116 templates/customers/list.html:81
-#: templates/provisioning/service_list.html:28
-#: templates/provisioning/service_list.html:102 templates/tickets/list.html:101
+#: apps/audit/admin.py:309 apps/billing/admin.py:183 apps/billing/admin.py:326
+#: apps/billing/admin.py:463 apps/integrations/admin.py:142
+#: apps/integrations/admin.py:281 apps/notifications/admin.py:130
+#: apps/notifications/admin.py:222 apps/provisioning/admin.py:255
+#: apps/provisioning/admin.py:434 apps/provisioning/admin.py:567
+#: apps/provisioning/models.py:178 apps/provisioning/models.py:346
+#: apps/provisioning/models.py:498 apps/tickets/admin.py:252
+#: apps/tickets/models.py:130 templates/billing/billing_list.html:153
+#: templates/billing/invoice_detail.html:41
+#: templates/billing/invoice_form.html:122
+#: templates/billing/invoice_list.html:34
+#: templates/billing/invoice_list.html:108
+#: templates/billing/proforma_form.html:167 templates/customers/detail.html:20
+#: templates/customers/detail.html:107 templates/customers/list.html:74
+#: templates/provisioning/service_form.html:336
+#: templates/provisioning/service_list.html:26
+#: templates/provisioning/service_list.html:98 templates/tickets/detail.html:21
+#: templates/tickets/list.html:101
 msgid "Status"
 msgstr ""
 
-#: apps/billing/models.py:97 apps/billing/models.py:313
-#: apps/billing/models.py:530
-msgid "Payment Method"
+#: apps/billing/admin.py:59 apps/billing/admin.py:72
+msgid "Next Number"
 msgstr ""
 
-#: apps/billing/models.py:99 apps/billing/models.py:334
-msgid "Payment Date"
-msgstr ""
-
-#: apps/billing/models.py:104
-msgid "Paid Amount"
-msgstr ""
-
-#: apps/billing/models.py:112
-msgid "Exchange Rate"
-msgstr ""
-
-#: apps/billing/models.py:116 apps/billing/models.py:232
-#: apps/billing/models.py:382 apps/provisioning/models.py:35
-#: apps/tickets/models.py:17 apps/tickets/models.py:96
-msgid "Description"
-msgstr ""
-
-#: apps/billing/models.py:117
-msgid "Internal Notes"
-msgstr ""
-
-#: apps/billing/models.py:120
-msgid "e-Invoice ID"
-msgstr ""
-
-#: apps/billing/models.py:121
-msgid "Sent to e-Invoice"
-msgstr ""
-
-#: apps/billing/models.py:130
-msgid "PDF File"
-msgstr ""
-
-#: apps/billing/models.py:136
-msgid "XML File (e-Invoice)"
-msgstr ""
-
-#: apps/billing/models.py:151 apps/billing/models.py:228
-#: apps/billing/models.py:299 apps/billing/models.py:510
-#: templates/billing/invoice_list.html:104 templates/dashboard.html:88
-msgid "Invoice"
-msgstr ""
-
-#: apps/billing/models.py:152 templates/base.html:73
-#: templates/billing/invoice_list.html:4 templates/billing/invoice_list.html:11
-msgid "Invoices"
-msgstr ""
-
-#: apps/billing/models.py:238
-msgid "Quantity"
-msgstr ""
-
-#: apps/billing/models.py:244
-msgid "Unit Price"
-msgstr ""
-
-#: apps/billing/models.py:249
+#: apps/billing/admin.py:89 apps/billing/admin.py:200
 msgid "Line Total"
 msgstr ""
 
-#: apps/billing/models.py:256
-msgid "Unit of Measure"
+#: apps/billing/admin.py:128
+msgid "Proforma Information"
 msgstr ""
 
-#: apps/billing/models.py:260
-msgid "Product Code"
+#: apps/billing/admin.py:137 apps/billing/admin.py:269
+msgid "Amounts"
 msgstr ""
 
-#: apps/billing/models.py:267 apps/billing/models.py:413
-#: apps/provisioning/models.py:382 apps/provisioning/models.py:479
-#: templates/provisioning/service_list.html:93
+#: apps/billing/admin.py:144 apps/billing/admin.py:286
+msgid "Billing Address"
+msgstr ""
+
+#: apps/billing/admin.py:158 apps/billing/admin.py:300
+msgid "Files & Metadata"
+msgstr ""
+
+#: apps/billing/admin.py:169 apps/billing/admin.py:330
+#: templates/billing/billing_list.html:150
+#: templates/billing/invoice_detail.html:113
+#: templates/billing/invoice_form.html:150
+#: templates/billing/proforma_convert.html:150
+#: templates/billing/proforma_detail.html:154
+#: templates/billing/proforma_form.html:189 templates/tickets/list.html:21
+msgid "Total"
+msgstr ""
+
+#: apps/billing/admin.py:173 apps/billing/admin.py:334
+msgid "Subtotal"
+msgstr ""
+
+#: apps/billing/admin.py:177 apps/billing/admin.py:338
+msgid "Tax"
+msgstr ""
+
+#: apps/billing/admin.py:247
+msgid "Invoice Information"
+msgstr ""
+
+#: apps/billing/admin.py:258
+msgid "Dates"
+msgstr ""
+
+#: apps/billing/admin.py:277
+msgid "e-Factura (Romanian)"
+msgstr ""
+
+#: apps/billing/admin.py:350
+msgid "Remaining"
+msgstr ""
+
+#: apps/billing/admin.py:361
+msgid "e-Factura"
+msgstr ""
+
+#: apps/billing/admin.py:377
+msgid "Mark as paid"
+msgstr ""
+
+#: apps/billing/admin.py:420
+msgid "Payment Information"
+msgstr ""
+
+#: apps/billing/admin.py:433
+msgid "Gateway Information"
+msgstr ""
+
+#: apps/billing/admin.py:446 templates/billing/invoice_detail.html:189
+#: templates/billing/invoice_list.html:105
+msgid "Amount"
+msgstr ""
+
+#: apps/billing/admin.py:496 apps/billing/models.py:571
+msgid "Credit Entry"
+msgstr ""
+
+#: apps/billing/admin.py:505
+msgid "Related Objects"
+msgstr ""
+
+#: apps/billing/admin.py:525
+msgid "Credit Change"
+msgstr ""
+
+#: apps/billing/admin.py:579
+msgid "Rate"
+msgstr ""
+
+#: apps/billing/admin.py:585
+msgid "Active Now"
+msgstr ""
+
+#: apps/billing/admin.py:629 apps/provisioning/models.py:291
+#: templates/billing/billing_list.html:194
+msgid "Expired"
+msgstr ""
+
+#: apps/billing/admin.py:681
+msgid "Retry Schedule"
+msgstr ""
+
+#: apps/billing/admin.py:686
+msgid "Suspend After"
+msgstr ""
+
+#: apps/billing/admin.py:723 apps/billing/models.py:515
+msgid "Payment"
+msgstr ""
+
+#: apps/billing/admin.py:783 apps/integrations/admin.py:153
+#: apps/integrations/admin.py:293 apps/provisioning/admin.py:599
+msgid "Duration"
+msgstr ""
+
+#: apps/billing/admin.py:796 apps/notifications/admin.py:257
+msgid "Success Rate"
+msgstr ""
+
+#: apps/billing/admin.py:808
+msgid "Recovered Amount"
+msgstr ""
+
+#: apps/billing/models.py:29 templates/billing/invoice_form.html:111
+#: templates/billing/proforma_form.html:156
+#: templates/provisioning/service_form.html:296
+msgid "Currency"
+msgstr ""
+
+#: apps/billing/models.py:30
+msgid "Currencies"
+msgstr ""
+
+#: apps/billing/models.py:65
+msgid "Invoice Sequence"
+msgstr ""
+
+#: apps/billing/models.py:66
+msgid "Invoice Sequences"
+msgstr ""
+
+#: apps/billing/models.py:88
+msgid "Proforma Sequence"
+msgstr ""
+
+#: apps/billing/models.py:89
+msgid "Proforma Sequences"
+msgstr ""
+
+#: apps/billing/models.py:138
+msgid "Proforma expires after this date"
+msgstr ""
+
+#: apps/billing/models.py:161
+msgid "Proforma Invoice"
+msgstr ""
+
+#: apps/billing/models.py:162
+msgid "Proforma Invoices"
+msgstr ""
+
+#: apps/billing/models.py:198 apps/billing/models.py:393
+#: apps/provisioning/models.py:383 apps/provisioning/models.py:486
+#: templates/provisioning/service_list.html:89
 msgid "Service"
 msgstr ""
 
-#: apps/billing/models.py:272
-msgid "Invoice Item"
+#: apps/billing/models.py:199 apps/billing/models.py:394
+#: apps/provisioning/admin.py:112
+msgid "Setup Fee"
 msgstr ""
 
-#: apps/billing/models.py:273
-msgid "Invoice Items"
+#: apps/billing/models.py:200 apps/billing/models.py:396
+msgid "Discount"
 msgstr ""
 
-#: apps/billing/models.py:289 apps/billing/models.py:488
-#: apps/provisioning/models.py:285 apps/provisioning/models.py:459
-#: apps/tickets/models.py:64 templates/billing/invoice_list.html:174
-#: templates/dashboard.html:99 templates/provisioning/service_list.html:36
-#: templates/provisioning/service_list.html:151 templates/tickets/list.html:77
+#: apps/billing/models.py:201 apps/billing/models.py:398
+msgid "Miscellaneous"
+msgstr ""
+
+#: apps/billing/models.py:250 apps/notifications/models.py:366
+#: apps/orders/models.py:45 templates/billing/billing_list.html:216
+#: templates/billing/invoice_form.html:126
+#: templates/billing/invoice_list.html:165
+#: templates/billing/proforma_form.html:171
+msgid "Draft"
+msgstr ""
+
+#: apps/billing/models.py:251 templates/billing/invoice_form.html:127
+#: templates/billing/proforma_convert.html:114
+msgid "Issued"
+msgstr ""
+
+#: apps/billing/models.py:252 templates/billing/billing_list.html:204
+#: templates/billing/invoice_form.html:129
+#: templates/billing/invoice_list.html:162 templates/dashboard.html:175
+msgid "Paid"
+msgstr ""
+
+#: apps/billing/models.py:253 templates/billing/billing_list.html:208
+#: templates/billing/invoice_form.html:130
+#: templates/billing/invoice_list.html:163 templates/dashboard.html:176
+msgid "Overdue"
+msgstr ""
+
+#: apps/billing/models.py:254
+msgid "Void"
+msgstr ""
+
+#: apps/billing/models.py:255 apps/billing/models.py:461
+#: apps/orders/models.py:51
+msgid "Refunded"
+msgstr ""
+
+#: apps/billing/models.py:274
+msgid "Exchange rate to RON at time of invoice"
+msgstr ""
+
+#: apps/billing/models.py:288
+msgid "When invoice became immutable"
+msgstr ""
+
+#: apps/billing/models.py:334
+msgid "Proforma that was converted to this invoice"
+msgstr ""
+
+#: apps/billing/models.py:339 templates/billing/billing_list.html:173
+#: templates/billing/invoice_detail.html:5
+#: templates/billing/invoice_detail.html:13
+#: templates/billing/invoice_list.html:96 templates/dashboard.html:160
+#: templates/dashboard.html:163
+msgid "Invoice"
+msgstr ""
+
+#: apps/billing/models.py:340 templates/base.html:79
+#: templates/billing/invoice_list.html:5 templates/billing/invoice_list.html:12
+msgid "Invoices"
+msgstr ""
+
+#: apps/billing/models.py:395
+msgid "Credit"
+msgstr ""
+
+#: apps/billing/models.py:397
+msgid "Refund"
+msgstr ""
+
+#: apps/billing/models.py:408
+msgid "Related service if applicable"
+msgstr ""
+
+#: apps/billing/models.py:418
+msgid "Tax rate as decimal (0.19 for 19%)"
+msgstr ""
+
+#: apps/billing/models.py:424
+msgid "Invoice Line"
+msgstr ""
+
+#: apps/billing/models.py:425 templates/billing/invoice_detail.html:95
+#: templates/billing/invoice_form.html:140
+msgid "Invoice Lines"
+msgstr ""
+
+#: apps/billing/models.py:458 apps/billing/models.py:943
+#: apps/orders/models.py:46 apps/orders/models.py:409
+#: apps/provisioning/models.py:286 apps/provisioning/models.py:466
+#: apps/tickets/models.py:64 templates/billing/invoice_list.html:166
+#: templates/dashboard.html:177 templates/provisioning/service_form.html:340
+#: templates/provisioning/service_list.html:36
+#: templates/provisioning/service_list.html:147 templates/tickets/list.html:77
 #: templates/tickets/list.html:166
 msgid "Pending"
 msgstr ""
 
-#: apps/billing/models.py:290 apps/billing/models.py:489
-#: apps/provisioning/models.py:461
-msgid "Completed"
+#: apps/billing/models.py:459
+msgid "Succeeded"
 msgstr ""
 
-#: apps/billing/models.py:291 apps/billing/models.py:490
-#: apps/provisioning/models.py:462
+#: apps/billing/models.py:460 apps/billing/models.py:946
+#: apps/billing/models.py:1063 apps/notifications/models.py:194
+#: apps/notifications/models.py:372 apps/orders/models.py:50
+#: apps/orders/models.py:412 apps/provisioning/models.py:469
 msgid "Failed"
 msgstr ""
 
-#: apps/billing/models.py:323
-msgid "Transaction ID"
+#: apps/billing/models.py:462 apps/orders/models.py:52
+msgid "Partially Refunded"
 msgstr ""
 
-#: apps/billing/models.py:324
-msgid "Reference Number"
+#: apps/billing/models.py:466
+msgid "Stripe"
 msgstr ""
 
-#: apps/billing/models.py:331 apps/billing/models.py:548
-msgid "Notes"
+#: apps/billing/models.py:467 apps/orders/models.py:124
+msgid "Bank Transfer"
 msgstr ""
 
-#: apps/billing/models.py:339
-msgid "Recorded By"
+#: apps/billing/models.py:468 apps/orders/models.py:125
+msgid "PayPal"
 msgstr ""
 
-#: apps/billing/models.py:344
-msgid "Invoice Payment"
+#: apps/billing/models.py:469
+msgid "Cash"
 msgstr ""
 
-#: apps/billing/models.py:345
-msgid "Invoice Payments"
+#: apps/billing/models.py:470 templates/provisioning/service_form.html:90
+msgid "Other"
 msgstr ""
 
-#: apps/billing/models.py:361 apps/provisioning/models.py:294
-msgid "Monthly"
-msgstr ""
-
-#: apps/billing/models.py:362 apps/provisioning/models.py:295
-msgid "Quarterly"
-msgstr ""
-
-#: apps/billing/models.py:363 apps/provisioning/models.py:296
-msgid "Semi-Annual"
-msgstr ""
-
-#: apps/billing/models.py:364 apps/provisioning/models.py:297
-msgid "Annual"
-msgstr ""
-
-#: apps/billing/models.py:368 apps/customers/models.py:103
-#: apps/customers/models_backup.py:24 apps/provisioning/models.py:91
-#: apps/provisioning/models.py:144 apps/provisioning/models.py:230
-#: apps/provisioning/models.py:287 apps/tickets/models.py:43
-#: templates/customers/list.html:130
-#: templates/provisioning/service_list.html:33
-#: templates/provisioning/service_list.html:148
-#: templates/users/profile.html:113 templates/users/profile.html:141
-msgid "Active"
-msgstr ""
-
-#: apps/billing/models.py:369
-msgid "Paused"
-msgstr ""
-
-#: apps/billing/models.py:371 apps/provisioning/models.py:290
-msgid "Expired"
-msgstr ""
-
-#: apps/billing/models.py:387 apps/billing/models.py:523
-#: templates/billing/invoice_list.html:113
-msgid "Amount"
-msgstr ""
-
-#: apps/billing/models.py:392
-msgid "Frequency"
-msgstr ""
-
-#: apps/billing/models.py:396
-msgid "Start Date"
-msgstr ""
-
-#: apps/billing/models.py:397
-msgid "Next Billing Date"
-msgstr ""
-
-#: apps/billing/models.py:398
-msgid "End Date"
-msgstr ""
-
-#: apps/billing/models.py:427 apps/billing/models.py:428
-msgid "Recurring Billing"
-msgstr ""
-
-#: apps/billing/models.py:540
-msgid "External ID"
-msgstr ""
-
-#: apps/billing/models.py:553
-msgid "Payment"
-msgstr ""
-
-#: apps/billing/models.py:554
+#: apps/billing/models.py:516 templates/billing/invoice_detail.html:177
 msgid "Payments"
 msgstr ""
 
-#: apps/billing/views.py:92 apps/billing/views.py:197
+#: apps/billing/models.py:572
+msgid "Credit Entries"
+msgstr ""
+
+#: apps/billing/models.py:601
+msgid "ISO 3166-1 alpha-2 country code (e.g., 'RO', 'DE')"
+msgstr ""
+
+#: apps/billing/models.py:606
+msgid "State/province for countries with regional tax rates"
+msgstr ""
+
+#: apps/billing/models.py:613 templates/billing/invoice_list.html:150
+#: templates/billing/proforma_convert.html:147
+#: templates/billing/proforma_detail.html:151
+msgid "VAT"
+msgstr ""
+
+#: apps/billing/models.py:614
+msgid "GST"
+msgstr ""
+
+#: apps/billing/models.py:615
+msgid "Sales Tax"
+msgstr ""
+
+#: apps/billing/models.py:616
+msgid "Withholding Tax"
+msgstr ""
+
+#: apps/billing/models.py:624
+msgid "Tax rate as decimal (e.g., 0.19 for 19%)"
+msgstr ""
+
+#: apps/billing/models.py:632
+msgid "Reduced rate for specific product categories"
+msgstr ""
+
+#: apps/billing/models.py:636
+msgid "When this tax rate becomes effective"
+msgstr ""
+
+#: apps/billing/models.py:640
+msgid "When this tax rate expires (null = indefinite)"
+msgstr ""
+
+#: apps/billing/models.py:646
+msgid "Whether tax applies to business-to-business transactions"
+msgstr ""
+
+#: apps/billing/models.py:650
+msgid "Whether tax applies to business-to-consumer transactions"
+msgstr ""
+
+#: apps/billing/models.py:654
+msgid "Whether reverse charge mechanism applies (EU B2B)"
+msgstr ""
+
+#: apps/billing/models.py:660
+msgid "Whether country is EU member for VAT purposes"
+msgstr ""
+
+#: apps/billing/models.py:664
+msgid "Whether VIES VAT number validation is required"
+msgstr ""
+
+#: apps/billing/models.py:671
+msgid "Additional tax configuration and rules"
+msgstr ""
+
+#: apps/billing/models.py:680
+msgid "Tax Rule"
+msgstr ""
+
+#: apps/billing/models.py:681
+msgid "Tax Rules"
+msgstr ""
+
+#: apps/billing/models.py:738
+msgid "Country code (e.g., 'RO')"
+msgstr ""
+
+#: apps/billing/models.py:739
+msgid "VAT number without country prefix"
+msgstr ""
+
+#: apps/billing/models.py:742
+msgid "Complete VAT number (e.g., 'RO12345678')"
+msgstr ""
+
+#: apps/billing/models.py:746
+msgid "Whether VAT number is valid"
+msgstr ""
+
+#: apps/billing/models.py:749
+msgid "Whether company is active for VAT purposes"
+msgstr ""
+
+#: apps/billing/models.py:754
+msgid "Company name from VIES (if available)"
+msgstr ""
+
+#: apps/billing/models.py:758
+msgid "Company address from VIES (if available)"
+msgstr ""
+
+#: apps/billing/models.py:766
+msgid "VIES API"
+msgstr ""
+
+#: apps/billing/models.py:767
+msgid "Manual Override"
+msgstr ""
+
+#: apps/billing/models.py:768
+msgid "Previous Validation"
+msgstr ""
+
+#: apps/billing/models.py:775
+msgid "Raw API response for audit purposes"
+msgstr ""
+
+#: apps/billing/models.py:782
+msgid "When validation result expires"
+msgstr ""
+
+#: apps/billing/models.py:787
+msgid "VAT Validation"
+msgstr ""
+
+#: apps/billing/models.py:788
+msgid "VAT Validations"
+msgstr ""
+
+#: apps/billing/models.py:825
+msgid "Human-readable policy name (e.g., 'Standard Hosting', 'VIP Customer')"
+msgstr ""
+
+#: apps/billing/models.py:829
+msgid "Description of when this policy applies"
+msgstr ""
+
+#: apps/billing/models.py:835
+msgid "Days after failure to retry (e.g., [1, 3, 7, 14, 30])"
+msgstr ""
+
+#: apps/billing/models.py:840
+msgid "Maximum number of retry attempts"
+msgstr ""
+
+#: apps/billing/models.py:847
+msgid "Days after final failure to suspend service (null = never)"
+msgstr ""
+
+#: apps/billing/models.py:852
+msgid "Days after final failure to terminate service (null = never)"
+msgstr ""
+
+#: apps/billing/models.py:858
+msgid "Whether to send email notifications during dunning"
+msgstr ""
+
+#: apps/billing/models.py:863
+msgid "Template prefix for dunning emails (e.g., 'dunning_vip')"
+msgstr ""
+
+#: apps/billing/models.py:869
+msgid "Whether this is the default policy for new customers"
+msgstr ""
+
+#: apps/billing/models.py:873
+msgid "Whether this policy is currently active"
+msgstr ""
+
+#: apps/billing/models.py:880
+msgid "Additional policy configuration"
+msgstr ""
+
+#: apps/billing/models.py:889
+msgid "Payment Retry Policy"
+msgstr ""
+
+#: apps/billing/models.py:890
+msgid "Payment Retry Policies"
+msgstr ""
+
+#: apps/billing/models.py:918
+msgid "Original failed payment"
+msgstr ""
+
+#: apps/billing/models.py:923
+msgid "Retry policy used for this attempt"
+msgstr ""
+
+#: apps/billing/models.py:928
+msgid "Sequence number of this retry attempt (1, 2, 3...)"
+msgstr ""
+
+#: apps/billing/models.py:931
+msgid "When this retry was scheduled to run"
+msgstr ""
+
+#: apps/billing/models.py:936
+msgid "When this retry was actually executed"
+msgstr ""
+
+#: apps/billing/models.py:945 apps/users/models.py:367
+msgid "Success"
+msgstr ""
+
+#: apps/billing/models.py:947
+msgid "Skipped"
+msgstr ""
+
+#: apps/billing/models.py:948 apps/billing/models.py:1064
+#: apps/notifications/models.py:371 apps/orders/models.py:49
+#: apps/orders/models.py:413 apps/tickets/models.py:67
+#: templates/billing/invoice_form.html:131
+#: templates/provisioning/service_form.html:343
+#: templates/provisioning/service_list.html:34
+#: templates/provisioning/service_list.html:146 templates/tickets/list.html:169
+msgid "Cancelled"
+msgstr ""
+
+#: apps/billing/models.py:957
+msgid "Payment gateway response for audit"
+msgstr ""
+
+#: apps/billing/models.py:961
+msgid "Reason for failure if retry was unsuccessful"
+msgstr ""
+
+#: apps/billing/models.py:967
+msgid "Whether dunning email was sent for this attempt"
+msgstr ""
+
+#: apps/billing/models.py:972
+msgid "When dunning email was sent"
+msgstr ""
+
+#: apps/billing/models.py:981
+msgid "Payment Retry Attempt"
+msgstr ""
+
+#: apps/billing/models.py:982
+msgid "Payment Retry Attempts"
+msgstr ""
+
+#: apps/billing/models.py:1007
+msgid "Automatic Scheduled"
+msgstr ""
+
+#: apps/billing/models.py:1008
+msgid "Manual Trigger"
+msgstr ""
+
+#: apps/billing/models.py:1009
+msgid "Test Run"
+msgstr ""
+
+#: apps/billing/models.py:1018
+msgid "User who triggered manual run"
+msgstr ""
+
+#: apps/billing/models.py:1026
+msgid "When collection run completed"
+msgstr ""
+
+#: apps/billing/models.py:1032
+msgid "Total retry attempts scheduled in this run"
+msgstr ""
+
+#: apps/billing/models.py:1036
+msgid "Total retry attempts processed"
+msgstr ""
+
+#: apps/billing/models.py:1040
+msgid "Total successful payment recoveries"
+msgstr ""
+
+#: apps/billing/models.py:1044
+msgid "Total failed retry attempts"
+msgstr ""
+
+#: apps/billing/models.py:1050
+msgid "Total amount recovered in cents"
+msgstr ""
+
+#: apps/billing/models.py:1054
+msgid "Total fees charged by payment processor"
+msgstr ""
+
+#: apps/billing/models.py:1061 apps/provisioning/models.py:467
+msgid "Running"
+msgstr ""
+
+#: apps/billing/models.py:1062 apps/orders/models.py:48
+#: apps/orders/models.py:411 apps/provisioning/models.py:468
+msgid "Completed"
+msgstr ""
+
+#: apps/billing/models.py:1070
+msgid "Error message if run failed"
+msgstr ""
+
+#: apps/billing/models.py:1077
+msgid "Configuration used for this run"
+msgstr ""
+
+#: apps/billing/models.py:1082
+msgid "Payment Collection Run"
+msgstr ""
+
+#: apps/billing/models.py:1083
+msgid "Payment Collection Runs"
+msgstr ""
+
+#: apps/billing/views.py:129 apps/billing/views.py:685
 msgid "❌ You do not have permission to access this invoice."
 msgstr ""
 
-#: apps/billing/views.py:122
-msgid "❌ You do not have permission to create invoices for this customer."
+#: apps/billing/views.py:159
+msgid "❌ You do not have permission to create proformas for this customer."
 msgstr ""
 
-#: apps/billing/views.py:136
+#: apps/billing/views.py:202
 #, python-brace-format
-msgid "✅ Invoice #{invoice_number} has been created!"
+msgid "❌ Error creating proforma: {error}"
 msgstr ""
 
-#: apps/billing/views.py:168
+#: apps/billing/views.py:264 apps/billing/views.py:578
+#, python-brace-format
+msgid "⚠️ {error}"
+msgstr ""
+
+#: apps/billing/views.py:266
+#, python-brace-format
+msgid "✅ Proforma #{number} has been created!"
+msgstr ""
+
+#: apps/billing/views.py:301 apps/billing/views.py:615
+msgid "❌ You do not have permission to access this proforma."
+msgstr ""
+
+#: apps/billing/views.py:327
+msgid "❌ You do not have permission to convert this proforma."
+msgstr ""
+
+#: apps/billing/views.py:332
+msgid "❌ Cannot convert expired proforma to invoice."
+msgstr ""
+
+#: apps/billing/views.py:338
+#, python-brace-format
+msgid "⚠️ This proforma has already been converted to invoice #{number}"
+msgstr ""
+
+#: apps/billing/views.py:385
+#, python-brace-format
+msgid "✅ Proforma #{proforma_number} converted to Invoice #{invoice_number}!"
+msgstr ""
+
+#: apps/billing/views.py:439
+#, python-brace-format
+msgid "✅ Payment processed and invoice #{number} marked as paid!"
+msgstr ""
+
+#: apps/billing/views.py:456
+msgid "❌ You do not have permission to edit this proforma."
+msgstr ""
+
+#: apps/billing/views.py:461
+msgid "❌ Cannot edit expired proforma."
+msgstr ""
+
+#: apps/billing/views.py:472
+msgid "❌ You do not have permission to assign this customer."
+msgstr ""
+
+#: apps/billing/views.py:580
+#, python-brace-format
+msgid "✅ Proforma #{proforma_number} has been updated!"
+msgstr ""
+
+#: apps/billing/views.py:641
+#, python-brace-format
+msgid "✅ Proforma #{proforma_number} has been sent successfully!"
+msgstr ""
+
+#: apps/billing/views.py:656
 msgid "❌ You do not have permission to edit this invoice."
 msgstr ""
 
-#: apps/billing/views.py:172
+#: apps/billing/views.py:660
 msgid "❌ Only draft invoices can be edited."
 msgstr ""
 
-#: apps/billing/views.py:177
+#: apps/billing/views.py:665
 #, python-brace-format
 msgid "✅ Invoice #{invoice_number} has been updated!"
 msgstr ""
 
-#: apps/billing/views.py:229
+#: apps/billing/views.py:717
 #, python-brace-format
 msgid "✅ Invoice #{invoice_number} has been sent successfully!"
 msgstr ""
 
-#: apps/billing/views.py:244
+#: apps/billing/views.py:732
 msgid "❌ You do not have permission to generate e-Invoice for this invoice."
 msgstr ""
 
-#: apps/billing/views.py:318
+#: apps/billing/views.py:806
 #, python-brace-format
 msgid "✅ Payment of {amount} RON has been registered!"
+msgstr ""
+
+#: apps/common/utils.py:231
+msgid "System is under maintenance. Please try again later."
+msgstr ""
+
+#: apps/customers/admin.py:30 apps/provisioning/admin.py:48
+#: apps/provisioning/admin.py:179 templates/customers/detail.html:39
+msgid "Basic Information"
+msgstr ""
+
+#: apps/customers/admin.py:33
+msgid "Contact Information"
+msgstr ""
+
+#: apps/customers/admin.py:36 templates/users/login.html:97
+msgid "GDPR Compliance"
+msgstr ""
+
+#: apps/customers/admin.py:42
+msgid "Account Management"
+msgstr ""
+
+#: apps/customers/admin.py:45
+msgid "Audit Information"
+msgstr ""
+
+#: apps/customers/admin.py:69 apps/customers/admin.py:97
+#: apps/customers/models.py:175 apps/integrations/admin.py:255
+#: apps/provisioning/models.py:306 apps/tickets/models.py:103
+#: apps/tickets/models.py:311 templates/billing/billing_list.html:147
+#: templates/billing/invoice_detail.html:33
+#: templates/billing/invoice_list.html:99 templates/customers/detail.html:261
+#: templates/provisioning/service_list.html:92 templates/tickets/detail.html:17
+#: templates/tickets/form.html:29 templates/tickets/list.html:95
+msgid "Customer"
+msgstr ""
+
+#: apps/customers/admin.py:72
+msgid "Address Details"
+msgstr ""
+
+#: apps/customers/admin.py:78
+msgid "Validation"
+msgstr ""
+
+#: apps/customers/admin.py:100
+msgid "Payment Terms"
+msgstr ""
+
+#: apps/customers/admin.py:105
+msgid "Billing Preferences"
 msgstr ""
 
 #: apps/customers/forms.py:47
 msgid "Customer name/designation"
 msgstr ""
 
-#: apps/customers/forms.py:51
+#: apps/customers/forms.py:51 apps/customers/forms.py:336
 msgid "SC EXAMPLE SRL"
 msgstr ""
 
-#: apps/customers/forms.py:55
+#: apps/customers/forms.py:55 apps/customers/forms.py:307
 msgid "contact@example.com"
 msgstr ""
 
-#: apps/customers/forms.py:59
+#: apps/customers/forms.py:59 apps/customers/forms.py:316
 msgid "+40 721 123 456"
 msgstr ""
 
-#: apps/customers/forms.py:63
+#: apps/customers/forms.py:63 apps/customers/forms.py:345
 msgid "IT & Software"
 msgstr ""
 
-#: apps/customers/forms.py:67
+#: apps/customers/forms.py:67 apps/customers/forms.py:353
 msgid "https://example.com"
 msgstr ""
 
-#: apps/customers/forms.py:77 apps/customers/forms.py:335
+#: apps/customers/forms.py:77
 msgid "Company name is required for companies"
 msgstr ""
 
 #: apps/customers/forms.py:105 apps/customers/forms.py:109
+#: apps/customers/forms.py:365 apps/customers/forms.py:375
 msgid "RO12345678"
 msgstr ""
 
@@ -407,7 +928,7 @@ msgstr ""
 msgid "CUI must be in format RO followed by 2-10 digits"
 msgstr ""
 
-#: apps/customers/forms.py:136
+#: apps/customers/forms.py:136 apps/customers/forms.py:501
 msgid "VAT number is required for VAT payers"
 msgstr ""
 
@@ -419,23 +940,23 @@ msgstr ""
 msgid "Credit limit cannot be negative"
 msgstr ""
 
-#: apps/customers/forms.py:208
+#: apps/customers/forms.py:208 apps/customers/forms.py:393
 msgid "Example Street, no. 123"
 msgstr ""
 
-#: apps/customers/forms.py:212
+#: apps/customers/forms.py:212 apps/customers/forms.py:403
 msgid "Block A, Apt. 45 (optional)"
 msgstr ""
 
-#: apps/customers/forms.py:216
+#: apps/customers/forms.py:216 apps/customers/forms.py:411
 msgid "Bucharest"
 msgstr ""
 
-#: apps/customers/forms.py:220
+#: apps/customers/forms.py:220 apps/customers/forms.py:419
 msgid "Sector 1 / Cluj"
 msgstr ""
 
-#: apps/customers/forms.py:224
+#: apps/customers/forms.py:224 apps/customers/forms.py:428
 msgid "010101"
 msgstr ""
 
@@ -455,80 +976,167 @@ msgstr ""
 msgid "Details..."
 msgstr ""
 
-#: apps/customers/forms.py:287
-msgid "Name"
+#: apps/customers/forms.py:289 apps/customers/forms.py:292
+#: apps/users/forms.py:53 apps/users/forms.py:147 apps/users/forms.py:339
+#: templates/users/profile.html:41
+msgid "First Name"
 msgstr ""
 
-#: apps/customers/forms.py:290
-msgid "Customer Type"
+#: apps/customers/forms.py:297 apps/customers/forms.py:300
+#: apps/users/forms.py:62 apps/users/forms.py:153 apps/users/forms.py:348
+#: templates/users/profile.html:50
+msgid "Last Name"
 msgstr ""
 
-#: apps/customers/forms.py:295
-msgid "Company Name"
-msgstr ""
-
-#: apps/customers/forms.py:297
+#: apps/customers/forms.py:304
 msgid "Primary Email"
 msgstr ""
 
-#: apps/customers/forms.py:298
+#: apps/customers/forms.py:312
 msgid "Primary Phone"
 msgstr ""
 
-#: apps/customers/forms.py:301
-msgid "CUI"
-msgstr ""
-
-#: apps/customers/forms.py:302
-msgid "VAT Payer"
-msgstr ""
-
-#: apps/customers/forms.py:303
-msgid "VAT Number"
-msgstr ""
-
-#: apps/customers/forms.py:306
-msgid "Address Line 1"
-msgstr ""
-
-#: apps/customers/forms.py:307
-msgid "Address Line 2"
-msgstr ""
-
-#: apps/customers/forms.py:308
-msgid "City"
-msgstr ""
-
-#: apps/customers/forms.py:309
-msgid "County"
-msgstr ""
-
-#: apps/customers/forms.py:310
-msgid "Postal Code"
-msgstr ""
-
 #: apps/customers/forms.py:313
-msgid "Payment Terms (days)"
+msgid "Format: +40 21 123 4567 or 0712 345 678"
 msgstr ""
 
-#: apps/customers/forms.py:318
-msgid "Credit Limit"
+#: apps/customers/forms.py:323 templates/customers/detail.html:94
+msgid "Customer Type"
 msgstr ""
 
 #: apps/customers/forms.py:324
+msgid "Individual, company, PFA, or NGO"
+msgstr ""
+
+#: apps/customers/forms.py:332
+msgid "Company Name"
+msgstr ""
+
+#: apps/customers/forms.py:333
+msgid "Required for companies, PFA, and NGOs"
+msgstr ""
+
+#: apps/customers/forms.py:342 templates/customers/detail.html:102
+msgid "Industry"
+msgstr ""
+
+#: apps/customers/forms.py:350 apps/tickets/models.py:79
+#: templates/customers/detail.html:79
+msgid "Website"
+msgstr ""
+
+#: apps/customers/forms.py:361 templates/customers/detail.html:184
+msgid "CUI/CIF"
+msgstr ""
+
+#: apps/customers/forms.py:362
+msgid "Format: RO12345678 (6-10 digits after RO)"
+msgstr ""
+
+#: apps/customers/forms.py:371 apps/users/forms.py:391
+#: templates/customers/detail.html:190 templates/dashboard.html:358
+msgid "VAT Number"
+msgstr ""
+
+#: apps/customers/forms.py:372
+msgid "Romanian VAT registration number"
+msgstr ""
+
+#: apps/customers/forms.py:380 templates/customers/detail.html:197
+msgid "VAT Payer"
+msgstr ""
+
+#: apps/customers/forms.py:381
+msgid "Customer is registered for VAT"
+msgstr ""
+
+#: apps/customers/forms.py:390
+msgid "Address Line 1"
+msgstr ""
+
+#: apps/customers/forms.py:399
+msgid "Address Line 2"
+msgstr ""
+
+#: apps/customers/forms.py:400
+msgid "Apartment, suite, unit, building, floor, etc."
+msgstr ""
+
+#: apps/customers/forms.py:408 apps/users/forms.py:416
+msgid "City"
+msgstr ""
+
+#: apps/customers/forms.py:416 apps/users/forms.py:425
+msgid "County"
+msgstr ""
+
+#: apps/customers/forms.py:424 apps/users/forms.py:434
+msgid "Postal Code"
+msgstr ""
+
+#: apps/customers/forms.py:425
+msgid "Romanian postal codes are 6 digits"
+msgstr ""
+
+#: apps/customers/forms.py:435
+msgid "Payment Terms (days)"
+msgstr ""
+
+#: apps/customers/forms.py:436
+msgid "Number of days for payment"
+msgstr ""
+
+#: apps/customers/forms.py:447
+msgid "Credit Limit (RON)"
+msgstr ""
+
+#: apps/customers/forms.py:448
+msgid "Maximum credit allowed"
+msgstr ""
+
+#: apps/customers/forms.py:458
+msgid "Preferred Currency"
+msgstr ""
+
+#: apps/customers/forms.py:467
 msgid "Data Processing Consent"
 msgstr ""
 
-#: apps/customers/models.py:96 apps/customers/models_backup.py:18
+#: apps/customers/forms.py:468
+msgid ""
+"Customer has given consent for personal data processing according to GDPR"
+msgstr ""
+
+#: apps/customers/forms.py:475
+msgid "Marketing Communications Consent"
+msgstr ""
+
+#: apps/customers/forms.py:476
+msgid "Customer consents to receive marketing communications"
+msgstr ""
+
+#: apps/customers/forms.py:493
+msgid "Company name is required for companies, PFA, and NGOs"
+msgstr ""
+
+#: apps/customers/forms.py:497
+msgid "CUI must be in format RO followed by 6-10 digits"
+msgstr ""
+
+#: apps/customers/forms.py:504
+msgid "VAT number must be in format RO followed by 6-10 digits"
+msgstr ""
+
+#: apps/customers/models.py:96
 msgid "Individual"
 msgstr ""
 
-#: apps/customers/models.py:97 apps/customers/models_backup.py:19
-#: templates/customers/list.html:72
+#: apps/customers/models.py:97 templates/customers/detail.html:51
+#: templates/customers/list.html:65 templates/dashboard.html:352
 msgid "Company"
 msgstr ""
 
-#: apps/customers/models.py:98 apps/customers/models_backup.py:20
+#: apps/customers/models.py:98
 msgid "PFA/SRL"
 msgstr ""
 
@@ -536,24 +1144,34 @@ msgstr ""
 msgid "NGO/Association"
 msgstr ""
 
-#: apps/customers/models.py:104 apps/customers/models_backup.py:26
-#: templates/users/profile.html:115
+#: apps/customers/models.py:103 apps/provisioning/models.py:92
+#: apps/provisioning/models.py:145 apps/provisioning/models.py:231
+#: apps/provisioning/models.py:288 apps/tickets/models.py:43
+#: templates/customers/list.html:123 templates/dashboard.html:120
+#: templates/provisioning/service_form.html:341
+#: templates/provisioning/service_list.html:31
+#: templates/provisioning/service_list.html:144
+#: templates/users/profile.html:157 templates/users/profile.html:225
+msgid "Active"
+msgstr ""
+
+#: apps/customers/models.py:104 templates/users/profile.html:159
 msgid "Inactive"
 msgstr ""
 
-#: apps/customers/models.py:105 apps/customers/models_backup.py:25
-#: apps/provisioning/models.py:288 templates/provisioning/service_list.html:34
-#: templates/provisioning/service_list.html:149
+#: apps/customers/models.py:105 apps/provisioning/models.py:289
+#: templates/provisioning/service_form.html:342
+#: templates/provisioning/service_list.html:32
+#: templates/provisioning/service_list.html:145
 msgid "Suspended"
 msgstr ""
 
-#: apps/customers/models.py:106 apps/customers/models_backup.py:27
+#: apps/customers/models.py:106
 msgid "Prospect"
 msgstr ""
 
-#: apps/customers/models.py:176 apps/customers/models_backup.py:154
-#: templates/base.html:69 templates/customers/list.html:4
-#: templates/customers/list.html:11
+#: apps/customers/models.py:176 templates/base.html:75
+#: templates/customers/list.html:5 templates/customers/list.html:12
 msgid "Customers"
 msgstr ""
 
@@ -589,24 +1207,12 @@ msgstr ""
 msgid "Customer Payment Methods"
 msgstr ""
 
-#: apps/customers/models.py:548 apps/customers/models_backup.py:339
+#: apps/customers/models.py:548
 msgid "Customer Note"
 msgstr ""
 
-#: apps/customers/models.py:549 apps/customers/models_backup.py:340
+#: apps/customers/models.py:549
 msgid "Customer Notes"
-msgstr ""
-
-#: apps/customers/models_backup.py:31
-msgid "Name/Company Name"
-msgstr ""
-
-#: apps/customers/models_backup.py:286
-msgid "Customer Contact"
-msgstr ""
-
-#: apps/customers/models_backup.py:287
-msgid "Customer Contacts"
 msgstr ""
 
 #: apps/customers/views.py:90 apps/customers/views.py:154
@@ -641,9 +1247,8 @@ msgstr ""
 msgid "✅ Customer \"{customer_name}\" updated"
 msgstr ""
 
-#: apps/customers/views.py:171 templates/billing/invoice_list.html:188
-#: templates/customers/list.html:141
-#: templates/provisioning/service_list.html:183
+#: apps/customers/views.py:171 templates/billing/proforma_detail.html:29
+#: templates/provisioning/service_list.html:179
 msgid "Edit"
 msgstr ""
 
@@ -685,414 +1290,2242 @@ msgstr ""
 msgid "🗑️ Customer \"{customer_name}\" deleted successfully"
 msgstr ""
 
-#: apps/provisioning/models.py:17
-msgid "Shared Web Hosting"
+#: apps/domains/models.py:28
+msgid "TLD extension (e.g., 'com', 'ro', 'eu')"
 msgstr ""
 
-#: apps/provisioning/models.py:18
+#: apps/domains/models.py:32
+msgid "Human-readable description of TLD"
+msgstr ""
+
+#: apps/domains/models.py:38
+msgid "Registration price in cents (customer pays)"
+msgstr ""
+
+#: apps/domains/models.py:42
+msgid "Renewal price in cents (customer pays)"
+msgstr ""
+
+#: apps/domains/models.py:46
+msgid "Transfer price in cents (customer pays)"
+msgstr ""
+
+#: apps/domains/models.py:53
+msgid "Cost from registrar in cents"
+msgstr ""
+
+#: apps/domains/models.py:60
+msgid "Minimum registration period in years"
+msgstr ""
+
+#: apps/domains/models.py:65
+msgid "Maximum registration period in years"
+msgstr ""
+
+#: apps/domains/models.py:71
+msgid "Whether WHOIS privacy is available for this TLD"
+msgstr ""
+
+#: apps/domains/models.py:75
+msgid "Grace period for renewal after expiration"
+msgstr ""
+
+#: apps/domains/models.py:80
+msgid "Additional fee for domain redemption"
+msgstr ""
+
+#: apps/domains/models.py:86
+msgid "Requires local presence (e.g., .ro domains)"
+msgstr ""
+
+#: apps/domains/models.py:90
+msgid "Special registration requirements"
+msgstr ""
+
+#: apps/domains/models.py:97
+msgid "Show in featured TLD list"
+msgstr ""
+
+#: apps/domains/models.py:105
+msgid "🌐 TLD"
+msgstr ""
+
+#: apps/domains/models.py:106
+msgid "🌐 TLDs"
+msgstr ""
+
+#: apps/domains/models.py:150 apps/domains/models.py:294
+#: apps/provisioning/models.py:873
+msgid "🟢 Active"
+msgstr ""
+
+#: apps/domains/models.py:151 apps/domains/models.py:296
+#: apps/provisioning/models.py:874
+msgid "🟡 Suspended"
+msgstr ""
+
+#: apps/domains/models.py:152
+msgid "🔴 Disabled"
+msgstr ""
+
+#: apps/domains/models.py:162
+msgid "Base API endpoint URL"
+msgstr ""
+
+#: apps/domains/models.py:172
+msgid "Secret for webhook signature verification"
+msgstr ""
+
+#: apps/domains/models.py:176
+msgid "Our webhook endpoint for this registrar"
+msgstr ""
+
+#: apps/domains/models.py:184
+msgid "Default nameservers for new domains"
+msgstr ""
+
+#: apps/domains/models.py:192
+msgid "Monthly account fee in cents"
+msgstr ""
+
+#: apps/domains/models.py:205
+msgid "🏢 Registrar"
+msgstr ""
+
+#: apps/domains/models.py:206
+msgid "🏢 Registrars"
+msgstr ""
+
+#: apps/domains/models.py:244
+msgid "Primary registrar for this TLD"
+msgstr ""
+
+#: apps/domains/models.py:248
+msgid "Priority order (1 = highest)"
+msgstr ""
+
+#: apps/domains/models.py:256
+msgid "Override cost for this registrar-TLD combination"
+msgstr ""
+
+#: apps/domains/models.py:267
+msgid "🔗 TLD-Registrar Assignment"
+msgstr ""
+
+#: apps/domains/models.py:268
+msgid "🔗 TLD-Registrar Assignments"
+msgstr ""
+
+#: apps/domains/models.py:293
+msgid "⏳ Pending Registration"
+msgstr ""
+
+#: apps/domains/models.py:295
+msgid "🔴 Expired"
+msgstr ""
+
+#: apps/domains/models.py:297
+msgid "📥 Transfer In Progress"
+msgstr ""
+
+#: apps/domains/models.py:298
+msgid "📤 Transfer Out Progress"
+msgstr ""
+
+#: apps/domains/models.py:299
+msgid "❌ Cancelled"
+msgstr ""
+
+#: apps/domains/models.py:307
+msgid "Full domain name (e.g., 'example.com')"
+msgstr ""
+
+#: apps/domains/models.py:336
+msgid "Domain ID at registrar"
+msgstr ""
+
+#: apps/domains/models.py:341
+msgid "EPP/Auth code for transfers"
+msgstr ""
+
+#: apps/domains/models.py:347
+msgid "Automatically renew domain before expiration"
+msgstr ""
+
+#: apps/domains/models.py:351
+msgid "WHOIS privacy protection enabled"
+msgstr ""
+
+#: apps/domains/models.py:355
+msgid "Domain lock to prevent unauthorized transfers"
+msgstr ""
+
+#: apps/domains/models.py:362
+msgid "Current nameservers for domain"
+msgstr ""
+
+#: apps/domains/models.py:373
+msgid "Last amount paid for this domain"
+msgstr ""
+
+#: apps/domains/models.py:382
+msgid "🌍 Domain"
+msgstr ""
+
+#: apps/domains/models.py:383
+msgid "🌍 Domains"
+msgstr ""
+
+#: apps/domains/models.py:448
+msgid "Domain name contains invalid characters"
+msgstr ""
+
+#: apps/domains/models.py:474
+msgid "🆕 Register"
+msgstr ""
+
+#: apps/domains/models.py:475
+msgid "🔄 Renew"
+msgstr ""
+
+#: apps/domains/models.py:476
+msgid "📥 Transfer"
+msgstr ""
+
+#: apps/domains/models.py:489
+msgid "Domain name to register/renew/transfer"
+msgstr ""
+
+#: apps/domains/models.py:502
+msgid "Registration/renewal period in years"
+msgstr ""
+
+#: apps/domains/models.py:508
+msgid "Price per year in cents"
+msgstr ""
+
+#: apps/domains/models.py:512
+msgid "Total price for all years"
+msgstr ""
+
+#: apps/domains/models.py:518
+msgid "Include WHOIS privacy protection"
+msgstr ""
+
+#: apps/domains/models.py:522
+msgid "Enable auto-renewal for this domain"
+msgstr ""
+
+#: apps/domains/models.py:529
+msgid "EPP/Auth code for domain transfer"
+msgstr ""
+
+#: apps/domains/models.py:539
+msgid "Created/renewed domain after order processing"
+msgstr ""
+
+#: apps/domains/models.py:547
+msgid "🛒 Domain Order Item"
+msgstr ""
+
+#: apps/domains/models.py:548
+msgid "🛒 Domain Order Items"
+msgstr ""
+
+#: apps/integrations/admin.py:48
+msgid "🔍 Event Information"
+msgstr ""
+
+#: apps/integrations/admin.py:59
+msgid "📋 Processing Details"
+msgstr ""
+
+#: apps/integrations/admin.py:68
+msgid "🌐 Request Information"
+msgstr ""
+
+#: apps/integrations/admin.py:77
+msgid "📦 Payload Data"
+msgstr ""
+
+#: apps/integrations/admin.py:84 apps/integrations/admin.py:242
+msgid "📅 Timestamps"
+msgstr ""
+
+#: apps/integrations/admin.py:109 apps/tickets/models.py:136
+msgid "Source"
+msgstr ""
+
+#: apps/integrations/admin.py:116
+msgid "Event Type"
+msgstr ""
+
+#: apps/integrations/admin.py:166 apps/tickets/admin.py:107
+msgid "Size"
+msgstr ""
+
+#: apps/integrations/admin.py:212
+msgid "📤 Delivery Information"
+msgstr ""
+
+#: apps/integrations/admin.py:221
+msgid "📋 Delivery Results"
+msgstr ""
+
+#: apps/integrations/admin.py:229
+msgid "🔄 Retry Logic"
+msgstr ""
+
+#: apps/integrations/admin.py:236
+msgid "📦 Payload"
+msgstr ""
+
+#: apps/integrations/apps.py:18
+msgid "🔌 Integrations"
+msgstr ""
+
+#: apps/integrations/models.py:29 apps/integrations/models.py:248
+msgid "⏳ Pending"
+msgstr ""
+
+#: apps/integrations/models.py:30
+msgid "✅ Processed"
+msgstr ""
+
+#: apps/integrations/models.py:31 apps/integrations/models.py:250
+msgid "❌ Failed"
+msgstr ""
+
+#: apps/integrations/models.py:32
+msgid "⏭️ Skipped"
+msgstr ""
+
+#: apps/integrations/models.py:36
+msgid "💳 Stripe"
+msgstr ""
+
+#: apps/integrations/models.py:37
+msgid "🟡 PayPal"
+msgstr ""
+
+#: apps/integrations/models.py:38
+msgid "🖥️ Virtualmin"
+msgstr ""
+
+#: apps/integrations/models.py:39
+msgid "🌐 cPanel"
+msgstr ""
+
+#: apps/integrations/models.py:40
+msgid "🏷️ Namecheap"
+msgstr ""
+
+#: apps/integrations/models.py:41
+msgid "🏷️ GoDaddy"
+msgstr ""
+
+#: apps/integrations/models.py:42
+msgid "🏦 Banca Transilvania"
+msgstr ""
+
+#: apps/integrations/models.py:43
+msgid "🏦 BCR"
+msgstr ""
+
+#: apps/integrations/models.py:44
+msgid "🇷🇴 e-Factura"
+msgstr ""
+
+#: apps/integrations/models.py:45
+msgid "🔌 Other"
+msgstr ""
+
+#: apps/integrations/models.py:53
+msgid "External service that sent the webhook"
+msgstr ""
+
+#: apps/integrations/models.py:57
+msgid "Unique event ID from the external service"
+msgstr ""
+
+#: apps/integrations/models.py:61
+msgid "Type of event (e.g., 'payment.succeeded', 'domain.created')"
+msgstr ""
+
+#: apps/integrations/models.py:74
+msgid "When webhook was received by our system"
+msgstr ""
+
+#: apps/integrations/models.py:79
+msgid "When webhook processing completed"
+msgstr ""
+
+#: apps/integrations/models.py:84
+msgid "Complete webhook payload from external service"
+msgstr ""
+
+#: apps/integrations/models.py:88
+msgid "Webhook signature for verification (e.g., Stripe signature)"
+msgstr ""
+
+#: apps/integrations/models.py:94
+msgid "Error details if processing failed"
+msgstr ""
+
+#: apps/integrations/models.py:99
+msgid "Number of processing attempts"
+msgstr ""
+
+#: apps/integrations/models.py:104
+msgid "When to retry processing (for failed webhooks)"
+msgstr ""
+
+#: apps/integrations/models.py:111
+msgid "IP address webhook was received from"
+msgstr ""
+
+#: apps/integrations/models.py:115
+msgid "User agent of webhook sender"
+msgstr ""
+
+#: apps/integrations/models.py:120
+msgid "HTTP headers from webhook request"
+msgstr ""
+
+#: apps/integrations/models.py:128
+msgid "🔄 Webhook Event"
+msgstr ""
+
+#: apps/integrations/models.py:129
+msgid "🔄 Webhook Events"
+msgstr ""
+
+#: apps/integrations/models.py:249
+msgid "✅ Delivered"
+msgstr ""
+
+#: apps/integrations/models.py:251
+msgid "🚫 Disabled"
+msgstr ""
+
+#: apps/integrations/models.py:264
+msgid "Customer's webhook endpoint URL"
+msgstr ""
+
+#: apps/integrations/models.py:270
+msgid "Type of event being delivered"
+msgstr ""
+
+#: apps/integrations/models.py:273
+msgid "Webhook payload sent to customer"
+msgstr ""
+
+#: apps/integrations/models.py:281
+msgid "HTTP response status from customer endpoint"
+msgstr ""
+
+#: apps/integrations/models.py:285
+msgid "Response body from customer endpoint"
+msgstr ""
+
+#: apps/integrations/models.py:301
+msgid "📤 Webhook Delivery"
+msgstr ""
+
+#: apps/integrations/models.py:302
+msgid "📤 Webhook Deliveries"
+msgstr ""
+
+#: apps/notifications/admin.py:34
+msgid "Template Identification"
+msgstr ""
+
+#: apps/notifications/admin.py:37 apps/tickets/models.py:324
+msgid "Content"
+msgstr ""
+
+#: apps/notifications/admin.py:41
+msgid "Configuration"
+msgstr ""
+
+#: apps/notifications/admin.py:44 apps/notifications/admin.py:186
+msgid "Audit"
+msgstr ""
+
+#: apps/notifications/admin.py:53 templates/tickets/detail.html:13
+#: templates/tickets/form.html:73
+msgid "Subject"
+msgstr ""
+
+#: apps/notifications/admin.py:85
+msgid "Email Details"
+msgstr ""
+
+#: apps/notifications/admin.py:88
+msgid "Template & Content"
+msgstr ""
+
+#: apps/notifications/admin.py:92
+msgid "Delivery Status"
+msgstr ""
+
+#: apps/notifications/admin.py:95
+msgid "Timing"
+msgstr ""
+
+#: apps/notifications/admin.py:98
+msgid "Context"
+msgstr ""
+
+#: apps/notifications/admin.py:101
+msgid "Technical Details"
+msgstr ""
+
+#: apps/notifications/admin.py:167
+msgid "Campaign Details"
+msgstr ""
+
+#: apps/notifications/admin.py:170
+msgid "Targeting"
+msgstr ""
+
+#: apps/notifications/admin.py:173
+msgid "Scheduling & Status"
+msgstr ""
+
+#: apps/notifications/admin.py:176 templates/base.html:169
+msgid "Compliance"
+msgstr ""
+
+#: apps/notifications/admin.py:228
+msgid "No recipients"
+msgstr ""
+
+#: apps/notifications/admin.py:237
+msgid "Progress"
+msgstr ""
+
+#: apps/notifications/models.py:31
+msgid "Template identifier (e.g., 'invoice_issued', 'payment_reminder')"
+msgstr ""
+
+#: apps/notifications/models.py:36
+msgid "Language/locale code (ro, en)"
+msgstr ""
+
+#: apps/notifications/models.py:42
+msgid "Email subject line (supports variables)"
+msgstr ""
+
+#: apps/notifications/models.py:45
+msgid "HTML email body (supports Django template syntax)"
+msgstr ""
+
+#: apps/notifications/models.py:49
+msgid "Plain text fallback (auto-generated if empty)"
+msgstr ""
+
+#: apps/notifications/models.py:55
+msgid "Description of when this template is used"
+msgstr ""
+
+#: apps/notifications/models.py:60
+msgid "Available template variables and their descriptions"
+msgstr ""
+
+#: apps/notifications/models.py:66
+msgid "Whether this template is available for use"
+msgstr ""
+
+#: apps/notifications/models.py:70
+msgid "Template version for change tracking"
+msgstr ""
+
+#: apps/notifications/models.py:75
+msgid "Billing & Invoices"
+msgstr ""
+
+#: apps/notifications/models.py:76
+msgid "Payment Reminders"
+msgstr ""
+
+#: apps/notifications/models.py:77
+msgid "Service Provisioning"
+msgstr ""
+
+#: apps/notifications/models.py:78
+msgid "Support & Tickets"
+msgstr ""
+
+#: apps/notifications/models.py:79
+msgid "Welcome & Onboarding"
+msgstr ""
+
+#: apps/notifications/models.py:80
+msgid "Service Renewals"
+msgstr ""
+
+#: apps/notifications/models.py:81
+msgid "Service Suspension"
+msgstr ""
+
+#: apps/notifications/models.py:82
+msgid "Service Termination"
+msgstr ""
+
+#: apps/notifications/models.py:83
+msgid "Domain Management"
+msgstr ""
+
+#: apps/notifications/models.py:84
+msgid "Security Alerts"
+msgstr ""
+
+#: apps/notifications/models.py:85
+msgid "Maintenance Notifications"
+msgstr ""
+
+#: apps/notifications/models.py:86
+msgid "Marketing & Promotions"
+msgstr ""
+
+#: apps/notifications/models.py:87
+msgid "Legal & Compliance"
+msgstr ""
+
+#: apps/notifications/models.py:88
+msgid "System Notifications"
+msgstr ""
+
+#: apps/notifications/models.py:94
+msgid "Template category for organization"
+msgstr ""
+
+#: apps/notifications/models.py:105
+msgid "User who created this template"
+msgstr ""
+
+#: apps/notifications/models.py:110
+msgid "Email Template"
+msgstr ""
+
+#: apps/notifications/models.py:111
+msgid "Email Templates"
+msgstr ""
+
+#: apps/notifications/models.py:151
+msgid "Customer this email was sent to (if applicable)"
+msgstr ""
+
+#: apps/notifications/models.py:155
+msgid "Recipient email address"
+msgstr ""
+
+#: apps/notifications/models.py:159
+msgid "Sender email address (if different from default)"
+msgstr ""
+
+#: apps/notifications/models.py:163
+msgid "Reply-to email address"
+msgstr ""
+
+#: apps/notifications/models.py:170
+msgid "Template used to generate this email"
+msgstr ""
+
+#: apps/notifications/models.py:174
+msgid "Actual email subject sent"
+msgstr ""
+
+#: apps/notifications/models.py:178
+msgid "Plain text version of email body"
+msgstr ""
+
+#: apps/notifications/models.py:182
+msgid "HTML version of email body"
+msgstr ""
+
+#: apps/notifications/models.py:187
+msgid "Queued"
+msgstr ""
+
+#: apps/notifications/models.py:188 apps/notifications/models.py:368
+msgid "Sending"
+msgstr ""
+
+#: apps/notifications/models.py:189 apps/notifications/models.py:369
+#: templates/billing/billing_list.html:212
+#: templates/billing/invoice_form.html:128
+#: templates/billing/invoice_list.html:164
+msgid "Sent"
+msgstr ""
+
+#: apps/notifications/models.py:190
+msgid "Delivered"
+msgstr ""
+
+#: apps/notifications/models.py:191
+msgid "Bounced"
+msgstr ""
+
+#: apps/notifications/models.py:192
+msgid "Soft Bounced"
+msgstr ""
+
+#: apps/notifications/models.py:193
+msgid "Complained"
+msgstr ""
+
+#: apps/notifications/models.py:195
+msgid "Rejected"
+msgstr ""
+
+#: apps/notifications/models.py:201
+msgid "Current delivery status"
+msgstr ""
+
+#: apps/notifications/models.py:208
+msgid "Email service provider (smtp, sendgrid, mailgun, etc.)"
+msgstr ""
+
+#: apps/notifications/models.py:213
+msgid "Provider's unique message ID"
+msgstr ""
+
+#: apps/notifications/models.py:218
+msgid "Raw provider response for debugging"
+msgstr ""
+
+#: apps/notifications/models.py:224
+msgid "When email was queued/sent"
+msgstr ""
+
+#: apps/notifications/models.py:229
+msgid "When email was confirmed delivered"
+msgstr ""
+
+#: apps/notifications/models.py:234
+msgid "When email was first opened (if tracking enabled)"
+msgstr ""
+
+#: apps/notifications/models.py:239
+msgid "When email links were first clicked"
+msgstr ""
+
+#: apps/notifications/models.py:246
+msgid "Additional email metadata (variables used, campaign info, etc.)"
+msgstr ""
+
+#: apps/notifications/models.py:253 apps/tickets/models.py:71
+#: templates/dashboard.html:235 templates/tickets/form.html:62
+#: templates/tickets/list.html:70 templates/tickets/list.html:156
+msgid "Low"
+msgstr ""
+
+#: apps/notifications/models.py:254 apps/tickets/models.py:72
+#: templates/tickets/list.html:69 templates/tickets/list.html:155
+msgid "Normal"
+msgstr ""
+
+#: apps/notifications/models.py:255 apps/tickets/models.py:73
+#: templates/tickets/form.html:64 templates/tickets/list.html:68
+#: templates/tickets/list.html:154
+msgid "High"
+msgstr ""
+
+#: apps/notifications/models.py:256 apps/tickets/models.py:74
+#: templates/dashboard.html:233 templates/tickets/form.html:65
+#: templates/tickets/list.html:67 templates/tickets/list.html:153
+msgid "Urgent"
+msgstr ""
+
+#: apps/notifications/models.py:259
+msgid "Email priority level"
+msgstr ""
+
+#: apps/notifications/models.py:269
+msgid "User who triggered this email (if manual)"
+msgstr ""
+
+#: apps/notifications/models.py:274
+msgid "Email Log"
+msgstr ""
+
+#: apps/notifications/models.py:275
+msgid "Email Logs"
+msgstr ""
+
+#: apps/notifications/models.py:329
+msgid "Campaign name for identification"
+msgstr ""
+
+#: apps/notifications/models.py:333
+msgid "Campaign description and purpose"
+msgstr ""
+
+#: apps/notifications/models.py:340
+msgid "Email template to use for this campaign"
+msgstr ""
+
+#: apps/notifications/models.py:345
+msgid "All Customers"
+msgstr ""
+
+#: apps/notifications/models.py:346 templates/dashboard.html:40
+msgid "Active Customers"
+msgstr ""
+
+#: apps/notifications/models.py:347
+msgid "Inactive Customers"
+msgstr ""
+
+#: apps/notifications/models.py:348
+msgid "Overdue Payments"
+msgstr ""
+
+#: apps/notifications/models.py:349
+msgid "Trial Expiring"
+msgstr ""
+
+#: apps/notifications/models.py:350
+msgid "Custom Filter"
+msgstr ""
+
+#: apps/notifications/models.py:356
+msgid "Target audience for this campaign"
+msgstr ""
+
+#: apps/notifications/models.py:361
+msgid "Custom filter criteria for audience selection"
+msgstr ""
+
+#: apps/notifications/models.py:367
+msgid "Scheduled"
+msgstr ""
+
+#: apps/notifications/models.py:370
+msgid "Paused"
+msgstr ""
+
+#: apps/notifications/models.py:378
+msgid "Current campaign status"
+msgstr ""
+
+#: apps/notifications/models.py:385
+msgid "When to send this campaign (leave blank for immediate)"
+msgstr ""
+
+#: apps/notifications/models.py:390
+msgid "When campaign sending actually started"
+msgstr ""
+
+#: apps/notifications/models.py:395
+msgid "When campaign sending completed"
+msgstr ""
+
+#: apps/notifications/models.py:401
+msgid "Total number of recipients"
+msgstr ""
+
+#: apps/notifications/models.py:405
+msgid "Number of emails successfully sent"
+msgstr ""
+
+#: apps/notifications/models.py:409
+msgid "Number of emails that failed to send"
+msgstr ""
+
+#: apps/notifications/models.py:415
+msgid "Transactional emails (billing, service) vs. marketing"
+msgstr ""
+
+#: apps/notifications/models.py:419
+msgid "Requires explicit customer consent (GDPR compliance)"
+msgstr ""
+
+#: apps/notifications/models.py:430
+msgid "User who created this campaign"
+msgstr ""
+
+#: apps/notifications/models.py:435
+msgid "Email Campaign"
+msgstr ""
+
+#: apps/notifications/models.py:436
+msgid "Email Campaigns"
+msgstr ""
+
+#: apps/orders/models.py:33
+msgid "Human-readable order number"
+msgstr ""
+
+#: apps/orders/models.py:58
+msgid "Current order status"
+msgstr ""
+
+#: apps/orders/models.py:65
+msgid "Order currency"
+msgstr ""
+
+#: apps/orders/models.py:72
+msgid "Exchange rate to RON at time of order"
+msgstr ""
+
+#: apps/orders/models.py:78
+msgid "Subtotal before tax in cents"
+msgstr ""
+
+#: apps/orders/models.py:82
+msgid "Total tax amount in cents"
+msgstr ""
+
+#: apps/orders/models.py:86
+msgid "Total discount amount in cents"
+msgstr ""
+
+#: apps/orders/models.py:90
+msgid "Final total amount in cents"
+msgstr ""
+
+#: apps/orders/models.py:95
+msgid "Customer email at time of order"
+msgstr ""
+
+#: apps/orders/models.py:99
+msgid "Customer name at time of order"
+msgstr ""
+
+#: apps/orders/models.py:104
+msgid "Company name if business customer"
+msgstr ""
+
+#: apps/orders/models.py:109
+msgid "VAT ID for Romanian compliance"
+msgstr ""
+
+#: apps/orders/models.py:115
+msgid "Billing address snapshot"
+msgstr ""
+
+#: apps/orders/models.py:123
+msgid "Credit/Debit Card"
+msgstr ""
+
+#: apps/orders/models.py:126
+msgid "Cryptocurrency"
+msgstr ""
+
+#: apps/orders/models.py:127
+msgid "Account Credit"
+msgstr ""
+
+#: apps/orders/models.py:128
+msgid "Manual Payment"
+msgstr ""
+
+#: apps/orders/models.py:130
+msgid "Payment method used"
+msgstr ""
+
+#: apps/orders/models.py:135
+msgid "Payment gateway transaction ID"
+msgstr ""
+
+#: apps/orders/models.py:140
+msgid "Payment gateway response data"
+msgstr ""
+
+#: apps/orders/models.py:147
+msgid "Customer IP address"
+msgstr ""
+
+#: apps/orders/models.py:151
+msgid "Customer browser user agent"
+msgstr ""
+
+#: apps/orders/models.py:155
+msgid "Referrer URL"
+msgstr ""
+
+#: apps/orders/models.py:164
+msgid "Internal order notes"
+msgstr ""
+
+#: apps/orders/models.py:168
+msgid "Notes from customer"
+msgstr ""
+
+#: apps/orders/models.py:178
+msgid "Generated invoice for this order"
+msgstr ""
+
+#: apps/orders/models.py:185
+msgid "Additional order metadata"
+msgstr ""
+
+#: apps/orders/models.py:194
+msgid "When order was completed"
+msgstr ""
+
+#: apps/orders/models.py:199
+msgid "When draft order expires"
+msgstr ""
+
+#: apps/orders/models.py:204
+msgid "Order"
+msgstr ""
+
+#: apps/orders/models.py:205
+msgid "Orders"
+msgstr ""
+
+#: apps/orders/models.py:333
+msgid "Product being ordered"
+msgstr ""
+
+#: apps/orders/models.py:339
+msgid "Product name at time of order"
+msgstr ""
+
+#: apps/orders/models.py:343
+msgid "Product type at time of order"
+msgstr ""
+
+#: apps/orders/models.py:347
+msgid "Billing period for this item"
+msgstr ""
+
+#: apps/orders/models.py:354
+msgid "Quantity ordered"
+msgstr ""
+
+#: apps/orders/models.py:358
+msgid "Unit price in cents (snapshot)"
+msgstr ""
+
+#: apps/orders/models.py:363
+msgid "Setup fee in cents"
+msgstr ""
+
+#: apps/orders/models.py:371
+msgid "Tax rate applied (e.g., 0.1900 for 19%)"
+msgstr ""
+
+#: apps/orders/models.py:375
+msgid "Tax amount in cents"
+msgstr ""
+
+#: apps/orders/models.py:381
+msgid "Total for this line including tax"
+msgstr ""
+
+#: apps/orders/models.py:387
+msgid "Product configuration (domain, username, specs, etc.)"
+msgstr ""
+
+#: apps/orders/models.py:394
+msgid "Associated domain name"
+msgstr ""
+
+#: apps/orders/models.py:404
+msgid "Provisioned service for this order item"
+msgstr ""
+
+#: apps/orders/models.py:410
+msgid "In Progress"
+msgstr ""
+
+#: apps/orders/models.py:419
+msgid "Provisioning status for this item"
+msgstr ""
+
+#: apps/orders/models.py:423
+msgid "Provisioning notes and error messages"
+msgstr ""
+
+#: apps/orders/models.py:432
+msgid "When this item was successfully provisioned"
+msgstr ""
+
+#: apps/orders/models.py:437
+msgid "Order Item"
+msgstr ""
+
+#: apps/orders/models.py:438
+msgid "Order Items"
+msgstr ""
+
+#: apps/orders/models.py:533
+msgid "Previous status"
+msgstr ""
+
+#: apps/orders/models.py:537
+msgid "New status"
+msgstr ""
+
+#: apps/orders/models.py:546
+msgid "User who made the change"
+msgstr ""
+
+#: apps/orders/models.py:551
+msgid "Reason for status change"
+msgstr ""
+
+#: apps/orders/models.py:555
+msgid "Additional notes about the change"
+msgstr ""
+
+#: apps/orders/models.py:561
+msgid "Whether this was an automatic system change"
+msgstr ""
+
+#: apps/orders/models.py:569
+msgid "Order Status History"
+msgstr ""
+
+#: apps/orders/models.py:570
+msgid "Order Status Histories"
+msgstr ""
+
+#: apps/products/models.py:33
+msgid "URL-friendly identifier"
+msgstr ""
+
+#: apps/products/models.py:37
+msgid "Display name for customers"
+msgstr ""
+
+#: apps/products/models.py:41
+msgid "Detailed product description"
+msgstr ""
+
+#: apps/products/models.py:46
+msgid "Brief description for listings"
+msgstr ""
+
+#: apps/products/models.py:51
+msgid "Shared Hosting"
+msgstr ""
+
+#: apps/products/models.py:52 apps/provisioning/models.py:19
 msgid "VPS"
 msgstr ""
 
-#: apps/provisioning/models.py:19 apps/provisioning/models.py:139
+#: apps/products/models.py:53 apps/provisioning/models.py:20
+#: apps/provisioning/models.py:140 templates/provisioning/service_form.html:85
 msgid "Dedicated Server"
 msgstr ""
 
-#: apps/provisioning/models.py:20
-msgid "Cloud Hosting"
+#: apps/products/models.py:54 templates/provisioning/service_form.html:86
+msgid "Domain Registration"
 msgstr ""
 
-#: apps/provisioning/models.py:21
-msgid "Domain"
-msgstr ""
-
-#: apps/provisioning/models.py:22
+#: apps/products/models.py:55 apps/provisioning/models.py:23
+#: templates/provisioning/service_form.html:87
 msgid "SSL Certificate"
 msgstr ""
 
-#: apps/provisioning/models.py:23
+#: apps/products/models.py:56 apps/provisioning/models.py:24
+#: templates/provisioning/service_form.html:88
 msgid "Email Hosting"
 msgstr ""
 
-#: apps/provisioning/models.py:24
-msgid "Backup"
-msgstr ""
-
-#: apps/provisioning/models.py:25
-msgid "Maintenance"
-msgstr ""
-
-#: apps/provisioning/models.py:29
-msgid "Plan Name"
-msgstr ""
-
-#: apps/provisioning/models.py:33
-msgid "Plan Type"
-msgstr ""
-
-#: apps/provisioning/models.py:42
-msgid "Monthly Price (RON)"
-msgstr ""
-
-#: apps/provisioning/models.py:50
-msgid "Quarterly Price (RON)"
-msgstr ""
-
-#: apps/provisioning/models.py:58
-msgid "Annual Price (RON)"
-msgstr ""
-
-#: apps/provisioning/models.py:66
-msgid "Setup Fee (RON)"
-msgstr ""
-
-#: apps/provisioning/models.py:72
-msgid "Technical specifications and features in JSON format"
-msgstr ""
-
-#: apps/provisioning/models.py:73
-msgid "Features"
-msgstr ""
-
-#: apps/provisioning/models.py:77
-msgid "Disk Space (GB)"
-msgstr ""
-
-#: apps/provisioning/models.py:78
-msgid "Monthly Traffic (GB)"
-msgstr ""
-
-#: apps/provisioning/models.py:79
-msgid "Email Accounts"
-msgstr ""
-
-#: apps/provisioning/models.py:80
-msgid "Databases"
-msgstr ""
-
-#: apps/provisioning/models.py:81
-msgid "Domains"
-msgstr ""
-
-#: apps/provisioning/models.py:84 apps/provisioning/models.py:167
-msgid "CPU Cores"
-msgstr ""
-
-#: apps/provisioning/models.py:85 apps/provisioning/models.py:168
-msgid "RAM (GB)"
-msgstr ""
-
-#: apps/provisioning/models.py:88
-msgid "Price Includes VAT"
-msgstr ""
-
-#: apps/provisioning/models.py:92
-msgid "Public on Website"
-msgstr ""
-
-#: apps/provisioning/models.py:93 apps/tickets/models.py:44
-msgid "Sort Order"
-msgstr ""
-
-#: apps/provisioning/models.py:96
-msgid "Auto Provision"
-msgstr ""
-
-#: apps/provisioning/models.py:97
-msgid "Provisioning Script"
-msgstr ""
-
-#: apps/provisioning/models.py:104 apps/provisioning/models.py:310
-msgid "Service Plan"
-msgstr ""
-
-#: apps/provisioning/models.py:105
-msgid "Service Plans"
-msgstr ""
-
-#: apps/provisioning/models.py:137
-msgid "Shared Server"
-msgstr ""
-
-#: apps/provisioning/models.py:138
-msgid "VPS Host"
-msgstr ""
-
-#: apps/provisioning/models.py:140
-msgid "Cloud Node"
-msgstr ""
-
-#: apps/provisioning/models.py:145
-msgid "Under Maintenance"
-msgstr ""
-
-#: apps/provisioning/models.py:146
-msgid "Offline"
-msgstr ""
-
-#: apps/provisioning/models.py:147
-msgid "Decommissioned"
-msgstr ""
-
-#: apps/provisioning/models.py:151
-msgid "Server Name"
-msgstr ""
-
-#: apps/provisioning/models.py:152
-msgid "Hostname"
-msgstr ""
-
-#: apps/provisioning/models.py:156
-msgid "Server Type"
-msgstr ""
-
-#: apps/provisioning/models.py:160
-msgid "Primary IP"
-msgstr ""
-
-#: apps/provisioning/models.py:161
-msgid "Secondary IPs"
-msgstr ""
-
-#: apps/provisioning/models.py:162
-msgid "Location"
-msgstr ""
-
-#: apps/provisioning/models.py:163
-msgid "Datacenter"
-msgstr ""
-
-#: apps/provisioning/models.py:166
-msgid "CPU Model"
-msgstr ""
-
-#: apps/provisioning/models.py:169
-msgid "Disk Type"
-msgstr ""
-
-#: apps/provisioning/models.py:170
-msgid "Disk Capacity (GB)"
-msgstr ""
-
-#: apps/provisioning/models.py:186
-msgid "CPU Usage (%)"
-msgstr ""
-
-#: apps/provisioning/models.py:193
-msgid "RAM Usage (%)"
-msgstr ""
-
-#: apps/provisioning/models.py:200
-msgid "Disk Usage (%)"
-msgstr ""
-
-#: apps/provisioning/models.py:207
-msgid "Maximum Services"
-msgstr ""
-
-#: apps/provisioning/models.py:211
-msgid "Operating System"
-msgstr ""
-
-#: apps/provisioning/models.py:212
-msgid "Control Panel"
-msgstr ""
-
-#: apps/provisioning/models.py:215
-msgid "Provider"
-msgstr ""
-
-#: apps/provisioning/models.py:216
-msgid "Instance ID"
-msgstr ""
-
-#: apps/provisioning/models.py:223
-msgid "Monthly Cost (RON)"
-msgstr ""
-
-#: apps/provisioning/models.py:227
-msgid "Last Maintenance"
-msgstr ""
-
-#: apps/provisioning/models.py:228
-msgid "Next Maintenance"
-msgstr ""
-
-#: apps/provisioning/models.py:236
-msgid "Server"
-msgstr ""
-
-#: apps/provisioning/models.py:237 templates/provisioning/service_list.html:247
-msgid "Servers"
-msgstr ""
-
-#: apps/provisioning/models.py:286
-msgid "Provisioning"
-msgstr ""
-
-#: apps/provisioning/models.py:289
-msgid "Terminated"
-msgstr ""
-
-#: apps/provisioning/models.py:322
-msgid "Service Name"
-msgstr ""
-
-#: apps/provisioning/models.py:323
-msgid "Primary Domain"
-msgstr ""
-
-#: apps/provisioning/models.py:324
-msgid "System Username"
-msgstr ""
-
-#: apps/provisioning/models.py:331
-msgid "Billing Cycle"
-msgstr ""
-
-#: apps/provisioning/models.py:336
-msgid "Price (RON)"
-msgstr ""
-
-#: apps/provisioning/models.py:338
-msgid "Setup Fee Paid"
-msgstr ""
-
-#: apps/provisioning/models.py:347 apps/tickets/models.py:204
-#: apps/tickets/models.py:359
-msgid "Created At"
-msgstr ""
-
-#: apps/provisioning/models.py:348
-msgid "Activated At"
-msgstr ""
-
-#: apps/provisioning/models.py:349
-msgid "Suspended At"
-msgstr ""
-
-#: apps/provisioning/models.py:350
-msgid "Expires At"
-msgstr ""
-
-#: apps/provisioning/models.py:356
-msgid "Provisioning Data"
-msgstr ""
-
-#: apps/provisioning/models.py:361
-msgid "Last Provisioning Attempt"
-msgstr ""
-
-#: apps/provisioning/models.py:363
-msgid "Provisioning Errors"
-msgstr ""
-
-#: apps/provisioning/models.py:366
-msgid "Disk Usage (MB)"
-msgstr ""
-
-#: apps/provisioning/models.py:367
-msgid "Bandwidth Used (MB)"
-msgstr ""
-
-#: apps/provisioning/models.py:368
-msgid "Email Accounts Used"
-msgstr ""
-
-#: apps/provisioning/models.py:369
-msgid "Databases Used"
-msgstr ""
-
-#: apps/provisioning/models.py:372
-msgid "Auto Renew"
-msgstr ""
-
-#: apps/provisioning/models.py:375
-msgid "Admin Notes"
-msgstr ""
-
-#: apps/provisioning/models.py:376
-msgid "Suspension Reason"
-msgstr ""
-
-#: apps/provisioning/models.py:383 templates/base.html:81
-#: templates/provisioning/service_list.html:4
-msgid "Services"
-msgstr ""
-
-#: apps/provisioning/models.py:460
-msgid "Running"
-msgstr ""
-
-#: apps/provisioning/models.py:463
-msgid "Retrying"
-msgstr ""
-
-#: apps/provisioning/models.py:467
-msgid "Create Service"
-msgstr ""
-
-#: apps/provisioning/models.py:468
-msgid "Suspend Service"
-msgstr ""
-
-#: apps/provisioning/models.py:469
-msgid "Unsuspend Service"
-msgstr ""
-
-#: apps/provisioning/models.py:470
-msgid "Terminate Service"
-msgstr ""
-
-#: apps/provisioning/models.py:471
-msgid "Update Service"
-msgstr ""
-
-#: apps/provisioning/models.py:472
+#: apps/products/models.py:57 apps/provisioning/models.py:479
+#: templates/provisioning/service_form.html:89
 msgid "Backup Service"
 msgstr ""
 
-#: apps/provisioning/models.py:485
+#: apps/products/models.py:58
+msgid "Add-on Service"
+msgstr ""
+
+#: apps/products/models.py:59
+msgid "Software License"
+msgstr ""
+
+#: apps/products/models.py:60
+msgid "Support Package"
+msgstr ""
+
+#: apps/products/models.py:65
+msgid "Product category"
+msgstr ""
+
+#: apps/products/models.py:72
+msgid "Provisioning module name (e.g., 'cpanel', 'plesk', 'virtualmin')"
+msgstr ""
+
+#: apps/products/models.py:77
+msgid "Module-specific configuration for provisioning"
+msgstr ""
+
+#: apps/products/models.py:83
+msgid "Whether product is available for purchase"
+msgstr ""
+
+#: apps/products/models.py:87
+msgid "Show prominently on website"
+msgstr ""
+
+#: apps/products/models.py:91
+msgid "Visible on public website"
+msgstr ""
+
+#: apps/products/models.py:97
+msgid "Customer must provide a domain"
+msgstr ""
+
+#: apps/products/models.py:101
+msgid "Domain must be specified during order"
+msgstr ""
+
+#: apps/products/models.py:107
+msgid "Display order (lower numbers first)"
+msgstr ""
+
+#: apps/products/models.py:124
+msgid "Whether displayed prices include VAT"
+msgstr ""
+
+#: apps/products/models.py:131
+msgid "Additional product metadata"
+msgstr ""
+
+#: apps/products/models.py:140
+msgid "Product"
+msgstr ""
+
+#: apps/products/models.py:141
+msgid "Products"
+msgstr ""
+
+#: apps/products/models.py:188
+msgid "Currency for this price"
+msgstr ""
+
+#: apps/products/models.py:193 apps/provisioning/models.py:916
+msgid "One Time"
+msgstr ""
+
+#: apps/products/models.py:194 apps/provisioning/models.py:295
+#: apps/provisioning/models.py:913 templates/provisioning/service_form.html:276
+msgid "Monthly"
+msgstr ""
+
+#: apps/products/models.py:195 apps/provisioning/models.py:296
+#: apps/provisioning/models.py:914 templates/provisioning/service_form.html:277
+msgid "Quarterly"
+msgstr ""
+
+#: apps/products/models.py:196 apps/provisioning/models.py:297
+#: templates/provisioning/service_form.html:278
+msgid "Semi-Annual"
+msgstr ""
+
+#: apps/products/models.py:197 apps/provisioning/models.py:298
+#: templates/provisioning/service_form.html:279
+msgid "Annual"
+msgstr ""
+
+#: apps/products/models.py:198 templates/provisioning/service_form.html:280
+msgid "Biennial"
+msgstr ""
+
+#: apps/products/models.py:199
+msgid "Triennial"
+msgstr ""
+
+#: apps/products/models.py:204
+msgid "Billing frequency"
+msgstr ""
+
+#: apps/products/models.py:210
+msgid "Recurring price in cents (e.g., 2999 for 29.99 RON)"
+msgstr ""
+
+#: apps/products/models.py:215
+msgid "One-time setup fee in cents"
+msgstr ""
+
+#: apps/products/models.py:224
+msgid "Percentage discount (0-100)"
+msgstr ""
+
+#: apps/products/models.py:230
+msgid "Minimum quantity that can be ordered"
+msgstr ""
+
+#: apps/products/models.py:235
+msgid "Maximum quantity (blank for unlimited)"
+msgstr ""
+
+#: apps/products/models.py:243
+msgid "Promotional price in cents"
+msgstr ""
+
+#: apps/products/models.py:248
+msgid "When promotional pricing expires"
+msgstr ""
+
+#: apps/products/models.py:254
+msgid "Whether this price is available"
+msgstr ""
+
+#: apps/products/models.py:263
+msgid "Product Price"
+msgstr ""
+
+#: apps/products/models.py:264
+msgid "Product Prices"
+msgstr ""
+
+#: apps/products/models.py:322
+msgid "Requires"
+msgstr ""
+
+#: apps/products/models.py:323
+msgid "Includes"
+msgstr ""
+
+#: apps/products/models.py:324
+msgid "Can Upgrade To"
+msgstr ""
+
+#: apps/products/models.py:325
+msgid "Cross-sell"
+msgstr ""
+
+#: apps/products/models.py:326
+msgid "Upsell"
+msgstr ""
+
+#: apps/products/models.py:327
+msgid "Downsell"
+msgstr ""
+
+#: apps/products/models.py:328
+msgid "Incompatible With"
+msgstr ""
+
+#: apps/products/models.py:329
+msgid "Replaces"
+msgstr ""
+
+#: apps/products/models.py:334
+msgid "Type of relationship between products"
+msgstr ""
+
+#: apps/products/models.py:341
+msgid "Relationship-specific configuration"
+msgstr ""
+
+#: apps/products/models.py:347
+msgid "Display order for relationships of same type"
+msgstr ""
+
+#: apps/products/models.py:353
+msgid "Whether this relationship is active"
+msgstr ""
+
+#: apps/products/models.py:362
+msgid "Product Relationship"
+msgstr ""
+
+#: apps/products/models.py:363
+msgid "Product Relationships"
+msgstr ""
+
+#: apps/products/models.py:387
+msgid "Bundle name"
+msgstr ""
+
+#: apps/products/models.py:391
+msgid "Bundle description"
+msgstr ""
+
+#: apps/products/models.py:397
+msgid "Whether bundle is available"
+msgstr ""
+
+#: apps/products/models.py:404
+msgid "Percentage Discount"
+msgstr ""
+
+#: apps/products/models.py:405
+msgid "Fixed Amount Discount"
+msgstr ""
+
+#: apps/products/models.py:406
+msgid "Override Total Price"
+msgstr ""
+
+#: apps/products/models.py:414
+msgid "Discount percentage or fixed amount"
+msgstr ""
+
+#: apps/products/models.py:426
+msgid "Product Bundle"
+msgstr ""
+
+#: apps/products/models.py:427
+msgid "Product Bundles"
+msgstr ""
+
+#: apps/products/models.py:456
+msgid "Quantity of this product in the bundle"
+msgstr ""
+
+#: apps/products/models.py:464
+msgid "Override price for this product in bundle (in cents)"
+msgstr ""
+
+#: apps/products/models.py:471
+msgid "Product configuration within bundle"
+msgstr ""
+
+#: apps/products/models.py:477
+msgid "Whether this product is required in the bundle"
+msgstr ""
+
+#: apps/products/models.py:486
+msgid "Product Bundle Item"
+msgstr ""
+
+#: apps/products/models.py:487
+msgid "Product Bundle Items"
+msgstr ""
+
+#: apps/provisioning/admin.py:56
+msgid "Pricing (RON)"
+msgstr ""
+
+#: apps/provisioning/admin.py:65 templates/provisioning/service_form.html:114
+msgid "Technical Specifications"
+msgstr ""
+
+#: apps/provisioning/admin.py:77 apps/provisioning/models.py:74
+msgid "Features"
+msgstr ""
+
+#: apps/provisioning/admin.py:83
+msgid "Availability & Provisioning"
+msgstr ""
+
+#: apps/provisioning/admin.py:91 apps/provisioning/admin.py:231
+#: apps/tickets/admin.py:63 apps/tickets/admin.py:228 apps/tickets/admin.py:415
+#: apps/tickets/admin.py:501
+msgid "Timestamps"
+msgstr ""
+
+#: apps/provisioning/admin.py:105
+msgid "Monthly Price"
+msgstr ""
+
+#: apps/provisioning/admin.py:120
+msgid "Activate selected plans"
+msgstr ""
+
+#: apps/provisioning/admin.py:126
+msgid "Deactivate selected plans"
+msgstr ""
+
+#: apps/provisioning/admin.py:132
+msgid "Make public on website"
+msgstr ""
+
+#: apps/provisioning/admin.py:138
+msgid "Make private (admin only)"
+msgstr ""
+
+#: apps/provisioning/admin.py:188
+msgid "Network"
+msgstr ""
+
+#: apps/provisioning/admin.py:196
+msgid "Hardware"
+msgstr ""
+
+#: apps/provisioning/admin.py:205 apps/provisioning/admin.py:294
+#: apps/provisioning/admin.py:392
+msgid "Resource Usage"
+msgstr ""
+
+#: apps/provisioning/admin.py:214
+msgid "Management"
+msgstr ""
+
+#: apps/provisioning/admin.py:223
+msgid "Cost & Maintenance"
+msgstr ""
+
+#: apps/provisioning/admin.py:274 apps/provisioning/models.py:384
+#: templates/base.html:87 templates/provisioning/service_list.html:5
+msgid "Services"
+msgstr ""
+
+#: apps/provisioning/admin.py:301
+msgid "Monthly Cost"
+msgstr ""
+
+#: apps/provisioning/admin.py:309
+msgid "Mark as under maintenance"
+msgstr ""
+
+#: apps/provisioning/admin.py:315
+msgid "Mark as active"
+msgstr ""
+
+#: apps/provisioning/admin.py:363
+msgid "Service Information"
+msgstr ""
+
+#: apps/provisioning/admin.py:374 apps/tickets/admin.py:494
+#: apps/users/forms.py:311 apps/users/models.py:208 apps/users/models.py:304
+#: templates/billing/billing_list.html:5
+msgid "Billing"
+msgstr ""
+
+#: apps/provisioning/admin.py:382
+msgid "Lifecycle"
+msgstr ""
+
+#: apps/provisioning/admin.py:401 apps/provisioning/models.py:287
+msgid "Provisioning"
+msgstr ""
+
+#: apps/provisioning/admin.py:409
+msgid "Notes"
+msgstr ""
+
+#: apps/provisioning/admin.py:439
+msgid "Price"
+msgstr ""
+
+#: apps/provisioning/admin.py:454
+msgid "Days to Expiry"
+msgstr ""
+
+#: apps/provisioning/admin.py:466
+msgid "Activate selected services"
+msgstr ""
+
+#: apps/provisioning/admin.py:476
+msgid "Suspend selected services"
+msgstr ""
+
+#: apps/provisioning/admin.py:519
+msgid "Task Information"
+msgstr ""
+
+#: apps/provisioning/admin.py:527
+msgid "Execution"
+msgstr ""
+
+#: apps/provisioning/admin.py:543
+msgid "Retry Logic"
+msgstr ""
+
+#: apps/provisioning/admin.py:584
+msgid "Retries"
+msgstr ""
+
+#: apps/provisioning/admin.py:613
+msgid "Retry failed tasks"
+msgstr ""
+
+#: apps/provisioning/admin.py:619
+msgid "Cancel pending tasks"
+msgstr ""
+
+#: apps/provisioning/models.py:18
+msgid "Shared Web Hosting"
+msgstr ""
+
+#: apps/provisioning/models.py:21
+msgid "Cloud Hosting"
+msgstr ""
+
+#: apps/provisioning/models.py:22
+msgid "Domain"
+msgstr ""
+
+#: apps/provisioning/models.py:25
+msgid "Backup"
+msgstr ""
+
+#: apps/provisioning/models.py:26
+msgid "Maintenance"
+msgstr ""
+
+#: apps/provisioning/models.py:30
+msgid "Plan Name"
+msgstr ""
+
+#: apps/provisioning/models.py:34
+msgid "Plan Type"
+msgstr ""
+
+#: apps/provisioning/models.py:36 apps/tickets/admin.py:522
+#: apps/tickets/models.py:17 apps/tickets/models.py:96
+#: templates/billing/invoice_detail.html:101
+#: templates/billing/invoice_form.html:146
+#: templates/billing/proforma_convert.html:138
+#: templates/billing/proforma_detail.html:142
+#: templates/billing/proforma_form.html:185 templates/tickets/detail.html:43
+#: templates/tickets/form.html:92
+msgid "Description"
+msgstr ""
+
+#: apps/provisioning/models.py:43
+msgid "Monthly Price (RON)"
+msgstr ""
+
+#: apps/provisioning/models.py:51
+msgid "Quarterly Price (RON)"
+msgstr ""
+
+#: apps/provisioning/models.py:59
+msgid "Annual Price (RON)"
+msgstr ""
+
+#: apps/provisioning/models.py:67 templates/provisioning/service_form.html:287
+msgid "Setup Fee (RON)"
+msgstr ""
+
+#: apps/provisioning/models.py:73
+msgid "Technical specifications and features in JSON format"
+msgstr ""
+
+#: apps/provisioning/models.py:78 templates/provisioning/service_form.html:137
+msgid "Disk Space (GB)"
+msgstr ""
+
+#: apps/provisioning/models.py:79
+msgid "Monthly Traffic (GB)"
+msgstr ""
+
+#: apps/provisioning/models.py:80
+msgid "Email Accounts"
+msgstr ""
+
+#: apps/provisioning/models.py:81
+msgid "Databases"
+msgstr ""
+
+#: apps/provisioning/models.py:82
+msgid "Domains"
+msgstr ""
+
+#: apps/provisioning/models.py:85 apps/provisioning/models.py:168
+#: templates/provisioning/service_form.html:159
+msgid "CPU Cores"
+msgstr ""
+
+#: apps/provisioning/models.py:86 apps/provisioning/models.py:169
+#: templates/provisioning/service_form.html:174
+msgid "RAM (GB)"
+msgstr ""
+
+#: apps/provisioning/models.py:89
+msgid "Price Includes VAT"
+msgstr ""
+
+#: apps/provisioning/models.py:93
+msgid "Public on Website"
+msgstr ""
+
+#: apps/provisioning/models.py:94 apps/tickets/models.py:44
+msgid "Sort Order"
+msgstr ""
+
+#: apps/provisioning/models.py:97
+msgid "Auto Provision"
+msgstr ""
+
+#: apps/provisioning/models.py:98
+msgid "Provisioning Script"
+msgstr ""
+
+#: apps/provisioning/models.py:105 apps/provisioning/models.py:311
+msgid "Service Plan"
+msgstr ""
+
+#: apps/provisioning/models.py:106
+msgid "Service Plans"
+msgstr ""
+
+#: apps/provisioning/models.py:138
+msgid "Shared Server"
+msgstr ""
+
+#: apps/provisioning/models.py:139
+msgid "VPS Host"
+msgstr ""
+
+#: apps/provisioning/models.py:141
+msgid "Cloud Node"
+msgstr ""
+
+#: apps/provisioning/models.py:146
+msgid "Under Maintenance"
+msgstr ""
+
+#: apps/provisioning/models.py:147
+msgid "Offline"
+msgstr ""
+
+#: apps/provisioning/models.py:148
+msgid "Decommissioned"
+msgstr ""
+
+#: apps/provisioning/models.py:152
+msgid "Server Name"
+msgstr ""
+
+#: apps/provisioning/models.py:153
+msgid "Hostname"
+msgstr ""
+
+#: apps/provisioning/models.py:157
+msgid "Server Type"
+msgstr ""
+
+#: apps/provisioning/models.py:161
+msgid "Primary IP"
+msgstr ""
+
+#: apps/provisioning/models.py:162
+msgid "Secondary IPs"
+msgstr ""
+
+#: apps/provisioning/models.py:163
+msgid "Location"
+msgstr ""
+
+#: apps/provisioning/models.py:164
+msgid "Datacenter"
+msgstr ""
+
+#: apps/provisioning/models.py:167
+msgid "CPU Model"
+msgstr ""
+
+#: apps/provisioning/models.py:170
+msgid "Disk Type"
+msgstr ""
+
+#: apps/provisioning/models.py:171
+msgid "Disk Capacity (GB)"
+msgstr ""
+
+#: apps/provisioning/models.py:187
+msgid "CPU Usage (%)"
+msgstr ""
+
+#: apps/provisioning/models.py:194
+msgid "RAM Usage (%)"
+msgstr ""
+
+#: apps/provisioning/models.py:201
+msgid "Disk Usage (%)"
+msgstr ""
+
+#: apps/provisioning/models.py:208
+msgid "Maximum Services"
+msgstr ""
+
+#: apps/provisioning/models.py:212 templates/provisioning/service_form.html:191
+msgid "Operating System"
+msgstr ""
+
+#: apps/provisioning/models.py:213 templates/provisioning/service_form.html:238
+msgid "Control Panel"
+msgstr ""
+
+#: apps/provisioning/models.py:216
+msgid "Provider"
+msgstr ""
+
+#: apps/provisioning/models.py:217
+msgid "Instance ID"
+msgstr ""
+
+#: apps/provisioning/models.py:224
+msgid "Monthly Cost (RON)"
+msgstr ""
+
+#: apps/provisioning/models.py:228
+msgid "Last Maintenance"
+msgstr ""
+
+#: apps/provisioning/models.py:229
+msgid "Next Maintenance"
+msgstr ""
+
+#: apps/provisioning/models.py:237
+msgid "Server"
+msgstr ""
+
+#: apps/provisioning/models.py:238 templates/provisioning/service_list.html:243
+msgid "Servers"
+msgstr ""
+
+#: apps/provisioning/models.py:290
+msgid "Terminated"
+msgstr ""
+
+#: apps/provisioning/models.py:323
+msgid "Service Name"
+msgstr ""
+
+#: apps/provisioning/models.py:324 templates/provisioning/service_form.html:217
+msgid "Primary Domain"
+msgstr ""
+
+#: apps/provisioning/models.py:325
+msgid "System Username"
+msgstr ""
+
+#: apps/provisioning/models.py:332 templates/provisioning/service_form.html:272
+msgid "Billing Cycle"
+msgstr ""
+
+#: apps/provisioning/models.py:337 templates/provisioning/service_form.html:262
+msgid "Price (RON)"
+msgstr ""
+
+#: apps/provisioning/models.py:339
+msgid "Setup Fee Paid"
+msgstr ""
+
+#: apps/provisioning/models.py:348 apps/tickets/models.py:204
+#: apps/tickets/models.py:359 templates/tickets/detail.html:33
+msgid "Created At"
+msgstr ""
+
+#: apps/provisioning/models.py:349
+msgid "Activated At"
+msgstr ""
+
+#: apps/provisioning/models.py:350
+msgid "Suspended At"
+msgstr ""
+
+#: apps/provisioning/models.py:351
+msgid "Expires At"
+msgstr ""
+
+#: apps/provisioning/models.py:357
+msgid "Provisioning Data"
+msgstr ""
+
+#: apps/provisioning/models.py:362
+msgid "Last Provisioning Attempt"
+msgstr ""
+
+#: apps/provisioning/models.py:364
+msgid "Provisioning Errors"
+msgstr ""
+
+#: apps/provisioning/models.py:367
+msgid "Disk Usage (MB)"
+msgstr ""
+
+#: apps/provisioning/models.py:368
+msgid "Bandwidth Used (MB)"
+msgstr ""
+
+#: apps/provisioning/models.py:369
+msgid "Email Accounts Used"
+msgstr ""
+
+#: apps/provisioning/models.py:370
+msgid "Databases Used"
+msgstr ""
+
+#: apps/provisioning/models.py:373
+msgid "Auto Renew"
+msgstr ""
+
+#: apps/provisioning/models.py:376
+msgid "Admin Notes"
+msgstr ""
+
+#: apps/provisioning/models.py:377
+msgid "Suspension Reason"
+msgstr ""
+
+#: apps/provisioning/models.py:470
+msgid "Retrying"
+msgstr ""
+
+#: apps/provisioning/models.py:474 templates/provisioning/service_form.html:4
+#: templates/provisioning/service_form.html:374
+msgid "Create Service"
+msgstr ""
+
+#: apps/provisioning/models.py:475
+msgid "Suspend Service"
+msgstr ""
+
+#: apps/provisioning/models.py:476
+msgid "Unsuspend Service"
+msgstr ""
+
+#: apps/provisioning/models.py:477
+msgid "Terminate Service"
+msgstr ""
+
+#: apps/provisioning/models.py:478
+msgid "Update Service"
+msgstr ""
+
+#: apps/provisioning/models.py:492
 msgid "Task Type"
 msgstr ""
 
-#: apps/provisioning/models.py:495
+#: apps/provisioning/models.py:502
 msgid "Parameters"
 msgstr ""
 
-#: apps/provisioning/models.py:498
+#: apps/provisioning/models.py:505
 msgid "Started At"
 msgstr ""
 
-#: apps/provisioning/models.py:499
+#: apps/provisioning/models.py:506
 msgid "Completed At"
 msgstr ""
 
-#: apps/provisioning/models.py:502
+#: apps/provisioning/models.py:509
 msgid "Result"
 msgstr ""
 
-#: apps/provisioning/models.py:503
+#: apps/provisioning/models.py:510
 msgid "Error Message"
 msgstr ""
 
-#: apps/provisioning/models.py:506
+#: apps/provisioning/models.py:513
 msgid "Retry Count"
 msgstr ""
 
-#: apps/provisioning/models.py:507
+#: apps/provisioning/models.py:514
 msgid "Max Retries"
 msgstr ""
 
-#: apps/provisioning/models.py:508
+#: apps/provisioning/models.py:515
 msgid "Next Retry At"
 msgstr ""
 
-#: apps/provisioning/models.py:515
+#: apps/provisioning/models.py:522
 msgid "Provisioning Task"
 msgstr ""
 
-#: apps/provisioning/models.py:516
+#: apps/provisioning/models.py:523
 msgid "Provisioning Tasks"
+msgstr ""
+
+#: apps/provisioning/models.py:569
+msgid "🔧 Add-on Service"
+msgstr ""
+
+#: apps/provisioning/models.py:570
+msgid "📦 Included Service"
+msgstr ""
+
+#: apps/provisioning/models.py:571
+msgid "⚡ Required Dependency"
+msgstr ""
+
+#: apps/provisioning/models.py:572
+msgid "⬆️ Service Upgrade"
+msgstr ""
+
+#: apps/provisioning/models.py:573
+msgid "🎁 Bundle Component"
+msgstr ""
+
+#: apps/provisioning/models.py:577
+msgid "💳 Billed Separately"
+msgstr ""
+
+#: apps/provisioning/models.py:578
+msgid "🆓 Included in Parent"
+msgstr ""
+
+#: apps/provisioning/models.py:579
+msgid "💰 Discounted Rate"
+msgstr ""
+
+#: apps/provisioning/models.py:580
+msgid "📊 Prorated Billing"
+msgstr ""
+
+#: apps/provisioning/models.py:588
+msgid "Primary service (e.g., VPS hosting)"
+msgstr ""
+
+#: apps/provisioning/models.py:594
+msgid "Related service (e.g., domain, SSL, backup)"
+msgstr ""
+
+#: apps/provisioning/models.py:601
+msgid "Type of service relationship"
+msgstr ""
+
+#: apps/provisioning/models.py:607
+msgid "How this affects customer billing"
+msgstr ""
+
+#: apps/provisioning/models.py:613
+msgid "Child service is required for parent to function"
+msgstr ""
+
+#: apps/provisioning/models.py:617
+msgid "Automatically provision child when parent is created"
+msgstr ""
+
+#: apps/provisioning/models.py:621
+msgid "Suspend child service when parent is suspended"
+msgstr ""
+
+#: apps/provisioning/models.py:625
+msgid "Terminate child service when parent is terminated"
+msgstr ""
+
+#: apps/provisioning/models.py:634
+msgid "Discount percentage for bundle pricing"
+msgstr ""
+
+#: apps/provisioning/models.py:639
+msgid "Fixed discount amount in cents"
+msgstr ""
+
+#: apps/provisioning/models.py:651
+msgid "🔗 Service Relationship"
+msgstr ""
+
+#: apps/provisioning/models.py:652
+msgid "🔗 Service Relationships"
+msgstr ""
+
+#: apps/provisioning/models.py:673
+msgid "Service cannot be related to itself"
+msgstr ""
+
+#: apps/provisioning/models.py:677
+msgid "This relationship would create a circular dependency"
+msgstr ""
+
+#: apps/provisioning/models.py:721
+msgid "🎯 Primary Domain"
+msgstr ""
+
+#: apps/provisioning/models.py:722
+msgid "➕ Add-on Domain"
+msgstr ""
+
+#: apps/provisioning/models.py:723
+msgid "🔗 Subdomain"
+msgstr ""
+
+#: apps/provisioning/models.py:724
+msgid "↩️ Domain Redirect"
+msgstr ""
+
+#: apps/provisioning/models.py:725
+msgid "🅿️ Parked Domain"
+msgstr ""
+
+#: apps/provisioning/models.py:733
+msgid "Hosting service for this domain"
+msgstr ""
+
+#: apps/provisioning/models.py:739
+msgid "Domain assigned to service"
+msgstr ""
+
+#: apps/provisioning/models.py:747
+msgid "How domain is used with service"
+msgstr ""
+
+#: apps/provisioning/models.py:752
+msgid "Subdomain prefix (e.g., 'blog' for blog.example.com)"
+msgstr ""
+
+#: apps/provisioning/models.py:758
+msgid "Manage DNS records for this domain"
+msgstr ""
+
+#: apps/provisioning/models.py:762
+msgid "SSL certificate enabled for this domain"
+msgstr ""
+
+#: apps/provisioning/models.py:767
+msgid "No SSL"
+msgstr ""
+
+#: apps/provisioning/models.py:768
+msgid "Shared SSL"
+msgstr ""
+
+#: apps/provisioning/models.py:769
+msgid "Dedicated SSL"
+msgstr ""
+
+#: apps/provisioning/models.py:770
+msgid "Wildcard SSL"
+msgstr ""
+
+#: apps/provisioning/models.py:778
+msgid "Redirect target URL (for redirect type)"
+msgstr ""
+
+#: apps/provisioning/models.py:783
+msgid "301 Permanent"
+msgstr ""
+
+#: apps/provisioning/models.py:784
+msgid "302 Temporary"
+msgstr ""
+
+#: apps/provisioning/models.py:793
+msgid "Handle email for this domain"
+msgstr ""
+
+#: apps/provisioning/models.py:797
+msgid "Catch-all email address"
+msgstr ""
+
+#: apps/provisioning/models.py:809
+msgid "🌐 Service Domain"
+msgstr ""
+
+#: apps/provisioning/models.py:810
+msgid "🌐 Service Domains"
+msgstr ""
+
+#: apps/provisioning/models.py:842
+msgid "Subdomain contains invalid characters"
+msgstr ""
+
+#: apps/provisioning/models.py:846
+msgid "Redirect domains must have a redirect URL"
+msgstr ""
+
+#: apps/provisioning/models.py:865
+msgid "📦 Hosting Package"
+msgstr ""
+
+#: apps/provisioning/models.py:866
+msgid "🔗 Service Cluster"
+msgstr ""
+
+#: apps/provisioning/models.py:867
+msgid "🎁 Product Bundle"
+msgstr ""
+
+#: apps/provisioning/models.py:868
+msgid "🏗️ Environment"
+msgstr ""
+
+#: apps/provisioning/models.py:869
+msgid "👥 Reseller Package"
+msgstr ""
+
+#: apps/provisioning/models.py:875
+msgid "🔴 Cancelled"
+msgstr ""
+
+#: apps/provisioning/models.py:876
+msgid "⏳ Pending Setup"
+msgstr ""
+
+#: apps/provisioning/models.py:882
+msgid "Service group name"
+msgstr ""
+
+#: apps/provisioning/models.py:886
+msgid "Description of service group"
+msgstr ""
+
+#: apps/provisioning/models.py:893
+msgid "Type of service group"
+msgstr ""
+
+#: apps/provisioning/models.py:899
+msgid "Customer owning this service group"
+msgstr ""
+
+#: apps/provisioning/models.py:915
+msgid "Yearly"
+msgstr ""
+
+#: apps/provisioning/models.py:924
+msgid "Automatically provision all services in group"
+msgstr ""
+
+#: apps/provisioning/models.py:928
+msgid "Generate single invoice for all services"
+msgstr ""
+
+#: apps/provisioning/models.py:937
+msgid "📦 Service Group"
+msgstr ""
+
+#: apps/provisioning/models.py:938
+msgid "📦 Service Groups"
+msgstr ""
+
+#: apps/provisioning/models.py:977
+msgid "🎯 Primary Service"
+msgstr ""
+
+#: apps/provisioning/models.py:978
+msgid "⚡ Dependency"
+msgstr ""
+
+#: apps/provisioning/models.py:979
+msgid "🔧 Add-on"
+msgstr ""
+
+#: apps/provisioning/models.py:980
+msgid "💾 Backup Service"
+msgstr ""
+
+#: apps/provisioning/models.py:988
+msgid "Service group"
+msgstr ""
+
+#: apps/provisioning/models.py:994
+msgid "Service in group"
+msgstr ""
+
+#: apps/provisioning/models.py:1002
+msgid "Role of service in group"
+msgstr ""
+
+#: apps/provisioning/models.py:1006
+msgid "Order for provisioning (1 = first)"
+msgstr ""
+
+#: apps/provisioning/models.py:1012
+msgid "Override individual service billing"
+msgstr ""
+
+#: apps/provisioning/models.py:1018
+msgid "Custom price for this service in group"
+msgstr ""
+
+#: apps/provisioning/models.py:1030
+msgid "👥 Service Group Member"
+msgstr ""
+
+#: apps/provisioning/models.py:1031
+msgid "👥 Service Group Members"
+msgstr ""
+
+#: apps/provisioning/models.py:1060
+msgid "Service must belong to same customer as group"
 msgstr ""
 
 #: apps/provisioning/views.py:59
@@ -1130,16 +3563,119 @@ msgstr ""
 msgid "▶️ Service {domain} has been activated!"
 msgstr ""
 
+#: apps/tickets/admin.py:45
+msgid "Category Information"
+msgstr ""
+
+#: apps/tickets/admin.py:56
+msgid "Service Level Agreement"
+msgstr ""
+
+#: apps/tickets/admin.py:79 apps/tickets/models.py:20
+msgid "Icon"
+msgstr ""
+
+#: apps/tickets/admin.py:172
+msgid "Ticket Information"
+msgstr ""
+
+#: apps/tickets/admin.py:183
+msgid "Customer & Contact"
+msgstr ""
+
+#: apps/tickets/admin.py:192
+msgid "Assignment"
+msgstr ""
+
+#: apps/tickets/admin.py:199
+msgid "SLA Tracking"
+msgstr ""
+
+#: apps/tickets/admin.py:208 apps/tickets/admin.py:410
+msgid "Time Tracking"
+msgstr ""
+
+#: apps/tickets/admin.py:214
+msgid "Customer Satisfaction"
+msgstr ""
+
+#: apps/tickets/admin.py:221
+msgid "Flags & Options"
+msgstr ""
+
+#: apps/tickets/admin.py:242 apps/tickets/models.py:95
+msgid "Title"
+msgstr ""
+
+#: apps/tickets/admin.py:262 apps/tickets/models.py:124
+#: templates/tickets/detail.html:27 templates/tickets/form.html:58
+#: templates/tickets/list.html:98
+msgid "Priority"
+msgstr ""
+
+#: apps/tickets/admin.py:295
+msgid "SLA Status"
+msgstr ""
+
+#: apps/tickets/admin.py:309
+msgid "Satisfaction"
+msgstr ""
+
+#: apps/tickets/admin.py:325
+msgid "Assign to me"
+msgstr ""
+
+#: apps/tickets/admin.py:338
+msgid "Mark as resolved"
+msgstr ""
+
+#: apps/tickets/admin.py:344
+msgid "Escalate tickets"
+msgstr ""
+
+#: apps/tickets/admin.py:353
+msgid "Require customer response"
+msgstr ""
+
+#: apps/tickets/admin.py:394
+msgid "Comment Information"
+msgstr ""
+
+#: apps/tickets/admin.py:403 apps/tickets/admin.py:439
+#: apps/tickets/models.py:338
+msgid "Author"
+msgstr ""
+
+#: apps/tickets/admin.py:446
+msgid "Content Preview"
+msgstr ""
+
+#: apps/tickets/admin.py:485
+msgid "Work Information"
+msgstr ""
+
+#: apps/tickets/admin.py:515
+msgid "Total Cost"
+msgstr ""
+
+#: apps/tickets/admin.py:584
+msgid "Attachment Information"
+msgstr ""
+
+#: apps/tickets/admin.py:600
+msgid "Upload Info"
+msgstr ""
+
+#: apps/tickets/admin.py:622
+msgid "Safety Status"
+msgstr ""
+
 #: apps/tickets/models.py:15
 msgid "Category Name"
 msgstr ""
 
 #: apps/tickets/models.py:16
 msgid "Name (EN)"
-msgstr ""
-
-#: apps/tickets/models.py:20
-msgid "Icon"
 msgstr ""
 
 #: apps/tickets/models.py:21
@@ -1171,8 +3707,8 @@ msgstr ""
 msgid "New"
 msgstr ""
 
-#: apps/tickets/models.py:63 templates/tickets/list.html:76
-#: templates/tickets/list.html:165
+#: apps/tickets/models.py:63 templates/tickets/list.html:19
+#: templates/tickets/list.html:76 templates/tickets/list.html:165
 msgid "Open"
 msgstr ""
 
@@ -1186,43 +3722,19 @@ msgstr ""
 msgid "Closed"
 msgstr ""
 
-#: apps/tickets/models.py:71 templates/dashboard.html:139
-#: templates/tickets/list.html:70 templates/tickets/list.html:156
-msgid "Low"
-msgstr ""
-
-#: apps/tickets/models.py:72 templates/tickets/list.html:69
-#: templates/tickets/list.html:155
-msgid "Normal"
-msgstr ""
-
-#: apps/tickets/models.py:73 templates/tickets/list.html:68
-#: templates/tickets/list.html:154
-msgid "High"
-msgstr ""
-
-#: apps/tickets/models.py:74 templates/dashboard.html:137
-#: templates/tickets/list.html:67 templates/tickets/list.html:153
-msgid "Urgent"
-msgstr ""
-
 #: apps/tickets/models.py:75 templates/tickets/list.html:66
 #: templates/tickets/list.html:152
 msgid "Critical"
 msgstr ""
 
-#: apps/tickets/models.py:79
-msgid "Website"
-msgstr ""
-
-#: apps/tickets/models.py:80 apps/users/forms.py:18 apps/users/forms.py:43
-#: apps/users/forms.py:281 apps/users/models.py:236
-#: templates/users/profile.html:39 templates/users/register.html:49
+#: apps/tickets/models.py:80 apps/users/forms.py:19 apps/users/forms.py:44
+#: apps/users/forms.py:282 apps/users/models.py:267
+#: templates/customers/detail.html:56
 msgid "Email"
 msgstr ""
 
-#: apps/tickets/models.py:81 apps/users/forms.py:70 apps/users/forms.py:158
-#: apps/users/models.py:237 templates/users/profile.html:51
+#: apps/tickets/models.py:81 apps/users/forms.py:71 apps/users/forms.py:159
+#: apps/users/models.py:268 templates/customers/detail.html:67
 msgid "Phone"
 msgstr ""
 
@@ -1242,10 +3754,6 @@ msgstr ""
 msgid "Ticket Number"
 msgstr ""
 
-#: apps/tickets/models.py:95
-msgid "Title"
-msgstr ""
-
 #: apps/tickets/models.py:108
 msgid "Contact Person"
 msgstr ""
@@ -1262,14 +3770,6 @@ msgstr ""
 msgid "Category"
 msgstr ""
 
-#: apps/tickets/models.py:124 templates/tickets/list.html:98
-msgid "Priority"
-msgstr ""
-
-#: apps/tickets/models.py:136
-msgid "Source"
-msgstr ""
-
 #: apps/tickets/models.py:147
 msgid "Assigned To"
 msgstr ""
@@ -1278,7 +3778,7 @@ msgstr ""
 msgid "Assigned At"
 msgstr ""
 
-#: apps/tickets/models.py:158
+#: apps/tickets/models.py:158 templates/tickets/form.html:81
 msgid "Related Service"
 msgstr ""
 
@@ -1323,7 +3823,7 @@ msgstr ""
 msgid "Support Tickets"
 msgstr ""
 
-#: apps/tickets/models.py:312 apps/users/forms.py:311
+#: apps/tickets/models.py:312 apps/users/forms.py:312
 msgid "Support"
 msgstr ""
 
@@ -1332,20 +3832,13 @@ msgid "System"
 msgstr ""
 
 #: apps/tickets/models.py:321 apps/tickets/models.py:390
-#: apps/tickets/models.py:451 templates/tickets/list.html:92
+#: apps/tickets/models.py:451 templates/tickets/detail.html:8
+#: templates/tickets/list.html:92
 msgid "Ticket"
-msgstr ""
-
-#: apps/tickets/models.py:324
-msgid "Content"
 msgstr ""
 
 #: apps/tickets/models.py:329
 msgid "Comment Type"
-msgstr ""
-
-#: apps/tickets/models.py:338
-msgid "Author"
 msgstr ""
 
 #: apps/tickets/models.py:343
@@ -1388,10 +3881,6 @@ msgstr ""
 msgid "Filename"
 msgstr ""
 
-#: apps/tickets/models.py:406
-msgid "File Size"
-msgstr ""
-
 #: apps/tickets/models.py:407
 msgid "Content Type"
 msgstr ""
@@ -1414,10 +3903,6 @@ msgstr ""
 
 #: apps/tickets/models.py:424
 msgid "Ticket Attachments"
-msgstr ""
-
-#: apps/tickets/models.py:457 apps/users/forms.py:302 apps/users/models.py:85
-msgid "User"
 msgstr ""
 
 #: apps/tickets/models.py:460
@@ -1487,484 +3972,975 @@ msgstr ""
 msgid "✅ Ticket #{ticket_pk} has been reopened!"
 msgstr ""
 
-#: apps/users/forms.py:21 apps/users/forms.py:47 apps/users/forms.py:284
+#: apps/users/forms.py:22 apps/users/forms.py:48 apps/users/forms.py:285
 msgid "name@example.com"
 msgstr ""
 
-#: apps/users/forms.py:26 apps/users/forms.py:102 templates/users/login.html:43
-#: templates/users/register.html:112
+#: apps/users/forms.py:27 apps/users/forms.py:103 templates/users/login.html:42
 msgid "Password"
 msgstr ""
 
-#: apps/users/forms.py:29
+#: apps/users/forms.py:30
 msgid "Your password"
 msgstr ""
 
-#: apps/users/forms.py:33
+#: apps/users/forms.py:34
 msgid "Remember me"
 msgstr ""
 
-#: apps/users/forms.py:44
+#: apps/users/forms.py:45
 msgid "The email address will be used for authentication."
 msgstr ""
 
-#: apps/users/forms.py:52 apps/users/forms.py:146
-#: templates/users/profile.html:21 templates/users/register.html:70
-msgid "First Name"
-msgstr ""
-
-#: apps/users/forms.py:56
+#: apps/users/forms.py:57
 msgid "John"
 msgstr ""
 
-#: apps/users/forms.py:61 apps/users/forms.py:152
-#: templates/users/profile.html:30 templates/users/register.html:91
-msgid "Last Name"
-msgstr ""
-
-#: apps/users/forms.py:65
+#: apps/users/forms.py:66
 msgid "Doe"
 msgstr ""
 
-#: apps/users/forms.py:72
+#: apps/users/forms.py:73 apps/users/forms.py:359
 msgid "Romanian phone number (+40.XX.XXX.XXXX)"
 msgstr ""
 
-#: apps/users/forms.py:80
+#: apps/users/forms.py:81
 msgid "I agree to receive commercial offers by email"
 msgstr ""
 
-#: apps/users/forms.py:86
+#: apps/users/forms.py:87
 msgid "I accept the processing of personal data according to GDPR"
 msgstr ""
 
-#: apps/users/forms.py:105
+#: apps/users/forms.py:106
 msgid "Minimum 12 characters"
 msgstr ""
 
-#: apps/users/forms.py:108
+#: apps/users/forms.py:109
 msgid "Confirm password"
 msgstr ""
 
-#: apps/users/forms.py:111
+#: apps/users/forms.py:112
 msgid "Repeat password"
 msgstr ""
 
-#: apps/users/forms.py:121
+#: apps/users/forms.py:122
 msgid "An account with this email address already exists."
 msgstr ""
 
-#: apps/users/forms.py:183 apps/users/forms.py:198
+#: apps/users/forms.py:184 apps/users/forms.py:199
 msgid "Emergency contact name"
 msgstr ""
 
-#: apps/users/forms.py:192
+#: apps/users/forms.py:193
 msgid "Preferred language"
 msgstr ""
 
-#: apps/users/forms.py:193
+#: apps/users/forms.py:194 templates/users/profile.html:100
 msgid "Timezone"
 msgstr ""
 
-#: apps/users/forms.py:194
+#: apps/users/forms.py:195
 msgid "Date format"
 msgstr ""
 
-#: apps/users/forms.py:195
+#: apps/users/forms.py:196
 msgid "Email notifications"
 msgstr ""
 
-#: apps/users/forms.py:196
+#: apps/users/forms.py:197
 msgid "SMS notifications"
 msgstr ""
 
-#: apps/users/forms.py:197
+#: apps/users/forms.py:198
 msgid "Marketing emails"
 msgstr ""
 
-#: apps/users/forms.py:199
+#: apps/users/forms.py:200
 msgid "Emergency contact phone"
 msgstr ""
 
-#: apps/users/forms.py:232
+#: apps/users/forms.py:233
 msgid "Verification code"
 msgstr ""
 
-#: apps/users/forms.py:242 apps/users/forms.py:267
+#: apps/users/forms.py:243 apps/users/forms.py:268
 msgid "Enter the code from the authenticator app"
 msgstr ""
 
-#: apps/users/forms.py:248 apps/users/forms.py:273
+#: apps/users/forms.py:249 apps/users/forms.py:274
 msgid "The code must contain only digits."
 msgstr ""
 
-#: apps/users/forms.py:256
+#: apps/users/forms.py:257
 msgid "2FA Code"
 msgstr ""
 
-#: apps/users/forms.py:287
+#: apps/users/forms.py:288
 msgid "Enter the email associated with your account."
 msgstr ""
 
-#: apps/users/forms.py:293
+#: apps/users/forms.py:294
 msgid "There is no account with this email address."
 msgstr ""
 
-#: apps/users/forms.py:308 templates/billing/invoice_list.html:182
-#: templates/customers/list.html:137
-#: templates/provisioning/service_list.html:165
+#: apps/users/forms.py:309 templates/billing/billing_list.html:231
+#: templates/billing/billing_list.html:240
+#: templates/provisioning/service_list.html:161
+#: templates/users/profile.html:229
 msgid "View"
 msgstr ""
 
-#: apps/users/forms.py:309
+#: apps/users/forms.py:310
 msgid "Manage"
 msgstr ""
 
-#: apps/users/forms.py:310 apps/users/models.py:177 apps/users/models.py:273
-msgid "Billing"
-msgstr ""
-
-#: apps/users/forms.py:314
+#: apps/users/forms.py:315
 msgid "Permissions"
 msgstr ""
 
-#: apps/users/models.py:22 apps/users/models.py:160
+#: apps/users/forms.py:330 templates/users/login.html:29
+#: templates/users/password_reset.html:47 templates/users/profile.html:61
+msgid "Email Address"
+msgstr ""
+
+#: apps/users/forms.py:331
+msgid "This will be used for authentication and billing notifications."
+msgstr ""
+
+#: apps/users/forms.py:334
+msgid "your@company.com"
+msgstr ""
+
+#: apps/users/forms.py:343
+msgid "Ion"
+msgstr ""
+
+#: apps/users/forms.py:352
+msgid "Popescu"
+msgstr ""
+
+#: apps/users/forms.py:357 templates/users/profile.html:72
+msgid "Phone Number"
+msgstr ""
+
+#: apps/users/forms.py:371
+msgid "Organization Type"
+msgstr ""
+
+#: apps/users/forms.py:374
+msgid "Select your business type for proper invoicing and VAT handling."
+msgstr ""
+
+#: apps/users/forms.py:381
+msgid "Company/Organization Name"
+msgstr ""
+
+#: apps/users/forms.py:383
+msgid "Official name as it appears on legal documents."
+msgstr ""
+
+#: apps/users/forms.py:386
+msgid "Your Company SRL"
+msgstr ""
+
+#: apps/users/forms.py:394
+msgid ""
+"Romanian VAT number (RO12345678) - required for VAT registered companies."
+msgstr ""
+
+#: apps/users/forms.py:406
+msgid "Address"
+msgstr ""
+
+#: apps/users/forms.py:408
+msgid "Street address of your business."
+msgstr ""
+
+#: apps/users/forms.py:411
+msgid "Str. Example Nr. 123"
+msgstr ""
+
+#: apps/users/forms.py:420 apps/users/forms.py:429
+msgid "București"
+msgstr ""
+
+#: apps/users/forms.py:447
+msgid "I agree to data processing"
+msgstr ""
+
+#: apps/users/forms.py:448
+msgid "Required: Agreement to process personal data according to GDPR."
+msgstr ""
+
+#: apps/users/forms.py:455
+msgid "I agree to receive marketing communications"
+msgstr ""
+
+#: apps/users/forms.py:457
+msgid "Optional: Receive newsletters and product updates."
+msgstr ""
+
+#: apps/users/forms.py:478
+msgid "Invalid customer type selected."
+msgstr ""
+
+#: apps/users/forms.py:484
+msgid "CustomerOnboardingRegistrationForm must be saved with commit=True"
+msgstr ""
+
+#: apps/users/models.py:48 apps/users/models.py:190
 msgid "System Administrator"
 msgstr ""
 
-#: apps/users/models.py:23 apps/users/models.py:162
+#: apps/users/models.py:49 apps/users/models.py:191
 msgid "Support Agent"
 msgstr ""
 
-#: apps/users/models.py:24
+#: apps/users/models.py:50 apps/users/models.py:192
 msgid "Billing Staff"
 msgstr ""
 
-#: apps/users/models.py:25 apps/users/models.py:161
+#: apps/users/models.py:51 apps/users/models.py:193
 msgid "Manager"
 msgstr ""
 
-#: apps/users/models.py:29
+#: apps/users/models.py:56
 msgid "email address"
 msgstr ""
 
-#: apps/users/models.py:33
+#: apps/users/models.py:60
 msgid "Invalid Romanian phone number"
 msgstr ""
 
-#: apps/users/models.py:42
-msgid "System role for internal staff. Leave empty for customer users."
+#: apps/users/models.py:69
+msgid "Staff role for internal staff. Leave empty for customer users."
 msgstr ""
 
-#: apps/users/models.py:86
+#: apps/users/models.py:116
 msgid "Users"
 msgstr ""
 
-#: apps/users/models.py:157
-msgid "Client"
+#: apps/users/models.py:187
+msgid "Customer User"
 msgstr ""
 
-#: apps/users/models.py:163
-msgid "Billing Specialist"
-msgstr ""
-
-#: apps/users/models.py:176 apps/users/models.py:272
+#: apps/users/models.py:207 apps/users/models.py:303
 msgid "Owner"
 msgstr ""
 
-#: apps/users/models.py:178 apps/users/models.py:274
+#: apps/users/models.py:209 apps/users/models.py:305
 msgid "Technical"
 msgstr ""
 
-#: apps/users/models.py:179 apps/users/models.py:275
+#: apps/users/models.py:210 apps/users/models.py:306
 msgid "Viewer"
 msgstr ""
 
-#: apps/users/models.py:197
+#: apps/users/models.py:228
 msgid "User role within this customer organization"
 msgstr ""
 
-#: apps/users/models.py:203
+#: apps/users/models.py:234
 msgid "Primary customer for this user (used for default context)"
 msgstr ""
 
-#: apps/users/models.py:213
+#: apps/users/models.py:244
 msgid "Email billing notifications"
 msgstr ""
 
-#: apps/users/models.py:217
+#: apps/users/models.py:248
 msgid "Email technical notifications"
 msgstr ""
 
-#: apps/users/models.py:221
+#: apps/users/models.py:252
 msgid "Email marketing notifications"
 msgstr ""
 
-#: apps/users/models.py:229
+#: apps/users/models.py:260
 msgid "Notification language"
 msgstr ""
 
-#: apps/users/models.py:238
+#: apps/users/models.py:269
 msgid "Email and phone"
 msgstr ""
 
-#: apps/users/models.py:241
+#: apps/users/models.py:272
 msgid "Preferred contact method"
 msgstr ""
 
-#: apps/users/models.py:257
+#: apps/users/models.py:288
 msgid "Customer Membership"
 msgstr ""
 
-#: apps/users/models.py:258
+#: apps/users/models.py:289
 msgid "Customer Memberships"
 msgstr ""
 
-#: apps/users/models.py:296
+#: apps/users/models.py:327
 msgid "English"
 msgstr ""
 
-#: apps/users/models.py:296
+#: apps/users/models.py:327
 msgid "Romanian"
 msgstr ""
 
-#: apps/users/models.py:325 templates/users/profile.html:4
-#: templates/users/profile.html:10
+#: apps/users/models.py:356 templates/users/profile.html:4
+#: templates/users/profile.html:11
 msgid "User Profile"
 msgstr ""
 
-#: apps/users/models.py:326
+#: apps/users/models.py:357
 msgid "User Profiles"
 msgstr ""
 
-#: apps/users/models.py:336
-msgid "Success"
-msgstr ""
-
-#: apps/users/models.py:337
+#: apps/users/models.py:368
 msgid "Failed Password"
 msgstr ""
 
-#: apps/users/models.py:338
+#: apps/users/models.py:369
 msgid "Failed 2FA"
 msgstr ""
 
-#: apps/users/models.py:339
+#: apps/users/models.py:370
 msgid "Account Locked"
 msgstr ""
 
-#: apps/users/models.py:340
+#: apps/users/models.py:371
 msgid "Account Disabled"
 msgstr ""
 
-#: apps/users/models.py:361
+#: apps/users/models.py:393
 msgid "User Login Log"
 msgstr ""
 
-#: apps/users/models.py:362
+#: apps/users/models.py:394
 msgid "User Login Logs"
 msgstr ""
 
-#: apps/users/views.py:58
+#: apps/users/services.py:30
+msgid "Individual Person"
+msgstr ""
+
+#: apps/users/services.py:31
+msgid "SRL - Limited Liability Company"
+msgstr ""
+
+#: apps/users/services.py:32
+msgid "PFA - Authorized Physical Person"
+msgstr ""
+
+#: apps/users/services.py:33
+msgid "SA - Joint Stock Company"
+msgstr ""
+
+#: apps/users/services.py:34
+msgid "NGO - Non-Governmental Organization"
+msgstr ""
+
+#: apps/users/services.py:35
+msgid "Other Organization Type"
+msgstr ""
+
+#: apps/users/services.py:141
+msgid "No customer found with provided company information"
+msgstr ""
+
+#: apps/users/services.py:191
+msgid "You don't have permission to invite users to this organization"
+msgstr ""
+
+#: apps/users/services.py:200
+msgid "Only organization owners can invite new users"
+msgstr ""
+
+#: apps/users/services.py:214
+msgid "User is already a member of this organization"
+msgstr ""
+
+#: apps/users/services.py:260
+msgid "A company with this name already exists"
+msgstr ""
+
+#: apps/users/services.py:264
+msgid "A company with this VAT number already exists"
+msgstr ""
+
+#: apps/users/services.py:268
+msgid "A company with this registration number already exists"
+msgstr ""
+
+#: apps/users/views.py:66
 msgid "Account temporarily locked for security reasons."
 msgstr ""
 
-#: apps/users/views.py:71 apps/users/views.py:221
+#: apps/users/views.py:79 apps/users/views.py:350
 #, python-brace-format
 msgid "Welcome, {user_full_name}!"
 msgstr ""
 
-#: apps/users/views.py:76
+#: apps/users/views.py:84
 msgid "Incorrect email or password."
 msgstr ""
 
-#: apps/users/views.py:92
-msgid "Account created successfully! You can now log in."
+#: apps/users/views.py:103
+msgid "Account created successfully! Please check your email for next steps."
 msgstr ""
 
-#: apps/users/views.py:103
+#: apps/users/views.py:117
 msgid "You have been successfully logged out."
 msgstr ""
 
-#: apps/users/views.py:115
-msgid "Password reset - under development!"
+#: apps/users/views.py:139
+msgid "Password reset for your account"
 msgstr ""
 
-#: apps/users/views.py:120
-msgid "Password reset email sent!"
+#: apps/users/views.py:154
+msgid "Too many password reset attempts. Please wait before trying again."
 msgstr ""
 
-#: apps/users/views.py:125
-msgid "Password reset confirmation - under development!"
+#: apps/users/views.py:201
+msgid ""
+"Too many password confirmation attempts. Please wait before trying again."
 msgstr ""
 
-#: apps/users/views.py:130
-msgid "Password reset successfully!"
-msgstr ""
-
-#: apps/users/views.py:143
+#: apps/users/views.py:272
 msgid "2FA is already enabled for your account."
 msgstr ""
 
-#: apps/users/views.py:164
+#: apps/users/views.py:293
 msgid "Two-factor authentication has been successfully enabled!"
 msgstr ""
 
-#: apps/users/views.py:168
+#: apps/users/views.py:297
 msgid "The entered code is invalid."
 msgstr ""
 
-#: apps/users/views.py:227
+#: apps/users/views.py:356
 msgid "The 2FA code is invalid."
 msgstr ""
 
-#: apps/users/views.py:250
+#: apps/users/views.py:379
 msgid "Profile updated successfully."
 msgstr ""
 
-#: apps/users/views.py:282 apps/users/views.py:314
+#: apps/users/views.py:411 apps/users/views.py:443
 msgid "You do not have permission to access this page."
 msgstr ""
 
-#: apps/users/views.py:348
+#: apps/users/views.py:477
 msgid "Email is required"
 msgstr ""
 
-#: apps/users/views.py:355
+#: apps/users/views.py:484
 msgid "Email available"
 msgstr ""
 
-#: apps/users/views.py:355
+#: apps/users/views.py:484
 msgid "Email already in use"
 msgstr ""
 
-#: templates/base.html:16
-msgid "CRM System for Romanian Hosting Providers"
+#: templates/base.html:18
+msgid "PRAHO Platform System for Romanian Hosting Providers"
 msgstr ""
 
-#: templates/base.html:65 templates/dashboard.html:4
+#: templates/base.html:68 templates/dashboard.html:5
 msgid "Dashboard"
 msgstr ""
 
-#: templates/base.html:77
+#: templates/base.html:83
 msgid "Tickets"
 msgstr ""
 
-#: templates/base.html:89
+#: templates/base.html:94
+msgid "My Tickets"
+msgstr ""
+
+#: templates/base.html:98
+msgid "My Invoices"
+msgstr ""
+
+#: templates/base.html:102 templates/dashboard.html:93
+msgid "My Services"
+msgstr ""
+
+#: templates/base.html:107
+msgid "No customer access assigned"
+msgstr ""
+
+#: templates/base.html:117 templates/users/password_reset_email.html:95
 msgid "Hello"
 msgstr ""
 
-#: templates/base.html:92
+#: templates/base.html:121
 msgid "Profile"
 msgstr ""
 
-#: templates/base.html:96
-msgid "Logout"
+#: templates/base.html:166 templates/users/login.html:17
+msgid "PRAHO Really Automates Hosting Operations"
 msgstr ""
 
-#: templates/base.html:135 templates/users/login.html:16
-msgid "Management system for Romanian hosting providers"
-msgstr ""
-
-#: templates/base.html:138
-msgid "Compliance"
-msgstr ""
-
-#: templates/base.html:138
+#: templates/base.html:169
 msgid "VAT Romania"
 msgstr ""
 
-#: templates/base.html:139
+#: templates/base.html:170
 msgid "Version"
 msgstr ""
 
-#: templates/base.html:159
+#: templates/base.html:190 templates/billing/proforma_detail.html:336
 msgid "An error occurred. Please try again."
 msgstr ""
 
-#: templates/billing/invoice_list.html:12
-msgid "Manage invoices and payments with Romanian VAT compliance"
+#: templates/billing/billing_list.html:13
+msgid "Billing Management"
 msgstr ""
 
-#: templates/billing/invoice_list.html:18 templates/dashboard.html:173
-msgid "New Invoice"
+#: templates/billing/billing_list.html:16
+msgid "Manage proformas and invoices following Romanian business practices"
 msgstr ""
 
-#: templates/billing/invoice_list.html:28 templates/customers/list.html:27
-#: templates/customers/list.html:35 templates/tickets/list.html:50
-msgid "Search"
+#: templates/billing/billing_list.html:34
+#: templates/billing/proforma_convert.html:33
+#: templates/billing/proforma_detail.html:258
+#: templates/billing/proforma_form.html:48
+msgid "Romanian Business Practice"
 msgstr ""
 
-#: templates/billing/invoice_list.html:31
-msgid "Invoice number, company name..."
+#: templates/billing/billing_list.html:36
+msgid ""
+"Only proformas can be created manually. Invoices are automatically generated "
+"when proformas are paid or manually converted."
 msgstr ""
 
-#: templates/billing/invoice_list.html:42
-#: templates/provisioning/service_list.html:32
-msgid "All"
+#: templates/billing/billing_list.html:50
+msgid "Active Proformas"
 msgstr ""
 
-#: templates/billing/invoice_list.html:52
-#: templates/provisioning/service_list.html:41
-msgid "Filter"
-msgstr ""
-
-#: templates/billing/invoice_list.html:58 templates/customers/list.html:40
-#: templates/provisioning/service_list.html:47
-msgid "Reset"
-msgstr ""
-
-#: templates/billing/invoice_list.html:70
-msgid "Total Amount"
-msgstr ""
-
-#: templates/billing/invoice_list.html:80
+#: templates/billing/billing_list.html:62
+#: templates/billing/invoice_list.html:72
 msgid "Total Invoices"
 msgstr ""
 
-#: templates/billing/invoice_list.html:90
-msgid "Romanian VAT"
+#: templates/billing/billing_list.html:74
+msgid "Proforma Value"
 msgstr ""
 
-#: templates/billing/invoice_list.html:110 templates/users/profile.html:164
+#: templates/billing/billing_list.html:86
+msgid "Invoice Revenue"
+msgstr ""
+
+#: templates/billing/billing_list.html:99
+#: templates/billing/invoice_list.html:26 templates/customers/list.html:25
+#: templates/tickets/list.html:50
+msgid "Search"
+msgstr ""
+
+#: templates/billing/billing_list.html:102
+msgid "Customer name, document number..."
+msgstr ""
+
+#: templates/billing/billing_list.html:109
+msgid "Document Type"
+msgstr ""
+
+#: templates/billing/billing_list.html:112
+msgid "All Documents"
+msgstr ""
+
+#: templates/billing/billing_list.html:113
+msgid "Proformas Only"
+msgstr ""
+
+#: templates/billing/billing_list.html:114
+msgid "Invoices Only"
+msgstr ""
+
+#: templates/billing/billing_list.html:122
+msgid "Clear"
+msgstr ""
+
+#: templates/billing/billing_list.html:132
+msgid "Documents"
+msgstr ""
+
+#: templates/billing/billing_list.html:144
+msgid "Number"
+msgstr ""
+
+#: templates/billing/billing_list.html:156
+#: templates/billing/invoice_detail.html:183
+#: templates/billing/invoice_list.html:102
 msgid "Date"
 msgstr ""
 
-#: templates/billing/invoice_list.html:119 templates/customers/list.html:84
-#: templates/provisioning/service_list.html:108 templates/tickets/list.html:107
+#: templates/billing/billing_list.html:159
+#: templates/billing/invoice_form.html:283
+#: templates/billing/invoice_list.html:111
+#: templates/billing/proforma_detail.html:284
+#: templates/billing/proforma_form.html:357 templates/customers/list.html:77
+#: templates/provisioning/service_list.html:104 templates/tickets/list.html:107
 msgid "Actions"
 msgstr ""
 
-#: templates/billing/invoice_list.html:135
+#: templates/billing/billing_list.html:169
+#: templates/billing/proforma_detail.html:5
+#: templates/billing/proforma_detail.html:18
+msgid "Proforma"
+msgstr ""
+
+#: templates/billing/billing_list.html:198
+#: templates/billing/proforma_convert.html:76
+msgid "Valid"
+msgstr ""
+
+#: templates/billing/billing_list.html:235
+msgid "Convert"
+msgstr ""
+
+#: templates/billing/billing_list.html:243
+msgid "PDF"
+msgstr ""
+
+#: templates/billing/billing_list.html:253
+msgid "No documents found"
+msgstr ""
+
+#: templates/billing/billing_list.html:256
+msgid "Create your first proforma to get started."
+msgstr ""
+
+#: templates/billing/billing_list.html:258
+msgid "No billing documents available for your account."
+msgstr ""
+
+#: templates/billing/billing_list.html:282
+#: templates/billing/invoice_list.html:225
+#: templates/provisioning/service_list.html:222 templates/tickets/list.html:196
+#: templates/tickets/list.html:219
+msgid "Previous"
+msgstr ""
+
+#: templates/billing/billing_list.html:289
+#: templates/billing/invoice_list.html:232
+#: templates/provisioning/service_list.html:229 templates/tickets/list.html:202
+#: templates/tickets/list.html:245
+msgid "Next"
+msgstr ""
+
+#: templates/billing/billing_list.html:297
+msgid "Showing"
+msgstr ""
+
+#: templates/billing/billing_list.html:299
+msgid "to"
+msgstr ""
+
+#: templates/billing/billing_list.html:301
+msgid "of"
+msgstr ""
+
+#: templates/billing/billing_list.html:303
+msgid "results"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:16
+msgid "Invoice details and line items"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:22
+#: templates/billing/invoice_form.html:14
+msgid "Back to Invoices"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:56
+#: templates/billing/invoice_list.html:62
+msgid "Total Amount"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:64
+msgid "Issue Date"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:72
+msgid "Due Date"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:80
+msgid "Payment Date"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:85
+msgid "Not paid"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:107
+#: templates/billing/invoice_form.html:147
+#: templates/billing/proforma_form.html:186
+msgid "Quantity"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:110
+#: templates/billing/proforma_convert.html:144
+#: templates/billing/proforma_detail.html:148
+msgid "Unit Price"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:139
+msgid "No invoice lines found"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:147
+#: templates/billing/invoice_form.html:231
+#: templates/billing/proforma_convert.html:181
+#: templates/billing/proforma_detail.html:225
+#: templates/billing/proforma_form.html:305
+msgid "Subtotal:"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:155
+#: templates/billing/proforma_convert.html:189
+#: templates/billing/proforma_detail.html:230
+msgid "VAT:"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:163
+#: templates/billing/invoice_form.html:242
+#: templates/billing/proforma_convert.html:81
+#: templates/billing/proforma_convert.html:119
+#: templates/billing/proforma_convert.html:197
+#: templates/billing/proforma_detail.html:236
+#: templates/billing/proforma_form.html:316
+msgid "Total:"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:186
+msgid "Method"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:192
+msgid "Reference"
+msgstr ""
+
+#: templates/billing/invoice_form.html:5
+msgid "Create Invoice"
+msgstr ""
+
+#: templates/billing/invoice_form.html:18
+msgid "Create New Invoice"
+msgstr ""
+
+#: templates/billing/invoice_form.html:21
+msgid "Create a new invoice for a customer with Romanian VAT compliance"
+msgstr ""
+
+#: templates/billing/invoice_form.html:46
+#: templates/billing/proforma_detail.html:86
+#: templates/billing/proforma_form.html:77 templates/customers/detail.html:33
+msgid "Customer Information"
+msgstr ""
+
+#: templates/billing/invoice_form.html:52
+#: templates/billing/proforma_form.html:83
+msgid "Select Customer"
+msgstr ""
+
+#: templates/billing/invoice_form.html:57
+#: templates/billing/proforma_form.html:88
+msgid "Choose a customer..."
+msgstr ""
+
+#: templates/billing/invoice_form.html:67
+#: templates/billing/proforma_form.html:99
+msgid "No customers available"
+msgstr ""
+
+#: templates/billing/invoice_form.html:76
+#: templates/billing/proforma_detail.html:93
+#: templates/billing/proforma_form.html:108
+msgid "Company:"
+msgstr ""
+
+#: templates/billing/invoice_form.html:80
+#: templates/billing/proforma_detail.html:99
+#: templates/billing/proforma_form.html:112
+msgid "VAT Number:"
+msgstr ""
+
+#: templates/billing/invoice_form.html:84
+#: templates/billing/proforma_detail.html:105
+#: templates/billing/proforma_form.html:116
+msgid "Email:"
+msgstr ""
+
+#: templates/billing/invoice_form.html:88
+#: templates/billing/proforma_form.html:120
+msgid "Payment Terms:"
+msgstr ""
+
+#: templates/billing/invoice_form.html:99
+msgid "Invoice Details"
+msgstr ""
+
+#: templates/billing/invoice_form.html:148
+#: templates/billing/proforma_form.html:187
+msgid "Unit Price (RON)"
+msgstr ""
+
+#: templates/billing/invoice_form.html:149
+#: templates/billing/proforma_form.html:188
+msgid "VAT Rate"
+msgstr ""
+
+#: templates/billing/invoice_form.html:168
+#: templates/billing/invoice_form.html:358
+#: templates/billing/proforma_form.html:210
+#: templates/billing/proforma_form.html:241
+#: templates/billing/proforma_form.html:439 templates/dashboard.html:372
+msgid "Standard"
+msgstr ""
+
+#: templates/billing/invoice_form.html:169
+#: templates/billing/invoice_form.html:359
+#: templates/billing/proforma_form.html:211
+#: templates/billing/proforma_form.html:242
+#: templates/billing/proforma_form.html:440
+msgid "Reduced"
+msgstr ""
+
+#: templates/billing/invoice_form.html:170
+#: templates/billing/invoice_form.html:360
+#: templates/billing/proforma_form.html:212
+#: templates/billing/proforma_form.html:243
+#: templates/billing/proforma_form.html:441
+msgid "Super Reduced"
+msgstr ""
+
+#: templates/billing/invoice_form.html:171
+#: templates/billing/invoice_form.html:361
+#: templates/billing/proforma_form.html:213
+#: templates/billing/proforma_form.html:244
+#: templates/billing/proforma_form.html:442
+msgid "Exempt"
+msgstr ""
+
+#: templates/billing/invoice_form.html:195
+#: templates/billing/proforma_detail.html:190
+#: templates/billing/proforma_form.html:269
+#: templates/provisioning/service_form.html:352
+msgid "Additional Information"
+msgstr ""
+
+#: templates/billing/invoice_form.html:201
+#: templates/billing/proforma_detail.html:195
+#: templates/billing/proforma_form.html:275
+msgid "Public Notes"
+msgstr ""
+
+#: templates/billing/invoice_form.html:201
+msgid "shown on invoice"
+msgstr ""
+
+#: templates/billing/invoice_form.html:205
+msgid "Thank you for your business! Payment due within 30 days."
+msgstr ""
+
+#: templates/billing/invoice_form.html:210
+#: templates/billing/proforma_detail.html:204
+#: templates/billing/proforma_form.html:284
+#: templates/provisioning/service_form.html:357
+msgid "Internal Notes"
+msgstr ""
+
+#: templates/billing/invoice_form.html:210
+msgid "not shown on invoice"
+msgstr ""
+
+#: templates/billing/invoice_form.html:214
+#: templates/billing/proforma_form.html:288
+msgid "Internal notes for accounting or follow-up"
+msgstr ""
+
+#: templates/billing/invoice_form.html:226
+msgid "Invoice Summary"
+msgstr ""
+
+#: templates/billing/invoice_form.html:236
+#: templates/billing/proforma_form.html:310
+#, python-format
+msgid "VAT (19%%):"
+msgstr ""
+
+#: templates/billing/invoice_form.html:249
+#: templates/billing/proforma_form.html:323
+msgid "line item(s)"
+msgstr ""
+
+#: templates/billing/invoice_form.html:257
+msgid "Romanian Compliance"
+msgstr ""
+
+#: templates/billing/invoice_form.html:263
+msgid "Sequential numbering"
+msgstr ""
+
+#: templates/billing/invoice_form.html:267
+#, python-format
+msgid "19%% Romanian VAT"
+msgstr ""
+
+#: templates/billing/invoice_form.html:271
+msgid "e-Factura ready"
+msgstr ""
+
+#: templates/billing/invoice_form.html:275
+msgid "GDPR compliant"
+msgstr ""
+
+#: templates/billing/invoice_form.html:295
+#: templates/billing/proforma_convert.html:230
+#: templates/billing/proforma_form.html:371 templates/components/modal.html:76
+#: templates/customers/form.html:365
+#: templates/provisioning/service_form.html:369
+msgid "Cancel"
+msgstr ""
+
+#: templates/billing/invoice_form.html:345
+#: templates/billing/proforma_form.html:426
+msgid "Service description"
+msgstr ""
+
+#: templates/billing/invoice_list.html:13
+msgid "Manage invoices and payments with Romanian VAT compliance"
+msgstr ""
+
+#: templates/billing/invoice_list.html:38
+#: templates/provisioning/service_list.html:30
+msgid "All"
+msgstr ""
+
+#: templates/billing/invoice_list.html:82
+msgid "Romanian VAT"
+msgstr ""
+
+#: templates/billing/invoice_list.html:127
 msgid "Due"
 msgstr ""
 
-#: templates/billing/invoice_list.html:158
-msgid "VAT"
-msgstr ""
-
-#: templates/billing/invoice_list.html:198
-msgid "Mark as paid?"
-msgstr ""
-
-#: templates/billing/invoice_list.html:200
-msgid "Pay"
-msgstr ""
-
-#: templates/billing/invoice_list.html:212
+#: templates/billing/invoice_list.html:193
 msgid "No invoices found for the selected filters"
 msgstr ""
 
-#: templates/billing/invoice_list.html:215
+#: templates/billing/invoice_list.html:196
 msgid "No invoices yet"
 msgstr ""
 
-#: templates/billing/invoice_list.html:218
+#: templates/billing/invoice_list.html:199
 msgid "Create the first invoice"
 msgstr ""
 
-#: templates/billing/invoice_list.html:235 templates/customers/list.html:175
-#: templates/provisioning/service_list.html:217
+#: templates/billing/invoice_list.html:216 templates/customers/list.html:165
+#: templates/provisioning/service_list.html:213
 #, python-format
 msgid ""
 "\n"
@@ -1972,77 +4948,413 @@ msgid ""
 "          "
 msgstr ""
 
-#: templates/billing/invoice_list.html:244 templates/customers/list.html:184
-#: templates/provisioning/service_list.html:226 templates/tickets/list.html:196
-#: templates/tickets/list.html:219
-msgid "Previous"
-msgstr ""
-
-#: templates/billing/invoice_list.html:251 templates/customers/list.html:191
-#: templates/provisioning/service_list.html:233 templates/tickets/list.html:202
-#: templates/tickets/list.html:245
-msgid "Next"
-msgstr ""
-
-#: templates/billing/invoice_list.html:265
+#: templates/billing/invoice_list.html:246
 msgid "Reports"
 msgstr ""
 
-#: templates/billing/invoice_list.html:271
+#: templates/billing/invoice_list.html:252
 msgid "VAT Report"
+msgstr ""
+
+#: templates/billing/proforma_convert.html:5
+#: templates/billing/proforma_convert.html:21
+msgid "Convert Proforma"
+msgstr ""
+
+#: templates/billing/proforma_convert.html:14
+msgid "Back to Proforma"
+msgstr ""
+
+#: templates/billing/proforma_convert.html:18
+#: templates/billing/proforma_convert.html:235
+#: templates/billing/proforma_detail.html:36
+#: templates/billing/proforma_detail.html:291
+msgid "Convert to Invoice"
+msgstr ""
+
+#: templates/billing/proforma_convert.html:21
+msgid "to an official invoice"
+msgstr ""
+
+#: templates/billing/proforma_convert.html:35
+msgid "Converting this proforma to an invoice will:"
+msgstr ""
+
+#: templates/billing/proforma_convert.html:37
+msgid "Generate a new sequential invoice number (INV-XXXXXX)"
+msgstr ""
+
+#: templates/billing/proforma_convert.html:38
+msgid "Create an immutable invoice record for tax compliance"
+msgstr ""
+
+#: templates/billing/proforma_convert.html:39
+msgid "Copy all line items and customer details exactly"
+msgstr ""
+
+#: templates/billing/proforma_convert.html:40
+msgid "Set the invoice status to \"issued\" and ready for payment"
+msgstr ""
+
+#: templates/billing/proforma_convert.html:41
+msgid "Link the invoice back to this proforma for audit trail"
+msgstr ""
+
+#: templates/billing/proforma_convert.html:53
+msgid "Current Proforma"
+msgstr ""
+
+#: templates/billing/proforma_convert.html:58
+#: templates/billing/proforma_convert.html:96
+msgid "Number:"
+msgstr ""
+
+#: templates/billing/proforma_convert.html:62
+#: templates/billing/proforma_convert.html:100
+msgid "Customer:"
+msgstr ""
+
+#: templates/billing/proforma_convert.html:66
+msgid "Created:"
+msgstr ""
+
+#: templates/billing/proforma_convert.html:70
+msgid "Valid Until:"
+msgstr ""
+
+#: templates/billing/proforma_convert.html:74
+#: templates/billing/proforma_convert.html:112
+msgid "Status:"
+msgstr ""
+
+#: templates/billing/proforma_convert.html:91
+msgid "New Invoice Preview"
+msgstr ""
+
+#: templates/billing/proforma_convert.html:97
+msgid "INV-"
+msgstr ""
+
+#: templates/billing/proforma_convert.html:97
+msgid "(auto-generated)"
+msgstr ""
+
+#: templates/billing/proforma_convert.html:104
+msgid "Issue Date:"
+msgstr ""
+
+#: templates/billing/proforma_convert.html:105
+msgid "Today"
+msgstr ""
+
+#: templates/billing/proforma_convert.html:108
+msgid "Due Date:"
+msgstr ""
+
+#: templates/billing/proforma_convert.html:109
+msgid "30 days from issue"
+msgstr ""
+
+#: templates/billing/proforma_convert.html:130
+msgid "Line Items to be Copied"
+msgstr ""
+
+#: templates/billing/proforma_convert.html:141
+#: templates/billing/proforma_detail.html:145
+msgid "Qty"
+msgstr ""
+
+#: templates/billing/proforma_convert.html:211
+msgid "Conversion Actions"
+msgstr ""
+
+#: templates/billing/proforma_convert.html:222
+msgid ""
+"I understand that this will create an immutable invoice record and that this "
+"action cannot be undone. The invoice will be assigned a new sequential "
+"number and will be ready for payment processing."
+msgstr ""
+
+#: templates/billing/proforma_detail.html:14
+#: templates/billing/proforma_form.html:20
+msgid "Back to Billing"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:21
+msgid "Created on"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:42
+#: templates/billing/proforma_detail.html:297
+msgid "Download PDF"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:56
+msgid "Proforma Expired"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:58
+msgid "This proforma expired on"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:58
+msgid "It can no longer be converted to an invoice."
+msgstr ""
+
+#: templates/billing/proforma_detail.html:70
+msgid "Proforma Valid"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:72
+msgid "Valid until"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:72
+msgid "Ready for conversion to invoice."
+msgstr ""
+
+#: templates/billing/proforma_detail.html:114
+msgid "Address:"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:134
+#: templates/billing/proforma_form.html:179
+msgid "Proforma Lines"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:204
+msgid "staff only"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:220
+msgid "Summary"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:246
+msgid "Valid until:"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:264
+msgid "Proforma for customer approval"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:268
+msgid "Converts to official invoice when paid"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:272
+msgid "Sequential numbering maintained"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:276
+msgid "Romanian VAT compliant"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:302
+msgid "Send to Customer"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:308
+#: templates/billing/proforma_form.html:7
+#: templates/billing/proforma_form.html:25
+msgid "Edit Proforma"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:319
+msgid "Send this proforma to the customer via email?"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:332
+msgid "Failed to send proforma. Please try again."
+msgstr ""
+
+#: templates/billing/proforma_form.html:9
+msgid "Create Proforma"
+msgstr ""
+
+#: templates/billing/proforma_form.html:27
+msgid "Create New Proforma"
+msgstr ""
+
+#: templates/billing/proforma_form.html:32
+msgid "Edit the existing proforma invoice details and line items"
+msgstr ""
+
+#: templates/billing/proforma_form.html:131
+msgid "Proforma Details"
+msgstr ""
+
+#: templates/billing/proforma_form.html:137
+msgid "Proforma Number"
+msgstr ""
+
+#: templates/billing/proforma_form.html:141
+msgid "Auto-generated (PRO-XXXXXX)"
+msgstr ""
+
+#: templates/billing/proforma_form.html:145
+msgid "Valid Until"
+msgstr ""
+
+#: templates/billing/proforma_form.html:275
+msgid "shown on proforma"
+msgstr ""
+
+#: templates/billing/proforma_form.html:279
+msgid "Thank you for your interest! Payment due upon invoice issuance."
+msgstr ""
+
+#: templates/billing/proforma_form.html:284
+msgid "not shown on proforma"
+msgstr ""
+
+#: templates/billing/proforma_form.html:300
+msgid "Proforma Summary"
+msgstr ""
+
+#: templates/billing/proforma_form.html:331
+msgid "Proforma Benefits"
+msgstr ""
+
+#: templates/billing/proforma_form.html:337
+msgid "Customer preview & approval"
+msgstr ""
+
+#: templates/billing/proforma_form.html:341
+msgid "Auto-converts to invoice when paid"
+msgstr ""
+
+#: templates/billing/proforma_form.html:345
+msgid "Sequential numbering (PRO-XXXXXX)"
+msgstr ""
+
+#: templates/billing/proforma_form.html:349
+msgid "Romanian VAT compliance"
+msgstr ""
+
+#: templates/components/modal.html:40
+msgid "Close"
+msgstr ""
+
+#: templates/components/modal.html:91
+msgid "Confirm"
+msgstr ""
+
+#: templates/customers/detail.html:5
+msgid "Customer Details"
+msgstr ""
+
+#: templates/customers/detail.html:16
+msgid "Company Customer"
+msgstr ""
+
+#: templates/customers/detail.html:17
+msgid "Individual Customer"
+msgstr ""
+
+#: templates/customers/detail.html:18
+msgid "PFA/SRL Customer"
+msgstr ""
+
+#: templates/customers/detail.html:19
+msgid "NGO/Association Customer"
+msgstr ""
+
+#: templates/customers/detail.html:42
+msgid "Customer ID"
+msgstr ""
+
+#: templates/customers/detail.html:46
+msgid "Name"
+msgstr ""
+
+#: templates/customers/detail.html:63 templates/customers/detail.html:74
+msgid "Not provided"
+msgstr ""
+
+#: templates/customers/detail.html:91 templates/customers/form.html:95
+#: templates/users/register.html:107
+msgid "Business Information"
+msgstr ""
+
+#: templates/customers/detail.html:117 templates/tickets/list.html:104
+msgid "Created"
+msgstr ""
+
+#: templates/customers/detail.html:121
+msgid "Updated"
+msgstr ""
+
+#: templates/customers/detail.html:134
+msgid "Customer Users"
+msgstr ""
+
+#: templates/customers/detail.html:163
+msgid "No users assigned to this customer"
+msgstr ""
+
+#: templates/customers/detail.html:165
+msgid "Users can be added through the admin interface or user registration."
+msgstr ""
+
+#: templates/customers/detail.html:177
+msgid "Tax Information"
+msgstr ""
+
+#: templates/customers/detail.html:199
+msgid "Yes"
+msgstr ""
+
+#: templates/customers/detail.html:200
+msgid "No"
+msgstr ""
+
+#: templates/customers/detail.html:205
+msgid "Registration"
+msgstr ""
+
+#: templates/customers/detail.html:220
+msgid "Addresses"
+msgstr ""
+
+#: templates/customers/detail.html:232
+msgid "Current"
+msgstr ""
+
+#: templates/customers/detail.html:258
+msgid "Back to Customers"
 msgstr ""
 
 #: templates/customers/form.html:12
 msgid "Back to customers"
 msgstr ""
 
-#: templates/customers/form.html:31
-msgid "Company Information"
-msgstr ""
-
-#: templates/customers/form.html:51
-msgid "Format: RO12345678 (6-10 digits after RO)"
-msgstr ""
-
-#: templates/customers/form.html:86
-msgid "Contact Information"
-msgstr ""
-
-#: templates/customers/form.html:115
-msgid "Format: +40 21 123 4567 or 0712 345 678"
-msgstr ""
-
-#: templates/customers/form.html:127
-msgid "Fill in only if it differs from the legal address"
+#: templates/customers/form.html:39 templates/users/profile.html:22
+#: templates/users/register.html:48
+msgid "Personal Information"
 msgstr ""
 
 #: templates/customers/form.html:154
-msgid "GDPR Consent"
+msgid "Romanian Tax Information"
 msgstr ""
 
-#: templates/customers/form.html:163
-msgid ""
-"The client has given consent for the processing of personal data according "
-"to GDPR"
+#: templates/customers/form.html:207 templates/users/register.html:156
+msgid "Address Information"
 msgstr ""
 
-#: templates/customers/form.html:185
-msgid "Cancel"
+#: templates/customers/form.html:277
+msgid "Billing Configuration"
 msgstr ""
 
-#: templates/customers/list.html:12
+#: templates/customers/form.html:325 templates/users/register.html:243
+msgid "Privacy & Consent"
+msgstr ""
+
+#: templates/customers/list.html:13
 msgid "Manage your companies and contacts."
 msgstr ""
 
-#: templates/customers/list.html:18 templates/dashboard.html:167
-msgid "New Customer"
-msgstr ""
-
-#: templates/customers/list.html:30
-msgid "Company name, CUI, email..."
-msgstr ""
-
-#: templates/customers/list.html:50
+#: templates/customers/list.html:43
 #, python-format
 msgid ""
 "\n"
@@ -2055,7 +5367,7 @@ msgid_plural ""
 msgstr[0] ""
 msgstr[1] ""
 
-#: templates/customers/list.html:56
+#: templates/customers/list.html:49
 #, python-format
 msgid ""
 "\n"
@@ -2068,188 +5380,479 @@ msgid_plural ""
 msgstr[0] ""
 msgstr[1] ""
 
-#: templates/customers/list.html:75
+#: templates/customers/list.html:68
 msgid "Contact"
 msgstr ""
 
-#: templates/customers/list.html:78
+#: templates/customers/list.html:71
 msgid "CUI / VAT"
 msgstr ""
 
-#: templates/customers/list.html:152
+#: templates/customers/list.html:142
 #, python-format
 msgid "No customers found for search \"%(search_query)s\""
 msgstr ""
 
-#: templates/customers/list.html:155
+#: templates/customers/list.html:145
 msgid "No customers yet"
 msgstr ""
 
-#: templates/customers/list.html:158
+#: templates/customers/list.html:148
 msgid "Create the first customer"
 msgstr ""
 
-#: templates/dashboard.html:11
+#: templates/dashboard.html:13
 msgid "Dashboard PragmaticHost"
 msgstr ""
 
-#: templates/dashboard.html:14
+#: templates/dashboard.html:15
+msgid "Welcome to PragmaticHost"
+msgstr ""
+
+#: templates/dashboard.html:20
 #, python-format
 msgid ""
 "Hello, %(user.first_name|default:user.username)s! Here is an overview of "
-"your activity."
+"your business\n"
+"      activity."
 msgstr ""
 
-#: templates/dashboard.html:27
-msgid "Active Customers"
-msgstr ""
-
-#: templates/dashboard.html:40
-msgid "Monthly Revenue"
+#: templates/dashboard.html:23
+#, python-format
+msgid ""
+"Hello, %(user.first_name|default:user.username)s! Here is an overview of "
+"your hosting services\n"
+"      and account."
 msgstr ""
 
 #: templates/dashboard.html:53
+msgid "Monthly Revenue"
+msgstr ""
+
+#: templates/dashboard.html:66
 msgid "Open Tickets"
 msgstr ""
 
-#: templates/dashboard.html:66 templates/provisioning/service_list.html:59
+#: templates/dashboard.html:79 templates/provisioning/service_list.html:55
 msgid "Active Services"
 msgstr ""
 
-#: templates/dashboard.html:79
+#: templates/dashboard.html:106
+msgid "My Open Tickets"
+msgstr ""
+
+#: templates/dashboard.html:119 templates/users/profile.html:154
+msgid "Account Status"
+msgstr ""
+
+#: templates/dashboard.html:132
+msgid "Next Billing"
+msgstr ""
+
+#: templates/dashboard.html:133
+msgid "End of Month"
+msgstr ""
+
+#: templates/dashboard.html:147
 msgid "Recent Invoices"
 msgstr ""
 
-#: templates/dashboard.html:104
+#: templates/dashboard.html:149
+msgid "My Recent Invoices"
+msgstr ""
+
+#: templates/dashboard.html:184
 msgid "No recent invoices"
 msgstr ""
 
-#: templates/dashboard.html:110
-msgid "View all invoices"
-msgstr ""
-
-#: templates/dashboard.html:120
-msgid "Recent Tickets"
-msgstr ""
-
-#: templates/dashboard.html:138
-msgid "Medium"
-msgstr ""
-
-#: templates/dashboard.html:144
-msgid "No recent tickets"
-msgstr ""
-
-#: templates/dashboard.html:150
-msgid "View all tickets"
-msgstr ""
-
-#: templates/dashboard.html:160
-msgid "Quick Actions"
-msgstr ""
-
-#: templates/dashboard.html:179 templates/tickets/list.html:29
-msgid "New Ticket"
-msgstr ""
-
-#: templates/dashboard.html:185 templates/provisioning/service_list.html:18
-msgid "New Service"
+#: templates/dashboard.html:186
+msgid "No recent invoices found"
 msgstr ""
 
 #: templates/dashboard.html:195
-msgid "System Status"
+msgid "View all invoices"
 msgstr ""
 
-#: templates/dashboard.html:200
-msgid "Server Status"
-msgstr ""
-
-#: templates/dashboard.html:202
-msgid "Online"
-msgstr ""
-
-#: templates/dashboard.html:207
-msgid "Backup Status"
+#: templates/dashboard.html:197
+msgid "View my invoices"
 msgstr ""
 
 #: templates/dashboard.html:209
+msgid "Recent Tickets"
+msgstr ""
+
+#: templates/dashboard.html:211
+msgid "My Recent Tickets"
+msgstr ""
+
+#: templates/dashboard.html:234 templates/tickets/form.html:63
+msgid "Medium"
+msgstr ""
+
+#: templates/dashboard.html:242
+msgid "No recent tickets"
+msgstr ""
+
+#: templates/dashboard.html:244
+msgid "No recent support tickets"
+msgstr ""
+
+#: templates/dashboard.html:253
+msgid "View all tickets"
+msgstr ""
+
+#: templates/dashboard.html:255
+msgid "View my tickets"
+msgstr ""
+
+#: templates/dashboard.html:266
+msgid "Quick Actions"
+msgstr ""
+
+#: templates/dashboard.html:304
+msgid "System Status"
+msgstr ""
+
+#: templates/dashboard.html:306 templates/users/profile.html:129
+msgid "Account Information"
+msgstr ""
+
+#: templates/dashboard.html:314
+msgid "Server Status"
+msgstr ""
+
+#: templates/dashboard.html:316
+msgid "Online"
+msgstr ""
+
+#: templates/dashboard.html:321
+msgid "Backup Status"
+msgstr ""
+
+#: templates/dashboard.html:323
 msgid "Up-to-date"
 msgstr ""
 
-#: templates/dashboard.html:216
+#: templates/dashboard.html:330
 msgid "Connected"
 msgstr ""
 
-#: templates/dashboard.html:221
+#: templates/dashboard.html:335
 msgid "Payment Gateway"
 msgstr ""
 
-#: templates/dashboard.html:223
+#: templates/dashboard.html:337
 msgid "Functional"
 msgstr ""
 
-#: templates/dashboard.html:230
+#: templates/dashboard.html:344
 msgid "Last update"
 msgstr ""
 
-#: templates/provisioning/service_list.html:11
-msgid "Hosting Services"
+#: templates/dashboard.html:364
+msgid "Customer Since"
+msgstr ""
+
+#: templates/dashboard.html:370
+msgid "Support Level"
+msgstr ""
+
+#: templates/dashboard.html:379
+msgid "Need help?"
+msgstr ""
+
+#: templates/dashboard.html:381
+msgid "Contact Support"
+msgstr ""
+
+#: templates/provisioning/service_form.html:13
+msgid "Back to Services"
+msgstr ""
+
+#: templates/provisioning/service_form.html:17
+msgid "Create New Service"
+msgstr ""
+
+#: templates/provisioning/service_form.html:20
+msgid "Provision a new hosting service for a customer"
+msgstr ""
+
+#: templates/provisioning/service_form.html:43
+msgid "Customer & Service Information"
+msgstr ""
+
+#: templates/provisioning/service_form.html:68
+msgid "Web Hosting Premium"
+msgstr ""
+
+#: templates/provisioning/service_form.html:82
+msgid "Select service type"
+msgstr ""
+
+#: templates/provisioning/service_form.html:83
+msgid "Web Hosting"
+msgstr ""
+
+#: templates/provisioning/service_form.html:84
+msgid "VPS Server"
+msgstr ""
+
+#: templates/provisioning/service_form.html:104
+msgid "Detailed service description"
+msgstr ""
+
+#: templates/provisioning/service_form.html:121
+msgid "Server Location"
+msgstr ""
+
+#: templates/provisioning/service_form.html:125
+msgid "Select location"
+msgstr ""
+
+#: templates/provisioning/service_form.html:126
+msgid "Bucharest, Romania"
+msgstr ""
+
+#: templates/provisioning/service_form.html:127
+msgid "Cluj-Napoca, Romania"
+msgstr ""
+
+#: templates/provisioning/service_form.html:128
+msgid "Frankfurt, Germany"
+msgstr ""
+
+#: templates/provisioning/service_form.html:129
+msgid "Amsterdam, Netherlands"
+msgstr ""
+
+#: templates/provisioning/service_form.html:130
+msgid "London, UK"
+msgstr ""
+
+#: templates/provisioning/service_form.html:147
+msgid "Bandwidth (GB/month)"
+msgstr ""
+
+#: templates/provisioning/service_form.html:195
+msgid "Select OS"
+msgstr ""
+
+#: templates/provisioning/service_form.html:210
+msgid "Domain & Access"
+msgstr ""
+
+#: templates/provisioning/service_form.html:227
+msgid "IP Address"
+msgstr ""
+
+#: templates/provisioning/service_form.html:242
+msgid "No control panel"
+msgstr ""
+
+#: templates/provisioning/service_form.html:247
+msgid "Custom Panel"
+msgstr ""
+
+#: templates/provisioning/service_form.html:255
+msgid "Billing Information"
+msgstr ""
+
+#: templates/provisioning/service_form.html:311
+msgid "Service Timeline"
+msgstr ""
+
+#: templates/provisioning/service_form.html:318
+msgid "Start Date"
+msgstr ""
+
+#: templates/provisioning/service_form.html:327
+msgid "End Date"
+msgstr ""
+
+#: templates/provisioning/service_form.html:361
+msgid "Internal notes about this service (not visible to customer)"
+msgstr ""
+
+#: templates/provisioning/service_form.html:379
+msgid "Create & Provision"
 msgstr ""
 
 #: templates/provisioning/service_list.html:12
+msgid "Hosting Services"
+msgstr ""
+
+#: templates/provisioning/service_list.html:13
 msgid "Manage hosting services for Romanian customers"
 msgstr ""
 
-#: templates/provisioning/service_list.html:69
+#: templates/provisioning/service_list.html:65
 msgid "Total Services"
 msgstr ""
 
-#: templates/provisioning/service_list.html:79
+#: templates/provisioning/service_list.html:75
 msgid "Romanian Hosting"
 msgstr ""
 
-#: templates/provisioning/service_list.html:99
+#: templates/provisioning/service_list.html:95
 msgid "Plan"
 msgstr ""
 
-#: templates/provisioning/service_list.html:105
+#: templates/provisioning/service_list.html:101
 msgid "Creation Date"
 msgstr ""
 
-#: templates/provisioning/service_list.html:169
+#: templates/provisioning/service_list.html:166
 msgid "Suspend service?"
 msgstr ""
 
-#: templates/provisioning/service_list.html:171
+#: templates/provisioning/service_list.html:167
 msgid "Suspend"
 msgstr ""
 
-#: templates/provisioning/service_list.html:175
+#: templates/provisioning/service_list.html:172
 msgid "Reactivate service?"
 msgstr ""
 
-#: templates/provisioning/service_list.html:177
+#: templates/provisioning/service_list.html:173
 msgid "Reactivate"
 msgstr ""
 
-#: templates/provisioning/service_list.html:194
+#: templates/provisioning/service_list.html:190
 msgid "No services found for the selected filter"
 msgstr ""
 
-#: templates/provisioning/service_list.html:197
+#: templates/provisioning/service_list.html:193
 msgid "No services yet"
 msgstr ""
 
-#: templates/provisioning/service_list.html:200
+#: templates/provisioning/service_list.html:196
 msgid "Create the first service"
 msgstr ""
 
-#: templates/provisioning/service_list.html:253
+#: templates/provisioning/service_list.html:249
 msgid "Plans"
+msgstr ""
+
+#: templates/tickets/detail.html:4
+msgid "Ticket Details"
+msgstr ""
+
+#: templates/tickets/detail.html:37
+msgid "Created By"
+msgstr ""
+
+#: templates/tickets/detail.html:52
+msgid "Replies"
+msgstr ""
+
+#: templates/tickets/detail.html:70
+msgid "Replies section coming soon."
+msgstr ""
+
+#: templates/tickets/detail.html:75
+msgid "Add Reply"
+msgstr ""
+
+#: templates/tickets/detail.html:78
+msgid "Type your reply here..."
+msgstr ""
+
+#: templates/tickets/detail.html:80
+msgid "Submit Reply"
+msgstr ""
+
+#: templates/tickets/detail.html:89
+msgid "Back to Tickets"
+msgstr ""
+
+#: templates/tickets/detail.html:96
+msgid "Close Ticket"
+msgstr ""
+
+#: templates/tickets/detail.html:102
+msgid "Reopen Ticket"
+msgstr ""
+
+#: templates/tickets/form.html:5 templates/tickets/form.html:16
+msgid "Create New Ticket"
+msgstr ""
+
+#: templates/tickets/form.html:33
+msgid "Select a customer"
+msgstr ""
+
+#: templates/tickets/form.html:48
+msgid "Technical Support"
+msgstr ""
+
+#: templates/tickets/form.html:49
+msgid "Billing Issue"
+msgstr ""
+
+#: templates/tickets/form.html:50
+msgid "Feature Request"
+msgstr ""
+
+#: templates/tickets/form.html:51
+msgid "Bug Report"
+msgstr ""
+
+#: templates/tickets/form.html:52
+msgid "General Inquiry"
+msgstr ""
+
+#: templates/tickets/form.html:81
+msgid "optional"
+msgstr ""
+
+#: templates/tickets/form.html:85 templates/tickets/form.html:123
+#: templates/tickets/form.html:131
+msgid "Select a service (if applicable)"
+msgstr ""
+
+#: templates/tickets/form.html:96
+msgid "Please provide detailed information about your request or issue..."
+msgstr ""
+
+#: templates/tickets/form.html:98
+msgid ""
+"Be as specific as possible. Include error messages, steps to reproduce, etc."
+msgstr ""
+
+#: templates/tickets/form.html:120
+msgid "Loading services..."
+msgstr ""
+
+#: templates/tickets/form.html:140
+msgid "No services found"
+msgstr ""
+
+#: templates/tickets/form.html:151
+msgid "Technical issue with"
+msgstr ""
+
+#: templates/tickets/form.html:152
+msgid "Billing question about"
+msgstr ""
+
+#: templates/tickets/form.html:153
+msgid "Feature request:"
+msgstr ""
+
+#: templates/tickets/form.html:154
+msgid "Bug report:"
+msgstr ""
+
+#: templates/tickets/form.html:155
+msgid "Question about"
 msgstr ""
 
 #: templates/tickets/list.html:14
 msgid "Management system for technical support requests"
+msgstr ""
+
+#: templates/tickets/list.html:29
+msgid "New Ticket"
 msgstr ""
 
 #: templates/tickets/list.html:60
@@ -2262,10 +5865,6 @@ msgstr ""
 
 #: templates/tickets/list.html:74
 msgid "All statuses"
-msgstr ""
-
-#: templates/tickets/list.html:104
-msgid "Created"
 msgstr ""
 
 #: templates/tickets/list.html:179
@@ -2292,199 +5891,253 @@ msgstr ""
 msgid "Create the first ticket"
 msgstr ""
 
-#: templates/users/login.html:4 templates/users/login.html:90
+#: templates/users/login.html:5
 msgid "Login"
 msgstr ""
 
-#: templates/users/login.html:13
-msgid "CRM Login"
+#: templates/users/login.html:14
+msgid "PRAHO Platform Login"
 msgstr ""
 
-#: templates/users/login.html:28
-msgid "Email Address"
-msgstr ""
-
-#: templates/users/login.html:33
-msgid "example@pragmatichost.com"
-msgstr ""
-
-#: templates/users/login.html:48
-msgid "Enter password"
-msgstr ""
-
-#: templates/users/login.html:61
+#: templates/users/login.html:58
 msgid "Keep me logged in"
 msgstr ""
 
-#: templates/users/login.html:67
+#: templates/users/login.html:64
 msgid "Forgot password?"
 msgstr ""
 
-#: templates/users/login.html:89
-msgid "Connecting..."
-msgstr ""
-
-#: templates/users/login.html:97
+#: templates/users/login.html:86
 msgid "Don\\"
 msgstr ""
 
-#: templates/users/login.html:99
+#: templates/users/login.html:88
 msgid "Register here"
 msgstr ""
 
-#: templates/users/login.html:108
+#: templates/users/login.html:97
 msgid "Secure Connection"
 msgstr ""
 
-#: templates/users/login.html:108
-msgid "GDPR Compliance"
-msgstr ""
-
-#: templates/users/login.html:108
+#: templates/users/login.html:97
 msgid "2FA Available"
 msgstr ""
 
-#: templates/users/profile.html:45
-msgid "Contact an administrator to change your email address."
-msgstr ""
-
-#: templates/users/profile.html:72
-msgid "Save"
-msgstr ""
-
-#: templates/users/profile.html:84
-msgid "Account Information"
-msgstr ""
-
-#: templates/users/profile.html:89
-msgid "Role"
-msgstr ""
-
-#: templates/users/profile.html:94
-msgid "Date Joined"
-msgstr ""
-
-#: templates/users/profile.html:99
-msgid "Last Login"
-msgstr ""
-
-#: templates/users/profile.html:104
-msgid "Never"
-msgstr ""
-
-#: templates/users/profile.html:110
-msgid "Two-Factor Authentication"
-msgstr ""
-
-#: templates/users/profile.html:117
-msgid "Enable"
-msgstr ""
-
-#: templates/users/profile.html:131
-msgid "Accessible Customers"
-msgstr ""
-
-#: templates/users/profile.html:156
-msgid "Recent Activity"
-msgstr ""
-
-#: templates/users/profile.html:167
-msgid "IP Address"
-msgstr ""
-
-#: templates/users/profile.html:170
-msgid "Browser"
-msgstr ""
-
-#: templates/users/register.html:4
-msgid "Register"
-msgstr ""
-
-#: templates/users/register.html:13
-msgid "New Account Registration"
-msgstr ""
-
-#: templates/users/register.html:16
-msgid "Create an account for the hosting management system"
-msgstr ""
-
-#: templates/users/register.html:133
-msgid "Confirm Password"
-msgstr ""
-
-#: templates/users/register.html:154
-msgid "Phone (optional)"
-msgstr ""
-
-#: templates/users/register.html:221
-msgid "Create Account"
-msgstr ""
-
-#: templates/users/register.html:228
-msgid "Already have an account?"
-msgstr ""
-
-#: templates/users/register.html:230
-msgid "Sign in here"
-msgstr ""
-
-#: apps/users/views.py:132
-msgid "Password reset for your account"
-msgstr ""
-
+#: templates/users/password_reset.html:5 templates/users/password_reset.html:14
 msgid "Reset Your Password"
 msgstr ""
 
-msgid "Enter your email address and we'll send you a link to reset your password."
+#: templates/users/password_reset.html:17
+msgid "Enter your email address and we\\"
 msgstr ""
 
-msgid "Email Address"
-msgstr ""
-
+#: templates/users/password_reset.html:64
 msgid "Send Password Reset Email"
 msgstr ""
 
-msgid "Password Reset Sent"
+#: templates/users/password_reset.html:71
+#: templates/users/password_reset_done.html:32
+msgid "Back to login"
 msgstr ""
 
-msgid "We've emailed you instructions for setting your password, if an account with that email address exists. You should receive them shortly."
-msgstr ""
-
-msgid "If you don't receive an email, please make sure you've entered the address you registered with, and check your spam folder."
-msgstr ""
-
-msgid "Set New Password"
-msgstr ""
-
-msgid "Please enter your new password twice so we can verify you typed it in correctly."
-msgstr ""
-
-msgid "New password"
-msgstr ""
-
-msgid "New password confirmation"
-msgstr ""
-
-msgid "Change my password"
-msgstr ""
-
+#: templates/users/password_reset_complete.html:4
+#: templates/users/password_reset_complete.html:13
 msgid "Password Reset Complete"
 msgstr ""
 
+#: templates/users/password_reset_complete.html:21
 msgid "Your password has been set. You may go ahead and log in now."
 msgstr ""
 
+#: templates/users/password_reset_complete.html:30
 msgid "Log in"
 msgstr ""
 
+#: templates/users/password_reset_confirm.html:4
+#: templates/users/password_reset_confirm.html:13
+msgid "Set New Password"
+msgstr ""
+
+#: templates/users/password_reset_confirm.html:16
+msgid ""
+"Please enter your new password twice so we can verify you typed it in "
+"correctly."
+msgstr ""
+
+#: templates/users/password_reset_confirm.html:47
+msgid "New password"
+msgstr ""
+
+#: templates/users/password_reset_confirm.html:60
+msgid "New password confirmation"
+msgstr ""
+
+#: templates/users/password_reset_confirm.html:77
+msgid "Change my password"
+msgstr ""
+
+#: templates/users/password_reset_confirm.html:87
+msgid "Password Reset Link Invalid"
+msgstr ""
+
+#: templates/users/password_reset_confirm.html:89
+msgid ""
+"This password reset link is invalid or has expired. Please request a new one."
+msgstr ""
+
+#: templates/users/password_reset_confirm.html:94
+msgid "Request New Reset Link"
+msgstr ""
+
+#: templates/users/password_reset_done.html:4
+#: templates/users/password_reset_done.html:13
+msgid "Password Reset Sent"
+msgstr ""
+
+#: templates/users/password_reset_done.html:21
+msgid "We\\"
+msgstr ""
+
+#: templates/users/password_reset_done.html:24
+msgid "If you don\\"
+msgstr ""
+
+#: templates/users/password_reset_email.html:8
+msgid "Password Reset"
+msgstr ""
+
+#: templates/users/password_reset_email.html:90
+msgid "Romanian Hosting Provider Management"
+msgstr ""
+
+#: templates/users/password_reset_email.html:99
+msgid "You have requested a password reset for your PRAHO Platform account."
+msgstr ""
+
+#: templates/users/password_reset_email.html:101
 msgid "Click the link below to reset your password:"
 msgstr ""
 
+#: templates/users/password_reset_email.html:105
 msgid "Reset Password"
 msgstr ""
 
+#: templates/users/password_reset_email.html:110
+msgid "Important"
+msgstr ""
+
+#: templates/users/password_reset_email.html:110
 msgid "This link will expire in 2 hours."
 msgstr ""
 
-msgid "If you didn't request this password reset, please ignore this email."
+#: templates/users/password_reset_email.html:113
+msgid "If you didn\\"
+msgstr ""
+
+#: templates/users/password_reset_email.html:120
+msgid "Romanian Hosting Provider Management System"
+msgstr ""
+
+#: templates/users/profile.html:14
+msgid "Manage your account settings and personal information"
+msgstr ""
+
+#: templates/users/profile.html:45
+msgid "Your first name"
+msgstr ""
+
+#: templates/users/profile.html:54
+msgid "Your last name"
+msgstr ""
+
+#: templates/users/profile.html:66
+msgid "Contact an administrator to change your email address"
+msgstr ""
+
+#: templates/users/profile.html:83
+msgid "Preferences"
+msgstr ""
+
+#: templates/users/profile.html:89
+msgid "Language"
+msgstr ""
+
+#: templates/users/profile.html:117
+msgid "Save Changes"
+msgstr ""
+
+#: templates/users/profile.html:135
+msgid "User Role"
+msgstr ""
+
+#: templates/users/profile.html:139
+msgid "Superuser"
+msgstr ""
+
+#: templates/users/profile.html:143
+msgid "Staff"
+msgstr ""
+
+#: templates/users/profile.html:165
+msgid "Member Since"
+msgstr ""
+
+#: templates/users/profile.html:172
+msgid "Last Login"
+msgstr ""
+
+#: templates/users/profile.html:177
+msgid "Never"
+msgstr ""
+
+#: templates/users/profile.html:183
+msgid "Two-Factor Authentication"
+msgstr ""
+
+#: templates/users/profile.html:186
+msgid "Enabled"
+msgstr ""
+
+#: templates/users/profile.html:188
+msgid "Disabled"
+msgstr ""
+
+#: templates/users/profile.html:190
+msgid "Enable 2FA"
+msgstr ""
+
+#: templates/users/profile.html:197
+msgid "Password Security"
+msgstr ""
+
+#: templates/users/profile.html:201
+msgid "Change Password"
+msgstr ""
+
+#: templates/users/profile.html:215
+msgid "Customer Access"
+msgstr ""
+
+#: templates/users/register.html:4 templates/users/register.html:280
+msgid "Create Account"
+msgstr ""
+
+#: templates/users/register.html:13
+msgid "Create Your PragmaticHost Account"
+msgstr ""
+
+#: templates/users/register.html:16
+msgid "Start your hosting journey with Romanian compliance built-in"
+msgstr ""
+
+#: templates/users/register.html:212
+msgid "Account Security"
+msgstr ""
+
+#: templates/users/register.html:287
+msgid "Already have an account?"
+msgstr ""
+
+#: templates/users/register.html:289
+msgid "Sign in here"
 msgstr ""

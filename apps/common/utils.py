@@ -16,6 +16,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect
+from django.utils.translation import gettext_lazy as _
 
 
 # ===============================================================================
@@ -227,7 +228,7 @@ def maintenance_mode_check(view_func: Callable) -> Callable:
         if getattr(settings, 'MAINTENANCE_MODE', False):
             if not request.user.is_staff:
                 return HttpResponse(
-                    "Sistem în mentenanță. Vă rugăm încercați mai târziu.",
+                    _("System is under maintenance. Please try again later."),
                     status=503
                 )
         return view_func(request, *args, **kwargs)
