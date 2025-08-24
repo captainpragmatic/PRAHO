@@ -8,7 +8,7 @@ from django.contrib import messages
 from django.core.paginator import Paginator
 from django.utils.translation import gettext_lazy as _
 
-from .models import Ticket
+from .models import Ticket, TicketComment
 
 
 @login_required
@@ -113,7 +113,22 @@ def ticket_reply(request, pk):
     if request.method == 'POST':
         reply_text = request.POST.get('reply')
         if reply_text:
-            # TODO: Create TicketReply model and save reply
+            # Create TicketComment
+            comment = TicketComment.objects.create(
+                ticket=ticket,
+                content=reply_text,
+                comment_type='support' if request.user.role in ['support', 'admin', 'manager'] else 'customer',
+                author=request.user,
+                author_name=request.user.get_full_name(),
+                author_email=request.user.email,
+                is_public=True
+            )
+            
+            # Update ticket status if it was new
+            if ticket.status == 'new':
+                ticket.status = 'open'
+                ticket.save()
+            
             messages.success(request, _("✅ Your reply has been added!"))
         else:
             messages.error(request, _("❌ The reply cannot be empty."))

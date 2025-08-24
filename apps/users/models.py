@@ -138,31 +138,63 @@ class User(AbstractUser):
     
     @property
     def is_customer_user(self) -> bool:
-        """Check if user belongs to customer organizations"""
+        """Check if user belongs to customer organizations
+        
+        🚀 Performance: Uses prefetched customer_memberships if available,
+        falls back to database query if not prefetched.
+        """
+        # Try to use prefetched data first (O(1) if prefetched)
+        prefetched_cache = getattr(self, '_prefetched_objects_cache', {})
+        if 'customer_memberships' in prefetched_cache:
+            return len(prefetched_cache['customer_memberships']) > 0
+        
+        # Fallback to database query (O(1) due to exists())
         return CustomerMembership.objects.filter(user=self).exists()
     
     @property
     def primary_customer(self):
-        """Get user's primary customer organization"""
-        membership = CustomerMembership.objects.filter(user=self, is_primary=True).first()
+        """Get user's primary customer organization
+        
+        🚀 Performance: Uses prefetched customer_memberships if available,
+        falls back to optimized database query if not prefetched.
+        """
+        # Try to use prefetched data first (O(N) where N = user's memberships, typically small)
+        prefetched_cache = getattr(self, '_prefetched_objects_cache', {})
+        if 'customer_memberships' in prefetched_cache:
+            for membership in prefetched_cache['customer_memberships']:
+                if membership.is_primary:
+                    return membership.customer
+            return None
+        
+        # Fallback to optimized database query (O(1) due to index + select_related)
+        membership = CustomerMembership.objects.filter(
+            user=self, 
+            is_primary=True
+        ).select_related('customer').first()
         return membership.customer if membership else None
     
     
     def get_accessible_customers(self):
-        """Get all customers this user can access"""
-        from apps.customers.models import Customer
+        """Get all customers this user can access
         
-        accessible = []
+        🚀 Performance: Uses prefetched customer_memberships if available,
+        falls back to optimized database query if not prefetched.
+        """
+        from apps.customers.models import Customer
         
         # Staff can see all customers
         if self.is_staff or self.staff_role:
             return Customer.objects.all()
         
-        # Customer users see their customers through memberships
-        for membership in CustomerMembership.objects.filter(user=self):
-            accessible.append(membership.customer)
+        # Try to use prefetched data first (O(N) where N = user's memberships)
+        prefetched_cache = getattr(self, '_prefetched_objects_cache', {})
+        if 'customer_memberships' in prefetched_cache:
+            return [membership.customer for membership in prefetched_cache['customer_memberships']]
         
-        return accessible
+        # Fallback to optimized database query (O(M) where M = user's customers)
+        return Customer.objects.filter(
+            memberships__user=self
+        ).distinct()
     
     def can_access_customer(self, customer) -> bool:
         """Check if user can access specific customer"""

@@ -636,11 +636,16 @@ def user_profile(request: HttpRequest) -> HttpResponse:
     else:
         form = UserProfileForm(instance=profile)
     
+    # 🚀 Performance: Prefetch customer memberships to prevent N+1 queries
+    user_with_memberships = User.objects.prefetch_related(
+        'customer_memberships__customer'
+    ).get(pk=request.user.pk)
+    
     context = {
         'form': form,
         'profile': profile,
-        'user': request.user,
-        'accessible_customers': request.user.get_accessible_customers(),
+        'user': user_with_memberships,
+        'accessible_customers': user_with_memberships.get_accessible_customers(),
         'recent_logins': UserLoginLog.objects.filter(
             user=request.user,
             status='success'
@@ -692,6 +697,15 @@ class UserDetailView(LoginRequiredMixin, DetailView):
     model = User
     template_name = 'users/user_detail.html'
     context_object_name = 'user_detail'
+    
+    def get_object(self, queryset=None):
+        """🚀 Performance: Prefetch customer memberships to prevent N+1 queries"""
+        if queryset is None:
+            queryset = self.get_queryset()
+        
+        return queryset.prefetch_related(
+            'customer_memberships__customer'
+        ).get(pk=self.kwargs['pk'])
     
     def dispatch(self, request, *args, **kwargs):
         if not request.user.is_staff:
