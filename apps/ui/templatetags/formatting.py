@@ -433,6 +433,57 @@ def cents_to_currency(value: Union[int, float, Decimal]) -> Decimal:
 
 
 @register.filter
+def multiply(value: Union[int, float, Decimal], multiplier: Union[int, float, Decimal]) -> Decimal:
+    """
+    Multiply two numbers safely with decimal precision
+    
+    Usage:
+        {{ price|multiply:1.19 }}           -> 118.99 (from 100)
+        {{ subtotal|multiply:vat_rate }}    -> 95.22 (from 500 with 0.19)
+        {{ amount|multiply:quantity }}      -> 300.00 (from 100 and 3)
+    
+    Args:
+        value: Base number to multiply
+        multiplier: Number to multiply by
+    """
+    if value is None or multiplier is None:
+        return Decimal('0.00')
+    
+    try:
+        base = Decimal(str(value))
+        mult = Decimal(str(multiplier))
+        return base * mult
+    except (ValueError, TypeError):
+        return Decimal('0.00')
+
+
+@register.filter
+def divide(value: Union[int, float, Decimal], divisor: Union[int, float, Decimal]) -> Decimal:
+    """
+    Divide two numbers safely with decimal precision
+    
+    Usage:
+        {{ total|divide:1.19 }}           -> 84.03 (from 100)
+        {{ vat_amount|divide:0.19 }}      -> 500.00 (from 95)
+    
+    Args:
+        value: Base number to divide
+        divisor: Number to divide by
+    """
+    if value is None or divisor is None:
+        return Decimal('0.00')
+    
+    try:
+        base = Decimal(str(value))
+        div = Decimal(str(divisor))
+        if div == 0:
+            return Decimal('0.00')
+        return base / div
+    except (ValueError, TypeError, ZeroDivisionError):
+        return Decimal('0.00')
+
+
+@register.filter
 def highlight_search(text: str, search_term: str) -> str:
     """
     Highlight search terms in Romanian text (case-insensitive, diacritic-aware)

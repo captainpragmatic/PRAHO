@@ -118,6 +118,65 @@ def service_create(request):
 
 
 @login_required
+def service_edit(request, pk):
+    """✏️ Edit existing hosting service"""
+    service = get_object_or_404(Service, pk=pk)
+    
+    # Security check
+    if not request.user.can_access_customer(service.customer):
+        messages.error(request, _("❌ You do not have permission to edit this service."))
+        return redirect('provisioning:services')
+    
+    # Get user's customers for dropdown
+    accessible_customers = request.user.get_accessible_customers()
+    if hasattr(accessible_customers, 'all'):
+        customers = accessible_customers.all()
+    else:
+        from django.db.models import QuerySet
+        if isinstance(accessible_customers, (list, tuple)):
+            customers = Customer.objects.filter(id__in=[c.id for c in accessible_customers])
+        else:
+            customers = accessible_customers
+    plans = ServicePlan.objects.filter(is_active=True)
+    
+    if request.method == 'POST':
+        customer_id = request.POST.get('customer_id')
+        plan_id = request.POST.get('plan_id')
+        domain = request.POST.get('domain')
+        
+        if customer_id and plan_id and domain:
+            customer = get_object_or_404(Customer, pk=customer_id)
+            
+            # Security check
+            accessible_customer_ids = _get_accessible_customer_ids(request.user)
+            if int(customer_id) not in accessible_customer_ids:
+                messages.error(request, _("❌ You do not have permission to move services to this customer."))
+                return redirect('provisioning:service_detail', pk=pk)
+            
+            plan = get_object_or_404(ServicePlan, pk=plan_id)
+            
+            # Update service
+            service.customer = customer
+            service.service_plan = plan
+            service.domain = domain
+            service.save()
+            
+            messages.success(request, _("✅ Service {domain} has been updated!").format(domain=domain))
+            return redirect('provisioning:service_detail', pk=service.pk)
+        else:
+            messages.error(request, _("❌ All fields are required."))
+    
+    context = {
+        'service': service,
+        'customers': customers,
+        'plans': plans,
+        'is_edit': True,
+    }
+    
+    return render(request, 'provisioning/service_form.html', context)
+
+
+@login_required
 def service_suspend(request, pk):
     """⏸️ Suspend hosting service"""
     service = get_object_or_404(Service, pk=pk)

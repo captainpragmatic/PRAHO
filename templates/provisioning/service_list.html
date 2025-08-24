@@ -168,7 +168,7 @@
                 </button>
                 {% elif service.status == 'suspended' %}
                 <span class="text-slate-600">|</span>
-                <button hx-post="{% url 'provisioning:service_reactivate' service.pk %}"
+                <button hx-post="{% url 'provisioning:service_activate' service.pk %}"
                   hx-confirm="{% trans 'Reactivate service?' %}" class="text-green-400 hover:text-green-300 text-sm">
                   {% trans 'Reactivate' %}
                 </button>
