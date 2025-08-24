@@ -281,7 +281,7 @@ class User(AbstractUser):
             from apps.common.encryption import encrypt_sensitive_data
             self._two_factor_secret = encrypt_sensitive_data(value)
         else:
-            self._two_factor_secret = ''
+            self._two_factor_secret = ''  # nosec B105
     
     def generate_backup_codes(self) -> list[str]:
         """Generate new backup codes and store hashed versions"""

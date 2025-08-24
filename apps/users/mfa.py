@@ -23,7 +23,7 @@ from django.conf import settings
 from typing import Optional, Dict, List, Tuple, Any
 import logging
 import string
-import random
+import secrets
 import pyotp
 import qrcode
 import io
@@ -237,7 +237,7 @@ class BackupCodeService:
         hashed_codes = []
         
         for _ in range(BackupCodeService.BACKUP_CODES_COUNT):
-            code = ''.join(random.choices(string.digits, k=BackupCodeService.BACKUP_CODE_LENGTH))
+            code = ''.join(secrets.choice(string.digits) for _ in range(BackupCodeService.BACKUP_CODE_LENGTH))
             codes.append(code)
             hashed_codes.append(make_password(code))
         
@@ -456,7 +456,7 @@ class MFAService:
             
             # Clear 2FA data
             user.two_factor_enabled = False
-            user.two_factor_secret = ''
+            user.two_factor_secret = ''  # nosec B105
             user.backup_tokens = []
             user.save()
             

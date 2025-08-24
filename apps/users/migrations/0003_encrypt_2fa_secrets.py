@@ -16,7 +16,7 @@ def encrypt_existing_2fa_secrets(apps, schema_editor):
         # Just clear secrets - users will need to re-setup 2FA
         print("WARNING: No DJANGO_ENCRYPTION_KEY found. Clearing existing 2FA secrets.")
         User.objects.filter(two_factor_enabled=True).update(
-            two_factor_secret='',
+            two_factor_secret='',  # nosec B106
             two_factor_enabled=False,
             backup_tokens=[]
         )
@@ -30,7 +30,7 @@ def encrypt_existing_2fa_secrets(apps, schema_editor):
         fernet = Fernet(key)
         
         # Encrypt existing secrets
-        for user in User.objects.filter(two_factor_enabled=True, two_factor_secret__isnull=False).exclude(two_factor_secret=''):
+        for user in User.objects.filter(two_factor_enabled=True, two_factor_secret__isnull=False).exclude(two_factor_secret=''):  # nosec B106
             if user.two_factor_secret:
                 # Encrypt the secret
                 encrypted_bytes = fernet.encrypt(user.two_factor_secret.encode('utf-8'))
@@ -45,7 +45,7 @@ def encrypt_existing_2fa_secrets(apps, schema_editor):
         print(f"Error encrypting 2FA secrets: {e}")
         # Clear secrets if encryption fails
         User.objects.filter(two_factor_enabled=True).update(
-            two_factor_secret='',
+            two_factor_secret='',  # nosec B106
             two_factor_enabled=False,
             backup_tokens=[]
         )
@@ -57,7 +57,7 @@ def reverse_encrypt_2fa_secrets(apps, schema_editor):
     # We'll just disable 2FA for affected users
     User = apps.get_model('users', 'User')
     User.objects.filter(two_factor_enabled=True).update(
-        two_factor_secret='',
+        two_factor_secret='',  # nosec B106
         two_factor_enabled=False,
         backup_tokens=[]
     )

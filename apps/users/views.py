@@ -600,7 +600,7 @@ def two_factor_disable(request: HttpRequest) -> HttpResponse:
         
         # Disable 2FA
         request.user.two_factor_enabled = False
-        request.user.two_factor_secret = ''
+        request.user.two_factor_secret = ''  # nosec B105
         request.user.backup_tokens = []
         request.user.save(update_fields=['two_factor_enabled', '_two_factor_secret', 'backup_tokens'])
         
