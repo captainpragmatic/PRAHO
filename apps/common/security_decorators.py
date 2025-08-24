@@ -1,0 +1,415 @@
+"""
+Security Decorators for Service Layer - PRAHO Platform
+Comprehensive security wrappers addressing critical vulnerabilities.
+"""
+
+import time
+import functools
+from typing import Any, Callable, Dict, Optional
+from django.core.exceptions import ValidationError
+from django.utils.translation import gettext_lazy as _
+from django.db import transaction
+from django.core.cache import cache
+from django.utils import timezone
+import logging
+
+from .validators import (
+    SecureInputValidator, BusinessLogicValidator, SecureErrorHandler,
+    log_security_event, RATE_LIMIT_REGISTRATION_PER_IP
+)
+from apps.common.types import Result, Ok, Err
+
+logger = logging.getLogger(__name__)
+
+
+# ===============================================================================
+# COMPREHENSIVE SERVICE SECURITY DECORATOR
+# ===============================================================================
+
+def secure_service_method(
+    validation_type: str = "general",
+    rate_limit_key: Optional[str] = None,
+    rate_limit: Optional[int] = None,
+    requires_permission: Optional[str] = None,
+    log_attempts: bool = True,
+    prevent_timing_attacks: bool = True
+):
+    """
+    Master security decorator for service methods
+    
+    Args:
+        validation_type: Type of validation ('user_registration', 'customer_data', 'invitation')
+        rate_limit_key: Cache key prefix for rate limiting
+        rate_limit: Number of attempts allowed per hour
+        requires_permission: Required permission level
+        log_attempts: Whether to log security events
+        prevent_timing_attacks: Whether to normalize response times
+    """
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs) -> Result[Any, str]:
+            start_time = time.time()
+            request_ip = kwargs.get('request_ip', 'unknown')
+            user = kwargs.get('user')
+            
+            try:
+                # 1. Rate Limiting Check
+                if rate_limit_key and rate_limit:
+                    _check_rate_limit(rate_limit_key, rate_limit, request_ip, user)
+                
+                # 2. Input Validation
+                if validation_type == "user_registration":
+                    _validate_user_registration_input(args, kwargs)
+                elif validation_type == "customer_data":
+                    _validate_customer_data_input(args, kwargs)
+                elif validation_type == "invitation":
+                    _validate_invitation_input(args, kwargs)
+                
+                # 3. Permission Validation
+                if requires_permission:
+                    _validate_permissions(user, kwargs.get('customer'), requires_permission)
+                
+                # 4. Execute Original Function
+                with transaction.atomic():
+                    result = func(*args, **kwargs)
+                
+                # 5. Log Success
+                if log_attempts:
+                    log_security_event('method_success', {
+                        'method': func.__name__,
+                        'validation_type': validation_type,
+                        'user_id': user.id if user else None
+                    }, request_ip)
+                
+                return result
+                
+            except ValidationError as e:
+                # Security validation failed
+                if log_attempts:
+                    log_security_event('validation_failed', {
+                        'method': func.__name__,
+                        'error': str(e),
+                        'validation_type': validation_type,
+                        'user_id': user.id if user else None
+                    }, request_ip)
+                
+                return Err(SecureErrorHandler.safe_error_response(e, validation_type))
+                
+            except Exception as e:
+                # Unexpected error
+                if log_attempts:
+                    log_security_event('method_error', {
+                        'method': func.__name__,
+                        'error': str(e),
+                        'user_id': user.id if user else None
+                    }, request_ip)
+                
+                return Err(SecureErrorHandler.safe_error_response(e, "general"))
+            
+            finally:
+                # 6. Timing Attack Prevention
+                if prevent_timing_attacks:
+                    _normalize_response_time(start_time)
+        
+        return wrapper
+    return decorator
+
+
+# ===============================================================================
+# SPECIALIZED SECURITY DECORATORS
+# ===============================================================================
+
+def secure_user_registration(rate_limit: int = RATE_LIMIT_REGISTRATION_PER_IP):
+    """Security decorator specifically for user registration methods"""
+    return secure_service_method(
+        validation_type="user_registration",
+        rate_limit_key="registration",
+        rate_limit=rate_limit,
+        log_attempts=True,
+        prevent_timing_attacks=True
+    )
+
+
+def secure_customer_operation(requires_owner: bool = False):
+    """Security decorator for customer-related operations"""
+    permission = "owner" if requires_owner else "viewer"
+    return secure_service_method(
+        validation_type="customer_data",
+        requires_permission=permission,
+        log_attempts=True,
+        prevent_timing_attacks=True
+    )
+
+
+def secure_invitation_system():
+    """Security decorator for invitation system"""
+    return secure_service_method(
+        validation_type="invitation",
+        rate_limit_key="invitation",
+        rate_limit=10,  # 10 invitations per hour
+        requires_permission="owner",
+        log_attempts=True,
+        prevent_timing_attacks=True
+    )
+
+
+# ===============================================================================
+# ATOMIC BUSINESS LOGIC DECORATORS
+# ===============================================================================
+
+def atomic_with_retry(max_retries: int = 3, delay: float = 0.1):
+    """
+    Atomic transaction with retry logic for race condition handling
+    """
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs) -> Any:
+            last_exception = None
+            
+            for attempt in range(max_retries):
+                try:
+                    with transaction.atomic():
+                        return func(*args, **kwargs)
+                
+                except Exception as e:
+                    last_exception = e
+                    if attempt < max_retries - 1:
+                        time.sleep(delay * (attempt + 1))  # Exponential backoff
+                        logger.warning(f"🔄 [Security] Retry {attempt + 1} for {func.__name__}: {e}")
+                    else:
+                        logger.error(f"🔥 [Security] All retries failed for {func.__name__}: {e}")
+            
+            raise last_exception
+        return wrapper
+    return decorator
+
+
+def prevent_race_conditions(lock_key_generator: Callable):
+    """
+    Prevent race conditions using distributed locking
+    """
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs) -> Any:
+            # Generate unique lock key
+            lock_key = f"race_lock:{lock_key_generator(*args, **kwargs)}"
+            
+            # Try to acquire lock
+            if cache.add(lock_key, "locked", timeout=30):  # 30 second lock
+                try:
+                    return func(*args, **kwargs)
+                finally:
+                    cache.delete(lock_key)
+            else:
+                # Lock already held - potential race condition
+                logger.warning(f"🚨 [Security] Race condition prevented for {func.__name__}")
+                raise ValidationError(_("Operation in progress, please try again"))
+        
+        return wrapper
+    return decorator
+
+
+# ===============================================================================
+# HELPER FUNCTIONS
+# ===============================================================================
+
+def _check_rate_limit(key_prefix: str, limit: int, request_ip: str, user=None):
+    """Check rate limiting with user and IP tracking"""
+    identifiers = [request_ip]
+    if user:
+        identifiers.append(str(user.id))
+    
+    for identifier in identifiers:
+        cache_key = f"rate_limit:{key_prefix}:{identifier}"
+        try:
+            # Try to get current count
+            current_count = cache.get(cache_key, 0)
+            
+            if current_count >= limit:
+                try:
+                    log_security_event('rate_limit_exceeded', {
+                        'key': key_prefix,
+                        'identifier': identifier,
+                        'limit': limit,
+                        'current': current_count
+                    }, request_ip)
+                except Exception as e:
+                    # Log the logging error but don't fail rate limiting
+                    logger.warning(f"⚠️ [Security] Failed to log rate limit event: {e}")  # nosec B110 - Intentional exception handling with logging
+                raise ValidationError(_("Rate limit exceeded"))
+            
+            # Increment counter with add/set pattern for race condition safety
+            new_count = current_count + 1
+            if not cache.set(cache_key, new_count, timeout=3600):
+                # Fallback if cache.set fails
+                logger.warning(f"🚨 [Security] Cache set failed for rate limiting key: {cache_key}")
+        except ValidationError:
+            # Re-raise ValidationError (rate limit exceeded)
+            raise
+        except Exception as e:
+            # If cache is not available, allow the request but log the issue
+            logger.warning(f"🚨 [Security] Rate limiting failed due to cache issue: {e}")
+            pass
+
+
+def _validate_user_registration_input(args, kwargs):
+    """Validate user registration input data"""
+    # Extract user_data from arguments
+    user_data = None
+    if len(args) >= 2 and isinstance(args[1], dict):
+        user_data = args[1]
+    elif 'user_data' in kwargs:
+        user_data = kwargs['user_data']
+    
+    if user_data:
+        validated_user_data = SecureInputValidator.validate_user_data_dict(user_data)
+        # Update the arguments with validated data
+        if len(args) >= 2:
+            args = list(args)
+            args[1] = validated_user_data
+        else:
+            kwargs['user_data'] = validated_user_data
+
+
+def _validate_customer_data_input(args, kwargs):
+    """Validate customer data input"""
+    customer_data = None
+    if len(args) >= 3 and isinstance(args[2], dict):
+        customer_data = args[2]
+    elif 'customer_data' in kwargs:
+        customer_data = kwargs['customer_data']
+    
+    if customer_data:
+        validated_customer_data = SecureInputValidator.validate_customer_data_dict(customer_data)
+        # Update the arguments with validated data
+        if len(args) >= 3:
+            args = list(args)
+            args[2] = validated_customer_data
+        else:
+            kwargs['customer_data'] = validated_customer_data
+        
+        # Also check business logic constraints
+        BusinessLogicValidator.check_company_uniqueness(
+            validated_customer_data, 
+            kwargs.get('request_ip')
+        )
+
+
+def _validate_invitation_input(args, kwargs):
+    """Validate invitation input data"""
+    inviter = kwargs.get('inviter') or (args[1] if len(args) > 1 else None)
+    invitee_email = kwargs.get('invitee_email') or (args[2] if len(args) > 2 else None)
+    customer = kwargs.get('customer') or (args[3] if len(args) > 3 else None)
+    role = kwargs.get('role', 'viewer') or (args[4] if len(args) > 4 else 'viewer')
+    
+    if all([inviter, invitee_email, customer, role]):
+        # Validate the invitation request
+        BusinessLogicValidator.validate_invitation_request(
+            inviter=inviter,
+            invitee_email=invitee_email,
+            customer=customer,
+            role=role,
+            user_id=inviter.id,
+            request_ip=kwargs.get('request_ip')
+        )
+
+
+def _validate_permissions(user, customer, required_role: str):
+    """Validate user permissions for customer operations"""
+    if user and customer:
+        BusinessLogicValidator.validate_user_permissions(user, customer, required_role)
+
+
+def _normalize_response_time(start_time: float, min_time: float = 0.1):
+    """Ensure consistent response time to prevent timing attacks"""
+    elapsed = time.time() - start_time
+    if elapsed < min_time:
+        time.sleep(min_time - elapsed)
+
+
+# ===============================================================================
+# AUDIT & MONITORING DECORATORS
+# ===============================================================================
+
+def audit_service_call(event_type: str, extract_details: Optional[Callable] = None):
+    """
+    Comprehensive audit logging for service method calls
+    """
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs) -> Any:
+            start_time = timezone.now()
+            user = kwargs.get('user') or (args[0] if len(args) > 0 and hasattr(args[0], 'id') else None)
+            request_ip = kwargs.get('request_ip')
+            
+            # Extract additional details if provided
+            details = {}
+            if extract_details:
+                try:
+                    details = extract_details(*args, **kwargs)
+                except Exception as e:
+                    logger.warning(f"Failed to extract audit details: {e}")
+            
+            try:
+                result = func(*args, **kwargs)
+                
+                # Log successful operation
+                log_security_event(f"{event_type}_success", {
+                    'method': func.__name__,
+                    'duration_ms': (timezone.now() - start_time).total_seconds() * 1000,
+                    'user_id': user.id if user else None,
+                    **details
+                }, request_ip)
+                
+                return result
+                
+            except Exception as e:
+                # Log failed operation
+                log_security_event(f"{event_type}_failed", {
+                    'method': func.__name__,
+                    'duration_ms': (timezone.now() - start_time).total_seconds() * 1000,
+                    'error': str(e)[:200],  # Truncate long errors
+                    'user_id': user.id if user else None,
+                    **details
+                }, request_ip)
+                
+                raise
+        
+        return wrapper
+    return decorator
+
+
+# ===============================================================================
+# PERFORMANCE MONITORING DECORATORS
+# ===============================================================================
+
+def monitor_performance(max_duration_seconds: float = 5.0, alert_threshold: float = 2.0):
+    """
+    Monitor method performance and alert on slow operations
+    """
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs) -> Any:
+            start_time = time.time()
+            
+            try:
+                result = func(*args, **kwargs)
+                duration = time.time() - start_time
+                
+                # Alert on slow operations
+                if duration > alert_threshold:
+                    logger.warning(f"⚠️ [Performance] Slow operation {func.__name__}: {duration:.2f}s")
+                
+                # Error on extremely slow operations
+                if duration > max_duration_seconds:
+                    logger.error(f"🐢 [Performance] Extremely slow operation {func.__name__}: {duration:.2f}s")
+                
+                return result
+                
+            except Exception as e:
+                duration = time.time() - start_time
+                logger.error(f"🔥 [Performance] Failed operation {func.__name__} after {duration:.2f}s: {e}")
+                raise
+        
+        return wrapper
+    return decorator

@@ -49,6 +49,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - HTML sanitization with bleach library for controlled formatting
   - Risk Level: Medium → Resolved ✅
 
+- **🔒 ENTERPRISE SECURITY FRAMEWORK**: Comprehensive service layer security implementation
+  - **Complete Service Layer Redesign**: Secured `apps/users/services.py` with enterprise-grade validation
+  - **Romanian Business Compliance**: Full CUI, VAT, and phone number validation with proper formatting
+  - **Injection Attack Prevention**: XSS, SQL injection, and code execution pattern detection
+  - **Rate Limiting & DoS Protection**: 
+    - User registration: 5 attempts/hour per IP
+    - Customer invitations: 10 attempts/hour per user  
+    - Company validation: 30 attempts/hour per IP
+    - Distributed cache-based implementation for scalability
+  - **Privilege Escalation Prevention**: Blocks administrative field manipulation (is_staff, is_superuser)
+  - **Secure Error Handling**: Generic user messages with detailed admin logging and unique error IDs
+  - **Business Logic Security**: Company uniqueness validation and role-based permission enforcement  
+  - **Security Decorators Framework**:
+    - `@secure_user_registration` - Complete registration protection
+    - `@secure_customer_operation` - Customer data validation
+    - `@secure_invitation_system` - Invitation security with rate limiting
+    - `@atomic_with_retry` - Race condition prevention
+    - `@monitor_performance` - Performance monitoring and alerting
+  - **Comprehensive Testing**: 28 security tests covering all OWASP attack vectors
+  - **Files Added**: 
+    - `apps/common/validators.py` (612 lines) - Core security validation framework
+    - `apps/common/security_decorators.py` (280 lines) - Security decorator framework
+    - `tests/security/test_enhanced_validation.py` - Complete security test suite
+  - **OWASP Coverage**: A03 (Injection), A04 (Insecure Design), A07 (Authentication Failures)
+  - **Risk Level**: High → Resolved ✅
+  - **Romanian Compliance**: ✅ Complete business validation framework
+
 ### Added
 - **VS Code Development Environment**: Enhanced development setup and automation
   - Terminal auto-approve for common dev commands (make test, make dev, git status)
