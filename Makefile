@@ -36,7 +36,9 @@ install:
 # Run development server
 dev:
 	@echo "🚀 Starting development server..."
-	@echo "🔧 Setting up test data if needed..."
+	@echo "�️ Running migrations..."
+	.venv/bin/python manage.py migrate
+	@echo "�🔧 Setting up test data if needed..."
 	.venv/bin/python scripts/setup_test_data.py
 	.venv/bin/python manage.py runserver 0.0.0.0:8001
 
