@@ -126,11 +126,13 @@
                 </div>
                 <div class="ml-4">
                   <div class="text-sm font-medium text-white">
-                    {% if ticket.ticket_number %}
-                    {{ ticket.ticket_number }}
-                    {% else %}
-                    #{{ ticket.id }}
-                    {% endif %}
+                    <a href="{% url 'tickets:detail' ticket.pk %}" class="hover:text-blue-300 transition-colors">
+                      {% if ticket.ticket_number %}
+                      {{ ticket.ticket_number }}
+                      {% else %}
+                      #{{ ticket.id }}
+                      {% endif %}
+                    </a>
                   </div>
                   <div class="text-sm text-slate-400 truncate max-w-xs">
                     {% if ticket.title %}{{ ticket.title }}{% elif ticket.subject %}{{ ticket.subject }}{% else %}{{
