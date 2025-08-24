@@ -95,7 +95,7 @@ class WebAuthnCredential(models.Model):
     is_active = models.BooleanField(default=True)
     
     class Meta:
-        db_table = 'tfa_webauthn_credentials'  # tfa = two-factor auth
+        db_table = 'webauthn_credentials'  # Use original table name from migration
         verbose_name = 'WebAuthn Credential'
         verbose_name_plural = 'WebAuthn Credentials'
         indexes = [

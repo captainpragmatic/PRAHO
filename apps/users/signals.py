@@ -27,36 +27,40 @@ def save_user_profile(sender, instance, **kwargs):
 @receiver(user_logged_in)
 def log_user_login(sender, request, user, **kwargs):
     """Log successful user login"""
-    UserLoginLog.objects.create(
-        user=user,
-        ip_address=_get_client_ip(request),
-        user_agent=request.META.get('HTTP_USER_AGENT', ''),
-        status='success'
-    )
+    # 🚨 DISABLED: Login logging now handled in login view with account lockout integration
+    # UserLoginLog.objects.create(
+    #     user=user,
+    #     ip_address=_get_client_ip(request),
+    #     user_agent=request.META.get('HTTP_USER_AGENT', ''),
+    #     status='success'
+    # )
+    pass
 
 
 @receiver(user_login_failed)
 def log_failed_login(sender, credentials, request, **kwargs):
     """Log failed login attempt"""
-    email = credentials.get('username') or credentials.get('email')
-    
-    if email:
-        try:
-            user = User.objects.get(email=email)
-            UserLoginLog.objects.create(
-                user=user,
-                ip_address=_get_client_ip(request),
-                user_agent=request.META.get('HTTP_USER_AGENT', ''),
-                status='failed_password'
-            )
-        except User.DoesNotExist:
-            # Create anonymous failed login log
-            UserLoginLog.objects.create(
-                user=None,
-                ip_address=_get_client_ip(request),
-                user_agent=request.META.get('HTTP_USER_AGENT', ''),
-                status='failed_password'
-            )
+    # 🚨 DISABLED: Failed login logging now handled in login view with account lockout integration
+    # email = credentials.get('username') or credentials.get('email')
+    # 
+    # if email:
+    #     try:
+    #         user = User.objects.get(email=email)
+    #         UserLoginLog.objects.create(
+    #             user=user,
+    #             ip_address=_get_client_ip(request),
+    #             user_agent=request.META.get('HTTP_USER_AGENT', ''),
+    #             status='failed_password'
+    #         )
+    #     except User.DoesNotExist:
+    #         # Create anonymous failed login log
+    #         UserLoginLog.objects.create(
+    #             user=None,
+    #             ip_address=_get_client_ip(request),
+    #             user_agent=request.META.get('HTTP_USER_AGENT', ''),
+    #             status='failed_password'
+    #         )
+    pass
 
 
 def _get_client_ip(request):

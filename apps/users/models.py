@@ -183,7 +183,41 @@ class User(AbstractUser):
         
         from django.utils import timezone
         return timezone.now() < self.account_locked_until
-    
+
+    def increment_failed_login_attempts(self) -> None:
+        """Increment failed login attempts and apply progressive lockout"""
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        self.failed_login_attempts += 1
+        
+        # Progressive lockout delays: 5min → 15min → 30min → 1hr → 2hr → 4hr
+        lockout_delays = [5, 15, 30, 60, 120, 240]  # minutes
+        
+        if self.failed_login_attempts >= len(lockout_delays):
+            # Cap at maximum lockout (4 hours)
+            lockout_minutes = lockout_delays[-1]
+        else:
+            lockout_minutes = lockout_delays[self.failed_login_attempts - 1]
+        
+        self.account_locked_until = timezone.now() + timedelta(minutes=lockout_minutes)
+        self.save(update_fields=['failed_login_attempts', 'account_locked_until'])
+
+    def reset_failed_login_attempts(self) -> None:
+        """Reset failed login attempts and unlock account"""
+        self.failed_login_attempts = 0
+        self.account_locked_until = None
+        self.save(update_fields=['failed_login_attempts', 'account_locked_until'])
+
+    def get_lockout_remaining_time(self) -> int:
+        """Get remaining lockout time in minutes, 0 if not locked"""
+        if not self.is_account_locked() or not self.account_locked_until:
+            return 0
+        
+        from django.utils import timezone
+        remaining = self.account_locked_until - timezone.now()
+        return max(0, int(remaining.total_seconds() / 60))
+
     def get_staff_role_display(self) -> str:
         """Get display name for staff role"""
         if not self.staff_role:
@@ -421,8 +455,12 @@ class UserLoginLog(models.Model):
         ('success', _('Success')),
         ('failed_password', _('Failed Password')),
         ('failed_2fa', _('Failed 2FA')),
+        ('failed_user_not_found', _('Failed User Not Found')),
         ('account_locked', _('Account Locked')),
         ('account_disabled', _('Account Disabled')),
+        ('password_reset_completed', _('Password Reset Completed')),
+        ('account_lockout_reset', _('Account Lockout Reset')),
+        ('password_reset_failed', _('Password Reset Failed')),
     ]
     
     user = models.ForeignKey(
@@ -436,7 +474,7 @@ class UserLoginLog(models.Model):
     timestamp = models.DateTimeField(auto_now_add=True)
     ip_address = models.GenericIPAddressField()
     user_agent = models.TextField()
-    status = models.CharField(max_length=20, choices=LOGIN_STATUS_CHOICES)
+    status = models.CharField(max_length=30, choices=LOGIN_STATUS_CHOICES)
     
     # Geographic info (optional)
     country = models.CharField(max_length=100, blank=True)

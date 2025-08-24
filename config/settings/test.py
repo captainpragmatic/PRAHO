@@ -14,6 +14,20 @@ DEBUG = False
 TEMPLATE_DEBUG = False
 
 # ===============================================================================
+# DISABLE DEBUG TOOLBAR IN TESTS
+# ===============================================================================
+
+DEBUG_TOOLBAR_CONFIG = {
+    'IS_RUNNING_TESTS': False
+}
+
+# Remove debug toolbar from installed apps in tests
+INSTALLED_APPS = [app for app in INSTALLED_APPS if app != 'debug_toolbar']
+
+# Remove debug toolbar middleware in tests
+MIDDLEWARE = [mw for mw in MIDDLEWARE if 'debug_toolbar' not in mw]
+
+# ===============================================================================
 # TEST DATABASE (In-memory for speed)
 # ===============================================================================
 

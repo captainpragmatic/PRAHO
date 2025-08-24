@@ -56,7 +56,7 @@ from .forms import CustomerOnboardingRegistrationForm
 # ===============================================================================
 
 def login_view(request: HttpRequest) -> HttpResponse:
-    """Romanian-localized login view"""
+    """Romanian-localized login view with account lockout protection"""
     if request.user.is_authenticated:
         return redirect('dashboard')
     
@@ -70,26 +70,66 @@ def login_view(request: HttpRequest) -> HttpResponse:
             try:
                 user = User.objects.get(email=email)
                 if user.is_account_locked():
+                    remaining_minutes = user.get_lockout_remaining_time()
                     messages.error(
                         request,
-                        _('Account temporarily locked for security reasons.')
+                        _('Account temporarily locked for security reasons. Try again in {minutes} minutes.').format(
+                            minutes=remaining_minutes
+                        )
                     )
                     return render(request, 'users/login.html', {'form': form})
             except User.DoesNotExist:
-                pass
+                # Don't reveal that user doesn't exist
+                user = None
             
             # Authenticate user
-            user = authenticate(request, username=email, password=password)
+            authenticated_user = authenticate(request, username=email, password=password)
             
-            if user:
-                # Regular login
-                login(request, user)
+            if authenticated_user:
+                # Successful login - reset failed attempts and log success
+                user_obj = cast(User, authenticated_user)
+                user_obj.reset_failed_login_attempts()
                 
-                messages.success(request, _('Welcome, {user_full_name}!').format(user_full_name=user.get_full_name()))
+                # Update login tracking
+                user_obj.last_login_ip = _get_client_ip(request)
+                user_obj.save(update_fields=['last_login_ip'])
+                
+                # Log successful login
+                UserLoginLog.objects.create(
+                    user=user_obj,
+                    ip_address=_get_client_ip(request),
+                    user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                    status='success'
+                )
+                
+                login(request, user_obj)
+                messages.success(request, _('Welcome, {user_full_name}!').format(
+                    user_full_name=user_obj.get_full_name()
+                ))
                 
                 next_url = request.GET.get('next', 'dashboard')
                 return redirect(next_url)
             else:
+                # Failed login - increment failed attempts if user exists
+                if user:
+                    user.increment_failed_login_attempts()
+                    
+                    # Log failed login attempt
+                    UserLoginLog.objects.create(
+                        user=user,
+                        ip_address=_get_client_ip(request),
+                        user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                        status='failed_password'
+                    )
+                else:
+                    # Log failed login for non-existent user (no user object)
+                    UserLoginLog.objects.create(
+                        user=None,
+                        ip_address=_get_client_ip(request),
+                        user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                        status='failed_user_not_found'
+                    )
+                
                 messages.error(request, _('Incorrect email or password.'))
     else:
         form = LoginForm()
