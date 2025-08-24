@@ -107,6 +107,13 @@ def login_view(request: HttpRequest) -> HttpResponse:
                 ))
                 
                 next_url = request.GET.get('next', 'dashboard')
+                
+                # Handle HTMX requests with full page reload
+                if request.headers.get('HX-Request'):
+                    response = HttpResponse()
+                    response['HX-Redirect'] = reverse(next_url) if next_url == 'dashboard' else next_url
+                    return response
+                
                 return redirect(next_url)
             else:
                 # Failed login - increment failed attempts if user exists
