@@ -170,13 +170,28 @@ addopts = [
     "--disable-warnings",
     "--reuse-db",
 ]
-testpaths = ["tests", "apps"]
+testpaths = [
+    "tests/users",
+    "tests/billing", 
+    "tests/customers",
+    "tests/audit",
+    "tests/common",
+    "tests/domains",
+    "tests/notifications", 
+    "tests/orders",
+    "tests/products",
+    "tests/provisioning",
+    "tests/tickets",
+    "tests/ui",
+    "tests/integration-tests"
+]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
-    "integration: marks tests as integration tests",
+    "integration: marks tests as integration tests (cross-app functionality)",
     "e2e: marks tests as end-to-end tests",
     "romanian_compliance: marks tests for Romanian regulations",
     "security: marks security-related tests",
+    "unit: marks tests as unit tests (single app/component)",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning",

@@ -3,31 +3,65 @@
 ## Overview
 **Hybrid testing approach** with Django test runner as default and optional pytest for production CI.
 
+## **Test Structure** 🏗️
+
+### **Organized by App Structure**
+Tests mirror the `apps/` directory structure for clear organization:
+
+```bash
+tests/
+├── users/                    # User authentication, 2FA, roles
+├── billing/                  # Invoices, payments, credit ledger  
+├── customers/               # Customer management
+├── audit/                   # Audit logging
+├── common/                  # Shared utilities
+├── domains/                 # Domain management
+├── integrations/            # External service integrations
+├── notifications/           # Email, SMS notifications
+├── orders/                  # Order processing
+├── products/                # Product catalog
+├── provisioning/            # Service provisioning
+├── tickets/                 # Support tickets
+├── ui/                      # Frontend/HTMX components
+└── integration-tests/       # Cross-app workflows
+```
+
+### **Naming Convention**
+- **Unit Tests**: `test_{app}_{feature}.py` (e.g., `test_users_2fa.py`)
+- **Integration Tests**: `test_{workflow_name}.py` in `integration-tests/`
+- **Clear Separation**: App tests vs cross-app tests
+
 ## **Current Status** ✅
 
 ### Active Test Suite
-- **`test_customer_user_comprehensive.py`** - Complete normalized customer model testing (14 tests)
-- **Coverage**: 39.22% overall, 85.71% on customer models
-- **Performance**: 0.047s execution time with query budget testing
-
-### Legacy Test Files (Retired)
-- **`test_customers.py.legacy`** - Old monolithic model tests (preserved for reference)
-- **`test_billing.py.legacy`** - Old billing tests using deprecated structure
+- **User Tests**: 2FA security, password reset validation
+- **Billing Tests**: Complete billing cycle (6 test files)
+- **Integration Tests**: Customer-user comprehensive workflows
+- **Coverage**: High coverage on critical business logic
+- **Performance**: Fast execution with query budget testing
 
 ## **Testing Commands** 📋
 
 ```bash
 # Primary development workflow (Django + SQLite)
-make test           # Run all tests - DEFAULT approach
-make test-fast      # Quick smoke tests (verbosity=1)
-make test-coverage  # Coverage analysis with HTML report
+make test               # Run all tests - DEFAULT approach
+make test-fast          # Quick smoke tests (verbosity=1)
+make test-coverage      # Coverage analysis with HTML report
 
-# Advanced/Production testing
-make test-prod      # pytest with PostgreSQL (auto-installs pytest if needed)
-make test-all       # Run both Django and pytest suites
+# App-specific testing
+pytest tests/users/           # User management tests only
+pytest tests/billing/         # Billing functionality only  
+pytest tests/integration-tests/  # Cross-app workflows only
 
-# Specific test files
-make test-file FILE=tests.test_customer_user_comprehensive
+# Advanced testing with markers
+pytest -m "integration"      # Integration tests only
+pytest -m "not slow"        # Skip slow tests
+pytest -m "security"        # Security-related tests
+pytest -m "romanian_compliance"  # Romanian regulation tests
+
+# Production testing
+make test-prod          # pytest with PostgreSQL (auto-installs pytest if needed)
+make test-all           # Run both Django and pytest suites
 ```
 
 ## **Architecture Decision** 🎯

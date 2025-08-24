@@ -1,7 +1,50 @@
 # 🧪 COMPREHENSIVE TEST SUITE SUMMARY
 
-## Overview
-Successfully created comprehensive test coverage for PRAHO Platform customer and user management functionality. All 14 tests pass with full coverage of critical business scenarios.
+## Test Structure Overview
+PRAHO Platform follows Django best practices with tests organized to mirror the `apps/` structure:
+
+```
+tests/
+├── conftest.py                    # Global fixtures & configuration
+├── users/                         # User authentication, 2FA, password reset
+│   ├── test_users_2fa.py         # Two-factor authentication tests
+│   └── test_users_password_reset.py # Password reset security tests
+├── billing/                       # All billing-related functionality  
+│   ├── test_billing_creditledger.py
+│   ├── test_billing_currency.py
+│   ├── test_billing_invoice.py
+│   ├── test_billing_payment.py
+│   ├── test_billing_proforma.py
+│   └── test_billing_sequences.py
+├── customers/                     # Customer management (future)
+├── integration-tests/            # Cross-app integration tests
+│   └── test_customer_user_comprehensive.py
+└── [other app directories]       # audit/, common/, domains/, etc.
+```
+
+## Running Tests
+
+### All Tests
+```bash
+make test
+# or
+pytest tests/
+```
+
+### App-Specific Tests
+```bash
+pytest tests/users/           # User management tests
+pytest tests/billing/         # Billing functionality tests  
+pytest tests/integration-tests/  # Cross-app integration tests
+```
+
+### Test Markers
+```bash
+pytest -m "integration"       # Integration tests only
+pytest -m "not slow"         # Skip slow tests
+pytest -m "security"         # Security-related tests
+pytest -m "romanian_compliance"  # Romanian regulation tests
+```
 
 ## Test Coverage Achieved ✅
 

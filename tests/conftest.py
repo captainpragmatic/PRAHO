@@ -1,6 +1,20 @@
 # ===============================================================================
 # PYTEST CONFIGURATION FOR PRAHO PLATFORM
 # ===============================================================================
+"""
+Global test configuration for PRAHO Platform.
+
+Test Structure:
+- tests/ mirrors apps/ structure for app-specific tests
+- tests/integration-tests/ for cross-app integration tests  
+- Naming convention: test_{app}_{feature}.py
+
+Test Discovery:
+- pytest automatically discovers tests in tests/{app}/ directories
+- Run specific app tests: pytest tests/billing/
+- Run integration tests: pytest tests/integration-tests/
+- Run all tests: pytest tests/
+"""
 
 import os
 import django
@@ -107,10 +121,9 @@ def authenticated_client(client, user):
     return client
 
 # ===============================================================================
-# TEST MARKS
+# TEST MARKS - DEFINED IN PYPROJECT.TOML
 # ===============================================================================
-
-pytest.mark.slow = pytest.mark.slow
-pytest.mark.integration = pytest.mark.integration
-pytest.mark.romanian = pytest.mark.romanian
-pytest.mark.vat = pytest.mark.vat
+"""
+Test marks are configured in pyproject.toml [tool.pytest.ini_options] markers.
+Use with: @pytest.mark.slow, @pytest.mark.integration, etc.
+"""

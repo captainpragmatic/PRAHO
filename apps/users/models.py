@@ -452,3 +452,7 @@ class UserLoginLog(models.Model):
     def __str__(self) -> str:
         user_display = self.user.email if self.user else "Unknown User"
         return f"{user_display} - {self.status} at {self.timestamp}"
+
+
+# Import MFA models to ensure they're recognized by Django
+from .mfa import WebAuthnCredential  # noqa
