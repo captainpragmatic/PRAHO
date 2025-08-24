@@ -523,6 +523,17 @@ class CustomerCreationForm(forms.Form):
         })
     )
     
+    def clean_phone(self):
+        """Validate Romanian phone number using centralized validation"""
+        phone = self.cleaned_data.get('phone')
+        if phone:
+            from apps.common.types import validate_romanian_phone
+            result = validate_romanian_phone(phone.strip())
+            if result.is_err():
+                raise ValidationError(result.error)
+            return result.unwrap()
+        return phone
+
     def clean(self):
         """Cross-field validation"""
         cleaned_data = super().clean()

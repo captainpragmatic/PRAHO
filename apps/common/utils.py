@@ -24,15 +24,10 @@ from django.utils.translation import gettext_lazy as _
 # ===============================================================================
 
 def validate_romanian_phone(phone: str) -> bool:
-    """Validate Romanian phone number format"""
-    # Romanian phone patterns: +40.XX.XXX.XXXX or 07XXXXXXXX
-    patterns = [
-        r'^\+40\.\d{2}\.\d{3}\.\d{4}$',  # +40.21.123.4567
-        r'^07\d{8}$',                     # 0712345678
-        r'^\+407\d{8}$',                  # +40712345678
-    ]
-    
-    return any(re.match(pattern, phone) for pattern in patterns)
+    """Validate Romanian phone number format (deprecated - use apps.common.types.validate_romanian_phone)"""
+    from apps.common.types import validate_romanian_phone as new_validator
+    result = new_validator(phone)
+    return result.is_ok()
 
 
 def format_romanian_phone(phone: str) -> str:

@@ -2,99 +2,119 @@
 
 {# HTMX Partial Template for Ticket Comments #}
 {% for comment in comments %}
-<div class="mb-6 {% if not forloop.last %}border-b border-slate-700 pb-6{% endif %}">
-    <div class="flex items-start space-x-3">
-        <!-- Avatar -->
-        <div class="flex-shrink-0">
-            <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium
-                {% if comment.comment_type == 'customer' %}bg-green-100 text-green-800{% elif comment.comment_type == 'support' %}bg-blue-100 text-blue-800{% elif comment.comment_type == 'internal' %}bg-yellow-100 text-yellow-800{% else %}bg-slate-100 text-slate-800{% endif %}">
-                {{ comment.get_author_name|first|upper }}
+    {# Only show internal comments to staff - following same pattern as billing templates #}
+    {% if comment.comment_type == 'internal' and user.is_staff %}
+        <div class="bg-amber-900/50 border-2 border-amber-600 rounded-xl p-6 mb-8 shadow-2xl ring-1 ring-amber-500/50">
+    {% elif comment.comment_type != 'internal' %}
+        <div class="mb-8{% if not forloop.last %} border-b border-slate-700 pb-8{% endif %}">
+    {% endif %}
+    
+    {# Render comment content only if it should be visible #}
+    {% if comment.comment_type != 'internal' or user.is_staff %}
+        <div class="flex items-start space-x-3">
+            <!-- Avatar -->
+            <div class="flex-shrink-0">
+                <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium
+                    {% if comment.comment_type == 'customer' %}bg-green-100 text-green-800{% elif comment.comment_type == 'support' %}bg-blue-100 text-blue-800{% elif comment.comment_type == 'internal' %}bg-amber-100 text-amber-800 ring-2 ring-amber-400 shadow-md{% else %}bg-slate-100 text-slate-800{% endif %}">
+                    {{ comment.get_author_name|first|upper }}
+                </div>
             </div>
-        </div>
-        
-        <!-- Comment Content -->
-        <div class="flex-1 min-w-0">
-            <!-- Header -->
-            <div class="flex items-center justify-between mb-2">
-                <div class="flex items-center space-x-2">
-                    <p class="text-white font-medium">{{ comment.get_author_name }}</p>
+            
+            <!-- Comment Content -->
+            <div class="flex-1 min-w-0">
+                <!-- Header -->
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center space-x-2">
+                        <p class="{% if comment.comment_type == 'internal' %}text-amber-100 font-bold text-lg{% else %}text-white font-medium{% endif %}">
+                            {{ comment.get_author_name }}
+                        </p>
+                        
+                        <!-- Role Badge -->
+                        {% if comment.comment_type == 'customer' %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                                <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"></path>
+                                </svg>
+                                {% trans 'Customer' %}
+                            </span>
+                        {% elif comment.comment_type == 'support' %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                                </svg>
+                                {% trans 'Support' %}
+                            </span>
+                        {% elif comment.comment_type == 'internal' %}
+                            <span class="inline-flex items-center px-3 py-1.5 rounded-full text-sm font-bold bg-red-700 text-white border-2 border-red-500 shadow-lg">
+                                <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M18 8a6 6 0 01-7.743 5.743L10 14l-1 1-1-1h-.257A6 6 0 1118 8zM7 9a1 1 0 100 2 1 1 0 000-2zm7 1a1 1 0 11-2 0 1 1 0 012 0zm-3 1a1 1 0 100 2 1 1 0 000-2z" clip-rule="evenodd"></path>
+                                </svg>
+                                {% trans 'STAFF INTERNAL NOTE' %}
+                            </span>
+                        {% endif %}
+                        
+                        <!-- Billable Status -->
+                        {% if comment.is_billable %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                                <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                                    <path d="M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z"></path>
+                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z" clip-rule="evenodd"></path>
+                                </svg>
+                                {% trans 'Billable' %}
+                            </span>
+                        {% endif %}
+                    </div>
                     
-                    <!-- Role Badge -->
-                    {% if comment.comment_type == 'customer' %}
-                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
-                            <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"></path>
-                            </svg>
-                            {% trans 'Customer' %}
-                        </span>
-                    {% elif comment.comment_type == 'support' %}
-                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                            <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
-                            </svg>
-                            {% trans 'Support' %}
-                        </span>
-                    {% elif comment.comment_type == 'internal' %}
-                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
-                            <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd" d="M18 8a6 6 0 01-7.743 5.743L10 14l-1 1-1-1h-.257A6 6 0 1118 8zM7 9a1 1 0 100 2 1 1 0 000-2zm7 1a1 1 0 11-2 0 1 1 0 012 0zm-3 1a1 1 0 100 2 1 1 0 000-2z" clip-rule="evenodd"></path>
-                            </svg>
-                            {% trans 'Internal' %}
-                        </span>
-                    {% endif %}
-                    
-                    <!-- Solution Badge -->
-                    {% if comment.is_solution %}
-                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-600 text-white">
-                            <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
-                            </svg>
-                            {% trans 'Solution' %}
-                        </span>
-                    {% endif %}
+                    <!-- Timestamp -->
+                    <p class="{% if comment.comment_type == 'internal' %}text-amber-200 text-sm{% else %}text-slate-400 text-sm{% endif %}" title="{{ comment.created_at|date:'c' }}">
+                        {{ comment.created_at|date:"d.m.Y H:i" }}
+                    </p>
                 </div>
                 
-                <!-- Timestamp -->
-                <p class="text-slate-400 text-sm" title="{{ comment.created_at|date:'c' }}">
-                    {{ comment.created_at|date:"d.m.Y H:i" }}
-                </p>
-            </div>
-            
-            <!-- Content -->
-            <div class="prose prose-invert prose-sm max-w-none">
-                <div class="text-slate-300 leading-relaxed">
-                    {{ comment.content|linebreaksbr }}
+                <!-- Content -->
+                {% if comment.comment_type == 'internal' %}
+                <div class="bg-amber-900/30 border border-amber-700/50 rounded-lg p-4 mt-3">
+                    <div class="text-amber-100 font-medium leading-relaxed text-base">
+                        {{ comment.content|linebreaksbr }}
+                    </div>
                 </div>
-            </div>
-            
-            <!-- Time Spent -->
-            {% if comment.time_spent > 0 %}
-            <div class="mt-2 text-xs text-slate-500">
-                <svg class="w-3 h-3 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
-                {% trans 'Time spent' %}: {{ comment.time_spent }}h
-            </div>
-            {% endif %}
-            
-            <!-- Attachments -->
-            {% if comment.attachments.all %}
-            <div class="mt-3 space-y-2">
-                {% for attachment in comment.attachments.all %}
-                <div class="flex items-center space-x-2 text-sm text-slate-400">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path>
+                {% else %}
+                <div class="prose prose-invert prose-sm max-w-none mt-3">
+                    <div class="text-slate-300 leading-relaxed">
+                        {{ comment.content|linebreaksbr }}
+                    </div>
+                </div>
+                {% endif %}
+                
+                <!-- Time Spent -->
+                {% if comment.time_spent > 0 %}
+                <div class="{% if comment.comment_type == 'internal' %}mt-3 text-xs text-amber-300{% else %}mt-2 text-xs text-slate-500{% endif %}">
+                    <svg class="w-3 h-3 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                     </svg>
-                    <a href="{% url 'tickets:download_attachment' attachment_id=attachment.id %}" class="text-blue-400 hover:text-blue-300">
-                        {{ attachment.filename }} ({{ attachment.get_file_size_display }})
-                    </a>
+                    {% trans 'Time spent' %}: {{ comment.time_spent }} {% trans 'minutes' %}
                 </div>
-                {% endfor %}
+                {% endif %}
+                
+                <!-- Attachments -->
+                {% if comment.attachments.all %}
+                <div class="{% if comment.comment_type == 'internal' %}mt-4 bg-amber-900/30 border border-amber-700/50 rounded-lg p-4{% else %}mt-3 space-y-2{% endif %}">
+                    {% for attachment in comment.attachments.all %}
+                    <div class="flex items-center space-x-2 text-sm {% if comment.comment_type == 'internal' %}text-amber-200{% else %}text-slate-400{% endif %}">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path>
+                        </svg>
+                        <a href="{% url 'tickets:download_attachment' attachment_id=attachment.id %}" class="{% if comment.comment_type == 'internal' %}text-amber-300 hover:text-amber-200 font-medium{% else %}text-blue-400 hover:text-blue-300{% endif %}">
+                            {{ attachment.filename }} ({{ attachment.get_file_size_display }})
+                        </a>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
             </div>
-            {% endif %}
         </div>
-    </div>
-</div>
+        </div>
+    {% endif %}
 {% empty %}
 <div class="text-center py-8">
     <svg class="mx-auto h-12 w-12 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">

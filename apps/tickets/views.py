@@ -45,8 +45,19 @@ def ticket_detail(request, pk):
         messages.error(request, _("❌ You do not have permission to access this ticket."))
         return redirect('tickets:list')
     
+    # Filter comments based on user permissions
+    if request.user.is_staff_user:
+        # Staff can see all comments including internal notes
+        comments = ticket.comments.all().order_by('created_at')
+    else:
+        # Customers can only see customer and support comments (never internal)
+        comments = ticket.comments.filter(
+            comment_type__in=['customer', 'support']
+        ).order_by('created_at')
+    
     context = {
         'ticket': ticket,
+        'comments': comments,
         'can_edit': ticket.status in ['open', 'in_progress'],
     }
     
@@ -205,7 +216,16 @@ def ticket_comments_htmx(request, pk):
     if ticket.customer.id not in accessible_customer_ids:
         return HttpResponse('<div class="text-red-500">Access denied</div>')
     
-    comments = ticket.comments.all().order_by('created_at')
+    # Filter comments based on user permissions
+    if request.user.is_staff_user:
+        # Staff can see all comments including internal notes
+        comments = ticket.comments.all().order_by('created_at')
+    else:
+        # Customers can only see customer and support comments (never internal)
+        comments = ticket.comments.filter(
+            comment_type__in=['customer', 'support']
+        ).order_by('created_at')
+    
     return render(request, 'tickets/partials/comments_list.html', {
         'ticket': ticket,
         'comments': comments,

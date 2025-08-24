@@ -155,23 +155,39 @@ def validate_email(email: str) -> Result[str, str]:
 
 
 def validate_romanian_phone(phone: str) -> Result[str, str]:
-    """Validate Romanian phone number"""
+    """Validate Romanian phone number with comprehensive support for Romanian formats"""
     import re
     
     # Remove all non-digit characters
     digits = re.sub(r'\D', '', phone)
     
-    # Check Romanian mobile formats
-    if digits.startswith('40'):  # +40 country code
-        if len(digits) == 12:  # +40 + 10 digits
-            return Ok(f"+{digits}")
-    elif digits.startswith('0'):  # National format
-        if len(digits) == 10 and digits[1] in '7':  # Mobile numbers start with 07
-            return Ok(f"+40{digits[1:]}")
-    elif len(digits) == 9 and digits[0] in '7':  # Without leading 0
-        return Ok(f"+40{digits}")
+    if not digits:
+        return Err("Phone number is required")
     
-    return Err("Invalid Romanian phone number format")
+    # Handle +40 prefix (Romanian country code)
+    if digits.startswith('40'):
+        # Remove the 40 prefix and validate the remaining number
+        local_digits = digits[2:]
+        if len(local_digits) >= 9 and len(local_digits) <= 10:
+            # Check if it's a valid Romanian number (starts with 7 for mobile or 2/3 for landline)
+            if local_digits.startswith('7') or local_digits.startswith('2') or local_digits.startswith('3'):
+                return Ok(f"+40{local_digits}")
+    
+    # Handle national format (starts with 0)
+    elif digits.startswith('0'):
+        local_digits = digits[1:]  # Remove leading 0
+        if len(local_digits) >= 9 and len(local_digits) <= 10:
+            # Check if it's a valid Romanian number
+            if local_digits.startswith('7') or local_digits.startswith('2') or local_digits.startswith('3'):
+                return Ok(f"+40{local_digits}")
+    
+    # Handle direct format (without country code or leading 0)
+    elif len(digits) >= 9 and len(digits) <= 10:
+        # Check if it's a valid Romanian number
+        if digits.startswith('7') or digits.startswith('2') or digits.startswith('3'):
+            return Ok(f"+40{digits}")
+    
+    return Err("Invalid Romanian phone number format. Expected: +40 721 123 456, 0721 123 456, or 721 123 456")
 
 
 def calculate_romanian_vat(amount_cents: int, include_vat: bool = True) -> dict:

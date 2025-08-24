@@ -122,6 +122,17 @@ class UserRegistrationForm(UserCreationForm):
             raise ValidationError(_('An account with this email address already exists.'))
         return email
     
+    def clean_phone(self):
+        """Validate Romanian phone number using centralized validation"""
+        phone = self.cleaned_data.get('phone')
+        if phone:
+            from apps.common.types import validate_romanian_phone
+            result = validate_romanian_phone(phone.strip())
+            if result.is_err():
+                raise ValidationError(result.error)
+            return result.unwrap()
+        return phone
+    
     def save(self, commit=True):
         user = super().save(commit=False)
         user.username = self.cleaned_data['email']  # Use email as username
@@ -208,6 +219,17 @@ class UserProfileForm(forms.ModelForm):
             self.fields['first_name'].initial = self.instance.user.first_name
             self.fields['last_name'].initial = self.instance.user.last_name
             self.fields['phone'].initial = self.instance.user.phone
+    
+    def clean_phone(self):
+        """Validate phone number"""
+        phone = self.cleaned_data.get('phone')
+        if phone:
+            from apps.common.types import validate_romanian_phone
+            result = validate_romanian_phone(phone.strip())
+            if result.is_err():
+                raise ValidationError(result.error)
+            return result.unwrap()
+        return phone
     
     def save(self, commit=True):
         profile = super().save(commit=False)
@@ -463,6 +485,17 @@ class CustomerOnboardingRegistrationForm(UserCreationForm):
     class Meta:
         model = User
         fields = ['email', 'first_name', 'last_name', 'phone', 'password1', 'password2']
+    
+    def clean_phone(self):
+        """Validate Romanian phone number using centralized validation"""
+        phone = self.cleaned_data.get('phone')
+        if phone:
+            from apps.common.types import validate_romanian_phone
+            result = validate_romanian_phone(phone.strip())
+            if result.is_err():
+                raise ValidationError(result.error)
+            return result.unwrap()
+        return phone
     
     def clean_vat_number(self):
         """Validate VAT number format"""

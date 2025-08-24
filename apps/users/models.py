@@ -57,7 +57,7 @@ class User(AbstractUser):
     phone = models.CharField(
         max_length=20, 
         blank=True,
-        validators=[RegexValidator(r'^(\+40|0)[0-9]{9,10}$', _('Invalid Romanian phone number'))]
+        help_text=_('Romanian phone number format: +40 721 123 456')
     )
     
     # Staff role for internal staff users (null for customer users)
@@ -250,6 +250,18 @@ class User(AbstractUser):
         remaining = self.account_locked_until - timezone.now()
         return max(0, int(remaining.total_seconds() / 60))
 
+    def clean(self):
+        """Validate user data including phone number"""
+        super().clean()
+        
+        if self.phone:
+            from apps.common.types import validate_romanian_phone
+            result = validate_romanian_phone(self.phone.strip())
+            if result.is_err():
+                from django.core.exceptions import ValidationError
+                raise ValidationError({'phone': result.error})
+            self.phone = result.unwrap()
+    
     def get_staff_role_display(self) -> str:
         """Get display name for staff role"""
         if not self.staff_role:
