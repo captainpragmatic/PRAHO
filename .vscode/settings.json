@@ -75,5 +75,6 @@
     "/^python\\s+manage\\.py\\s+test(\\s|$)/": true,
     "/^python\\s+manage\\.py\\s+runserver(\\s|$)/": true,
     "/^source\\s+\\.venv\\/bin\\/activate(\\s|$)/": true
-  }
+  },
+  "python.analysis.typeCheckingMode": "standard"
 }
