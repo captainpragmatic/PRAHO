@@ -473,13 +473,25 @@ def icon(
         'xl': 'w-8 h-8',
     }
     
-    # Build CSS classes
+    # Validate and sanitize inputs to prevent XSS
+    from django.utils.html import escape
+    import re
+    
+    # Sanitize icon name - only allow alphanumeric and hyphens
+    if not re.match(r'^[a-zA-Z0-9\-_]+$', name):
+        name = 'default'  # Fallback to safe default
+    
+    # Build CSS classes with escaped input
     classes = f"inline-block {size_classes.get(size, size_classes['md'])}"
     if css_class:
-        classes += f" {css_class}"
+        classes += f" {escape(css_class)}"
+    
+    # Escape all inputs before rendering
+    safe_name = escape(name)
+    safe_classes = escape(classes)
     
     # For now, return a placeholder - will be replaced with actual SVG icons
-    return mark_safe(f'<svg class="{classes}" data-icon="{name}"><use href="#icon-{name}"></use></svg>')
+    return mark_safe(f'<svg class="{safe_classes}" data-icon="{safe_name}"><use href="#icon-{safe_name}"></use></svg>')  # nosec B308 B703 - All inputs are validated and escaped
 
 
 @register.simple_tag(takes_context=True)

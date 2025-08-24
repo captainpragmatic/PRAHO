@@ -34,7 +34,7 @@ def safe_message(value):
         strip=True
     )
     
-    return mark_safe(cleaned)
+    return mark_safe(cleaned)  # nosec B308 B703 - Input sanitized by bleach
 
 
 @register.filter
@@ -88,5 +88,5 @@ def secure_alert(message, alert_type='info', dismissible=True):
         ''',
         class_str,
         escaped_message,
-        mark_safe(dismiss_button)
+        mark_safe(dismiss_button)  # nosec B308 - Static HTML button, no user input
     )

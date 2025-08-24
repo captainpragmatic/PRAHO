@@ -350,7 +350,7 @@ def romanian_legal_notice() -> str:
     Usage:
         {% romanian_legal_notice %}
     """
-    return mark_safe(
+    return mark_safe(  # nosec B308 B703 - Static legal text, no user input
         "Această factură este emisă în conformitate cu Legea 227/2015 "
         "privind Codul fiscal și HG 1/2016 pentru aplicarea Codului fiscal."
     )
@@ -437,6 +437,8 @@ def highlight_search(text: str, search_term: str) -> str:
     """
     Highlight search terms in Romanian text (case-insensitive, diacritic-aware)
     
+    🔒 SECURITY: HTML-escapes input before highlighting to prevent XSS
+    
     Usage:
         {{ description|highlight_search:query }}
     
@@ -446,6 +448,11 @@ def highlight_search(text: str, search_term: str) -> str:
     """
     if not text or not search_term:
         return text
+    
+    # First escape HTML to prevent XSS
+    from django.utils.html import escape
+    escaped_text = escape(text)
+    escaped_search = escape(search_term)
     
     # Romanian diacritic mapping for search
     diacritic_map = {
@@ -459,11 +466,11 @@ def highlight_search(text: str, search_term: str) -> str:
             s = s.replace(diacritic, replacement)
         return s.lower()
     
-    normalized_text = normalize_text(text)
-    normalized_search = normalize_text(search_term)
+    normalized_text = normalize_text(escaped_text)
+    normalized_search = normalize_text(escaped_search)
     
     # Find matches
-    highlighted = text
+    highlighted = escaped_text
     start = 0
     while True:
         pos = normalized_text.find(normalized_search, start)
@@ -471,18 +478,18 @@ def highlight_search(text: str, search_term: str) -> str:
             break
         
         # Get the original text portion to preserve diacritics
-        original_match = text[pos:pos + len(search_term)]
+        original_match = escaped_text[pos:pos + len(escaped_search)]
         highlighted_match = f'<mark class="bg-yellow-200">{original_match}</mark>'
         
         # Replace in the highlighted text
         highlighted = (
             highlighted[:pos] + 
             highlighted_match + 
-            highlighted[pos + len(search_term):]
+            highlighted[pos + len(escaped_search):]
         )
         
         start = pos + len(highlighted_match)
         # Update the normalized text for next search
         normalized_text = normalize_text(highlighted)
     
-    return mark_safe(highlighted)
+    return mark_safe(highlighted)  # nosec B308 B703 - Input is HTML-escaped before highlighting
