@@ -138,13 +138,7 @@
 
             <!-- Confirmation Checkbox -->
             <div class="border border-yellow-600 bg-yellow-900 bg-opacity-30 rounded-lg p-4">
-              <div class="flex items-start">
-                <input type="checkbox" id="confirm_disable" name="confirm_disable" required
-                       class="h-4 w-4 text-red-600 focus:ring-red-500 border-gray-300 rounded mt-1">
-                <label for="confirm_disable" class="ml-3 text-sm text-yellow-200">
-                  {% trans 'I understand that disabling 2FA will make my account less secure and will permanently delete all backup codes' %}
-                </label>
-              </div>
+              {% checkbox_field name="confirm_disable" label="I understand that disabling 2FA will make my account less secure and will permanently delete all backup codes" required=True variant="warning" %}
             </div>
 
             <!-- Action Buttons -->
@@ -196,7 +190,7 @@
 <!-- JavaScript for Enhanced UX -->
 <script>
 function confirmDisable() {
-  const checkbox = document.getElementById('confirm_disable');
+  const checkbox = document.getElementById('checkbox-confirm_disable');
   if (!checkbox.checked) {
     alert('{% trans "Please confirm that you understand the security implications" %}');
     return false;

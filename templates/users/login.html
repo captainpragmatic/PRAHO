@@ -54,13 +54,7 @@
 
         <!-- Remember Me -->
         <div class="flex items-center justify-between">
-          <div class="flex items-center">
-            <input id="remember-me" name="remember-me" type="checkbox"
-              class="h-4 w-4 text-blue-600 bg-slate-700 border-slate-600 rounded focus:ring-blue-500">
-            <label for="remember-me" class="ml-2 block text-sm text-slate-300">
-              {% trans 'Keep me logged in' %}
-            </label>
-          </div>
+          {% checkbox_field name="remember-me" label="Keep me logged in" variant="primary" container_class="flex items-center" %}
 
           <div class="text-sm">
             <a href="{% url 'users:password_reset' %}" class="text-blue-400 hover:text-blue-300">

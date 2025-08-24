@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load i18n %}
+{% load ui_components %}
 
 {% block title %}{% trans 'Create Account' %} - PragmaticHost{% endblock %}
 
@@ -219,24 +220,12 @@
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <!-- Password -->
             <div>
-              <label for="{{ form.password1.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
-                {{ form.password1.label }}
-              </label>
-              {{ form.password1 }}
-              {% if form.password1.errors %}
-              <p class="mt-1 text-sm text-red-400">{{ form.password1.errors.0 }}</p>
-              {% endif %}
+              {% input_field name="password1" input_type="password" label="Password" placeholder="Enter secure password" required=True error=form.password1.errors.0|default:None %}
             </div>
 
             <!-- Confirm Password -->
             <div>
-              <label for="{{ form.password2.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
-                {{ form.password2.label }}
-              </label>
-              {{ form.password2 }}
-              {% if form.password2.errors %}
-              <p class="mt-1 text-sm text-red-400">{{ form.password2.errors.0 }}</p>
-              {% endif %}
+              {% input_field name="password2" input_type="password" label="Password confirmation" placeholder="Confirm your password" required=True error=form.password2.errors.0|default:None %}
             </div>
           </div>
         </div>
@@ -248,41 +237,15 @@
           </h3>
 
           <!-- Data Processing Consent -->
-          <div class="flex items-start space-x-3">
-            {{ form.data_processing_consent }}
-            <div class="flex-1">
-              <label for="{{ form.data_processing_consent.id_for_label }}" class="text-sm text-slate-300">
-                {{ form.data_processing_consent.label }}
-              </label>
-              {% if form.data_processing_consent.help_text %}
-              <p class="text-xs text-slate-400">{{ form.data_processing_consent.help_text }}</p>
-              {% endif %}
-              {% if form.data_processing_consent.errors %}
-              <p class="mt-1 text-sm text-red-400">{{ form.data_processing_consent.errors.0 }}</p>
-              {% endif %}
-            </div>
-          </div>
+          {% checkbox_field name="data_processing_consent" label="I agree to data processing" help_text="Required: Agreement to process personal data according to GDPR." required=True variant="primary" error=form.data_processing_consent.errors.0|default:None %}
 
           <!-- Marketing Consent -->
-          <div class="flex items-start space-x-3">
-            {{ form.marketing_consent }}
-            <div class="flex-1">
-              <label for="{{ form.marketing_consent.id_for_label }}" class="text-sm text-slate-300">
-                {{ form.marketing_consent.label }}
-              </label>
-              {% if form.marketing_consent.help_text %}
-              <p class="text-xs text-slate-400">{{ form.marketing_consent.help_text }}</p>
-              {% endif %}
-            </div>
-          </div>
+          {% checkbox_field name="marketing_consent" label="I agree to receive marketing communications" help_text="Optional: Receive newsletters and product updates." variant="primary" error=form.marketing_consent.errors.0|default:None %}
         </div>
 
         <!-- Submit Button -->
         <div class="pt-6">
-          <button type="submit"
-            class="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 focus:ring-offset-slate-800 transition-colors">
-            🚀 {% trans 'Create Account' %}
-          </button>
+          {% button "🚀 Create Account" variant="primary" type="submit" size="lg" %}
         </div>
 
         <!-- Login Link -->

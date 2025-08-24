@@ -154,6 +154,85 @@ def input_field(
     }
 
 
+@register.inclusion_tag('components/checkbox.html')
+def checkbox_field(
+    name: str,
+    *,
+    label: Optional[str] = None,
+    value: Optional[str] = None,
+    checked: bool = False,
+    required: bool = False,
+    disabled: bool = False,
+    error: Optional[str] = None,
+    help_text: Optional[str] = None,
+    variant: str = 'primary',
+    css_class: str = '',
+    container_class: str = '',
+    html_id: Optional[str] = None,
+    hx_get: Optional[str] = None,
+    hx_post: Optional[str] = None,
+    hx_trigger: Optional[str] = None,
+    hx_target: Optional[str] = None,
+    hx_swap: Optional[str] = None,
+    data_attrs: Optional[dict] = None,
+    **kwargs
+) -> Dict[str, Any]:
+    """
+    Romanian hosting provider checkbox component with proper text centering
+    
+    Usage:
+        {% checkbox_field "agree_terms" label="I agree to the terms and conditions" required=True %}
+        {% checkbox_field "marketing_consent" label="Send me updates" help_text="Optional newsletter subscription" %}
+        {% checkbox_field "confirm_action" label="I understand this action" variant="warning" %}
+    
+    Args:
+        name: Checkbox input name
+        label: Checkbox label text (Romanian text supported)
+        value: Checkbox value (default: "on")
+        checked: Initial checked state
+        required: Mark as required field
+        disabled: Disable the checkbox
+        error: Error message to display
+        help_text: Additional help text below label
+        variant: primary|success|warning|danger (affects colors)
+        css_class: Additional CSS classes for checkbox
+        container_class: Additional CSS classes for container
+        html_id: Custom HTML ID (auto-generated if not provided)
+        hx_*: HTMX attributes for dynamic behavior
+        data_attrs: Dictionary of data attributes
+    """
+    
+    # Auto-generate ID if not provided
+    if not html_id:
+        html_id = f"checkbox-{name}"
+    
+    # Default value for checkboxes
+    if not value:
+        value = "on"
+    
+    return {
+        'name': name,
+        'label': label,
+        'value': value,
+        'checked': checked,
+        'required': required,
+        'disabled': disabled,
+        'error': error,
+        'help_text': help_text,
+        'variant': variant,
+        'css_class': css_class,
+        'container_class': container_class,
+        'html_id': html_id,
+        'hx_get': hx_get,
+        'hx_post': hx_post,
+        'hx_trigger': hx_trigger,
+        'hx_target': hx_target,
+        'hx_swap': hx_swap,
+        'data_attrs': data_attrs or {},
+        **kwargs
+    }
+
+
 @register.inclusion_tag('components/alert.html')
 def alert(
     message: str,
