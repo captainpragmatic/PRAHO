@@ -28,7 +28,7 @@ help:
 # Development environment setup
 install:
 	@echo "🔧 Setting up development environment..."
-	python -m venv .venv
+	python3 -m venv .venv
 	.venv/bin/pip install --upgrade pip
 	.venv/bin/pip install -r requirements/dev.txt
 	@echo "✅ Environment ready! Activate with: source .venv/bin/activate"

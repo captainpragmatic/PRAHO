@@ -42,6 +42,9 @@ pytz>=2023.3
 # Romanian specific
 requests>=2.31.0  # For e-Factura API integration
 
+# Environment management
+python-dotenv>=1.0.0  # Load .env files for local development
+
 # Payments
 stripe>=6.0.0
 
