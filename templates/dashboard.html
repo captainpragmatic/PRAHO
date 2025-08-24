@@ -152,32 +152,34 @@
 
         <div class="space-y-3">
           {% for invoice in recent_invoices %}
-          <div class="flex items-center justify-between p-3 bg-slate-700 rounded-md">
-            <div>
-              {% if user.is_staff %}
-              <p class="text-white font-medium">{{ invoice.customer.company_name }}</p>
-              <p class="text-slate-400 text-sm">
-                {% trans 'Invoice' %} #{{ invoice.number }} - {{ invoice.created_at|date:"d.m.Y" }}
-              </p>
-              {% else %}
-              <p class="text-white font-medium">{% trans 'Invoice' %} #{{ invoice.number }}</p>
-              <p class="text-slate-400 text-sm">
-                {{ invoice.created_at|date:"d.m.Y" }}
-              </p>
-              {% endif %}
+          <a href="{% url 'billing:invoice_detail' invoice.id %}" class="block group">
+            <div class="flex items-center justify-between p-3 bg-slate-700 rounded-md hover:bg-slate-600 transition-colors border border-transparent hover:border-slate-500">
+              <div>
+                {% if user.is_staff %}
+                <p class="text-white font-medium group-hover:text-blue-400 transition-colors">{{ invoice.customer.company_name }}</p>
+                <p class="text-slate-400 text-sm">
+                  {% trans 'Invoice' %} #{{ invoice.number }} - {{ invoice.created_at|date:"d.m.Y" }}
+                </p>
+                {% else %}
+                <p class="text-white font-medium group-hover:text-blue-400 transition-colors">{% trans 'Invoice' %} #{{ invoice.number }}</p>
+                <p class="text-slate-400 text-sm">
+                  {{ invoice.created_at|date:"d.m.Y" }}
+                </p>
+                {% endif %}
+              </div>
+              <div class="text-right">
+                <p class="text-white font-medium">{{ invoice.total|floatformat:2 }} RON</p>
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+                                  {% if invoice.status == 'paid' %}bg-green-900 text-green-200
+                                  {% elif invoice.status == 'overdue' %}bg-red-900 text-red-200
+                                  {% else %}bg-yellow-900 text-yellow-200{% endif %}">
+                  {% if invoice.status == 'paid' %}✅ {% trans 'Paid' %}
+                  {% elif invoice.status == 'overdue' %}❌ {% trans 'Overdue' %}
+                  {% else %}⏳ {% trans 'Pending' %}{% endif %}
+                </span>
+              </div>
             </div>
-            <div class="text-right">
-              <p class="text-white font-medium">{{ invoice.total|floatformat:2 }} RON</p>
-              <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                                {% if invoice.status == 'paid' %}bg-green-900 text-green-200
-                                {% elif invoice.status == 'overdue' %}bg-red-900 text-red-200
-                                {% else %}bg-yellow-900 text-yellow-200{% endif %}">
-                {% if invoice.status == 'paid' %}✅ {% trans 'Paid' %}
-                {% elif invoice.status == 'overdue' %}❌ {% trans 'Overdue' %}
-                {% else %}⏳ {% trans 'Pending' %}{% endif %}
-              </span>
-            </div>
-          </div>
+          </a>
           {% empty %}
           <p class="text-slate-400 text-center py-4">
             {% if user.is_staff %}
@@ -214,28 +216,30 @@
 
         <div class="space-y-3">
           {% for ticket in recent_tickets %}
-          <div class="flex items-center justify-between p-3 bg-slate-700 rounded-md">
-            <div>
-              <p class="text-white font-medium">{{ ticket.subject|truncatechars:40 }}</p>
-              <p class="text-slate-400 text-sm">
-                {% if user.is_staff %}
-                {{ ticket.customer.company_name }} - {{ ticket.created_at|date:"d.m.Y" }}
-                {% else %}
-                {{ ticket.created_at|date:"d.m.Y" }}
-                {% endif %}
-              </p>
+          <a href="{% url 'tickets:detail' ticket.id %}" class="block group">
+            <div class="flex items-center justify-between p-3 bg-slate-700 rounded-md hover:bg-slate-600 transition-colors border border-transparent hover:border-slate-500">
+              <div>
+                <p class="text-white font-medium group-hover:text-blue-400 transition-colors">{{ ticket.ticket_number }} - {{ ticket.title|truncatechars:40 }}</p>
+                <p class="text-slate-400 text-sm">
+                  {% if user.is_staff %}
+                  {{ ticket.customer.company_name }} - {{ ticket.created_at|date:"d.m.Y" }}
+                  {% else %}
+                  {{ ticket.created_at|date:"d.m.Y" }}
+                  {% endif %}
+                </p>
+              </div>
+              <div class="text-right">
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+                                  {% if ticket.priority == 'high' %}bg-red-900 text-red-200
+                                  {% elif ticket.priority == 'medium' %}bg-yellow-900 text-yellow-200
+                                  {% else %}bg-green-900 text-green-200{% endif %}">
+                  {% if ticket.priority == 'high' %}🔴 {% trans 'Urgent' %}
+                  {% elif ticket.priority == 'medium' %}🟡 {% trans 'Medium' %}
+                  {% else %}🟢 {% trans 'Low' %}{% endif %}
+                </span>
+              </div>
             </div>
-            <div class="text-right">
-              <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                                {% if ticket.priority == 'high' %}bg-red-900 text-red-200
-                                {% elif ticket.priority == 'medium' %}bg-yellow-900 text-yellow-200
-                                {% else %}bg-green-900 text-green-200{% endif %}">
-                {% if ticket.priority == 'high' %}🔴 {% trans 'Urgent' %}
-                {% elif ticket.priority == 'medium' %}🟡 {% trans 'Medium' %}
-                {% else %}🟢 {% trans 'Low' %}{% endif %}
-              </span>
-            </div>
-          </div>
+          </a>
           {% empty %}
           <p class="text-slate-400 text-center py-4">
             {% if user.is_staff %}
