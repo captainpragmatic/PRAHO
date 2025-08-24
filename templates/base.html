@@ -113,9 +113,6 @@
 
           <!-- User Menu -->
           <div class="flex items-center space-x-3 flex-shrink-0">
-            <span class="text-slate-400 text-sm whitespace-nowrap">
-              {% trans 'Hello' %}, {{ user.first_name|default:user.username }}
-            </span>
             <a href="{% url 'users:user_profile' %}"
               class="text-slate-300 hover:text-white flex items-center px-2 py-1 whitespace-nowrap">
               <span class="mr-1">⚙️</span> {% trans 'Profile' %}
