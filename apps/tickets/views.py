@@ -7,6 +7,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.core.paginator import Paginator
 from django.utils.translation import gettext_lazy as _
+from django.http import JsonResponse, HttpResponse
 
 from .models import Ticket, TicketComment
 
@@ -112,16 +113,18 @@ def ticket_reply(request, pk):
     
     if request.method == 'POST':
         reply_text = request.POST.get('reply')
+        is_internal = request.POST.get('is_internal') == 'on'
+        
         if reply_text:
             # Create TicketComment
             comment = TicketComment.objects.create(
                 ticket=ticket,
                 content=reply_text,
-                comment_type='support' if request.user.role in ['support', 'admin', 'manager'] else 'customer',
+                comment_type='internal' if is_internal else ('support' if request.user.staff_role in ['support', 'admin', 'manager'] else 'customer'),
                 author=request.user,
                 author_name=request.user.get_full_name(),
                 author_email=request.user.email,
-                is_public=True
+                is_public=not is_internal
             )
             
             # Update ticket status if it was new
@@ -129,11 +132,40 @@ def ticket_reply(request, pk):
                 ticket.status = 'open'
                 ticket.save()
             
+            # Check if this is an HTMX request
+            if request.headers.get('HX-Request'):
+                # Return the updated comments section
+                comments = ticket.comments.all().order_by('created_at')
+                return render(request, 'tickets/partials/comments_list.html', {
+                    'ticket': ticket,
+                    'comments': comments,
+                })
+            
             messages.success(request, _("✅ Your reply has been added!"))
         else:
+            if request.headers.get('HX-Request'):
+                return HttpResponse('<div class="text-red-500 text-sm">Reply cannot be empty.</div>')
             messages.error(request, _("❌ The reply cannot be empty."))
     
     return redirect('tickets:detail', pk=pk)
+
+
+@login_required
+def ticket_comments_htmx(request, pk):
+    """🔄 HTMX endpoint for loading comments"""
+    ticket = get_object_or_404(Ticket, pk=pk)
+    
+    # Security check - verify user has access to this customer
+    accessible_customers = request.user.get_accessible_customers()
+    accessible_customer_ids = [customer.id for customer in accessible_customers]
+    if ticket.customer.id not in accessible_customer_ids:
+        return HttpResponse('<div class="text-red-500">Access denied</div>')
+    
+    comments = ticket.comments.all().order_by('created_at')
+    return render(request, 'tickets/partials/comments_list.html', {
+        'ticket': ticket,
+        'comments': comments,
+    })
 
 
 @login_required

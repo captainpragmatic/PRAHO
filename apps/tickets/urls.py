@@ -12,6 +12,7 @@ urlpatterns = [
     path('create/', views.ticket_create, name='create'),
     path('<int:pk>/', views.ticket_detail, name='detail'),
     path('<int:pk>/reply/', views.ticket_reply, name='reply'),
+    path('<int:pk>/comments/', views.ticket_comments_htmx, name='comments_htmx'),
     path('<int:pk>/close/', views.ticket_close, name='close'),
     path('<int:pk>/reopen/', views.ticket_reopen, name='reopen'),
 ]
