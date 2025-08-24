@@ -319,3 +319,21 @@ def validate_production_secret_key():
             "🔥 CRITICAL SECURITY ERROR: Cannot use insecure SECRET_KEY in production! "
             "Generate a secure key: python -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())'"
         )
+
+# ===============================================================================
+# COMPANY INFORMATION FOR INVOICES & LEGAL DOCUMENTS 🏢
+# ===============================================================================
+
+# Company information - override these in environment or local settings
+COMPANY_NAME = os.environ.get('COMPANY_NAME', 'PRAHO Platform')
+COMPANY_ADDRESS = os.environ.get('COMPANY_ADDRESS', 'Str. Exemplu Nr. 1')
+COMPANY_CITY = os.environ.get('COMPANY_CITY', 'București')
+COMPANY_COUNTRY = os.environ.get('COMPANY_COUNTRY', 'România')
+COMPANY_CUI = os.environ.get('COMPANY_CUI', 'RO12345678')  # Romanian tax ID
+COMPANY_EMAIL = os.environ.get('COMPANY_EMAIL', 'contact@praho.ro')
+COMPANY_PHONE = os.environ.get('COMPANY_PHONE', '+40 21 000 0000')
+COMPANY_WEBSITE = os.environ.get('COMPANY_WEBSITE', 'https://praho.ro')
+
+# VAT settings for Romanian compliance
+VAT_RATE = 0.19  # 19% Romanian VAT rate
+VAT_ENABLED = True

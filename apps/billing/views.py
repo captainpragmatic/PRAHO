@@ -606,8 +606,15 @@ def proforma_edit(request, pk):
 @login_required
 def proforma_pdf(request, pk):
     """
-    📄 Generate PDF proforma (Romanian format)
+    📄 Generate PDF proforma (Romanian format) using ReportLab
     """
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import cm
+    from io import BytesIO
+    from django.conf import settings
+    from django.utils.translation import gettext as _t  # Use gettext for immediate evaluation
+    
     proforma = get_object_or_404(ProformaInvoice, pk=pk)
     
     # Security check
@@ -615,12 +622,106 @@ def proforma_pdf(request, pk):
         messages.error(request, _("❌ You do not have permission to access this proforma."))
         return redirect('billing:invoice_list')
     
-    # TODO: Implement PDF generation with Romanian formatting
-    response = HttpResponse(content_type='application/pdf')
-    response['Content-Disposition'] = f'attachment; filename="proforma_{proforma.number}.pdf"'
+    # Create PDF buffer
+    buffer = BytesIO()
+    p = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
     
-    # Placeholder PDF content
-    response.write(b'%PDF-1.4\n%Placeholder PDF for proforma #' + proforma.number.encode() + b'\n')
+    # ===============================================================================
+    # COMPANY INFO FROM SETTINGS 🏢
+    # ===============================================================================
+    
+    # Get company info from settings (with fallbacks)
+    company_name = getattr(settings, 'COMPANY_NAME', 'PRAHO Platform')
+    company_address = getattr(settings, 'COMPANY_ADDRESS', 'Str. Exemplu Nr. 1')
+    company_city = getattr(settings, 'COMPANY_CITY', 'București')
+    company_country = getattr(settings, 'COMPANY_COUNTRY', 'România')
+    company_cui = getattr(settings, 'COMPANY_CUI', 'RO12345678')
+    company_email = getattr(settings, 'COMPANY_EMAIL', 'contact@praho.ro')
+    
+    # ===============================================================================
+    # PDF CONTENT GENERATION 📄
+    # ===============================================================================
+    
+    # Header with company branding
+    p.setFont("Helvetica-Bold", 24)
+    p.drawString(2*cm, height - 3*cm, f"🇷🇴 {company_name}")
+    
+    p.setFont("Helvetica-Bold", 16)
+    p.drawString(2*cm, height - 4*cm, str(_t("FACTURĂ PROFORMA")))
+    
+    p.setFont("Helvetica", 12)
+    p.drawString(2*cm, height - 5*cm, str(_t("Number: {number}")).format(number=proforma.number))
+    p.drawString(2*cm, height - 5.5*cm, str(_t("Date: {date}")).format(date=proforma.created_at.strftime('%d.%m.%Y')))
+    p.drawString(2*cm, height - 6*cm, str(_t("Valid until: {date}")).format(date=proforma.valid_until.strftime('%d.%m.%Y')))
+    
+    # Company info section
+    y_pos = height - 8*cm
+    p.setFont("Helvetica-Bold", 14)
+    p.drawString(2*cm, y_pos, str(_t("Supplier:")))
+    
+    p.setFont("Helvetica", 10)
+    p.drawString(2*cm, y_pos - 0.5*cm, company_name)
+    p.drawString(2*cm, y_pos - 1*cm, f"{company_address}, {company_city}, {company_country}")
+    p.drawString(2*cm, y_pos - 1.5*cm, str(_t("Tax ID: {cui}")).format(cui=company_cui))
+    p.drawString(2*cm, y_pos - 2*cm, str(_t("Email: {email}")).format(email=company_email))
+    
+    # Client info section
+    p.setFont("Helvetica-Bold", 14)
+    p.drawString(11*cm, y_pos, str(_t("Client:")))
+    
+    p.setFont("Helvetica", 10)
+    p.drawString(11*cm, y_pos - 0.5*cm, proforma.bill_to_name or "")
+    if proforma.bill_to_address1:
+        p.drawString(11*cm, y_pos - 1*cm, proforma.bill_to_address1)
+    if proforma.bill_to_tax_id:
+        p.drawString(11*cm, y_pos - 1.5*cm, str(_t("Tax ID: {tax_id}")).format(tax_id=proforma.bill_to_tax_id))
+    if proforma.bill_to_email:
+        p.drawString(11*cm, y_pos - 2*cm, str(_t("Email: {email}")).format(email=proforma.bill_to_email))
+    
+    # Items table headers
+    table_y = height - 13*cm
+    p.setFont("Helvetica-Bold", 10)
+    p.drawString(2*cm, table_y, str(_t("Description")))
+    p.drawString(10*cm, table_y, str(_t("Quantity")))
+    p.drawString(12*cm, table_y, str(_t("Unit Price")))
+    p.drawString(15*cm, table_y, str(_t("Total")))
+    
+    # Draw line under headers
+    p.line(2*cm, table_y - 0.3*cm, 18*cm, table_y - 0.3*cm)
+    
+    # Items data
+    p.setFont("Helvetica", 9)
+    current_y = table_y - 0.8*cm
+    
+    lines = proforma.lines.all()
+    for line in lines:
+        p.drawString(2*cm, current_y, str(line.description)[:40])  # Truncate long descriptions
+        p.drawString(10*cm, current_y, f"{line.quantity:.2f}")
+        p.drawString(12*cm, current_y, f"{line.unit_price:.2f} RON")
+        p.drawString(15*cm, current_y, f"{line.line_total:.2f} RON")
+        current_y -= 0.5*cm
+    
+    # Totals section
+    totals_y = current_y - 1*cm
+    p.setFont("Helvetica-Bold", 12)
+    p.drawString(12*cm, totals_y, str(_t("Subtotal: {amount} RON")).format(amount=f"{proforma.subtotal:.2f}"))
+    p.drawString(12*cm, totals_y - 0.5*cm, str(_t("VAT (19%): {amount} RON")).format(amount=f"{proforma.tax_amount:.2f}"))
+    p.drawString(12*cm, totals_y - 1*cm, str(_t("TOTAL: {amount} RON")).format(amount=f"{proforma.total:.2f}"))
+    
+    # Footer with legal disclaimers
+    p.setFont("Helvetica", 8)
+    p.drawString(2*cm, 2*cm, str(_t("This proforma is not a fiscal invoice.")))
+    p.drawString(2*cm, 1.5*cm, str(_t("Generated automatically by {platform}")).format(platform=company_name))
+    
+    # Finalize PDF
+    p.showPage()
+    p.save()
+    
+    # Return response
+    buffer.seek(0)
+    response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="proforma_{proforma.number}.pdf"'
     
     return response
 
@@ -676,8 +777,15 @@ def invoice_edit(request, pk):
 @login_required
 def invoice_pdf(request, pk):
     """
-    📄 Generate PDF invoice (Romanian format)
+    📄 Generate PDF invoice (Romanian format) using ReportLab
     """
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import cm
+    from io import BytesIO
+    from django.conf import settings
+    from django.utils.translation import gettext as _t  # Use gettext for immediate evaluation
+    
     invoice = get_object_or_404(Invoice, pk=pk)
     
     # Security check
@@ -685,13 +793,121 @@ def invoice_pdf(request, pk):
         messages.error(request, _("❌ You do not have permission to access this invoice."))
         return redirect('billing:invoice_list')
     
-    # TODO: Implement PDF generation with Romanian formatting
-    # For now, return a simple response
-    response = HttpResponse(content_type='application/pdf')
-    response['Content-Disposition'] = f'attachment; filename="factura_{invoice.number}.pdf"'
+    # Create PDF buffer
+    buffer = BytesIO()
+    p = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
     
-    # Placeholder PDF content
-    response.write(b'%PDF-1.4\n%Placeholder PDF for invoice #' + invoice.number.encode() + b'\n')
+    # ===============================================================================
+    # COMPANY INFO FROM SETTINGS 🏢
+    # ===============================================================================
+    
+    # Get company info from settings (with fallbacks)
+    company_name = getattr(settings, 'COMPANY_NAME', 'PRAHO Platform')
+    company_address = getattr(settings, 'COMPANY_ADDRESS', 'Str. Exemplu Nr. 1')
+    company_city = getattr(settings, 'COMPANY_CITY', 'București')
+    company_country = getattr(settings, 'COMPANY_COUNTRY', 'România')
+    company_cui = getattr(settings, 'COMPANY_CUI', 'RO12345678')
+    company_email = getattr(settings, 'COMPANY_EMAIL', 'contact@praho.ro')
+    
+    # ===============================================================================
+    # PDF CONTENT GENERATION 📄
+    # ===============================================================================
+    
+    # Header with company branding
+    p.setFont("Helvetica-Bold", 24)
+    p.drawString(2*cm, height - 3*cm, f"🇷🇴 {company_name}")
+    
+    p.setFont("Helvetica-Bold", 16)
+    p.drawString(2*cm, height - 4*cm, str(_t("FISCAL INVOICE")))
+    
+    p.setFont("Helvetica", 12)
+    p.drawString(2*cm, height - 5*cm, str(_t("Number: {number}")).format(number=invoice.number))
+    if invoice.issued_at:
+        p.drawString(2*cm, height - 5.5*cm, str(_t("Issue date: {date}")).format(date=invoice.issued_at.strftime('%d.%m.%Y')))
+    if invoice.due_at:
+        p.drawString(2*cm, height - 6*cm, str(_t("Due date: {date}")).format(date=invoice.due_at.strftime('%d.%m.%Y')))
+    
+    # Status indicator
+    p.setFont("Helvetica-Bold", 10)
+    p.drawString(14*cm, height - 5*cm, str(_t("Status: {status}")).format(status=invoice.status.upper()))
+    
+    # Company info section
+    y_pos = height - 8*cm
+    p.setFont("Helvetica-Bold", 14)
+    p.drawString(2*cm, y_pos, str(_t("Supplier:")))
+    
+    p.setFont("Helvetica", 10)
+    p.drawString(2*cm, y_pos - 0.5*cm, company_name)
+    p.drawString(2*cm, y_pos - 1*cm, f"{company_address}, {company_city}, {company_country}")
+    p.drawString(2*cm, y_pos - 1.5*cm, str(_t("Tax ID: {cui}")).format(cui=company_cui))
+    p.drawString(2*cm, y_pos - 2*cm, str(_t("Email: {email}")).format(email=company_email))
+    
+    # Client info section
+    p.setFont("Helvetica-Bold", 14)
+    p.drawString(11*cm, y_pos, str(_t("Client:")))
+    
+    p.setFont("Helvetica", 10)
+    p.drawString(11*cm, y_pos - 0.5*cm, invoice.bill_to_name or "")
+    if invoice.bill_to_address1:
+        p.drawString(11*cm, y_pos - 1*cm, invoice.bill_to_address1)
+    if invoice.bill_to_tax_id:
+        p.drawString(11*cm, y_pos - 1.5*cm, str(_t("Tax ID: {tax_id}")).format(tax_id=invoice.bill_to_tax_id))
+    if invoice.bill_to_email:
+        p.drawString(11*cm, y_pos - 2*cm, str(_t("Email: {email}")).format(email=invoice.bill_to_email))
+    
+    # Items table headers
+    table_y = height - 13*cm
+    p.setFont("Helvetica-Bold", 10)
+    p.drawString(2*cm, table_y, str(_t("Description")))
+    p.drawString(10*cm, table_y, str(_t("Quantity")))
+    p.drawString(12*cm, table_y, str(_t("Unit Price")))
+    p.drawString(15*cm, table_y, str(_t("Total")))
+    
+    # Draw line under headers
+    p.line(2*cm, table_y - 0.3*cm, 18*cm, table_y - 0.3*cm)
+    
+    # Items data
+    p.setFont("Helvetica", 9)
+    current_y = table_y - 0.8*cm
+    
+    lines = invoice.lines.all()
+    for line in lines:
+        p.drawString(2*cm, current_y, str(line.description)[:40])  # Truncate long descriptions
+        p.drawString(10*cm, current_y, f"{line.quantity:.2f}")
+        p.drawString(12*cm, current_y, f"{line.unit_price:.2f} RON")
+        p.drawString(15*cm, current_y, f"{line.line_total:.2f} RON")
+        current_y -= 0.5*cm
+    
+    # Totals section
+    totals_y = current_y - 1*cm
+    p.setFont("Helvetica-Bold", 12)
+    p.drawString(12*cm, totals_y, str(_t("Subtotal: {amount} RON")).format(amount=f"{invoice.subtotal:.2f}"))
+    p.drawString(12*cm, totals_y - 0.5*cm, str(_t("VAT (19%): {amount} RON")).format(amount=f"{invoice.tax_amount:.2f}"))
+    p.drawString(12*cm, totals_y - 1*cm, str(_t("TOTAL TO PAY: {amount} RON")).format(amount=f"{invoice.total:.2f}"))
+    
+    # Payment status info
+    if invoice.status != 'paid':
+        p.setFont("Helvetica-Bold", 10)
+        due_date_str = invoice.due_at.strftime('%d.%m.%Y') if invoice.due_at else str(_t("undefined"))
+        p.drawString(2*cm, totals_y - 2*cm, str(_t("⚠️  Unpaid invoice - Due: {date}")).format(date=due_date_str))
+    elif invoice.status == 'paid' and hasattr(invoice, 'paid_at') and invoice.paid_at:
+        p.setFont("Helvetica-Bold", 10)
+        p.drawString(2*cm, totals_y - 2*cm, str(_t("✅ Invoice paid on: {date}")).format(date=invoice.paid_at.strftime('%d.%m.%Y')))
+    
+    # Footer with legal disclaimers
+    p.setFont("Helvetica", 8)
+    p.drawString(2*cm, 2*cm, str(_t("Fiscal invoice issued according to Romanian legislation.")))
+    p.drawString(2*cm, 1.5*cm, str(_t("Generated automatically by {platform}")).format(platform=company_name))
+    
+    # Finalize PDF
+    p.showPage()
+    p.save()
+    
+    # Return response
+    buffer.seek(0)
+    response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="factura_{invoice.number}.pdf"'
     
     return response
 

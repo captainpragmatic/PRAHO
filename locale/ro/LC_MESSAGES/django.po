@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2025-08-24 17:59+0300\n"
+"POT-Creation-Date: 2025-08-25 00:23+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -39,7 +39,7 @@ msgstr ""
 
 #: apps/audit/admin.py:105 apps/audit/admin.py:319 apps/tickets/models.py:457
 #: apps/users/forms.py:303 apps/users/models.py:115
-#: templates/customers/detail.html:149 templates/users/profile.html:147
+#: templates/users/profile.html:147
 msgid "User"
 msgstr "Utilizator"
 
@@ -107,7 +107,6 @@ msgstr "Tip plan"
 #: templates/billing/proforma_form.html:167
 #: templates/customers/assign_user.html:50 templates/customers/detail.html:20
 #: templates/customers/detail.html:107 templates/customers/list.html:74
-#: templates/provisioning/service_form.html:336
 #: templates/provisioning/service_list.html:26
 #: templates/provisioning/service_list.html:98 templates/tickets/detail.html:21
 #: templates/tickets/list.html:101
@@ -147,6 +146,7 @@ msgid "Files & Metadata"
 msgstr ""
 
 #: apps/billing/admin.py:169 apps/billing/admin.py:330
+#: apps/billing/views.py:687 apps/billing/views.py:863
 #: templates/billing/billing_list.html:150
 #: templates/billing/invoice_detail.html:113
 #: templates/billing/invoice_form.html:150
@@ -242,7 +242,7 @@ msgid "Active Now"
 msgstr "Activ"
 
 #: apps/billing/admin.py:629 apps/provisioning/models.py:291
-#: templates/billing/billing_list.html:194
+#: templates/billing/billing_list.html:202
 msgid "Expired"
 msgstr "Expirat"
 
@@ -279,7 +279,6 @@ msgstr ""
 
 #: apps/billing/models.py:29 templates/billing/invoice_form.html:111
 #: templates/billing/proforma_form.html:156
-#: templates/provisioning/service_form.html:296
 msgid "Currency"
 msgstr "Monedă"
 
@@ -347,7 +346,7 @@ msgid "Miscellaneous"
 msgstr ""
 
 #: apps/billing/models.py:250 apps/notifications/models.py:366
-#: apps/orders/models.py:45 templates/billing/billing_list.html:216
+#: apps/orders/models.py:45 templates/billing/billing_list.html:224
 #: templates/billing/invoice_form.html:126
 #: templates/billing/invoice_list.html:165
 #: templates/billing/proforma_form.html:171
@@ -361,15 +360,15 @@ msgstr "Proformă"
 msgid "Issued"
 msgstr "Data emiterii"
 
-#: apps/billing/models.py:252 templates/billing/billing_list.html:204
+#: apps/billing/models.py:252 templates/billing/billing_list.html:212
 #: templates/billing/invoice_form.html:129
-#: templates/billing/invoice_list.html:162 templates/dashboard.html:175
+#: templates/billing/invoice_list.html:162 templates/dashboard.html:176
 msgid "Paid"
 msgstr "Plătit"
 
-#: apps/billing/models.py:253 templates/billing/billing_list.html:208
+#: apps/billing/models.py:253 templates/billing/billing_list.html:216
 #: templates/billing/invoice_form.html:130
-#: templates/billing/invoice_list.html:163 templates/dashboard.html:176
+#: templates/billing/invoice_list.html:163 templates/dashboard.html:177
 msgid "Overdue"
 msgstr "Restant"
 
@@ -397,12 +396,12 @@ msgstr ""
 #: apps/billing/models.py:339 templates/billing/billing_list.html:173
 #: templates/billing/invoice_detail.html:5
 #: templates/billing/invoice_detail.html:13
-#: templates/billing/invoice_list.html:96 templates/dashboard.html:160
-#: templates/dashboard.html:163
+#: templates/billing/invoice_list.html:96 templates/dashboard.html:161
+#: templates/dashboard.html:164
 msgid "Invoice"
 msgstr "Factură"
 
-#: apps/billing/models.py:340 templates/base.html:80
+#: apps/billing/models.py:340 templates/base.html:89
 #: templates/billing/invoice_list.html:5 templates/billing/invoice_list.html:12
 msgid "Invoices"
 msgstr "Facturi"
@@ -446,10 +445,10 @@ msgstr "Linii factură"
 #: apps/orders/models.py:46 apps/orders/models.py:409
 #: apps/provisioning/models.py:286 apps/provisioning/models.py:466
 #: apps/tickets/models.py:64 templates/billing/invoice_list.html:166
-#: templates/dashboard.html:177 templates/provisioning/service_form.html:340
+#: templates/dashboard.html:178 templates/provisioning/service_detail.html:27
 #: templates/provisioning/service_list.html:36
 #: templates/provisioning/service_list.html:147 templates/tickets/list.html:77
-#: templates/tickets/list.html:166
+#: templates/tickets/list.html:168
 msgid "Pending"
 msgstr "În așteptare"
 
@@ -488,7 +487,7 @@ msgstr "PayPal"
 msgid "Cash"
 msgstr "Numerar"
 
-#: apps/billing/models.py:470 templates/provisioning/service_form.html:90
+#: apps/billing/models.py:470
 msgid "Other"
 msgstr ""
 
@@ -712,7 +711,7 @@ msgstr ""
 msgid "When this retry was actually executed"
 msgstr ""
 
-#: apps/billing/models.py:945 apps/users/models.py:421
+#: apps/billing/models.py:945 apps/users/models.py:487
 msgid "Success"
 msgstr "Succes"
 
@@ -724,9 +723,10 @@ msgstr ""
 #: apps/notifications/models.py:371 apps/orders/models.py:49
 #: apps/orders/models.py:413 apps/tickets/models.py:67
 #: templates/billing/invoice_form.html:131
-#: templates/provisioning/service_form.html:343
+#: templates/provisioning/service_detail.html:26
+#: templates/provisioning/service_detail.html:279
 #: templates/provisioning/service_list.html:34
-#: templates/provisioning/service_list.html:146 templates/tickets/list.html:169
+#: templates/provisioning/service_list.html:146 templates/tickets/list.html:171
 msgid "Cancelled"
 msgstr "Anulat"
 
@@ -831,7 +831,7 @@ msgstr "Metodă de plată"
 msgid "Payment Collection Runs"
 msgstr ""
 
-#: apps/billing/views.py:129 apps/billing/views.py:685
+#: apps/billing/views.py:129 apps/billing/views.py:791
 msgid "❌ You do not have permission to access this invoice."
 msgstr "❌ Nu aveți permisiunea de a accesa această factură."
 
@@ -858,7 +858,7 @@ msgstr ""
 msgid "✅ Proforma #{number} has been created!"
 msgstr "✅ Factura #{invoice_number} a fost creată!"
 
-#: apps/billing/views.py:301 apps/billing/views.py:615
+#: apps/billing/views.py:301 apps/billing/views.py:621
 #, fuzzy
 #| msgid "You do not have permission to access this page."
 msgid "❌ You do not have permission to access this proforma."
@@ -911,42 +911,346 @@ msgstr "❌ Nu aveți permisiunea de a accesa acest serviciu."
 msgid "✅ Proforma #{proforma_number} has been updated!"
 msgstr "✅ Factura #{invoice_number} a fost actualizată!"
 
-#: apps/billing/views.py:641
+#: apps/billing/views.py:650
+msgid "FACTURĂ PROFORMA"
+msgstr ""
+
+#: apps/billing/views.py:653 apps/billing/views.py:823
+#, fuzzy, python-brace-format
+#| msgid "VAT Number"
+msgid "Number: {number}"
+msgstr "Număr TVA"
+
+#: apps/billing/views.py:654
+#, fuzzy, python-brace-format
+#| msgid "Date format"
+msgid "Date: {date}"
+msgstr "Format dată"
+
+#: apps/billing/views.py:655
+#, python-brace-format
+msgid "Valid until: {date}"
+msgstr ""
+
+#: apps/billing/views.py:660 apps/billing/views.py:836
+#, fuzzy
+#| msgid "Support"
+msgid "Supplier:"
+msgstr "Suport"
+
+#: apps/billing/views.py:665 apps/billing/views.py:841
+#, python-brace-format
+msgid "Tax ID: {cui}"
+msgstr ""
+
+#: apps/billing/views.py:666 apps/billing/views.py:679
+#: apps/billing/views.py:842 apps/billing/views.py:855
+#, fuzzy, python-brace-format
+#| msgid "Email available"
+msgid "Email: {email}"
+msgstr "Email disponibil"
+
+#: apps/billing/views.py:670 apps/billing/views.py:846
+#, fuzzy
+#| msgid "Client"
+msgid "Client:"
+msgstr "Client"
+
+#: apps/billing/views.py:677 apps/billing/views.py:853
+#, python-brace-format
+msgid "Tax ID: {tax_id}"
+msgstr ""
+
+#: apps/billing/views.py:684 apps/billing/views.py:860
+#: apps/provisioning/models.py:36 apps/tickets/admin.py:522
+#: apps/tickets/models.py:17 apps/tickets/models.py:96
+#: templates/billing/invoice_detail.html:101
+#: templates/billing/invoice_form.html:146
+#: templates/billing/proforma_convert.html:138
+#: templates/billing/proforma_detail.html:142
+#: templates/billing/proforma_form.html:185 templates/tickets/detail.html:43
+#: templates/tickets/form.html:92
+msgid "Description"
+msgstr "Descriere"
+
+#: apps/billing/views.py:685 apps/billing/views.py:861
+#: templates/billing/invoice_detail.html:107
+#: templates/billing/invoice_form.html:147
+#: templates/billing/proforma_form.html:186
+msgid "Quantity"
+msgstr "Cantitate"
+
+#: apps/billing/views.py:686 apps/billing/views.py:862
+#: templates/billing/invoice_detail.html:110
+#: templates/billing/proforma_convert.html:144
+#: templates/billing/proforma_detail.html:148
+msgid "Unit Price"
+msgstr "Preț unitar"
+
+#: apps/billing/views.py:707 apps/billing/views.py:883
+#, python-brace-format
+msgid "Subtotal: {amount} RON"
+msgstr ""
+
+#: apps/billing/views.py:708 apps/billing/views.py:884
+#, python-brace-format
+msgid "VAT (19%): {amount} RON"
+msgstr ""
+
+#: apps/billing/views.py:709
+#, python-brace-format
+msgid "TOTAL: {amount} RON"
+msgstr ""
+
+#: apps/billing/views.py:713
+msgid "This proforma is not a fiscal invoice."
+msgstr ""
+
+#: apps/billing/views.py:714 apps/billing/views.py:899
+#, python-brace-format
+msgid "Generated automatically by {platform}"
+msgstr ""
+
+#: apps/billing/views.py:741
 #, fuzzy, python-brace-format
 #| msgid "✅ Invoice #{invoice_number} has been sent successfully!"
 msgid "✅ Proforma #{proforma_number} has been sent successfully!"
 msgstr "✅ Factura #{invoice_number} a fost trimisă cu succes!"
 
-#: apps/billing/views.py:656
+#: apps/billing/views.py:756
 msgid "❌ You do not have permission to edit this invoice."
 msgstr "❌ Nu aveți permisiunea de a edita această factură."
 
-#: apps/billing/views.py:660
+#: apps/billing/views.py:760
 msgid "❌ Only draft invoices can be edited."
 msgstr "❌ Doar facturile proforme pot fi editate."
 
-#: apps/billing/views.py:665
+#: apps/billing/views.py:765
 #, python-brace-format
 msgid "✅ Invoice #{invoice_number} has been updated!"
 msgstr "✅ Factura #{invoice_number} a fost actualizată!"
 
-#: apps/billing/views.py:717
+#: apps/billing/views.py:820
+msgid "FISCAL INVOICE"
+msgstr ""
+
+#: apps/billing/views.py:825
+#, fuzzy, python-brace-format
+#| msgid "Issue Date"
+msgid "Issue date: {date}"
+msgstr "Data emiterii"
+
+#: apps/billing/views.py:827
+#, fuzzy, python-brace-format
+#| msgid "Due Date"
+msgid "Due date: {date}"
+msgstr "Data scadentă"
+
+#: apps/billing/views.py:831
+#, fuzzy, python-brace-format
+#| msgid "Status"
+msgid "Status: {status}"
+msgstr "Stare"
+
+#: apps/billing/views.py:885
+#, python-brace-format
+msgid "TOTAL TO PAY: {amount} RON"
+msgstr ""
+
+#: apps/billing/views.py:890
+msgid "undefined"
+msgstr ""
+
+#: apps/billing/views.py:891
+#, python-brace-format
+msgid "⚠️  Unpaid invoice - Due: {date}"
+msgstr ""
+
+#: apps/billing/views.py:894
+#, python-brace-format
+msgid "✅ Invoice paid on: {date}"
+msgstr ""
+
+#: apps/billing/views.py:898
+msgid "Fiscal invoice issued according to Romanian legislation."
+msgstr ""
+
+#: apps/billing/views.py:931
 #, python-brace-format
 msgid "✅ Invoice #{invoice_number} has been sent successfully!"
 msgstr "✅ Factura #{invoice_number} a fost trimisă cu succes!"
 
-#: apps/billing/views.py:732
+#: apps/billing/views.py:946
 msgid "❌ You do not have permission to generate e-Invoice for this invoice."
 msgstr "❌ Nu aveți permisiunea de a genera e-Factura pentru această factură."
 
-#: apps/billing/views.py:806
+#: apps/billing/views.py:1020
 #, python-brace-format
 msgid "✅ Payment of {amount} RON has been registered!"
 msgstr "✅ Plata de {amount} RON a fost înregistrată!"
 
+#: apps/common/security_decorators.py:206
+#, fuzzy
+#| msgid "An error occurred. Please try again."
+msgid "Operation in progress, please try again"
+msgstr "A apărut o eroare. Vă rugăm să încercați din nou."
+
+#: apps/common/security_decorators.py:239
+msgid "Rate limit exceeded"
+msgstr ""
+
 #: apps/common/utils.py:231
 msgid "System is under maintenance. Please try again later."
 msgstr "Sistemul este în mentenanță. Vă rugăm să încercați mai târziu."
+
+#: apps/common/validators.py:92
+#, fuzzy
+#| msgid "System is under maintenance. Please try again later."
+msgid "Too many requests. Please try again later."
+msgstr "Sistemul este în mentenanță. Vă rugăm să încercați mai târziu."
+
+#: apps/common/validators.py:146 apps/common/validators.py:163
+#: apps/common/validators.py:175 apps/common/validators.py:204
+#: apps/common/validators.py:229 apps/common/validators.py:254
+#: apps/common/validators.py:278 apps/common/validators.py:302
+#: apps/common/validators.py:318 apps/common/validators.py:360
+#: apps/common/validators.py:375
+#, fuzzy
+#| msgid "Company Information"
+msgid "Invalid input format"
+msgstr "Informații companie"
+
+#: apps/common/validators.py:150 apps/common/validators.py:179
+#: apps/common/validators.py:208 apps/common/validators.py:233
+#: apps/common/validators.py:258
+msgid "Input too long"
+msgstr ""
+
+#: apps/common/validators.py:186
+msgid "Invalid characters detected"
+msgstr ""
+
+#: apps/common/validators.py:193
+#, fuzzy
+#| msgid "❌ The reply cannot be empty."
+msgid "Required field cannot be empty"
+msgstr "❌ Răspunsul nu poate fi gol."
+
+#: apps/common/validators.py:218
+#, fuzzy
+#| msgid "Invalid Romanian phone number"
+msgid "Invalid Romanian phone number format"
+msgstr "Număr de telefon românesc invalid"
+
+#: apps/common/validators.py:243
+#, fuzzy
+#| msgid "Invalid Romanian phone number"
+msgid "Invalid Romanian VAT number format"
+msgstr "Număr de telefon românesc invalid"
+
+#: apps/common/validators.py:268
+#, fuzzy
+#| msgid "Invalid Romanian phone number"
+msgid "Invalid Romanian CUI format"
+msgstr "Număr de telefon românesc invalid"
+
+#: apps/common/validators.py:282
+#, fuzzy
+#| msgid "Company Name"
+msgid "Company name too long"
+msgstr "Nume companie"
+
+#: apps/common/validators.py:289
+#, fuzzy
+#| msgid "Company Name"
+msgid "Company name too short"
+msgstr "Nume companie"
+
+#: apps/common/validators.py:294
+#, fuzzy
+#| msgid "Invoice number, company name..."
+msgid "Invalid company name"
+msgstr "Număr factură, nume companie..."
+
+#: apps/common/validators.py:308
+msgid "Invalid role specified"
+msgstr ""
+
+#: apps/common/validators.py:324
+msgid "Invalid input data"
+msgstr ""
+
+#: apps/common/validators.py:331 apps/common/validators.py:338
+#: apps/common/validators.py:344 apps/common/validators.py:381
+msgid "Required field missing"
+msgstr ""
+
+#: apps/common/validators.py:391
+#, fuzzy
+#| msgid "Individual"
+msgid "Invalid customer type"
+msgstr "Persoană fizică"
+
+#: apps/common/validators.py:424
+msgid "Invalid input detected"
+msgstr ""
+
+#: apps/common/validators.py:446
+#, fuzzy
+#| msgid "Email available"
+msgid "Service temporarily unavailable"
+msgstr "Email disponibil"
+
+#: apps/common/validators.py:483
+msgid "Registration validation failed"
+msgstr ""
+
+#: apps/common/validators.py:502
+#, fuzzy
+#| msgid "Permissions"
+msgid "Permission denied"
+msgstr "Permisiuni"
+
+#: apps/common/validators.py:507
+#, fuzzy
+#| msgid "Company Information"
+msgid "Account not active"
+msgstr "Informații companie"
+
+#: apps/common/validators.py:534 apps/users/services.py:472
+#, fuzzy
+#| msgid "User role within this customer organization"
+msgid "User already has access to this organization"
+msgstr "Rolul utilizatorului în cadrul acestei organizații client"
+
+#: apps/common/validators.py:555 apps/common/validators.py:556
+#: apps/users/services.py:204
+msgid "Registration could not be completed. Please contact support."
+msgstr ""
+
+#: apps/common/validators.py:557
+#, fuzzy
+#| msgid "An error occurred. Please try again."
+msgid "Invitation could not be sent. Please try again later."
+msgstr "A apărut o eroare. Vă rugăm să încercați din nou."
+
+#: apps/common/validators.py:558
+#, fuzzy
+#| msgid "The entered code is invalid."
+msgid "The provided information is invalid."
+msgstr "Codul introdus este invalid."
+
+#: apps/common/validators.py:559
+#, fuzzy
+#| msgid "You do not have permission to access this page."
+msgid "You don't have permission to perform this action."
+msgstr "Nu aveți permisiuni pentru această pagină."
+
+#: apps/common/validators.py:560
+#, fuzzy
+#| msgid "An error occurred. Please try again."
+msgid "An error occurred. Please try again later."
+msgstr "A apărut o eroare. Vă rugăm să încercați din nou."
 
 #: apps/customers/admin.py:30 apps/provisioning/admin.py:48
 #: apps/provisioning/admin.py:179 templates/customers/detail.html:39
@@ -961,7 +1265,7 @@ msgstr "Informații companie"
 msgid "Contact Information"
 msgstr "Informații companie"
 
-#: apps/customers/admin.py:36 templates/users/login.html:97
+#: apps/customers/admin.py:36 templates/users/login.html:94
 #, fuzzy
 #| msgid "Compliance"
 msgid "GDPR Compliance"
@@ -983,8 +1287,11 @@ msgstr "Informații companie"
 #: apps/tickets/models.py:311 templates/billing/billing_list.html:147
 #: templates/billing/invoice_detail.html:33
 #: templates/billing/invoice_list.html:99 templates/customers/detail.html:270
+#: templates/provisioning/service_detail.html:77
+#: templates/provisioning/service_form.html:55
 #: templates/provisioning/service_list.html:92 templates/tickets/detail.html:17
 #: templates/tickets/form.html:29 templates/tickets/list.html:95
+#: templates/tickets/partials/comments_list.html:30
 msgid "Customer"
 msgstr "Client"
 
@@ -1212,7 +1519,7 @@ msgid "Format: RO12345678 (6-10 digits after RO)"
 msgstr ""
 
 #: apps/customers/forms.py:415 apps/users/forms.py:391
-#: templates/customers/detail.html:199 templates/dashboard.html:358
+#: templates/customers/detail.html:199 templates/dashboard.html:362
 msgid "VAT Number"
 msgstr "Număr TVA"
 
@@ -1398,7 +1705,7 @@ msgstr "Persoană fizică"
 
 #: apps/customers/models.py:97 templates/customers/assign_user.html:35
 #: templates/customers/detail.html:51 templates/customers/list.html:65
-#: templates/dashboard.html:352
+#: templates/dashboard.html:356 templates/provisioning/service_detail.html:86
 msgid "Company"
 msgstr "Companie"
 
@@ -1414,7 +1721,8 @@ msgstr "ONG/Asociație"
 #: apps/provisioning/models.py:145 apps/provisioning/models.py:231
 #: apps/provisioning/models.py:288 apps/tickets/models.py:43
 #: templates/customers/list.html:123 templates/dashboard.html:120
-#: templates/provisioning/service_form.html:341
+#: templates/provisioning/service_detail.html:24
+#: templates/provisioning/service_detail.html:277
 #: templates/provisioning/service_list.html:31
 #: templates/provisioning/service_list.html:144
 #: templates/users/profile.html:157 templates/users/profile.html:233
@@ -1426,7 +1734,8 @@ msgid "Inactive"
 msgstr "Inactiv"
 
 #: apps/customers/models.py:105 apps/provisioning/models.py:289
-#: templates/provisioning/service_form.html:342
+#: templates/provisioning/service_detail.html:25
+#: templates/provisioning/service_detail.html:278
 #: templates/provisioning/service_list.html:32
 #: templates/provisioning/service_list.html:145
 msgid "Suspended"
@@ -1436,7 +1745,7 @@ msgstr "Suspendat"
 msgid "Prospect"
 msgstr "Prospect"
 
-#: apps/customers/models.py:176 templates/base.html:76
+#: apps/customers/models.py:176 templates/base.html:85
 #: templates/customers/assign_user.html:12 templates/customers/list.html:5
 #: templates/customers/list.html:12
 msgid "Customers"
@@ -2142,6 +2451,7 @@ msgid "Content"
 msgstr "Conținut"
 
 #: apps/notifications/admin.py:41
+#: templates/provisioning/service_detail.html:207
 #, fuzzy
 #| msgid "Company Information"
 msgid "Configuration"
@@ -2198,7 +2508,7 @@ msgstr ""
 msgid "Scheduling & Status"
 msgstr ""
 
-#: apps/notifications/admin.py:176 templates/base.html:167
+#: apps/notifications/admin.py:176 templates/base.html:176
 msgid "Compliance"
 msgstr "Conformitate"
 
@@ -2393,7 +2703,7 @@ msgid "Sending"
 msgstr "În așteptare"
 
 #: apps/notifications/models.py:189 apps/notifications/models.py:369
-#: templates/billing/billing_list.html:212
+#: templates/billing/billing_list.html:220
 #: templates/billing/invoice_form.html:128
 #: templates/billing/invoice_list.html:164
 msgid "Sent"
@@ -2458,25 +2768,25 @@ msgid "Additional email metadata (variables used, campaign info, etc.)"
 msgstr ""
 
 #: apps/notifications/models.py:253 apps/tickets/models.py:71
-#: templates/dashboard.html:235 templates/tickets/form.html:62
-#: templates/tickets/list.html:70 templates/tickets/list.html:156
+#: templates/dashboard.html:238 templates/tickets/form.html:62
+#: templates/tickets/list.html:70 templates/tickets/list.html:158
 msgid "Low"
 msgstr "Scăzut"
 
 #: apps/notifications/models.py:254 apps/tickets/models.py:72
-#: templates/tickets/list.html:69 templates/tickets/list.html:155
+#: templates/tickets/list.html:69 templates/tickets/list.html:157
 msgid "Normal"
 msgstr "Normal"
 
 #: apps/notifications/models.py:255 apps/tickets/models.py:73
 #: templates/tickets/form.html:64 templates/tickets/list.html:68
-#: templates/tickets/list.html:154
+#: templates/tickets/list.html:156
 msgid "High"
 msgstr "Ridicat"
 
 #: apps/notifications/models.py:256 apps/tickets/models.py:74
-#: templates/dashboard.html:233 templates/tickets/form.html:65
-#: templates/tickets/list.html:67 templates/tickets/list.html:153
+#: templates/dashboard.html:236 templates/tickets/form.html:65
+#: templates/tickets/list.html:67 templates/tickets/list.html:155
 msgid "Urgent"
 msgstr "Urgent"
 
@@ -2917,26 +3227,23 @@ msgid "VPS"
 msgstr "VPS"
 
 #: apps/products/models.py:53 apps/provisioning/models.py:20
-#: apps/provisioning/models.py:140 templates/provisioning/service_form.html:85
+#: apps/provisioning/models.py:140
 msgid "Dedicated Server"
 msgstr "Server dedicat"
 
-#: apps/products/models.py:54 templates/provisioning/service_form.html:86
+#: apps/products/models.py:54
 msgid "Domain Registration"
 msgstr ""
 
 #: apps/products/models.py:55 apps/provisioning/models.py:23
-#: templates/provisioning/service_form.html:87
 msgid "SSL Certificate"
 msgstr "Certificat SSL"
 
 #: apps/products/models.py:56 apps/provisioning/models.py:24
-#: templates/provisioning/service_form.html:88
 msgid "Email Hosting"
 msgstr "Găzduire email"
 
 #: apps/products/models.py:57 apps/provisioning/models.py:479
-#: templates/provisioning/service_form.html:89
 msgid "Backup Service"
 msgstr "Backup serviciu"
 
@@ -3023,26 +3330,24 @@ msgid "One Time"
 msgstr ""
 
 #: apps/products/models.py:194 apps/provisioning/models.py:295
-#: apps/provisioning/models.py:913 templates/provisioning/service_form.html:276
+#: apps/provisioning/models.py:913
 msgid "Monthly"
 msgstr "Lunar"
 
 #: apps/products/models.py:195 apps/provisioning/models.py:296
-#: apps/provisioning/models.py:914 templates/provisioning/service_form.html:277
+#: apps/provisioning/models.py:914
 msgid "Quarterly"
 msgstr "Trimestrial"
 
 #: apps/products/models.py:196 apps/provisioning/models.py:297
-#: templates/provisioning/service_form.html:278
 msgid "Semi-Annual"
 msgstr "Semestrial"
 
 #: apps/products/models.py:197 apps/provisioning/models.py:298
-#: templates/provisioning/service_form.html:279
 msgid "Annual"
 msgstr "Anual"
 
-#: apps/products/models.py:198 templates/provisioning/service_form.html:280
+#: apps/products/models.py:198
 msgid "Biennial"
 msgstr ""
 
@@ -3236,7 +3541,7 @@ msgstr "Cod produs"
 msgid "Pricing (RON)"
 msgstr "Preț (RON)"
 
-#: apps/provisioning/admin.py:65 templates/provisioning/service_form.html:114
+#: apps/provisioning/admin.py:65
 #, fuzzy
 #| msgid "Email technical notifications"
 msgid "Technical Specifications"
@@ -3259,6 +3564,7 @@ msgid "Timestamps"
 msgstr ""
 
 #: apps/provisioning/admin.py:105
+#: templates/provisioning/service_detail.html:125
 #, fuzzy
 #| msgid "Monthly Price (RON)"
 msgid "Monthly Price"
@@ -3308,7 +3614,7 @@ msgid "Cost & Maintenance"
 msgstr "Ultima mentenanță"
 
 #: apps/provisioning/admin.py:274 apps/provisioning/models.py:384
-#: templates/base.html:88 templates/provisioning/service_list.html:5
+#: templates/base.html:97 templates/provisioning/service_list.html:5
 msgid "Services"
 msgstr "Servicii"
 
@@ -3330,15 +3636,16 @@ msgstr "În mentenanță"
 msgid "Mark as active"
 msgstr "Marcați ca plătit?"
 
-#: apps/provisioning/admin.py:363
+#: apps/provisioning/admin.py:363 templates/provisioning/service_form.html:48
 #, fuzzy
 #| msgid "Service Plan"
 msgid "Service Information"
 msgstr "Plan de servicii"
 
 #: apps/provisioning/admin.py:374 apps/tickets/admin.py:494
-#: apps/users/forms.py:311 apps/users/models.py:262 apps/users/models.py:358
+#: apps/users/forms.py:311 apps/users/models.py:328 apps/users/models.py:424
 #: templates/billing/billing_list.html:5
+#: templates/provisioning/service_detail.html:120
 msgid "Billing"
 msgstr "Facturare"
 
@@ -3415,6 +3722,8 @@ msgid "Cloud Hosting"
 msgstr "Găzduire cloud"
 
 #: apps/provisioning/models.py:22
+#: templates/provisioning/service_detail.html:213
+#: templates/provisioning/service_form.html:87
 msgid "Domain"
 msgstr "Domeniu"
 
@@ -3434,17 +3743,6 @@ msgstr "Nume plan"
 msgid "Plan Type"
 msgstr "Tip plan"
 
-#: apps/provisioning/models.py:36 apps/tickets/admin.py:522
-#: apps/tickets/models.py:17 apps/tickets/models.py:96
-#: templates/billing/invoice_detail.html:101
-#: templates/billing/invoice_form.html:146
-#: templates/billing/proforma_convert.html:138
-#: templates/billing/proforma_detail.html:142
-#: templates/billing/proforma_form.html:185 templates/tickets/detail.html:43
-#: templates/tickets/form.html:92
-msgid "Description"
-msgstr "Descriere"
-
 #: apps/provisioning/models.py:43
 msgid "Monthly Price (RON)"
 msgstr "Preț lunar (RON)"
@@ -3457,7 +3755,7 @@ msgstr "Preț trimestrial (RON)"
 msgid "Annual Price (RON)"
 msgstr "Preț anual (RON)"
 
-#: apps/provisioning/models.py:67 templates/provisioning/service_form.html:287
+#: apps/provisioning/models.py:67
 msgid "Setup Fee (RON)"
 msgstr "Taxă de instalare (RON)"
 
@@ -3465,7 +3763,7 @@ msgstr "Taxă de instalare (RON)"
 msgid "Technical specifications and features in JSON format"
 msgstr "Specificații tehnice și caracteristici în format JSON"
 
-#: apps/provisioning/models.py:78 templates/provisioning/service_form.html:137
+#: apps/provisioning/models.py:78
 msgid "Disk Space (GB)"
 msgstr "Spațiu disc (GB)"
 
@@ -3486,12 +3784,11 @@ msgid "Domains"
 msgstr "Domenii"
 
 #: apps/provisioning/models.py:85 apps/provisioning/models.py:168
-#: templates/provisioning/service_form.html:159
+#: templates/provisioning/service_detail.html:196
 msgid "CPU Cores"
 msgstr "Nuclee CPU"
 
 #: apps/provisioning/models.py:86 apps/provisioning/models.py:169
-#: templates/provisioning/service_form.html:174
 msgid "RAM (GB)"
 msgstr "RAM (GB)"
 
@@ -3516,6 +3813,8 @@ msgid "Provisioning Script"
 msgstr "Script de aprovizionare"
 
 #: apps/provisioning/models.py:105 apps/provisioning/models.py:311
+#: templates/provisioning/service_detail.html:159
+#: templates/provisioning/service_form.html:71
 msgid "Service Plan"
 msgstr "Plan de servicii"
 
@@ -3603,11 +3902,11 @@ msgstr "Utilizare disc (%)"
 msgid "Maximum Services"
 msgstr "Număr maxim de servicii"
 
-#: apps/provisioning/models.py:212 templates/provisioning/service_form.html:191
+#: apps/provisioning/models.py:212
 msgid "Operating System"
 msgstr "Sistem de operare"
 
-#: apps/provisioning/models.py:213 templates/provisioning/service_form.html:238
+#: apps/provisioning/models.py:213
 msgid "Control Panel"
 msgstr "Panou de control"
 
@@ -3632,6 +3931,7 @@ msgid "Next Maintenance"
 msgstr "Următoarea mentenanță"
 
 #: apps/provisioning/models.py:237
+#: templates/provisioning/service_detail.html:233
 msgid "Server"
 msgstr "Server"
 
@@ -3647,7 +3947,8 @@ msgstr "Terminat"
 msgid "Service Name"
 msgstr "Nume serviciu"
 
-#: apps/provisioning/models.py:324 templates/provisioning/service_form.html:217
+#: apps/provisioning/models.py:324
+#: templates/provisioning/service_detail.html:216
 msgid "Primary Domain"
 msgstr "Domeniu principal"
 
@@ -3655,11 +3956,11 @@ msgstr "Domeniu principal"
 msgid "System Username"
 msgstr "Nume de utilizator sistem"
 
-#: apps/provisioning/models.py:332 templates/provisioning/service_form.html:272
+#: apps/provisioning/models.py:332
 msgid "Billing Cycle"
 msgstr "Ciclu de facturare"
 
-#: apps/provisioning/models.py:337 templates/provisioning/service_form.html:262
+#: apps/provisioning/models.py:337
 msgid "Price (RON)"
 msgstr "Preț (RON)"
 
@@ -3728,8 +4029,8 @@ msgstr "Motiv suspendare"
 msgid "Retrying"
 msgstr "Se reîncearcă"
 
-#: apps/provisioning/models.py:474 templates/provisioning/service_form.html:4
-#: templates/provisioning/service_form.html:374
+#: apps/provisioning/models.py:474 templates/provisioning/service_form.html:8
+#: templates/provisioning/service_form.html:112
 msgid "Create Service"
 msgstr "Creare serviciu"
 
@@ -3745,7 +4046,7 @@ msgstr "Anulare suspendare serviciu"
 msgid "Terminate Service"
 msgstr "Terminare serviciu"
 
-#: apps/provisioning/models.py:478
+#: apps/provisioning/models.py:478 templates/provisioning/service_form.html:110
 msgid "Update Service"
 msgstr "Actualizare serviciu"
 
@@ -4142,24 +4443,43 @@ msgstr "❌ Nu aveți permisiunea de a crea servicii pentru acest client."
 msgid "✅ Service for {domain} has been created!"
 msgstr "✅ Serviciul pentru {domain} a fost creat!"
 
-#: apps/provisioning/views.py:110 apps/tickets/views.py:92
+#: apps/provisioning/views.py:110 apps/provisioning/views.py:167
+#: apps/tickets/views.py:106
 msgid "❌ All fields are required."
 msgstr "❌ Toate câmpurile sunt obligatorii."
 
 #: apps/provisioning/views.py:127
+#, fuzzy
+#| msgid "❌ You do not have permission to edit this invoice."
+msgid "❌ You do not have permission to edit this service."
+msgstr "❌ Nu aveți permisiunea de a edita această factură."
+
+#: apps/provisioning/views.py:153
+#, fuzzy
+#| msgid "❌ You do not have permission to create services for this customer."
+msgid "❌ You do not have permission to move services to this customer."
+msgstr "❌ Nu aveți permisiunea de a crea servicii pentru acest client."
+
+#: apps/provisioning/views.py:164
+#, fuzzy, python-brace-format
+#| msgid "✅ Service for {domain} has been created!"
+msgid "✅ Service {domain} has been updated!"
+msgstr "✅ Serviciul pentru {domain} a fost creat!"
+
+#: apps/provisioning/views.py:186
 msgid "❌ You do not have permission to suspend this service."
 msgstr "❌ Nu aveți permisiunea de a suspenda acest serviciu."
 
-#: apps/provisioning/views.py:134
+#: apps/provisioning/views.py:193
 #, python-brace-format
 msgid "⏸️ Service {domain} has been suspended!"
 msgstr "⏸️ Serviciul {domain} a fost suspendat!"
 
-#: apps/provisioning/views.py:147
+#: apps/provisioning/views.py:206
 msgid "❌ You do not have permission to activate this service."
 msgstr "❌ Nu aveți permisiunea de a activa acest serviciu."
 
-#: apps/provisioning/views.py:153
+#: apps/provisioning/views.py:212
 #, python-brace-format
 msgid "▶️ Service {domain} has been activated!"
 msgstr "▶️ Serviciul {domain} a fost activat!"
@@ -4340,38 +4660,39 @@ msgid "Support Categories"
 msgstr "Categorii suport"
 
 #: apps/tickets/models.py:62 templates/tickets/list.html:75
-#: templates/tickets/list.html:164
+#: templates/tickets/list.html:166
 msgid "New"
 msgstr "Nou"
 
 #: apps/tickets/models.py:63 templates/tickets/list.html:19
-#: templates/tickets/list.html:76 templates/tickets/list.html:165
+#: templates/tickets/list.html:76 templates/tickets/list.html:167
 msgid "Open"
 msgstr "Deschis"
 
 #: apps/tickets/models.py:65 templates/tickets/list.html:78
-#: templates/tickets/list.html:167
+#: templates/tickets/list.html:169
 msgid "Resolved"
 msgstr "Rezolvat"
 
 #: apps/tickets/models.py:66 templates/tickets/list.html:79
-#: templates/tickets/list.html:168
+#: templates/tickets/list.html:170
 msgid "Closed"
 msgstr "Închis"
 
 #: apps/tickets/models.py:75 templates/tickets/list.html:66
-#: templates/tickets/list.html:152
+#: templates/tickets/list.html:154
 msgid "Critical"
 msgstr "Critic"
 
 #: apps/tickets/models.py:80 apps/users/forms.py:19 apps/users/forms.py:44
-#: apps/users/forms.py:282 apps/users/models.py:321
+#: apps/users/forms.py:282 apps/users/models.py:387
 #: templates/customers/assign_user.html:40 templates/customers/detail.html:56
 msgid "Email"
 msgstr "Email"
 
 #: apps/tickets/models.py:81 apps/users/forms.py:71 apps/users/forms.py:159
-#: apps/users/models.py:322 templates/customers/detail.html:67
+#: apps/users/models.py:388 templates/customers/detail.html:67
+#: templates/provisioning/service_detail.html:110
 msgid "Phone"
 msgstr "Telefon"
 
@@ -4461,6 +4782,7 @@ msgid "Support Tickets"
 msgstr "Tichete de suport"
 
 #: apps/tickets/models.py:312 apps/users/forms.py:312
+#: templates/tickets/partials/comments_list.html:37
 msgid "Support"
 msgstr "Suport"
 
@@ -4566,45 +4888,45 @@ msgstr "Pontaj tichet"
 msgid "Ticket Worklogs"
 msgstr "Pontaje tichet"
 
-#: apps/tickets/views.py:44
+#: apps/tickets/views.py:46
 msgid "❌ You do not have permission to access this ticket."
 msgstr "❌ Nu aveți permisiunea de a accesa acest tichet."
 
-#: apps/tickets/views.py:77
+#: apps/tickets/views.py:91
 msgid "❌ You do not have permission to create tickets for this customer."
 msgstr "❌ Nu aveți permisiunea de a crea tichete pentru acest client."
 
-#: apps/tickets/views.py:89
+#: apps/tickets/views.py:103
 #, python-brace-format
 msgid "✅ Ticket #{ticket_pk} has been created!"
 msgstr "✅ Tichetul #{ticket_pk} a fost creat!"
 
-#: apps/tickets/views.py:110
+#: apps/tickets/views.py:124
 msgid "❌ You do not have permission to reply to this ticket."
 msgstr "❌ Nu aveți permisiunea de a răspunde la acest tichet."
 
-#: apps/tickets/views.py:117
+#: apps/tickets/views.py:201
 msgid "✅ Your reply has been added!"
 msgstr "✅ Răspunsul a fost adăugat!"
 
-#: apps/tickets/views.py:119
+#: apps/tickets/views.py:205
 msgid "❌ The reply cannot be empty."
 msgstr "❌ Răspunsul nu poate fi gol."
 
-#: apps/tickets/views.py:133
+#: apps/tickets/views.py:247
 msgid "❌ You do not have permission to close this ticket."
 msgstr "❌ Nu aveți permisiunea de a închide acest tichet."
 
-#: apps/tickets/views.py:139
+#: apps/tickets/views.py:253
 #, python-brace-format
 msgid "✅ Ticket #{ticket_pk} has been closed!"
 msgstr "✅ Tichetul #{ticket_pk} a fost închis!"
 
-#: apps/tickets/views.py:152
+#: apps/tickets/views.py:266
 msgid "❌ You do not have permission to reopen this ticket."
 msgstr "❌ Nu aveți permisiunea de a redeschide acest tichet."
 
-#: apps/tickets/views.py:158
+#: apps/tickets/views.py:272
 #, python-brace-format
 msgid "✅ Ticket #{ticket_pk} has been reopened!"
 msgstr "✅ Tichetul #{ticket_pk} a fost redeschis!"
@@ -4613,7 +4935,7 @@ msgstr "✅ Tichetul #{ticket_pk} a fost redeschis!"
 msgid "name@example.com"
 msgstr "nume@exemplu.ro"
 
-#: apps/users/forms.py:27 apps/users/forms.py:103 templates/users/login.html:42
+#: apps/users/forms.py:27 apps/users/forms.py:103 templates/users/login.html:45
 msgid "Password"
 msgstr "Parolă"
 
@@ -4713,8 +5035,8 @@ msgstr "Introduceți emailul asociat contului dvs."
 msgid "There is no account with this email address."
 msgstr "Nu există niciun cont cu această adresă de email."
 
-#: apps/users/forms.py:309 templates/billing/billing_list.html:231
-#: templates/billing/billing_list.html:240
+#: apps/users/forms.py:309 templates/billing/billing_list.html:239
+#: templates/billing/billing_list.html:248
 #: templates/provisioning/service_list.html:161
 #: templates/users/profile.html:237
 msgid "View"
@@ -4728,8 +5050,8 @@ msgstr "Administrare"
 msgid "Permissions"
 msgstr "Permisiuni"
 
-#: apps/users/forms.py:330 templates/users/login.html:29
-#: templates/users/password_reset.html:47 templates/users/profile.html:61
+#: apps/users/forms.py:330 templates/users/login.html:32
+#: templates/users/password_reset.html:50 templates/users/profile.html:61
 msgid "Email Address"
 msgstr "Adresă email"
 
@@ -4838,19 +5160,19 @@ msgstr ""
 msgid "CustomerOnboardingRegistrationForm must be saved with commit=True"
 msgstr ""
 
-#: apps/users/models.py:48 apps/users/models.py:193
+#: apps/users/models.py:48 apps/users/models.py:259
 msgid "System Administrator"
 msgstr "Administrator de sistem"
 
-#: apps/users/models.py:49 apps/users/models.py:194
+#: apps/users/models.py:49 apps/users/models.py:260
 msgid "Support Agent"
 msgstr "Agent de suport"
 
-#: apps/users/models.py:50 apps/users/models.py:195
+#: apps/users/models.py:50 apps/users/models.py:261
 msgid "Billing Staff"
 msgstr "Personal facturare"
 
-#: apps/users/models.py:51 apps/users/models.py:196
+#: apps/users/models.py:51 apps/users/models.py:262
 msgid "Manager"
 msgstr "Manager"
 
@@ -4874,238 +5196,246 @@ msgstr ""
 msgid "Users"
 msgstr "Utilizatori"
 
-#: apps/users/models.py:190
+#: apps/users/models.py:256
 #, fuzzy
 #| msgid "Customers"
 msgid "Customer User"
 msgstr "Clienți"
 
-#: apps/users/models.py:261 apps/users/models.py:357
+#: apps/users/models.py:327 apps/users/models.py:423
 #: templates/customers/emails/welcome_email.html:87
 #: templates/customers/emails/welcome_email.txt:13
 msgid "Owner"
 msgstr "Proprietar"
 
-#: apps/users/models.py:263 apps/users/models.py:359
+#: apps/users/models.py:329 apps/users/models.py:425
 msgid "Technical"
 msgstr "Tehnic"
 
-#: apps/users/models.py:264 apps/users/models.py:360
+#: apps/users/models.py:330 apps/users/models.py:426
 msgid "Viewer"
 msgstr "Vizualizator"
 
-#: apps/users/models.py:282
+#: apps/users/models.py:348
 msgid "User role within this customer organization"
 msgstr "Rolul utilizatorului în cadrul acestei organizații client"
 
-#: apps/users/models.py:288
+#: apps/users/models.py:354
 msgid "Primary customer for this user (used for default context)"
 msgstr ""
 "Client principal pentru acest utilizator (utilizat pentru contextul implicit)"
 
-#: apps/users/models.py:298
+#: apps/users/models.py:364
 msgid "Email billing notifications"
 msgstr "Notificări de facturare prin email"
 
-#: apps/users/models.py:302
+#: apps/users/models.py:368
 msgid "Email technical notifications"
 msgstr "Notificări tehnice prin email"
 
-#: apps/users/models.py:306
+#: apps/users/models.py:372
 msgid "Email marketing notifications"
 msgstr "Notificări de marketing prin email"
 
-#: apps/users/models.py:314
+#: apps/users/models.py:380
 msgid "Notification language"
 msgstr "Limba notificărilor"
 
-#: apps/users/models.py:323
+#: apps/users/models.py:389
 msgid "Email and phone"
 msgstr "Email și telefon"
 
-#: apps/users/models.py:326
+#: apps/users/models.py:392
 msgid "Preferred contact method"
 msgstr "Metodă de contact preferată"
 
-#: apps/users/models.py:342
+#: apps/users/models.py:408
 msgid "Customer Membership"
 msgstr "Membru client"
 
-#: apps/users/models.py:343
+#: apps/users/models.py:409
 msgid "Customer Memberships"
 msgstr "Membri clienți"
 
-#: apps/users/models.py:381
+#: apps/users/models.py:447
 msgid "English"
 msgstr "Engleză"
 
-#: apps/users/models.py:381
+#: apps/users/models.py:447
 msgid "Romanian"
 msgstr "Română"
 
-#: apps/users/models.py:410 templates/users/profile.html:4
+#: apps/users/models.py:476 templates/users/profile.html:4
 #: templates/users/profile.html:11
 msgid "User Profile"
 msgstr "Profil utilizator"
 
-#: apps/users/models.py:411
+#: apps/users/models.py:477
 msgid "User Profiles"
 msgstr "Profile utilizator"
 
-#: apps/users/models.py:422
+#: apps/users/models.py:488
 msgid "Failed Password"
 msgstr "Parolă greșită"
 
-#: apps/users/models.py:423
+#: apps/users/models.py:489
 msgid "Failed 2FA"
 msgstr "2FA eșuat"
 
-#: apps/users/models.py:424
+#: apps/users/models.py:490
+msgid "Failed User Not Found"
+msgstr ""
+
+#: apps/users/models.py:491
 msgid "Account Locked"
 msgstr "Cont blocat"
 
-#: apps/users/models.py:425
+#: apps/users/models.py:492
 msgid "Account Disabled"
 msgstr "Cont dezactivat"
 
-#: apps/users/models.py:447
+#: apps/users/models.py:493
+#, fuzzy
+#| msgid "Password Reset Complete"
+msgid "Password Reset Completed"
+msgstr "Resetarea parolei completă"
+
+#: apps/users/models.py:494
+#, fuzzy
+#| msgid "Account Locked"
+msgid "Account Lockout Reset"
+msgstr "Cont blocat"
+
+#: apps/users/models.py:495
+#, fuzzy
+#| msgid "Password Reset Sent"
+msgid "Password Reset Failed"
+msgstr "Resetare parolă trimisă"
+
+#: apps/users/models.py:517
 msgid "User Login Log"
 msgstr "Jurnal de autentificare utilizator"
 
-#: apps/users/models.py:448
+#: apps/users/models.py:518
 msgid "User Login Logs"
 msgstr "Jurnale de autentificare utilizator"
 
-#: apps/users/services.py:42
+#: apps/users/services.py:65
 #, fuzzy
 #| msgid "Individual"
 msgid "Individual Person"
 msgstr "Persoană fizică"
 
-#: apps/users/services.py:43
+#: apps/users/services.py:66
 msgid "SRL - Limited Liability Company"
 msgstr ""
 
-#: apps/users/services.py:44
+#: apps/users/services.py:67
 msgid "PFA - Authorized Physical Person"
 msgstr ""
 
-#: apps/users/services.py:45
+#: apps/users/services.py:68
 msgid "SA - Joint Stock Company"
 msgstr ""
 
-#: apps/users/services.py:46
+#: apps/users/services.py:69
 msgid "NGO - Non-Governmental Organization"
 msgstr ""
 
-#: apps/users/services.py:47
+#: apps/users/services.py:70
 msgid "Other Organization Type"
 msgstr ""
 
-#: apps/users/services.py:153
-msgid "No customer found with provided company information"
+#: apps/users/services.py:239
+msgid "Company information could not be verified"
 msgstr ""
 
-#: apps/users/services.py:212
-#, fuzzy, python-brace-format
-#| msgid "An account with this email address already exists."
-msgid "User with email {email} already exists"
-msgstr "Un cont cu această adresă de email există deja."
-
-#: apps/users/services.py:252
-#, fuzzy, python-brace-format
-#| msgid "❌ Error creating customer: {error}"
-msgid "Failed to create user: {error}"
-msgstr "❌ Eroare la crearea clientului: {error}"
-
-#: apps/users/services.py:270
-#, python-brace-format
-msgid "User {email} is already linked to customer {customer}"
+#: apps/users/services.py:316
+msgid "Customer does not have a valid email address"
 msgstr ""
 
-#: apps/users/services.py:289
-#, python-brace-format
-msgid "Failed to link user: {error}"
+#: apps/users/services.py:329
+msgid "User account already exists for this email"
 msgstr ""
 
-#: apps/users/services.py:317
+#: apps/users/services.py:406
+#, fuzzy
+#| msgid "User role within this customer organization"
+msgid "User is already associated with this organization"
+msgstr "Rolul utilizatorului în cadrul acestei organizații client"
+
+#: apps/users/services.py:601
 #, python-brace-format
 msgid "Welcome to PRAHO - Account Created for {customer_name}"
 msgstr ""
 
-#: apps/users/services.py:353
-#, fuzzy
-#| msgid "You do not have permission to access this page."
-msgid "You don't have permission to invite users to this organization"
-msgstr "Nu aveți permisiuni pentru această pagină."
-
-#: apps/users/services.py:362
-msgid "Only organization owners can invite new users"
+#: apps/users/services.py:655
+#, python-brace-format
+msgid "[PRAHO] New Access Request for {company}"
 msgstr ""
 
-#: apps/users/services.py:376
-msgid "User is already a member of this organization"
+#: apps/users/services.py:658
+msgid ""
+"A user has requested access to your organization. Please review in your "
+"dashboard."
 msgstr ""
 
-#: apps/users/services.py:422
-#, fuzzy
-#| msgid "An account with this email address already exists."
-msgid "A company with this name already exists"
-msgstr "Un cont cu această adresă de email există deja."
+#: apps/users/services.py:695
+#, python-brace-format
+msgid "[PRAHO] Invitation to join {company}"
+msgstr ""
 
-#: apps/users/services.py:426
-#, fuzzy
-#| msgid "An account with this email address already exists."
-msgid "A company with this VAT number already exists"
-msgstr "Un cont cu această adresă de email există deja."
-
-#: apps/users/services.py:430
-#, fuzzy
-#| msgid "An account with this email address already exists."
-msgid "A company with this registration number already exists"
-msgstr "Un cont cu această adresă de email există deja."
+#: apps/users/services.py:698
+msgid ""
+"You have been invited to join an organization on PRAHO. Please check your "
+"dashboard to accept."
+msgstr ""
 
 #: apps/users/views.py:75
-msgid "Account temporarily locked for security reasons."
+#, fuzzy, python-brace-format
+#| msgid "Account temporarily locked for security reasons."
+msgid ""
+"Account temporarily locked for security reasons. Try again in {minutes} "
+"minutes."
 msgstr "Cont blocat temporar din motive de securitate."
 
-#: apps/users/views.py:88 apps/users/views.py:492
+#: apps/users/views.py:105 apps/users/views.py:531
 #, python-brace-format
 msgid "Welcome, {user_full_name}!"
 msgstr "Bun venit, {user_full_name}!"
 
-#: apps/users/views.py:93
+#: apps/users/views.py:132
 msgid "Incorrect email or password."
 msgstr "Email sau parolă incorectă."
 
-#: apps/users/views.py:112
+#: apps/users/views.py:151
 #, fuzzy
 #| msgid "Account created successfully! You can now log in."
 msgid "Account created successfully! Please check your email for next steps."
 msgstr "Contul a fost creat cu succes! Vă puteți autentifica acum."
 
-#: apps/users/views.py:126
+#: apps/users/views.py:165
 msgid "You have been successfully logged out."
 msgstr "Ați fost deconectat cu succes."
 
-#: apps/users/views.py:148
+#: apps/users/views.py:187
 msgid "Password reset for your account"
 msgstr "Resetare parolă pentru contul dumneavoastră"
 
-#: apps/users/views.py:162
+#: apps/users/views.py:201
 msgid "Too many password reset attempts. Please wait before trying again."
 msgstr ""
 "Prea multe încercări de resetare a parolei. Vă rugăm să așteptați înainte de "
 "a încerca din nou."
 
-#: apps/users/views.py:207
+#: apps/users/views.py:246
 msgid ""
 "Too many password confirmation attempts. Please wait before trying again."
 msgstr ""
 "Prea multe încercări de confirmare a parolei. Vă rugăm să așteptați înainte "
 "de a încerca din nou."
 
-#: apps/users/views.py:289
+#: apps/users/views.py:328
 #, fuzzy
 #| msgid "Too many password reset attempts. Please wait before trying again."
 msgid "Too many password change attempts. Please wait before trying again."
@@ -5113,147 +5443,153 @@ msgstr ""
 "Prea multe încercări de resetare a parolei. Vă rugăm să așteptați înainte de "
 "a încerca din nou."
 
-#: apps/users/views.py:304
+#: apps/users/views.py:343
 #, fuzzy
 #| msgid "Password reset successfully!"
 msgid "Your password has been changed successfully!"
 msgstr "Parola a fost resetată cu succes!"
 
-#: apps/users/views.py:332
+#: apps/users/views.py:371
 #, fuzzy
 #| msgid "Payment Method"
 msgid "Choose Method"
 msgstr "Metodă de plată"
 
-#: apps/users/views.py:333
+#: apps/users/views.py:372
 #, fuzzy
 #| msgid "Location"
 msgid "Select authentication method"
 msgstr "Locație"
 
-#: apps/users/views.py:337
+#: apps/users/views.py:376
 #, fuzzy
 #| msgid "Payment Method"
 msgid "Set Up Method"
 msgstr "Metodă de plată"
 
-#: apps/users/views.py:338
+#: apps/users/views.py:377
 msgid "Configure your authenticator"
 msgstr ""
 
-#: apps/users/views.py:342
+#: apps/users/views.py:381
 #, fuzzy
 #| msgid "Completed"
 msgid "Complete"
 msgstr "Finalizat"
 
-#: apps/users/views.py:343
+#: apps/users/views.py:382
 msgid "Save backup codes"
 msgstr ""
 
-#: apps/users/views.py:355 apps/users/views.py:371 apps/users/views.py:435
+#: apps/users/views.py:394 apps/users/views.py:410 apps/users/views.py:474
 msgid "2FA is already enabled for your account."
 msgstr "2FA este deja activat pentru contul dvs."
 
-#: apps/users/views.py:389
+#: apps/users/views.py:428
 #, fuzzy
 #| msgid "✅ Note added successfully"
 msgid "2FA has been enabled successfully!"
 msgstr "✅ Notă adăugată cu succes"
 
-#: apps/users/views.py:402
+#: apps/users/views.py:441
 #, fuzzy
 #| msgid "An error occurred. Please try again."
 msgid "Failed to enable 2FA. Please try again."
 msgstr "A apărut o eroare. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:404
+#: apps/users/views.py:443
 #, fuzzy
 #| msgid "An error occurred. Please try again."
 msgid "Invalid verification code. Please try again."
 msgstr "A apărut o eroare. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:406
+#: apps/users/views.py:445
 msgid "Setup session expired. Please start over."
 msgstr ""
 
-#: apps/users/views.py:439
+#: apps/users/views.py:478
 msgid ""
 "WebAuthn/Passkeys are coming soon! Please use the Authenticator App method "
 "for now."
 msgstr ""
 
-#: apps/users/views.py:482
+#: apps/users/views.py:521
 msgid ""
 "You have used your last backup code! Please generate new ones in your "
 "profile."
 msgstr ""
 
-#: apps/users/views.py:487
+#: apps/users/views.py:526
 #, python-brace-format
 msgid "You have {count} backup codes remaining. Consider generating new ones."
 msgstr ""
 
-#: apps/users/views.py:490
+#: apps/users/views.py:529
 #, python-brace-format
 msgid "Backup code used. You have {count} codes remaining."
 msgstr ""
 
-#: apps/users/views.py:498
+#: apps/users/views.py:537
 #, fuzzy
 #| msgid "The 2FA code is invalid."
 msgid "The 2FA code or backup code is invalid."
 msgstr "Codul 2FA este invalid."
 
-#: apps/users/views.py:514
+#: apps/users/views.py:553
 msgid "No backup codes available."
 msgstr ""
 
-#: apps/users/views.py:532
+#: apps/users/views.py:571
 #, fuzzy
 #| msgid "Two-factor authentication has been successfully enabled!"
 msgid "Two-factor authentication is not enabled."
 msgstr "Autentificarea în doi pași a fost activată cu succes!"
 
-#: apps/users/views.py:540
+#: apps/users/views.py:579
 msgid "New backup codes have been generated."
 msgstr ""
 
-#: apps/users/views.py:552
+#: apps/users/views.py:591
 #, fuzzy
 #| msgid "Two-factor authentication has been successfully enabled!"
 msgid "Two-factor authentication is already disabled."
 msgstr "Autentificarea în doi pași a fost activată cu succes!"
 
-#: apps/users/views.py:559
+#: apps/users/views.py:598
 #, fuzzy
 #| msgid "Failed Password"
 msgid "Invalid password."
 msgstr "Parolă greșită"
 
-#: apps/users/views.py:576
+#: apps/users/views.py:615
 #, fuzzy
 #| msgid "Two-factor authentication has been successfully enabled!"
 msgid "Two-factor authentication has been disabled."
 msgstr "Autentificarea în doi pași a fost activată cu succes!"
 
-#: apps/users/views.py:595
+#: apps/users/views.py:634
 msgid "Profile updated successfully."
 msgstr "Profilul a fost actualizat cu succes."
 
-#: apps/users/views.py:627 apps/users/views.py:659
+#: apps/users/views.py:671 apps/users/views.py:712
 msgid "You do not have permission to access this page."
 msgstr "Nu aveți permisiuni pentru această pagină."
 
-#: apps/users/views.py:693
+#: apps/users/views.py:750
 msgid "Email is required"
 msgstr "Emailul este obligatoriu"
 
-#: apps/users/views.py:700
+#: apps/users/views.py:757
+#, fuzzy
+#| msgid "Company Information"
+msgid "Invalid email format"
+msgstr "Informații companie"
+
+#: apps/users/views.py:764
 msgid "Email available"
 msgstr "Email disponibil"
 
-#: apps/users/views.py:700
+#: apps/users/views.py:764
 msgid "Email already in use"
 msgstr "Email deja folosit"
 
@@ -5263,53 +5599,53 @@ msgstr "Email deja folosit"
 msgid "PRAHO Platform System for Romanian Hosting Providers"
 msgstr "Sistem CRM pentru furnizorii de hosting din România"
 
-#: templates/base.html:69 templates/dashboard.html:5
+#: templates/base.html:78 templates/dashboard.html:5
 msgid "Dashboard"
 msgstr "Panou de control"
 
-#: templates/base.html:84
+#: templates/base.html:93
 msgid "Tickets"
 msgstr "Tichete"
 
-#: templates/base.html:95
+#: templates/base.html:104
 #, fuzzy
 #| msgid "Tickets"
 msgid "My Tickets"
 msgstr "Tichete"
 
-#: templates/base.html:99
+#: templates/base.html:108
 #, fuzzy
 #| msgid "Invoices"
 msgid "My Invoices"
 msgstr "Facturi"
 
-#: templates/base.html:103 templates/dashboard.html:93
+#: templates/base.html:112 templates/dashboard.html:93
 #, fuzzy
 #| msgid "Services"
 msgid "My Services"
 msgstr "Servicii"
 
-#: templates/base.html:108
+#: templates/base.html:117
 msgid "No customer access assigned"
 msgstr ""
 
-#: templates/base.html:119
+#: templates/base.html:128
 msgid "Profile"
 msgstr "Profil"
 
-#: templates/base.html:164 templates/users/login.html:17
+#: templates/base.html:173 templates/users/login.html:20
 msgid "PRAHO Really Automates Hosting Operations"
 msgstr ""
 
-#: templates/base.html:167
+#: templates/base.html:176
 msgid "VAT Romania"
 msgstr "TVA România"
 
-#: templates/base.html:168
+#: templates/base.html:177
 msgid "Version"
 msgstr "Versiune"
 
-#: templates/base.html:188 templates/billing/proforma_detail.html:336
+#: templates/base.html:197 templates/billing/proforma_detail.html:336
 msgid "An error occurred. Please try again."
 msgstr "A apărut o eroare. Vă rugăm să încercați din nou."
 
@@ -5422,60 +5758,60 @@ msgstr "Acțiuni"
 msgid "Proforma"
 msgstr ""
 
-#: templates/billing/billing_list.html:198
+#: templates/billing/billing_list.html:206
 #: templates/billing/proforma_convert.html:76
 msgid "Valid"
 msgstr ""
 
-#: templates/billing/billing_list.html:235
+#: templates/billing/billing_list.html:243
 msgid "Convert"
 msgstr ""
 
-#: templates/billing/billing_list.html:243
+#: templates/billing/billing_list.html:251
 msgid "PDF"
 msgstr ""
 
-#: templates/billing/billing_list.html:253
+#: templates/billing/billing_list.html:261
 msgid "No documents found"
 msgstr ""
 
-#: templates/billing/billing_list.html:256
+#: templates/billing/billing_list.html:264
 msgid "Create your first proforma to get started."
 msgstr ""
 
-#: templates/billing/billing_list.html:258
+#: templates/billing/billing_list.html:266
 #, fuzzy
 #| msgid "2FA is already enabled for your account."
 msgid "No billing documents available for your account."
 msgstr "2FA este deja activat pentru contul dvs."
 
-#: templates/billing/billing_list.html:282
+#: templates/billing/billing_list.html:290
 #: templates/billing/invoice_list.html:225
-#: templates/provisioning/service_list.html:222 templates/tickets/list.html:196
-#: templates/tickets/list.html:219
+#: templates/provisioning/service_list.html:222 templates/tickets/list.html:198
+#: templates/tickets/list.html:221
 msgid "Previous"
 msgstr "Anterior"
 
-#: templates/billing/billing_list.html:289
+#: templates/billing/billing_list.html:297
 #: templates/billing/invoice_list.html:232
-#: templates/provisioning/service_list.html:229 templates/tickets/list.html:202
-#: templates/tickets/list.html:245
+#: templates/provisioning/service_list.html:229 templates/tickets/list.html:204
+#: templates/tickets/list.html:247
 msgid "Next"
 msgstr "Următor"
 
-#: templates/billing/billing_list.html:297
+#: templates/billing/billing_list.html:305
 msgid "Showing"
 msgstr ""
 
-#: templates/billing/billing_list.html:299
+#: templates/billing/billing_list.html:307
 msgid "to"
 msgstr ""
 
-#: templates/billing/billing_list.html:301
+#: templates/billing/billing_list.html:309
 msgid "of"
 msgstr ""
 
-#: templates/billing/billing_list.html:303
+#: templates/billing/billing_list.html:311
 #, fuzzy
 #| msgid "Result"
 msgid "results"
@@ -5512,18 +5848,6 @@ msgstr "Data plății"
 #: templates/billing/invoice_detail.html:85
 msgid "Not paid"
 msgstr ""
-
-#: templates/billing/invoice_detail.html:107
-#: templates/billing/invoice_form.html:147
-#: templates/billing/proforma_form.html:186
-msgid "Quantity"
-msgstr "Cantitate"
-
-#: templates/billing/invoice_detail.html:110
-#: templates/billing/proforma_convert.html:144
-#: templates/billing/proforma_detail.html:148
-msgid "Unit Price"
-msgstr "Preț unitar"
 
 #: templates/billing/invoice_detail.html:139
 #, fuzzy
@@ -5670,7 +5994,7 @@ msgstr "Cotă TVA (%)"
 #: templates/billing/invoice_form.html:358
 #: templates/billing/proforma_form.html:210
 #: templates/billing/proforma_form.html:241
-#: templates/billing/proforma_form.html:439 templates/dashboard.html:372
+#: templates/billing/proforma_form.html:439 templates/dashboard.html:376
 msgid "Standard"
 msgstr ""
 
@@ -5701,7 +6025,6 @@ msgstr ""
 #: templates/billing/invoice_form.html:195
 #: templates/billing/proforma_detail.html:190
 #: templates/billing/proforma_form.html:269
-#: templates/provisioning/service_form.html:352
 #, fuzzy
 #| msgid "Company Information"
 msgid "Additional Information"
@@ -5728,7 +6051,6 @@ msgstr ""
 #: templates/billing/invoice_form.html:210
 #: templates/billing/proforma_detail.html:204
 #: templates/billing/proforma_form.html:284
-#: templates/provisioning/service_form.html:357
 msgid "Internal Notes"
 msgstr "Note interne"
 
@@ -5784,13 +6106,14 @@ msgid "GDPR compliant"
 msgstr ""
 
 #: templates/billing/invoice_form.html:295
-#: templates/billing/proforma_convert.html:230
+#: templates/billing/proforma_convert.html:224
 #: templates/billing/proforma_form.html:371 templates/components/modal.html:76
 #: templates/customers/form.html:18 templates/customers/form.html:460
-#: templates/provisioning/service_form.html:369
-#: templates/users/two_factor_disable.html:154
-#: templates/users/two_factor_disable.html:232
-#: templates/users/two_factor_regenerate_backup_codes.html:144
+#: templates/provisioning/service_form.html:104
+#: templates/tickets/detail.html:119
+#: templates/users/two_factor_disable.html:148
+#: templates/users/two_factor_disable.html:226
+#: templates/users/two_factor_regenerate_backup_codes.html:139
 #, fuzzy
 #| msgid "Cancelled"
 msgid "Cancel"
@@ -5864,7 +6187,7 @@ msgid "Back to Proforma"
 msgstr "Înapoi la conectare"
 
 #: templates/billing/proforma_convert.html:18
-#: templates/billing/proforma_convert.html:235
+#: templates/billing/proforma_convert.html:229
 #: templates/billing/proforma_detail.html:36
 #: templates/billing/proforma_detail.html:291
 #, fuzzy
@@ -5982,13 +6305,6 @@ msgstr ""
 
 #: templates/billing/proforma_convert.html:211
 msgid "Conversion Actions"
-msgstr ""
-
-#: templates/billing/proforma_convert.html:222
-msgid ""
-"I understand that this will create an immutable invoice record and that this "
-"action cannot be undone. The invoice will be assigned a new sequential "
-"number and will be ready for payment processing."
 msgstr ""
 
 #: templates/billing/proforma_detail.html:14
@@ -6167,6 +6483,10 @@ msgstr ""
 #| msgid "Romanian VAT"
 msgid "Romanian VAT compliance"
 msgstr "TVA România"
+
+#: templates/components/mobile_header.html:30
+msgid "Toggle mobile menu"
+msgstr ""
 
 #: templates/components/modal.html:40
 #, fuzzy
@@ -6352,7 +6672,7 @@ msgid "Not provided"
 msgstr "Furnizor"
 
 #: templates/customers/detail.html:91 templates/customers/form.html:190
-#: templates/users/register.html:107
+#: templates/users/register.html:112
 #, fuzzy
 #| msgid "Company Information"
 msgid "Business Information"
@@ -6506,7 +6826,7 @@ msgid "Back to customers"
 msgstr "Înapoi la clienți"
 
 #: templates/customers/form.html:44 templates/users/profile.html:22
-#: templates/users/register.html:48
+#: templates/users/register.html:53
 #, fuzzy
 #| msgid "Company Information"
 msgid "Personal Information"
@@ -6542,7 +6862,7 @@ msgstr ""
 msgid "Romanian Tax Information"
 msgstr "Informații companie"
 
-#: templates/customers/form.html:302 templates/users/register.html:156
+#: templates/customers/form.html:302 templates/users/register.html:161
 #, fuzzy
 #| msgid "Company Information"
 msgid "Address Information"
@@ -6554,7 +6874,7 @@ msgstr "Informații companie"
 msgid "Billing Configuration"
 msgstr "Notificări de facturare prin email"
 
-#: templates/customers/form.html:420 templates/users/register.html:243
+#: templates/customers/form.html:420 templates/users/register.html:236
 msgid "Privacy & Consent"
 msgstr ""
 
@@ -6591,6 +6911,7 @@ msgstr[1] ""
 msgstr[2] ""
 
 #: templates/customers/list.html:68
+#: templates/provisioning/service_detail.html:101
 #, fuzzy
 #| msgid "Content"
 msgid "Contact"
@@ -6693,293 +7014,291 @@ msgstr "Facturi"
 msgid "My Recent Invoices"
 msgstr "Trimis la e-Factură"
 
-#: templates/dashboard.html:184
+#: templates/dashboard.html:186
 #, fuzzy
 #| msgid "No invoices yet"
 msgid "No recent invoices"
 msgstr "Nicio factură încă"
 
-#: templates/dashboard.html:186
+#: templates/dashboard.html:188
 #, fuzzy
 #| msgid "No invoices yet"
 msgid "No recent invoices found"
 msgstr "Nicio factură încă"
 
-#: templates/dashboard.html:195
+#: templates/dashboard.html:197
 #, fuzzy
 #| msgid "Total Invoices"
 msgid "View all invoices"
 msgstr "Total facturi"
 
-#: templates/dashboard.html:197
+#: templates/dashboard.html:199
 #, fuzzy
 #| msgid "New Invoice"
 msgid "View my invoices"
 msgstr "Factură nouă"
 
-#: templates/dashboard.html:209
+#: templates/dashboard.html:211
 #, fuzzy
 #| msgid "Tickets"
 msgid "Recent Tickets"
 msgstr "Tichete"
 
-#: templates/dashboard.html:211
+#: templates/dashboard.html:213
 msgid "My Recent Tickets"
 msgstr ""
 
-#: templates/dashboard.html:234 templates/tickets/form.html:63
+#: templates/dashboard.html:237 templates/tickets/form.html:63
 msgid "Medium"
 msgstr ""
 
-#: templates/dashboard.html:242
+#: templates/dashboard.html:246
 #, fuzzy
 #| msgid "Support Tickets"
 msgid "No recent tickets"
 msgstr "Tichete de suport"
 
-#: templates/dashboard.html:244
+#: templates/dashboard.html:248
 #, fuzzy
 #| msgid "Support Tickets"
 msgid "No recent support tickets"
 msgstr "Tichete de suport"
 
-#: templates/dashboard.html:253
+#: templates/dashboard.html:257
 msgid "View all tickets"
 msgstr ""
 
-#: templates/dashboard.html:255
+#: templates/dashboard.html:259
 msgid "View my tickets"
 msgstr ""
 
-#: templates/dashboard.html:266
+#: templates/dashboard.html:270
 #, fuzzy
 #| msgid "Actions"
 msgid "Quick Actions"
 msgstr "Acțiuni"
 
-#: templates/dashboard.html:304
+#: templates/dashboard.html:308
 #, fuzzy
 #| msgid "Status"
 msgid "System Status"
 msgstr "Stare"
 
-#: templates/dashboard.html:306 templates/users/profile.html:129
+#: templates/dashboard.html:310 templates/users/profile.html:129
 #, fuzzy
 #| msgid "Company Information"
 msgid "Account Information"
 msgstr "Informații companie"
 
-#: templates/dashboard.html:314
+#: templates/dashboard.html:318
 #, fuzzy
 #| msgid "Servers"
 msgid "Server Status"
 msgstr "Servere"
 
-#: templates/dashboard.html:316
+#: templates/dashboard.html:320
 #, fuzzy
 #| msgid "Offline"
 msgid "Online"
 msgstr "Offline"
 
-#: templates/dashboard.html:321
+#: templates/dashboard.html:325
 #, fuzzy
 #| msgid "Status"
 msgid "Backup Status"
 msgstr "Stare"
 
-#: templates/dashboard.html:323
+#: templates/dashboard.html:327
 #, fuzzy
 #| msgid "Updated At"
 msgid "Up-to-date"
 msgstr "Actualizat la"
 
-#: templates/dashboard.html:330
+#: templates/dashboard.html:334
 msgid "Connected"
 msgstr ""
 
-#: templates/dashboard.html:335
+#: templates/dashboard.html:339
 #, fuzzy
 #| msgid "Payment Date"
 msgid "Payment Gateway"
 msgstr "Data plății"
 
-#: templates/dashboard.html:337
+#: templates/dashboard.html:341
 msgid "Functional"
 msgstr ""
 
-#: templates/dashboard.html:344
+#: templates/dashboard.html:348
 #, fuzzy
 #| msgid "Last Name"
 msgid "Last update"
 msgstr "Nume"
 
-#: templates/dashboard.html:364
+#: templates/dashboard.html:368
 #, fuzzy
 #| msgid "Customer Type"
 msgid "Customer Since"
 msgstr "Tip client"
 
-#: templates/dashboard.html:370
+#: templates/dashboard.html:374
 #, fuzzy
 #| msgid "Support"
 msgid "Support Level"
 msgstr "Suport"
 
-#: templates/dashboard.html:379
+#: templates/dashboard.html:383
 msgid "Need help?"
 msgstr ""
 
-#: templates/dashboard.html:381
+#: templates/dashboard.html:385
 #, fuzzy
 #| msgid "Contact Phone"
 msgid "Contact Support"
 msgstr "Telefon de contact"
 
-#: templates/provisioning/service_form.html:13
+#: templates/provisioning/service_detail.html:6
 #, fuzzy
-#| msgid "Backup Service"
-msgid "Back to Services"
-msgstr "Backup serviciu"
+#| msgid "Invoice Items"
+msgid "Service Details"
+msgstr "Linii factură"
 
-#: templates/provisioning/service_form.html:17
+#: templates/provisioning/service_detail.html:91
+msgid "CUI"
+msgstr "CUI"
+
+#: templates/provisioning/service_detail.html:131
 #, fuzzy
-#| msgid "Create Service"
-msgid "Create New Service"
-msgstr "Creare serviciu"
+#| msgid "Quarterly Price (RON)"
+msgid "Quarterly Price"
+msgstr "Preț trimestrial (RON)"
 
-#: templates/provisioning/service_form.html:20
-msgid "Provision a new hosting service for a customer"
-msgstr ""
-
-#: templates/provisioning/service_form.html:43
+#: templates/provisioning/service_detail.html:138
 #, fuzzy
-#| msgid "Customer name/designation"
-msgid "Customer & Service Information"
-msgstr "Nume/denumire client"
+#| msgid "Monthly Price (RON)"
+msgid "Yearly Price"
+msgstr "Preț lunar (RON)"
 
-#: templates/provisioning/service_form.html:68
-msgid "Web Hosting Premium"
-msgstr ""
+#: templates/provisioning/service_detail.html:145
+#, fuzzy, python-format
+#| msgid "VAT Rate (%)"
+msgid "VAT (19%%)"
+msgstr "Cotă TVA (%)"
 
-#: templates/provisioning/service_form.html:82
-msgid "Select service type"
-msgstr ""
-
-#: templates/provisioning/service_form.html:83
+#: templates/provisioning/service_detail.html:175
 #, fuzzy
-#| msgid "Shared Web Hosting"
-msgid "Web Hosting"
-msgstr "Găzduire web partajată"
+#| msgid "Disk Space (GB)"
+msgid "Disk Space"
+msgstr "Spațiu disc (GB)"
 
-#: templates/provisioning/service_form.html:84
-#, fuzzy
-#| msgid "Server"
-msgid "VPS Server"
-msgstr "Server"
-
-#: templates/provisioning/service_form.html:104
-#, fuzzy
-#| msgid "Activity Description"
-msgid "Detailed service description"
-msgstr "Descriere activitate"
-
-#: templates/provisioning/service_form.html:121
-#, fuzzy
-#| msgid "Location"
-msgid "Server Location"
-msgstr "Locație"
-
-#: templates/provisioning/service_form.html:125
-#, fuzzy
-#| msgid "Location"
-msgid "Select location"
-msgstr "Locație"
-
-#: templates/provisioning/service_form.html:126
-#, fuzzy
-#| msgid "Bucharest"
-msgid "Bucharest, Romania"
-msgstr "București"
-
-#: templates/provisioning/service_form.html:127
-msgid "Cluj-Napoca, Romania"
-msgstr ""
-
-#: templates/provisioning/service_form.html:128
-msgid "Frankfurt, Germany"
-msgstr ""
-
-#: templates/provisioning/service_form.html:129
-msgid "Amsterdam, Netherlands"
-msgstr ""
-
-#: templates/provisioning/service_form.html:130
-msgid "London, UK"
-msgstr ""
-
-#: templates/provisioning/service_form.html:147
+#: templates/provisioning/service_detail.html:182
 #, fuzzy
 #| msgid "Bandwidth Used (MB)"
-msgid "Bandwidth (GB/month)"
+msgid "Bandwidth"
 msgstr "Lățime de bandă utilizată (MB)"
 
-#: templates/provisioning/service_form.html:195
-msgid "Select OS"
+#: templates/provisioning/service_detail.html:189
+msgid "RAM"
 msgstr ""
 
-#: templates/provisioning/service_form.html:210
+#: templates/provisioning/service_detail.html:224
 #, fuzzy
-#| msgid "Domains"
-msgid "Domain & Access"
-msgstr "Domenii"
+#| msgid "Description"
+msgid "Registered Domain"
+msgstr "Descriere"
 
-#: templates/provisioning/service_form.html:227
+#: templates/provisioning/service_detail.html:236
+#, fuzzy
+#| msgid "Assigned To"
+msgid "Assigned Server"
+msgstr "Alocat către"
+
+#: templates/provisioning/service_detail.html:240
+#, fuzzy
+#| msgid "Assigned To"
+msgid "Not assigned"
+msgstr "Alocat către"
+
+#: templates/provisioning/service_detail.html:248
 #, fuzzy
 #| msgid "Add Address"
 msgid "IP Address"
 msgstr "Adăugare adresă"
 
-#: templates/provisioning/service_form.html:242
-#, fuzzy
-#| msgid "Control Panel"
-msgid "No control panel"
-msgstr "Panou de control"
-
-#: templates/provisioning/service_form.html:247
-#, fuzzy
-#| msgid "Control Panel"
-msgid "Custom Panel"
-msgstr "Panou de control"
-
-#: templates/provisioning/service_form.html:255
-#, fuzzy
-#| msgid "Company Information"
-msgid "Billing Information"
-msgstr "Informații companie"
-
-#: templates/provisioning/service_form.html:311
+#: templates/provisioning/service_detail.html:261
 #, fuzzy
 #| msgid "Service Plan"
-msgid "Service Timeline"
+msgid "Status Timeline"
 msgstr "Plan de servicii"
 
-#: templates/provisioning/service_form.html:318
-msgid "Start Date"
-msgstr "Data de început"
+#: templates/provisioning/service_detail.html:276
+#: templates/users/two_factor_regenerate_backup_codes.html:32
+#, fuzzy
+#| msgid "Account Disabled"
+msgid "Current Status"
+msgstr "Cont dezactivat"
 
-#: templates/provisioning/service_form.html:327
-msgid "End Date"
-msgstr "Data de sfârșit"
+#: templates/provisioning/service_detail.html:282
+#, fuzzy
+#| msgid "Last Name"
+msgid "Last updated"
+msgstr "Nume"
 
-#: templates/provisioning/service_form.html:361
-msgid "Internal notes about this service (not visible to customer)"
+#: templates/provisioning/service_detail.html:294
+#, fuzzy
+#| msgid "Service Name"
+msgid "Service Created"
+msgstr "Nume serviciu"
+
+#: templates/provisioning/service_form.html:6
+#: templates/provisioning/service_form.html:24
+#, fuzzy
+#| msgid "Update Service"
+msgid "Edit Service"
+msgstr "Actualizare serviciu"
+
+#: templates/provisioning/service_form.html:19
+#, fuzzy
+#| msgid "Backup Service"
+msgid "Back to Services"
+msgstr "Backup serviciu"
+
+#: templates/provisioning/service_form.html:26
+#, fuzzy
+#| msgid "Create Service"
+msgid "Create New Service"
+msgstr "Creare serviciu"
+
+#: templates/provisioning/service_form.html:31
+#, fuzzy
+#| msgid "Management system for Romanian hosting providers"
+msgid "Update hosting service configuration"
+msgstr "Sistem de management pentru furnizorii de hosting din România"
+
+#: templates/provisioning/service_form.html:33
+msgid "Provision a new hosting service for a customer"
 msgstr ""
 
-#: templates/provisioning/service_form.html:379
+#: templates/provisioning/service_form.html:59
 #, fuzzy
-#| msgid "Auto Provision"
-msgid "Create & Provision"
-msgstr "Aprovizionare automată"
+#| msgid "Back to customers"
+msgid "Select customer"
+msgstr "Înapoi la clienți"
+
+#: templates/provisioning/service_form.html:75
+#, fuzzy
+#| msgid "Location"
+msgid "Select plan"
+msgstr "Locație"
+
+#: templates/provisioning/service_form.html:92
+#, fuzzy
+#| msgid "name@example.com"
+msgid "example.com"
+msgstr "nume@exemplu.ro"
+
+#: templates/provisioning/service_form.html:94
+msgid "Primary domain for this hosting service"
+msgstr ""
 
 #: templates/provisioning/service_list.html:12
 #, fuzzy
@@ -7075,39 +7394,55 @@ msgstr "Comentarii tichet"
 msgid "Created By"
 msgstr "Creat la"
 
-#: templates/tickets/detail.html:52
-msgid "Replies"
+#: templates/tickets/detail.html:57
+#, fuzzy
+#| msgid "Company Information"
+msgid "Conversation"
+msgstr "Informații companie"
+
+#: templates/tickets/detail.html:58
+msgid "replies"
 msgstr ""
 
-#: templates/tickets/detail.html:70
-msgid "Replies section coming soon."
+#: templates/tickets/detail.html:85
+msgid "Write a reply..."
 msgstr ""
 
-#: templates/tickets/detail.html:75
-msgid "Add Reply"
+#: templates/tickets/detail.html:99
+msgid "Attach file"
 msgstr ""
 
-#: templates/tickets/detail.html:78
-msgid "Type your reply here..."
+#: templates/tickets/detail.html:103
+msgid "Attach"
 msgstr ""
 
-#: templates/tickets/detail.html:80
-msgid "Submit Reply"
+#: templates/tickets/detail.html:112
+#, fuzzy
+#| msgid "Internal Notes"
+msgid "Internal note"
+msgstr "Note interne"
+
+#: templates/tickets/detail.html:125
+msgid "Send Reply"
 msgstr ""
 
-#: templates/tickets/detail.html:89
+#: templates/tickets/detail.html:135
+msgid "Your reply will be visible to the customer unless marked as internal."
+msgstr ""
+
+#: templates/tickets/detail.html:146
 #, fuzzy
 #| msgid "Back to customers"
 msgid "Back to Tickets"
 msgstr "Înapoi la clienți"
 
-#: templates/tickets/detail.html:96
+#: templates/tickets/detail.html:153
 #, fuzzy
 #| msgid "Ticket"
 msgid "Close Ticket"
 msgstr "Tichet"
 
-#: templates/tickets/detail.html:102
+#: templates/tickets/detail.html:159
 #, fuzzy
 #| msgid "Ticket"
 msgid "Reopen Ticket"
@@ -7231,13 +7566,13 @@ msgstr ""
 msgid "All statuses"
 msgstr ""
 
-#: templates/tickets/list.html:179
+#: templates/tickets/list.html:181
 #, fuzzy
 #| msgid "Details..."
 msgid "View Details"
 msgstr "Detalii..."
 
-#: templates/tickets/list.html:209
+#: templates/tickets/list.html:211
 #, fuzzy, python-format
 #| msgid ""
 #| "\n"
@@ -7252,51 +7587,67 @@ msgstr ""
 "          Pagina %(page_number)s din %(num_pages)s\n"
 "          "
 
-#: templates/tickets/list.html:266
+#: templates/tickets/list.html:268
 msgid "No tickets found"
 msgstr ""
 
-#: templates/tickets/list.html:268
+#: templates/tickets/list.html:270
 msgid "There are no support tickets for your customers yet."
 msgstr ""
 
-#: templates/tickets/list.html:276
+#: templates/tickets/list.html:278
 #, fuzzy
 #| msgid "Create the first invoice"
 msgid "Create the first ticket"
 msgstr "Creează prima factură"
 
+#: templates/tickets/partials/comments_list.html:44
+msgid "STAFF INTERNAL NOTE"
+msgstr ""
+
+#: templates/tickets/partials/comments_list.html:54
+#, fuzzy
+#| msgid "Is Solution"
+msgid "Solution"
+msgstr "Este soluție"
+
+#: templates/tickets/partials/comments_list.html:76
+#, fuzzy
+#| msgid "Time Spent (hours)"
+msgid "Time spent"
+msgstr "Timp petrecut (ore)"
+
+#: templates/tickets/partials/comments_list.html:103
+msgid "No replies yet. Be the first to respond!"
+msgstr ""
+
 #: templates/users/login.html:5
 msgid "Login"
 msgstr ""
 
-#: templates/users/login.html:14
+#: templates/users/login.html:17
 msgid "PRAHO Platform Login"
 msgstr ""
 
-#: templates/users/login.html:58
-msgid "Keep me logged in"
-msgstr ""
-
-#: templates/users/login.html:64
+#: templates/users/login.html:61
 #, fuzzy
 #| msgid "Your password"
 msgid "Forgot password?"
 msgstr "Parola dvs."
 
-#: templates/users/login.html:86
+#: templates/users/login.html:83
 msgid "Don\\"
 msgstr ""
 
-#: templates/users/login.html:88
+#: templates/users/login.html:85
 msgid "Register here"
 msgstr ""
 
-#: templates/users/login.html:97
+#: templates/users/login.html:94
 msgid "Secure Connection"
 msgstr ""
 
-#: templates/users/login.html:97
+#: templates/users/login.html:94
 #, fuzzy
 #| msgid "Email available"
 msgid "2FA Available"
@@ -7350,34 +7701,34 @@ msgid ""
 "numbers."
 msgstr ""
 
-#: templates/users/password_reset.html:5 templates/users/password_reset.html:14
+#: templates/users/password_reset.html:5 templates/users/password_reset.html:17
 msgid "Reset Your Password"
 msgstr "Resetează parola"
 
-#: templates/users/password_reset.html:17
+#: templates/users/password_reset.html:20
 msgid "Enter your email address and we\\"
 msgstr ""
 
-#: templates/users/password_reset.html:64
+#: templates/users/password_reset.html:67
 msgid "Send Password Reset Email"
 msgstr "Trimite email pentru resetarea parolei"
 
-#: templates/users/password_reset.html:71
-#: templates/users/password_reset_done.html:32
+#: templates/users/password_reset.html:74
+#: templates/users/password_reset_done.html:35
 #: templates/users/two_factor_verify.html:127
 msgid "Back to login"
 msgstr "Înapoi la conectare"
 
 #: templates/users/password_reset_complete.html:4
-#: templates/users/password_reset_complete.html:13
+#: templates/users/password_reset_complete.html:16
 msgid "Password Reset Complete"
 msgstr "Resetarea parolei completă"
 
-#: templates/users/password_reset_complete.html:21
+#: templates/users/password_reset_complete.html:24
 msgid "Your password has been set. You may go ahead and log in now."
 msgstr "Parola dumneavoastră a fost setată. Puteți să vă conectați acum."
 
-#: templates/users/password_reset_complete.html:30
+#: templates/users/password_reset_complete.html:33
 msgid "Log in"
 msgstr "Conectare"
 
@@ -7418,15 +7769,15 @@ msgid "Request New Reset Link"
 msgstr "Solicită un nou link pentru resetare"
 
 #: templates/users/password_reset_done.html:4
-#: templates/users/password_reset_done.html:13
+#: templates/users/password_reset_done.html:16
 msgid "Password Reset Sent"
 msgstr "Resetare parolă trimisă"
 
-#: templates/users/password_reset_done.html:21
+#: templates/users/password_reset_done.html:24
 msgid "We\\"
 msgstr ""
 
-#: templates/users/password_reset_done.html:24
+#: templates/users/password_reset_done.html:27
 msgid "If you don\\"
 msgstr ""
 
@@ -7541,12 +7892,12 @@ msgid "Enabled"
 msgstr ""
 
 #: templates/users/profile.html:189
-#: templates/users/two_factor_regenerate_backup_codes.html:4
-#: templates/users/two_factor_regenerate_backup_codes.html:14
+#: templates/users/two_factor_regenerate_backup_codes.html:5
+#: templates/users/two_factor_regenerate_backup_codes.html:15
 msgid "Regenerate Backup Codes"
 msgstr ""
 
-#: templates/users/profile.html:192 templates/users/two_factor_disable.html:160
+#: templates/users/profile.html:192 templates/users/two_factor_disable.html:154
 #, fuzzy
 #| msgid "Failed 2FA"
 msgid "Disable 2FA"
@@ -7576,31 +7927,31 @@ msgstr "Resetare parolă trimisă"
 msgid "Customer Access"
 msgstr "Adresă client"
 
-#: templates/users/register.html:4 templates/users/register.html:280
+#: templates/users/register.html:5
 #, fuzzy
 #| msgid "Created At"
 msgid "Create Account"
 msgstr "Creat la"
 
-#: templates/users/register.html:13
+#: templates/users/register.html:18
 msgid "Create Your PragmaticHost Account"
 msgstr ""
 
-#: templates/users/register.html:16
+#: templates/users/register.html:21
 msgid "Start your hosting journey with Romanian compliance built-in"
 msgstr ""
 
-#: templates/users/register.html:212
+#: templates/users/register.html:217
 #, fuzzy
 #| msgid "Account Locked"
 msgid "Account Security"
 msgstr "Cont blocat"
 
-#: templates/users/register.html:287
+#: templates/users/register.html:254
 msgid "Already have an account?"
 msgstr ""
 
-#: templates/users/register.html:289
+#: templates/users/register.html:256
 msgid "Sign in here"
 msgstr ""
 
@@ -7684,7 +8035,7 @@ msgid "Continue to Profile"
 msgstr "Tip conținut"
 
 #: templates/users/two_factor_backup_codes.html:138
-#: templates/users/two_factor_regenerate_backup_codes.html:90
+#: templates/users/two_factor_regenerate_backup_codes.html:91
 #, fuzzy
 #| msgid "New Invoice"
 msgid "Generate New Codes"
@@ -7786,85 +8137,79 @@ msgstr "Confirmă parola"
 msgid "Enter your current password to confirm this action"
 msgstr "Confirmare parolă nouă"
 
-#: templates/users/two_factor_disable.html:145
-msgid ""
-"I understand that disabling 2FA will make my account less secure and will "
-"permanently delete all backup codes"
-msgstr ""
-
-#: templates/users/two_factor_disable.html:174
+#: templates/users/two_factor_disable.html:168
 msgid "Consider These Alternatives"
 msgstr ""
 
-#: templates/users/two_factor_disable.html:178
+#: templates/users/two_factor_disable.html:172
 msgid "Instead of disabling:"
 msgstr ""
 
-#: templates/users/two_factor_disable.html:179
+#: templates/users/two_factor_disable.html:173
 msgid "Add a second authenticator device"
 msgstr ""
 
-#: templates/users/two_factor_disable.html:180
+#: templates/users/two_factor_disable.html:174
 msgid "Print backup codes for safe storage"
 msgstr ""
 
-#: templates/users/two_factor_disable.html:181
+#: templates/users/two_factor_disable.html:175
 msgid "Use a password manager with 2FA"
 msgstr ""
 
-#: templates/users/two_factor_disable.html:184
+#: templates/users/two_factor_disable.html:178
 msgid "Security best practices:"
 msgstr ""
 
-#: templates/users/two_factor_disable.html:185
+#: templates/users/two_factor_disable.html:179
 msgid "Use strong, unique passwords"
 msgstr ""
 
-#: templates/users/two_factor_disable.html:186
+#: templates/users/two_factor_disable.html:180
 #, fuzzy
 #| msgid "Email notifications"
 msgid "Enable email notifications"
 msgstr "Notificări email"
 
-#: templates/users/two_factor_disable.html:187
+#: templates/users/two_factor_disable.html:181
 msgid "Review account activity regularly"
 msgstr ""
 
-#: templates/users/two_factor_disable.html:201
+#: templates/users/two_factor_disable.html:195
 msgid "Please confirm that you understand the security implications"
 msgstr ""
 
-#: templates/users/two_factor_disable.html:205
+#: templates/users/two_factor_disable.html:199
 msgid ""
 "Are you absolutely sure you want to disable two-factor authentication? This "
 "action cannot be undone."
 msgstr ""
 
-#: templates/users/two_factor_disable.html:227
+#: templates/users/two_factor_disable.html:221
 msgid "Yes, Disable Two-Factor Authentication"
 msgstr ""
 
-#: templates/users/two_factor_disable.html:248
+#: templates/users/two_factor_disable.html:242
 #, fuzzy
 #| msgid "Enter the code from the authenticator app"
 msgid "Lost your authenticator app?"
 msgstr "Introduceți codul din aplicația de autentificare"
 
-#: templates/users/two_factor_disable.html:251
+#: templates/users/two_factor_disable.html:245
 msgid "Before disabling 2FA, try these options:"
 msgstr ""
 
-#: templates/users/two_factor_disable.html:253
+#: templates/users/two_factor_disable.html:247
 #, fuzzy
 #| msgid "Back to login"
 msgid "Use a backup code to log in"
 msgstr "Înapoi la conectare"
 
-#: templates/users/two_factor_disable.html:254
+#: templates/users/two_factor_disable.html:248
 msgid "Restore your authenticator app from backup"
 msgstr ""
 
-#: templates/users/two_factor_disable.html:255
+#: templates/users/two_factor_disable.html:249
 msgid "Contact support if you have no other options"
 msgstr ""
 
@@ -7972,115 +8317,103 @@ msgstr ""
 msgid "Your browser or device doesn\\"
 msgstr ""
 
-#: templates/users/two_factor_regenerate_backup_codes.html:17
+#: templates/users/two_factor_regenerate_backup_codes.html:18
 msgid "Generate fresh backup codes for emergency access"
 msgstr ""
 
-#: templates/users/two_factor_regenerate_backup_codes.html:31
-#, fuzzy
-#| msgid "Account Disabled"
-msgid "Current Status"
-msgstr "Cont dezactivat"
-
-#: templates/users/two_factor_regenerate_backup_codes.html:38
+#: templates/users/two_factor_regenerate_backup_codes.html:39
 msgid "unused backup codes remaining"
 msgstr ""
 
-#: templates/users/two_factor_regenerate_backup_codes.html:47
+#: templates/users/two_factor_regenerate_backup_codes.html:48
 msgid "Running low on backup codes!"
 msgstr ""
 
-#: templates/users/two_factor_regenerate_backup_codes.html:60
+#: templates/users/two_factor_regenerate_backup_codes.html:61
 #, fuzzy
 #| msgid "Important"
 msgid "Important Warning"
 msgstr "Important"
 
-#: templates/users/two_factor_regenerate_backup_codes.html:66
+#: templates/users/two_factor_regenerate_backup_codes.html:67
 msgid "All existing backup codes will be invalidated"
 msgstr ""
 
-#: templates/users/two_factor_regenerate_backup_codes.html:70
+#: templates/users/two_factor_regenerate_backup_codes.html:71
 msgid "You will receive 8 new fresh backup codes"
 msgstr ""
 
-#: templates/users/two_factor_regenerate_backup_codes.html:74
+#: templates/users/two_factor_regenerate_backup_codes.html:75
 #, fuzzy
 #| msgid "Enter the code from the authenticator app"
 msgid "Ensure you have access to your authenticator app"
 msgstr "Introduceți codul din aplicația de autentificare"
 
-#: templates/users/two_factor_regenerate_backup_codes.html:78
+#: templates/users/two_factor_regenerate_backup_codes.html:79
 msgid "Store new codes securely after generation"
 msgstr ""
 
-#: templates/users/two_factor_regenerate_backup_codes.html:93
+#: templates/users/two_factor_regenerate_backup_codes.html:94
 msgid "Confirm regeneration to proceed"
 msgstr ""
 
-#: templates/users/two_factor_regenerate_backup_codes.html:119
+#: templates/users/two_factor_regenerate_backup_codes.html:120
 msgid "Confirm with 2FA Code"
 msgstr ""
 
-#: templates/users/two_factor_regenerate_backup_codes.html:125
+#: templates/users/two_factor_regenerate_backup_codes.html:126
 #, fuzzy
 #| msgid "Enter the code from the authenticator app"
 msgid "Enter code from your authenticator app or existing backup code"
 msgstr "Introduceți codul din aplicația de autentificare"
 
-#: templates/users/two_factor_regenerate_backup_codes.html:135
-msgid ""
-"I understand that all existing backup codes will be invalidated and I will "
-"need to store the new codes securely"
-msgstr ""
-
-#: templates/users/two_factor_regenerate_backup_codes.html:150
+#: templates/users/two_factor_regenerate_backup_codes.html:145
 msgid "Regenerate Codes"
 msgstr ""
 
-#: templates/users/two_factor_regenerate_backup_codes.html:164
+#: templates/users/two_factor_regenerate_backup_codes.html:159
 msgid "When to Regenerate Backup Codes"
 msgstr ""
 
-#: templates/users/two_factor_regenerate_backup_codes.html:168
+#: templates/users/two_factor_regenerate_backup_codes.html:163
 msgid "Good reasons:"
 msgstr ""
 
-#: templates/users/two_factor_regenerate_backup_codes.html:169
+#: templates/users/two_factor_regenerate_backup_codes.html:164
 msgid "Running low on unused codes (< 3 remaining)"
 msgstr ""
 
-#: templates/users/two_factor_regenerate_backup_codes.html:170
+#: templates/users/two_factor_regenerate_backup_codes.html:165
 msgid "Suspect codes may be compromised"
 msgstr ""
 
-#: templates/users/two_factor_regenerate_backup_codes.html:171
+#: templates/users/two_factor_regenerate_backup_codes.html:166
 msgid "Lost access to stored codes"
 msgstr ""
 
-#: templates/users/two_factor_regenerate_backup_codes.html:174
+#: templates/users/two_factor_regenerate_backup_codes.html:169
 msgid "After regeneration:"
 msgstr ""
 
-#: templates/users/two_factor_regenerate_backup_codes.html:175
+#: templates/users/two_factor_regenerate_backup_codes.html:170
 msgid "Download and store codes securely"
 msgstr ""
 
-#: templates/users/two_factor_regenerate_backup_codes.html:176
+#: templates/users/two_factor_regenerate_backup_codes.html:171
 msgid "Print codes for offline backup"
 msgstr ""
 
-#: templates/users/two_factor_regenerate_backup_codes.html:177
+#: templates/users/two_factor_regenerate_backup_codes.html:172
 msgid "Test one code to verify it works"
 msgstr ""
 
-#: templates/users/two_factor_regenerate_backup_codes.html:191
+#: templates/users/two_factor_regenerate_backup_codes.html:186
 msgid ""
 "Please confirm that you understand the implications of regenerating backup "
 "codes"
 msgstr ""
 
-#: templates/users/two_factor_regenerate_backup_codes.html:195
+#: templates/users/two_factor_regenerate_backup_codes.html:190
 msgid ""
 "Are you sure you want to regenerate your backup codes? All existing codes "
 "will be invalidated."
@@ -8225,8 +8558,96 @@ msgstr ""
 msgid "Contact support if you need to reset your 2FA"
 msgstr ""
 
-#~ msgid "The entered code is invalid."
-#~ msgstr "Codul introdus este invalid."
+#, fuzzy, python-brace-format
+#~| msgid "An account with this email address already exists."
+#~ msgid "User with email {email} already exists"
+#~ msgstr "Un cont cu această adresă de email există deja."
+
+#, fuzzy, python-brace-format
+#~| msgid "❌ Error creating customer: {error}"
+#~ msgid "Failed to create user: {error}"
+#~ msgstr "❌ Eroare la crearea clientului: {error}"
+
+#, fuzzy
+#~| msgid "An account with this email address already exists."
+#~ msgid "A company with this name already exists"
+#~ msgstr "Un cont cu această adresă de email există deja."
+
+#, fuzzy
+#~| msgid "An account with this email address already exists."
+#~ msgid "A company with this VAT number already exists"
+#~ msgstr "Un cont cu această adresă de email există deja."
+
+#, fuzzy
+#~| msgid "An account with this email address already exists."
+#~ msgid "A company with this registration number already exists"
+#~ msgstr "Un cont cu această adresă de email există deja."
+
+#, fuzzy
+#~| msgid "Customer name/designation"
+#~ msgid "Customer & Service Information"
+#~ msgstr "Nume/denumire client"
+
+#, fuzzy
+#~| msgid "Shared Web Hosting"
+#~ msgid "Web Hosting"
+#~ msgstr "Găzduire web partajată"
+
+#, fuzzy
+#~| msgid "Server"
+#~ msgid "VPS Server"
+#~ msgstr "Server"
+
+#, fuzzy
+#~| msgid "Activity Description"
+#~ msgid "Detailed service description"
+#~ msgstr "Descriere activitate"
+
+#, fuzzy
+#~| msgid "Location"
+#~ msgid "Server Location"
+#~ msgstr "Locație"
+
+#, fuzzy
+#~| msgid "Bucharest"
+#~ msgid "Bucharest, Romania"
+#~ msgstr "București"
+
+#, fuzzy
+#~| msgid "Bandwidth Used (MB)"
+#~ msgid "Bandwidth (GB/month)"
+#~ msgstr "Lățime de bandă utilizată (MB)"
+
+#, fuzzy
+#~| msgid "Domains"
+#~ msgid "Domain & Access"
+#~ msgstr "Domenii"
+
+#, fuzzy
+#~| msgid "Control Panel"
+#~ msgid "No control panel"
+#~ msgstr "Panou de control"
+
+#, fuzzy
+#~| msgid "Control Panel"
+#~ msgid "Custom Panel"
+#~ msgstr "Panou de control"
+
+#, fuzzy
+#~| msgid "Company Information"
+#~ msgid "Billing Information"
+#~ msgstr "Informații companie"
+
+#~ msgid "Start Date"
+#~ msgstr "Data de început"
+
+#~ msgid "End Date"
+#~ msgstr "Data de sfârșit"
+
+#, fuzzy
+#~| msgid "Auto Provision"
+#~ msgid "Create & Provision"
+#~ msgstr "Aprovizionare automată"
 
 #~ msgid "Bank Card"
 #~ msgstr "Card bancar"
@@ -8279,17 +8700,11 @@ msgstr ""
 #~ msgid "External ID"
 #~ msgstr "ID extern"
 
-#~ msgid "CUI"
-#~ msgstr "CUI"
-
 #~ msgid "Name/Company Name"
 #~ msgstr "Nume/Denumire companie"
 
 #~ msgid "Customer Contacts"
 #~ msgstr "Contacte clienți"
-
-#~ msgid "Client"
-#~ msgstr "Client"
 
 #~ msgid "Password reset - under development!"
 #~ msgstr "Resetare parolă - în dezvoltare!"
@@ -8302,9 +8717,6 @@ msgstr ""
 
 #~ msgid "Logout"
 #~ msgstr "Deconectare"
-
-#~ msgid "Invoice number, company name..."
-#~ msgstr "Număr factură, nume companie..."
 
 #~ msgid "Filter"
 #~ msgstr "Filtrare"
