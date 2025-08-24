@@ -52,15 +52,18 @@ class SecurityHeadersMiddleware:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         response = self.get_response(request)
         
-        # Content Security Policy
+        # Content Security Policy - Enhanced security
         if not response.get('Content-Security-Policy'):
             csp = (
                 "default-src 'self'; "
-                "style-src 'self' 'unsafe-inline' fonts.googleapis.com; "
+                "style-src 'self' 'unsafe-inline' fonts.googleapis.com; "  # unsafe-inline needed for Tailwind
                 "font-src 'self' fonts.gstatic.com; "
-                "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+                "script-src 'self' 'unsafe-inline'; "  # Removed unsafe-eval for better security
                 "img-src 'self' data: https:; "
-                "connect-src 'self';"
+                "connect-src 'self'; "
+                "object-src 'none'; "  # Prevent Flash/Java execution
+                "base-uri 'self'; "    # Prevent base tag injection
+                "form-action 'self';"  # Restrict form submissions
             )
             response['Content-Security-Policy'] = csp
         
