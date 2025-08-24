@@ -3,6 +3,7 @@ Test settings for PRAHO Platform
 Fast, isolated testing environment.
 """
 
+import os
 from .base import *
 
 # ===============================================================================
@@ -32,7 +33,8 @@ DATABASES = {
 
 CACHES = {
     'default': {
-        'BACKEND': 'django.core.cache.backends.dummy.DummyCache',
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'test-cache',
     }
 }
 
@@ -89,10 +91,19 @@ LOGGING = {
 STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
 
 # ===============================================================================
+# LOCALIZATION (English for tests)
+# ===============================================================================
+
+LANGUAGE_CODE = 'en-us'
+USE_I18N = True
+USE_L10N = True
+
+# ===============================================================================
 # SECURITY (Relaxed for tests)
 # ===============================================================================
 
 SECRET_KEY = 'django-test-key-not-secure'
+ALLOWED_HOSTS = ['testserver', 'localhost', '127.0.0.1']
 
 # ===============================================================================
 # EXTERNAL SERVICES (Disabled in tests)

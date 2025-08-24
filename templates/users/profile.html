@@ -184,9 +184,17 @@
             <dd class="mt-1 text-sm">
               {% if user.two_factor_enabled %}
                 <span class="text-green-400">🔒 {% trans 'Enabled' %}</span>
+                <div class="mt-2 space-x-4">
+                  <a href="{% url 'users:two_factor_regenerate_backup_codes' %}" class="text-blue-400 hover:text-blue-300 text-xs">
+                    {% trans 'Regenerate Backup Codes' %}
+                  </a>
+                  <a href="{% url 'users:two_factor_disable' %}" class="text-red-400 hover:text-red-300 text-xs">
+                    {% trans 'Disable 2FA' %}
+                  </a>
+                </div>
               {% else %}
                 <span class="text-orange-400">⚠️ {% trans 'Disabled' %}</span>
-                <a href="#" class="ml-2 text-blue-400 hover:text-blue-300 text-xs">
+                <a href="{% url 'users:two_factor_setup' %}" class="ml-2 text-blue-400 hover:text-blue-300 text-xs">
                   {% trans 'Enable 2FA' %}
                 </a>
               {% endif %}
@@ -196,7 +204,7 @@
           <div>
             <dt class="text-sm font-medium text-slate-400">{% trans 'Password Security' %}</dt>
             <dd class="mt-1 text-sm">
-              <a href="{% url 'users:password_reset' %}" 
+              <a href="{% url 'users:password_change' %}" 
                  class="text-blue-400 hover:text-blue-300">
                 🔑 {% trans 'Change Password' %}
               </a>

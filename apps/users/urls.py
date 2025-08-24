@@ -19,8 +19,13 @@ urlpatterns = [
     path('password-reset-confirm/<uidb64>/<token>/', views.password_reset_confirm_view, name='password_reset_confirm'),
     path('password-reset-complete/', views.password_reset_complete_view, name='password_reset_complete'),
     
+    # Password change
+    path('password-change/', views.password_change_view, name='password_change'),
+    
     # Two-factor authentication
-    path('2fa/setup/', views.two_factor_setup, name='two_factor_setup'),
+    path('2fa/setup/', views.mfa_method_selection, name='two_factor_setup'),  # Method selection first
+    path('2fa/setup/totp/', views.two_factor_setup_totp, name='two_factor_setup_totp'),  # TOTP-specific
+    path('2fa/setup/webauthn/', views.two_factor_setup_webauthn, name='two_factor_setup_webauthn'),  # WebAuthn-specific
     path('2fa/verify/', views.two_factor_verify, name='two_factor_verify'),
     path('2fa/backup-codes/', views.two_factor_backup_codes, name='two_factor_backup_codes'),
     path('2fa/regenerate-backup-codes/', views.two_factor_regenerate_backup_codes, name='two_factor_regenerate_backup_codes'),

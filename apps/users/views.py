@@ -7,7 +7,12 @@ import pyotp
 import qrcode
 import io
 import base64
-from typing import Any
+import logging
+from typing import Any, cast
+
+from django.contrib.auth import get_user_model
+
+logger = logging.getLogger(__name__)
 
 from django.contrib import messages
 from django.contrib.auth import login, logout, authenticate
@@ -15,7 +20,8 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.views import (
     PasswordResetView, PasswordResetDoneView,
-    PasswordResetConfirmView, PasswordResetCompleteView
+    PasswordResetConfirmView, PasswordResetCompleteView,
+    PasswordChangeView
 )
 from django_ratelimit.decorators import ratelimit
 from django_ratelimit.exceptions import Ratelimited
@@ -23,9 +29,9 @@ from django.utils.decorators import method_decorator
 from django.core.exceptions import ValidationError
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render, redirect, get_object_or_404
-from django.urls import reverse_lazy
+from django.urls import reverse_lazy, reverse
 from django.utils import timezone
-from django.utils.translation import gettext_lazy as _
+from django.utils.translation import gettext_lazy as _, gettext as _
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
 from django.views.generic import ListView, DetailView, UpdateView
@@ -35,6 +41,9 @@ from apps.common.utils import (
     get_romanian_now, mask_sensitive_data
 )
 from .models import User, UserProfile, UserLoginLog, CustomerMembership
+
+# Type alias for cleaner type hints
+CustomUser = User
 from .forms import (
     LoginForm, UserRegistrationForm, UserProfileForm,
     TwoFactorSetupForm, TwoFactorVerifyForm
@@ -145,10 +154,9 @@ class SecurePasswordResetView(PasswordResetView):
             # Log rate limit exceeded
             UserLoginLog.objects.create(
                 user=None,
-                success=False,
-                action='password_reset_rate_limited',
                 ip_address=_get_client_ip(request),
-                notes='Password reset rate limit exceeded'
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                status='password_reset_rate_limited'
             )
             messages.error(request, _(
                 'Too many password reset attempts. Please wait before trying again.'
@@ -164,10 +172,9 @@ class SecurePasswordResetView(PasswordResetView):
         
         UserLoginLog.objects.create(
             user=None,  # Don't reveal if user exists in logs
-            success=True,
-            action='password_reset_requested',
             ip_address=_get_client_ip(self.request),
-            notes=f'Password reset requested for email: {email[:3]}***@{email.split("@")[1] if "@" in email else "unknown"} (exists: {user_exists})'
+            user_agent=self.request.META.get('HTTP_USER_AGENT', ''),
+            status='password_reset_requested'
         )
         return super().form_valid(form)
 
@@ -192,10 +199,9 @@ class SecurePasswordResetConfirmView(PasswordResetConfirmView):
             # Log rate limit exceeded
             UserLoginLog.objects.create(
                 user=None,
-                success=False,
-                action='password_confirm_rate_limited',
                 ip_address=_get_client_ip(request),
-                notes='Password confirmation rate limit exceeded'
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                status='password_confirm_rate_limited'
             )
             messages.error(request, _(
                 'Too many password confirmation attempts. Please wait before trying again.'
@@ -212,10 +218,9 @@ class SecurePasswordResetConfirmView(PasswordResetConfirmView):
         # Enhanced security logging
         UserLoginLog.objects.create(
             user=user,
-            success=True,
-            action='password_reset_completed',
             ip_address=_get_client_ip(self.request),
-            notes=f'Password successfully reset for user {user.email}'
+            user_agent=self.request.META.get('HTTP_USER_AGENT', ''),
+            status='password_reset_completed'
         )
         
         # Reset any account lockout since password was reset
@@ -227,10 +232,9 @@ class SecurePasswordResetConfirmView(PasswordResetConfirmView):
             # Log lockout reset
             UserLoginLog.objects.create(
                 user=user,
-                success=True,
-                action='account_lockout_reset',
                 ip_address=_get_client_ip(self.request),
-                notes='Account lockout reset due to successful password reset'
+                user_agent=self.request.META.get('HTTP_USER_AGENT', ''),
+                status='account_lockout_reset'
             )
         
         return super().form_valid(form)
@@ -239,10 +243,9 @@ class SecurePasswordResetConfirmView(PasswordResetConfirmView):
         # Log failed password reset confirmation
         UserLoginLog.objects.create(
             user=None,
-            success=False,
-            action='password_reset_failed',
             ip_address=_get_client_ip(self.request),
-            notes=f'Password reset confirmation failed: {form.errors}'
+            user_agent=self.request.META.get('HTTP_USER_AGENT', ''),
+            status='password_reset_failed'
         )
         return super().form_invalid(form)
 
@@ -260,17 +263,113 @@ password_reset_complete_view = SecurePasswordResetCompleteView.as_view()
 
 
 # ===============================================================================
-# TWO-FACTOR AUTHENTICATION
+# PASSWORD CHANGE
 # ===============================================================================
 
-def two_factor_setup(request: HttpRequest) -> HttpResponse:
-    """Set up 2FA for user account"""
-    if not request.user.is_authenticated:
-        return redirect('login')
+@method_decorator([
+    ratelimit(key='user', rate='10/h', method='POST', block=True),  # 10 password changes per hour per user
+], name='dispatch')
+class SecurePasswordChangeView(PasswordChangeView):
+    """Secure password change view with rate limiting and audit logging"""
+    template_name = 'users/password_change.html'
+    success_url = reverse_lazy('users:user_profile')
     
+    def dispatch(self, request, *args, **kwargs):
+        try:
+            return super().dispatch(request, *args, **kwargs)
+        except Ratelimited:
+            # Log rate limit exceeded
+            UserLoginLog.objects.create(
+                user=request.user,
+                ip_address=_get_client_ip(request),
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                status='password_change_rate_limited'
+            )
+            messages.error(request, _(
+                'Too many password change attempts. Please wait before trying again.'
+            ))
+            return render(request, self.template_name, {'form': self.get_form()})
+    
+    def form_valid(self, form):
+        # Log successful password change for audit
+        UserLoginLog.objects.create(
+            user=self.request.user,
+            ip_address=_get_client_ip(self.request),
+            user_agent=self.request.META.get('HTTP_USER_AGENT', ''),
+            status='password_changed'
+        )
+        
+        messages.success(
+            self.request, 
+            _('Your password has been changed successfully!')
+        )
+        return super().form_valid(form)
+    
+    def form_invalid(self, form):
+        # Log failed password change attempt
+        UserLoginLog.objects.create(
+            user=self.request.user,
+            ip_address=_get_client_ip(self.request),
+            user_agent=self.request.META.get('HTTP_USER_AGENT', ''),
+            status='password_change_failed'
+        )
+        return super().form_invalid(form)
+
+
+# View for backward compatibility
+password_change_view = SecurePasswordChangeView.as_view()
+
+
+logger = logging.getLogger(__name__)
+
+# ===============================================================================
+# MULTI-FACTOR AUTHENTICATION SETUP FLOW
+# ===============================================================================
+
+# Define 2FA Setup Steps for Progress Indicator
+TWO_FACTOR_STEPS = [
+    {
+        'label': _('Choose Method'),
+        'description': _('Select authentication method'),
+        'url': 'users:two_factor_setup'
+    },
+    {
+        'label': _('Set Up Method'),
+        'description': _('Configure your authenticator'),
+        'url': 'users:two_factor_setup_totp'
+    },
+    {
+        'label': _('Complete'),
+        'description': _('Save backup codes'),
+        'url': 'users:two_factor_backup_codes'
+    }
+]
+
+@login_required
+def mfa_method_selection(request: HttpRequest) -> HttpResponse:
+    """MFA method selection - first step in 2FA setup"""
+    
+    # Check if user already has 2FA enabled
+    user = request.user  # type: User
+    if user.two_factor_enabled:
+        messages.info(request, _('2FA is already enabled for your account.'))
+        return redirect('users:user_profile')
+    
+    context = {
+        'steps': TWO_FACTOR_STEPS,
+        'current_step': 1
+    }
+    return render(request, 'users/two_factor_method_selection.html', context)
+
+@login_required
+def two_factor_setup_totp(request: HttpRequest) -> HttpResponse:
+    """Set up 2FA for user account using new MFA service"""
+    from .mfa import MFAService, TOTPService
+    
+    # Check if user already has 2FA enabled
     if request.user.two_factor_enabled:
         messages.info(request, _('2FA is already enabled for your account.'))
-        return redirect('user_profile')
+        return redirect('users:user_profile')
     
     if request.method == 'POST':
         form = TwoFactorSetupForm(request.POST)
@@ -278,58 +377,67 @@ def two_factor_setup(request: HttpRequest) -> HttpResponse:
             token = form.cleaned_data['token']
             secret = request.session.get('2fa_secret')
             
-            if secret and pyotp.TOTP(secret).verify(token):
-                # Enable 2FA and generate backup codes
-                user = request.user
-                user.two_factor_secret = secret
-                user.two_factor_enabled = True
-                
-                # Generate backup codes
-                backup_codes = user.generate_backup_codes()
-                user.save()
-                
-                # Store backup codes in session to display once
-                request.session['new_backup_codes'] = backup_codes
-                
-                # Clear 2FA setup session
-                del request.session['2fa_secret']
-                
-                messages.success(
-                    request,
-                    _('Two-factor authentication has been successfully enabled!')
-                )
-                
-                # Redirect to backup codes display
-                return redirect('users:two_factor_backup_codes')
+            # Create temporary user object with the secret to verify
+            if secret:
+                # Verify the TOTP code using pyotp directly for setup
+                totp = pyotp.TOTP(secret)
+                if totp.verify(token):
+                    try:
+                        # Enable TOTP using MFA service
+                        secret, backup_codes = MFAService.enable_totp(request.user, request)
+                        
+                        messages.success(request, _('2FA has been enabled successfully!'))
+                        
+                        # Store backup codes in session to display once
+                        request.session['new_backup_codes'] = backup_codes
+                        
+                        # Clear setup session
+                        if '2fa_secret' in request.session:
+                            del request.session['2fa_secret']
+                        
+                        return redirect('users:two_factor_backup_codes')
+                        
+                    except Exception as e:
+                        logger.error(f"🔥 [2FA] Failed to enable TOTP: {e}")
+                        messages.error(request, _('Failed to enable 2FA. Please try again.'))
+                else:
+                    form.add_error('token', _('Invalid verification code. Please try again.'))
             else:
-                messages.error(request, _('The entered code is invalid.'))
+                form.add_error(None, _('Setup session expired. Please start over.'))
     else:
         form = TwoFactorSetupForm()
-        
-        # Generate new secret
-        secret = pyotp.random_base32()
-        request.session['2fa_secret'] = secret
-        
-        # Generate QR code
-        totp = pyotp.TOTP(secret)
-        qr_url = totp.provisioning_uri(
-            request.user.email,
-            issuer_name="PragmaticHost România"
-        )
-        
-        qr = qrcode.QRCode(version=1, box_size=10, border=5)
-        qr.add_data(qr_url)
-        qr.make(fit=True)
-        
-        qr_img = qr.make_image(fill_color="black", back_color="white")
-        qr_buffer = io.BytesIO()
-        qr_img.save(qr_buffer, format='PNG')
-        qr_data = base64.b64encode(qr_buffer.getvalue()).decode()
-        
-        form.qr_code = qr_data
-        form.secret = secret
     
-    return render(request, 'users/two_factor_setup.html', {'form': form})
+    # Generate new secret and QR code for setup
+    secret = TOTPService.generate_secret()
+    request.session['2fa_secret'] = secret
+    
+    # Generate QR code using the static method
+    qr_data = TOTPService.generate_qr_code(request.user, secret)
+    
+    context = {
+        'form': form,
+        'qr_code': qr_data,
+        'secret': secret,  # For manual entry
+        'user': request.user,
+        'steps': TWO_FACTOR_STEPS,
+        'current_step': 2,
+        'back_url': reverse('users:two_factor_setup')  # Explicit back to method selection
+    }
+    
+    return render(request, 'users/two_factor_setup.html', context)
+
+@login_required  
+def two_factor_setup_webauthn(request: HttpRequest) -> HttpResponse:
+    """WebAuthn/Passkey setup - future implementation"""
+    
+    # Check if user already has 2FA enabled
+    if request.user.two_factor_enabled:
+        messages.info(request, _('2FA is already enabled for your account.'))
+        return redirect('users:user_profile')
+    
+    # For now, redirect to TOTP setup with a message
+    messages.info(request, _('WebAuthn/Passkeys are coming soon! Please use the Authenticator App method for now.'))
+    return redirect('users:two_factor_setup_totp')
 
 
 def two_factor_verify(request: HttpRequest) -> HttpResponse:
@@ -410,7 +518,10 @@ def two_factor_backup_codes(request: HttpRequest) -> HttpResponse:
     del request.session['new_backup_codes']
     
     return render(request, 'users/two_factor_backup_codes.html', {
-        'backup_codes': backup_codes
+        'backup_codes': backup_codes,
+        'steps': TWO_FACTOR_STEPS,
+        'current_step': 3,
+        'back_url': reverse('users:two_factor_setup_totp')  # Back to TOTP setup
     })
 
 
@@ -457,10 +568,9 @@ def two_factor_disable(request: HttpRequest) -> HttpResponse:
         # Log the action
         UserLoginLog.objects.create(
             user=request.user,
-            success=True,
-            action='two_factor_disabled',
             ip_address=_get_client_ip(request),
-            notes='User disabled 2FA from profile'
+            user_agent=request.META.get('HTTP_USER_AGENT', ''),
+            status='two_factor_disabled'
         )
         
         messages.success(request, _('Two-factor authentication has been disabled.'))
