@@ -18,6 +18,13 @@ except ImportError:
 from .base import *
 
 # ===============================================================================
+# PRODUCTION SECURITY VALIDATION
+# ===============================================================================
+
+# Validate SECRET_KEY meets production security requirements
+validate_production_secret_key()
+
+# ===============================================================================
 # PRODUCTION FLAGS
 # ===============================================================================
 

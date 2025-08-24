@@ -205,10 +205,30 @@ SESSION_CACHE_ALIAS = 'default'
 SESSION_COOKIE_AGE = 86400  # 24 hours
 SESSION_COOKIE_HTTPONLY = True
 SESSION_SAVE_EVERY_REQUEST = True
+# Note: SESSION_COOKIE_SECURE = True set in prod.py
 
 # CSRF settings
 CSRF_COOKIE_HTTPONLY = True
 CSRF_TRUSTED_ORIGINS = []
+# Note: CSRF_COOKIE_SECURE = True set in prod.py
+
+# ===============================================================================
+# ADDITIONAL SECURITY SETTINGS
+# ===============================================================================
+
+# Security headers (enhanced in production)
+SECURE_BROWSER_XSS_FILTER = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = 'DENY'
+
+# File upload security
+FILE_UPLOAD_MAX_MEMORY_SIZE = 10485760  # 10MB
+DATA_UPLOAD_MAX_MEMORY_SIZE = 10485760  # 10MB
+FILE_UPLOAD_PERMISSIONS = 0o644
+
+# Email security
+EMAIL_USE_TLS = True
+EMAIL_USE_SSL = False  # Use TLS instead of SSL
 
 # ===============================================================================
 # DJANGO REST FRAMEWORK
@@ -278,4 +298,24 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # SECURITY SETTINGS (Base - override in prod.py)
 # ===============================================================================
 
-SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-change-in-production')
+# SECRET_KEY validation for production security
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
+if not SECRET_KEY:
+    # Development fallback - never use this in production
+    import warnings
+    warnings.warn(
+        "🚨 SECURITY WARNING: Using default SECRET_KEY. "
+        "Set DJANGO_SECRET_KEY environment variable for production!",
+        UserWarning,
+        stacklevel=2
+    )
+    SECRET_KEY = 'django-insecure-dev-key-only-change-in-production-or-tests'
+
+# Validate SECRET_KEY security in production (checked in prod.py)
+def validate_production_secret_key():
+    """Validate SECRET_KEY meets production security requirements"""
+    if SECRET_KEY and SECRET_KEY.startswith('django-insecure-'):
+        raise ValueError(
+            "🔥 CRITICAL SECURITY ERROR: Cannot use insecure SECRET_KEY in production! "
+            "Generate a secure key: python -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())'"
+        )
