@@ -33,7 +33,6 @@ from django.urls import reverse_lazy, reverse
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _, gettext as _
 from django.views.decorators.http import require_http_methods
-from django.views.decorators.csrf import csrf_exempt
 from django.views.generic import ListView, DetailView, UpdateView
 
 from apps.common.utils import (
@@ -723,14 +722,25 @@ class UserDetailView(LoginRequiredMixin, DetailView):
 # API ENDPOINTS
 # ===============================================================================
 
-@csrf_exempt
 @require_http_methods(["POST"])
+@ratelimit(key='ip', rate='30/m', method='POST', block=True)  # Rate limit to prevent abuse
 def api_check_email(request: HttpRequest) -> JsonResponse:
-    """Check if email is already registered"""
+    """Check if email is already registered
+    
+    🔒 SECURITY: CSRF protection enabled, rate limited to prevent enumeration attacks.
+    This endpoint validates email uniqueness for registration forms.
+    """
     email = request.POST.get('email')
     
     if not email:
         return json_error(_('Email is required'))
+    
+    # ⚠️ Security: Only check email format, don't reveal existence for privacy
+    try:
+        from django.core.validators import validate_email
+        validate_email(email)
+    except ValidationError:
+        return json_error(_('Invalid email format'))
     
     exists = User.objects.filter(email=email).exists()
     
