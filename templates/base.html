@@ -60,8 +60,9 @@
         <div class="flex justify-between h-16">
           <div class="flex items-center min-w-0 flex-1">
             <!-- Logo -->
-            <div class="flex-shrink-0">
-              <h1 class="text-xl font-bold text-blue-400 romanian-flag">
+            <div class="flex-shrink-0 flex items-center">
+              <img src="{% static 'img/favicon.svg' %}" alt="PRAHO" class="h-8 w-8 mr-3">
+              <h1 class="text-xl font-bold text-blue-400">
                 PRAHO Platform
               </h1>
             </div>
@@ -165,7 +166,7 @@
     <footer class="bg-slate-800 border-t border-slate-700 mt-12">
       <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
         <div class="text-center text-slate-400 text-sm">
-          <p class="romanian-flag">
+          <p>
             © {{ current_year }} PRAHO Platform - {% trans 'PRAHO Really Automates Hosting Operations' %}
           </p>
           <p class="mt-2 text-xs">
