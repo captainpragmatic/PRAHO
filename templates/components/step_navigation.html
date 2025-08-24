@@ -1,0 +1,122 @@
+{% comment %}
+===============================================================================
+🧭 GENERIC STEP NAVIGATION COMPONENT
+===============================================================================
+Reusable step navigation/breadcrumb for any multi-step flow in PRAHO Platform
+
+INDUSTRY STANDARD NAMES:
+- Step Navigation (our choice)
+- Breadcrumb Navigation  
+- Step Indicator
+- Wizard Navigation
+- Multi-step Navigation
+
+Usage Examples:
+- {% include 'components/step_navigation.html' with steps=onboarding_steps current_step=2 %}
+- {% include 'components/step_navigation.html' with steps=provisioning_steps current_step=1 show_back_button=True %}
+
+Required Context:
+- steps: List of step objects with 'label', 'description' (optional), 'url' (optional)
+- current_step: Integer (1-based) indicating current step
+
+Optional Context:
+- show_back_button: Boolean to show navigation
+- variant: 'default', 'compact', 'vertical' 
+- color_scheme: 'blue-green', 'purple', 'red' (for different contexts)
+- back_url: Custom back URL override
+{% endcomment %}
+
+{% load i18n %}
+
+<div class="{% if variant == 'compact' %}mb-4{% else %}mb-8{% endif %}">
+  
+  {% if variant == 'vertical' %}
+  <!-- Vertical Step Navigation (for narrow screens/sidebars) -->
+  <div class="space-y-4">
+    {% for step in steps %}
+    <div class="flex items-center {% if forloop.counter <= current_step %}text-white{% else %}text-slate-500{% endif %}">
+      <div class="w-8 h-8 
+        {% if forloop.counter < current_step %}
+          {% if color_scheme == 'purple' %}bg-purple-600{% elif color_scheme == 'red' %}bg-red-600{% else %}bg-blue-600{% endif %}
+        {% elif forloop.counter == current_step %}
+          {% if color_scheme == 'purple' %}bg-purple-600{% elif color_scheme == 'red' %}bg-red-600{% else %}bg-green-600{% endif %}
+        {% else %}bg-slate-600{% endif %} 
+        rounded-full flex items-center justify-center text-white text-sm font-bold">
+        {% if forloop.counter < current_step %}✓{% else %}{{ forloop.counter }}{% endif %}
+      </div>
+      <div class="ml-3">
+        <div class="text-sm font-medium">{{ step.label }}</div>
+        {% if step.description %}<div class="text-xs opacity-75">{{ step.description }}</div>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  
+  {% else %}
+  <!-- Horizontal Step Navigation (default) -->
+  <div class="{% if variant == 'compact' %}text-center{% else %}text-center{% endif %}">
+    <div class="flex justify-center items-center space-x-2 md:space-x-8">
+      {% for step in steps %}
+      <div class="flex items-center">
+        <!-- Step Circle -->
+        <div class="w-10 h-10 
+          {% if forloop.counter < current_step %}
+            {% if color_scheme == 'purple' %}bg-purple-600{% elif color_scheme == 'red' %}bg-red-600{% else %}bg-blue-600{% endif %}
+          {% elif forloop.counter == current_step %}
+            {% if color_scheme == 'purple' %}bg-purple-600{% elif color_scheme == 'red' %}bg-red-600{% else %}bg-green-600{% endif %}
+          {% else %}bg-slate-600{% endif %} 
+          rounded-full flex items-center justify-center text-white font-bold
+          {% if variant != 'compact' %}shadow-lg{% endif %}">
+          {% if forloop.counter < current_step %}
+            ✓
+          {% else %}
+            {{ forloop.counter }}
+          {% endif %}
+        </div>
+        
+        {% if variant != 'compact' %}
+        <!-- Step Label -->
+        <div class="ml-4 {% if forloop.counter <= current_step %}text-white{% else %}text-slate-500{% endif %}">
+          <div class="text-sm font-medium">{{ step.label }}</div>
+          {% if step.description %}<div class="text-xs opacity-75">{{ step.description }}</div>{% endif %}
+        </div>
+        {% endif %}
+        
+        <!-- Connection Line -->
+        {% if not forloop.last %}
+        <div class="w-8 md:w-16 h-0.5 ml-4 
+          {% if forloop.counter < current_step %}
+            {% if color_scheme == 'purple' %}bg-purple-600{% elif color_scheme == 'red' %}bg-red-600{% else %}bg-blue-600{% endif %}
+          {% else %}bg-slate-600{% endif %}">
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+  
+  <!-- Navigation Buttons -->
+  {% if show_back_button and current_step > 1 %}
+  <div class="mt-6 flex justify-center">
+    {% if back_url %}
+      <a href="{{ back_url }}" 
+         class="inline-flex items-center px-4 py-2 border border-slate-600 text-sm font-medium rounded-md text-slate-300 bg-slate-700 hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors">
+        <svg class="mr-2 -ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+        </svg>
+        {% trans 'Back' %}
+      </a>
+    {% else %}
+      {# Simplified back navigation - let the view handle the URL logic #}
+      <button onclick="history.back()" 
+              class="inline-flex items-center px-4 py-2 border border-slate-600 text-sm font-medium rounded-md text-slate-300 bg-slate-700 hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors">
+        <svg class="mr-2 -ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+        </svg>
+        {% trans 'Back' %}
+      </button>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>

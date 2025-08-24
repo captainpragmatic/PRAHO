@@ -1,0 +1,172 @@
+{% extends 'base.html' %}
+{% load i18n %}
+
+{% block title %}{% trans 'Two-Factor Authentication' %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+  <div class="max-w-lg w-full space-y-8">
+    
+    <!-- Header -->
+    <div class="text-center">
+      <div class="mx-auto h-16 w-16 text-5xl">🔐</div>
+      <h2 class="mt-6 text-3xl font-extrabold text-white">
+        {% trans 'Two-Factor Authentication' %}
+      </h2>
+      <p class="mt-2 text-lg text-slate-400">
+        {% trans 'Enter your authentication code to continue' %}
+      </p>
+    </div>
+
+    <!-- 2FA Form Card -->
+    <div class="bg-slate-800 rounded-lg p-8 border border-slate-700 shadow-xl">
+      
+      <!-- User Info -->
+      <div class="flex items-center justify-center mb-6 pb-6 border-b border-slate-600">
+        <div class="text-center">
+          <div class="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-2">
+            <span class="text-white font-bold text-lg">{{ user.email.0|upper }}</span>
+          </div>
+          <p class="text-sm text-slate-300">{{ user.email }}</p>
+        </div>
+      </div>
+
+      <form method="post" class="space-y-6">
+        {% csrf_token %}
+        
+        <!-- Display form errors -->
+        {% if messages %}
+          {% for message in messages %}
+            {% if message.tags == 'error' %}
+            <div class="bg-red-900 bg-opacity-50 border border-red-600 rounded-lg p-4">
+              <div class="flex items-center">
+                <div class="text-xl mr-3">❌</div>
+                <div class="text-red-200 text-sm">{{ message }}</div>
+              </div>
+            </div>
+            {% endif %}
+          {% endfor %}
+        {% endif %}
+
+        <!-- Code Input Section -->
+        <div class="text-center">
+          <label for="token" class="block text-lg font-medium text-white mb-4">
+            🔢 {% trans 'Enter Authentication Code' %}
+          </label>
+          
+          <div class="mb-4">
+            <input type="text" id="token" name="token" maxlength="8" 
+                   class="appearance-none block w-full px-4 py-4 border border-slate-600 placeholder-slate-400 text-white text-center text-2xl font-mono tracking-widest rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-slate-700 transition-all"
+                   placeholder="123456" required autocomplete="off" autofocus>
+          </div>
+          
+          <p class="text-sm text-slate-400 mb-6">
+            {% trans 'Enter the 6-digit code from your authenticator app' %}
+          </p>
+        </div>
+
+        <!-- Submit Button -->
+        <div>
+          <button type="submit" 
+                  class="w-full flex justify-center py-4 px-6 border border-transparent text-lg font-medium rounded-lg text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all shadow-lg">
+            <span class="mr-2">🔓</span>
+            {% trans 'Verify & Continue' %}
+          </button>
+        </div>
+      </form>
+      
+      <!-- Alternative Options -->
+      <div class="mt-8 border-t border-slate-600 pt-6">
+        <div class="text-center">
+          <p class="text-sm text-slate-400 mb-4">{% trans 'Having trouble?' %}</p>
+          
+          <div class="space-y-3">
+            <button onclick="showBackupCodeInput()" 
+                    class="w-full flex items-center justify-center px-4 py-3 border border-yellow-600 text-sm font-medium rounded-lg text-yellow-200 bg-yellow-900 bg-opacity-30 hover:bg-opacity-50 focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-all">
+              <span class="mr-2">🔑</span>
+              {% trans 'Use Backup Code Instead' %}
+            </button>
+            
+            <div id="backup-code-input" class="hidden space-y-3">
+              <input type="text" id="backup-token" name="backup-token" 
+                     class="appearance-none block w-full px-4 py-3 border border-slate-600 placeholder-slate-400 text-white text-center font-mono rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 bg-slate-700 transition-all"
+                     placeholder="BACKUP-CODE-12345" autocomplete="off">
+              <button onclick="submitBackupCode()" 
+                      class="w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-yellow-600 hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-all">
+                <span class="mr-2">🔑</span>
+                {% trans 'Use Backup Code' %}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Help Card -->
+    <div class="bg-blue-900 bg-opacity-50 rounded-lg border border-blue-600 p-6">
+      <div class="flex items-start">
+        <div class="text-2xl mr-4">💡</div>
+        <div>
+          <h3 class="text-lg font-medium text-blue-200 mb-2">
+            {% trans 'Need Help?' %}
+          </h3>
+          <div class="text-sm text-blue-300 space-y-2">
+            <p>• {% trans 'Codes refresh every 30 seconds in your authenticator app' %}</p>
+            <p>• {% trans 'Make sure your device time is synchronized' %}</p>
+            <p>• {% trans 'Use backup codes if you lost access to your device' %}</p>
+            <p>• {% trans 'Contact support if you need to reset your 2FA' %}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Back to Login -->
+    <div class="text-center mt-6">
+      <a href="{% url 'users:login' %}" 
+         class="text-slate-400 hover:text-slate-300 transition-colors text-sm">
+        ← {% trans 'Back to login' %}
+      </a>
+    </div>
+  </div>
+</div>
+
+<!-- JavaScript for Enhanced UX -->
+<script>
+function showBackupCodeInput() {
+  const backupDiv = document.getElementById('backup-code-input');
+  const backupInput = document.getElementById('backup-token');
+  
+  if (backupDiv.classList.contains('hidden')) {
+    backupDiv.classList.remove('hidden');
+    backupInput.focus();
+  } else {
+    backupDiv.classList.add('hidden');
+  }
+}
+
+function submitBackupCode() {
+  const backupCode = document.getElementById('backup-token').value;
+  if (backupCode.trim()) {
+    // Set the backup code in the main form
+    document.getElementById('token').value = backupCode;
+    // Submit the form
+    document.querySelector('form').submit();
+  }
+}
+
+// Auto-format input as user types
+document.getElementById('token').addEventListener('input', function(e) {
+  let value = e.target.value.replace(/\D/g, ''); // Remove non-digits
+  if (value.length > 6) {
+    value = value.substring(0, 6); // Limit to 6 digits
+  }
+  e.target.value = value;
+});
+
+document.getElementById('backup-token').addEventListener('input', function(e) {
+  let value = e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ''); // Keep only alphanumeric and dashes
+  e.target.value = value;
+});
+</script>
+
+{% endblock %}

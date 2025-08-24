@@ -1,0 +1,19 @@
+{% extends "admin/index.html" %}
+
+{% block content %}
+{{ block.super }}
+
+<div class="module" style="margin-top: 20px;">
+    <h2>🔐 Security Management</h2>
+    <table summary="Quick access to security tools">
+        <tr class="model-users">
+            <th scope="row">
+                <a href="{% url 'admin:users_user_2fa_dashboard' %}">2FA Security Dashboard</a>
+            </th>
+            <td>
+                <a href="{% url 'admin:users_user_2fa_dashboard' %}" class="viewlink">View</a>
+            </td>
+        </tr>
+    </table>
+</div>
+{% endblock %}

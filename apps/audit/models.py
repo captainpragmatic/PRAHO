@@ -25,6 +25,18 @@ class AuditEvent(models.Model):
         ('access', 'Access'),
         ('export', 'Export'),
         ('import', 'Import'),
+        # 2FA Security Events
+        ('2fa_enabled', '2FA Enabled'),
+        ('2fa_disabled', '2FA Disabled'),
+        ('2fa_admin_reset', '2FA Admin Reset'),
+        ('2fa_backup_codes_generated', '2FA Backup Codes Generated'),
+        ('2fa_backup_codes_viewed', '2FA Backup Codes Viewed'),
+        ('2fa_backup_code_used', '2FA Backup Code Used'),
+        ('2fa_secret_regenerated', '2FA Secret Regenerated'),
+        ('2fa_verification_success', '2FA Verification Success'),
+        ('2fa_verification_failed', '2FA Verification Failed'),
+        ('2fa_setup_started', '2FA Setup Started'),
+        ('2fa_setup_completed', '2FA Setup Completed'),
     ]
     
     # Unique event ID
@@ -40,7 +52,7 @@ class AuditEvent(models.Model):
     actor_type = models.CharField(max_length=20, default='user')  # user, system, api
     
     # What
-    action = models.CharField(max_length=20, choices=ACTION_CHOICES, db_index=True)
+    action = models.CharField(max_length=30, choices=ACTION_CHOICES, db_index=True)
     
     # What object (generic foreign key)
     content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)

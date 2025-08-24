@@ -1,0 +1,151 @@
+{% extends 'base.html' %}
+{% load i18n %}
+
+{% block title %}{% trans 'Choose Authentication Method' %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+  <div class="max-w-4xl w-full space-y-8">
+    
+    <!-- Step Navigation -->
+    {% include 'components/step_navigation.html' with steps=steps current_step=current_step show_back_button=False %}
+    
+    <!-- Header -->
+    <div class="text-center">
+      <div class="mx-auto h-16 w-16 text-5xl">🛡️</div>
+      <h2 class="mt-6 text-3xl font-extrabold text-white">
+        {% trans 'Secure Your Account' %}
+      </h2>
+      <p class="mt-2 text-lg text-slate-400">
+        {% trans 'Choose how you want to add an extra layer of security to your account' %}
+      </p>
+    </div>
+
+    <!-- Security Benefits Alert -->
+    <div class="relative border rounded-lg p-4 bg-blue-50 border-blue-200 text-blue-800 dark:bg-blue-950 dark:border-blue-800 dark:text-blue-200" role="alert">
+      <div class="flex">
+        <div class="flex-shrink-0">
+          <svg class="h-5 w-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
+          </svg>
+        </div>
+        <div class="ml-3">
+          <h4 class="font-medium">{% trans 'Why enable 2FA?' %}</h4>
+          <ul class="list-disc list-inside text-sm space-y-1 mt-2">
+            <li>{% trans 'Protects against password breaches' %}</li>
+            <li>{% trans 'Prevents unauthorized access' %}</li>
+            <li>{% trans 'Required for admin and billing access' %}</li>
+            <li>{% trans 'Industry standard security practice' %}</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Method Selection Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
+      
+      <!-- TOTP Method -->
+      <div class="bg-slate-800 rounded-lg p-6 border border-slate-700 hover:border-blue-500 transition-colors group">
+        <div class="text-center">
+          <div class="text-4xl mb-4">📱</div>
+          <h3 class="text-xl font-bold text-white mb-3">
+            {% trans 'Authenticator App' %}
+          </h3>
+          <p class="text-slate-300 mb-4 text-sm">
+            {% trans 'Use Google Authenticator, Authy, or Microsoft Authenticator to generate time-based codes' %}
+          </p>
+          
+          <!-- Pros/Cons -->
+          <div class="text-left mb-6 space-y-2">
+            <div class="flex items-center text-green-400 text-sm">
+              <span class="mr-2">✅</span>
+              {% trans 'Works offline' %}
+            </div>
+            <div class="flex items-center text-green-400 text-sm">
+              <span class="mr-2">✅</span>
+              {% trans 'Very secure' %}
+            </div>
+            <div class="flex items-center text-green-400 text-sm">
+              <span class="mr-2">✅</span>
+              {% trans 'Widely supported' %}
+            </div>
+            <div class="flex items-center text-yellow-400 text-sm">
+              <span class="mr-2">⚠️</span>
+              {% trans 'Requires app download' %}
+            </div>
+          </div>
+          
+          {% include 'components/button.html' with text='Set Up Authenticator App' variant='info' href='/auth/2fa/setup/totp/' class='block w-full' size='md' %}
+        </div>
+      </div>
+
+      <!-- WebAuthn/Passkeys Method -->
+      <div class="bg-slate-800 rounded-lg p-6 border border-slate-700 hover:border-green-500 transition-colors group relative">
+        <!-- Recommended Badge -->
+        <div class="absolute -top-3 left-1/2 transform -translate-x-1/2">
+          <span class="bg-green-600 text-white text-xs font-bold px-3 py-1 rounded-full">
+            {% trans 'RECOMMENDED' %}
+          </span>
+        </div>
+        
+        <div class="text-center">
+          <div class="text-4xl mb-4">🔑</div>
+          <h3 class="text-xl font-bold text-white mb-3">
+            {% trans 'Passkeys' %} <span class="text-green-400 text-sm">(New!)</span>
+          </h3>
+          <p class="text-slate-300 mb-4 text-sm">
+            {% trans 'Use your device biometrics (Face ID, Touch ID, fingerprint) or hardware security keys' %}
+          </p>
+          
+          <!-- Pros/Cons -->
+          <div class="text-left mb-6 space-y-2">
+            <div class="flex items-center text-green-400 text-sm">
+              <span class="mr-2">✅</span>
+              {% trans 'Most secure' %}
+            </div>
+            <div class="flex items-center text-green-400 text-sm">
+              <span class="mr-2">✅</span>
+              {% trans 'No app needed' %}
+            </div>
+            <div class="flex items-center text-green-400 text-sm">
+              <span class="mr-2">✅</span>
+              {% trans 'Fastest login' %}
+            </div>
+            <div class="flex items-center text-yellow-400 text-sm">
+              <span class="mr-2">⚠️</span>
+              {% trans 'Requires modern device' %}
+            </div>
+          </div>
+          
+          {% include 'components/button.html' with text='Set Up Passkey' variant='success' class='block w-full' size='md' attrs='onclick="checkWebAuthnSupport()"' %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Additional Info -->
+    <div class="text-center mt-8">
+      <p class="text-slate-400 text-sm">
+        {% trans 'You can always add more authentication methods later from your profile settings' %}
+      </p>
+      <div class="mt-4">
+        <a href="{% url 'users:user_profile' %}" 
+           class="text-blue-400 hover:text-blue-300 text-sm">
+          ← {% trans 'Back to Profile' %}
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function checkWebAuthnSupport() {
+  if (window.PublicKeyCredential) {
+    // WebAuthn is supported
+    window.location.href = "{% url 'users:two_factor_setup_webauthn' %}";
+  } else {
+    // WebAuthn not supported
+    alert("{% trans 'Your browser or device doesn\'t support passkeys. Please try the Authenticator App method or update your browser.' %}");
+  }
+}
+</script>
+{% endblock %}

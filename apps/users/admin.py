@@ -8,9 +8,13 @@ from django.utils.html import format_html
 from django.urls import reverse, path
 from django.http import HttpResponseRedirect
 from django.contrib import messages
-from django.shortcuts import get_object_or_404
+from django.shortcuts import get_object_or_404, render
+from django.db.models import Count, Q
+from django.utils import timezone
+from django.template.response import TemplateResponse
 
 from .models import User, UserProfile, CustomerMembership, UserLoginLog
+from .mfa import MFAService
 
 
 @admin.register(User)
@@ -29,6 +33,13 @@ class UserAdmin(BaseUserAdmin):
     ]
     
     search_fields = ['email', 'first_name', 'last_name']
+    
+    actions = ['go_to_2fa_dashboard']
+    
+    def go_to_2fa_dashboard(self, request, queryset):
+        """Redirect to 2FA Dashboard"""
+        return HttpResponseRedirect(reverse('admin:users_user_2fa_dashboard'))
+    go_to_2fa_dashboard.short_description = "🔐 Go to 2FA Security Dashboard"
     
     fieldsets = [
         (None, {'fields': ('email', 'password')}),
@@ -128,6 +139,22 @@ class UserAdmin(BaseUserAdmin):
             reset_codes_url
         ))
         
+        # 2FA Dashboard link (shown only once)
+        if obj.pk:  # Only show for existing users
+            try:
+                dashboard_url = reverse('admin:users_user_2fa_dashboard')
+                actions.append(format_html(
+                    '<a href="{}" '
+                    'style="color: green; text-decoration: none; padding: 2px 6px; border: 1px solid green; border-radius: 3px; font-size: 11px; margin-left: 5px;">📊 2FA Dashboard</a>',
+                    dashboard_url
+                ))
+            except:
+                # If reverse fails, use direct URL
+                actions.append(format_html(
+                    '<a href="/admin/users/user/2fa-dashboard/" '
+                    'style="color: green; text-decoration: none; padding: 2px 6px; border: 1px solid green; border-radius: 3px; font-size: 11px; margin-left: 5px;">📊 2FA Dashboard</a>'
+                ))
+        
         return format_html(' '.join(actions))
     two_factor_actions.short_description = '2FA Actions'
     
@@ -135,6 +162,11 @@ class UserAdmin(BaseUserAdmin):
         """Add custom admin URLs for 2FA management"""
         urls = super().get_urls()
         custom_urls = [
+            path(
+                '2fa-dashboard/',
+                self.admin_site.admin_view(self.tfa_dashboard_view),
+                name='users_user_2fa_dashboard',
+            ),
             path(
                 '<int:user_id>/disable-2fa/',
                 self.admin_site.admin_view(self.disable_2fa_view),
@@ -148,56 +180,81 @@ class UserAdmin(BaseUserAdmin):
         ]
         return custom_urls + urls
     
+    def changelist_view(self, request, extra_context=None):
+        """Override changelist to add 2FA dashboard link"""
+        extra_context = extra_context or {}
+        extra_context['show_2fa_dashboard'] = True
+        extra_context['dashboard_url'] = reverse('admin:users_user_2fa_dashboard')
+        return super().changelist_view(request, extra_context)
+    
+    def tfa_dashboard_view(self, request):
+        """🔐 Admin view for 2FA security dashboard"""
+        
+        # Simple test context first
+        context = {
+            'title': '🔐 Two-Factor Authentication Dashboard',
+            'total_users': User.objects.count(),
+            'users_with_2fa': User.objects.filter(two_factor_enabled=True).count(),
+            'staff_with_2fa': 0,
+            'total_staff': 0,
+            'users_low_backup_codes': User.objects.none(),
+            'recent_2fa_events': [],
+            'recommendations': [],
+            'has_permission': True,
+        }
+        
+        return render(request, 'admin/users/2fa_dashboard.html', context)
+    
     def disable_2fa_view(self, request, user_id):
-        """Admin view to disable 2FA for a user"""
+        """Admin view to disable 2FA for a user using MFA service"""
         user = get_object_or_404(User, id=user_id)
         
         if not user.two_factor_enabled:
             messages.warning(request, f'2FA is already disabled for {user.email}')
         else:
-            # Disable 2FA
-            user.two_factor_enabled = False
-            user.two_factor_secret = ''
-            user.backup_tokens = []
-            user.save(update_fields=['two_factor_enabled', '_two_factor_secret', 'backup_tokens'])
-            
-            # Log the admin action
-            UserLoginLog.objects.create(
-                user=user,
-                success=True,
-                action='admin_2fa_disabled',
-                ip_address=request.META.get('REMOTE_ADDR', ''),
-                notes=f'2FA disabled by admin user {request.user.email}'
-            )
-            
-            messages.success(request, f'2FA has been disabled for {user.email}')
+            try:
+                # Use MFA service to disable 2FA with audit logging
+                result = MFAService.disable_totp(
+                    user=user,
+                    admin_user=request.user,
+                    reason=f'Admin reset by {request.user.email}',
+                    request=request
+                )
+                
+                if result:
+                    messages.success(request, f'✅ 2FA has been disabled for {user.email}')
+                else:
+                    messages.error(request, f'❌ Failed to disable 2FA for {user.email}')
+                    
+            except Exception as e:
+                messages.error(request, f'❌ Error disabling 2FA: {str(e)}')
         
         return HttpResponseRedirect(reverse('admin:users_user_change', args=[user_id]))
     
     def reset_backup_codes_view(self, request, user_id):
-        """Admin view to reset backup codes for a user"""
+        """Admin view to reset backup codes for a user using MFA service"""
         user = get_object_or_404(User, id=user_id)
         
         if not user.two_factor_enabled:
             messages.warning(request, f'2FA is not enabled for {user.email}')
         else:
-            # Generate new backup codes
-            backup_codes = user.generate_backup_codes()
-            
-            # Log the admin action
-            UserLoginLog.objects.create(
-                user=user,
-                success=True,
-                action='admin_backup_codes_reset',
-                ip_address=request.META.get('REMOTE_ADDR', ''),
-                notes=f'Backup codes reset by admin user {request.user.email}'
-            )
-            
-            messages.success(
-                request, 
-                f'New backup codes generated for {user.email}. '
-                f'User should be notified to save the new codes: {", ".join(backup_codes[:3])}... (8 total)'
-            )
+            try:
+                # Use MFA service to generate new backup codes with audit logging
+                backup_codes = MFAService.generate_backup_codes(user, request)
+                
+                messages.success(
+                    request, 
+                    format_html(
+                        '✅ New backup codes generated for <strong>{}</strong>.<br>'
+                        'First 3 codes: <code>{}</code><br>'
+                        '<em>User should be notified to save all 8 new codes!</em>',
+                        user.email,
+                        ', '.join(backup_codes[:3]) + '...'
+                    )
+                )
+                
+            except Exception as e:
+                messages.error(request, f'❌ Error generating backup codes: {str(e)}')
         
         return HttpResponseRedirect(reverse('admin:users_user_change', args=[user_id]))
 

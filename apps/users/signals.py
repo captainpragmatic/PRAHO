@@ -63,7 +63,9 @@ def _get_client_ip(request):
     """Get client IP address from request"""
     x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
     if x_forwarded_for:
-        ip = x_forwarded_for.split(',')[0]
+        ip = x_forwarded_for.split(',')[0].strip()
     else:
-        ip = request.META.get('REMOTE_ADDR', '')
-    return ip
+        ip = request.META.get('REMOTE_ADDR', '127.0.0.1')
+    
+    # Ensure we always return a valid IP address
+    return ip if ip else '127.0.0.1'
