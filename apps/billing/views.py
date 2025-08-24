@@ -35,7 +35,7 @@ def billing_list(request):
     🧾 Display combined list of proformas and invoices (Romanian business practice)
     """
     # Get accessible customers
-    customer_ids = get_accessible_customer_ids(request.user)
+    customer_ids = _get_accessible_customer_ids(request.user)
     
     # Get both proformas and invoices
     proformas = ProformaInvoice.objects.filter(customer_id__in=customer_ids).select_related('customer')
@@ -154,7 +154,7 @@ def proforma_create(request):
         customer = get_object_or_404(Customer, pk=customer_id)
         
         # Security check
-        accessible_customer_ids = get_accessible_customer_ids(request.user)
+        accessible_customer_ids = _get_accessible_customer_ids(request.user)
         if int(customer_id) not in accessible_customer_ids:
             messages.error(request, _("❌ You do not have permission to create proformas for this customer."))
             return redirect('billing:invoice_list')
@@ -467,7 +467,7 @@ def proforma_edit(request, pk):
         customer = get_object_or_404(Customer, pk=customer_id)
         
         # Security check
-        accessible_customer_ids = get_accessible_customer_ids(request.user)
+        accessible_customer_ids = _get_accessible_customer_ids(request.user)
         if int(customer_id) not in accessible_customer_ids:
             messages.error(request, _("❌ You do not have permission to assign this customer."))
             return redirect('billing:proforma_detail', pk=pk)
@@ -756,7 +756,7 @@ def payment_list(request):
     """
     💰 Display list of payments
     """
-    customer_ids = get_accessible_customer_ids(request.user)
+    customer_ids = _get_accessible_customer_ids(request.user)
     payments = Payment.objects.filter(
         invoice__customer_id__in=customer_ids
     ).select_related('invoice', 'invoice__customer').order_by('-created_at')
@@ -814,7 +814,7 @@ def billing_reports(request):
     """
     📊 Billing reports and analytics
     """
-    customer_ids = get_accessible_customer_ids(request.user)
+    customer_ids = _get_accessible_customer_ids(request.user)
     
     # Monthly revenue
     from django.db.models import Count
@@ -844,7 +844,7 @@ def vat_report(request):
     """
     🇷🇴 VAT report for Romanian tax compliance
     """
-    customer_ids = get_accessible_customer_ids(request.user)
+    customer_ids = _get_accessible_customer_ids(request.user)
     
     # VAT calculations for the selected period
     from datetime import datetime
