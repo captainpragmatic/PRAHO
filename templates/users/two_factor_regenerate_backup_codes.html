@@ -1,0 +1,98 @@
+{% extends 'base.html' %}
+{% load i18n %}
+
+{% block title %}{% trans 'Regenerate Backup Codes' %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+  <div class="max-w-md w-full space-y-8">
+    <!-- Header -->
+    <div class="text-center">
+      <div class="mx-auto h-12 w-12 text-4xl">🔄</div>
+      <h2 class="mt-6 text-3xl font-extrabold text-white">
+        {% trans 'Regenerate Backup Codes' %}
+      </h2>
+      <p class="mt-2 text-sm text-slate-400">
+        {% trans 'Generate new backup codes for your account' %}
+      </p>
+    </div>
+
+    <!-- Current Status -->
+    <div class="rounded-lg bg-slate-800 p-6 space-y-4">
+      <div class="text-center">
+        <h3 class="text-lg font-medium text-white mb-2">
+          {% trans 'Current Status' %}
+        </h3>
+        <div class="text-2xl font-bold text-blue-400">
+          {{ backup_count }}
+        </div>
+        <p class="text-sm text-slate-300">
+          {% trans 'unused backup codes remaining' %}
+        </p>
+      </div>
+    </div>
+
+    <!-- Warning -->
+    <div class="rounded-lg bg-red-900 border border-red-600 p-6">
+      <div class="flex">
+        <div class="flex-shrink-0">
+          <svg class="h-5 w-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+          </svg>
+        </div>
+        <div class="ml-3">
+          <h3 class="text-sm font-medium text-red-200">
+            {% trans 'Important Warning' %}
+          </h3>
+          <div class="mt-2 text-sm text-red-200">
+            <p>{% trans 'Generating new backup codes will invalidate all your existing backup codes. Make sure you have access to your authenticator app before proceeding.' %}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Regeneration Form -->
+    <form method="post" class="space-y-6">
+      {% csrf_token %}
+      
+      <div class="text-center space-y-4">
+        <button type="submit" class="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
+          <span class="absolute left-0 inset-y-0 flex items-center pl-3">
+            🔄
+          </span>
+          {% trans 'Generate New Backup Codes' %}
+        </button>
+        
+        <div class="text-sm">
+          <a href="{% url 'users:user_profile' %}" class="text-blue-400 hover:text-blue-300">
+            {% trans 'Cancel and return to profile' %}
+          </a>
+        </div>
+      </div>
+    </form>
+
+    <!-- Help Text -->
+    <div class="rounded-lg bg-blue-900 border border-blue-600 p-4">
+      <div class="flex">
+        <div class="flex-shrink-0">
+          <svg class="h-5 w-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
+          </svg>
+        </div>
+        <div class="ml-3">
+          <h3 class="text-sm font-medium text-blue-200">
+            {% trans 'When to regenerate backup codes' %}
+          </h3>
+          <div class="mt-1 text-sm text-blue-200">
+            <ul class="list-disc list-inside space-y-1">
+              <li>{% trans 'You suspect your codes have been compromised' %}</li>
+              <li>{% trans 'You have used most of your backup codes' %}</li>
+              <li>{% trans 'You want to refresh your security credentials' %}</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

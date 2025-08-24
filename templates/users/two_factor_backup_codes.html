@@ -1,0 +1,120 @@
+{% extends 'base.html' %}
+{% load i18n %}
+
+{% block title %}{% trans 'Backup Codes' %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+  <div class="max-w-2xl w-full space-y-8">
+    <!-- Header -->
+    <div class="text-center">
+      <div class="mx-auto h-12 w-12 text-4xl">🔑</div>
+      <h2 class="mt-6 text-3xl font-extrabold text-white">
+        {% trans 'Your Backup Codes' %}
+      </h2>
+      <p class="mt-2 text-sm text-slate-400">
+        {% trans 'Save these codes in a secure location. You can use them to access your account if you lose your authenticator device.' %}
+      </p>
+    </div>
+
+    <!-- Important Warning -->
+    <div class="rounded-lg bg-yellow-900 border border-yellow-600 p-6">
+      <div class="flex">
+        <div class="flex-shrink-0">
+          <svg class="h-5 w-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+          </svg>
+        </div>
+        <div class="ml-3">
+          <h3 class="text-sm font-medium text-yellow-200">
+            {% trans 'Important Security Notice' %}
+          </h3>
+          <div class="mt-2 text-sm text-yellow-200">
+            <ul class="list-disc list-inside space-y-1">
+              <li>{% trans 'Each backup code can only be used once' %}</li>
+              <li>{% trans 'Store these codes in a secure password manager or safe location' %}</li>
+              <li>{% trans 'Do not share these codes with anyone' %}</li>
+              <li>{% trans 'Generate new codes if you suspect these have been compromised' %}</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Backup Codes -->
+    <div class="rounded-lg bg-slate-800 p-6">
+      <div class="text-center mb-6">
+        <h3 class="text-lg font-medium text-white mb-2">
+          {% trans 'Your 8 Backup Codes' %}
+        </h3>
+        <p class="text-sm text-slate-300">
+          {% trans 'Copy these codes and store them securely' %}
+        </p>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4 mb-6">
+        {% for code in backup_codes %}
+        <div class="bg-slate-900 rounded-lg p-4 text-center">
+          <code class="text-lg font-mono text-green-400 select-all">{{ code }}</code>
+        </div>
+        {% endfor %}
+      </div>
+
+      <!-- Copy to Clipboard Button -->
+      <div class="text-center">
+        <button onclick="copyBackupCodes()" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors">
+          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+          </svg>
+          {% trans 'Copy All Codes' %}
+        </button>
+      </div>
+    </div>
+
+    <!-- Navigation -->
+    <div class="text-center space-y-4">
+      <div>
+        <a href="{% url 'users:user_profile' %}" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors">
+          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+          </svg>
+          {% trans 'Continue to Profile' %}
+        </a>
+      </div>
+      <div>
+        <a href="{% url 'users:two_factor_regenerate_backup_codes' %}" class="text-blue-400 hover:text-blue-300 text-sm">
+          {% trans 'Generate New Backup Codes' %}
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function copyBackupCodes() {
+  const codes = [
+    {% for code in backup_codes %}'{{ code }}'{% if not forloop.last %},{% endif %}{% endfor %}
+  ];
+  
+  const text = 'PRAHO Platform Backup Codes:\n\n' + codes.join('\n') + 
+               '\n\nKeep these codes secure and use them only when you cannot access your authenticator app.';
+  
+  navigator.clipboard.writeText(text).then(function() {
+    // Show success feedback
+    const button = event.target;
+    const originalText = button.innerHTML;
+    button.innerHTML = '<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>{% trans "Copied!" %}';
+    button.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+    button.classList.add('bg-green-600', 'hover:bg-green-700');
+    
+    setTimeout(function() {
+      button.innerHTML = originalText;
+      button.classList.remove('bg-green-600', 'hover:bg-green-700');
+      button.classList.add('bg-blue-600', 'hover:bg-blue-700');
+    }, 2000);
+  }).catch(function(err) {
+    console.error('Failed to copy: ', err);
+  });
+}
+</script>
+{% endblock %}

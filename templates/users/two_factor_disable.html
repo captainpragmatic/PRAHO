@@ -1,0 +1,120 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans 'Disable Two-Factor Authentication' %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+  <div class="max-w-md w-full space-y-8">
+    <!-- Header -->
+    <div class="text-center">
+      <div class="mx-auto h-12 w-12 text-4xl">⚠️</div>
+      <h2 class="mt-6 text-3xl font-extrabold text-white">
+        {% trans 'Disable Two-Factor Authentication' %}
+      </h2>
+      <p class="mt-2 text-sm text-slate-400">
+        {% trans 'Remove two-factor authentication from your account' %}
+      </p>
+    </div>
+
+    <!-- Security Warning -->
+    <div class="rounded-lg bg-red-900 border border-red-600 p-6">
+      <div class="flex">
+        <div class="flex-shrink-0">
+          <svg class="h-5 w-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+          </svg>
+        </div>
+        <div class="ml-3">
+          <h3 class="text-sm font-medium text-red-200">
+            {% trans 'Security Warning' %}
+          </h3>
+          <div class="mt-2 text-sm text-red-200">
+            <p class="mb-2">{% trans 'Disabling two-factor authentication will:' %}</p>
+            <ul class="list-disc list-inside space-y-1">
+              <li>{% trans 'Make your account less secure' %}</li>
+              <li>{% trans 'Delete all your backup codes' %}</li>
+              <li>{% trans 'Remove your authenticator app connection' %}</li>
+              <li>{% trans 'Allow login with just email and password' %}</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Disable Form -->
+    <form method="post" class="space-y-6">
+      {% csrf_token %}
+
+      <div class="rounded-lg bg-slate-800 p-6 space-y-4">
+        <!-- Display form errors -->
+        {% if messages %}
+          {% for message in messages %}
+            {% if message.tags == 'error' %}
+            <div class="rounded-md bg-red-900 p-4">
+              <div class="text-red-300 text-sm">
+                {{ message }}
+              </div>
+            </div>
+            {% endif %}
+          {% endfor %}
+        {% endif %}
+
+        <!-- Password Confirmation -->
+        <div>
+          <label for="password" class="block text-sm font-medium text-slate-300">
+            🔐 {% trans 'Confirm Your Password' %}
+          </label>
+          <div class="mt-1">
+            {% input_field name="password" input_type="password" placeholder="Enter your current password" required=True %}
+          </div>
+          <p class="mt-1 text-xs text-slate-400">
+            {% trans 'Enter your current password to confirm this action' %}
+          </p>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="space-y-4">
+        <button type="submit" class="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
+          <span class="absolute left-0 inset-y-0 flex items-center pl-3">
+            ⚠️
+          </span>
+          {% trans 'Yes, Disable Two-Factor Authentication' %}
+        </button>
+        
+        <div class="text-center">
+          <a href="{% url 'users:user_profile' %}" class="inline-flex items-center px-4 py-2 border border-slate-600 text-sm font-medium rounded-md text-slate-300 bg-slate-800 hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500 transition-colors">
+            {% trans 'Cancel' %}
+          </a>
+        </div>
+      </div>
+    </form>
+
+    <!-- Alternative Options -->
+    <div class="rounded-lg bg-blue-900 border border-blue-600 p-4">
+      <div class="flex">
+        <div class="flex-shrink-0">
+          <svg class="h-5 w-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
+          </svg>
+        </div>
+        <div class="ml-3">
+          <h3 class="text-sm font-medium text-blue-200">
+            {% trans 'Lost your authenticator app?' %}
+          </h3>
+          <div class="mt-1 text-sm text-blue-200">
+            <p class="mb-2">{% trans 'Before disabling 2FA, try these options:' %}</p>
+            <ul class="list-disc list-inside space-y-1">
+              <li>{% trans 'Use a backup code to log in' %}</li>
+              <li>{% trans 'Restore your authenticator app from backup' %}</li>
+              <li>{% trans 'Contact support if you have no other options' %}</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

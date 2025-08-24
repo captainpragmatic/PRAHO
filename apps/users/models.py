@@ -71,8 +71,8 @@ class User(AbstractUser):
     
     # Two-factor authentication
     two_factor_enabled = models.BooleanField(default=False)
-    two_factor_secret = models.CharField(max_length=32, blank=True)
-    backup_tokens = models.JSONField(default=list, blank=True)
+    _two_factor_secret = models.CharField(max_length=256, blank=True)  # Encrypted storage
+    backup_tokens = models.JSONField(default=list, blank=True)  # Stores hashed backup codes
     
     # Customer relationships (replaces primary_customer + additional_customers)
     customers = models.ManyToManyField(
@@ -194,6 +194,57 @@ class User(AbstractUser):
         }
         
         return role_map.get(self.staff_role, self.staff_role)
+    
+    # Two-factor authentication properties
+    @property
+    def two_factor_secret(self) -> str:
+        """Get decrypted 2FA secret"""
+        if not self._two_factor_secret:
+            return ''
+        
+        from apps.common.encryption import decrypt_sensitive_data
+        return decrypt_sensitive_data(self._two_factor_secret)
+    
+    @two_factor_secret.setter
+    def two_factor_secret(self, value: str) -> None:
+        """Set encrypted 2FA secret"""
+        if value:
+            from apps.common.encryption import encrypt_sensitive_data
+            self._two_factor_secret = encrypt_sensitive_data(value)
+        else:
+            self._two_factor_secret = ''
+    
+    def generate_backup_codes(self) -> list[str]:
+        """Generate new backup codes and store hashed versions"""
+        from apps.common.encryption import generate_backup_codes, hash_backup_code
+        
+        # Generate plain text codes
+        codes = generate_backup_codes(count=8)
+        
+        # Store hashed versions
+        hashed_codes = [hash_backup_code(code) for code in codes]
+        self.backup_tokens = hashed_codes
+        self.save(update_fields=['backup_tokens'])
+        
+        # Return plain text codes for user to save (only time they see them)
+        return codes
+    
+    def verify_backup_code(self, code: str) -> bool:
+        """Verify and consume a backup code"""
+        from apps.common.encryption import verify_backup_code
+        
+        for i, hashed_code in enumerate(self.backup_tokens):
+            if verify_backup_code(code, hashed_code):
+                # Remove used backup code
+                self.backup_tokens.pop(i)
+                self.save(update_fields=['backup_tokens'])
+                return True
+        
+        return False
+    
+    def has_backup_codes(self) -> bool:
+        """Check if user has unused backup codes"""
+        return len(self.backup_tokens) > 0
 
 
 class CustomerMembership(models.Model):

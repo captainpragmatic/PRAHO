@@ -279,20 +279,28 @@ def two_factor_setup(request: HttpRequest) -> HttpResponse:
             secret = request.session.get('2fa_secret')
             
             if secret and pyotp.TOTP(secret).verify(token):
-                # Enable 2FA
+                # Enable 2FA and generate backup codes
                 user = request.user
                 user.two_factor_secret = secret
                 user.two_factor_enabled = True
+                
+                # Generate backup codes
+                backup_codes = user.generate_backup_codes()
                 user.save()
                 
-                # Clear session
+                # Store backup codes in session to display once
+                request.session['new_backup_codes'] = backup_codes
+                
+                # Clear 2FA setup session
                 del request.session['2fa_secret']
                 
                 messages.success(
                     request,
                     _('Two-factor authentication has been successfully enabled!')
                 )
-                return redirect('user_profile')
+                
+                # Redirect to backup codes display
+                return redirect('users:two_factor_backup_codes')
             else:
                 messages.error(request, _('The entered code is invalid.'))
     else:
@@ -341,19 +349,45 @@ def two_factor_verify(request: HttpRequest) -> HttpResponse:
         if form.is_valid():
             token = form.cleaned_data['token']
             
-            if pyotp.TOTP(user.two_factor_secret).verify(token):
+            # Try TOTP code first
+            totp_valid = pyotp.TOTP(user.two_factor_secret).verify(token)
+            backup_code_valid = False
+            
+            # If TOTP fails, try backup code (8 digits)
+            if not totp_valid and len(token) == 8 and token.isdigit():
+                backup_code_valid = user.verify_backup_code(token)
+            
+            if totp_valid or backup_code_valid:
                 # Complete login
                 login(request, user)
                 del request.session['pre_2fa_user_id']
                 
-                _log_user_login(request, user, 'success')
+                # Log which method was used
+                method = 'totp' if totp_valid else 'backup_code'
+                _log_user_login(request, user, f'success_2fa_{method}')
+                
+                if backup_code_valid:
+                    remaining_codes = len(user.backup_tokens)
+                    if remaining_codes == 0:
+                        messages.warning(
+                            request, 
+                            _('You have used your last backup code! Please generate new ones in your profile.')
+                        )
+                    elif remaining_codes <= 2:
+                        messages.warning(
+                            request,
+                            _('You have {count} backup codes remaining. Consider generating new ones.').format(count=remaining_codes)
+                        )
+                    else:
+                        messages.info(request, _('Backup code used. You have {count} codes remaining.').format(count=remaining_codes))
+                
                 messages.success(request, _('Welcome, {user_full_name}!').format(user_full_name=user.get_full_name()))
                 
                 next_url = request.GET.get('next', 'dashboard')
                 return redirect(next_url)
             else:
                 _log_user_login(request, user, 'failed_2fa')
-                messages.error(request, _('The 2FA code is invalid.'))
+                messages.error(request, _('The 2FA code or backup code is invalid.'))
     else:
         form = TwoFactorVerifyForm()
     
@@ -361,6 +395,78 @@ def two_factor_verify(request: HttpRequest) -> HttpResponse:
         'form': form,
         'user': user
     })
+
+
+@login_required
+def two_factor_backup_codes(request: HttpRequest) -> HttpResponse:
+    """Display backup codes after 2FA setup or regeneration"""
+    backup_codes = request.session.get('new_backup_codes')
+    
+    if not backup_codes:
+        messages.error(request, _('No backup codes available.'))
+        return redirect('users:user_profile')
+    
+    # Clear from session after display
+    del request.session['new_backup_codes']
+    
+    return render(request, 'users/two_factor_backup_codes.html', {
+        'backup_codes': backup_codes
+    })
+
+
+@login_required
+def two_factor_regenerate_backup_codes(request: HttpRequest) -> HttpResponse:
+    """Regenerate backup codes for 2FA"""
+    if not request.user.two_factor_enabled:
+        messages.error(request, _('Two-factor authentication is not enabled.'))
+        return redirect('users:user_profile')
+    
+    if request.method == 'POST':
+        # Generate new backup codes
+        backup_codes = request.user.generate_backup_codes()
+        request.session['new_backup_codes'] = backup_codes
+        
+        messages.success(request, _('New backup codes have been generated.'))
+        return redirect('users:two_factor_backup_codes')
+    
+    return render(request, 'users/two_factor_regenerate_backup_codes.html', {
+        'backup_count': len(request.user.backup_tokens)
+    })
+
+
+@login_required
+def two_factor_disable(request: HttpRequest) -> HttpResponse:
+    """Disable 2FA for user account"""
+    if not request.user.two_factor_enabled:
+        messages.info(request, _('Two-factor authentication is already disabled.'))
+        return redirect('users:user_profile')
+    
+    if request.method == 'POST':
+        # Verify current password for security
+        password = request.POST.get('password')
+        if not request.user.check_password(password):
+            messages.error(request, _('Invalid password.'))
+            return render(request, 'users/two_factor_disable.html')
+        
+        # Disable 2FA
+        request.user.two_factor_enabled = False
+        request.user.two_factor_secret = ''
+        request.user.backup_tokens = []
+        request.user.save(update_fields=['two_factor_enabled', '_two_factor_secret', 'backup_tokens'])
+        
+        # Log the action
+        UserLoginLog.objects.create(
+            user=request.user,
+            success=True,
+            action='two_factor_disabled',
+            ip_address=_get_client_ip(request),
+            notes='User disabled 2FA from profile'
+        )
+        
+        messages.success(request, _('Two-factor authentication has been disabled.'))
+        return redirect('users:user_profile')
+    
+    return render(request, 'users/two_factor_disable.html')
 
 
 # ===============================================================================

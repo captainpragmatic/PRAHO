@@ -5,7 +5,10 @@ Django admin configuration for Users app
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.utils.html import format_html
-from django.urls import reverse
+from django.urls import reverse, path
+from django.http import HttpResponseRedirect
+from django.contrib import messages
+from django.shortcuts import get_object_or_404
 
 from .models import User, UserProfile, CustomerMembership, UserLoginLog
 
@@ -38,8 +41,9 @@ class UserAdmin(BaseUserAdmin):
             'fields': ('staff_role',),
             'description': 'System role for internal staff. Leave empty for customer users.'
         }),
-        ('Security', {
-            'fields': ('two_factor_enabled', 'two_factor_secret', 'backup_tokens')
+        ('Two-Factor Authentication', {
+            'fields': ('two_factor_enabled', 'backup_codes_count', 'two_factor_actions'),
+            'description': 'Two-factor authentication status and management'
         }),
         ('GDPR Compliance', {
             'fields': (
@@ -67,7 +71,7 @@ class UserAdmin(BaseUserAdmin):
     
     ordering = ['email']
     
-    readonly_fields = ['date_joined', 'last_login', 'created_at', 'updated_at']
+    readonly_fields = ['date_joined', 'last_login', 'created_at', 'updated_at', 'backup_codes_count', 'two_factor_actions']
     
     def is_staff_user(self, obj):
         """Check if user is system/staff user"""
@@ -86,6 +90,116 @@ class UserAdmin(BaseUserAdmin):
             )
         return '-'
     primary_customer_name.short_description = 'Primary Customer'
+    
+    def backup_codes_count(self, obj):
+        """Show number of backup codes remaining"""
+        if not obj.two_factor_enabled:
+            return '-'
+        
+        count = len(obj.backup_tokens)
+        if count == 0:
+            return format_html('<span style="color: red; font-weight: bold;">0 (No backup codes!)</span>')
+        elif count <= 2:
+            return format_html('<span style="color: orange; font-weight: bold;">{} (Running low)</span>', count)
+        else:
+            return format_html('<span style="color: green;">{}</span>', count)
+    backup_codes_count.short_description = 'Backup Codes'
+    
+    def two_factor_actions(self, obj):
+        """Admin actions for 2FA management"""
+        if not obj.two_factor_enabled:
+            return format_html('<em>2FA not enabled</em>')
+        
+        actions = []
+        
+        # Disable 2FA action
+        disable_url = reverse('admin:users_user_disable_2fa', args=[obj.id])
+        actions.append(format_html(
+            '<a href="{}" onclick="return confirm(\'Are you sure you want to disable 2FA for this user?\');" '
+            'style="color: red; text-decoration: none; padding: 2px 6px; border: 1px solid red; border-radius: 3px; font-size: 11px;">🔒 Disable 2FA</a>',
+            disable_url
+        ))
+        
+        # Reset backup codes action  
+        reset_codes_url = reverse('admin:users_user_reset_backup_codes', args=[obj.id])
+        actions.append(format_html(
+            '<a href="{}" onclick="return confirm(\'This will invalidate all existing backup codes. Continue?\');" '
+            'style="color: blue; text-decoration: none; padding: 2px 6px; border: 1px solid blue; border-radius: 3px; font-size: 11px; margin-left: 5px;">🔄 Reset Backup Codes</a>',
+            reset_codes_url
+        ))
+        
+        return format_html(' '.join(actions))
+    two_factor_actions.short_description = '2FA Actions'
+    
+    def get_urls(self):
+        """Add custom admin URLs for 2FA management"""
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                '<int:user_id>/disable-2fa/',
+                self.admin_site.admin_view(self.disable_2fa_view),
+                name='users_user_disable_2fa',
+            ),
+            path(
+                '<int:user_id>/reset-backup-codes/',
+                self.admin_site.admin_view(self.reset_backup_codes_view),
+                name='users_user_reset_backup_codes',
+            ),
+        ]
+        return custom_urls + urls
+    
+    def disable_2fa_view(self, request, user_id):
+        """Admin view to disable 2FA for a user"""
+        user = get_object_or_404(User, id=user_id)
+        
+        if not user.two_factor_enabled:
+            messages.warning(request, f'2FA is already disabled for {user.email}')
+        else:
+            # Disable 2FA
+            user.two_factor_enabled = False
+            user.two_factor_secret = ''
+            user.backup_tokens = []
+            user.save(update_fields=['two_factor_enabled', '_two_factor_secret', 'backup_tokens'])
+            
+            # Log the admin action
+            UserLoginLog.objects.create(
+                user=user,
+                success=True,
+                action='admin_2fa_disabled',
+                ip_address=request.META.get('REMOTE_ADDR', ''),
+                notes=f'2FA disabled by admin user {request.user.email}'
+            )
+            
+            messages.success(request, f'2FA has been disabled for {user.email}')
+        
+        return HttpResponseRedirect(reverse('admin:users_user_change', args=[user_id]))
+    
+    def reset_backup_codes_view(self, request, user_id):
+        """Admin view to reset backup codes for a user"""
+        user = get_object_or_404(User, id=user_id)
+        
+        if not user.two_factor_enabled:
+            messages.warning(request, f'2FA is not enabled for {user.email}')
+        else:
+            # Generate new backup codes
+            backup_codes = user.generate_backup_codes()
+            
+            # Log the admin action
+            UserLoginLog.objects.create(
+                user=user,
+                success=True,
+                action='admin_backup_codes_reset',
+                ip_address=request.META.get('REMOTE_ADDR', ''),
+                notes=f'Backup codes reset by admin user {request.user.email}'
+            )
+            
+            messages.success(
+                request, 
+                f'New backup codes generated for {user.email}. '
+                f'User should be notified to save the new codes: {", ".join(backup_codes[:3])}... (8 total)'
+            )
+        
+        return HttpResponseRedirect(reverse('admin:users_user_change', args=[user_id]))
 
 
 @admin.register(UserProfile)
