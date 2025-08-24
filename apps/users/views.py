@@ -13,6 +13,13 @@ from django.contrib import messages
 from django.contrib.auth import login, logout, authenticate
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.auth.views import (
+    PasswordResetView, PasswordResetDoneView,
+    PasswordResetConfirmView, PasswordResetCompleteView
+)
+from django_ratelimit.decorators import ratelimit
+from django_ratelimit.exceptions import Ratelimited
+from django.utils.decorators import method_decorator
 from django.core.exceptions import ValidationError
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render, redirect, get_object_or_404
@@ -117,24 +124,139 @@ def logout_view(request: HttpRequest) -> HttpResponse:
 # PASSWORD RESET
 # ===============================================================================
 
-def password_reset_view(request: HttpRequest) -> HttpResponse:
-    """Password reset request view"""
-    return HttpResponse(_("Password reset - under development!"), content_type="text/html")
+@method_decorator([
+    ratelimit(key='ip', rate='5/h', method='POST', block=True),  # 5 attempts per hour per IP
+    ratelimit(key='header:user-agent', rate='10/h', method='POST', block=True),  # 10 per user agent
+], name='dispatch')
+class SecurePasswordResetView(PasswordResetView):
+    """Secure password reset request view with rate limiting and audit logging"""
+    template_name = 'users/password_reset.html'
+    email_template_name = 'users/password_reset_email.html'
+    success_url = reverse_lazy('users:password_reset_done')
+    
+    def get_email_subject(self):
+        """Get translatable email subject"""
+        return _("Password reset for your account")
+    
+    def dispatch(self, request, *args, **kwargs):
+        try:
+            return super().dispatch(request, *args, **kwargs)
+        except Ratelimited:
+            # Log rate limit exceeded
+            UserLoginLog.objects.create(
+                user=None,
+                success=False,
+                action='password_reset_rate_limited',
+                ip_address=_get_client_ip(request),
+                notes='Password reset rate limit exceeded'
+            )
+            messages.error(request, _(
+                'Too many password reset attempts. Please wait before trying again.'
+            ))
+            return render(request, self.template_name, {'form': self.get_form()})
+    
+    def form_valid(self, form):
+        # Log password reset attempt for audit trail
+        email = form.cleaned_data['email']
+        
+        # Check if user exists (for internal logging only, don't reveal to user)
+        user_exists = User.objects.filter(email=email).exists()
+        
+        UserLoginLog.objects.create(
+            user=None,  # Don't reveal if user exists in logs
+            success=True,
+            action='password_reset_requested',
+            ip_address=_get_client_ip(self.request),
+            notes=f'Password reset requested for email: {email[:3]}***@{email.split("@")[1] if "@" in email else "unknown"} (exists: {user_exists})'
+        )
+        return super().form_valid(form)
 
 
-def password_reset_done_view(request: HttpRequest) -> HttpResponse:
+class SecurePasswordResetDoneView(PasswordResetDoneView):
     """Password reset done view"""
-    return HttpResponse(_("Password reset email sent!"), content_type="text/html")
+    template_name = 'users/password_reset_done.html'
 
 
-def password_reset_confirm_view(request: HttpRequest, uidb64: str, token: str) -> HttpResponse:
-    """Password reset confirmation view"""
-    return HttpResponse(_("Password reset confirmation - under development!"), content_type="text/html")
+@method_decorator([
+    ratelimit(key='ip', rate='10/h', method='POST', block=True),  # 10 password confirmations per hour per IP
+], name='dispatch')
+class SecurePasswordResetConfirmView(PasswordResetConfirmView):
+    """Password reset confirmation view with audit logging and rate limiting"""
+    template_name = 'users/password_reset_confirm.html'
+    success_url = reverse_lazy('users:password_reset_complete')
+    
+    def dispatch(self, request, *args, **kwargs):
+        try:
+            return super().dispatch(request, *args, **kwargs)
+        except Ratelimited:
+            # Log rate limit exceeded
+            UserLoginLog.objects.create(
+                user=None,
+                success=False,
+                action='password_confirm_rate_limited',
+                ip_address=_get_client_ip(request),
+                notes='Password confirmation rate limit exceeded'
+            )
+            messages.error(request, _(
+                'Too many password confirmation attempts. Please wait before trying again.'
+            ))
+            return render(request, self.template_name, {
+                'form': self.get_form(),
+                'validlink': False
+            })
+    
+    def form_valid(self, form):
+        # Log successful password reset for audit
+        user = form.user
+        
+        # Enhanced security logging
+        UserLoginLog.objects.create(
+            user=user,
+            success=True,
+            action='password_reset_completed',
+            ip_address=_get_client_ip(self.request),
+            notes=f'Password successfully reset for user {user.email}'
+        )
+        
+        # Reset any account lockout since password was reset
+        if hasattr(user, 'account_locked_until') and user.account_locked_until:
+            user.account_locked_until = None
+            user.failed_login_attempts = 0  # Reset failed attempts counter
+            user.save(update_fields=['account_locked_until', 'failed_login_attempts'])
+            
+            # Log lockout reset
+            UserLoginLog.objects.create(
+                user=user,
+                success=True,
+                action='account_lockout_reset',
+                ip_address=_get_client_ip(self.request),
+                notes='Account lockout reset due to successful password reset'
+            )
+        
+        return super().form_valid(form)
+    
+    def form_invalid(self, form):
+        # Log failed password reset confirmation
+        UserLoginLog.objects.create(
+            user=None,
+            success=False,
+            action='password_reset_failed',
+            ip_address=_get_client_ip(self.request),
+            notes=f'Password reset confirmation failed: {form.errors}'
+        )
+        return super().form_invalid(form)
 
 
-def password_reset_complete_view(request: HttpRequest) -> HttpResponse:
+class SecurePasswordResetCompleteView(PasswordResetCompleteView):
     """Password reset complete view"""
-    return HttpResponse(_("Password reset successfully!"), content_type="text/html")
+    template_name = 'users/password_reset_complete.html'
+
+
+# Views for backward compatibility (use class-based views)
+password_reset_view = SecurePasswordResetView.as_view()
+password_reset_done_view = SecurePasswordResetDoneView.as_view()
+password_reset_confirm_view = SecurePasswordResetConfirmView.as_view()
+password_reset_complete_view = SecurePasswordResetCompleteView.as_view()
 
 
 # ===============================================================================

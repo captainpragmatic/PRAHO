@@ -2427,3 +2427,64 @@ msgstr ""
 #: templates/users/register.html:230
 msgid "Sign in here"
 msgstr ""
+
+#: apps/users/views.py:132
+msgid "Password reset for your account"
+msgstr ""
+
+msgid "Reset Your Password"
+msgstr ""
+
+msgid "Enter your email address and we'll send you a link to reset your password."
+msgstr ""
+
+msgid "Email Address"
+msgstr ""
+
+msgid "Send Password Reset Email"
+msgstr ""
+
+msgid "Password Reset Sent"
+msgstr ""
+
+msgid "We've emailed you instructions for setting your password, if an account with that email address exists. You should receive them shortly."
+msgstr ""
+
+msgid "If you don't receive an email, please make sure you've entered the address you registered with, and check your spam folder."
+msgstr ""
+
+msgid "Set New Password"
+msgstr ""
+
+msgid "Please enter your new password twice so we can verify you typed it in correctly."
+msgstr ""
+
+msgid "New password"
+msgstr ""
+
+msgid "New password confirmation"
+msgstr ""
+
+msgid "Change my password"
+msgstr ""
+
+msgid "Password Reset Complete"
+msgstr ""
+
+msgid "Your password has been set. You may go ahead and log in now."
+msgstr ""
+
+msgid "Log in"
+msgstr ""
+
+msgid "Click the link below to reset your password:"
+msgstr ""
+
+msgid "Reset Password"
+msgstr ""
+
+msgid "This link will expire in 2 hours."
+msgstr ""
+
+msgid "If you didn't request this password reset, please ignore this email."
+msgstr ""

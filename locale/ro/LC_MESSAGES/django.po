@@ -1996,3 +1996,94 @@ msgstr "Înapoi la clienți"
 #: templates/customers/form.html:31
 msgid "Company Information"
 msgstr "Informații companie"
+
+#: apps/users/views.py:132
+msgid "Password reset for your account"
+msgstr "Resetare parolă pentru contul dumneavoastră"
+
+msgid "Reset Your Password"
+msgstr "Resetează parola"
+
+msgid "Enter your email address and we'll send you a link to reset your password."
+msgstr "Introduceți adresa de email și vă vom trimite un link pentru a reseta parola."
+
+msgid "Email Address"
+msgstr "Adresă email"
+
+msgid "Send Password Reset Email"
+msgstr "Trimite email pentru resetarea parolei"
+
+msgid "Password Reset Sent"
+msgstr "Resetare parolă trimisă"
+
+msgid "We've emailed you instructions for setting your password, if an account with that email address exists. You should receive them shortly."
+msgstr "V-am trimis prin email instrucțiuni pentru setarea parolei, dacă există un cont cu această adresă de email. Ar trebui să le primiți în scurt timp."
+
+msgid "If you don't receive an email, please make sure you've entered the address you registered with, and check your spam folder."
+msgstr "Dacă nu primiți emailul, vă rugăm să vă asigurați că ați introdus adresa cu care v-ați înregistrat și verificați folderul de spam."
+
+msgid "Set New Password"
+msgstr "Setează parolă nouă"
+
+msgid "Please enter your new password twice so we can verify you typed it in correctly."
+msgstr "Vă rugăm să introduceți noua parolă de două ori pentru a verifica că ați tastat corect."
+
+msgid "New password"
+msgstr "Parolă nouă"
+
+msgid "New password confirmation"
+msgstr "Confirmare parolă nouă"
+
+msgid "Change my password"
+msgstr "Schimbă parola"
+
+msgid "Password Reset Complete"
+msgstr "Resetarea parolei completă"
+
+msgid "Your password has been set. You may go ahead and log in now."
+msgstr "Parola dumneavoastră a fost setată. Puteți să vă conectați acum."
+
+msgid "Log in"
+msgstr "Conectare"
+
+msgid "Click the link below to reset your password:"
+msgstr "Apăsați pe linkul de mai jos pentru a reseta parola:"
+
+msgid "Reset Password"
+msgstr "Resetează parola"
+
+msgid "This link will expire in 2 hours."
+msgstr "Acest link va expira în 2 ore."
+
+msgid "If you didn't request this password reset, please ignore this email."
+msgstr "Dacă nu ați solicitat această resetare a parolei, vă rugăm să ignorați acest email."
+
+msgid "Too many password reset attempts. Please wait before trying again."
+msgstr "Prea multe încercări de resetare a parolei. Vă rugăm să așteptați înainte de a încerca din nou."
+
+msgid "Too many password confirmation attempts. Please wait before trying again."
+msgstr "Prea multe încercări de confirmare a parolei. Vă rugăm să așteptați înainte de a încerca din nou."
+
+msgid "Password Reset Link Invalid"
+msgstr "Link-ul pentru resetarea parolei este invalid"
+
+msgid "This password reset link is invalid or has expired. Please request a new one."
+msgstr "Acest link pentru resetarea parolei este invalid sau a expirat. Vă rugăm să solicitați unul nou."
+
+msgid "Request New Reset Link"
+msgstr "Solicită un nou link pentru resetare"
+
+msgid "Back to login"
+msgstr "Înapoi la conectare"
+
+msgid "Important"
+msgstr "Important"
+
+msgid "You have requested a password reset for your PRAHO Platform account."
+msgstr "Ați solicitat resetarea parolei pentru contul dumneavoastră PRAHO Platform."
+
+msgid "Romanian Hosting Provider Management"
+msgstr "Management Furnizor Hosting Românesc"
+
+msgid "Romanian Hosting Provider Management System"
+msgstr "Sistem Management Furnizor Hosting Românesc"

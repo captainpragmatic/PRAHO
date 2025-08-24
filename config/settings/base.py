@@ -142,6 +142,9 @@ LOGIN_URL = '/auth/login/'
 LOGIN_REDIRECT_URL = '/app/'
 LOGOUT_REDIRECT_URL = '/'
 
+# Password reset settings
+PASSWORD_RESET_TIMEOUT = 7200  # 2 hours in seconds
+
 # ===============================================================================
 # INTERNATIONALIZATION & LOCALIZATION
 # ===============================================================================
