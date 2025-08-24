@@ -5,6 +5,7 @@
 from django import forms
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
+from django.contrib.auth import get_user_model
 import re
 
 from .models import (
@@ -15,6 +16,9 @@ from .models import (
     CustomerPaymentMethod,
     CustomerNote
 )
+from apps.users.models import CustomerMembership
+
+User = get_user_model()
 
 
 # ===============================================================================
@@ -283,6 +287,46 @@ class CustomerCreationForm(forms.Form):
     Aligned with registration form structure for consistency.
     """
     
+    # User Account Assignment
+    user_action = forms.ChoiceField(
+        choices=[
+            ('create', _('Create new user account')),
+            ('link', _('Link existing user')),
+            ('skip', _('Skip user assignment'))
+        ],
+        initial='create',
+        label=_('User Account Assignment'),
+        help_text=_('Choose how to handle user assignment for this customer'),
+        widget=forms.RadioSelect(attrs={
+            'class': 'user-action-radio'
+        })
+    )
+    
+    existing_user = forms.ModelChoiceField(
+        queryset=User.objects.filter(is_active=True),
+        required=False,
+        label=_('Existing User'),
+        help_text=_('Select an existing user to assign as owner'),
+        widget=forms.Select(attrs={
+            'class': 'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500',
+            'x-show': "userAction === 'link'",
+            'x-cloak': 'true'
+        }),
+        empty_label=_('Select a user...')
+    )
+    
+    send_welcome_email = forms.BooleanField(
+        initial=True,
+        required=False,
+        label=_('Send welcome email'),
+        help_text=_('Send welcome email with login instructions'),
+        widget=forms.CheckboxInput(attrs={
+            'class': 'rounded border-slate-600 bg-slate-700 text-blue-600 focus:ring-blue-500',
+            'x-show': "userAction === 'create'",
+            'x-cloak': 'true'
+        })
+    )
+    
     # Personal/Contact Information (matching registration)
     first_name = forms.CharField(
         max_length=150, 
@@ -487,6 +531,9 @@ class CustomerCreationForm(forms.Form):
         vat_number = cleaned_data.get('vat_number')
         is_vat_payer = cleaned_data.get('is_vat_payer')
         cui = cleaned_data.get('cui')
+        user_action = cleaned_data.get('user_action')
+        existing_user = cleaned_data.get('existing_user')
+        email = cleaned_data.get('email')
         
         # Require company name for companies, PFA, and NGOs
         if customer_type in ['company', 'pfa', 'ngo'] and not company_name:
@@ -503,10 +550,20 @@ class CustomerCreationForm(forms.Form):
         if vat_number and not re.match(r'^RO\d{6,10}$', vat_number):
             raise ValidationError(_('VAT number must be in format RO followed by 6-10 digits'))
         
+        # User action validation
+        if user_action == 'link' and not existing_user:
+            raise ValidationError(_('Please select an existing user to link.'))
+        
+        if user_action == 'create' and email:
+            if User.objects.filter(email=email).exists():
+                raise ValidationError(
+                    _('A user with email {email} already exists. Please choose "Link existing user" instead.').format(email=email)
+                )
+        
         return cleaned_data
     
     def save(self, user=None):
-        """Create customer with all related profiles"""
+        """Create customer with all related profiles and handle user assignment"""
         data = self.cleaned_data
         
         # Build customer name from first_name + last_name
@@ -556,4 +613,154 @@ class CustomerCreationForm(forms.Form):
             is_current=True
         )
         
-        return customer
+        # Return customer and user action data for view to handle
+        return {
+            'customer': customer,
+            'user_action': data.get('user_action'),
+            'existing_user': data.get('existing_user'),
+            'send_welcome_email': data.get('send_welcome_email', True)
+        }
+
+
+# ===============================================================================
+# USER ASSIGNMENT FORM (for existing customers)
+# ===============================================================================
+
+class CustomerUserAssignmentForm(forms.Form):
+    """
+    🔗 Form for assigning users to existing customers
+    Provides the same three options as customer creation
+    """
+    
+    USER_ACTION_CHOICES = [
+        ('create', _('Create new user account')),
+        ('link', _('Link existing user')),
+        ('skip', _('Skip user assignment')),
+    ]
+    
+    user_action = forms.ChoiceField(
+        choices=USER_ACTION_CHOICES,
+        widget=forms.RadioSelect,
+        label=_('User Assignment Action'),
+        initial='create',
+        help_text=_('Choose how to assign a user to this customer')
+    )
+    
+    # Fields for creating new user
+    first_name = forms.CharField(
+        max_length=30,
+        required=False,
+        label=_('First Name'),
+        widget=forms.TextInput(attrs={
+            'class': 'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500',
+            'placeholder': _('John')
+        })
+    )
+    
+    last_name = forms.CharField(
+        max_length=30,
+        required=False,
+        label=_('Last Name'),
+        widget=forms.TextInput(attrs={
+            'class': 'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500',
+            'placeholder': _('Doe')
+        })
+    )
+    
+    # Link existing user
+    existing_user = forms.ModelChoiceField(
+        queryset=User.objects.filter(is_active=True),
+        required=False,
+        label=_('Select Existing User'),
+        help_text=_('Choose a user to link to this customer'),
+        widget=forms.Select(attrs={
+            'class': 'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500'
+        })
+    )
+    
+    # User role in customer organization
+    role = forms.ChoiceField(
+        choices=CustomerMembership.CUSTOMER_ROLE_CHOICES,
+        initial='owner',
+        label=_('User Role'),
+        help_text=_('Role this user will have within the customer organization'),
+        widget=forms.Select(attrs={
+            'class': 'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500'
+        })
+    )
+    
+    # Email options
+    send_welcome_email = forms.BooleanField(
+        required=False,
+        initial=True,
+        label=_('Send welcome email'),
+        help_text=_('Send welcome email with password reset link to new user'),
+        widget=forms.CheckboxInput(attrs={
+            'class': 'text-blue-600 focus:ring-blue-500 border-slate-500 bg-slate-700 rounded'
+        })
+    )
+    
+    def __init__(self, customer=None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.customer = customer
+        
+        # Exclude users who are already members of this customer
+        if customer:
+            existing_member_ids = CustomerMembership.objects.filter(
+                customer=customer
+            ).values_list('user_id', flat=True)
+            
+            # Update the queryset for existing_user field
+            from django.forms.models import ModelChoiceField
+            existing_user_field = self.fields['existing_user']
+            if isinstance(existing_user_field, ModelChoiceField):
+                existing_user_field.queryset = User.objects.filter(
+                    is_active=True
+                ).exclude(id__in=existing_member_ids)
+    
+    def clean(self):
+        cleaned_data = super().clean()
+        user_action = cleaned_data.get('user_action')
+        
+        if user_action == 'create':
+            # Validate required fields for user creation
+            if not cleaned_data.get('first_name'):
+                self.add_error('first_name', _('First name is required when creating a new user'))
+            if not cleaned_data.get('last_name'):
+                self.add_error('last_name', _('Last name is required when creating a new user'))
+                
+        elif user_action == 'link':
+            # Validate existing user selection
+            if not cleaned_data.get('existing_user'):
+                self.add_error('existing_user', _('Please select a user to link'))
+        
+        return cleaned_data
+    
+    def save(self, customer, created_by):
+        """
+        Process the user assignment
+        Returns: Dict with assignment results
+        """
+        data = self.cleaned_data
+        user_action = data['user_action']
+        
+        if user_action == 'create':
+            # Create new user using customer's email
+            return {
+                'action': 'create',
+                'first_name': data['first_name'],
+                'last_name': data['last_name'],
+                'role': data['role'],
+                'send_welcome_email': data['send_welcome_email']
+            }
+        elif user_action == 'link':
+            # Link existing user
+            return {
+                'action': 'link',
+                'existing_user': data['existing_user'],
+                'role': data['role']
+            }
+        else:  # skip
+            return {
+                'action': 'skip'
+            }

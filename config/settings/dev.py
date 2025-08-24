@@ -12,7 +12,9 @@ from .base import *
 DEBUG = True
 TEMPLATE_DEBUG = True
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0']
+# Get ALLOWED_HOSTS from environment variable, with sensible development defaults
+allowed_hosts_env = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1,0.0.0.0')
+ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_env.split(',') if host.strip()]
 
 # ===============================================================================
 # DEVELOPMENT MIDDLEWARE

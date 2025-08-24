@@ -134,25 +134,25 @@
                 👥 {% trans 'Customer Users' %}
             </h2>
 
-            {% if customer.users.exists %}
+            {% if customer.memberships.exists %}
             <div class="space-y-4">
-                {% for user in customer.users.all %}
+                {% for membership in customer.memberships.all %}
                 <div class="bg-slate-700 border border-slate-600 rounded-lg p-4">
                     <div class="flex items-center justify-between">
                         <div>
-                            <h3 class="font-medium text-white">{{ user.get_full_name }}</h3>
-                            <p class="text-sm text-slate-400">{{ user.email }}</p>
+                            <h3 class="font-medium text-white">{{ membership.user.get_full_name|default:membership.user.email }}</h3>
+                            <p class="text-sm text-slate-400">{{ membership.user.email }}</p>
                         </div>
                         <div class="flex items-center space-x-2">
                             <span
                                 class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-900 text-blue-200">
-                                {% trans 'User' %}
+                                {{ membership.get_role_display }}
                             </span>
                         </div>
                     </div>
-                    {% if user.phone %}
+                    {% if membership.user.phone %}
                     <p class="text-sm text-slate-400 mt-2">
-                        📞 {{ user.phone }}
+                        📞 {{ membership.user.phone }}
                     </p>
                     {% endif %}
                 </div>
@@ -162,8 +162,17 @@
             <div class="text-center py-8">
                 <p class="text-slate-400">👤 {% trans 'No users assigned to this customer' %}</p>
                 <p class="text-sm text-slate-500 mt-2">
-                    {% trans 'Users can be added through the admin interface or user registration.' %}
+                    {% trans 'This customer needs a user account to access services and receive communications.' %}
                 </p>
+                
+                <div class="mt-4 space-y-2">
+                    {% url 'customers:assign_user' customer.pk as assign_user_url %}
+                    {% include 'components/button.html' with text='Assign User Account' variant='primary' href=assign_user_url class='inline-flex' %}
+                    
+                    <p class="text-xs text-slate-500">
+                        {% trans 'You can create a new user or link an existing user account' %}
+                    </p>
+                </div>
             </div>
             {% endif %}
         </div>

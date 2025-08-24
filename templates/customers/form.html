@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load i18n %}
+{% load ui_components %}
 
 {% block title %}{{ title }} - PRAHO Platform{% endblock %}
 
@@ -13,7 +14,11 @@
       </a>
     </div>
 
-    <h1 class="text-2xl font-bold text-white mt-4 romanian-flag">
+    <h1 class="text-2xl font-bold text-white mt-4 rom          <a href="{% url 'customers:list' %}" class="bg-slate-600 hover:bg-slate-700 text-white px-6 py-2 rounded-md font-medium transition-colors">
+            {% trans 'Cancel' %}
+          </a>
+
+          {% include 'components/button.html' with text=submit_text|default:'Create Customer' variant='primary' type='submit' %}lag">
       {{ title }}
     </h1>
   </div>
@@ -88,6 +93,96 @@
             {% endif %}
           </div>
         </div>
+
+        <!-- User Account Assignment (only for new customers) -->
+        {% if not form.instance.pk %}
+        <div class="space-y-4" x-data="{ userAction: 'create' }">
+          <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
+            👤 {% trans 'User Account Assignment' %}
+          </h3>
+          
+          <div class="space-y-3">
+            <!-- Create new user option -->
+            <label class="flex items-start p-4 rounded-lg border border-slate-600 hover:border-blue-500 transition-colors cursor-pointer">
+              <input type="radio" name="user_action" value="create" x-model="userAction" 
+                     class="mt-1 text-blue-600 focus:ring-blue-500 border-slate-500 bg-slate-700">
+              <div class="ml-3 flex-1">
+                <div class="font-medium text-white">{% trans "Create new user account" %}</div>
+                <div class="text-sm text-slate-400 mt-1">
+                  {% trans "Automatically create a user account and send welcome email" %}
+                </div>
+              </div>
+            </label>
+            
+            <!-- Link existing user option -->
+            <label class="flex items-start p-4 rounded-lg border border-slate-600 hover:border-blue-500 transition-colors cursor-pointer">
+              <input type="radio" name="user_action" value="link" x-model="userAction"
+                     class="mt-1 text-blue-600 focus:ring-blue-500 border-slate-500 bg-slate-700">
+              <div class="ml-3 flex-1">
+                <div class="font-medium text-white">{% trans "Link existing user" %}</div>
+                <div class="text-sm text-slate-400 mt-1">
+                  {% trans "Assign an existing user as the owner of this customer" %}
+                </div>
+              </div>
+            </label>
+            
+            <!-- Skip user assignment option -->
+            <label class="flex items-start p-4 rounded-lg border border-slate-600 hover:border-blue-500 transition-colors cursor-pointer">
+              <input type="radio" name="user_action" value="skip" x-model="userAction"
+                     class="mt-1 text-blue-600 focus:ring-blue-500 border-slate-500 bg-slate-700">
+              <div class="ml-3 flex-1">
+                <div class="font-medium text-white">{% trans "Skip user assignment" %}</div>
+                <div class="text-sm text-slate-400 mt-1">
+                  {% trans "Create customer without assigning any user (can be done later)" %}
+                </div>
+              </div>
+            </label>
+          </div>
+          
+          <!-- Conditional Fields -->
+          <div x-show="userAction === 'create'" x-cloak class="mt-4 pl-4 border-l-2 border-blue-500 space-y-3">
+            <div class="flex items-start space-x-3">
+              {{ form.send_welcome_email }}
+              <div class="flex-1">
+                <label for="{{ form.send_welcome_email.id_for_label }}" class="text-sm text-slate-300">
+                  {{ form.send_welcome_email.label }}
+                </label>
+                {% if form.send_welcome_email.help_text %}
+                <p class="text-xs text-slate-400">{{ form.send_welcome_email.help_text }}</p>
+                {% endif %}
+              </div>
+            </div>
+            <div class="p-3 bg-blue-900/20 rounded-lg border border-blue-800">
+              <p class="text-sm text-blue-300">
+                ℹ️ {% trans "A user account will be created using the customer's email address. They will receive a password reset link to set their password." %}
+              </p>
+            </div>
+          </div>
+          
+          <div x-show="userAction === 'link'" x-cloak class="mt-4 pl-4 border-l-2 border-blue-500">
+            <div>
+              <label for="{{ form.existing_user.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                {{ form.existing_user.label }}
+              </label>
+              {{ form.existing_user }}
+              {% if form.existing_user.help_text %}
+              <p class="mt-1 text-xs text-slate-400">{{ form.existing_user.help_text }}</p>
+              {% endif %}
+              {% if form.existing_user.errors %}
+              <p class="text-red-500 text-sm mt-1">{{ form.existing_user.errors.0 }}</p>
+              {% endif %}
+            </div>
+          </div>
+          
+          <div x-show="userAction === 'skip'" x-cloak class="mt-4 pl-4 border-l-2 border-yellow-500">
+            <div class="p-3 bg-yellow-900/20 rounded-lg border border-yellow-800">
+              <p class="text-sm text-yellow-300">
+                ⚠️ {% trans "The customer will be created without any assigned users. You can assign users later from the customer detail page." %}
+              </p>
+            </div>
+          </div>
+        </div>
+        {% endif %}
 
         <!-- Step 2: Business Information -->
         <div class="space-y-4">

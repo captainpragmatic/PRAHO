@@ -95,13 +95,20 @@ class WebAuthnCredential(models.Model):
     is_active = models.BooleanField(default=True)
     
     class Meta:
-        db_table = 'webauthn_credentials'
+        db_table = 'tfa_webauthn_credentials'  # tfa = two-factor auth
         verbose_name = 'WebAuthn Credential'
         verbose_name_plural = 'WebAuthn Credentials'
         indexes = [
-            models.Index(fields=['user', '-created_at']),
-            models.Index(fields=['credential_id']),
-            models.Index(fields=['is_active', '-last_used']),
+            # Core performance indexes with consistent 2FA naming
+            models.Index(fields=['user', '-created_at'], name='idx_tfa_webauthn_user_created'),
+            models.Index(fields=['credential_id'], name='idx_tfa_webauthn_credential_id'),
+            models.Index(fields=['is_active', '-last_used'], name='idx_tfa_webauthn_active_used'),
+            
+            # Additional performance indexes for 2FA operations
+            models.Index(fields=['user'], name='idx_tfa_webauthn_user_lookup'),
+            models.Index(fields=['aaguid'], name='idx_tfa_webauthn_aaguid'),
+            models.Index(fields=['credential_type'], name='idx_tfa_webauthn_type'),
+            models.Index(fields=['is_active'], name='idx_tfa_webauthn_active'),
         ]
     
     def __str__(self):

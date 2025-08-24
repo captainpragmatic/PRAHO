@@ -23,4 +23,7 @@ urlpatterns = [
     path('<int:customer_id>/billing-profile/', views.customer_billing_profile, name='billing_profile'),
     path('<int:customer_id>/address/add/', views.customer_address_add, name='address_add'),
     path('<int:customer_id>/note/add/', views.customer_note_add, name='note_add'),
+    
+    # User Assignment
+    path('<int:customer_id>/assign-user/', views.customer_assign_user, name='assign_user'),
 ]

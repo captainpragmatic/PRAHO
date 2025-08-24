@@ -118,6 +118,9 @@ class User(AbstractUser):
             models.Index(fields=['email']),
             models.Index(fields=['staff_role']),
             models.Index(fields=['is_staff']),
+            # 2FA performance indexes with consistent naming
+            models.Index(fields=['two_factor_enabled'], name='idx_users_2fa_enabled'),
+            models.Index(fields=['two_factor_enabled', 'is_staff'], name='idx_users_2fa_enabled_staff'),
         ]
     
     def __str__(self) -> str:
