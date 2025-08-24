@@ -62,5 +62,6 @@
   },
   "emmet.excludeLanguages": [
     "html"
-  ]
+  ],
+  "makefile.configureOnOpen": false
 }
