@@ -11,14 +11,14 @@ from apps.billing.models import PaymentRetryPolicy
 class Command(BaseCommand):
     help = 'Set up payment retry policies for failed payment recovery'
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser) -> None:
         parser.add_argument(
             '--force',
             action='store_true',
             help='Force recreation of existing policies',
         )
 
-    def handle(self, *args, **options):
+    def handle(self, *args, **options) -> None:
         """Set up standard payment retry policies"""
 
         force = options.get('force', False)

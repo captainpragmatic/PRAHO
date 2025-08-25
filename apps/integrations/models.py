@@ -2,7 +2,7 @@ import hashlib
 import json
 import uuid
 from datetime import timedelta
-from typing import Any, Optional
+from typing import Any
 
 from django.core.validators import MinValueValidator
 from django.db import models

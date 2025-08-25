@@ -11,14 +11,14 @@ from apps.notifications.models import EmailTemplate
 class Command(BaseCommand):
     help = 'Set up essential email templates for Romanian hosting provider'
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser) -> None:
         parser.add_argument(
             '--overwrite',
             action='store_true',
             help='Overwrite existing templates',
         )
 
-    def handle(self, *args, **options):
+    def handle(self, *args, **options) -> None:
         """Create email templates for Romanian hosting provider"""
 
         self.stdout.write(

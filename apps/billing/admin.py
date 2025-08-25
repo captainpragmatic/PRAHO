@@ -204,7 +204,7 @@ class InvoiceLineInline(admin.TabularInline):
     extra = 0
     readonly_fields = ['line_total_display']
 
-    def line_total_display(self, obj):
+    def line_total_display(self, obj) -> str:
         if obj.pk:
             return f"€{obj.line_total:.2f}"
         return "-"
@@ -336,15 +336,15 @@ class InvoiceAdmin(admin.ModelAdmin):
         )
     status_display.short_description = _('Status')
 
-    def total_display(self, obj):
+    def total_display(self, obj) -> str:
         return f"{obj.currency.symbol}{obj.total:.2f}"
     total_display.short_description = _('Total')
 
-    def subtotal_display(self, obj):
+    def subtotal_display(self, obj) -> str:
         return f"{obj.currency.symbol}{obj.subtotal:.2f}"
     subtotal_display.short_description = _('Subtotal')
 
-    def tax_display(self, obj):
+    def tax_display(self, obj) -> str:
         return f"{obj.currency.symbol}{obj.tax_amount:.2f}"
     tax_display.short_description = _('Tax')
 
@@ -373,7 +373,7 @@ class InvoiceAdmin(admin.ModelAdmin):
 
     actions = ['mark_as_paid', 'send_efactura']
 
-    def mark_as_paid(self, request, queryset):
+    def mark_as_paid(self, request, queryset) -> None:
         """Mark selected invoices as paid"""
         updated = 0
         for invoice in queryset:
@@ -452,7 +452,7 @@ class PaymentAdmin(admin.ModelAdmin):
         }),
     )
 
-    def amount_display(self, obj):
+    def amount_display(self, obj) -> str:
         return f"{obj.currency.symbol}{obj.amount:.2f}"
     amount_display.short_description = _('Amount')
 
@@ -584,7 +584,7 @@ class TaxRuleAdmin(admin.ModelAdmin):
 
     readonly_fields = ('created_at', 'updated_at')
 
-    def rate_display(self, obj):
+    def rate_display(self, obj) -> str:
         """Display rate as percentage"""
         return f"{obj.rate * 100:.2f}%"
     rate_display.short_description = _('Rate')
@@ -691,7 +691,7 @@ class PaymentRetryPolicyAdmin(admin.ModelAdmin):
         return schedule
     retry_schedule_display.short_description = _('Retry Schedule')
 
-    def suspend_after_days(self, obj):
+    def suspend_after_days(self, obj) -> str:
         """Display suspension period"""
         return f"{obj.suspend_service_after_days} days" if obj.suspend_service_after_days else "Never"
     suspend_after_days.short_description = _('Suspend After')
@@ -781,7 +781,7 @@ class PaymentCollectionRunAdmin(admin.ModelAdmin):
         })
     )
 
-    def duration_display(self, obj):
+    def duration_display(self, obj) -> str:
         """Display run duration"""
         if not obj.completed_at:
             if obj.status == 'running':

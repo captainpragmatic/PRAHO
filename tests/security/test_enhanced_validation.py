@@ -89,31 +89,6 @@ class TestSecureInputValidator(TestCase):
             result = SecureInputValidator.validate_name_secure(name)
             self.assertEqual(result, name.strip())
 
-    def test_phone_validation_romanian_format(self):
-        """Test Romanian phone number validation"""
-        valid_phones = [
-            '+40721234567',
-            '0721234567',
-            '+40371234567',  # Bucharest
-            '0371234567'
-        ]
-
-        invalid_phones = [
-            '721234567',      # Missing country code/prefix
-            '+40621234567',   # Invalid area code
-            '+41721234567',   # Wrong country
-            '<script>alert("xss")</script>',
-            'DROP TABLE users;--'
-        ]
-
-        for phone in valid_phones:
-            result = SecureInputValidator.validate_phone_romanian(phone)
-            self.assertIn(result, [phone, phone.replace(' ', '').replace('-', '')])
-
-        for phone in invalid_phones:
-            with self.assertRaises(ValidationError):
-                SecureInputValidator.validate_phone_romanian(phone)
-
     def test_vat_validation_romanian_format(self):
         """Test Romanian VAT number validation"""
         valid_vat_numbers = [

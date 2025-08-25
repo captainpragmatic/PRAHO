@@ -3,9 +3,10 @@ Comprehensive type system for PRAHO Platform
 Rust-inspired Result pattern and Django-specific type aliases for clean architecture.
 """
 
+from __future__ import annotations
+
 from collections.abc import Callable
 from dataclasses import dataclass
-from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from django.contrib.admin import ModelAdmin
@@ -44,7 +45,7 @@ class Ok(Generic[T]):
         """Get the success value (ignores default)"""
         return self.value
 
-    def map(self, func: Callable[[T], Any]) -> 'Result[Any, Any]':
+    def map(self, func: Callable[[T], Any]) -> Result[Any, Any]:
         """Transform the success value"""
         try:
             return Ok(func(self.value))
@@ -71,7 +72,7 @@ class Err(Generic[E]):
         """Get the default value since this is an error"""
         return default
 
-    def map(self, func: Callable[[Any], Any]) -> 'Result[Any, E]':
+    def map(self, func: Callable[[Any], Any]) -> Result[Any, E]:
         """No-op for error results"""
         return self
 
@@ -212,7 +213,7 @@ class Money:
             raise ValueError(f"Unsupported currency: {self.currency}")
 
     @classmethod
-    def from_decimal(cls, amount: float, currency: str = 'RON') -> 'Money':
+    def from_decimal(cls, amount: float, currency: str = 'RON') -> Money:
         """Create Money from decimal amount"""
         return cls(int(amount * 100), currency)
 
@@ -260,20 +261,19 @@ class CUI:
 # ===============================================================================
 
 def validate_romanian_cui(cui: str) -> Result[CUIString, str]:
-    """Validate Romanian CUI (company ID) - accepts both RO12345678 and 12345678 formats"""
-    # Remove RO prefix if present for validation
-    digits = cui
+    """Validate Romanian CUI (company ID) - accepts only numeric format (no RO prefix)"""
+    # CUI should not have RO prefix (that's for VAT numbers)
     if cui.startswith('RO'):
-        digits = cui[2:]
+        return Err("CUI should not have RO prefix")
     
-    if not digits.isdigit():
+    if not cui.isdigit():
         return Err("CUI must contain only digits")
 
-    if len(digits) < 2 or len(digits) > 10:
+    if len(cui) < 2 or len(cui) > 10:
         return Err("CUI must have 2-10 digits")
 
-    # Return the normalized format without RO prefix
-    return Ok(CUIString(digits))
+    # Return the normalized format
+    return Ok(CUIString(cui))
 
 
 def validate_email(email: str) -> Result[EmailAddress, str]:
@@ -290,48 +290,6 @@ def validate_email(email: str) -> Result[EmailAddress, str]:
         return Err("Invalid email format")
 
     return Ok(EmailAddress(email))
-
-
-def validate_romanian_phone(phone: str) -> Result[PhoneNumber, str]:
-    """Validate Romanian phone number with comprehensive support for Romanian formats"""
-    import re
-
-    # Store original format for return
-    original = phone
-    
-    # Remove all non-digit characters for validation
-    digits = re.sub(r'\D', '', phone)
-
-    if not digits:
-        return Err("Phone number is required")
-
-    # Handle +40 prefix (Romanian country code)
-    if digits.startswith('40'):
-        # Remove the 40 prefix and validate the remaining number
-        local_digits = digits[2:]
-        if len(local_digits) >= 9 and len(local_digits) <= 10:
-            # Check if it's a valid Romanian number (starts with 7 for mobile or 2/3 for landline)
-            if local_digits.startswith(('7', '2', '3')):
-                # Return cleaned version of original format
-                return Ok(PhoneNumber(original.replace(' ', '').replace('-', '')))
-
-    # Handle national format (starts with 0)
-    elif digits.startswith('0'):
-        local_digits = digits[1:]  # Remove leading 0
-        if len(local_digits) >= 9 and len(local_digits) <= 10:
-            # Check if it's a valid Romanian number
-            if local_digits.startswith(('7', '2', '3')):
-                # Return cleaned version of original format
-                return Ok(PhoneNumber(original.replace(' ', '').replace('-', '')))
-
-    # Handle direct format (without country code or leading 0)
-    elif len(digits) >= 9 and len(digits) <= 10:
-        # Check if it's a valid Romanian number
-        if digits.startswith(('7', '2', '3')):
-            # Return cleaned version of original format
-            return Ok(PhoneNumber(original.replace(' ', '').replace('-', '')))
-
-    return Err("Invalid Romanian phone number format. Expected: +40 721 123 456, 0721 123 456, or 721 123 456")
 
 
 def calculate_romanian_vat(amount_cents: int, include_vat: bool = True) -> dict[str, float]:

@@ -3,6 +3,8 @@ Common utilities for PRAHO Platform
 Shared helper functions and decorators.
 """
 
+from __future__ import annotations
+
 import hashlib
 import re
 import secrets
@@ -10,7 +12,6 @@ from collections.abc import Callable
 from datetime import datetime
 from decimal import Decimal
 from functools import wraps
-from __future__ import annotations
 from typing import Any, TypedDict
 
 from django.conf import settings
@@ -22,13 +23,6 @@ from django.utils.translation import gettext_lazy as _
 # ===============================================================================
 # ROMANIAN VALIDATION UTILITIES
 # ===============================================================================
-
-def validate_romanian_phone(phone: str) -> bool:
-    """Validate Romanian phone number format (deprecated - use apps.common.types.validate_romanian_phone)"""
-    from apps.common.types import validate_romanian_phone as new_validator
-    result = new_validator(phone)
-    return result.is_ok()
-
 
 def format_romanian_phone(phone: str) -> str:
     """Format phone number to Romanian standard"""

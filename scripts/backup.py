@@ -172,9 +172,8 @@ class PragmaticHostBackup:
                     return False
 
                 # Compress the dump
-                with open(dump_file, 'rb') as f_in:
-                    with gzip.open(f"{dump_file}.gz", 'wb') as f_out:
-                        shutil.copyfileobj(f_in, f_out)
+                with open(dump_file, 'rb') as f_in, gzip.open(f"{dump_file}.gz", 'wb') as f_out:
+                    shutil.copyfileobj(f_in, f_out)
 
                 dump_file.unlink()  # Remove uncompressed file
 

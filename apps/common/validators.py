@@ -207,35 +207,6 @@ class SecureInputValidator:
         return name
 
     @staticmethod
-    def validate_phone_romanian(phone: str) -> PhoneNumber:
-        """Romanian phone number validation - delegating to types module"""
-        from apps.common.types import validate_romanian_phone
-        
-        if not phone:
-            return PhoneNumber("")  # Phone is optional
-
-        if not isinstance(phone, str):
-            raise ValidationError(_("Invalid input format"))
-
-        # Length check
-        if len(phone) > MAX_PHONE_LENGTH:
-            raise ValidationError(_("Input too long"))
-
-        # XSS/injection check
-        SecureInputValidator._check_malicious_patterns(phone)
-
-        # Use centralized validation from types module
-        result = validate_romanian_phone(phone)
-        if result.is_err():
-            # TypeScript-style type narrowing for Result pattern
-            from apps.common.types import Err
-            if isinstance(result, Err):
-                raise ValidationError(_(result.error))
-            else:
-                raise ValidationError(_("Invalid phone number"))
-        
-        return result.unwrap()
-
     @staticmethod
     def validate_vat_number_romanian(vat_number: str) -> VATString:
         """Romanian VAT number validation"""
@@ -283,10 +254,9 @@ class SecureInputValidator:
         result = validate_romanian_cui(cui.strip())
         if result.is_err():
             from apps.common.types import Err
-            if isinstance(result, Err):
-                raise ValidationError(_(result.error))
-            else:
-                raise ValidationError(_("Invalid CUI format"))
+            from typing import cast
+            error_result = cast(Err[str], result)
+            raise ValidationError(_(error_result.error))
         
         return result.unwrap()
 
@@ -367,9 +337,13 @@ class SecureInputValidator:
 
         # Optional fields
         if 'phone' in user_data:
-            validated_data['phone'] = SecureInputValidator.validate_phone_romanian(
-                user_data['phone']
-            )
+            # No phone validation - just basic input sanitization
+            phone = user_data['phone']
+            if isinstance(phone, str):
+                SecureInputValidator._check_malicious_patterns(phone)
+                validated_data['phone'] = phone.strip()
+            else:
+                raise ValidationError(_("Invalid input format"))
 
         # Boolean fields with type safety
         if 'accepts_marketing' in user_data:
@@ -451,7 +425,7 @@ class BusinessLogicValidator:
 
     @staticmethod
     @timing_safe_validator
-    def check_company_uniqueness(company_data: dict[str, Any], request_ip: str = None) -> None:
+    def check_company_uniqueness(company_data: dict[str, Any], request_ip: str | None = None) -> None:
         """
         Check company uniqueness with race condition prevention
         """
@@ -585,7 +559,7 @@ class SecureErrorHandler:
 # AUDIT LOGGING INTEGRATION
 # ===============================================================================
 
-def log_security_event(event_type: str, details: dict[str, Any], request_ip: str = None):
+def log_security_event(event_type: str, details: dict[str, Any], request_ip: str | None = None) -> None:
     """
     Log security events for monitoring and forensics
     """

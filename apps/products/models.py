@@ -153,7 +153,7 @@ class Product(models.Model):
     def __str__(self) -> str:
         return self.name
 
-    def get_active_prices(self) -> QuerySet['ProductPrice']:
+    def get_active_prices(self) -> QuerySet[ProductPrice]:
         """Get all active prices for this product"""
         return self.prices.filter(is_active=True)
 

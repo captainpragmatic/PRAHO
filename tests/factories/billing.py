@@ -1,9 +1,11 @@
 # ===============================================================================
 # TEST FACTORIES FOR BILLING
 # ===============================================================================
-from typing import Optional
+
+from datetime import timedelta
 
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 
 from apps.billing.models import Currency, Invoice, Payment
 from apps.customers.models import Customer
@@ -21,7 +23,7 @@ def create_customer(company_name: str = 'Test Co') -> Customer:
     return Customer.objects.create(customer_type='company', company_name=company_name, status='active')
 
 
-def create_invoice(customer: Customer, currency: Optional[Currency] = None, number: str = 'INV-TEST-001', total_cents: int = 10000) -> Invoice:
+def create_invoice(customer: Customer, currency: Currency | None = None, number: str = 'INV-TEST-001', total_cents: int = 10000) -> Invoice:
     """Create an Invoice with sensible defaults."""
     if currency is None:
         currency = create_currency()
@@ -32,11 +34,12 @@ def create_invoice(customer: Customer, currency: Optional[Currency] = None, numb
         number=number,
         total_cents=total_cents,
         subtotal_cents=total_cents,
-        status='issued'
+        status='issued',
+        due_at=timezone.now() + timedelta(days=30)  # Default 30 day payment terms
     )
 
 
-def create_payment(customer: Customer, invoice: Optional[Invoice] = None, currency: Optional[Currency] = None, amount_cents: int = 1000, method: str = 'stripe', status: str = 'succeeded') -> Payment:
+def create_payment(customer: Customer, invoice: Invoice | None = None, currency: Currency | None = None, amount_cents: int = 1000, method: str = 'stripe', status: str = 'succeeded') -> Payment:
     """Create a Payment linked to an invoice optionally."""
     if currency is None:
         currency = create_currency()

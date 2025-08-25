@@ -483,8 +483,8 @@ class GDPRDeletionService:
         cls,
         user: User,
         deletion_type: str = 'anonymize',  # 'anonymize' or 'delete'
-        request_ip: str = None,
-        reason: str = None
+        request_ip: str | None = None,
+        reason: str | None = None
     ) -> Result[ComplianceLog, str]:
         """Create a GDPR data deletion request"""
 
@@ -685,7 +685,7 @@ class GDPRConsentService:
         cls,
         user: User,
         consent_types: list[str],
-        request_ip: str = None
+        request_ip: str | None = None
     ) -> Result[str, str]:
         """Withdraw specific types of consent"""
 

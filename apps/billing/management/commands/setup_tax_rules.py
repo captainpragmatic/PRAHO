@@ -14,14 +14,14 @@ from apps.billing.models import TaxRule
 class Command(BaseCommand):
     help = 'Set up Romanian and EU VAT tax rules for hosting business'
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser) -> None:
         parser.add_argument(
             '--force',
             action='store_true',
             help='Force recreation of existing tax rules',
         )
 
-    def handle(self, *args, **options):
+    def handle(self, *args, **options) -> None:
         """Set up tax rules for Romanian hosting provider"""
 
         force = options.get('force', False)

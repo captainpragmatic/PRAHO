@@ -8,7 +8,7 @@ This replaces the existing services.py with security-hardened implementations.
 import hashlib
 import logging
 import time
-from typing import TYPE_CHECKING, Any, Optional, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -89,19 +89,19 @@ class SecureUserRegistrationService:
         email: EmailAddress
         first_name: str
         last_name: str
-        phone: Optional[PhoneNumber]
-        accepts_marketing: Optional[bool]
-        gdpr_consent_date: Optional[str]
+        phone: PhoneNumber | None
+        accepts_marketing: bool | None
+        gdpr_consent_date: str | None
 
     class CustomerData(TypedDict):
         """Type definition for customer registration data"""
         company_name: str
         customer_type: str
-        vat_number: Optional[VATString]
-        registration_number: Optional[CUIString]
-        billing_address: Optional[str]
-        billing_city: Optional[str]
-        billing_postal_code: Optional[str]
+        vat_number: VATString | None
+        registration_number: CUIString | None
+        billing_address: str | None
+        billing_city: str | None
+        billing_postal_code: str | None
 
     @classmethod
     @secure_user_registration(rate_limit=5)  # 5 registrations per hour per IP
@@ -118,8 +118,8 @@ class SecureUserRegistrationService:
         cls,
         user_data: dict[str, Any],
         customer_data: dict[str, Any],
-        request_ip: Optional[str] = None,
-        user_agent: Optional[str] = None,
+        request_ip: str | None = None,
+        user_agent: str | None = None,
         **kwargs: Any
     ) -> Result[tuple[User, Customer], str]:
         """
@@ -246,7 +246,7 @@ class SecureUserRegistrationService:
         user_data: dict[str, Any],
         company_identifier: str,
         identification_type: str,  # 'name', 'vat_number', 'registration_number'
-        request_ip: str = None,
+        request_ip: str | None = None,
         **kwargs
     ) -> Result[dict[str, Any], str]:
         """
@@ -331,7 +331,7 @@ class SecureCustomerUserService:
         last_name: str = "",
         send_welcome: bool = True,
         created_by=None,
-        request_ip: str = None,
+        request_ip: str | None = None,
         **kwargs
     ) -> Result[tuple[User, bool], str]:
         """
@@ -372,9 +372,7 @@ class SecureCustomerUserService:
                     email=validated_email,
                     first_name=first_name or '',
                     last_name=last_name or '',
-                    phone=SecureInputValidator.validate_phone_romanian(
-                        getattr(customer, 'primary_phone', '') or ''
-                    ),
+                    phone=getattr(customer, 'primary_phone', '') or '',
                     is_active=True,
                     created_by=created_by
                 )
@@ -419,7 +417,7 @@ class SecureCustomerUserService:
         role: str = 'viewer',  # Secure default
         is_primary: bool = False,
         created_by=None,
-        request_ip: str = None,
+        request_ip: str | None = None,
         **kwargs
     ) -> Result[Any, str]:
         """
@@ -471,8 +469,8 @@ class SecureCustomerUserService:
         invitee_email: str,
         customer,
         role: str = 'viewer',
-        request_ip: str = None,
-        user_id: int = None,  # For rate limiting
+        request_ip: str | None = None,
+        user_id: int | None = None,  # For rate limiting
         **kwargs
     ) -> Result[CustomerMembership, str]:
         """
@@ -552,7 +550,7 @@ class SecureCustomerUserService:
         cls,
         identifier: str,
         identification_type: str,
-        request_ip: str = None
+        request_ip: str | None = None
     ) -> Customer | None:
         """
         🔒 Timing-safe customer lookup preventing enumeration attacks
@@ -603,7 +601,7 @@ class SecureCustomerUserService:
                 time.sleep(0.1 - elapsed)
 
     @classmethod
-    def _send_welcome_email_secure(cls, user: User, customer, request_ip: str = None) -> bool:
+    def _send_welcome_email_secure(cls, user: User, customer, request_ip: str | None = None) -> bool:
         """
         🔒 Secure welcome email with proper token generation
         """
@@ -664,7 +662,7 @@ class SecureCustomerUserService:
             return False
 
     @classmethod
-    def _notify_owners_of_join_request_secure(cls, customer, requesting_user, request_ip: str = None):
+    def _notify_owners_of_join_request_secure(cls, customer, requesting_user, request_ip: str | None = None) -> None:
         """
         🔒 Secure notification to owners with rate limiting
         """
@@ -704,7 +702,7 @@ class SecureCustomerUserService:
             logger.error(f"📧 [Secure Notification] Failed to notify owners: {e!s}")
 
     @classmethod
-    def _send_invitation_email_secure(cls, membership, inviter, request_ip: str = None):
+    def _send_invitation_email_secure(cls, membership, inviter, request_ip: str | None = None) -> None:
         """
         🔒 Secure invitation email with proper tokens and expiration
         """
@@ -768,7 +766,7 @@ class SessionSecurityService:
     }
 
     @classmethod
-    def rotate_session_on_password_change(cls, request, user=None):
+    def rotate_session_on_password_change(cls, request, user=None) -> None:
         """🔒 Rotate session after password change and invalidate other sessions"""
         if not request.user.is_authenticated and not user:
             return
@@ -796,7 +794,7 @@ class SessionSecurityService:
         logger.warning(f"🔄 [SessionSecurity] Session rotated for {target_user.email} after password change")
 
     @classmethod
-    def rotate_session_on_2fa_change(cls, request):
+    def rotate_session_on_2fa_change(cls, request) -> None:
         """🔒 Rotate session when 2FA is enabled/disabled"""
         if not request.user.is_authenticated:
             return
@@ -821,7 +819,7 @@ class SessionSecurityService:
         logger.warning(f"🔄 [SessionSecurity] Session rotated for {user.email} after 2FA change")
 
     @classmethod
-    def cleanup_2fa_secrets_on_recovery(cls, user, request_ip=None):
+    def cleanup_2fa_secrets_on_recovery(cls, user, request_ip=None) -> None:
         """🔒 Clean up 2FA secrets during account recovery"""
         if not user:
             return
@@ -844,7 +842,7 @@ class SessionSecurityService:
         logger.warning(f"🔐 [SessionSecurity] 2FA secrets cleared for {user.email} during recovery")
 
     @classmethod
-    def update_session_timeout(cls, request):
+    def update_session_timeout(cls, request) -> None:
         """🔒 Update session timeout based on user context"""
         if not hasattr(request, 'session') or not request.user.is_authenticated:
             return
@@ -882,7 +880,7 @@ class SessionSecurityService:
         return cls.TIMEOUT_POLICIES['standard']
 
     @classmethod
-    def enable_shared_device_mode(cls, request):
+    def enable_shared_device_mode(cls, request) -> None:
         """🔒 Enable shared device mode with enhanced security"""
         if not request.user.is_authenticated:
             return
@@ -947,7 +945,7 @@ class SessionSecurityService:
         return is_suspicious
 
     @classmethod
-    def log_session_activity(cls, request, activity_type: str, **extra_data):
+    def log_session_activity(cls, request, activity_type: str, **extra_data) -> None:
         """🔒 Log session activity using existing security event system"""
         if not request.user.is_authenticated:
             return
@@ -972,7 +970,7 @@ class SessionSecurityService:
     # ===============================================================================
 
     @classmethod
-    def _invalidate_other_user_sessions(cls, user_id: int, keep_session_key: str):
+    def _invalidate_other_user_sessions(cls, user_id: int, keep_session_key: str) -> None:
         """Invalidate all sessions for a user except specified one"""
         try:
             from django.contrib.sessions.models import Session
@@ -995,7 +993,7 @@ class SessionSecurityService:
             logger.error(f"🔥 [SessionSecurity] Error invalidating sessions for user {user_id}: {e}")
 
     @classmethod
-    def _invalidate_all_user_sessions(cls, user_id: int):
+    def _invalidate_all_user_sessions(cls, user_id: int) -> None:
         """Invalidate all sessions for a user"""
         try:
             from django.contrib.sessions.models import Session
@@ -1018,7 +1016,7 @@ class SessionSecurityService:
             logger.error(f"🔥 [SessionSecurity] Error invalidating all sessions for user {user_id}: {e}")
 
     @classmethod
-    def _clear_sensitive_session_data(cls, request):
+    def _clear_sensitive_session_data(cls, request) -> None:
         """Clear sensitive data from session"""
         sensitive_keys = [
             '2fa_secret', 'new_backup_codes', 'password_reset_token',

@@ -219,7 +219,7 @@ def prevent_race_conditions(lock_key_generator: Callable):
 # HELPER FUNCTIONS
 # ===============================================================================
 
-def _check_rate_limit(key_prefix: str, limit: int, request_ip: str, user=None):
+def _check_rate_limit(key_prefix: str, limit: int, request_ip: str, user=None) -> None:
     """Check rate limiting with user and IP tracking"""
     identifiers = [request_ip]
     if user:
@@ -257,7 +257,7 @@ def _check_rate_limit(key_prefix: str, limit: int, request_ip: str, user=None):
             logger.warning(f"🚨 [Security] Rate limiting failed due to cache issue: {e}")
 
 
-def _validate_user_registration_input(args, kwargs):
+def _validate_user_registration_input(args, kwargs) -> None:
     """Validate user registration input data"""
     # Extract user_data from arguments
     user_data = None
@@ -276,7 +276,7 @@ def _validate_user_registration_input(args, kwargs):
             kwargs['user_data'] = validated_user_data
 
 
-def _validate_customer_data_input(args, kwargs):
+def _validate_customer_data_input(args, kwargs) -> None:
     """Validate customer data input"""
     customer_data = None
     if len(args) >= 3 and isinstance(args[2], dict):
@@ -300,7 +300,7 @@ def _validate_customer_data_input(args, kwargs):
         )
 
 
-def _validate_invitation_input(args, kwargs):
+def _validate_invitation_input(args, kwargs) -> None:
     """Validate invitation input data"""
     inviter = kwargs.get('inviter') or (args[1] if len(args) > 1 else None)
     invitee_email = kwargs.get('invitee_email') or (args[2] if len(args) > 2 else None)
@@ -319,13 +319,13 @@ def _validate_invitation_input(args, kwargs):
         )
 
 
-def _validate_permissions(user, customer, required_role: str):
+def _validate_permissions(user, customer, required_role: str) -> None:
     """Validate user permissions for customer operations"""
     if user and customer:
         BusinessLogicValidator.validate_user_permissions(user, customer, required_role)
 
 
-def _normalize_response_time(start_time: float, min_time: float = 0.1):
+def _normalize_response_time(start_time: float, min_time: float = 0.1) -> None:
     """Ensure consistent response time to prevent timing attacks"""
     elapsed = time.time() - start_time
     if elapsed < min_time:

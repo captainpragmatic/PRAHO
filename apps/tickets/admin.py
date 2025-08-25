@@ -4,7 +4,7 @@ Romanian hosting provider customer support system administration.
 """
 
 
-from typing import Any, Optional
+from typing import Any
 
 from django.contrib import admin
 from django.db import models

@@ -6,7 +6,7 @@ class AuditConfig(AppConfig):
     name = 'apps.audit'
     verbose_name = 'Audit & Compliance'
 
-    def ready(self):
+    def ready(self) -> None:
         """Import signal handlers when app is ready."""
         try:
             import apps.audit.signals  # noqa F401

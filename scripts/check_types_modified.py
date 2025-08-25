@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 
-def get_modified_python_files(staged_only: bool = False, since: str = None) -> list[str]:
+def get_modified_python_files(staged_only: bool = False, since: str | None = None) -> list[str]:
     """Get Python files that have been modified."""
     try:
         if staged_only:
@@ -89,7 +89,7 @@ def run_mypy_on_files(files: list[str], verbose: bool = False) -> bool:
             print(f"  • {f}")
     
     # Run mypy
-    cmd = ["mypy"] + files_to_check
+    cmd = ["mypy", *files_to_check]
     result = subprocess.run(cmd, check=False, capture_output=True, text=True)
     
     if result.returncode == 0:

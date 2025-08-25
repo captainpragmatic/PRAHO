@@ -69,7 +69,7 @@ class PragmaticHostWorker:
 
         logger.info(f"Initialized PragmaticHost worker for queues: {self.queue_names}")
 
-    def start(self):
+    def start(self) -> None:
         """Start the worker process"""
         try:
             logger.info("Starting PragmaticHost background worker...")
@@ -93,7 +93,7 @@ class PragmaticHostWorker:
             logger.error(f"Worker failed to start: {e}")
             raise
 
-    def _handle_job_exception(self, job, exc_type, exc_value, traceback):
+    def _handle_job_exception(self, job, exc_type, exc_value, traceback) -> None:
         """
         Handle job exceptions with Romanian business context
         
@@ -134,7 +134,7 @@ class PragmaticHostWorker:
             }
         return stats
 
-    def clear_failed_jobs(self, queue_name: str | None = None):
+    def clear_failed_jobs(self, queue_name: str | None = None) -> None:
         """Clear failed jobs from queue(s)"""
         if queue_name:
             queue = Queue(queue_name, connection=self.redis_conn)
@@ -153,7 +153,7 @@ class PragmaticHostWorker:
             logger.info(f"Total failed jobs cleared: {total_cleared}")
 
 
-def main():
+def main() -> None:
     """Main worker entry point"""
     import argparse
 

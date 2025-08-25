@@ -6,7 +6,7 @@ from typing import Any
 from django.db import transaction
 from django.utils import timezone
 
-from ..models import WebhookEvent
+from apps.integrations.models import WebhookEvent
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ class BaseWebhookProcessor:
 
     source_name: str = None  # Override in subclasses
 
-    def __init__(self):
+    def __init__(self) -> None:
         if not self.source_name:
             raise ValueError("source_name must be defined in subclass")
 
@@ -36,9 +36,9 @@ class BaseWebhookProcessor:
         self,
         payload: dict[str, Any],
         signature: str = "",
-        headers: dict[str, str] = None,
-        ip_address: str = None,
-        user_agent: str = None
+        headers: dict[str, str] | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None
     ) -> tuple[bool, str, WebhookEvent | None]:
         """
         🔄 Main webhook processing pipeline
@@ -267,7 +267,7 @@ def should_retry_webhook(webhook_event: WebhookEvent, max_retries: int = 5) -> b
 # WEBHOOK PROCESSING QUEUE
 # ===============================================================================
 
-def process_pending_webhooks(source: str = None, limit: int = 100) -> dict[str, int]:
+def process_pending_webhooks(source: str | None = None, limit: int = 100) -> dict[str, int]:
     """
     🔄 Process pending webhooks in queue
     
@@ -305,7 +305,7 @@ def process_pending_webhooks(source: str = None, limit: int = 100) -> dict[str, 
     return stats
 
 
-def retry_failed_webhooks(source: str = None) -> dict[str, int]:
+def retry_failed_webhooks(source: str | None = None) -> dict[str, int]:
     """
     🔄 Retry failed webhooks that are ready for retry
     

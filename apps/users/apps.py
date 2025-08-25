@@ -10,5 +10,5 @@ class UsersConfig(AppConfig):
     name = 'apps.users'
     verbose_name = 'Users'
 
-    def ready(self):
+    def ready(self) -> None:
         import apps.users.signals  # noqa

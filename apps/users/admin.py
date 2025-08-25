@@ -353,7 +353,7 @@ class UserLoginLogAdmin(admin.ModelAdmin):
     get_user_display.short_description = 'User'
     get_user_display.admin_order_field = 'user__email'
 
-    def get_location(self, obj):
+    def get_location(self, obj) -> str:
         """Display location information"""
         if obj.country and obj.city:
             return f"🌍 {obj.city}, {obj.country}"
@@ -370,11 +370,11 @@ class UserLoginLogAdmin(admin.ModelAdmin):
         return ua
     get_user_agent_short.short_description = 'User Agent'
 
-    def has_add_permission(self, request):
+    def has_add_permission(self, request) -> bool:
         """Login logs are created automatically"""
         return False
 
-    def has_change_permission(self, request, obj=None):
+    def has_change_permission(self, request, obj=None) -> bool:
         """Login logs are read-only"""
         return False
 

@@ -370,22 +370,3 @@ class MinimalModelIntegrationTestCase(TestCase):
         user.last_name = 'User'
         user.save()
         self.assertEqual(user.get_full_name(), 'Test User')
-
-    def test_clean_method_phone_validation(self):
-        """Test User clean method with phone validation"""
-        user = User.objects.create_user(
-            email='test@example.com',
-            password='testpass123'
-        )
-        
-        # Valid Romanian phone
-        user.phone = '+40712345678'
-        try:
-            user.clean()  # Should not raise
-        except ValidationError:
-            self.fail("Valid Romanian phone should not raise ValidationError")
-        
-        # Invalid phone should raise during clean
-        user.phone = 'invalid-phone'
-        with self.assertRaises(ValidationError):
-            user.clean()

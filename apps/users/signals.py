@@ -11,21 +11,21 @@ from .models import User, UserProfile
 
 
 @receiver(post_save, sender=User)
-def create_user_profile(sender, instance, created, **kwargs):
+def create_user_profile(sender, instance, created, **kwargs) -> None:
     """Create user profile when user is created"""
     if created:
         UserProfile.objects.create(user=instance)
 
 
 @receiver(post_save, sender=User)
-def save_user_profile(sender, instance, **kwargs):
+def save_user_profile(sender, instance, **kwargs) -> None:
     """Save user profile when user is saved"""
     if hasattr(instance, 'profile'):
         instance.profile.save()
 
 
 @receiver(user_logged_in)
-def log_user_login(sender, request, user, **kwargs):
+def log_user_login(sender, request, user, **kwargs) -> None:
     """Log successful user login"""
     # 🚨 DISABLED: Login logging now handled in login view with account lockout integration
     # UserLoginLog.objects.create(
@@ -37,7 +37,7 @@ def log_user_login(sender, request, user, **kwargs):
 
 
 @receiver(user_login_failed)
-def log_failed_login(sender, credentials, request, **kwargs):
+def log_failed_login(sender, credentials, request, **kwargs) -> None:
     """Log failed login attempt"""
     # 🚨 DISABLED: Failed login logging now handled in login view with account lockout integration
     # email = credentials.get('username') or credentials.get('email')

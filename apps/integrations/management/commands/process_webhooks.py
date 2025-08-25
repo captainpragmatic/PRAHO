@@ -29,7 +29,7 @@ class Command(BaseCommand):
 
     help = '🔄 Process webhook queue and retry failed webhooks'
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser) -> None:
         parser.add_argument(
             '--pending',
             action='store_true',
@@ -62,7 +62,7 @@ class Command(BaseCommand):
             help='Show webhook processing statistics'
         )
 
-    def handle(self, *args, **options):
+    def handle(self, *args, **options) -> None:
         """🎯 Main command handler"""
         self.stdout.write(
             self.style.SUCCESS('🔄 Starting webhook processing...')
@@ -92,7 +92,7 @@ class Command(BaseCommand):
             self.style.SUCCESS('✅ Webhook processing completed!')
         )
 
-    def process_pending(self, source=None, limit=100):
+    def process_pending(self, source=None, limit=100) -> None:
         """📋 Process pending webhooks"""
         self.stdout.write(f"📋 Processing pending webhooks (source: {source or 'all'}, limit: {limit})")
 
@@ -113,7 +113,7 @@ class Command(BaseCommand):
                 self.style.WARNING(f"⚠️ {stats['failed']} webhooks failed - they will be retried later")
             )
 
-    def retry_failed(self, source=None):
+    def retry_failed(self, source=None) -> None:
         """🔄 Retry failed webhooks"""
         self.stdout.write(f"🔄 Retrying failed webhooks (source: {source or 'all'})")
 
@@ -129,7 +129,7 @@ class Command(BaseCommand):
             f"  🗑️ Abandoned (too old/max retries): {stats['abandoned']}"
         )
 
-    def cleanup_old_webhooks(self):
+    def cleanup_old_webhooks(self) -> None:
         """🗑️ Clean up old processed webhooks"""
         self.stdout.write("🗑️ Cleaning up old processed webhooks (>30 days)")
 
@@ -148,7 +148,7 @@ class Command(BaseCommand):
         else:
             self.stdout.write("  ℹ️ No old webhooks to clean up")
 
-    def show_stats(self):
+    def show_stats(self) -> None:
         """📊 Show webhook statistics"""
         self.stdout.write("📊 Webhook Processing Statistics")
         self.stdout.write("=" * 50)

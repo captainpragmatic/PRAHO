@@ -61,7 +61,7 @@ class PragmaticHostScheduler:
     - Report generation
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize scheduler with Redis connection"""
         self.redis_conn = Redis.from_url(
             settings.REDIS_URL if hasattr(settings, 'REDIS_URL')
@@ -81,7 +81,7 @@ class PragmaticHostScheduler:
         self._setup_tasks()
         logger.info("Initialized PragmaticHost beat scheduler")
 
-    def _setup_tasks(self):
+    def _setup_tasks(self) -> None:
         """Setup all periodic tasks for Romanian hosting operations"""
 
         # Daily tasks
@@ -168,7 +168,7 @@ class PragmaticHostScheduler:
         self._calculate_next_runs()
         logger.info(f"Setup {len(self.tasks)} periodic tasks")
 
-    def _calculate_next_runs(self):
+    def _calculate_next_runs(self) -> None:
         """Calculate next run times for all tasks"""
         now = datetime.now()
 
@@ -187,7 +187,7 @@ class PragmaticHostScheduler:
                 # Set next run based on interval
                 task.next_run = now + timedelta(minutes=task.interval)
 
-    def _enqueue_task(self, task: ScheduledTask):
+    def _enqueue_task(self, task: ScheduledTask) -> None:
         """Enqueue a task for execution"""
         try:
             # Import the function dynamically
@@ -207,7 +207,7 @@ class PragmaticHostScheduler:
         except Exception as e:
             logger.error(f"Failed to execute task {task.name}: {e}")
 
-    def start(self):
+    def start(self) -> None:
         """Start the beat scheduler"""
         try:
             logger.info("Starting PragmaticHost beat scheduler...")
@@ -232,7 +232,7 @@ class PragmaticHostScheduler:
             logger.error(f"Scheduler failed: {e}")
             raise
 
-    def stop(self):
+    def stop(self) -> None:
         """Stop the scheduler"""
         self.running = False
         logger.info("Scheduler stopped")
@@ -259,7 +259,7 @@ class PragmaticHostScheduler:
         }
 
 
-def main():
+def main() -> None:
     """Main scheduler entry point"""
     import argparse
 

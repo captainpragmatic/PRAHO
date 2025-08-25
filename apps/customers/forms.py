@@ -2,8 +2,9 @@
 # CUSTOMER FORMS - NORMALIZED MODEL STRUCTURE
 # ===============================================================================
 
-import re
 from __future__ import annotations
+
+import re
 from typing import Any, cast
 
 from django import forms

@@ -13,6 +13,7 @@ from django.utils import timezone
 from apps.billing.models import Currency, Invoice, InvoiceLine, ProformaInvoice
 from apps.customers.models import Customer
 from apps.provisioning.models import Service, ServicePlan
+from tests.factories.billing import create_invoice
 
 User = get_user_model()
 
@@ -48,7 +49,7 @@ class InvoiceTestCase(TestCase):
 
     def test_invoice_str_representation(self):
         """Test string representation"""
-        invoice = Invoice.objects.create(
+        invoice = create_invoice(
             customer=self.customer,
             currency=self.currency,
             number='INV-2025-002'
@@ -57,14 +58,15 @@ class InvoiceTestCase(TestCase):
 
     def test_invoice_property_calculations(self):
         """Test invoice calculated properties"""
-        invoice = Invoice.objects.create(
+        invoice = create_invoice(
             customer=self.customer,
             currency=self.currency,
             number='INV-2025-003',
-            subtotal_cents=10000,
-            tax_cents=1900,
             total_cents=11900
         )
+        # Manually set the other fields since factory doesn't support them
+        invoice.tax_cents = 1900
+        invoice.save()
 
         self.assertEqual(invoice.subtotal, Decimal('100.00'))
         self.assertEqual(invoice.tax_amount, Decimal('19.00'))

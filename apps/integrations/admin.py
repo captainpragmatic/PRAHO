@@ -90,7 +90,7 @@ class WebhookEventAdmin(admin.ModelAdmin):
         }),
     )
 
-    def source_display(self, obj):
+    def source_display(self, obj) -> str:
         """🔌 Display source with icon"""
         source_icons = {
             'stripe': '💳',
@@ -141,7 +141,7 @@ class WebhookEventAdmin(admin.ModelAdmin):
         )
     status_display.short_description = _('Status')
 
-    def processing_time(self, obj):
+    def processing_time(self, obj) -> str:
         """⏱️ Processing duration"""
         if obj.processing_duration:
             seconds = obj.processing_duration.total_seconds()
@@ -152,7 +152,7 @@ class WebhookEventAdmin(admin.ModelAdmin):
         return "-"
     processing_time.short_description = _('Duration')
 
-    def payload_size(self, obj):
+    def payload_size(self, obj) -> str:
         """📦 Payload size in KB"""
         import json
         payload_str = json.dumps(obj.payload)
@@ -280,7 +280,7 @@ class WebhookDeliveryAdmin(admin.ModelAdmin):
         )
     status_display.short_description = _('Status')
 
-    def delivery_time(self, obj):
+    def delivery_time(self, obj) -> str:
         """⏱️ Delivery duration"""
         if obj.delivered_at and obj.scheduled_at:
             duration = obj.delivered_at - obj.scheduled_at

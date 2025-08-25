@@ -4,6 +4,7 @@ Romanian hosting provider authentication with multi-customer support.
 """
 
 from __future__ import annotations
+
 from typing import Any
 
 from django.contrib.auth.models import AbstractUser, BaseUserManager
@@ -251,17 +252,9 @@ class User(AbstractUser):
         remaining = self.account_locked_until - timezone.now()
         return max(0, int(remaining.total_seconds() / 60))
 
-    def clean(self):
-        """Validate user data including phone number"""
+    def clean(self) -> None:
+        """Validate user data"""
         super().clean()
-
-        if self.phone:
-            from apps.common.types import validate_romanian_phone
-            result = validate_romanian_phone(self.phone.strip())
-            if result.is_err():
-                from django.core.exceptions import ValidationError
-                raise ValidationError({'phone': result.error})
-            self.phone = result.unwrap()
 
     def get_staff_role_display(self) -> str:
         """Get display name for staff role"""

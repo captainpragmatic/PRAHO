@@ -5,6 +5,7 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
+from datetime import timedelta
 
 from apps.billing.models import Currency, Invoice, Payment
 from apps.customers.models import Customer
@@ -27,7 +28,8 @@ class PaymentTestCase(TestCase):
             customer=self.customer,
             currency=self.currency,
             number='INV-PAY-001',
-            total_cents=10000
+            total_cents=10000,
+            due_at=timezone.now() + timedelta(days=30)
         )
 
     def test_create_payment(self):
@@ -208,7 +210,8 @@ class PaymentIntegrationTestCase(TestCase):
             customer=self.customer,
             currency=self.currency,
             number='INV-PARTIAL',
-            total_cents=10000  # 100.00 EUR
+            total_cents=10000,  # 100.00 EUR
+            due_at=timezone.now() + timedelta(days=30)
         )
 
         # First partial payment
@@ -240,7 +243,8 @@ class PaymentIntegrationTestCase(TestCase):
             customer=self.customer,
             currency=self.currency,
             number='INV-OVERPAY',
-            total_cents=5000  # 50.00 EUR
+            total_cents=5000,  # 50.00 EUR
+            due_at=timezone.now() + timedelta(days=30)
         )
 
         # Overpayment
@@ -262,7 +266,8 @@ class PaymentIntegrationTestCase(TestCase):
             customer=self.customer,
             currency=self.currency,
             number='INV-FAILED',
-            total_cents=10000
+            total_cents=10000,
+            due_at=timezone.now() + timedelta(days=30)
         )
 
         # Failed payment

@@ -435,7 +435,7 @@ class ServiceAdmin(admin.ModelAdmin):
         )
     status_display.short_description = _('Status')
 
-    def price_display(self, obj):
+    def price_display(self, obj) -> str:
         """Display service price"""
         return f"{obj.price:.2f} RON"
     price_display.short_description = _('Price')
@@ -457,7 +457,7 @@ class ServiceAdmin(admin.ModelAdmin):
 
     actions = ['activate_services', 'suspend_services', 'extend_expiry']
 
-    def activate_services(self, request, queryset):
+    def activate_services(self, request, queryset) -> None:
         """Activate selected services"""
         updated = 0
         for service in queryset:
@@ -467,7 +467,7 @@ class ServiceAdmin(admin.ModelAdmin):
         self.message_user(request, f'Successfully activated {updated} services.')
     activate_services.short_description = _('Activate selected services')
 
-    def suspend_services(self, request, queryset):
+    def suspend_services(self, request, queryset) -> None:
         """Suspend selected services"""
         updated = 0
         for service in queryset:
@@ -585,7 +585,7 @@ class ProvisioningTaskAdmin(admin.ModelAdmin):
         return f"{obj.retry_count}/∞"
     retry_count_display.short_description = _('Retries')
 
-    def duration_display(self, obj):
+    def duration_display(self, obj) -> str:
         """Display task duration"""
         duration = obj.duration_seconds
         if duration > 0:
@@ -602,7 +602,7 @@ class ProvisioningTaskAdmin(admin.ModelAdmin):
 
     actions = ['retry_failed_tasks', 'cancel_pending_tasks']
 
-    def retry_failed_tasks(self, request, queryset):
+    def retry_failed_tasks(self, request, queryset) -> None:
         """Retry failed tasks that can be retried"""
         retried = 0
         for task in queryset:
@@ -614,7 +614,7 @@ class ProvisioningTaskAdmin(admin.ModelAdmin):
         self.message_user(request, f'Successfully queued {retried} tasks for retry.')
     retry_failed_tasks.short_description = _('Retry failed tasks')
 
-    def cancel_pending_tasks(self, request, queryset):
+    def cancel_pending_tasks(self, request, queryset) -> None:
         """Cancel pending tasks"""
         cancelled = queryset.filter(status='pending').update(status='failed', error_message='Cancelled by admin')
         self.message_user(request, f'Successfully cancelled {cancelled} pending tasks.')
