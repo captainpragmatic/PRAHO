@@ -3,13 +3,12 @@
 # ===============================================================================
 
 import re
-from typing import Any, Dict, Optional, Union, cast
+from __future__ import annotations
+from typing import Any, cast
 
 from django import forms
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.db.models import QuerySet
-from django.forms import Form
 from django.utils.translation import gettext_lazy as _
 
 from apps.users.models import CustomerMembership
@@ -78,8 +77,8 @@ class CustomerForm(forms.ModelForm):
 
     def clean_company_name(self) -> str:
         """Require company name for companies"""
-        customer_type: Optional[str] = self.cleaned_data.get('customer_type')
-        company_name: Optional[str] = self.cleaned_data.get('company_name')
+        customer_type: str | None = self.cleaned_data.get('customer_type')
+        company_name: str | None = self.cleaned_data.get('company_name')
 
         if customer_type == 'company' and not company_name:
             raise ValidationError(_('Company name is required for companies'))
@@ -130,15 +129,15 @@ class CustomerTaxProfileForm(forms.ModelForm):
 
     def clean_cui(self) -> str:
         """Validate Romanian CUI format"""
-        cui: Optional[str] = self.cleaned_data.get('cui')
+        cui: str | None = self.cleaned_data.get('cui')
         if cui and not re.match(r'^RO\d{2,10}$', cui):
             raise ValidationError(_('CUI must be in format RO followed by 2-10 digits'))
         return cast(str, cui or '')
 
     def clean_vat_number(self) -> str:
         """Validate VAT number format"""
-        vat_number: Optional[str] = self.cleaned_data.get('vat_number')
-        is_vat_payer: Optional[bool] = self.cleaned_data.get('is_vat_payer')
+        vat_number: str | None = self.cleaned_data.get('vat_number')
+        is_vat_payer: bool | None = self.cleaned_data.get('is_vat_payer')
 
         if is_vat_payer and not vat_number:
             raise ValidationError(_('VAT number is required for VAT payers'))
@@ -183,7 +182,7 @@ class CustomerBillingProfileForm(forms.ModelForm):
 
     def clean_credit_limit(self) -> float:
         """Ensure credit limit is not negative"""
-        credit_limit: Optional[float] = self.cleaned_data.get('credit_limit')
+        credit_limit: float | None = self.cleaned_data.get('credit_limit')
         if credit_limit is not None and credit_limit < 0:
             raise ValidationError(_('Credit limit cannot be negative'))
         return credit_limit or 0.0
@@ -239,8 +238,8 @@ class CustomerAddressForm(forms.ModelForm):
 
     def clean_postal_code(self) -> str:
         """Validate Romanian postal code format"""
-        postal_code: Optional[str] = self.cleaned_data.get('postal_code')
-        country: Optional[str] = self.cleaned_data.get('country')
+        postal_code: str | None = self.cleaned_data.get('postal_code')
+        country: str | None = self.cleaned_data.get('country')
 
         if country == 'România' and postal_code and not re.match(r'^\d{6}$', postal_code):
             raise ValidationError(_('Romanian postal codes must be 6 digits'))
@@ -528,7 +527,7 @@ class CustomerCreationForm(forms.Form):
 
     def clean_phone(self) -> str:
         """Validate Romanian phone number using centralized validation"""
-        phone: Optional[str] = self.cleaned_data.get('phone')
+        phone: str | None = self.cleaned_data.get('phone')
         if phone:
             from apps.common.types import validate_romanian_phone
             result = validate_romanian_phone(phone.strip())
@@ -537,17 +536,17 @@ class CustomerCreationForm(forms.Form):
             return result.unwrap()
         return cast(str, phone or '')
 
-    def clean(self) -> Dict[str, Any]:
+    def clean(self) -> dict[str, Any]:
         """Cross-field validation"""
         cleaned_data = super().clean()
-        customer_type: Optional[str] = cleaned_data.get('customer_type')
-        company_name: Optional[str] = cleaned_data.get('company_name')
-        vat_number: Optional[str] = cleaned_data.get('vat_number')
-        is_vat_payer: Optional[bool] = cleaned_data.get('is_vat_payer')
-        cui: Optional[str] = cleaned_data.get('cui')
-        user_action: Optional[str] = cleaned_data.get('user_action')
-        existing_user: Optional[User] = cleaned_data.get('existing_user')
-        email: Optional[str] = cleaned_data.get('email')
+        customer_type: str | None = cleaned_data.get('customer_type')
+        company_name: str | None = cleaned_data.get('company_name')
+        vat_number: str | None = cleaned_data.get('vat_number')
+        is_vat_payer: bool | None = cleaned_data.get('is_vat_payer')
+        cui: str | None = cleaned_data.get('cui')
+        user_action: str | None = cleaned_data.get('user_action')
+        existing_user: User | None = cleaned_data.get('existing_user')
+        email: str | None = cleaned_data.get('email')
 
         # Require company name for companies, PFA, and NGOs
         if customer_type in ['company', 'pfa', 'ngo'] and not company_name:
@@ -576,7 +575,7 @@ class CustomerCreationForm(forms.Form):
 
         return cleaned_data
 
-    def save(self, user: Optional[User] = None) -> Dict[str, Any]:
+    def save(self, user: User | None = None) -> dict[str, Any]:
         """Create customer with all related profiles and handle user assignment"""
         data = self.cleaned_data
 
@@ -714,7 +713,7 @@ class CustomerUserAssignmentForm(forms.Form):
         })
     )
 
-    def __init__(self, customer: Optional[Customer] = None, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, customer: Customer | None = None, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.customer = customer
 
@@ -732,9 +731,9 @@ class CustomerUserAssignmentForm(forms.Form):
                     is_active=True
                 ).exclude(id__in=existing_member_ids)
 
-    def clean(self) -> Dict[str, Any]:
+    def clean(self) -> dict[str, Any]:
         cleaned_data = super().clean()
-        user_action: Optional[str] = cleaned_data.get('user_action')
+        user_action: str | None = cleaned_data.get('user_action')
 
         if user_action == 'create':
             # Validate required fields for user creation
@@ -750,7 +749,7 @@ class CustomerUserAssignmentForm(forms.Form):
 
         return cleaned_data
 
-    def save(self, customer: Customer, created_by: Optional[User]) -> Dict[str, Any]:
+    def save(self, customer: Customer, created_by: User | None) -> dict[str, Any]:
         """
         Process the user assignment
         Returns: Dict with assignment results

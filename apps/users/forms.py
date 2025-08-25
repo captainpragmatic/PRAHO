@@ -3,13 +3,11 @@ User forms for PRAHO Platform
 Romanian-localized authentication and profile forms.
 """
 
-from typing import Any, Dict, Optional, TypeVar, Union, cast
+from typing import Any, Dict, Optional, TypeVar, cast
 
 from django import forms
 from django.contrib.auth.forms import UserCreationForm
 from django.core.exceptions import ValidationError
-from django.db.models import QuerySet
-from django.forms import Form, ModelForm
 from django.utils.translation import gettext_lazy as _
 
 from .models import User, UserProfile
@@ -122,7 +120,7 @@ class UserRegistrationForm(UserCreationForm):
             del self.fields['username']
 
     def clean_email(self) -> str:
-        email: Optional[str] = self.cleaned_data.get('email')
+        email: str | None = self.cleaned_data.get('email')
         if email and User.objects.filter(email=email).exists():
             raise ValidationError(_('An account with this email address already exists.'))
         return cast(str, email)
@@ -227,7 +225,7 @@ class UserProfileForm(forms.ModelForm):
 
     def clean_phone(self) -> str:
         """Validate phone number"""
-        phone: Optional[str] = self.cleaned_data.get('phone')
+        phone: str | None = self.cleaned_data.get('phone')
         if phone:
             from apps.common.types import validate_romanian_phone
             result = validate_romanian_phone(phone.strip())

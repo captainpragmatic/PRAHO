@@ -69,14 +69,26 @@ RESTRICTED_USER_FIELDS = [
 # CORE VALIDATION DECORATORS
 # ===============================================================================
 
-def rate_limited(key_prefix: str, limit: int, window_minutes: int = 60):
+from collections.abc import Callable
+from typing import TypeVar, cast
+
+from apps.common.types import (
+    CUIString,
+    EmailAddress,
+    PhoneNumber,
+    VATString,
+)
+
+F = TypeVar('F', bound=Callable[..., Any])
+
+def rate_limited(key_prefix: str, limit: int, window_minutes: int = 60) -> Callable[[F], F]:
     """
     Rate limiting decorator with Redis-like behavior using Django cache
     Prevents DoS and abuse attacks
     """
-    def decorator(func):
+    def decorator(func: F) -> F:
         @wraps(func)
-        def wrapper(*args, **kwargs):
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
             # Extract IP or user identifier
             request_ip = kwargs.get('request_ip') or 'unknown'
             user_id = kwargs.get('user_id', '')
@@ -99,16 +111,16 @@ def rate_limited(key_prefix: str, limit: int, window_minutes: int = 60):
             cache.set(rate_key, current_count + 1, timeout=window_minutes * 60)
 
             return result
-        return wrapper
+        return cast(F, wrapper)
     return decorator
 
 
-def timing_safe_validator(func):
+def timing_safe_validator(func: F) -> F:
     """
     Decorator to prevent timing attacks by ensuring consistent execution time
     """
     @wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
         start_time = time.time()
 
         try:
@@ -127,7 +139,7 @@ def timing_safe_validator(func):
         if not success:
             raise result
         return result
-    return wrapper
+    return cast(F, wrapper)
 
 
 # ===============================================================================
@@ -138,7 +150,7 @@ class SecureInputValidator:
     """Comprehensive input validation with security focus"""
 
     @staticmethod
-    def validate_email_secure(email: str, context: str = "general") -> str:
+    def validate_email_secure(email: str, context: str = "general") -> EmailAddress:
         """
         Secure email validation preventing enumeration attacks
         """
@@ -166,7 +178,7 @@ class SecureInputValidator:
         if '@' not in email or email.count('@') > 1:
             logger.warning(f"🚨 [Security] Suspicious email format: {email[:20]}...")
 
-        return email
+        return EmailAddress(email)
 
     @staticmethod
     def validate_name_secure(name: str, field_name: str = "name") -> str:
@@ -195,10 +207,12 @@ class SecureInputValidator:
         return name
 
     @staticmethod
-    def validate_phone_romanian(phone: str) -> str:
-        """Romanian phone number validation"""
+    def validate_phone_romanian(phone: str) -> PhoneNumber:
+        """Romanian phone number validation - delegating to types module"""
+        from apps.common.types import validate_romanian_phone
+        
         if not phone:
-            return ""  # Phone is optional
+            return PhoneNumber("")  # Phone is optional
 
         if not isinstance(phone, str):
             raise ValidationError(_("Invalid input format"))
@@ -210,20 +224,23 @@ class SecureInputValidator:
         # XSS/injection check
         SecureInputValidator._check_malicious_patterns(phone)
 
-        # Normalize
-        phone = re.sub(r'[\s\-\(\)]', '', phone.strip())
-
-        # Romanian format validation
-        if not re.match(ROMANIAN_PHONE_PATTERN, phone):
-            raise ValidationError(_("Invalid Romanian phone number format"))
-
-        return phone
+        # Use centralized validation from types module
+        result = validate_romanian_phone(phone)
+        if result.is_err():
+            # TypeScript-style type narrowing for Result pattern
+            from apps.common.types import Err
+            if isinstance(result, Err):
+                raise ValidationError(_(result.error))
+            else:
+                raise ValidationError(_("Invalid phone number"))
+        
+        return result.unwrap()
 
     @staticmethod
-    def validate_vat_number_romanian(vat_number: str) -> str:
+    def validate_vat_number_romanian(vat_number: str) -> VATString:
         """Romanian VAT number validation"""
         if not vat_number:
-            return ""  # VAT is optional for some business types
+            return VATString("")  # VAT is optional for some business types
 
         if not isinstance(vat_number, str):
             raise ValidationError(_("Invalid input format"))
@@ -242,13 +259,15 @@ class SecureInputValidator:
         if not re.match(ROMANIAN_VAT_PATTERN, vat_number):
             raise ValidationError(_("Invalid Romanian VAT number format"))
 
-        return vat_number
+        return VATString(vat_number)
 
     @staticmethod
-    def validate_cui_romanian(cui: str) -> str:
-        """Romanian CUI (Company Unique Identifier) validation"""
+    def validate_cui_romanian(cui: str) -> CUIString:
+        """Romanian CUI (Company Unique Identifier) validation - delegating to types module"""
+        from apps.common.types import validate_romanian_cui
+        
         if not cui:
-            return ""  # CUI might be optional for some business types
+            return CUIString("")  # CUI might be optional for some business types
 
         if not isinstance(cui, str):
             raise ValidationError(_("Invalid input format"))
@@ -260,16 +279,16 @@ class SecureInputValidator:
         # XSS/injection check
         SecureInputValidator._check_malicious_patterns(cui)
 
-        # Normalize
-        cui = cui.strip()
-
-        # Romanian CUI format validation
-        if not re.match(ROMANIAN_CUI_PATTERN, cui):
-            raise ValidationError(_("Invalid Romanian CUI format"))
-
-        # TODO: Add CUI checksum validation (Luhn algorithm variant)
-
-        return cui
+        # Use centralized validation from types module
+        result = validate_romanian_cui(cui.strip())
+        if result.is_err():
+            from apps.common.types import Err
+            if isinstance(result, Err):
+                raise ValidationError(_(result.error))
+            else:
+                raise ValidationError(_("Invalid CUI format"))
+        
+        return result.unwrap()
 
     @staticmethod
     def validate_company_name(company_name: str) -> str:

@@ -1,5 +1,5 @@
 import uuid
-from typing import Any, Optional
+from typing import Any
 
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
@@ -417,7 +417,7 @@ class Domain(models.Model):
         return self.name
 
     @property
-    def days_until_expiry(self) -> Optional[int]:
+    def days_until_expiry(self) -> int | None:
         """📅 Days until domain expires"""
         if self.expires_at:
             delta = self.expires_at - timezone.now()

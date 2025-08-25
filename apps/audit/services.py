@@ -6,7 +6,7 @@ Centralized audit logging for Romanian compliance and security.
 import json
 import logging
 import uuid
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, TypedDict, Union
+from typing import TYPE_CHECKING, Any, Optional, TypedDict
 
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.models import ContentType
@@ -14,13 +14,14 @@ from django.core.files.storage import default_storage
 from django.db import transaction
 from django.utils import timezone
 
-from apps.common.types import Result
+from apps.common.types import EmailAddress, Result
+
 from .models import AuditEvent, ComplianceLog, DataExport
 
 if TYPE_CHECKING:
-    pass
-
-User = get_user_model()
+    from apps.users.models import User as UserType
+else:
+    User = get_user_model()
 
 class ExportScope(TypedDict):
     """Type definition for GDPR export scope configuration"""
@@ -32,13 +33,29 @@ class ExportScope(TypedDict):
     include_sessions: bool
     format: str
 
+class AuditEventType(TypedDict):
+    """Type definition for audit event types"""
+    event_type: str
+    category: str
+    severity: str
+    description: str
+
+class ComplianceReport(TypedDict):
+    """Type definition for compliance reports"""
+    report_type: str
+    period_start: str
+    period_end: str
+    user_email: EmailAddress
+    status: str
+    violations: list[dict[str, Any]]
+
 class ConsentHistoryEntry(TypedDict):
     """Type definition for consent history entries"""
     timestamp: str
     action: str
     description: str
     status: str
-    evidence: Dict[str, Any]
+    evidence: dict[str, Any]
 logger = logging.getLogger(__name__)
 
 
@@ -48,16 +65,16 @@ class AuditService:
     @staticmethod
     def log_event(
         event_type: str,
-        user: Optional[User] = None,
-        content_object: Optional[Any] = None,
-        old_values: Optional[Dict[str, Any]] = None,
-        new_values: Optional[Dict[str, Any]] = None,
+        user: User | None = None,
+        content_object: Any | None = None,
+        old_values: dict[str, Any] | None = None,
+        new_values: dict[str, Any] | None = None,
         description: str = '',
-        ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None,
-        request_id: Optional[str] = None,
-        session_key: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+        request_id: str | None = None,
+        session_key: str | None = None,
+        metadata: dict[str, Any] | None = None,
         actor_type: str = 'user'
     ) -> AuditEvent:
         """
@@ -116,12 +133,12 @@ class AuditService:
     def log_2fa_event(
         event_type: str,
         user: User,
-        ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+        metadata: dict[str, Any] | None = None,
         description: str = '',
-        request_id: Optional[str] = None,
-        session_key: Optional[str] = None
+        request_id: str | None = None,
+        session_key: str | None = None
     ) -> AuditEvent:
         """
         🔐 Log 2FA-specific audit event
@@ -168,10 +185,10 @@ class AuditService:
         compliance_type: str,
         reference_id: str,
         description: str,
-        user = None,
+        user: Optional['UserType'] = None,
         status: str = 'success',
-        evidence: dict | None = None,
-        metadata: dict | None = None
+        evidence: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None
     ) -> ComplianceLog:
         """
         📋 Log Romanian compliance event
@@ -223,8 +240,8 @@ class GDPRExportService:
     def create_data_export_request(
         cls,
         user: User,
-        request_ip: Optional[str] = None,
-        export_scope: Optional[Dict[str, Any]] = None
+        request_ip: str | None = None,
+        export_scope: dict[str, Any] | None = None
     ) -> Result[DataExport, str]:
         """Create a new GDPR data export request"""
 
@@ -341,7 +358,7 @@ class GDPRExportService:
             return Err(f"Export processing failed: {e!s}")
 
     @classmethod
-    def _collect_user_data(cls, user: User, scope: Dict[str, Any]) -> Dict[str, Any]:
+    def _collect_user_data(cls, user: User, scope: dict[str, Any]) -> dict[str, Any]:
         """Collect comprehensive user data based on export scope"""
         data = {
             'metadata': {
@@ -568,7 +585,7 @@ class GDPRDeletionService:
             return Err(f"Deletion processing failed: {e!s}")
 
     @classmethod
-    def _can_user_be_deleted(cls, user: User) -> tuple[bool, Optional[str]]:
+    def _can_user_be_deleted(cls, user: User) -> tuple[bool, str | None]:
         """Check if user can be completely deleted based on business rules"""
 
         restrictions = []
@@ -667,7 +684,7 @@ class GDPRConsentService:
     def withdraw_consent(
         cls,
         user: User,
-        consent_types: List[str],
+        consent_types: list[str],
         request_ip: str = None
     ) -> Result[str, str]:
         """Withdraw specific types of consent"""
@@ -731,7 +748,7 @@ class GDPRConsentService:
             return Err(f"Consent withdrawal failed: {e!s}")
 
     @classmethod
-    def get_consent_history(cls, user: User) -> List[Dict[str, Any]]:
+    def get_consent_history(cls, user: User) -> list[dict[str, Any]]:
         """Get user's consent history for transparency"""
         from .models import ComplianceLog
 

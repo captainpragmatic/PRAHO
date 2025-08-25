@@ -10,7 +10,8 @@ from collections.abc import Callable
 from datetime import datetime
 from decimal import Decimal
 from functools import wraps
-from typing import Any, Dict, Optional, TypedDict, Union
+from __future__ import annotations
+from typing import Any, TypedDict
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
@@ -54,17 +55,17 @@ class VATCalculation(TypedDict):
 
 
 def calculate_romanian_vat(amount: Decimal, vat_rate: int = 19) -> VATCalculation:
-    """Calculate Romanian VAT breakdown"""
-    vat_multiplier = Decimal(vat_rate) / Decimal(100)
-
-    # Amount includes VAT
-    amount_without_vat = amount / (Decimal(1) + vat_multiplier)
-    vat_amount = amount - amount_without_vat
-
+    """Calculate Romanian VAT breakdown (deprecated - use apps.common.types.calculate_romanian_vat)"""
+    from apps.common.types import calculate_romanian_vat as new_calculator
+    
+    # Convert to cents-based calculation for precision
+    amount_cents = int(amount * 100)
+    result = new_calculator(amount_cents, include_vat=True)
+    
     return {
-        'amount_without_vat': amount_without_vat.quantize(Decimal('0.01')),
-        'vat_amount': vat_amount.quantize(Decimal('0.01')),
-        'amount_with_vat': amount,
+        'amount_without_vat': Decimal(result['base_amount']) / 100,
+        'vat_amount': Decimal(result['vat_amount']) / 100,
+        'amount_with_vat': Decimal(result['total_amount']) / 100,
         'vat_rate': vat_rate,
     }
 
@@ -164,7 +165,7 @@ def format_romanian_datetime(dt: datetime) -> str:
 # BUSINESS LOGIC HELPERS
 # ===============================================================================
 
-def generate_invoice_number(year: Optional[int] = None) -> str:
+def generate_invoice_number(year: int | None = None) -> str:
     """Generate Romanian invoice number format"""
     if year is None:
         year = get_romanian_now().year
@@ -196,7 +197,7 @@ def calculate_due_date(invoice_date: datetime, payment_terms: int = 30) -> datet
 # RESPONSE HELPERS
 # ===============================================================================
 
-def json_success(data: Optional[Any] = None, message: str = "Success") -> JsonResponse:
+def json_success(data: Any | None = None, message: str = "Success") -> JsonResponse:
     """Standard JSON success response"""
     response_data = {
         'success': True,

@@ -3,7 +3,7 @@ Support ticket models for PRAHO Platform
 Romanian hosting provider customer support system.
 """
 
-from typing import Any, Optional
+from typing import Any
 
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
@@ -436,7 +436,7 @@ class TicketAttachment(models.Model):
 
     def get_file_size_display(self) -> str:
         """Human readable file size"""
-        size = self.file_size
+        size: float = float(self.file_size)
         for unit in ['B', 'KB', 'MB', 'GB']:
             if size < 1024.0:
                 return f"{size:.1f} {unit}"

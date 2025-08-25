@@ -6,17 +6,20 @@ Romanian hosting provider with security-first routing.
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
+
+# ===============================================================================
+# MAIN URL PATTERNS
+# ===============================================================================
+from django.http import HttpRequest
+from django.http.response import HttpResponseBase
 from django.urls import include, path
 from django.views.generic import RedirectView
 
 # Import dashboard view
 from apps.common.views import dashboard_view
 
-# ===============================================================================
-# MAIN URL PATTERNS
-# ===============================================================================
 
-def root_redirect(request):
+def root_redirect(request: HttpRequest) -> HttpResponseBase:
     """Redirect root URL based on authentication status"""
     if request.user.is_authenticated:
         return RedirectView.as_view(url='/app/', permanent=False)(request)

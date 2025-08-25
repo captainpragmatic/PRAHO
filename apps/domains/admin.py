@@ -2,16 +2,13 @@
 Django admin configuration for Domains app
 """
 
-from typing import Any, Optional
 
 from django.contrib import admin
-from django.db.models.query import QuerySet
-from django.http import HttpRequest
 from django.utils.html import format_html
 from django.utils.safestring import SafeString
 from django.utils.translation import gettext_lazy as _
 
-from .models import Domain, DomainOrderItem, Registrar, TLD, TLDRegistrarAssignment
+from .models import TLD, Domain, DomainOrderItem, Registrar, TLDRegistrarAssignment
 
 
 @admin.register(TLD)

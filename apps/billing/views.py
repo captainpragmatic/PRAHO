@@ -2,21 +2,23 @@
 # BILLING VIEWS - INVOICE & PAYMENT PROCESSING
 # ===============================================================================
 
+from __future__ import annotations
+
 import decimal
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, List
+from typing import Any
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db.models import Q, Sum
-from django.db.models.query import QuerySet
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.utils import json_error, json_success
 from apps.customers.models import Customer
 
 from .models import (
@@ -30,7 +32,7 @@ from .models import (
 )
 
 
-def _get_accessible_customer_ids(user: Any) -> List[int]:
+def _get_accessible_customer_ids(user: Any) -> list[int]:
     """Helper to get customer IDs that user can access"""
     accessible_customers = user.get_accessible_customers()
 
@@ -452,11 +454,11 @@ def process_proforma_payment(request: HttpRequest, pk: int) -> HttpResponse:
             invoice.save()
 
             messages.success(request, _("✅ Payment processed and invoice #{number} marked as paid!").format(number=invoice.number))
-            return JsonResponse({'success': True, 'invoice_id': invoice.id})
+            return json_success({'invoice_id': invoice.id}, "Payment processed successfully")
         else:
-            return JsonResponse({'error': 'Failed to convert proforma'}, status=400)
+            return json_error('Failed to convert proforma', status=400)
 
-    return JsonResponse({'error': 'Invalid method'}, status=405)
+    return json_error('Invalid method', status=405)
 
 
 @login_required

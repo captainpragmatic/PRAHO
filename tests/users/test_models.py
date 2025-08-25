@@ -3,14 +3,12 @@ Minimal working comprehensive test for users models to boost coverage.
 Handles the actual model structure properly.
 """
 
-from datetime import timedelta
-from django.test import TestCase
-from django.utils import timezone
 from django.core.exceptions import ValidationError
+from django.test import TestCase
 
-from apps.users.models import User, UserProfile, CustomerMembership, UserLoginLog
-from apps.users.mfa import WebAuthnCredential
 from apps.customers.models import Customer
+from apps.users.mfa import WebAuthnCredential
+from apps.users.models import CustomerMembership, User, UserLoginLog, UserProfile
 
 
 class MinimalUserModelTestCase(TestCase):
@@ -100,7 +98,7 @@ class MinimalUserModelTestCase(TestCase):
         self.assertIsNone(user.get_role_for_customer(customer))
         
         # Create membership
-        membership = CustomerMembership.objects.create(
+        CustomerMembership.objects.create(
             user=user,
             customer=customer,
             role='owner',

@@ -2,7 +2,7 @@
 # PRAHO PLATFORM - DEVELOPMENT MAKEFILE (Updated for Django Test Runner)
 # ===============================================================================
 
-.PHONY: help install dev test test-e2e test-with-e2e test-coverage test-fast test-file build-css migrate fixtures clean lint
+.PHONY: help install dev test test-e2e test-with-e2e test-coverage test-fast test-file build-css migrate fixtures clean lint type-check type-coverage type-check-modified
 
 # Default target
 help:

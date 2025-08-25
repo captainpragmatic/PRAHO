@@ -1,6 +1,7 @@
 import hashlib
 import json
 import uuid
+from datetime import timedelta
 from typing import Any, Optional
 
 from django.core.validators import MinValueValidator
@@ -165,7 +166,7 @@ class WebhookEvent(models.Model):
         return hashlib.sha256(payload_str.encode()).hexdigest()[:16]
 
     @property
-    def processing_duration(self) -> Optional[Any]:
+    def processing_duration(self) -> Any | None:
         """⏱️ Time taken to process webhook"""
         if self.processed_at and self.received_at:
             return self.processed_at - self.received_at
@@ -189,7 +190,7 @@ class WebhookEvent(models.Model):
         retry_delays = [300, 900, 3600, 7200, 21600]  # 5m, 15m, 1h, 2h, 6h
         if self.retry_count <= len(retry_delays):
             delay_seconds = retry_delays[self.retry_count - 1]
-            self.next_retry_at = timezone.now() + timezone.timedelta(seconds=delay_seconds)
+            self.next_retry_at = timezone.now() + timedelta(seconds=delay_seconds)
 
         if save:
             self.save(update_fields=[
@@ -211,7 +212,7 @@ class WebhookEvent(models.Model):
         return cls.objects.filter(source=source, event_id=event_id).exists()
 
     @classmethod
-    def get_pending_webhooks(cls, source: Optional[str] = None, limit: int = 100) -> QuerySet['WebhookEvent']:
+    def get_pending_webhooks(cls, source: str | None = None, limit: int = 100) -> QuerySet['WebhookEvent']:
         """📋 Get pending webhooks for processing"""
         queryset = cls.objects.filter(status='pending').order_by('received_at')
         if source:
@@ -219,7 +220,7 @@ class WebhookEvent(models.Model):
         return queryset[:limit]
 
     @classmethod
-    def get_failed_webhooks_for_retry(cls, source: Optional[str] = None) -> QuerySet['WebhookEvent']:
+    def get_failed_webhooks_for_retry(cls, source: str | None = None) -> QuerySet['WebhookEvent']:
         """🔄 Get failed webhooks ready for retry"""
         now = timezone.now()
         queryset = cls.objects.filter(

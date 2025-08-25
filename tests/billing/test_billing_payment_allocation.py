@@ -1,13 +1,10 @@
 # ===============================================================================
 # BILLING PAYMENT ALLOCATION TESTS
 # ===============================================================================
-from decimal import Decimal
-from typing import Optional
 
 from django.test import TestCase
 
 from tests.factories.billing import create_currency, create_customer, create_invoice, create_payment
-from apps.billing.models import Invoice, Payment
 
 
 class PaymentAllocationTests(TestCase):
@@ -20,7 +17,7 @@ class PaymentAllocationTests(TestCase):
 
     def test_partial_payment_reduces_remaining_amount(self) -> None:
         # Partial payment of 30.00 (3000 cents)
-        p = create_payment(customer=self.customer, invoice=self.invoice, currency=self.currency, amount_cents=3000, status='succeeded')
+        create_payment(customer=self.customer, invoice=self.invoice, currency=self.currency, amount_cents=3000, status='succeeded')
 
         remaining = self.invoice.get_remaining_amount()
         self.assertEqual(remaining, 7000)

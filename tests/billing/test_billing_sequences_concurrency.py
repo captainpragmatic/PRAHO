@@ -1,7 +1,6 @@
 # ===============================================================================
 # BILLING SEQUENCE CONCURRENCY TESTS
 # ===============================================================================
-from typing import List
 
 from django.test import TestCase
 
@@ -14,7 +13,7 @@ class InvoiceSequenceConcurrencyTests(TestCase):
     def test_sequential_numbers_unique_and_incrementing(self) -> None:
         seq = InvoiceSequence.objects.create(scope='test_conc', last_value=0)
 
-        numbers: List[str] = []
+        numbers: list[str] = []
         for _ in range(10):
             numbers.append(seq.get_next_number('TST'))
 

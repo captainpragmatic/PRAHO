@@ -62,10 +62,10 @@ EMAIL_BACKEND = 'django.core.mail.backends.locmem.EmailBackend'
 # ===============================================================================
 
 class DisableMigrations:
-    def __contains__(self, item):
+    def __contains__(self, item: str) -> bool:
         return True
 
-    def __getitem__(self, item):
+    def __getitem__(self, item: str) -> None:
         return None
 
 # Uncomment to disable migrations in tests (faster but risky)

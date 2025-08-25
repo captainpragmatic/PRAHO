@@ -398,7 +398,7 @@ class Service(models.Model):
     def __str__(self) -> str:
         return f"{self.service_name} - {self.customer.get_display_name()}"
 
-    def get_next_billing_date(self) -> Optional[Any]:
+    def get_next_billing_date(self) -> Any | None:
         """Calculate next billing date based on cycle"""
         if not self.activated_at:
             return None
@@ -662,7 +662,7 @@ class ServiceRelationship(models.Model):
             ),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.parent_service} → {self.child_service} ({self.get_relationship_type_display()})"
 
     def clean(self) -> None:
@@ -692,7 +692,7 @@ class ServiceRelationship(models.Model):
             child_relationships = ServiceRelationship.objects.filter(
                 parent_service=current,
                 is_active=True
-            ).exclude(id=self.id if self.id else None)
+            ).exclude(id=self.id if self.id is not None else None)
 
             # ⚡ PERFORMANCE: Use list extend for better performance than multiple appends
             stack.extend(rel.child_service for rel in child_relationships)
@@ -820,7 +820,7 @@ class ServiceDomain(models.Model):
             ),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         domain_name = self.full_domain_name
         type_display = self.get_domain_type_display()
         return f"{domain_name} ({type_display})"
@@ -946,7 +946,7 @@ class ServiceGroup(models.Model):
             ),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.name} ({self.get_group_type_display()})"
 
     @property
@@ -1040,11 +1040,11 @@ class ServiceGroupMember(models.Model):
             ),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.service} in {self.group} ({self.get_member_role_display()})"
 
     @property
-    def custom_price(self) -> Optional[float]:
+    def custom_price(self) -> float | None:
         """💰 Custom price in RON"""
         if self.custom_price_cents:
             return self.custom_price_cents / 100

@@ -3,7 +3,6 @@ Django admin configuration for audit models.
 Romanian PRAHO Platform audit trail management with security focus.
 """
 
-from typing import Optional, Any
 
 from django.contrib import admin
 from django.db.models.query import QuerySet
@@ -112,11 +111,11 @@ class AuditEventAdmin(admin.ModelAdmin):
         """Audit events cannot be manually created"""
         return False
 
-    def has_change_permission(self, request: HttpRequest, obj: Optional[AuditEvent] = None) -> bool:
+    def has_change_permission(self, request: HttpRequest, obj: AuditEvent | None = None) -> bool:
         """Audit events are immutable"""
         return False
 
-    def has_delete_permission(self, request: HttpRequest, obj: Optional[AuditEvent] = None) -> bool:
+    def has_delete_permission(self, request: HttpRequest, obj: AuditEvent | None = None) -> bool:
         """Audit events cannot be deleted"""
         return False
 
@@ -326,10 +325,10 @@ class ComplianceLogAdmin(admin.ModelAdmin):
         """Compliance logs cannot be manually created"""
         return False
 
-    def has_change_permission(self, request: HttpRequest, obj: Optional[ComplianceLog] = None) -> bool:
+    def has_change_permission(self, request: HttpRequest, obj: ComplianceLog | None = None) -> bool:
         """Compliance logs are immutable"""
         return False
 
-    def has_delete_permission(self, request: HttpRequest, obj: Optional[ComplianceLog] = None) -> bool:
+    def has_delete_permission(self, request: HttpRequest, obj: ComplianceLog | None = None) -> bool:
         """Compliance logs cannot be deleted for audit trail"""
         return False

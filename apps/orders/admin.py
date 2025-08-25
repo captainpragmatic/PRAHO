@@ -3,11 +3,8 @@ Django admin configuration for orders app.
 Romanian hosting provider order management interface.
 """
 
-from typing import Optional
 
 from django.contrib import admin
-from django.db.models.query import QuerySet
-from django.http import HttpRequest
 
 from .models import Order, OrderItem, OrderStatusHistory
 

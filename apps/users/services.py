@@ -28,7 +28,15 @@ from apps.common.security_decorators import (
     secure_invitation_system,
     secure_user_registration,
 )
-from apps.common.types import Err, Ok, Result
+from apps.common.types import (
+    CUIString,
+    EmailAddress,
+    Err,
+    Ok,
+    PhoneNumber,
+    Result,
+    VATString,
+)
 from apps.common.validators import (
     SecureErrorHandler,
     SecureInputValidator,
@@ -44,8 +52,6 @@ from apps.customers.models import (
 from .models import CustomerMembership
 
 if TYPE_CHECKING:
-    from django.http import HttpRequest
-    from django.contrib.auth.models import AbstractBaseUser
     from .models import User
 else:
     User = get_user_model()
@@ -80,10 +86,10 @@ class SecureUserRegistrationService:
 
     class UserData(TypedDict):
         """Type definition for user registration data"""
-        email: str
+        email: EmailAddress
         first_name: str
         last_name: str
-        phone: Optional[str]
+        phone: Optional[PhoneNumber]
         accepts_marketing: Optional[bool]
         gdpr_consent_date: Optional[str]
 
@@ -91,8 +97,8 @@ class SecureUserRegistrationService:
         """Type definition for customer registration data"""
         company_name: str
         customer_type: str
-        vat_number: Optional[str]
-        registration_number: Optional[str]
+        vat_number: Optional[VATString]
+        registration_number: Optional[CUIString]
         billing_address: Optional[str]
         billing_city: Optional[str]
         billing_postal_code: Optional[str]

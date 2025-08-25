@@ -91,3 +91,6 @@ cursor-instructions*
 .openai*
 *.llm
 *.ai-instructions
+
+# Playwright MCP cache
+.playwright-mcp/

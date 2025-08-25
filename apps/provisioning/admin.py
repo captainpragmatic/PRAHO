@@ -4,15 +4,14 @@ Romanian hosting provider service provisioning and server management.
 """
 
 
-from typing import Any
 
 from django.contrib import admin
 from django.db.models import QuerySet
 from django.http import HttpRequest
 from django.utils import timezone
 from django.utils.html import format_html
-from django.utils.translation import gettext_lazy as _
 from django.utils.safestring import SafeString
+from django.utils.translation import gettext_lazy as _
 
 from .models import ProvisioningTask, Server, Service, ServicePlan
 

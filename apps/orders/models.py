@@ -6,7 +6,10 @@ Romanian hosting provider specific order processing and configuration.
 
 import uuid
 from decimal import Decimal
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
+
+if TYPE_CHECKING:
+    from apps.provisioning.models import Service
 
 from django.core.validators import MinValueValidator
 from django.db import models
@@ -449,43 +452,43 @@ class OrderItem(models.Model):
         ]
 
     @property
-    def unit_price(self):
+    def unit_price(self) -> Decimal:
         """Return unit price in currency units"""
         return Decimal(self.unit_price_cents) / 100
 
     @property
-    def setup_fee(self):
+    def setup_fee(self) -> Decimal:
         """Return setup fee in currency units"""
         return Decimal(self.setup_cents) / 100
 
     @property
-    def tax_amount(self):
+    def tax_amount(self) -> Decimal:
         """Return tax amount in currency units"""
         return Decimal(self.tax_cents) / 100
 
     @property
-    def line_total(self):
+    def line_total(self) -> Decimal:
         """Return line total in currency units"""
         return Decimal(self.line_total_cents) / 100
 
     @property
-    def subtotal_cents(self):
+    def subtotal_cents(self) -> int:
         """Calculate subtotal before tax"""
         return (self.unit_price_cents * self.quantity) + self.setup_cents
 
     @property
-    def subtotal(self):
+    def subtotal(self) -> Decimal:
         """Return subtotal in currency units"""
         return Decimal(self.subtotal_cents) / 100
 
-    def calculate_totals(self):
+    def calculate_totals(self) -> int:
         """Calculate tax and line total"""
         subtotal = self.subtotal_cents
         self.tax_cents = int(subtotal * self.tax_rate)
         self.line_total_cents = subtotal + self.tax_cents
         return self.line_total_cents
 
-    def mark_as_provisioned(self, service=None):
+    def mark_as_provisioned(self, service: Optional['Service'] = None) -> None:
         """Mark this item as successfully provisioned"""
         self.provisioning_status = 'completed'
         self.provisioned_at = timezone.now()
@@ -497,7 +500,7 @@ class OrderItem(models.Model):
             'service'
         ])
 
-    def save(self, *args, **kwargs):
+    def save(self, *args, **kwargs) -> None:  # type: ignore[override]
         """Auto-calculate totals before saving"""
         # Store product details snapshot
         if self.product and not self.product_name:
@@ -509,7 +512,7 @@ class OrderItem(models.Model):
 
         super().save(*args, **kwargs)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.product_name} x{self.quantity} ({self.order.order_number})"
 
 
@@ -574,5 +577,5 @@ class OrderStatusHistory(models.Model):
             models.Index(fields=['order', '-created_at']),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.order.order_number}: {self.old_status} → {self.new_status}"

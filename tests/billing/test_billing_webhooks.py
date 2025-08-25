@@ -1,13 +1,11 @@
 # ===============================================================================
 # BILLING WEBHOOKS TESTS
 # ===============================================================================
-from typing import Any, Dict
-from unittest import mock
+from typing import Any
 
 from django.test import TestCase, override_settings
 
 from apps.integrations.webhooks.stripe import StripeWebhookProcessor
-from apps.integrations.webhooks.base import WebhookEvent
 
 
 class StripeWebhookProcessorTests(TestCase):
@@ -15,7 +13,7 @@ class StripeWebhookProcessorTests(TestCase):
 
     def setUp(self) -> None:
         self.processor = StripeWebhookProcessor()
-        self.payload: Dict[str, Any] = {
+        self.payload: dict[str, Any] = {
             'id': 'evt_test_1',
             'type': 'payment_intent.succeeded',
             'data': {'object': {'id': 'pi_123', 'amount_received': 1000}}

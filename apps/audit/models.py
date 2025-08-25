@@ -4,7 +4,6 @@ Implements Romanian compliance requirements and security audit trails.
 """
 
 import uuid
-from typing import Any, Optional
 
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.fields import GenericForeignKey

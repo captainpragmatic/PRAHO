@@ -3,11 +3,10 @@ Django admin for notifications app.
 Email templates and communication logging for Romanian hosting provider.
 """
 
-from typing import Optional
+from __future__ import annotations
 
 from django import forms
 from django.contrib import admin
-from django.db.models.query import QuerySet
 from django.http import HttpRequest
 from django.utils.html import format_html
 from django.utils.safestring import SafeString
@@ -137,7 +136,7 @@ class EmailLogAdmin(admin.ModelAdmin):
         """Email logs are created by system, not manually"""
         return False
 
-    def has_change_permission(self, request: HttpRequest, obj: Optional[EmailLog] = None) -> bool:
+    def has_change_permission(self, request: HttpRequest, obj: EmailLog | None = None) -> bool:
         """Email logs are immutable for audit purposes"""
         return False
 

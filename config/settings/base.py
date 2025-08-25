@@ -208,7 +208,7 @@ SESSION_SAVE_EVERY_REQUEST = True
 
 # CSRF settings
 CSRF_COOKIE_HTTPONLY = True
-CSRF_TRUSTED_ORIGINS = []
+CSRF_TRUSTED_ORIGINS: list[str] = []
 # Note: CSRF_COOKIE_SECURE = True set in prod.py
 
 # ===============================================================================

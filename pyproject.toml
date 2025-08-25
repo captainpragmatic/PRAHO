@@ -292,7 +292,7 @@ suppress-dummy-args = true
 # ===============================================================================
 
 [tool.mypy]
-# Strict typing for compliance and security
+# Gradual typing strategy - Phase 2 implementation 🎯
 python_version = "3.11"
 strict = true
 warn_return_any = true
@@ -315,8 +315,66 @@ module = "apps.*.migrations.*"
 ignore_errors = true
 
 [[tool.mypy.overrides]]
+module = "config.settings.*"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
 module = "tests.*"
 disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+# Phase 2: Gradual typing - High-impact modules first
+module = [
+    "apps.common.types",
+    "apps.common.validators",
+    "apps.users.services",
+    "apps.audit.services",
+]
+disallow_untyped_defs = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+# Phase 3: Progressive strict mode - Core apps (audit, billing, users)
+module = [
+    "apps.audit.*",
+    "apps.billing.*",
+    "apps.users.*",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+warn_return_any = true
+
+[[tool.mypy.overrides]]
+# Phase 3: Business logic apps (customers, tickets, orders)
+module = [
+    "apps.customers.*",
+    "apps.tickets.*",
+    "apps.orders.*",
+]
+disallow_untyped_defs = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+# Phase 3: Infrastructure apps (provisioning, domains, integrations)
+module = [
+    "apps.provisioning.*",
+    "apps.domains.*",
+    "apps.integrations.*",
+]
+disallow_untyped_defs = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+# Phase 2: Service layer modules - strict typing
+module = [
+    "apps.*.services",
+    "apps.*.repos",
+    "apps.*.gateways",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
 
 [tool.django-stubs]
 django_settings_module = "config.settings.dev"

@@ -4,9 +4,10 @@ Defines the master catalog of products and services that customers can order.
 Includes pricing, relationships, and configuration for Romanian hosting provider.
 """
 
+from __future__ import annotations
+
 import uuid
 from decimal import Decimal
-from typing import Any, Optional
 
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
@@ -156,7 +157,7 @@ class Product(models.Model):
         """Get all active prices for this product"""
         return self.prices.filter(is_active=True)
 
-    def get_price_for_period(self, currency_code: str, billing_period: str) -> Optional['ProductPrice']:
+    def get_price_for_period(self, currency_code: str, billing_period: str) -> ProductPrice | None:
         """Get price for specific currency and billing period"""
         try:
             return self.prices.get(
@@ -491,7 +492,7 @@ class ProductBundleItem(models.Model):
         ordering = ['created_at']
 
     @property
-    def override_price(self) -> Optional[Decimal]:
+    def override_price(self) -> Decimal | None:
         """Return override price in currency units"""
         if self.override_price_cents:
             return Decimal(self.override_price_cents) / 100

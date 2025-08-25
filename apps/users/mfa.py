@@ -111,10 +111,10 @@ class WebAuthnCredential(models.Model):
             models.Index(fields=['is_active'], name='idx_tfa_webauthn_active'),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.name} ({self.user.email})"
 
-    def mark_as_used(self):
+    def mark_as_used(self) -> None:
         """Mark credential as recently used"""
         self.last_used = timezone.now()
         self.save(update_fields=['last_used'])

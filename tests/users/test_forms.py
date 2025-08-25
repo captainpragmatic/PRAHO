@@ -4,11 +4,14 @@ Handles the actual form structure properly.
 """
 
 from django.test import TestCase
-from django.contrib.auth.forms import AuthenticationForm
 
 from apps.users.forms import (
-    LoginForm, UserRegistrationForm, UserProfileForm,
-    TwoFactorSetupForm, TwoFactorVerifyForm, CustomerOnboardingRegistrationForm
+    CustomerOnboardingRegistrationForm,
+    LoginForm,
+    TwoFactorSetupForm,
+    TwoFactorVerifyForm,
+    UserProfileForm,
+    UserRegistrationForm,
 )
 from apps.users.models import User
 

@@ -5,7 +5,6 @@ Aligned with PostgreSQL hosting panel schema v1.
 """
 
 import uuid
-from typing import Any, Optional
 
 from django.core.validators import EmailValidator
 from django.db import models

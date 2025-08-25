@@ -1,0 +1,105 @@
+{
+  "timestamp": "2025-08-25",
+  "project": "praho-platform",
+  "overall_summary": {
+    "total_apps": 12,
+    "total_python_files": 96,
+    "total_type_errors": 1768,
+    "target_errors": 50,
+    "target_coverage": 95,
+    "phase_3_status": "in_progress"
+  },
+  "app_breakdown": [
+    {
+      "app": "orders",
+      "total_files": 6,
+      "error_count": 79,
+      "type_coverage": 0,
+      "status": "needs_improvement"
+    },
+    {
+      "app": "products",
+      "total_files": 6,
+      "error_count": 80,
+      "type_coverage": 0,
+      "status": "needs_improvement"
+    },
+    {
+      "app": "notifications",
+      "total_files": 10,
+      "error_count": 92,
+      "type_coverage": 8.0,
+      "status": "needs_improvement"
+    },
+    {
+      "app": "domains",
+      "total_files": 6,
+      "error_count": 94,
+      "type_coverage": 0,
+      "status": "needs_improvement"
+    },
+    {
+      "app": "audit",
+      "total_files": 7,
+      "error_count": 107,
+      "type_coverage": 0,
+      "status": "needs_improvement"
+    },
+    {
+      "app": "provisioning",
+      "total_files": 6,
+      "error_count": 119,
+      "type_coverage": 0,
+      "status": "needs_improvement"
+    },
+    {
+      "app": "tickets",
+      "total_files": 6,
+      "error_count": 124,
+      "type_coverage": 0,
+      "status": "needs_improvement"
+    },
+    {
+      "app": "integrations",
+      "total_files": 12,
+      "error_count": 131,
+      "type_coverage": 0,
+      "status": "needs_improvement"
+    },
+    {
+      "app": "billing",
+      "total_files": 8,
+      "error_count": 203,
+      "type_coverage": 0,
+      "status": "needs_improvement"
+    },
+    {
+      "app": "common",
+      "total_files": 12,
+      "error_count": 220,
+      "type_coverage": 0,
+      "status": "needs_improvement"
+    },
+    {
+      "app": "customers",
+      "total_files": 7,
+      "error_count": 227,
+      "type_coverage": 0,
+      "status": "needs_improvement"
+    },
+    {
+      "app": "users",
+      "total_files": 10,
+      "error_count": 292,
+      "type_coverage": 0,
+      "status": "needs_improvement"
+    }
+  ],
+  "recommendations": [
+    "Focus on apps with high type errors: ['audit', 'billing', 'customers', 'domains', 'integrations', 'notifications', 'orders', 'products', 'provisioning', 'tickets', 'users', 'common']",
+    "Enable strict mode for core apps: audit, billing, users",
+    "Add type stubs for Django ORM patterns",
+    "Implement incremental strict mode re-enablement",
+    "Set up CI/CD type coverage gates"
+  ]
+}

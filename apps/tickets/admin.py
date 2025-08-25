@@ -529,7 +529,7 @@ class TicketWorklogAdmin(admin.ModelAdmin):
         return obj.description
     description_preview.short_description = _('Description')
 
-    def changelist_view(self, request: HttpRequest, extra_context: Optional[dict[str, Any]] = None) -> HttpResponse:
+    def changelist_view(self, request: HttpRequest, extra_context: dict[str, Any] | None = None) -> HttpResponse:
         """Add summary statistics to changelist"""
         response = super().changelist_view(request, extra_context=extra_context)
 

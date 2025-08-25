@@ -5,8 +5,9 @@ Aligned with PostgreSQL hosting panel schema v1 with separate proforma handling.
 """
 
 import uuid
+from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Dict, Optional
+from typing import Any
 
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
@@ -46,7 +47,7 @@ class FXRate(models.Model):
             models.Index(fields=['base_code', 'quote_code', '-as_of']),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.base_code}/{self.quote_code} = {self.rate} ({self.as_of})"
 
 
@@ -64,7 +65,7 @@ class InvoiceSequence(models.Model):
         verbose_name = _('Invoice Sequence')
         verbose_name_plural = _('Invoice Sequences')
 
-    def get_next_number(self, prefix='INV'):
+    def get_next_number(self, prefix: str = 'INV') -> str:
         """Get next invoice number and increment sequence atomically"""
         from django.db import transaction
         from django.db.models import F
@@ -87,7 +88,7 @@ class ProformaSequence(models.Model):
         verbose_name = _('Proforma Sequence')
         verbose_name_plural = _('Proforma Sequences')
 
-    def get_next_number(self, prefix='PRO'):
+    def get_next_number(self, prefix: str = 'PRO') -> str:
         """Get next proforma number and increment sequence atomically"""
         import logging
 
@@ -166,26 +167,26 @@ class ProformaInvoice(models.Model):
             models.Index(fields=['created_at']),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.number} - {self.customer}"
 
     @property
-    def is_expired(self):
+    def is_expired(self) -> bool:
         return timezone.now() > self.valid_until
 
     @property
-    def subtotal(self):
+    def subtotal(self) -> Decimal:
         return Decimal(self.subtotal_cents) / 100
 
     @property
-    def tax_amount(self):
+    def tax_amount(self) -> Decimal:
         return Decimal(self.tax_cents) / 100
 
     @property
-    def total(self):
+    def total(self) -> Decimal:
         return Decimal(self.total_cents) / 100
 
-    def convert_to_invoice(self):
+    def convert_to_invoice(self) -> None:
         """Convert this proforma to an actual invoice"""
         # Will implement this method in business logic
 
@@ -226,11 +227,11 @@ class ProformaLine(models.Model):
         ]
 
     @property
-    def unit_price(self):
+    def unit_price(self) -> Decimal:
         return Decimal(self.unit_price_cents) / 100
 
     @property
-    def line_total(self):
+    def line_total(self) -> Decimal:
         return Decimal(self.line_total_cents) / 100
 
 
@@ -344,38 +345,38 @@ class Invoice(models.Model):
             models.Index(fields=['number']),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.number} - {self.customer}"
 
     @property
-    def subtotal(self):
+    def subtotal(self) -> Decimal:
         """Convert cents to decimal"""
         return Decimal(self.subtotal_cents) / 100
 
     @property
-    def tax_amount(self):
+    def tax_amount(self) -> Decimal:
         """Convert cents to decimal"""
         return Decimal(self.tax_cents) / 100
 
     @property
-    def total(self):
+    def total(self) -> Decimal:
         """Convert cents to decimal"""
         return Decimal(self.total_cents) / 100
 
-    def is_overdue(self):
+    def is_overdue(self) -> bool:
         """Check if invoice is overdue"""
-        return (self.due_at and
+        return (self.due_at is not None and
                 timezone.now() > self.due_at and
-                self.status in ['issued'])
+                self.status == 'issued')
 
-    def get_remaining_amount(self):
-        """Calculate remaining unpaid amount"""
+    def get_remaining_amount(self) -> int:
+        """Calculate remaining unpaid amount in cents"""
         paid_amount = self.payments.filter(status='succeeded').aggregate(
             total=models.Sum('amount_cents')
         )['total'] or 0
         return max(0, self.total_cents - paid_amount)
 
-    def mark_as_paid(self):
+    def mark_as_paid(self) -> None:
         """Mark invoice as paid"""
         self.status = 'paid'
         self.paid_at = timezone.now()
@@ -428,14 +429,14 @@ class InvoiceLine(models.Model):
         ]
 
     @property
-    def unit_price(self):
+    def unit_price(self) -> Decimal:
         return Decimal(self.unit_price_cents) / 100
 
     @property
-    def line_total(self):
+    def line_total(self) -> Decimal:
         return Decimal(self.line_total_cents) / 100
 
-    def save(self, *args, **kwargs):
+    def save(self, *args: Any, **kwargs: Any) -> None:
         # Calculate line total
         subtotal = self.quantity * (Decimal(self.unit_price_cents) / 100)
         tax_amount = subtotal * self.tax_rate
@@ -520,11 +521,11 @@ class Payment(models.Model):
             models.Index(fields=['gateway_txn_id']),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Payment {self.amount} {self.currency.code} for {self.customer}"
 
     @property
-    def amount(self):
+    def amount(self) -> Decimal:
         return Decimal(self.amount_cents) / 100
 
 
@@ -574,10 +575,10 @@ class CreditLedger(models.Model):
         ]
 
     @property
-    def delta(self):
+    def delta(self) -> Decimal:
         return Decimal(self.delta_cents) / 100
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.customer} - {self.delta} ({self.reason})"
 
 
@@ -686,13 +687,13 @@ class TaxRule(models.Model):
         ]
         ordering = ['country_code', 'tax_type', '-valid_from']
 
-    def __str__(self):
+    def __str__(self) -> str:
         rate_display = f"{self.rate * 100:.2f}%"
         if self.valid_to:
             return f"{self.country_code} {self.tax_type.upper()} {rate_display} ({self.valid_from} - {self.valid_to})"
         return f"{self.country_code} {self.tax_type.upper()} {rate_display} (from {self.valid_from})"
 
-    def is_active(self, date=None):
+    def is_active(self, date: date | None = None) -> bool:
         """Check if tax rule is active on given date"""
         if date is None:
             date = timezone.now().date()
@@ -703,7 +704,7 @@ class TaxRule(models.Model):
         return not (self.valid_to and date > self.valid_to)
 
     @classmethod
-    def get_active_rate(cls, country_code, tax_type='vat', date=None):
+    def get_active_rate(cls, country_code: str, tax_type: str = 'vat', date: date | None = None) -> Decimal:
         """Get active tax rate for country and date"""
         if date is None:
             date = timezone.now().date()
@@ -790,11 +791,11 @@ class VATValidation(models.Model):
         ]
         ordering = ['-validation_date']
 
-    def __str__(self):
+    def __str__(self) -> str:
         status = "✓ Valid" if self.is_valid else "✗ Invalid"
         return f"{self.full_vat_number} - {status}"
 
-    def is_expired(self):
+    def is_expired(self) -> bool:
         """Check if validation result has expired"""
         if not self.expires_at:
             return False
@@ -886,16 +887,17 @@ class PaymentRetryPolicy(models.Model):
         verbose_name_plural = _('Payment Retry Policies')
         ordering = ['name']
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.name} ({len(self.retry_intervals_days)} attempts)"
 
-    def get_next_retry_date(self, failure_date, attempt_number):
+    def get_next_retry_date(self, failure_date: datetime, attempt_number: int) -> datetime | None:
         """Calculate next retry date based on policy"""
         if attempt_number >= len(self.retry_intervals_days):
             return None
 
         days_to_wait = self.retry_intervals_days[attempt_number]
-        return failure_date + timezone.timedelta(days=days_to_wait)
+        from datetime import timedelta
+        return failure_date + timedelta(days=days_to_wait)
 
 
 class PaymentRetryAttempt(models.Model):
@@ -984,7 +986,7 @@ class PaymentRetryAttempt(models.Model):
         ]
         ordering = ['payment', 'attempt_number']
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Retry #{self.attempt_number} for Payment {self.payment.id} - {self.status}"
 
 
@@ -1084,28 +1086,28 @@ class PaymentCollectionRun(models.Model):
         ]
         ordering = ['-started_at']
 
-    def __str__(self):
+    def __str__(self) -> str:
         duration = ""
         if self.completed_at:
             duration = f" ({(self.completed_at - self.started_at).total_seconds():.0f}s)"
         return f"Collection Run {self.started_at.strftime('%Y-%m-%d %H:%M')} - {self.status}{duration}"
 
     @property
-    def amount_recovered(self):
+    def amount_recovered(self) -> Decimal:
         """Amount recovered as Decimal"""
         return Decimal(self.amount_recovered_cents) / 100
 
     @property
-    def fees_charged(self):
+    def fees_charged(self) -> Decimal:
         """Fees charged as Decimal"""
         return Decimal(self.fees_charged_cents) / 100
 
     @property
-    def net_recovery(self):
+    def net_recovery(self) -> Decimal:
         """Net amount recovered after fees"""
         return self.amount_recovered - self.fees_charged
 
-    def mark_completed(self):
+    def mark_completed(self) -> None:
         """Mark collection run as completed"""
         self.completed_at = timezone.now()
         self.status = 'completed'

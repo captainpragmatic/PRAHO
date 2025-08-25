@@ -41,7 +41,7 @@ if os.environ.get('USE_POSTGRES') != 'true':
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
+            'NAME': str(BASE_DIR / 'db.sqlite3'),
         }
     }
 
@@ -61,8 +61,6 @@ DEBUG_TOOLBAR_CONFIG = {
 }
 
 # Disable debug toolbar during tests
-import sys
-
 if 'test' in sys.argv:
     INSTALLED_APPS = [app for app in INSTALLED_APPS if app != 'debug_toolbar']
     MIDDLEWARE = [mw for mw in MIDDLEWARE if 'debug_toolbar' not in mw]
