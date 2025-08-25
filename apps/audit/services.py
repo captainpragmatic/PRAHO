@@ -468,7 +468,7 @@ class GDPRDeletionService:
         deletion_type: str = 'anonymize',  # 'anonymize' or 'delete'
         request_ip: str = None,
         reason: str = None
-    ) -> 'Result[ComplianceLog, str]':
+    ) -> Result[ComplianceLog, str]:
         """Create a GDPR data deletion request"""
 
         from apps.common.types import Err, Ok
@@ -512,7 +512,7 @@ class GDPRDeletionService:
 
     @classmethod
     @transaction.atomic
-    def process_deletion_request(cls, deletion_request: 'ComplianceLog') -> 'Result[str, str]':
+    def process_deletion_request(cls, deletion_request: 'ComplianceLog') -> Result[str, str]:
         """Process the actual data deletion/anonymization"""
 
         from apps.common.types import Err, Ok
@@ -731,7 +731,7 @@ class GDPRConsentService:
             return Err(f"Consent withdrawal failed: {e!s}")
 
     @classmethod
-    def get_consent_history(cls, user: User) -> 'List[dict[str, Any]]':
+    def get_consent_history(cls, user: User) -> List[Dict[str, Any]]:
         """Get user's consent history for transparency"""
         from .models import ComplianceLog
 

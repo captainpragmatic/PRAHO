@@ -78,7 +78,7 @@ class RomanianVATNumber:
     """Romanian VAT number validation"""
     value: str
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not self.is_valid():
             raise ValueError(f"Invalid Romanian VAT number: {self.value}")
 
@@ -191,7 +191,7 @@ def validate_romanian_phone(phone: str) -> Result[str, str]:
     return Err("Invalid Romanian phone number format. Expected: +40 721 123 456, 0721 123 456, or 721 123 456")
 
 
-def calculate_romanian_vat(amount_cents: int, include_vat: bool = True) -> dict:
+def calculate_romanian_vat(amount_cents: int, include_vat: bool = True) -> dict[str, float]:
     """Calculate Romanian VAT (19%) for the given amount"""
     VAT_RATE = 0.19
 

@@ -3,13 +3,19 @@ User forms for PRAHO Platform
 Romanian-localized authentication and profile forms.
 """
 
+from typing import Any, Dict, Optional, TypeVar, Union, cast
+
 from django import forms
 from django.contrib.auth.forms import UserCreationForm
 from django.core.exceptions import ValidationError
+from django.db.models import QuerySet
+from django.forms import Form, ModelForm
 from django.utils.translation import gettext_lazy as _
 
 from .models import User, UserProfile
 from .services import UserRegistrationService
+
+T = TypeVar('T')
 
 
 class LoginForm(forms.Form):
@@ -95,7 +101,7 @@ class UserRegistrationForm(UserCreationForm):
             'password1', 'password2', 'accepts_marketing', 'gdpr_consent'
         ]
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
         # Customize password fields
@@ -115,11 +121,11 @@ class UserRegistrationForm(UserCreationForm):
         if 'username' in self.fields:
             del self.fields['username']
 
-    def clean_email(self):
-        email = self.cleaned_data.get('email')
+    def clean_email(self) -> str:
+        email: Optional[str] = self.cleaned_data.get('email')
         if email and User.objects.filter(email=email).exists():
             raise ValidationError(_('An account with this email address already exists.'))
-        return email
+        return cast(str, email)
 
     def clean_phone(self):
         """Validate Romanian phone number using centralized validation"""
@@ -132,7 +138,7 @@ class UserRegistrationForm(UserCreationForm):
             return result.unwrap()
         return phone
 
-    def save(self, commit=True):
+    def save(self, commit: bool = True) -> User:
         user = super().save(commit=False)
         user.username = self.cleaned_data['email']  # Use email as username
         user.email = self.cleaned_data['email']
@@ -210,7 +216,7 @@ class UserProfileForm(forms.ModelForm):
             'emergency_contact_phone': _('Emergency contact phone'),
         }
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
         # Pre-populate user fields
@@ -219,18 +225,18 @@ class UserProfileForm(forms.ModelForm):
             self.fields['last_name'].initial = self.instance.user.last_name
             self.fields['phone'].initial = self.instance.user.phone
 
-    def clean_phone(self):
+    def clean_phone(self) -> str:
         """Validate phone number"""
-        phone = self.cleaned_data.get('phone')
+        phone: Optional[str] = self.cleaned_data.get('phone')
         if phone:
             from apps.common.types import validate_romanian_phone
             result = validate_romanian_phone(phone.strip())
             if result.is_err():
                 raise ValidationError(result.error)
             return result.unwrap()
-        return phone
+        return cast(str, phone or '')
 
-    def save(self, commit=True):
+    def save(self, commit: bool = True) -> UserProfile:
         profile = super().save(commit=False)
 
         # Update user fields
@@ -264,11 +270,11 @@ class TwoFactorSetupForm(forms.Form):
         help_text=_('Enter the code from the authenticator app')
     )
 
-    def clean_token(self):
-        token = self.cleaned_data.get('token')
+    def clean_token(self) -> str:
+        token: Optional[str] = self.cleaned_data.get('token')
         if token and not token.isdigit():
             raise ValidationError(_('The code must contain only digits.'))
-        return token
+        return cast(str, token or '')
 
 
 class TwoFactorVerifyForm(forms.Form):
@@ -289,11 +295,11 @@ class TwoFactorVerifyForm(forms.Form):
         help_text=_('Enter the code from the authenticator app')
     )
 
-    def clean_token(self):
-        token = self.cleaned_data.get('token')
+    def clean_token(self) -> str:
+        token: Optional[str] = self.cleaned_data.get('token')
         if token and not token.isdigit():
             raise ValidationError(_('The code must contain only digits.'))
-        return token
+        return cast(str, token or '')
 
 
 class PasswordResetRequestForm(forms.Form):
@@ -309,11 +315,11 @@ class PasswordResetRequestForm(forms.Form):
         help_text=_('Enter the email associated with your account.')
     )
 
-    def clean_email(self):
-        email = self.cleaned_data.get('email')
+    def clean_email(self) -> str:
+        email: Optional[str] = self.cleaned_data.get('email')
         if email and not User.objects.filter(email=email).exists():
             raise ValidationError(_('There is no account with this email address.'))
-        return email
+        return cast(str, email)
 
 
 class CustomerMembershipForm(forms.Form):
@@ -496,27 +502,27 @@ class CustomerOnboardingRegistrationForm(UserCreationForm):
             return result.unwrap()
         return phone
 
-    def clean_vat_number(self):
+    def clean_vat_number(self) -> str:
         """Validate VAT number format"""
-        vat_number = self.cleaned_data.get('vat_number', '').strip()
+        vat_number: str = self.cleaned_data.get('vat_number', '').strip()
         if vat_number and not vat_number.startswith('RO'):
             vat_number = f'RO{vat_number}'
         return vat_number
 
-    def clean_customer_type(self):
+    def clean_customer_type(self) -> str:
         """Validate customer type"""
-        customer_type = self.cleaned_data.get('customer_type')
+        customer_type: Optional[str] = self.cleaned_data.get('customer_type')
         if customer_type not in dict(UserRegistrationService.CUSTOMER_TYPES):
             raise ValidationError(_('Invalid customer type selected.'))
-        return customer_type
+        return cast(str, customer_type)
 
-    def save(self, commit=True):
+    def save(self, commit: bool = True) -> User:
         """Save user and create customer organization"""
         if not commit:
             raise ValidationError(_('CustomerOnboardingRegistrationForm must be saved with commit=True'))
 
         # Extract form data
-        user_data = {
+        user_data: Dict[str, str] = {
             'email': self.cleaned_data['email'],
             'first_name': self.cleaned_data['first_name'],
             'last_name': self.cleaned_data['last_name'],
@@ -524,7 +530,7 @@ class CustomerOnboardingRegistrationForm(UserCreationForm):
             'password': self.cleaned_data['password1'],
         }
 
-        customer_data = {
+        customer_data: Dict[str, str] = {
             'customer_type': self.cleaned_data['customer_type'],
             'company_name': self.cleaned_data['company_name'],
             'vat_number': self.cleaned_data.get('vat_number', ''),

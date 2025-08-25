@@ -311,7 +311,7 @@ if not SECRET_KEY:
     SECRET_KEY = 'django-insecure-dev-key-only-change-in-production-or-tests'
 
 # Validate SECRET_KEY security in production (checked in prod.py)
-def validate_production_secret_key():
+def validate_production_secret_key() -> None:
     """Validate SECRET_KEY meets production security requirements"""
     if SECRET_KEY and SECRET_KEY.startswith('django-insecure-'):
         raise ValueError(

@@ -3,6 +3,9 @@ Development settings for PRAHO Platform
 Fast iteration with debugging tools enabled.
 """
 
+import os
+import sys
+
 from .base import *
 
 # ===============================================================================
