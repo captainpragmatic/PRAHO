@@ -2,10 +2,13 @@
 # TICKETS VIEWS - SUPPORT SYSTEM
 # ===============================================================================
 
+from typing import Any, Dict
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
-from django.http import HttpResponse
+from django.db.models.query import QuerySet
+from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
 
@@ -13,7 +16,7 @@ from .models import Ticket, TicketComment
 
 
 @login_required
-def ticket_list(request):
+def ticket_list(request: HttpRequest) -> HttpResponse:
     """🎫 Display support tickets for user's customers"""
     accessible_customers = request.user.get_accessible_customers()
     customer_ids = [customer.id for customer in accessible_customers]
@@ -34,7 +37,7 @@ def ticket_list(request):
 
 
 @login_required
-def ticket_detail(request, pk):
+def ticket_detail(request: HttpRequest, pk: int) -> HttpResponse:
     """🎫 Display ticket details and conversation"""
     ticket = get_object_or_404(Ticket, pk=pk)
 
@@ -65,7 +68,7 @@ def ticket_detail(request, pk):
 
 
 @login_required
-def ticket_create(request):
+def ticket_create(request: HttpRequest) -> HttpResponse:
     """➕ Create new support ticket"""
     customers = request.user.get_accessible_customers()
 
@@ -111,7 +114,7 @@ def ticket_create(request):
 
 
 @login_required
-def ticket_reply(request, pk):
+def ticket_reply(request: HttpRequest, pk: int) -> HttpResponse:
     """💬 Add reply to ticket"""
     ticket = get_object_or_404(Ticket, pk=pk)
 
@@ -207,7 +210,7 @@ def ticket_reply(request, pk):
 
 
 @login_required
-def ticket_comments_htmx(request, pk):
+def ticket_comments_htmx(request: HttpRequest, pk: int) -> HttpResponse:
     """🔄 HTMX endpoint for loading comments"""
     ticket = get_object_or_404(Ticket, pk=pk)
 
@@ -234,7 +237,7 @@ def ticket_comments_htmx(request, pk):
 
 
 @login_required
-def ticket_close(request, pk):
+def ticket_close(request: HttpRequest, pk: int) -> HttpResponse:
     """✅ Close ticket"""
     ticket = get_object_or_404(Ticket, pk=pk)
 
@@ -253,7 +256,7 @@ def ticket_close(request, pk):
 
 
 @login_required
-def ticket_reopen(request, pk):
+def ticket_reopen(request: HttpRequest, pk: int) -> HttpResponse:
     """🔄 Reopen closed ticket"""
     ticket = get_object_or_404(Ticket, pk=pk)
 
@@ -272,7 +275,7 @@ def ticket_reopen(request, pk):
 
 
 @login_required
-def download_attachment(request, attachment_id):
+def download_attachment(request: HttpRequest, attachment_id: int) -> HttpResponse:
     """📎 Download ticket attachment"""
     import os
 

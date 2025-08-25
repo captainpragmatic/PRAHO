@@ -3,8 +3,13 @@ Django admin configuration for audit models.
 Romanian PRAHO Platform audit trail management with security focus.
 """
 
+from typing import Optional, Any
+
 from django.contrib import admin
+from django.db.models.query import QuerySet
+from django.http import HttpRequest
 from django.utils.html import format_html
+from django.utils.safestring import SafeString
 from django.utils.translation import gettext_lazy as _
 
 from .models import AuditEvent, ComplianceLog, DataExport
@@ -92,7 +97,7 @@ class AuditEventAdmin(admin.ModelAdmin):
         }),
     )
 
-    def user_display(self, obj):
+    def user_display(self, obj: AuditEvent) -> SafeString:
         """Display user with icon"""
         if obj.user:
             return format_html(
@@ -103,15 +108,15 @@ class AuditEventAdmin(admin.ModelAdmin):
         return format_html('🤖 System')
     user_display.short_description = _('User')
 
-    def has_add_permission(self, request):
+    def has_add_permission(self, request: HttpRequest) -> bool:
         """Audit events cannot be manually created"""
         return False
 
-    def has_change_permission(self, request, obj=None):
+    def has_change_permission(self, request: HttpRequest, obj: Optional[AuditEvent] = None) -> bool:
         """Audit events are immutable"""
         return False
 
-    def has_delete_permission(self, request, obj=None):
+    def has_delete_permission(self, request: HttpRequest, obj: Optional[AuditEvent] = None) -> bool:
         """Audit events cannot be deleted"""
         return False
 
@@ -187,7 +192,7 @@ class DataExportAdmin(admin.ModelAdmin):
         }),
     )
 
-    def file_size_display(self, obj):
+    def file_size_display(self, obj: DataExport) -> str:
         """Display file size in human readable format"""
         if not obj.file_size:
             return '-'
@@ -200,7 +205,7 @@ class DataExportAdmin(admin.ModelAdmin):
         return f"{size:.1f} TB"
     file_size_display.short_description = _('File Size')
 
-    def get_queryset(self, request):
+    def get_queryset(self, request: HttpRequest) -> QuerySet[DataExport]:
         """Filter exports by user permissions"""
         qs = super().get_queryset(request)
         if not request.user.is_superuser:
@@ -270,7 +275,7 @@ class ComplianceLogAdmin(admin.ModelAdmin):
         }),
     )
 
-    def compliance_type_display(self, obj):
+    def compliance_type_display(self, obj: ComplianceLog) -> SafeString:
         """Display compliance type with icon"""
         icons = {
             'gdpr_consent': '🛡️',
@@ -288,7 +293,7 @@ class ComplianceLogAdmin(admin.ModelAdmin):
         )
     compliance_type_display.short_description = _('Type')
 
-    def status_display(self, obj):
+    def status_display(self, obj: ComplianceLog) -> SafeString:
         """Display status with color"""
         if obj.status == 'success':
             return format_html(
@@ -307,7 +312,7 @@ class ComplianceLogAdmin(admin.ModelAdmin):
             )
     status_display.short_description = _('Status')
 
-    def user_display(self, obj):
+    def user_display(self, obj: ComplianceLog) -> SafeString:
         """Display user with icon"""
         if obj.user:
             return format_html(
@@ -317,14 +322,14 @@ class ComplianceLogAdmin(admin.ModelAdmin):
         return format_html('🤖 System')
     user_display.short_description = _('User')
 
-    def has_add_permission(self, request):
+    def has_add_permission(self, request: HttpRequest) -> bool:
         """Compliance logs cannot be manually created"""
         return False
 
-    def has_change_permission(self, request, obj=None):
+    def has_change_permission(self, request: HttpRequest, obj: Optional[ComplianceLog] = None) -> bool:
         """Compliance logs are immutable"""
         return False
 
-    def has_delete_permission(self, request, obj=None):
+    def has_delete_permission(self, request: HttpRequest, obj: Optional[ComplianceLog] = None) -> bool:
         """Compliance logs cannot be deleted for audit trail"""
         return False

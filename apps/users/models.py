@@ -3,6 +3,8 @@ User models for PRAHO Platform
 Romanian hosting provider authentication with multi-customer support.
 """
 
+from typing import Any, List, Optional
+
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
 from django.utils.translation import gettext_lazy as _
@@ -11,7 +13,7 @@ from django.utils.translation import gettext_lazy as _
 class UserManager(BaseUserManager):
     """Custom user manager for email-based authentication"""
 
-    def create_user(self, email, password=None, **extra_fields):
+    def create_user(self, email: str, password: Optional[str] = None, **extra_fields: Any) -> 'User':
         """Create and return a regular user with email and password"""
         if not email:
             raise ValueError('The Email field must be set')
@@ -21,7 +23,7 @@ class UserManager(BaseUserManager):
         user.save(using=self._db)
         return user
 
-    def create_superuser(self, email, password=None, **extra_fields):
+    def create_superuser(self, email: str, password: Optional[str] = None, **extra_fields: Any) -> 'User':
         """Create and return a superuser with email and password"""
         extra_fields.setdefault('is_staff', True)
         extra_fields.setdefault('is_superuser', True)
@@ -293,7 +295,7 @@ class User(AbstractUser):
         else:
             self._two_factor_secret = ''  # nosec B105
 
-    def generate_backup_codes(self) -> list[str]:
+    def generate_backup_codes(self) -> List[str]:
         """Generate new backup codes and store hashed versions"""
         from apps.common.encryption import generate_backup_codes, hash_backup_code
 

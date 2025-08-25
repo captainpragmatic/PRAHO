@@ -4,10 +4,15 @@ Romanian hosting provider service provisioning and server management.
 """
 
 
+from typing import Any
+
 from django.contrib import admin
+from django.db.models import QuerySet
+from django.http import HttpRequest
 from django.utils import timezone
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
+from django.utils.safestring import SafeString
 
 from .models import ProvisioningTask, Server, Service, ServicePlan
 
@@ -96,13 +101,13 @@ class ServicePlanAdmin(admin.ModelAdmin):
     )
     readonly_fields = ['created_at', 'updated_at']
 
-    def price_monthly_display(self, obj):
+    def price_monthly_display(self, obj: ServicePlan) -> str:
         """Display monthly price with VAT indicator"""
         vat_text = " (incl. VAT)" if obj.includes_vat else " (excl. VAT)"
         return f"{obj.price_monthly:.2f} RON{vat_text}"
     price_monthly_display.short_description = _('Monthly Price')
 
-    def setup_fee_display(self, obj):
+    def setup_fee_display(self, obj: ServicePlan) -> SafeString | str:
         """Display setup fee"""
         if obj.setup_fee > 0:
             return f"{obj.setup_fee:.2f} RON"
@@ -111,25 +116,25 @@ class ServicePlanAdmin(admin.ModelAdmin):
 
     actions = ['activate_plans', 'deactivate_plans', 'make_public', 'make_private']
 
-    def activate_plans(self, request, queryset):
+    def activate_plans(self, request: HttpRequest, queryset: QuerySet[ServicePlan]) -> None:
         """Activate selected service plans"""
         updated = queryset.update(is_active=True)
         self.message_user(request, f'Successfully activated {updated} service plans.')
     activate_plans.short_description = _('Activate selected plans')
 
-    def deactivate_plans(self, request, queryset):
+    def deactivate_plans(self, request: HttpRequest, queryset: QuerySet[ServicePlan]) -> None:
         """Deactivate selected service plans"""
         updated = queryset.update(is_active=False)
         self.message_user(request, f'Successfully deactivated {updated} service plans.')
     deactivate_plans.short_description = _('Deactivate selected plans')
 
-    def make_public(self, request, queryset):
+    def make_public(self, request: HttpRequest, queryset: QuerySet[ServicePlan]) -> None:
         """Make plans public on website"""
         updated = queryset.update(is_public=True)
         self.message_user(request, f'Successfully made {updated} plans public.')
     make_public.short_description = _('Make public on website')
 
-    def make_private(self, request, queryset):
+    def make_private(self, request: HttpRequest, queryset: QuerySet[ServicePlan]) -> None:
         """Make plans private (admin only)"""
         updated = queryset.update(is_public=False)
         self.message_user(request, f'Successfully made {updated} plans private.')
@@ -236,7 +241,7 @@ class ServerAdmin(admin.ModelAdmin):
     )
     readonly_fields = ['created_at', 'updated_at']
 
-    def status_display(self, obj):
+    def status_display(self, obj: Server) -> SafeString:
         """Display status with colors"""
         colors = {
             'active': 'green',
@@ -252,7 +257,7 @@ class ServerAdmin(admin.ModelAdmin):
         )
     status_display.short_description = _('Status')
 
-    def active_services_display(self, obj):
+    def active_services_display(self, obj: Server) -> SafeString | str:
         """Display active services count"""
         count = obj.active_services_count
         max_services = obj.max_services
@@ -271,7 +276,7 @@ class ServerAdmin(admin.ModelAdmin):
         return str(count)
     active_services_display.short_description = _('Services')
 
-    def resource_usage_display(self, obj):
+    def resource_usage_display(self, obj: Server) -> SafeString:
         """Display average resource usage"""
         avg_usage = obj.resource_usage_average
         if avg_usage > 90:
@@ -291,7 +296,7 @@ class ServerAdmin(admin.ModelAdmin):
         )
     resource_usage_display.short_description = _('Resource Usage')
 
-    def monthly_cost_display(self, obj):
+    def monthly_cost_display(self, obj: Server) -> str:
         """Display monthly cost"""
         if obj.monthly_cost > 0:
             return f"{obj.monthly_cost:.2f} RON"
@@ -300,13 +305,13 @@ class ServerAdmin(admin.ModelAdmin):
 
     actions = ['mark_maintenance', 'mark_active']
 
-    def mark_maintenance(self, request, queryset):
+    def mark_maintenance(self, request: HttpRequest, queryset: QuerySet[Server]) -> None:
         """Mark servers as under maintenance"""
         updated = queryset.update(status='maintenance')
         self.message_user(request, f'Successfully marked {updated} servers as under maintenance.')
     mark_maintenance.short_description = _('Mark as under maintenance')
 
-    def mark_active(self, request, queryset):
+    def mark_active(self, request: HttpRequest, queryset: QuerySet[Server]) -> None:
         """Mark servers as active"""
         updated = queryset.update(status='active')
         self.message_user(request, f'Successfully marked {updated} servers as active.')

@@ -69,6 +69,7 @@
   "chat.tools.terminal.autoApprove": {
     "/^make\\s+test(\\s|$)/": true,
     "/^make\\s+test-fast(\\s|$)/": true,
+    "/^make\\s+test-file(\\s|$)/": true,
     "/^make\\s+test-e2e(\\s|$)/": true,
     "/^make\\s+test-with-e2e(\\s|$)/": true,
     "/^make\\s+lint(\\s|$)/": true,

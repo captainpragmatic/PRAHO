@@ -5,12 +5,14 @@
 import decimal
 from datetime import datetime
 from decimal import Decimal
+from typing import Any, List
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db.models import Q, Sum
-from django.http import HttpResponse, JsonResponse
+from django.db.models.query import QuerySet
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -28,7 +30,7 @@ from .models import (
 )
 
 
-def _get_accessible_customer_ids(user):
+def _get_accessible_customer_ids(user: Any) -> List[int]:
     """Helper to get customer IDs that user can access"""
     accessible_customers = user.get_accessible_customers()
 
@@ -40,7 +42,7 @@ def _get_accessible_customer_ids(user):
 
 
 @login_required
-def billing_list(request):
+def billing_list(request: HttpRequest) -> HttpResponse:
     """
     🧾 Display combined list of proformas and invoices (Romanian business practice)
     """
@@ -133,7 +135,7 @@ def billing_list(request):
 
 
 @login_required
-def invoice_detail(request, pk):
+def invoice_detail(request: HttpRequest, pk: int) -> HttpResponse:
     """
     📋 Display detailed invoice information
     """
@@ -159,7 +161,7 @@ def invoice_detail(request, pk):
 
 
 @login_required
-def proforma_create(request):
+def proforma_create(request: HttpRequest) -> HttpResponse:
     """
     ➕ Create new proforma invoice (Romanian business practice - only proformas can be created manually)
     """
@@ -303,7 +305,7 @@ def proforma_create(request):
 
 
 @login_required
-def proforma_detail(request, pk):
+def proforma_detail(request: HttpRequest, pk: int) -> HttpResponse:
     """
     📋 Display detailed proforma information
     """
@@ -329,7 +331,7 @@ def proforma_detail(request, pk):
 
 
 @login_required
-def proforma_to_invoice(request, pk):
+def proforma_to_invoice(request: HttpRequest, pk: int) -> HttpResponse:
     """
     🔄 Convert proforma to actual invoice (Romanian business practice)
     """
@@ -410,7 +412,7 @@ def proforma_to_invoice(request, pk):
 
 
 @login_required
-def process_proforma_payment(request, pk):
+def process_proforma_payment(request: HttpRequest, pk: int) -> HttpResponse:
     """
     💳 Process payment for proforma (automatically converts to invoice)
     """
@@ -458,7 +460,7 @@ def process_proforma_payment(request, pk):
 
 
 @login_required
-def proforma_edit(request, pk):
+def proforma_edit(request: HttpRequest, pk: int) -> HttpResponse:
     """
     ✏️ Edit proforma invoice
     """
@@ -616,7 +618,7 @@ def proforma_edit(request, pk):
 
 
 @login_required
-def proforma_pdf(request, pk):
+def proforma_pdf(request: HttpRequest, pk: int) -> HttpResponse:
     """
     📄 Generate PDF proforma (Romanian format) using ReportLab
     """
@@ -742,7 +744,7 @@ def proforma_pdf(request, pk):
 
 
 @login_required
-def proforma_send(request, pk):
+def proforma_send(request: HttpRequest, pk: int) -> HttpResponse:
     """
     📧 Send proforma via email to customer
     """
@@ -761,7 +763,7 @@ def proforma_send(request, pk):
 
 
 @login_required
-def invoice_edit(request, pk):
+def invoice_edit(request: HttpRequest, pk: int) -> HttpResponse:
     """
     ✏️ Edit draft invoice
     """
@@ -790,7 +792,7 @@ def invoice_edit(request, pk):
 
 
 @login_required
-def invoice_pdf(request, pk):
+def invoice_pdf(request: HttpRequest, pk: int) -> HttpResponse:
     """
     📄 Generate PDF invoice (Romanian format) using ReportLab
     """
@@ -931,7 +933,7 @@ def invoice_pdf(request, pk):
 
 
 @login_required
-def invoice_send(request, pk):
+def invoice_send(request: HttpRequest, pk: int) -> HttpResponse:
     """
     📧 Send invoice via email to customer
     """
@@ -955,7 +957,7 @@ def invoice_send(request, pk):
 
 
 @login_required
-def generate_e_factura(request, pk):
+def generate_e_factura(request: HttpRequest, pk: int) -> HttpResponse:
     """
     🇷🇴 Generate e-Factura XML for Romanian tax authorities
     """
@@ -986,7 +988,7 @@ def generate_e_factura(request, pk):
 
 
 @login_required
-def payment_list(request):
+def payment_list(request: HttpRequest) -> HttpResponse:
     """
     💰 Display list of payments
     """
@@ -1009,7 +1011,7 @@ def payment_list(request):
 
 
 @login_required
-def process_payment(request, pk):
+def process_payment(request: HttpRequest, pk: int) -> HttpResponse:
     """
     💳 Process payment for invoice
     """
@@ -1044,7 +1046,7 @@ def process_payment(request, pk):
 
 
 @login_required
-def billing_reports(request):
+def billing_reports(request: HttpRequest) -> HttpResponse:
     """
     📊 Billing reports and analytics
     """
@@ -1074,7 +1076,7 @@ def billing_reports(request):
 
 
 @login_required
-def vat_report(request):
+def vat_report(request: HttpRequest) -> HttpResponse:
     """
     🇷🇴 VAT report for Romanian tax compliance
     """

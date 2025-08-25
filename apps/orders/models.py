@@ -6,6 +6,7 @@ Romanian hosting provider specific order processing and configuration.
 
 import uuid
 from decimal import Decimal
+from typing import Any, Optional
 
 from django.core.validators import MinValueValidator
 from django.db import models
@@ -217,41 +218,41 @@ class Order(models.Model):
         ]
 
     @property
-    def subtotal(self):
+    def subtotal(self) -> Decimal:
         """Return subtotal in currency units"""
         return Decimal(self.subtotal_cents) / 100
 
     @property
-    def tax_amount(self):
+    def tax_amount(self) -> Decimal:
         """Return tax amount in currency units"""
         return Decimal(self.tax_cents) / 100
 
     @property
-    def discount_amount(self):
+    def discount_amount(self) -> Decimal:
         """Return discount amount in currency units"""
         return Decimal(self.discount_cents) / 100
 
     @property
-    def total(self):
+    def total(self) -> Decimal:
         """Return total in currency units"""
         return Decimal(self.total_cents) / 100
 
     @property
-    def is_draft(self):
+    def is_draft(self) -> bool:
         """Check if order is still in draft state"""
         return self.status == 'draft'
 
     @property
-    def is_paid(self):
+    def is_paid(self) -> bool:
         """Check if order has been paid"""
         return self.status in ['processing', 'completed']
 
     @property
-    def can_be_cancelled(self):
+    def can_be_cancelled(self) -> bool:
         """Check if order can be cancelled"""
         return self.status in ['draft', 'pending']
 
-    def calculate_totals(self):
+    def calculate_totals(self) -> None:
         """
         Recalculate order totals from line items.
         Should be called after adding/removing/updating items.
@@ -282,13 +283,13 @@ class Order(models.Model):
             'total_cents'
         ])
 
-    def mark_as_completed(self):
+    def mark_as_completed(self) -> None:
         """Mark order as completed and set completion timestamp"""
         self.status = 'completed'
         self.completed_at = timezone.now()
         self.save(update_fields=['status', 'completed_at'])
 
-    def generate_order_number(self):
+    def generate_order_number(self) -> None:
         """Generate a unique order number"""
         if not self.order_number:
             # Format: ORD-YYYYMMDD-XXXXXX
@@ -301,13 +302,13 @@ class Order(models.Model):
             sequence = str(today_orders + 1).zfill(6)
             self.order_number = f"ORD-{date_part}-{sequence}"
 
-    def save(self, *args, **kwargs):
+    def save(self, *args: Any, **kwargs: Any) -> None:
         """Auto-generate order number before saving"""
         if not self.order_number:
             self.generate_order_number()
         super().save(*args, **kwargs)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Order {self.order_number} - {self.customer_email}"
 
 

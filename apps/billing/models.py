@@ -6,6 +6,7 @@ Aligned with PostgreSQL hosting panel schema v1 with separate proforma handling.
 
 import uuid
 from decimal import Decimal
+from typing import Any, Dict, Optional
 
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
@@ -27,7 +28,7 @@ class Currency(models.Model):
         verbose_name = _('Currency')
         verbose_name_plural = _('Currencies')
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.code} ({self.symbol})"
 
 

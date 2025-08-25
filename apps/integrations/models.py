@@ -1,9 +1,11 @@
 import hashlib
 import json
 import uuid
+from typing import Any, Optional
 
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.db.models.query import QuerySet
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -153,30 +155,30 @@ class WebhookEvent(models.Model):
 
         ordering = ['-received_at']
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"🔄 {self.get_source_display()} | {self.event_type} | {self.status}"
 
     @property
-    def payload_hash(self):
+    def payload_hash(self) -> str:
         """📋 Generate hash of payload for deduplication by content"""
         payload_str = json.dumps(self.payload, sort_keys=True)
         return hashlib.sha256(payload_str.encode()).hexdigest()[:16]
 
     @property
-    def processing_duration(self):
+    def processing_duration(self) -> Optional[Any]:
         """⏱️ Time taken to process webhook"""
         if self.processed_at and self.received_at:
             return self.processed_at - self.received_at
         return None
 
-    def mark_processed(self, save=True):
+    def mark_processed(self, save: bool = True) -> None:
         """✅ Mark webhook as successfully processed"""
         self.status = 'processed'
         self.processed_at = timezone.now()
         if save:
             self.save(update_fields=['status', 'processed_at', 'updated_at'])
 
-    def mark_failed(self, error_message, save=True):
+    def mark_failed(self, error_message: str, save: bool = True) -> None:
         """❌ Mark webhook as failed with error details"""
         self.status = 'failed'
         self.error_message = error_message
@@ -195,7 +197,7 @@ class WebhookEvent(models.Model):
                 'processed_at', 'next_retry_at', 'updated_at'
             ])
 
-    def mark_skipped(self, reason="Duplicate or irrelevant", save=True):
+    def mark_skipped(self, reason: str = "Duplicate or irrelevant", save: bool = True) -> None:
         """⏭️ Mark webhook as skipped (duplicate/irrelevant)"""
         self.status = 'skipped'
         self.error_message = reason
@@ -204,12 +206,12 @@ class WebhookEvent(models.Model):
             self.save(update_fields=['status', 'error_message', 'processed_at', 'updated_at'])
 
     @classmethod
-    def is_duplicate(cls, source, event_id):
+    def is_duplicate(cls, source: str, event_id: str) -> bool:
         """🔍 Check if webhook has already been received"""
         return cls.objects.filter(source=source, event_id=event_id).exists()
 
     @classmethod
-    def get_pending_webhooks(cls, source=None, limit=100):
+    def get_pending_webhooks(cls, source: Optional[str] = None, limit: int = 100) -> QuerySet['WebhookEvent']:
         """📋 Get pending webhooks for processing"""
         queryset = cls.objects.filter(status='pending').order_by('received_at')
         if source:
@@ -217,7 +219,7 @@ class WebhookEvent(models.Model):
         return queryset[:limit]
 
     @classmethod
-    def get_failed_webhooks_for_retry(cls, source=None):
+    def get_failed_webhooks_for_retry(cls, source: Optional[str] = None) -> QuerySet['WebhookEvent']:
         """🔄 Get failed webhooks ready for retry"""
         now = timezone.now()
         queryset = cls.objects.filter(
@@ -313,5 +315,5 @@ class WebhookDelivery(models.Model):
             ),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"📤 {self.customer} | {self.event_type} | {self.status}"

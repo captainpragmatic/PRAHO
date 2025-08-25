@@ -1,8 +1,10 @@
 import uuid
+from typing import Any, Optional
 
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.db.models.query import QuerySet
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -106,26 +108,26 @@ class TLD(models.Model):
         verbose_name_plural = _('🌐 TLDs')
         ordering = ['extension']
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f".{self.extension}"
 
     @property
-    def registration_price(self):
+    def registration_price(self) -> float:
         """💰 Registration price in RON"""
         return self.registration_price_cents / 100
 
     @property
-    def renewal_price(self):
+    def renewal_price(self) -> float:
         """💰 Renewal price in RON"""
         return self.renewal_price_cents / 100
 
     @property
-    def profit_margin_cents(self):
+    def profit_margin_cents(self) -> int:
         """📊 Profit margin in cents"""
         return self.registration_price_cents - self.registrar_cost_cents
 
     @property
-    def profit_margin_percentage(self):
+    def profit_margin_percentage(self) -> float:
         """📊 Profit margin as percentage"""
         if self.registrar_cost_cents > 0:
             return (self.profit_margin_cents / self.registrar_cost_cents) * 100
@@ -206,10 +208,10 @@ class Registrar(models.Model):
         verbose_name_plural = _('🏢 Registrars')
         ordering = ['name']
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.display_name
 
-    def get_supported_tlds(self):
+    def get_supported_tlds(self) -> QuerySet['TLD']:
         """🌐 Get TLDs supported by this registrar"""
         return TLD.objects.filter(registrar_assignments__registrar=self)
 
@@ -269,7 +271,7 @@ class TLDRegistrarAssignment(models.Model):
         unique_together = ('tld', 'registrar')
         ordering = ['tld__extension', 'priority']
 
-    def __str__(self):
+    def __str__(self) -> str:
         primary = " (Primary)" if self.is_primary else ""
         return f"{self.tld} → {self.registrar}{primary}"
 
@@ -411,11 +413,11 @@ class Domain(models.Model):
             ),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.name
 
     @property
-    def days_until_expiry(self):
+    def days_until_expiry(self) -> Optional[int]:
         """📅 Days until domain expires"""
         if self.expires_at:
             delta = self.expires_at - timezone.now()
@@ -423,24 +425,24 @@ class Domain(models.Model):
         return None
 
     @property
-    def is_expired(self):
+    def is_expired(self) -> bool:
         """🔴 Check if domain is expired"""
         if self.expires_at:
             return timezone.now() > self.expires_at
         return False
 
     @property
-    def is_expiring_soon(self, days=30):
+    def is_expiring_soon(self, days: int = 30) -> bool:
         """⚠️ Check if domain expires within specified days"""
         days_left = self.days_until_expiry
         return days_left is not None and 0 <= days_left <= days
 
     @property
-    def last_paid_amount(self):
+    def last_paid_amount(self) -> float:
         """💰 Last paid amount in RON"""
         return self.last_paid_amount_cents / 100
 
-    def clean(self):
+    def clean(self) -> None:
         """🔍 Validate domain data"""
         if self.name:
             # Basic domain validation
@@ -548,21 +550,21 @@ class DomainOrderItem(models.Model):
         verbose_name_plural = _('🛒 Domain Order Items')
         ordering = ['-created_at']
 
-    def __str__(self):
+    def __str__(self) -> str:
         action_display = self.get_action_display()
         return f"{action_display} {self.domain_name} ({self.years} years)"
 
     @property
-    def unit_price(self):
+    def unit_price(self) -> float:
         """💰 Unit price in RON"""
         return self.unit_price_cents / 100
 
     @property
-    def total_price(self):
+    def total_price(self) -> float:
         """💰 Total price in RON"""
         return self.total_price_cents / 100
 
-    def save(self, *args, **kwargs):
+    def save(self, *args: Any, **kwargs: Any) -> None:
         """💾 Calculate total price on save"""
         if self.unit_price_cents and self.years:
             self.total_price_cents = self.unit_price_cents * self.years

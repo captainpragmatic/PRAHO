@@ -5,6 +5,7 @@ Aligned with PostgreSQL hosting panel schema v1.
 """
 
 import uuid
+from typing import Any, Optional
 
 from django.core.validators import EmailValidator
 from django.db import models
@@ -116,10 +117,10 @@ class EmailTemplate(models.Model):
         ]
         ordering = ['category', 'key', 'locale']
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.key} ({self.locale}): {self.subject}"
 
-    def get_subject_display(self):
+    def get_subject_display(self) -> str:
         """Truncated subject for admin display"""
         if len(self.subject) > 50:
             return f"{self.subject[:47]}..."
@@ -282,10 +283,10 @@ class EmailLog(models.Model):
         ]
         ordering = ['-sent_at']
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.subject} → {self.to_addr} ({self.status})"
 
-    def get_status_display_color(self):
+    def get_status_display_color(self) -> str:
         """Get color for status display in admin"""
         status_colors = {
             'queued': '#6B7280',      # Gray
@@ -300,11 +301,11 @@ class EmailLog(models.Model):
         }
         return status_colors.get(self.status, '#6B7280')
 
-    def is_successful(self):
+    def is_successful(self) -> bool:
         """Check if email was successfully delivered"""
         return self.status in ['sent', 'delivered']
 
-    def is_failed(self):
+    def is_failed(self) -> bool:
         """Check if email failed to deliver"""
         return self.status in ['bounced', 'failed', 'rejected']
 
@@ -440,19 +441,19 @@ class EmailCampaign(models.Model):
         ]
         ordering = ['-created_at']
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.name} ({self.get_status_display()})"
 
-    def get_success_rate(self):
+    def get_success_rate(self) -> float:
         """Calculate campaign success rate percentage"""
         if self.total_recipients == 0:
             return 0
         return round((self.emails_sent / self.total_recipients) * 100, 1)
 
-    def can_be_sent(self):
+    def can_be_sent(self) -> bool:
         """Check if campaign can be sent"""
         return self.status in ['draft', 'scheduled', 'paused']
 
-    def is_completed(self):
+    def is_completed(self) -> bool:
         """Check if campaign is completed"""
         return self.status in ['sent', 'cancelled', 'failed']

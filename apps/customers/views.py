@@ -2,13 +2,14 @@
 # CUSTOMERS VIEWS - NORMALIZED MODEL STRUCTURE
 # ===============================================================================
 
-from typing import cast
+from typing import Any, cast
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db.models import Q
-from django.http import JsonResponse
+from django.db.models.query import QuerySet
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
 
@@ -33,7 +34,7 @@ from .models import (
 
 
 @login_required
-def customer_list(request):
+def customer_list(request: HttpRequest) -> HttpResponse:
     """
     👥 Display list of customers with search functionality
     Uses simplified Customer model with related data loaded efficiently
@@ -81,7 +82,7 @@ def customer_list(request):
 
 
 @login_required
-def customer_detail(request, customer_id):
+def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
     """
     🔍 Customer detail view with all related information
     Shows normalized data from separate profile models
@@ -114,7 +115,7 @@ def customer_detail(request, customer_id):
 
 
 @login_required
-def customer_create(request):
+def customer_create(request: HttpRequest) -> HttpResponse:
     """
     ➕ Create new customer with all profiles and optional user assignment
     Uses composite form to handle normalized structure and user creation/linking
@@ -229,7 +230,7 @@ def customer_create(request):
 
 
 @login_required
-def customer_edit(request, customer_id):
+def customer_edit(request: HttpRequest, customer_id: int) -> HttpResponse:
     """
     ✏️ Edit customer core information
     Separate views for tax/billing/address profiles
@@ -262,7 +263,7 @@ def customer_edit(request, customer_id):
 
 
 @login_required
-def customer_tax_profile(request, customer_id):
+def customer_tax_profile(request: HttpRequest, customer_id: int) -> HttpResponse:
     """
     🧾 Edit customer tax profile (CUI, VAT, compliance)
     """
@@ -298,7 +299,7 @@ def customer_tax_profile(request, customer_id):
 
 
 @login_required
-def customer_billing_profile(request, customer_id):
+def customer_billing_profile(request: HttpRequest, customer_id: int) -> HttpResponse:
     """
     💰 Edit customer billing profile (payment terms, credit)
     """
@@ -334,7 +335,7 @@ def customer_billing_profile(request, customer_id):
 
 
 @login_required
-def customer_address_add(request, customer_id):
+def customer_address_add(request: HttpRequest, customer_id: int) -> HttpResponse:
     """
     🏠 Add new address for customer
     """
@@ -382,7 +383,7 @@ def customer_address_add(request, customer_id):
 
 
 @login_required
-def customer_note_add(request, customer_id):
+def customer_note_add(request: HttpRequest, customer_id: int) -> HttpResponse:
     """
     📝 Add customer interaction note
     """
@@ -417,7 +418,7 @@ def customer_note_add(request, customer_id):
 
 
 @login_required
-def customer_delete(request, customer_id):
+def customer_delete(request: HttpRequest, customer_id: int) -> HttpResponse:
     """
     🗑️ Soft delete customer (preserves audit trail)
     """
@@ -445,7 +446,7 @@ def customer_delete(request, customer_id):
 
 
 @login_required
-def customer_search_api(request):
+def customer_search_api(request: HttpRequest) -> JsonResponse:
     """
     🔍 AJAX customer search for dropdowns
     """
@@ -483,7 +484,7 @@ def customer_search_api(request):
 
 
 @login_required
-def customer_assign_user(request, customer_id):
+def customer_assign_user(request: HttpRequest, customer_id: int) -> HttpResponse:
     """
     🔗 Assign user to existing customer (for orphaned customers)
     Provides same three-option workflow as customer creation

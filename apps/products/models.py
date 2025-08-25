@@ -6,9 +6,11 @@ Includes pricing, relationships, and configuration for Romanian hosting provider
 
 import uuid
 from decimal import Decimal
+from typing import Any, Optional
 
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.db.models.query import QuerySet
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -147,14 +149,14 @@ class Product(models.Model):
             models.Index(fields=['sort_order']),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.name
 
-    def get_active_prices(self):
+    def get_active_prices(self) -> QuerySet['ProductPrice']:
         """Get all active prices for this product"""
         return self.prices.filter(is_active=True)
 
-    def get_price_for_period(self, currency_code, billing_period):
+    def get_price_for_period(self, currency_code: str, billing_period: str) -> Optional['ProductPrice']:
         """Get price for specific currency and billing period"""
         try:
             return self.prices.get(
@@ -270,17 +272,17 @@ class ProductPrice(models.Model):
         ]
 
     @property
-    def amount(self):
+    def amount(self) -> Decimal:
         """Return amount in currency units (e.g., 29.99)"""
         return Decimal(self.amount_cents) / 100
 
     @property
-    def setup_fee(self):
+    def setup_fee(self) -> Decimal:
         """Return setup fee in currency units"""
         return Decimal(self.setup_cents) / 100
 
     @property
-    def effective_price_cents(self):
+    def effective_price_cents(self) -> int:
         """Get effective price considering promotions"""
         if (self.promo_price_cents and
             self.promo_valid_until and
@@ -289,11 +291,11 @@ class ProductPrice(models.Model):
         return self.amount_cents
 
     @property
-    def effective_price(self):
+    def effective_price(self) -> Decimal:
         """Get effective price in currency units"""
         return Decimal(self.effective_price_cents) / 100
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.product.name} - {self.currency.code} {self.amount} {self.billing_period}"
 
 
@@ -369,7 +371,7 @@ class ProductRelationship(models.Model):
             models.Index(fields=['is_active']),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.source_product.name} {self.get_relationship_type_display()} {self.target_product.name}"
 
 
@@ -427,7 +429,7 @@ class ProductBundle(models.Model):
         verbose_name_plural = _('Product Bundles')
         ordering = ['name']
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.name
 
 
@@ -489,11 +491,11 @@ class ProductBundleItem(models.Model):
         ordering = ['created_at']
 
     @property
-    def override_price(self):
+    def override_price(self) -> Optional[Decimal]:
         """Return override price in currency units"""
         if self.override_price_cents:
             return Decimal(self.override_price_cents) / 100
         return None
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.bundle.name} - {self.product.name} x{self.quantity}"

@@ -3,9 +3,12 @@
 # ===============================================================================
 
 from datetime import datetime, timedelta
+from typing import Any
 
 from django.contrib.auth.decorators import login_required
 from django.db.models import Sum
+from django.db.models.query import QuerySet
+from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 from django.utils import timezone
 
@@ -16,7 +19,7 @@ from apps.tickets.models import Ticket
 
 
 @login_required
-def dashboard_view(request):
+def dashboard_view(request: HttpRequest) -> HttpResponse:
     """
     🚀 Main dashboard with Romanian hosting business metrics
     Shows key statistics and recent activity for authenticated users
@@ -82,7 +85,7 @@ def dashboard_view(request):
 # HELPER FUNCTIONS - BUSINESS LOGIC
 # ===============================================================================
 
-def _calculate_monthly_revenue(customers):
+def _calculate_monthly_revenue(customers: QuerySet[Customer]) -> int:
     """Calculate total revenue for current month in RON"""
     current_month = timezone.now().replace(day=1)
 
@@ -95,7 +98,7 @@ def _calculate_monthly_revenue(customers):
     return monthly_total
 
 
-def _count_open_tickets(customers):
+def _count_open_tickets(customers: QuerySet[Customer]) -> int:
     """Count open support tickets requiring attention"""
     return Ticket.objects.filter(
         customer__in=customers,
@@ -103,7 +106,7 @@ def _count_open_tickets(customers):
     ).count()
 
 
-def _count_active_services(customers):
+def _count_active_services(customers: QuerySet[Customer]) -> int:
     """Count active hosting services"""
     return Service.objects.filter(
         customer__in=customers,

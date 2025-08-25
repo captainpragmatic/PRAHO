@@ -10,7 +10,7 @@ from collections.abc import Callable
 from datetime import datetime
 from decimal import Decimal
 from functools import wraps
-from typing import Any
+from typing import Any, Dict, Optional, TypedDict, Union
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
@@ -45,7 +45,15 @@ def format_romanian_phone(phone: str) -> str:
     return phone  # Return original if can't format
 
 
-def calculate_romanian_vat(amount: Decimal, vat_rate: int = 19) -> dict[str, Decimal]:
+class VATCalculation(TypedDict):
+    """Type definition for VAT calculation results"""
+    amount_without_vat: Decimal
+    vat_amount: Decimal
+    amount_with_vat: Decimal
+    vat_rate: int
+
+
+def calculate_romanian_vat(amount: Decimal, vat_rate: int = 19) -> VATCalculation:
     """Calculate Romanian VAT breakdown"""
     vat_multiplier = Decimal(vat_rate) / Decimal(100)
 
@@ -156,7 +164,7 @@ def format_romanian_datetime(dt: datetime) -> str:
 # BUSINESS LOGIC HELPERS
 # ===============================================================================
 
-def generate_invoice_number(year: int | None = None) -> str:
+def generate_invoice_number(year: Optional[int] = None) -> str:
     """Generate Romanian invoice number format"""
     if year is None:
         year = get_romanian_now().year
@@ -188,7 +196,7 @@ def calculate_due_date(invoice_date: datetime, payment_terms: int = 30) -> datet
 # RESPONSE HELPERS
 # ===============================================================================
 
-def json_success(data: Any = None, message: str = "Success") -> JsonResponse:
+def json_success(data: Optional[Any] = None, message: str = "Success") -> JsonResponse:
     """Standard JSON success response"""
     response_data = {
         'success': True,

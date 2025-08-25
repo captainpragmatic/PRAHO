@@ -4,11 +4,13 @@ Romanian hosting provider billing management with VAT compliance.
 """
 
 from decimal import Decimal
+from typing import Optional
 
 from django.contrib import admin
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.html import format_html
+from django.utils.safestring import SafeString
 from django.utils.translation import gettext_lazy as _
 
 from .models import (
@@ -63,7 +65,7 @@ class InvoiceSequenceAdmin(admin.ModelAdmin):
     list_display = ['scope', 'last_value', 'next_number_preview']
     search_fields = ['scope']
 
-    def next_number_preview(self, obj):
+    def next_number_preview(self, obj: InvoiceSequence) -> str:
         """Preview next number without incrementing"""
         return f"INV-{obj.last_value + 1:06d}"
     next_number_preview.short_description = _('Next Number')
@@ -76,7 +78,7 @@ class ProformaSequenceAdmin(admin.ModelAdmin):
     list_display = ['scope', 'last_value', 'next_number_preview']
     search_fields = ['scope']
 
-    def next_number_preview(self, obj):
+    def next_number_preview(self, obj: ProformaSequence) -> str:
         """Preview next number without incrementing"""
         return f"PRO-{obj.last_value + 1:06d}"
     next_number_preview.short_description = _('Next Number')
@@ -92,7 +94,7 @@ class ProformaLineInline(admin.TabularInline):
     extra = 0
     readonly_fields = ['line_total_display']
 
-    def line_total_display(self, obj):
+    def line_total_display(self, obj: ProformaLine) -> str:
         if obj.pk:
             return f"€{obj.line_total:.2f}"
         return "-"
@@ -174,19 +176,19 @@ class ProformaInvoiceAdmin(admin.ModelAdmin):
         }),
     )
 
-    def total_display(self, obj):
+    def total_display(self, obj: ProformaInvoice) -> str:
         return f"{obj.currency.symbol}{obj.total:.2f}"
     total_display.short_description = _('Total')
 
-    def subtotal_display(self, obj):
+    def subtotal_display(self, obj: ProformaInvoice) -> str:
         return f"{obj.currency.symbol}{obj.subtotal:.2f}"
     subtotal_display.short_description = _('Subtotal')
 
-    def tax_display(self, obj):
+    def tax_display(self, obj: ProformaInvoice) -> str:
         return f"{obj.currency.symbol}{obj.tax_amount:.2f}"
     tax_display.short_description = _('Tax')
 
-    def is_expired_display(self, obj):
+    def is_expired_display(self, obj: ProformaInvoice) -> SafeString:
         if obj.is_expired:
             return format_html('<span style="color: red;">❌ Expired</span>')
         return format_html('<span style="color: green;">✅ Valid</span>')

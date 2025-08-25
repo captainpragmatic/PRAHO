@@ -11,6 +11,7 @@ Refactored to normalized structure with soft deletes and separated concerns:
 """
 
 from decimal import Decimal
+from typing import Any, Optional
 
 from django.core.validators import RegexValidator
 from django.db import models

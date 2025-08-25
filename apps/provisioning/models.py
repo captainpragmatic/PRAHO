@@ -4,6 +4,7 @@ Romanian hosting provider service management and provisioning.
 """
 
 from decimal import Decimal
+from typing import Any, Optional
 
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
@@ -261,7 +262,7 @@ class Server(models.Model):
         ]
         return sum(float(v) for v in usage_values) / len(usage_values)
 
-    def can_host_service(self, service_plan: ServicePlan) -> bool:
+    def can_host_service(self, service_plan: 'ServicePlan') -> bool:
         """Check if server can host a new service"""
         if not self.is_active or self.status != 'active':
             return False
@@ -397,7 +398,7 @@ class Service(models.Model):
     def __str__(self) -> str:
         return f"{self.service_name} - {self.customer.get_display_name()}"
 
-    def get_next_billing_date(self):
+    def get_next_billing_date(self) -> Optional[Any]:
         """Calculate next billing date based on cycle"""
         if not self.activated_at:
             return None
@@ -435,7 +436,7 @@ class Service(models.Model):
         delta = self.expires_at - timezone.now()
         return max(0, delta.days)
 
-    def suspend(self, reason: str = ''):
+    def suspend(self, reason: str = '') -> None:
         """Suspend service"""
         from django.utils import timezone
 
@@ -444,7 +445,7 @@ class Service(models.Model):
         self.suspension_reason = reason
         self.save(update_fields=['status', 'suspended_at', 'suspension_reason'])
 
-    def activate(self):
+    def activate(self) -> None:
         """Activate service"""
         from django.utils import timezone
 
@@ -664,7 +665,7 @@ class ServiceRelationship(models.Model):
     def __str__(self):
         return f"{self.parent_service} → {self.child_service} ({self.get_relationship_type_display()})"
 
-    def clean(self):
+    def clean(self) -> None:
         """🔍 Validate service relationship"""
         if self.parent_service == self.child_service:
             raise ValidationError(_("Service cannot be related to itself"))
@@ -673,7 +674,7 @@ class ServiceRelationship(models.Model):
         if self._creates_circular_dependency():
             raise ValidationError(_("This relationship would create a circular dependency"))
 
-    def _creates_circular_dependency(self):
+    def _creates_circular_dependency(self) -> bool:
         """🔄 Check for circular dependency chains"""
         visited = set()
         stack = [self.child_service]
@@ -825,13 +826,13 @@ class ServiceDomain(models.Model):
         return f"{domain_name} ({type_display})"
 
     @property
-    def full_domain_name(self):
+    def full_domain_name(self) -> str:
         """🌐 Full domain name including subdomain"""
         if self.subdomain:
             return f"{self.subdomain}.{self.domain.name}"
         return self.domain.name
 
-    def clean(self):
+    def clean(self) -> None:
         """🔍 Validate service domain configuration"""
         # Validate subdomain format
         if self.subdomain and not self.subdomain.replace('-', '').isalnum():
@@ -949,12 +950,12 @@ class ServiceGroup(models.Model):
         return f"{self.name} ({self.get_group_type_display()})"
 
     @property
-    def total_services(self):
+    def total_services(self) -> int:
         """📊 Total number of services in group"""
         return self.members.count()
 
     @property
-    def active_services(self):
+    def active_services(self) -> int:
         """🟢 Number of active services in group"""
         return self.members.filter(service__status='active').count()
 
@@ -1043,13 +1044,13 @@ class ServiceGroupMember(models.Model):
         return f"{self.service} in {self.group} ({self.get_member_role_display()})"
 
     @property
-    def custom_price(self):
+    def custom_price(self) -> Optional[float]:
         """💰 Custom price in RON"""
         if self.custom_price_cents:
             return self.custom_price_cents / 100
         return None
 
-    def clean(self):
+    def clean(self) -> None:
         """🔍 Validate group membership"""
         # Ensure service belongs to same customer as group
         if self.service.customer != self.group.customer:

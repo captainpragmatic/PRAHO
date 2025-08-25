@@ -4,10 +4,16 @@ Romanian hosting provider customer support system administration.
 """
 
 
+from typing import Any, Optional
+
 from django.contrib import admin
+from django.db import models
 from django.db.models import Sum
+from django.db.models.query import QuerySet
+from django.http import HttpRequest, HttpResponse
 from django.utils import timezone
 from django.utils.html import format_html
+from django.utils.safestring import SafeString
 from django.utils.translation import gettext_lazy as _
 
 from .models import (
@@ -71,7 +77,7 @@ class SupportCategoryAdmin(admin.ModelAdmin):
     )
     readonly_fields = ['created_at']
 
-    def icon_display(self, obj):
+    def icon_display(self, obj: SupportCategory) -> SafeString:
         """Display category icon with color"""
         return format_html(
             '<span style="color: {}; font-size: 16px;">{}</span>',
@@ -101,7 +107,7 @@ class TicketAttachmentInline(admin.TabularInline):
     fields = ['filename', 'file_size_display', 'content_type', 'is_safe', 'uploaded_at']
     readonly_fields = ['file_size_display', 'uploaded_at']
 
-    def file_size_display(self, obj):
+    def file_size_display(self, obj: TicketAttachment) -> str:
         """Display file size in human readable format"""
         if obj.pk:
             return obj.get_file_size_display()
@@ -236,14 +242,14 @@ class TicketAdmin(admin.ModelAdmin):
         }),
     )
 
-    def title_truncated(self, obj):
+    def title_truncated(self, obj: Ticket) -> str:
         """Display truncated title"""
         if len(obj.title) > 50:
             return f"{obj.title[:47]}..."
         return obj.title
     title_truncated.short_description = _('Title')
 
-    def status_display(self, obj):
+    def status_display(self, obj: Ticket) -> SafeString:
         """Display status with colors"""
         color = obj.get_status_color()
         return format_html(
@@ -253,7 +259,7 @@ class TicketAdmin(admin.ModelAdmin):
         )
     status_display.short_description = _('Status')
 
-    def priority_display(self, obj):
+    def priority_display(self, obj: Ticket) -> SafeString:
         """Display priority with colors"""
         color = obj.get_priority_color()
         return format_html(
@@ -263,7 +269,7 @@ class TicketAdmin(admin.ModelAdmin):
         )
     priority_display.short_description = _('Priority')
 
-    def sla_status(self, obj):
+    def sla_status(self, obj: Ticket) -> SafeString:
         """Display SLA status with warnings"""
         now = timezone.now()
 
@@ -296,7 +302,7 @@ class TicketAdmin(admin.ModelAdmin):
         )
     sla_status.short_description = _('SLA Status')
 
-    def satisfaction_display(self, obj):
+    def satisfaction_display(self, obj: Ticket) -> SafeString:
         """Display customer satisfaction rating"""
         if obj.satisfaction_rating:
             stars = '⭐' * obj.satisfaction_rating
@@ -317,7 +323,7 @@ class TicketAdmin(admin.ModelAdmin):
         'require_customer_response',
     ]
 
-    def assign_to_me(self, request, queryset):
+    def assign_to_me(self, request: HttpRequest, queryset: QuerySet[Ticket]) -> None:
         """Assign selected tickets to current user"""
         updated = queryset.filter(status__in=['new', 'open']).update(
             assigned_to=request.user,
@@ -326,7 +332,7 @@ class TicketAdmin(admin.ModelAdmin):
         self.message_user(request, f'Successfully assigned {updated} tickets to you.')
     assign_to_me.short_description = _('Assign to me')
 
-    def mark_resolved(self, request, queryset):
+    def mark_resolved(self, request: HttpRequest, queryset: QuerySet[Ticket]) -> None:
         """Mark selected tickets as resolved"""
         now = timezone.now()
         updated = 0
@@ -339,13 +345,13 @@ class TicketAdmin(admin.ModelAdmin):
         self.message_user(request, f'Successfully resolved {updated} tickets.')
     mark_resolved.short_description = _('Mark as resolved')
 
-    def escalate_tickets(self, request, queryset):
+    def escalate_tickets(self, request: HttpRequest, queryset: QuerySet[Ticket]) -> None:
         """Escalate selected tickets"""
         updated = queryset.update(is_escalated=True, priority='urgent')
         self.message_user(request, f'Successfully escalated {updated} tickets.')
     escalate_tickets.short_description = _('Escalate tickets')
 
-    def require_customer_response(self, request, queryset):
+    def require_customer_response(self, request: HttpRequest, queryset: QuerySet[Ticket]) -> None:
         """Mark tickets as requiring customer response"""
         updated = queryset.update(
             requires_customer_response=True,
@@ -423,7 +429,7 @@ class TicketCommentAdmin(admin.ModelAdmin):
         }),
     )
 
-    def author_display(self, obj):
+    def author_display(self, obj: TicketComment) -> SafeString:
         """Display comment author"""
         if obj.author:
             return format_html(
@@ -440,7 +446,7 @@ class TicketCommentAdmin(admin.ModelAdmin):
         return 'Anonymous'
     author_display.short_description = _('Author')
 
-    def content_preview(self, obj):
+    def content_preview(self, obj: TicketComment) -> str:
         """Display content preview"""
         if len(obj.content) > 100:
             return f"{obj.content[:97]}..."
@@ -508,7 +514,7 @@ class TicketWorklogAdmin(admin.ModelAdmin):
         }),
     )
 
-    def total_cost_display(self, obj):
+    def total_cost_display(self, obj: TicketWorklog) -> str:
         """Display total cost if billable"""
         if obj.is_billable and obj.hourly_rate:
             total = obj.total_cost
@@ -516,14 +522,14 @@ class TicketWorklogAdmin(admin.ModelAdmin):
         return '-'
     total_cost_display.short_description = _('Total Cost')
 
-    def description_preview(self, obj):
+    def description_preview(self, obj: TicketWorklog) -> str:
         """Display description preview"""
         if len(obj.description) > 80:
             return f"{obj.description[:77]}..."
         return obj.description
     description_preview.short_description = _('Description')
 
-    def changelist_view(self, request, extra_context=None):
+    def changelist_view(self, request: HttpRequest, extra_context: Optional[dict[str, Any]] = None) -> HttpResponse:
         """Add summary statistics to changelist"""
         response = super().changelist_view(request, extra_context=extra_context)
 
@@ -608,14 +614,14 @@ class TicketAttachmentAdmin(admin.ModelAdmin):
         }),
     )
 
-    def file_size_display(self, obj):
+    def file_size_display(self, obj: TicketAttachment) -> str:
         """Display file size in human readable format"""
         if obj.pk:
             return obj.get_file_size_display()
         return '-'
     file_size_display.short_description = _('File Size')
 
-    def is_safe_display(self, obj):
+    def is_safe_display(self, obj: TicketAttachment) -> SafeString:
         """Display safety status with colors"""
         if obj.is_safe:
             return format_html('<span style="color: green;">✅ Safe</span>')

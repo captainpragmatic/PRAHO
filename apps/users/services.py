@@ -8,7 +8,7 @@ This replaces the existing services.py with security-hardened implementations.
 import hashlib
 import logging
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional, TypedDict
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -44,6 +44,8 @@ from apps.customers.models import (
 from .models import CustomerMembership
 
 if TYPE_CHECKING:
+    from django.http import HttpRequest
+    from django.contrib.auth.models import AbstractBaseUser
     from .models import User
 else:
     User = get_user_model()
@@ -76,6 +78,25 @@ class SecureUserRegistrationService:
         ('other', _('Other Organization Type')),
     ]
 
+    class UserData(TypedDict):
+        """Type definition for user registration data"""
+        email: str
+        first_name: str
+        last_name: str
+        phone: Optional[str]
+        accepts_marketing: Optional[bool]
+        gdpr_consent_date: Optional[str]
+
+    class CustomerData(TypedDict):
+        """Type definition for customer registration data"""
+        company_name: str
+        customer_type: str
+        vat_number: Optional[str]
+        registration_number: Optional[str]
+        billing_address: Optional[str]
+        billing_city: Optional[str]
+        billing_postal_code: Optional[str]
+
     @classmethod
     @secure_user_registration(rate_limit=5)  # 5 registrations per hour per IP
     @atomic_with_retry(max_retries=3)
@@ -91,9 +112,9 @@ class SecureUserRegistrationService:
         cls,
         user_data: dict[str, Any],
         customer_data: dict[str, Any],
-        request_ip: str = None,
-        user_agent: str = None,
-        **kwargs
+        request_ip: Optional[str] = None,
+        user_agent: Optional[str] = None,
+        **kwargs: Any
     ) -> Result[tuple[User, Customer], str]:
         """
         🔒 Secure registration of new user as owner of NEW customer organization

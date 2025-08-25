@@ -6,7 +6,7 @@ Centralized audit logging for Romanian compliance and security.
 import json
 import logging
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, TypedDict, Union
 
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.models import ContentType
@@ -14,14 +14,31 @@ from django.core.files.storage import default_storage
 from django.db import transaction
 from django.utils import timezone
 
-from .models import AuditEvent, ComplianceLog
+from apps.common.types import Result
+from .models import AuditEvent, ComplianceLog, DataExport
 
 if TYPE_CHECKING:
-    from apps.common.types import Result
-
-    from .models import DataExport
+    pass
 
 User = get_user_model()
+
+class ExportScope(TypedDict):
+    """Type definition for GDPR export scope configuration"""
+    include_profile: bool
+    include_customers: bool
+    include_billing: bool
+    include_tickets: bool
+    include_audit_logs: bool
+    include_sessions: bool
+    format: str
+
+class ConsentHistoryEntry(TypedDict):
+    """Type definition for consent history entries"""
+    timestamp: str
+    action: str
+    description: str
+    status: str
+    evidence: Dict[str, Any]
 logger = logging.getLogger(__name__)
 
 
@@ -31,16 +48,16 @@ class AuditService:
     @staticmethod
     def log_event(
         event_type: str,
-        user = None,
-        content_object: Any | None = None,
-        old_values: dict | None = None,
-        new_values: dict | None = None,
+        user: Optional[User] = None,
+        content_object: Optional[Any] = None,
+        old_values: Optional[Dict[str, Any]] = None,
+        new_values: Optional[Dict[str, Any]] = None,
         description: str = '',
-        ip_address: str | None = None,
-        user_agent: str | None = None,
-        request_id: str | None = None,
-        session_key: str | None = None,
-        metadata: dict | None = None,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+        request_id: Optional[str] = None,
+        session_key: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
         actor_type: str = 'user'
     ) -> AuditEvent:
         """
@@ -98,13 +115,13 @@ class AuditService:
     @staticmethod
     def log_2fa_event(
         event_type: str,
-        user,
-        ip_address: str | None = None,
-        user_agent: str | None = None,
-        metadata: dict | None = None,
+        user: User,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
         description: str = '',
-        request_id: str | None = None,
-        session_key: str | None = None
+        request_id: Optional[str] = None,
+        session_key: Optional[str] = None
     ) -> AuditEvent:
         """
         🔐 Log 2FA-specific audit event
@@ -206,9 +223,9 @@ class GDPRExportService:
     def create_data_export_request(
         cls,
         user: User,
-        request_ip: str = None,
-        export_scope: dict[str, Any] = None
-    ) -> 'Result[DataExport, str]':
+        request_ip: Optional[str] = None,
+        export_scope: Optional[Dict[str, Any]] = None
+    ) -> Result[DataExport, str]:
         """Create a new GDPR data export request"""
 
         from apps.common.types import Err, Ok
@@ -256,7 +273,7 @@ class GDPRExportService:
 
     @classmethod
     @transaction.atomic
-    def process_data_export(cls, export_request: 'DataExport') -> 'Result[str, str]':
+    def process_data_export(cls, export_request: 'DataExport') -> Result[str, str]:
         """Process and generate the actual data export file"""
         import hashlib
 
@@ -324,7 +341,7 @@ class GDPRExportService:
             return Err(f"Export processing failed: {e!s}")
 
     @classmethod
-    def _collect_user_data(cls, user: User, scope: dict[str, Any]) -> dict[str, Any]:
+    def _collect_user_data(cls, user: User, scope: Dict[str, Any]) -> Dict[str, Any]:
         """Collect comprehensive user data based on export scope"""
         data = {
             'metadata': {
@@ -551,7 +568,7 @@ class GDPRDeletionService:
             return Err(f"Deletion processing failed: {e!s}")
 
     @classmethod
-    def _can_user_be_deleted(cls, user: User) -> 'tuple[bool, str | None]':
+    def _can_user_be_deleted(cls, user: User) -> tuple[bool, Optional[str]]:
         """Check if user can be completely deleted based on business rules"""
 
         restrictions = []
@@ -568,7 +585,7 @@ class GDPRDeletionService:
         return True, None
 
     @classmethod
-    def _anonymize_user_data(cls, user: User) -> 'Result[str, str]':
+    def _anonymize_user_data(cls, user: User) -> Result[str, str]:
         """Anonymize user data while preserving business relationships"""
         from apps.common.types import Err, Ok
 
@@ -611,7 +628,7 @@ class GDPRDeletionService:
             return Err(f"Anonymization failed: {e!s}")
 
     @classmethod
-    def _delete_user_data(cls, user: User) -> 'Result[str, str]':
+    def _delete_user_data(cls, user: User) -> Result[str, str]:
         """Complete data deletion (only when legally permitted)"""
         from apps.common.types import Err, Ok
 
@@ -650,11 +667,10 @@ class GDPRConsentService:
     def withdraw_consent(
         cls,
         user: User,
-        consent_types: 'List[str]',
+        consent_types: List[str],
         request_ip: str = None
-    ) -> 'Result[str, str]':
+    ) -> Result[str, str]:
         """Withdraw specific types of consent"""
-
 
         from apps.common.types import Err, Ok
 

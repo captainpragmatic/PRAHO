@@ -2,9 +2,13 @@
 # PROVISIONING VIEWS - HOSTING SERVICES MANAGEMENT
 # ===============================================================================
 
+from typing import Any, List, Union
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
+from django.db.models.query import QuerySet
+from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
 
@@ -13,7 +17,7 @@ from apps.customers.models import Customer
 from .models import Server, Service, ServicePlan
 
 
-def _get_accessible_customer_ids(user):
+def _get_accessible_customer_ids(user: Any) -> List[int]:
     """Helper to get customer IDs that user can access"""
     accessible_customers = user.get_accessible_customers()
 
@@ -25,7 +29,7 @@ def _get_accessible_customer_ids(user):
 
 
 @login_required
-def service_list(request):
+def service_list(request: HttpRequest) -> HttpResponse:
     """🚀 Display hosting services for user's customers"""
     customer_ids = _get_accessible_customer_ids(request.user)
     services = Service.objects.filter(customer_id__in=customer_ids).select_related('customer', 'service_plan').order_by('-created_at')
@@ -51,7 +55,7 @@ def service_list(request):
 
 
 @login_required
-def service_detail(request, pk):
+def service_detail(request: HttpRequest, pk: int) -> HttpResponse:
     """🚀 Display service details and configuration"""
     service = get_object_or_404(Service, pk=pk)
 
@@ -69,7 +73,7 @@ def service_detail(request, pk):
 
 
 @login_required
-def service_create(request):
+def service_create(request: HttpRequest) -> HttpResponse:
     """➕ Create new hosting service"""
     # Get user's customers for dropdown
     accessible_customers = request.user.get_accessible_customers()
@@ -117,7 +121,7 @@ def service_create(request):
 
 
 @login_required
-def service_edit(request, pk):
+def service_edit(request: HttpRequest, pk: int) -> HttpResponse:
     """✏️ Edit existing hosting service"""
     service = get_object_or_404(Service, pk=pk)
 
@@ -174,7 +178,7 @@ def service_edit(request, pk):
 
 
 @login_required
-def service_suspend(request, pk):
+def service_suspend(request: HttpRequest, pk: int) -> HttpResponse:
     """⏸️ Suspend hosting service"""
     service = get_object_or_404(Service, pk=pk)
 
@@ -194,7 +198,7 @@ def service_suspend(request, pk):
 
 
 @login_required
-def service_activate(request, pk):
+def service_activate(request: HttpRequest, pk: int) -> HttpResponse:
     """▶️ Activate suspended service"""
     service = get_object_or_404(Service, pk=pk)
 
@@ -211,7 +215,7 @@ def service_activate(request, pk):
 
 
 @login_required
-def plan_list(request):
+def plan_list(request: HttpRequest) -> HttpResponse:
     """📋 Display available hosting plans"""
     plans = ServicePlan.objects.filter(is_active=True).order_by('price')
 
@@ -223,7 +227,7 @@ def plan_list(request):
 
 
 @login_required
-def server_list(request):
+def server_list(request: HttpRequest) -> HttpResponse:
     """🖥️ Display server infrastructure"""
     servers = Server.objects.all().order_by('name')
 

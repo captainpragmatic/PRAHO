@@ -3,8 +3,14 @@ Django admin for notifications app.
 Email templates and communication logging for Romanian hosting provider.
 """
 
+from typing import Optional
+
+from django import forms
 from django.contrib import admin
+from django.db.models.query import QuerySet
+from django.http import HttpRequest
 from django.utils.html import format_html
+from django.utils.safestring import SafeString
 from django.utils.translation import gettext_lazy as _
 
 from .models import EmailCampaign, EmailLog, EmailTemplate
@@ -44,12 +50,12 @@ class EmailTemplateAdmin(admin.ModelAdmin):
         }),
     )
 
-    def get_subject_display(self, obj):
+    def get_subject_display(self, obj: EmailTemplate) -> str:
         """Display truncated subject"""
         return obj.get_subject_display()
     get_subject_display.short_description = _('Subject')
 
-    def save_model(self, request, obj, form, change):
+    def save_model(self, request: HttpRequest, obj: EmailTemplate, form: forms.ModelForm, change: bool) -> None:
         """Set created_by on new templates"""
         if not change and not obj.created_by:
             obj.created_by = request.user
@@ -101,7 +107,7 @@ class EmailLogAdmin(admin.ModelAdmin):
         }),
     )
 
-    def get_status_display_colored(self, obj):
+    def get_status_display_colored(self, obj: EmailLog) -> SafeString:
         """Display status with color coding"""
         color = obj.get_status_display_color()
         status_text = obj.get_status_display()
@@ -127,11 +133,11 @@ class EmailLogAdmin(admin.ModelAdmin):
     get_status_display_colored.short_description = _('Status')
     get_status_display_colored.admin_order_field = 'status'
 
-    def has_add_permission(self, request):
+    def has_add_permission(self, request: HttpRequest) -> bool:
         """Email logs are created by system, not manually"""
         return False
 
-    def has_change_permission(self, request, obj=None):
+    def has_change_permission(self, request: HttpRequest, obj: Optional[EmailLog] = None) -> bool:
         """Email logs are immutable for audit purposes"""
         return False
 
@@ -186,7 +192,7 @@ class EmailCampaignAdmin(admin.ModelAdmin):
         }),
     )
 
-    def get_status_display_colored(self, obj):
+    def get_status_display_colored(self, obj: EmailCampaign) -> SafeString:
         """Display campaign status with color coding"""
         status_colors = {
             'draft': '#6B7280',       # Gray
@@ -219,7 +225,7 @@ class EmailCampaignAdmin(admin.ModelAdmin):
     get_status_display_colored.short_description = _('Status')
     get_status_display_colored.admin_order_field = 'status'
 
-    def get_progress_display(self, obj):
+    def get_progress_display(self, obj: EmailCampaign) -> SafeString:
         """Display campaign progress"""
         if obj.total_recipients == 0:
             return _('No recipients')
@@ -233,7 +239,7 @@ class EmailCampaignAdmin(admin.ModelAdmin):
         )
     get_progress_display.short_description = _('Progress')
 
-    def get_success_rate_display(self, obj):
+    def get_success_rate_display(self, obj: EmailCampaign) -> SafeString:
         """Display success rate with color coding"""
         rate = obj.get_success_rate()
 
@@ -253,7 +259,7 @@ class EmailCampaignAdmin(admin.ModelAdmin):
         )
     get_success_rate_display.short_description = _('Success Rate')
 
-    def save_model(self, request, obj, form, change):
+    def save_model(self, request: HttpRequest, obj: EmailCampaign, form: forms.ModelForm, change: bool) -> None:
         """Set created_by on new campaigns"""
         if not change and not obj.created_by:
             obj.created_by = request.user

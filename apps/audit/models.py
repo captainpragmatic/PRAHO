@@ -4,6 +4,7 @@ Implements Romanian compliance requirements and security audit trails.
 """
 
 import uuid
+from typing import Any, Optional
 
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.fields import GenericForeignKey
@@ -81,7 +82,7 @@ class AuditEvent(models.Model):
             models.Index(fields=['request_id']),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.action} on {self.content_type} by {self.user or 'System'}"
 
 
@@ -126,7 +127,7 @@ class DataExport(models.Model):
         db_table = 'audit_data_export'
         ordering = ['-requested_at']
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.export_type} export by {self.requested_by}"
 
 
@@ -169,5 +170,5 @@ class ComplianceLog(models.Model):
             models.Index(fields=['status', '-timestamp']),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.compliance_type}: {self.reference_id}"

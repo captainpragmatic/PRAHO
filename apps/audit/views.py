@@ -4,11 +4,12 @@ Comprehensive data subject rights implementation with industry-standard UI/UX.
 """
 
 import logging
+from typing import Optional
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.files.storage import default_storage
-from django.http import Http404, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.utils.translation import gettext as _
@@ -26,7 +27,7 @@ from .services import (
 logger = logging.getLogger(__name__)
 
 
-def _get_client_ip(request):
+def _get_client_ip(request: HttpRequest) -> Optional[str]:
     """Get client IP address"""
     x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
     if x_forwarded_for:
@@ -39,7 +40,7 @@ def _get_client_ip(request):
 # ===============================================================================
 
 @login_required
-def gdpr_dashboard(request):
+def gdpr_dashboard(request: HttpRequest) -> HttpResponse:
     """GDPR privacy dashboard - main entry point for data subject rights"""
     # Get user's consent history
     consent_history = gdpr_consent_service.get_consent_history(request.user)
@@ -76,7 +77,7 @@ def gdpr_dashboard(request):
 @login_required
 @require_POST
 @csrf_protect
-def request_data_export(request):
+def request_data_export(request: HttpRequest) -> HttpResponse:
     """Create a new GDPR data export request"""
     try:
         # Get export scope from form
@@ -127,7 +128,7 @@ def request_data_export(request):
 
 
 @login_required
-def download_data_export(request, export_id):
+def download_data_export(request: HttpRequest, export_id: int) -> HttpResponse:
     """Download completed GDPR data export"""
 
     try:
@@ -192,7 +193,7 @@ def download_data_export(request, export_id):
 @login_required
 @require_POST
 @csrf_protect
-def request_data_deletion(request):
+def request_data_deletion(request: HttpRequest) -> HttpResponse:
     """Create a GDPR data deletion/anonymization request"""
     try:
         deletion_type = request.POST.get('deletion_type', 'anonymize')
@@ -253,7 +254,7 @@ def request_data_deletion(request):
 @login_required
 @require_POST
 @csrf_protect
-def withdraw_consent(request):
+def withdraw_consent(request: HttpRequest) -> HttpResponse:
     """Withdraw specific GDPR consents"""
     try:
         consent_types = request.POST.getlist('consent_types')
@@ -295,7 +296,7 @@ def withdraw_consent(request):
 
 
 @login_required
-def consent_history(request):
+def consent_history(request: HttpRequest) -> HttpResponse:
     """Display detailed consent history"""
     history = gdpr_consent_service.get_consent_history(request.user)
 
@@ -312,7 +313,7 @@ def consent_history(request):
 # ===============================================================================
 
 @login_required
-def audit_log(request):
+def audit_log(request: HttpRequest) -> HttpResponse:
     """Display audit log for authorized users."""
     # TODO: Implement audit log view for staff
     return render(request, 'audit/log.html')
@@ -320,7 +321,7 @@ def audit_log(request):
 
 # Legacy export endpoint - redirect to new GDPR system
 @login_required
-def export_data(request):
+def export_data(request: HttpRequest) -> HttpResponse:
     """Legacy data export endpoint - redirect to GDPR dashboard"""
     messages.info(request, _('Data export has moved to the GDPR Privacy Dashboard.'))
     return redirect('audit:gdpr_dashboard')

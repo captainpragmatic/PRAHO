@@ -3,6 +3,8 @@ Support ticket models for PRAHO Platform
 Romanian hosting provider customer support system.
 """
 
+from typing import Any, Optional
+
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
@@ -226,7 +228,7 @@ class Ticket(models.Model):
     def __str__(self) -> str:
         return f"#{self.ticket_number}: {self.title}"
 
-    def save(self, *args, **kwargs):
+    def save(self, *args: Any, **kwargs: Any) -> None:
         if not self.ticket_number:
             self.ticket_number = self._generate_ticket_number()
 
