@@ -54,7 +54,14 @@ INTERNAL_IPS = [
 DEBUG_TOOLBAR_CONFIG = {
     'SHOW_TOOLBAR_CALLBACK': lambda request: DEBUG,
     'SHOW_COLLAPSED': True,
+    'IS_RUNNING_TESTS': False,  # Fix for debug toolbar test issue
 }
+
+# Disable debug toolbar during tests
+import sys
+if 'test' in sys.argv:
+    INSTALLED_APPS = [app for app in INSTALLED_APPS if app != 'debug_toolbar']
+    MIDDLEWARE = [mw for mw in MIDDLEWARE if 'debug_toolbar' not in mw]
 
 # ===============================================================================
 # EMAIL BACKEND (Console for development)
@@ -71,7 +78,8 @@ DEFAULT_FROM_EMAIL = 'dev@pragmatichost.com'
 if os.environ.get('USE_REDIS') != 'true':
     CACHES = {
         'default': {
-            'BACKEND': 'django.core.cache.backends.dummy.DummyCache',
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'praho-cache',
         }
     }
     # Use database sessions when Redis is disabled

@@ -215,6 +215,126 @@
     </div>
   </div>
 
+  <!-- GDPR Privacy & Data Protection -->
+  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mt-6">
+    <div class="p-6">
+      <h3 class="text-lg font-medium text-white mb-6">
+        🛡️ {% trans 'Privacy & Data Protection' %}
+      </h3>
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Current Consent Status -->
+        <div class="space-y-4">
+          <h4 class="text-sm font-semibold text-slate-300">{% trans 'Current Consent Status' %}</h4>
+          
+          <div class="space-y-3">
+            <!-- Data Processing Consent -->
+            <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
+              <div class="flex items-center">
+                <span class="text-green-400 mr-2">🔒</span>
+                <div>
+                  <div class="text-sm font-medium text-white">{% trans 'Data Processing' %}</div>
+                  <div class="text-xs text-slate-400">{% trans 'Required for service' %}</div>
+                </div>
+              </div>
+              {% if user.gdpr_consent_date %}
+                <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-green-600 text-white rounded-full">
+                  ✅ {% trans 'Active' %}
+                </span>
+              {% else %}
+                <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-red-600 text-white rounded-full">
+                  ❌ {% trans 'Not Given' %}
+                </span>
+              {% endif %}
+            </div>
+
+            <!-- Marketing Consent -->
+            <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
+              <div class="flex items-center">
+                <span class="text-blue-400 mr-2">📧</span>
+                <div>
+                  <div class="text-sm font-medium text-white">{% trans 'Marketing Communications' %}</div>
+                  <div class="text-xs text-slate-400">{% trans 'Newsletters and updates' %}</div>
+                </div>
+              </div>
+              {% if user.accepts_marketing %}
+                <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-green-600 text-white rounded-full">
+                  ✅ {% trans 'Enabled' %}
+                </span>
+              {% else %}
+                <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-slate-500 text-white rounded-full">
+                  📛 {% trans 'Disabled' %}
+                </span>
+              {% endif %}
+            </div>
+          </div>
+
+          {% if user.gdpr_consent_date %}
+          <div class="text-xs text-slate-400">
+            {% trans 'Last updated:' %} {{ user.gdpr_consent_date|date:"M d, Y" }}
+          </div>
+          {% endif %}
+        </div>
+
+        <!-- GDPR Actions -->
+        <div class="space-y-4">
+          <h4 class="text-sm font-semibold text-slate-300">{% trans 'Your Data Rights' %}</h4>
+          
+          <div class="space-y-3">
+            <a href="{% url 'audit:gdpr_dashboard' %}" 
+               class="flex items-center p-3 bg-blue-900 hover:bg-blue-800 rounded-lg transition-colors group">
+              <span class="text-blue-400 mr-3 text-lg">🛡️</span>
+              <div>
+                <div class="text-sm font-medium text-white group-hover:text-blue-100">
+                  {% trans 'Privacy Dashboard' %}
+                </div>
+                <div class="text-xs text-blue-300">
+                  {% trans 'Manage all your privacy settings' %}
+                </div>
+              </div>
+              <span class="ml-auto text-blue-400 group-hover:text-blue-300">→</span>
+            </a>
+
+            <a href="{% url 'audit:gdpr_dashboard' %}#export" 
+               class="flex items-center p-3 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors group">
+              <span class="text-green-400 mr-3">📄</span>
+              <div>
+                <div class="text-sm font-medium text-white group-hover:text-slate-100">
+                  {% trans 'Export My Data' %}
+                </div>
+                <div class="text-xs text-slate-400">
+                  {% trans 'Download your personal information' %}
+                </div>
+              </div>
+              <span class="ml-auto text-slate-400 group-hover:text-slate-300">→</span>
+            </a>
+
+            <a href="{% url 'audit:consent_history' %}" 
+               class="flex items-center p-3 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors group">
+              <span class="text-yellow-400 mr-3">📜</span>
+              <div>
+                <div class="text-sm font-medium text-white group-hover:text-slate-100">
+                  {% trans 'Consent History' %}
+                </div>
+                <div class="text-xs text-slate-400">
+                  {% trans 'View your consent changes' %}
+                </div>
+              </div>
+              <span class="ml-auto text-slate-400 group-hover:text-slate-300">→</span>
+            </a>
+          </div>
+
+          <!-- Legal compliance note -->
+          <div class="mt-4 p-3 bg-slate-900 border border-slate-600 rounded-lg">
+            <p class="text-xs text-slate-400">
+              🇷🇴 {% trans 'GDPR compliant according to Romanian Law 190/2018 and EU Regulation 2016/679' %}
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Customer Access -->
   {% if accessible_customers %}
   <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mt-6">

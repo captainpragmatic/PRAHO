@@ -1,0 +1,431 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans 'Privacy & Data Protection' %} - PRAHO{% endblock %}
+
+{% block content %}
+<div class="min-h-screen bg-slate-900 px-4 sm:px-6 lg:px-8 py-8">
+  <!-- Header -->
+  <div class="max-w-7xl mx-auto">
+    <div class="mb-8">
+      <h1 class="text-3xl font-bold text-white mb-4">
+        🛡️ {% trans 'Privacy & Data Protection' %}
+      </h1>
+      <p class="text-slate-300 text-lg">
+        {% trans 'Manage your personal data and exercise your GDPR rights as a Romanian hosting customer.' %}
+      </p>
+    </div>
+
+    <!-- Current Status Overview -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+      <!-- Consent Status Card -->
+      <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-sm">
+        <div class="px-6 py-4 border-b border-slate-700">
+          <h3 class="text-lg font-medium text-white">
+            🔒 {% trans 'Privacy Consent Status' %}
+          </h3>
+        </div>
+        <div class="p-6">
+          <div class="space-y-4">
+            <!-- Data Processing Consent -->
+            <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
+              <div>
+                <div class="text-sm font-medium text-white">{% trans 'Data Processing' %}</div>
+                <div class="text-xs text-slate-400">{% trans 'Required for service' %}</div>
+              </div>
+              <div class="flex items-center">
+                {% if consent_status.data_processing %}
+                  <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-green-600 text-white rounded-full">
+                    ✅ {% trans 'Active' %}
+                  </span>
+                {% else %}
+                  <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-red-600 text-white rounded-full">
+                    ❌ {% trans 'Not Given' %}
+                  </span>
+                {% endif %}
+              </div>
+            </div>
+
+            <!-- Marketing Consent -->
+            <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
+              <div>
+                <div class="text-sm font-medium text-white">{% trans 'Marketing Communications' %}</div>
+                <div class="text-xs text-slate-400">{% trans 'Optional newsletters' %}</div>
+              </div>
+              <div class="flex items-center">
+                {% if consent_status.marketing %}
+                  <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-green-600 text-white rounded-full">
+                    ✅ {% trans 'Enabled' %}
+                  </span>
+                {% else %}
+                  <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-slate-500 text-white rounded-full">
+                    📛 {% trans 'Disabled' %}
+                  </span>
+                {% endif %}
+              </div>
+            </div>
+
+            {% if consent_status.last_updated %}
+            <div class="text-xs text-slate-400 mt-3">
+              {% trans 'Last updated:' %} {{ consent_status.last_updated|date:"M d, Y" }}
+            </div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Actions -->
+      <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-sm">
+        <div class="px-6 py-4 border-b border-slate-700">
+          <h3 class="text-lg font-medium text-white">
+            ⚡ {% trans 'Quick Actions' %}
+          </h3>
+        </div>
+        <div class="p-6">
+          <div class="space-y-3">
+            <button onclick="showModal('export-modal')" class="w-full inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 border border-blue-600 transition-all duration-200">
+              📄 {% trans 'Export My Data' %}
+            </button>
+            
+            <a href="{% url 'audit:consent_history' %}" class="w-full inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-lg bg-slate-600 text-white hover:bg-slate-700 focus:ring-4 focus:ring-slate-300 border border-slate-600 transition-all duration-200">
+              🔄 {% trans 'Consent History' %}
+            </a>
+            
+            <button onclick="showModal('consent-modal')" class="w-full inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-lg bg-yellow-500 text-white hover:bg-yellow-600 focus:ring-4 focus:ring-yellow-300 border border-yellow-500 transition-all duration-200">
+              ⚠️ {% trans 'Withdraw Consent' %}
+            </button>
+            
+            <button onclick="showModal('deletion-modal')" class="w-full inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-lg bg-red-600 text-white hover:bg-red-700 focus:ring-4 focus:ring-red-300 border border-red-600 transition-all duration-200">
+              🗑️ {% trans 'Delete Account' %}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- GDPR Rights Info -->
+      <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-sm">
+        <div class="px-6 py-4 border-b border-slate-700">
+          <h3 class="text-lg font-medium text-white">
+            📋 {% trans 'Your Rights' %}
+          </h3>
+        </div>
+        <div class="p-6">
+          <div class="space-y-2 text-sm">
+            <div class="flex items-start">
+              <span class="text-blue-400 mr-2">📄</span>
+              <div>
+                <div class="text-white font-medium">{% trans 'Right to Access' %}</div>
+                <div class="text-slate-400">{% trans 'Export your personal data' %}</div>
+              </div>
+            </div>
+            
+            <div class="flex items-start">
+              <span class="text-yellow-400 mr-2">✏️</span>
+              <div>
+                <div class="text-white font-medium">{% trans 'Right to Rectification' %}</div>
+                <div class="text-slate-400">{% trans 'Update your information' %}</div>
+              </div>
+            </div>
+            
+            <div class="flex items-start">
+              <span class="text-red-400 mr-2">🗑️</span>
+              <div>
+                <div class="text-white font-medium">{% trans 'Right to Erasure' %}</div>
+                <div class="text-slate-400">{% trans 'Request data deletion' %}</div>
+              </div>
+            </div>
+            
+            <div class="flex items-start">
+              <span class="text-green-400 mr-2">🔒</span>
+              <div>
+                <div class="text-white font-medium">{% trans 'Right to Withdraw Consent' %}</div>
+                <div class="text-slate-400">{% trans 'Change your consent anytime' %}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recent Activity -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- Recent Export Requests -->
+      {% if recent_exports %}
+      <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-sm">
+        <div class="px-6 py-4 border-b border-slate-700">
+          <h3 class="text-lg font-medium text-white">
+            📋 {% trans 'Recent Data Exports' %}
+          </h3>
+        </div>
+        <div class="p-6">
+        <div class="space-y-3">
+          {% for export in recent_exports %}
+          <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
+            <div>
+              <div class="text-sm font-medium text-white">
+                {% trans 'Export' %} #{{ export.id|slice:":8" }}
+              </div>
+              <div class="text-xs text-slate-400">{{ export.requested_at|date:"M d, Y H:i" }}</div>
+            </div>
+            <div class="flex items-center space-x-2">
+              <!-- Status Badge -->
+              {% if export.status == 'completed' %}
+                <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-green-600 text-white rounded-full">
+                  ✅ {% trans 'Ready' %}
+                </span>
+                {% button "📥 Download" variant="success" size="xs" href="/audit/gdpr/export/download/{{ export.id }}/" %}
+              {% elif export.status == 'processing' %}
+                <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-yellow-600 text-white rounded-full">
+                  ⏳ {% trans 'Processing' %}
+                </span>
+              {% elif export.status == 'failed' %}
+                <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-red-600 text-white rounded-full">
+                  ❌ {% trans 'Failed' %}
+                </span>
+              {% else %}
+                <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-slate-600 text-white rounded-full">
+                  ⏳ {% trans 'Pending' %}
+                </span>
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        </div>
+      </div>
+      {% else %}
+      <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-sm">
+        <div class="px-6 py-4 border-b border-slate-700">
+          <h3 class="text-lg font-medium text-white">
+            📋 {% trans 'Recent Data Exports' %}
+          </h3>
+        </div>
+        <div class="p-6">
+          <div class="text-center py-8">
+            <p class="text-slate-400 mb-4">{% trans 'No data exports yet' %}</p>
+            <button onclick="showModal('export-modal')" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 border border-blue-600 transition-all duration-200">
+              📄 {% trans 'Export My Data' %}
+            </button>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Recent Consent Changes -->
+      {% if consent_history %}
+      <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-sm">
+        <div class="px-6 py-4 border-b border-slate-700">
+          <h3 class="text-lg font-medium text-white">
+            🔄 {% trans 'Recent Consent Changes' %}
+          </h3>
+        </div>
+        <div class="p-6">
+        <div class="space-y-3">
+          {% for change in consent_history|slice:":5" %}
+          <div class="p-3 bg-slate-700 rounded-lg">
+            <div class="text-sm font-medium text-white">{{ change.action }}</div>
+            <div class="text-xs text-slate-400">{{ change.date|date:"M d, Y H:i" }}</div>
+            {% if change.status == 'completed' %}
+              <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-green-600 text-white rounded-full mt-2">
+                ✅ {% trans 'Completed' %}
+              </span>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        
+        <div class="mt-4">
+          <a href="{% url 'audit:consent_history' %}" class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-lg bg-slate-600 text-white hover:bg-slate-700 focus:ring-4 focus:ring-slate-300 border border-slate-600 transition-all duration-200">
+            📜 {% trans 'View Full History' %}
+          </a>
+        </div>
+        </div>
+      </div>
+      {% else %}
+      <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-sm">
+        <div class="px-6 py-4 border-b border-slate-700">
+          <h3 class="text-lg font-medium text-white">
+            🔄 {% trans 'Recent Consent Changes' %}
+          </h3>
+        </div>
+        <div class="p-6">
+          <div class="text-center py-8">
+            <p class="text-slate-400">{% trans 'No recent consent changes' %}</p>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Legal Information -->
+    <div class="mt-8 p-4 bg-slate-800 border border-slate-700 rounded-lg">
+      <h3 class="text-lg font-medium text-white mb-2">⚖️ {% trans 'Legal Information' %}</h3>
+      <p class="text-slate-300 text-sm mb-2">
+        {% trans 'Your personal data is processed according to GDPR (EU 2016/679) and Romanian Law 190/2018. As a Romanian hosting provider, we ensure compliance with national data protection requirements.' %}
+      </p>
+      <div class="flex flex-wrap gap-4 text-xs">
+        <a href="/privacy-policy/" class="text-blue-400 hover:text-blue-300">{% trans 'Privacy Policy' %}</a>
+        <a href="/terms/" class="text-blue-400 hover:text-blue-300">{% trans 'Terms of Service' %}</a>
+        <a href="/gdpr-compliance/" class="text-blue-400 hover:text-blue-300">{% trans 'GDPR Compliance' %}</a>
+        <span class="text-slate-500">|</span>
+        <span class="text-slate-400">{% trans 'Data Protection Officer:' %} dpo@praho.com</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Container -->
+<div id="modal-container"></div>
+
+<!-- Hidden Modal Templates -->
+<template id="export-modal">
+  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
+    <div class="bg-slate-800 rounded-lg p-6 w-full max-w-md mx-4" onclick="event.stopPropagation()">
+      <h3 class="text-lg font-medium text-white mb-4">📄 {% trans 'Export Personal Data' %}</h3>
+      <form hx-post="{% url 'audit:request_data_export' %}" hx-target="body">
+        {% csrf_token %}
+        <div class="space-y-4">
+          <p class="text-slate-300 text-sm">
+            {% trans 'Select which data to include in your export:' %}
+          </p>
+          
+          <label class="flex items-center">
+            <input type="checkbox" name="include_profile" checked class="rounded border-slate-600 bg-slate-700 text-blue-600">
+            <span class="ml-2 text-sm text-white">{% trans 'Profile Information' %}</span>
+          </label>
+          
+          <label class="flex items-center">
+            <input type="checkbox" name="include_customers" checked class="rounded border-slate-600 bg-slate-700 text-blue-600">
+            <span class="ml-2 text-sm text-white">{% trans 'Customer Relationships' %}</span>
+          </label>
+          
+          <label class="flex items-center">
+            <input type="checkbox" name="include_billing" class="rounded border-slate-600 bg-slate-700 text-blue-600">
+            <span class="ml-2 text-sm text-white">{% trans 'Billing Information' %}</span>
+          </label>
+          
+          <label class="flex items-center">
+            <input type="checkbox" name="include_tickets" class="rounded border-slate-600 bg-slate-700 text-blue-600">
+            <span class="ml-2 text-sm text-white">{% trans 'Support Tickets' %}</span>
+          </label>
+          
+          <label class="flex items-center">
+            <input type="checkbox" name="include_audit_logs" class="rounded border-slate-600 bg-slate-700 text-blue-600">
+            <span class="ml-2 text-sm text-white">{% trans 'Activity Summary' %}</span>
+          </label>
+        </div>
+        
+        <div class="mt-6 flex space-x-3">
+          <button type="submit" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 border border-blue-600 transition-all duration-200">
+            📄 {% trans 'Request Export' %}
+          </button>
+          <button type="button" onclick="closeModal()" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg bg-slate-600 text-white hover:bg-slate-700 focus:ring-4 focus:ring-slate-300 border border-slate-600 transition-all duration-200">
+            {% trans 'Cancel' %}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</template>
+
+<template id="consent-modal">
+  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
+    <div class="bg-slate-800 rounded-lg p-6 w-full max-w-md mx-4" onclick="event.stopPropagation()">
+      <h3 class="text-lg font-medium text-white mb-4">⚠️ {% trans 'Withdraw Consent' %}</h3>
+      <form hx-post="{% url 'audit:withdraw_consent' %}" hx-target="body">
+        {% csrf_token %}
+        <div class="space-y-4">
+          {% alert "⚠️ Warning: Withdrawing consent may affect your service." variant="warning" %}
+          
+          <label class="flex items-center">
+            <input type="checkbox" name="consent_types" value="marketing" class="rounded border-slate-600 bg-slate-700 text-blue-600">
+            <span class="ml-2 text-sm text-white">{% trans 'Marketing Communications' %}</span>
+          </label>
+          
+          <label class="flex items-center">
+            <input type="checkbox" name="consent_types" value="data_processing" class="rounded border-slate-600 bg-slate-700 text-blue-600">
+            <span class="ml-2 text-sm text-white">{% trans 'Data Processing' %} <span class="text-red-400">({% trans 'will anonymize account' %})</span></span>
+          </label>
+        </div>
+        
+        <div class="mt-6 flex space-x-3">
+          <button type="submit" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg bg-yellow-500 text-white hover:bg-yellow-600 focus:ring-4 focus:ring-yellow-300 border border-yellow-500 transition-all duration-200">
+            ⚠️ {% trans 'Withdraw Consent' %}
+          </button>
+          <button type="button" onclick="closeModal()" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg bg-slate-600 text-white hover:bg-slate-700 focus:ring-4 focus:ring-slate-300 border border-slate-600 transition-all duration-200">
+            {% trans 'Cancel' %}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</template>
+
+<template id="deletion-modal">
+  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
+    <div class="bg-slate-800 rounded-lg p-6 w-full max-w-md mx-4" onclick="event.stopPropagation()">
+      <h3 class="text-lg font-medium text-white mb-4">🗑️ {% trans 'Request Account Deletion' %}</h3>
+      <form hx-post="{% url 'audit:request_data_deletion' %}" hx-target="body">
+        {% csrf_token %}
+        <div class="space-y-4">
+          {% alert "🚨 This action cannot be undone. Your account will be anonymized to comply with Romanian business law." variant="danger" %}
+          
+          <div>
+            <label class="block text-sm font-medium text-white mb-2">{% trans 'Deletion Type:' %}</label>
+            <select name="deletion_type" class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white">
+              <option value="anonymize">{% trans 'Anonymize (recommended)' %}</option>
+              <option value="delete">{% trans 'Full Deletion (if legally possible)' %}</option>
+            </select>
+          </div>
+          
+          <div>
+            <label class="block text-sm font-medium text-white mb-2">{% trans 'Reason for deletion:' %}</label>
+            <textarea name="reason" required class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white" rows="3" placeholder="{% trans 'Please provide a reason for this request...' %}"></textarea>
+          </div>
+          
+          <label class="flex items-center">
+            <input type="checkbox" name="confirm_immediate" value="yes" class="rounded border-slate-600 bg-slate-700 text-red-600">
+            <span class="ml-2 text-sm text-white">{% trans 'Process immediately (for demo)' %}</span>
+          </label>
+        </div>
+        
+        <div class="mt-6 flex space-x-3">
+          <button type="submit" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg bg-red-600 text-white hover:bg-red-700 focus:ring-4 focus:ring-red-300 border border-red-600 transition-all duration-200">
+            🗑️ {% trans 'Request Deletion' %}
+          </button>
+          <button type="button" onclick="closeModal()" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg bg-slate-600 text-white hover:bg-slate-700 focus:ring-4 focus:ring-slate-300 border border-slate-600 transition-all duration-200">
+            {% trans 'Cancel' %}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</template>
+
+<script>
+// Simple modal handling
+function showModal(modalId) {
+  const template = document.getElementById(modalId);
+  if (template) {
+    document.getElementById('modal-container').innerHTML = template.innerHTML;
+  }
+}
+
+function closeModal() {
+  document.getElementById('modal-container').innerHTML = '';
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  // Handle modal triggers
+  document.addEventListener('click', function(e) {
+    const target = e.target.closest('[data-modal]');
+    if (target) {
+      e.preventDefault();
+      const modalId = target.getAttribute('data-modal');
+      showModal(modalId);
+    }
+  });
+});
+</script>
+{% endblock %}

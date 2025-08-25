@@ -3,11 +3,11 @@ User signals for PRAHO Platform
 Auto-creation of user profiles and audit logging.
 """
 
-from django.db.models.signals import post_save, pre_save
+from django.contrib.auth.signals import user_logged_in, user_login_failed
+from django.db.models.signals import post_save
 from django.dispatch import receiver
-from django.contrib.auth.signals import user_logged_in, user_logged_out, user_login_failed
 
-from .models import User, UserProfile, UserLoginLog
+from .models import User, UserProfile
 
 
 @receiver(post_save, sender=User)
@@ -34,7 +34,6 @@ def log_user_login(sender, request, user, **kwargs):
     #     user_agent=request.META.get('HTTP_USER_AGENT', ''),
     #     status='success'
     # )
-    pass
 
 
 @receiver(user_login_failed)
@@ -42,7 +41,7 @@ def log_failed_login(sender, credentials, request, **kwargs):
     """Log failed login attempt"""
     # 🚨 DISABLED: Failed login logging now handled in login view with account lockout integration
     # email = credentials.get('username') or credentials.get('email')
-    # 
+    #
     # if email:
     #     try:
     #         user = User.objects.get(email=email)
@@ -60,7 +59,6 @@ def log_failed_login(sender, credentials, request, **kwargs):
     #             user_agent=request.META.get('HTTP_USER_AGENT', ''),
     #             status='failed_password'
     #         )
-    pass
 
 
 def _get_client_ip(request):
@@ -70,6 +68,6 @@ def _get_client_ip(request):
         ip = x_forwarded_for.split(',')[0].strip()
     else:
         ip = request.META.get('REMOTE_ADDR', '127.0.0.1')
-    
+
     # Ensure we always return a valid IP address
     return ip if ip else '127.0.0.1'

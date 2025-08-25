@@ -49,6 +49,9 @@ urlpatterns = [
     # External integrations & webhooks
     path('integrations/', include('apps.integrations.urls')),
     
+    # GDPR compliance and audit
+    path('app/audit/', include('apps.audit.urls')),
+    
     # Background job monitoring (DISABLED - Redis not needed yet)
     # path('django-rq/', include('django_rq.urls')),
 ]

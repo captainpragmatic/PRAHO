@@ -2,45 +2,41 @@
 Django admin configuration for Users app
 """
 
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
-from django.utils.html import format_html
-from django.urls import reverse, path
 from django.http import HttpResponseRedirect
-from django.contrib import messages
 from django.shortcuts import get_object_or_404, render
-from django.db.models import Count, Q
-from django.utils import timezone
-from django.template.response import TemplateResponse
+from django.urls import path, reverse
+from django.utils.html import format_html
 
-from .models import User, UserProfile, CustomerMembership, UserLoginLog
 from .mfa import MFAService
+from .models import CustomerMembership, User, UserLoginLog, UserProfile
 
 
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
     """Custom user admin with hybrid approach (system roles + customer memberships)"""
-    
+
     list_display = [
         'email', 'get_full_name', 'staff_role', 'is_staff_user',
         'primary_customer_name', 'two_factor_enabled', 'is_active',
         'last_login', 'date_joined'
     ]
-    
+
     list_filter = [
         'staff_role', 'two_factor_enabled', 'is_active',
         'is_staff', 'date_joined', 'last_login'
     ]
-    
+
     search_fields = ['email', 'first_name', 'last_name']
-    
+
     actions = ['go_to_2fa_dashboard']
-    
+
     def go_to_2fa_dashboard(self, request, queryset):
         """Redirect to 2FA Dashboard"""
         return HttpResponseRedirect(reverse('admin:users_user_2fa_dashboard'))
     go_to_2fa_dashboard.short_description = "🔐 Go to 2FA Security Dashboard"
-    
+
     fieldsets = [
         (None, {'fields': ('email', 'password')}),
         ('Personal info', {'fields': ('first_name', 'last_name', 'phone')}),
@@ -72,24 +68,24 @@ class UserAdmin(BaseUserAdmin):
             'fields': ('created_by',)
         }),
     ]
-    
+
     add_fieldsets = [
         (None, {
             'classes': ('wide',),
             'fields': ('email', 'password1', 'password2'),
         }),
     ]
-    
+
     ordering = ['email']
-    
+
     readonly_fields = ['date_joined', 'last_login', 'created_at', 'updated_at', 'backup_codes_count', 'two_factor_actions']
-    
+
     def is_staff_user(self, obj):
         """Check if user is system/staff user"""
         return obj.is_staff_user
     is_staff_user.boolean = True
     is_staff_user.short_description = 'Staff User'
-    
+
     def primary_customer_name(self, obj):
         """Get primary customer name"""
         primary = obj.primary_customer
@@ -101,12 +97,12 @@ class UserAdmin(BaseUserAdmin):
             )
         return '-'
     primary_customer_name.short_description = 'Primary Customer'
-    
+
     def backup_codes_count(self, obj):
         """Show number of backup codes remaining"""
         if not obj.two_factor_enabled:
             return '-'
-        
+
         count = len(obj.backup_tokens)
         if count == 0:
             return format_html('<span style="color: red; font-weight: bold;">0 (No backup codes!)</span>')
@@ -115,14 +111,14 @@ class UserAdmin(BaseUserAdmin):
         else:
             return format_html('<span style="color: green;">{}</span>', count)
     backup_codes_count.short_description = 'Backup Codes'
-    
+
     def two_factor_actions(self, obj):
         """Admin actions for 2FA management"""
         if not obj.two_factor_enabled:
             return format_html('<em>2FA not enabled</em>')
-        
+
         actions = []
-        
+
         # Disable 2FA action
         disable_url = reverse('admin:users_user_disable_2fa', args=[obj.id])
         actions.append(format_html(
@@ -130,15 +126,15 @@ class UserAdmin(BaseUserAdmin):
             'style="color: red; text-decoration: none; padding: 2px 6px; border: 1px solid red; border-radius: 3px; font-size: 11px;">🔒 Disable 2FA</a>',
             disable_url
         ))
-        
-        # Reset backup codes action  
+
+        # Reset backup codes action
         reset_codes_url = reverse('admin:users_user_reset_backup_codes', args=[obj.id])
         actions.append(format_html(
             '<a href="{}" onclick="return confirm(\'This will invalidate all existing backup codes. Continue?\');" '
             'style="color: blue; text-decoration: none; padding: 2px 6px; border: 1px solid blue; border-radius: 3px; font-size: 11px; margin-left: 5px;">🔄 Reset Backup Codes</a>',
             reset_codes_url
         ))
-        
+
         # 2FA Dashboard link (shown only once)
         if obj.pk:  # Only show for existing users
             try:
@@ -154,10 +150,10 @@ class UserAdmin(BaseUserAdmin):
                     '<a href="/admin/users/user/2fa-dashboard/" '
                     'style="color: green; text-decoration: none; padding: 2px 6px; border: 1px solid green; border-radius: 3px; font-size: 11px; margin-left: 5px;">📊 2FA Dashboard</a>'
                 ))
-        
+
         return format_html(' '.join(actions))
     two_factor_actions.short_description = '2FA Actions'
-    
+
     def get_urls(self):
         """Add custom admin URLs for 2FA management"""
         urls = super().get_urls()
@@ -179,17 +175,17 @@ class UserAdmin(BaseUserAdmin):
             ),
         ]
         return custom_urls + urls
-    
+
     def changelist_view(self, request, extra_context=None):
         """Override changelist to add 2FA dashboard link"""
         extra_context = extra_context or {}
         extra_context['show_2fa_dashboard'] = True
         extra_context['dashboard_url'] = reverse('admin:users_user_2fa_dashboard')
         return super().changelist_view(request, extra_context)
-    
+
     def tfa_dashboard_view(self, request):
         """🔐 Admin view for 2FA security dashboard"""
-        
+
         # Simple test context first
         context = {
             'title': '🔐 Two-Factor Authentication Dashboard',
@@ -202,13 +198,13 @@ class UserAdmin(BaseUserAdmin):
             'recommendations': [],
             'has_permission': True,
         }
-        
+
         return render(request, 'admin/users/2fa_dashboard.html', context)
-    
+
     def disable_2fa_view(self, request, user_id):
         """Admin view to disable 2FA for a user using MFA service"""
         user = get_object_or_404(User, id=user_id)
-        
+
         if not user.two_factor_enabled:
             messages.warning(request, f'2FA is already disabled for {user.email}')
         else:
@@ -220,30 +216,30 @@ class UserAdmin(BaseUserAdmin):
                     reason=f'Admin reset by {request.user.email}',
                     request=request
                 )
-                
+
                 if result:
                     messages.success(request, f'✅ 2FA has been disabled for {user.email}')
                 else:
                     messages.error(request, f'❌ Failed to disable 2FA for {user.email}')
-                    
+
             except Exception as e:
                 messages.error(request, f'❌ Error disabling 2FA: {str(e)}')
-        
+
         return HttpResponseRedirect(reverse('admin:users_user_change', args=[user_id]))
-    
+
     def reset_backup_codes_view(self, request, user_id):
         """Admin view to reset backup codes for a user using MFA service"""
         user = get_object_or_404(User, id=user_id)
-        
+
         if not user.two_factor_enabled:
             messages.warning(request, f'2FA is not enabled for {user.email}')
         else:
             try:
                 # Use MFA service to generate new backup codes with audit logging
                 backup_codes = MFAService.generate_backup_codes(user, request)
-                
+
                 messages.success(
-                    request, 
+                    request,
                     format_html(
                         '✅ New backup codes generated for <strong>{}</strong>.<br>'
                         'First 3 codes: <code>{}</code><br>'
@@ -252,29 +248,29 @@ class UserAdmin(BaseUserAdmin):
                         ', '.join(backup_codes[:3]) + '...'
                     )
                 )
-                
+
             except Exception as e:
                 messages.error(request, f'❌ Error generating backup codes: {str(e)}')
-        
+
         return HttpResponseRedirect(reverse('admin:users_user_change', args=[user_id]))
 
 
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
     """User profile admin"""
-    
+
     list_display = [
         'user', 'preferred_language', 'timezone',
         'email_notifications', 'sms_notifications'
     ]
-    
+
     list_filter = [
         'preferred_language', 'timezone', 'email_notifications',
         'sms_notifications', 'marketing_emails'
     ]
-    
+
     search_fields = ['user__email', 'user__first_name', 'user__last_name']
-    
+
     fieldsets = (
         ('User', {
             'fields': ('user',)
@@ -289,25 +285,25 @@ class UserProfileAdmin(admin.ModelAdmin):
             'fields': ('emergency_contact_name', 'emergency_contact_phone')
         }),
     )
-    
+
     readonly_fields = ['created_at', 'updated_at']
 
 
 @admin.register(CustomerMembership)
 class CustomerMembershipAdmin(admin.ModelAdmin):
     """Customer membership admin for PostgreSQL-aligned user-customer relationships"""
-    
+
     list_display = [
         'user', 'customer', 'role', 'is_primary',
         'created_at', 'created_by'
     ]
-    
+
     list_filter = ['role', 'is_primary', 'created_at']
-    
+
     search_fields = [
         'user__email', 'customer__name', 'customer__company_name'
     ]
-    
+
     fieldsets = (
         ('Membership', {
             'fields': ('user', 'customer', 'role', 'is_primary')
@@ -316,9 +312,9 @@ class CustomerMembershipAdmin(admin.ModelAdmin):
             'fields': ('created_by',)
         }),
     )
-    
+
     readonly_fields = ['created_at', 'updated_at']
-    
+
     def get_queryset(self, request):
         return super().get_queryset(request).select_related(
             'user', 'customer', 'created_by'
@@ -328,27 +324,27 @@ class CustomerMembershipAdmin(admin.ModelAdmin):
 @admin.register(UserLoginLog)
 class UserLoginLogAdmin(admin.ModelAdmin):
     """User login log admin for security monitoring"""
-    
+
     list_display = [
         'get_user_display', 'timestamp', 'status', 'ip_address',
         'get_location', 'get_user_agent_short'
     ]
-    
+
     list_filter = [
         'status', 'timestamp', 'country', 'city'
     ]
-    
+
     search_fields = [
         'user__email', 'ip_address', 'user_agent', 'country', 'city'
     ]
-    
+
     readonly_fields = [
         'user', 'timestamp', 'ip_address', 'user_agent',
         'status', 'country', 'city'
     ]
-    
+
     date_hierarchy = 'timestamp'
-    
+
     def get_user_display(self, obj):
         """Display user email or 'Unknown User' for null users"""
         if obj.user:
@@ -356,7 +352,7 @@ class UserLoginLogAdmin(admin.ModelAdmin):
         return "❌ Unknown User"
     get_user_display.short_description = 'User'
     get_user_display.admin_order_field = 'user__email'
-    
+
     def get_location(self, obj):
         """Display location information"""
         if obj.country and obj.city:
@@ -365,7 +361,7 @@ class UserLoginLogAdmin(admin.ModelAdmin):
             return f"🌍 {obj.country}"
         return "❓ Unknown"
     get_location.short_description = 'Location'
-    
+
     def get_user_agent_short(self, obj):
         """Display shortened user agent"""
         ua = obj.user_agent
@@ -373,14 +369,14 @@ class UserLoginLogAdmin(admin.ModelAdmin):
             return f"{ua[:47]}..."
         return ua
     get_user_agent_short.short_description = 'User Agent'
-    
+
     def has_add_permission(self, request):
         """Login logs are created automatically"""
         return False
-    
+
     def has_change_permission(self, request, obj=None):
         """Login logs are read-only"""
         return False
-    
+
     def get_queryset(self, request):
         return super().get_queryset(request).select_related('user')
