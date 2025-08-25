@@ -2,7 +2,7 @@
 # PRAHO PLATFORM - DEVELOPMENT MAKEFILE (Updated for Django Test Runner)
 # ===============================================================================
 
-.PHONY: help install dev test test-coverage test-fast test-file build-css migrate fixtures clean lint
+.PHONY: help install dev test test-e2e test-with-e2e test-coverage test-fast test-file build-css migrate fixtures clean lint
 
 # Default target
 help:
@@ -11,6 +11,8 @@ help:
 	@echo "  make install         - Set up development environment"
 	@echo "  make dev             - Run development server"
 	@echo "  make test            - Run all tests (Django runner) - DEFAULT"
+	@echo "  make test-e2e        - Run E2E tests with pytest-playwright"
+	@echo "  make test-with-e2e   - Run all tests including E2E"
 	@echo "  make test-coverage   - Run tests with coverage report"
 	@echo "  make test-fast       - Run tests with minimal output"
 	@echo "  make test-prod       - Run production tests with PostgreSQL"
@@ -47,6 +49,22 @@ test:
 	@echo "🧪 Running unified test suite with Django runner..."
 	.venv/bin/python manage.py test tests --settings=config.settings.test --verbosity=2
 	@echo "✅ All tests completed successfully!"
+
+# Run E2E tests with Django and Playwright
+test-e2e:
+	@echo "🎭 Running E2E tests with pytest-playwright..."
+	@echo "ℹ️  Make sure development server is running: make dev"
+	.venv/bin/pytest tests/e2e/ -v --tb=short
+	@echo "✅ E2E tests completed successfully!"
+
+# Run all tests including E2E
+test-with-e2e:
+	@echo "🔄 Running all tests including E2E..."
+	@echo "📋 Phase 1: Unit and integration tests"
+	@$(MAKE) test
+	@echo "📋 Phase 2: End-to-end tests"
+	@$(MAKE) test-e2e
+	@echo "✅ All tests (including E2E) completed successfully!"
 
 # Run tests with coverage report
 test-coverage:

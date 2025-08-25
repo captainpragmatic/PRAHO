@@ -68,13 +68,20 @@
   // Terminal auto-approve settings for common development commands
   "chat.tools.terminal.autoApprove": {
     "/^make\\s+test(\\s|$)/": true,
+    "/^make\\s+test-e2e(\\s|$)/": true,
+    "/^make\\s+test-with-e2e(\\s|$)/": true,
     "/^make\\s+dev(\\s|$)/": true,
     "/^git\\s+status(\\s|$)/": true,
     "/^git\\s+log(\\s|$)/": true,
     "/^git\\s+diff(\\s|$)/": true,
     "/^python\\s+manage\\.py\\s+test(\\s|$)/": true,
     "/^python\\s+manage\\.py\\s+runserver(\\s|$)/": true,
-    "/^source\\s+\\.venv\\/bin\\/activate(\\s|$)/": true
+    "/^source\\s+\\.venv\\/bin\\/activate(\\s|$)/": true,
+    "/^\\.venv\\/bin\\/pytest\\s+tests\\/e2e\\/(\\s|$)/": true,
+    "/^\\.venv\\/bin\\/python\\s+-m\\s+pytest\\s+tests\\/e2e\\/(\\s|$)/": true,
+    "/^playwright\\s+install(\\s|$)/": true,
+    "/^playwright\\s+test(\\s|$)/": true,
+    "/^\\.venv\\/bin\\/playwright\\s+/": true
   },
   "python.analysis.typeCheckingMode": "standard"
 }
