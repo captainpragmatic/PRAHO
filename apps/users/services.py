@@ -712,6 +712,308 @@ class SecureCustomerUserService:
 
 
 # ===============================================================================
+# SESSION SECURITY SERVICE
+# ===============================================================================
+
+class SessionSecurityService:
+    """
+    🔒 Secure session management for Romanian hosting security compliance
+    
+    Provides:
+    - Session rotation on security events
+    - 2FA secret cleanup during recovery
+    - Activity tracking and suspicious behavior detection
+    - Shared device mode with enhanced timeouts
+    """
+    
+    # Session timeout policies (seconds)
+    TIMEOUT_POLICIES = {
+        'standard': 3600,        # 1 hour for regular users
+        'sensitive': 1800,       # 30 min for admin/billing staff  
+        'shared_device': 900,    # 15 min for shared device mode
+        'remember_me': 86400 * 7 # 7 days for remember me
+    }
+    
+    @classmethod
+    def rotate_session_on_password_change(cls, request, user=None):
+        """🔒 Rotate session after password change and invalidate other sessions"""
+        if not request.user.is_authenticated and not user:
+            return
+            
+        target_user = user or request.user
+        old_session_key = request.session.session_key
+        
+        # Cycle session key (Django's built-in security)
+        request.session.cycle_key()
+        new_session_key = request.session.session_key
+        
+        # Invalidate all other sessions for this user
+        cls._invalidate_other_user_sessions(target_user.id, new_session_key)
+        
+        # Clear sensitive session data
+        cls._clear_sensitive_session_data(request)
+        
+        # Log security event using existing pattern
+        log_security_event('session_rotated_password_change', {
+            'user_id': target_user.id,
+            'old_session_key': old_session_key[:8] + '...',  # Truncated for security
+            'new_session_key': new_session_key[:8] + '...'
+        }, cls._get_client_ip(request))
+        
+        logger.warning(f"🔄 [SessionSecurity] Session rotated for {target_user.email} after password change")
+    
+    @classmethod
+    def rotate_session_on_2fa_change(cls, request):
+        """🔒 Rotate session when 2FA is enabled/disabled"""
+        if not request.user.is_authenticated:
+            return
+            
+        user = request.user
+        old_session_key = request.session.session_key
+        
+        # Cycle session key
+        request.session.cycle_key()
+        new_session_key = request.session.session_key
+        
+        # For 2FA changes, invalidate other sessions as security measure
+        cls._invalidate_other_user_sessions(user.id, new_session_key)
+        
+        # Log security event
+        log_security_event('session_rotated_2fa_change', {
+            'user_id': user.id,
+            'old_session_key': old_session_key[:8] + '...',
+            'new_session_key': new_session_key[:8] + '...'
+        }, cls._get_client_ip(request))
+        
+        logger.warning(f"🔄 [SessionSecurity] Session rotated for {user.email} after 2FA change")
+    
+    @classmethod
+    def cleanup_2fa_secrets_on_recovery(cls, user, request_ip=None):
+        """🔒 Clean up 2FA secrets during account recovery"""
+        if not user:
+            return
+            
+        # Clear 2FA configuration
+        user.two_factor_enabled = False
+        user.two_factor_secret = ''  # This will encrypt empty string
+        user.backup_tokens = []
+        user.save(update_fields=['two_factor_enabled', '_two_factor_secret', 'backup_tokens'])
+        
+        # Invalidate all sessions for security
+        cls._invalidate_all_user_sessions(user.id)
+        
+        # Log security event
+        log_security_event('2fa_secrets_cleared_recovery', {
+            'user_id': user.id,
+            'email': user.email
+        }, request_ip)
+        
+        logger.warning(f"🔐 [SessionSecurity] 2FA secrets cleared for {user.email} during recovery")
+    
+    @classmethod
+    def update_session_timeout(cls, request):
+        """🔒 Update session timeout based on user context"""
+        if not hasattr(request, 'session') or not request.user.is_authenticated:
+            return
+            
+        timeout_seconds = cls.get_appropriate_timeout(request)
+        request.session.set_expiry(timeout_seconds)
+        
+        # Log timeout update
+        log_security_event('session_timeout_updated', {
+            'user_id': request.user.id,
+            'timeout_seconds': timeout_seconds,
+            'policy': cls._get_timeout_policy_name(timeout_seconds)
+        }, cls._get_client_ip(request))
+    
+    @classmethod
+    def get_appropriate_timeout(cls, request) -> int:
+        """Get appropriate timeout based on user role and device context"""
+        if not request.user.is_authenticated:
+            return cls.TIMEOUT_POLICIES['standard']
+        
+        user = request.user
+        
+        # Shared device mode (shorter timeout)
+        if request.session.get('shared_device_mode', False):
+            return cls.TIMEOUT_POLICIES['shared_device']
+        
+        # Sensitive staff roles get shorter timeouts
+        if hasattr(user, 'staff_role') and user.staff_role in ['admin', 'billing']:
+            return cls.TIMEOUT_POLICIES['sensitive']
+        
+        # Remember me functionality
+        if request.session.get('remember_me', False):
+            return cls.TIMEOUT_POLICIES['remember_me']
+        
+        return cls.TIMEOUT_POLICIES['standard']
+    
+    @classmethod
+    def enable_shared_device_mode(cls, request):
+        """🔒 Enable shared device mode with enhanced security"""
+        if not request.user.is_authenticated:
+            return
+            
+        request.session['shared_device_mode'] = True
+        request.session['shared_device_enabled_at'] = timezone.now().isoformat()
+        
+        # Set shorter timeout immediately
+        timeout = cls.TIMEOUT_POLICIES['shared_device']
+        request.session.set_expiry(timeout)
+        
+        # Clear any remember me settings
+        request.session.pop('remember_me', None)
+        
+        log_security_event('shared_device_mode_enabled', {
+            'user_id': request.user.id,
+            'timeout_seconds': timeout
+        }, cls._get_client_ip(request))
+        
+        logger.info(f"📱 [SessionSecurity] Shared device mode enabled for {request.user.email}")
+    
+    @classmethod
+    def detect_suspicious_activity(cls, request) -> bool:
+        """🔒 Detect suspicious session activity patterns"""
+        if not request.user.is_authenticated:
+            return False
+            
+        user_id = request.user.id
+        current_ip = cls._get_client_ip(request)
+        
+        # Check for rapid IP changes (simplified detection)
+        cache_key = f"recent_ips:{user_id}"
+        recent_ips = cache.get(cache_key, [])
+        
+        # Add current IP
+        recent_ips.append({
+            'ip': current_ip,
+            'timestamp': time.time()
+        })
+        
+        # Keep only last hour of IPs
+        one_hour_ago = time.time() - 3600
+        recent_ips = [ip_data for ip_data in recent_ips if ip_data['timestamp'] > one_hour_ago]
+        
+        # Check for suspicious pattern (3+ different IPs in 1 hour)
+        unique_ips = set(ip_data['ip'] for ip_data in recent_ips)
+        is_suspicious = len(unique_ips) >= 3
+        
+        if is_suspicious:
+            log_security_event('suspicious_activity_detected', {
+                'user_id': user_id,
+                'ip_count': len(unique_ips),
+                'current_ip': current_ip,
+                'pattern': 'multiple_ips'
+            }, current_ip)
+            
+            logger.warning(f"🚨 [SessionSecurity] Suspicious IP pattern for {request.user.email}: {unique_ips}")
+        
+        # Update cache
+        cache.set(cache_key, recent_ips, timeout=3600)
+        
+        return is_suspicious
+    
+    @classmethod
+    def log_session_activity(cls, request, activity_type: str, **extra_data):
+        """🔒 Log session activity using existing security event system"""
+        if not request.user.is_authenticated:
+            return
+            
+        activity_data = {
+            'user_id': request.user.id,
+            'session_key': request.session.session_key[:8] + '...' if request.session.session_key else None,
+            'activity_type': activity_type,
+            'request_path': request.path,
+            **extra_data
+        }
+        
+        # Use existing security logging
+        log_security_event(f'session_activity_{activity_type}', activity_data, cls._get_client_ip(request))
+        
+        # Log critical activities with warning level
+        if activity_type in ['login', 'logout', 'password_changed', '2fa_disabled']:
+            logger.warning(f"🔐 [SessionActivity] {activity_type.upper()}: {request.user.email}")
+    
+    # ===============================================================================
+    # PRIVATE HELPER METHODS
+    # ===============================================================================
+    
+    @classmethod
+    def _invalidate_other_user_sessions(cls, user_id: int, keep_session_key: str):
+        """Invalidate all sessions for a user except specified one"""
+        try:
+            from django.contrib.sessions.models import Session
+            count = 0
+            
+            for session in Session.objects.all():
+                try:
+                    session_data = session.get_decoded()
+                    session_user_id = session_data.get('_auth_user_id')
+                    
+                    if session_user_id == str(user_id) and session.session_key != keep_session_key:
+                        session.delete()
+                        count += 1
+                except:
+                    # Skip invalid sessions
+                    continue
+                    
+            logger.info(f"🗑️ [SessionSecurity] Invalidated {count} other sessions for user {user_id}")
+        except Exception as e:
+            logger.error(f"🔥 [SessionSecurity] Error invalidating sessions for user {user_id}: {e}")
+    
+    @classmethod
+    def _invalidate_all_user_sessions(cls, user_id: int):
+        """Invalidate all sessions for a user"""
+        try:
+            from django.contrib.sessions.models import Session
+            count = 0
+            
+            for session in Session.objects.all():
+                try:
+                    session_data = session.get_decoded()
+                    session_user_id = session_data.get('_auth_user_id')
+                    
+                    if session_user_id == str(user_id):
+                        session.delete()
+                        count += 1
+                except:
+                    # Skip invalid sessions
+                    continue
+                    
+            logger.warning(f"🗑️ [SessionSecurity] Invalidated {count} sessions for user {user_id}")
+        except Exception as e:
+            logger.error(f"🔥 [SessionSecurity] Error invalidating all sessions for user {user_id}: {e}")
+    
+    @classmethod
+    def _clear_sensitive_session_data(cls, request):
+        """Clear sensitive data from session"""
+        sensitive_keys = [
+            '2fa_secret', 'new_backup_codes', 'password_reset_token',
+            'email_verification_token', 'temp_user_data'
+        ]
+        
+        for key in sensitive_keys:
+            if key in request.session:
+                del request.session[key]
+    
+    @classmethod
+    def _get_client_ip(cls, request) -> str:
+        """Get real client IP address"""
+        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+        if x_forwarded_for:
+            return x_forwarded_for.split(',')[0].strip()
+        return request.META.get('REMOTE_ADDR', '')
+    
+    @classmethod
+    def _get_timeout_policy_name(cls, timeout_seconds: int) -> str:
+        """Get policy name for timeout value"""
+        for policy, seconds in cls.TIMEOUT_POLICIES.items():
+            if seconds == timeout_seconds:
+                return policy
+        return 'custom'
+
+
+# ===============================================================================
 # EXPORT SECURE SERVICES (BACKWARD COMPATIBILITY)
 # ===============================================================================
 

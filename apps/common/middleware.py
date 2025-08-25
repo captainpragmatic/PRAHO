@@ -247,3 +247,122 @@ class GDPRComplianceMiddleware:
         response['X-Privacy-Policy'] = '/privacy-policy/'
         
         return response
+
+
+# ===============================================================================
+# SESSION SECURITY MIDDLEWARE
+# ===============================================================================
+
+class SessionSecurityMiddleware:
+    """
+    🔒 Automatic session security management for Romanian hosting compliance
+    
+    Features:
+    - Dynamic timeout adjustment based on user role/context
+    - Suspicious activity detection and logging
+    - Session activity tracking
+    - Shared device mode handling
+    """
+    
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
+        self.get_response = get_response
+    
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        # Only process authenticated users with sessions
+        if request.user.is_authenticated and hasattr(request, 'session'):
+            self._process_session_security(request)
+        
+        response = self.get_response(request)
+        
+        # Add session security headers
+        if request.user.is_authenticated:
+            self._add_security_headers(request, response)
+        
+        return response
+    
+    def _process_session_security(self, request: HttpRequest) -> None:
+        """Process session security checks and updates"""
+        try:
+            from apps.users.services import SessionSecurityService
+            
+            # Update session timeout based on current context
+            SessionSecurityService.update_session_timeout(request)
+            
+            # Detect and log suspicious activity
+            is_suspicious = SessionSecurityService.detect_suspicious_activity(request)
+            
+            # Log session activity for important paths
+            if self._should_log_activity(request):
+                activity_type = self._get_activity_type(request)
+                SessionSecurityService.log_session_activity(
+                    request, 
+                    activity_type,
+                    is_suspicious=is_suspicious
+                )
+            
+            # Handle shared device mode expiry
+            if request.session.get('shared_device_mode'):
+                self._check_shared_device_expiry(request)
+                
+        except Exception as e:
+            # Don't break the request if session security fails
+            logger.error(f"🔥 [SessionSecurityMiddleware] Error processing session security: {e}")
+    
+    def _should_log_activity(self, request: HttpRequest) -> bool:
+        """Determine if this request should be logged for activity tracking"""
+        sensitive_paths = [
+            '/users/', '/billing/', '/customers/', '/admin/',
+            '/api/', '/settings/', '/tickets/'
+        ]
+        return any(request.path.startswith(path) for path in sensitive_paths)
+    
+    def _get_activity_type(self, request: HttpRequest) -> str:
+        """Get activity type based on request path and method"""
+        if request.path.startswith('/admin/'):
+            return 'admin_access'
+        elif request.path.startswith('/billing/'):
+            return 'billing_access'
+        elif request.path.startswith('/api/'):
+            return 'api_access'
+        elif request.method in ['POST', 'PUT', 'PATCH', 'DELETE']:
+            return 'data_modification'
+        else:
+            return 'page_access'
+    
+    def _check_shared_device_expiry(self, request: HttpRequest) -> None:
+        """Check if shared device mode should expire based on inactivity"""
+        enabled_at_str = request.session.get('shared_device_enabled_at')
+        if not enabled_at_str:
+            return
+            
+        try:
+            from django.utils import timezone
+            from datetime import datetime, timedelta
+            
+            enabled_at = datetime.fromisoformat(enabled_at_str)
+            max_shared_duration = timedelta(hours=2)  # Max 2 hours in shared mode
+            
+            if timezone.now() - enabled_at > max_shared_duration:
+                # Auto-disable shared device mode after extended use
+                request.session.pop('shared_device_mode', None)
+                request.session.pop('shared_device_enabled_at', None)
+                
+                from apps.users.services import SessionSecurityService
+                SessionSecurityService.log_session_activity(
+                    request, 
+                    'shared_device_auto_expired',
+                    reason='max_duration_exceeded'
+                )
+                
+        except Exception as e:
+            logger.error(f"🔥 [SessionSecurity] Error checking shared device expiry: {e}")
+    
+    def _add_security_headers(self, request: HttpRequest, response: HttpResponse) -> None:
+        """Add session security headers to response"""
+        # Add session timeout info for client-side warnings
+        if hasattr(request, 'session') and request.session.get_expiry_age():
+            response['X-Session-Timeout'] = str(request.session.get_expiry_age())
+        
+        # Add shared device mode indicator
+        if request.session.get('shared_device_mode'):
+            response['X-Shared-Device-Mode'] = 'true'

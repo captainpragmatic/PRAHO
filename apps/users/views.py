@@ -283,6 +283,10 @@ class SecurePasswordResetConfirmView(PasswordResetConfirmView):
                 status='account_lockout_reset'
             )
         
+        # 🔒 Clean up 2FA secrets and rotate sessions for security
+        from .services import SessionSecurityService
+        SessionSecurityService.cleanup_2fa_secrets_on_recovery(user, _get_client_ip(self.request))
+        
         return super().form_valid(form)
     
     def form_invalid(self, form):
@@ -344,6 +348,10 @@ class SecurePasswordChangeView(PasswordChangeView):
             user_agent=self.request.META.get('HTTP_USER_AGENT', ''),
             status='password_changed'
         )
+        
+        # 🔒 Rotate session for security after password change
+        from .services import SessionSecurityService
+        SessionSecurityService.rotate_session_on_password_change(self.request)
         
         messages.success(
             self.request, 
@@ -431,6 +439,10 @@ def two_factor_setup_totp(request: HttpRequest) -> HttpResponse:
                     try:
                         # Enable TOTP using MFA service
                         secret, backup_codes = MFAService.enable_totp(request.user, request)
+                        
+                        # 🔒 Rotate session for security after enabling 2FA
+                        from .services import SessionSecurityService
+                        SessionSecurityService.rotate_session_on_2fa_change(request)
                         
                         messages.success(request, _('2FA has been enabled successfully!'))
                         
@@ -610,6 +622,10 @@ def two_factor_disable(request: HttpRequest) -> HttpResponse:
         request.user.two_factor_secret = ''  # nosec B105
         request.user.backup_tokens = []
         request.user.save(update_fields=['two_factor_enabled', '_two_factor_secret', 'backup_tokens'])
+        
+        # 🔒 Rotate session for security after disabling 2FA
+        from .services import SessionSecurityService
+        SessionSecurityService.rotate_session_on_2fa_change(request)
         
         # Log the action
         UserLoginLog.objects.create(
