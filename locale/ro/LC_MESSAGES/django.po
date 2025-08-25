@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2025-08-25 21:35+0300\n"
+"POT-Creation-Date: 2025-08-25 21:40+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -470,13 +470,13 @@ msgstr "Data emiterii"
 
 #: apps/billing/models.py:252 templates/billing/billing_list.html:212
 #: templates/billing/invoice_form.html:129
-#: templates/billing/invoice_list.html:162 templates/dashboard.html:176
+#: templates/billing/invoice_list.html:162 templates/dashboard.html:174
 msgid "Paid"
 msgstr "Plătit"
 
 #: apps/billing/models.py:253 templates/billing/billing_list.html:216
 #: templates/billing/invoice_form.html:130
-#: templates/billing/invoice_list.html:163 templates/dashboard.html:177
+#: templates/billing/invoice_list.html:163 templates/dashboard.html:175
 msgid "Overdue"
 msgstr "Restant"
 
@@ -504,8 +504,8 @@ msgstr ""
 #: apps/billing/models.py:336 templates/billing/billing_list.html:173
 #: templates/billing/invoice_detail.html:5
 #: templates/billing/invoice_detail.html:13
-#: templates/billing/invoice_list.html:96 templates/dashboard.html:161
-#: templates/dashboard.html:164
+#: templates/billing/invoice_list.html:96 templates/dashboard.html:159
+#: templates/dashboard.html:162
 msgid "Invoice"
 msgstr "Factură"
 
@@ -554,7 +554,7 @@ msgstr "Linii factură"
 #: apps/provisioning/models.py:284 apps/provisioning/models.py:464
 #: apps/tickets/models.py:66 templates/audit/consent_history.html:55
 #: templates/audit/gdpr_dashboard.html:188
-#: templates/billing/invoice_list.html:166 templates/dashboard.html:178
+#: templates/billing/invoice_list.html:166 templates/dashboard.html:176
 #: templates/provisioning/service_detail.html:27
 #: templates/provisioning/service_list.html:36
 #: templates/provisioning/service_list.html:147 templates/tickets/list.html:77
@@ -1499,7 +1499,7 @@ msgid "Format: RO12345678 (6-10 digits after RO)"
 msgstr ""
 
 #: apps/customers/forms.py:418 apps/users/forms.py:394
-#: templates/customers/detail.html:199 templates/dashboard.html:378
+#: templates/customers/detail.html:199 templates/dashboard.html:376
 msgid "VAT Number"
 msgstr "Număr TVA"
 
@@ -1685,7 +1685,7 @@ msgstr "Persoană fizică"
 
 #: apps/customers/models.py:98 templates/customers/assign_user.html:35
 #: templates/customers/detail.html:51 templates/customers/list.html:65
-#: templates/dashboard.html:372 templates/provisioning/service_detail.html:86
+#: templates/dashboard.html:370 templates/provisioning/service_detail.html:86
 msgid "Company"
 msgstr "Companie"
 
@@ -1701,7 +1701,7 @@ msgstr "ONG/Asociație"
 #: apps/provisioning/models.py:146 apps/provisioning/models.py:232
 #: apps/provisioning/models.py:286 apps/tickets/models.py:45
 #: templates/audit/gdpr_dashboard.html:40 templates/customers/list.html:123
-#: templates/dashboard.html:120 templates/provisioning/service_detail.html:24
+#: templates/dashboard.html:118 templates/provisioning/service_detail.html:24
 #: templates/provisioning/service_detail.html:277
 #: templates/provisioning/service_list.html:31
 #: templates/provisioning/service_list.html:144
@@ -2935,7 +2935,7 @@ msgid "Additional email metadata (variables used, campaign info, etc.)"
 msgstr ""
 
 #: apps/notifications/models.py:252 apps/tickets/models.py:73
-#: templates/dashboard.html:238 templates/tickets/form.html:62
+#: templates/dashboard.html:236 templates/tickets/form.html:62
 #: templates/tickets/list.html:70 templates/tickets/list.html:158
 msgid "Low"
 msgstr "Scăzut"
@@ -2952,7 +2952,7 @@ msgid "High"
 msgstr "Ridicat"
 
 #: apps/notifications/models.py:255 apps/tickets/models.py:76
-#: templates/dashboard.html:236 templates/tickets/form.html:65
+#: templates/dashboard.html:234 templates/tickets/form.html:65
 #: templates/tickets/list.html:67 templates/tickets/list.html:155
 msgid "Urgent"
 msgstr "Urgent"
@@ -2997,7 +2997,7 @@ msgstr ""
 msgid "All Customers"
 msgstr "Clienți"
 
-#: apps/notifications/models.py:345 templates/dashboard.html:40
+#: apps/notifications/models.py:345 templates/dashboard.html:38
 #, fuzzy
 #| msgid "Customers"
 msgid "Active Customers"
@@ -5857,7 +5857,7 @@ msgstr "Cont dezactivat"
 msgid "Last updated:"
 msgstr "Nume"
 
-#: templates/audit/gdpr_dashboard.html:82 templates/dashboard.html:270
+#: templates/audit/gdpr_dashboard.html:82 templates/dashboard.html:268
 #, fuzzy
 #| msgid "Actions"
 msgid "Quick Actions"
@@ -6116,8 +6116,8 @@ msgstr "Tichete"
 msgid "My Invoices"
 msgstr "Facturi"
 
-#: templates/base.html:112 templates/dashboard.html:93
-#: templates/dashboard.html:309
+#: templates/base.html:112 templates/dashboard.html:91
+#: templates/dashboard.html:307
 #, fuzzy
 #| msgid "Services"
 msgid "My Services"
@@ -6500,7 +6500,7 @@ msgstr "Cotă TVA (%)"
 #: templates/billing/invoice_form.html:358
 #: templates/billing/proforma_form.html:210
 #: templates/billing/proforma_form.html:241
-#: templates/billing/proforma_form.html:439 templates/dashboard.html:392
+#: templates/billing/proforma_form.html:439 templates/dashboard.html:390
 msgid "Standard"
 msgstr ""
 
@@ -7443,245 +7443,245 @@ msgid "Welcome to PragmaticHost"
 msgstr "Bine ați venit la PragmaticHost"
 
 #: templates/dashboard.html:20
-#, python-format
-msgid ""
-"Hello, %(user.first_name|default:user.username)s! Here is an overview of "
-"your business\n"
-"      activity."
-msgstr ""
-"Salut, %(user.first_name|default:user.username)s! Iată o prezentare generală "
-"a activității tale de afaceri."
+#, fuzzy, python-format
+#| msgid ""
+#| "Hello, %(user.first_name|default:user.username)s! Here is an overview of "
+#| "your business\n"
+#| "      activity."
+msgid "Hello, %(first_name)s! Here is an overview of your business activity."
+msgstr "Salut, %(first_name)s! Iată o prezentare generală a activității tale de afaceri."
 
-#: templates/dashboard.html:23
-#, python-format
+#: templates/dashboard.html:22
+#, fuzzy, python-format
+#| msgid ""
+#| "Hello, %(user.first_name|default:user.username)s! Here is an overview of "
+#| "your hosting services\n"
+#| "      and account."
 msgid ""
-"Hello, %(user.first_name|default:user.username)s! Here is an overview of "
-"your hosting services\n"
-"      and account."
-msgstr ""
-"Salut, %(user.first_name|default:user.username)s! Iată o prezentare generală "
-"a serviciilor tale de găzduire și a contului."
+"Hello, %(first_name)s! Here is an overview of your hosting services and "
+"account."
+msgstr "Salut, %(first_name)s! Iată o prezentare generală a serviciilor tale de găzduire și a contului."
 
-#: templates/dashboard.html:53
+#: templates/dashboard.html:51
 #, fuzzy
 #| msgid "Monthly"
 msgid "Monthly Revenue"
 msgstr "Venit lunar"
 
-#: templates/dashboard.html:66
+#: templates/dashboard.html:64
 #, fuzzy
 #| msgid "Tickets"
 msgid "Open Tickets"
 msgstr "Tichete deschise"
 
-#: templates/dashboard.html:79 templates/provisioning/service_list.html:55
+#: templates/dashboard.html:77 templates/provisioning/service_list.html:55
 #, fuzzy
 #| msgid "Services"
 msgid "Active Services"
 msgstr "Servicii active"
 
-#: templates/dashboard.html:106
+#: templates/dashboard.html:104
 #, fuzzy
 #| msgid "Tickets"
 msgid "My Open Tickets"
 msgstr "Tichetele mele deschise"
 
-#: templates/dashboard.html:119 templates/users/profile.html:154
+#: templates/dashboard.html:117 templates/users/profile.html:154
 #, fuzzy
 #| msgid "Account Disabled"
 msgid "Account Status"
 msgstr "Stare cont"
 
-#: templates/dashboard.html:132
+#: templates/dashboard.html:130
 #, fuzzy
 #| msgid "Next Billing Date"
 msgid "Next Billing"
 msgstr "Următoarea facturare"
 
-#: templates/dashboard.html:133
+#: templates/dashboard.html:131
 msgid "End of Month"
 msgstr "Sfârșitul lunii"
 
-#: templates/dashboard.html:147
+#: templates/dashboard.html:145
 #, fuzzy
 #| msgid "Invoices"
 msgid "Recent Invoices"
 msgstr "Facturi recente"
 
-#: templates/dashboard.html:149
+#: templates/dashboard.html:147
 #, fuzzy
 #| msgid "Sent to e-Invoice"
 msgid "My Recent Invoices"
 msgstr "Facturile mele recente"
 
-#: templates/dashboard.html:186
+#: templates/dashboard.html:184
 #, fuzzy
 #| msgid "No invoices yet"
 msgid "No recent invoices"
 msgstr "Nici o factură recentă"
 
-#: templates/dashboard.html:188
+#: templates/dashboard.html:186
 #, fuzzy
 #| msgid "No invoices yet"
 msgid "No recent invoices found"
 msgstr "Nu s-au găsit facturi recente"
 
-#: templates/dashboard.html:197
+#: templates/dashboard.html:195
 #, fuzzy
 #| msgid "Total Invoices"
 msgid "View all invoices"
 msgstr "Vizualizează toate facturile"
 
-#: templates/dashboard.html:199
+#: templates/dashboard.html:197
 #, fuzzy
 #| msgid "New Invoice"
 msgid "View my invoices"
 msgstr "Vizualizează facturile mele"
 
-#: templates/dashboard.html:211
+#: templates/dashboard.html:209
 #, fuzzy
 #| msgid "Tickets"
 msgid "Recent Tickets"
 msgstr "Tichete recente"
 
-#: templates/dashboard.html:213
+#: templates/dashboard.html:211
 msgid "My Recent Tickets"
 msgstr "Tichetele mele recente"
 
-#: templates/dashboard.html:237 templates/tickets/form.html:63
+#: templates/dashboard.html:235 templates/tickets/form.html:63
 msgid "Medium"
 msgstr "Mediu"
 
-#: templates/dashboard.html:246
+#: templates/dashboard.html:244
 #, fuzzy
 #| msgid "Support Tickets"
 msgid "No recent tickets"
 msgstr "Nici un tichet recent"
 
-#: templates/dashboard.html:248
+#: templates/dashboard.html:246
 #, fuzzy
 #| msgid "Support Tickets"
 msgid "No recent support tickets"
 msgstr "Nu există tichete de suport recente"
 
-#: templates/dashboard.html:257
+#: templates/dashboard.html:255
 msgid "View all tickets"
 msgstr "Vizualizează toate tichetele"
 
-#: templates/dashboard.html:259
+#: templates/dashboard.html:257
 msgid "View my tickets"
 msgstr "Vizualizează tichetele mele"
 
-#: templates/dashboard.html:282
+#: templates/dashboard.html:280
 #, fuzzy
 #| msgid "Customer"
 msgid "New Customer"
 msgstr "Client nou"
 
-#: templates/dashboard.html:285
+#: templates/dashboard.html:283
 #, fuzzy
 #| msgid "Date format"
 msgid "New Proforma"
 msgstr "Proformă nouă"
 
-#: templates/dashboard.html:288 templates/dashboard.html:303
+#: templates/dashboard.html:286 templates/dashboard.html:301
 #: templates/tickets/list.html:29
 #, fuzzy
 #| msgid "Ticket"
 msgid "New Ticket"
 msgstr "Tichet nou"
 
-#: templates/dashboard.html:291
+#: templates/dashboard.html:289
 #, fuzzy
 #| msgid "Service"
 msgid "New Service"
 msgstr "Serviciu nou"
 
-#: templates/dashboard.html:306
+#: templates/dashboard.html:304
 #, fuzzy
 #| msgid "New Invoice"
 msgid "View Invoices"
 msgstr "Vizualizează facturile"
 
-#: templates/dashboard.html:312
+#: templates/dashboard.html:310
 #, fuzzy
 #| msgid "Profile"
 msgid "My Profile"
 msgstr "Profilul meu"
 
-#: templates/dashboard.html:324
+#: templates/dashboard.html:322
 #, fuzzy
 #| msgid "Status"
 msgid "System Status"
 msgstr "Stare sistem"
 
-#: templates/dashboard.html:326 templates/users/profile.html:129
+#: templates/dashboard.html:324 templates/users/profile.html:129
 #, fuzzy
 #| msgid "Company Information"
 msgid "Account Information"
 msgstr "Informații cont"
 
-#: templates/dashboard.html:334
+#: templates/dashboard.html:332
 #, fuzzy
 #| msgid "Servers"
 msgid "Server Status"
 msgstr "Stare server"
 
-#: templates/dashboard.html:336
+#: templates/dashboard.html:334
 #, fuzzy
 #| msgid "Offline"
 msgid "Online"
 msgstr "Online"
 
-#: templates/dashboard.html:341
+#: templates/dashboard.html:339
 #, fuzzy
 #| msgid "Status"
 msgid "Backup Status"
 msgstr "Stare"
 
-#: templates/dashboard.html:343
+#: templates/dashboard.html:341
 #, fuzzy
 #| msgid "Updated At"
 msgid "Up-to-date"
 msgstr "Actualizat la"
 
-#: templates/dashboard.html:350
+#: templates/dashboard.html:348
 msgid "Connected"
 msgstr "Conectat"
 
-#: templates/dashboard.html:355
+#: templates/dashboard.html:353
 #, fuzzy
 #| msgid "Payment Date"
 msgid "Payment Gateway"
 msgstr "Data plății"
 
-#: templates/dashboard.html:357
+#: templates/dashboard.html:355
 msgid "Functional"
 msgstr ""
 
-#: templates/dashboard.html:364
+#: templates/dashboard.html:362
 #, fuzzy
 #| msgid "Last Name"
 msgid "Last update"
 msgstr "Nume"
 
-#: templates/dashboard.html:384
+#: templates/dashboard.html:382
 #, fuzzy
 #| msgid "Customer Type"
 msgid "Customer Since"
 msgstr "Tip client"
 
-#: templates/dashboard.html:390
+#: templates/dashboard.html:388
 #, fuzzy
 #| msgid "Support"
 msgid "Support Level"
 msgstr "Suport"
 
-#: templates/dashboard.html:399
+#: templates/dashboard.html:397
 msgid "Need help?"
 msgstr ""
 
-#: templates/dashboard.html:401
+#: templates/dashboard.html:399
 #, fuzzy
 #| msgid "Contact Phone"
 msgid "Contact Support"

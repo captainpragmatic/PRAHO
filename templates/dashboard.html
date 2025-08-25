@@ -17,11 +17,9 @@
     </h1>
     <p class="mt-2 text-slate-400">
       {% if user.is_staff %}
-      {% blocktrans %}Hello, {{ user.first_name|default:user.username }}! Here is an overview of your business
-      activity.{% endblocktrans %}
+      {% blocktrans with first_name=user.first_name|default:user.username %}Hello, {{ first_name }}! Here is an overview of your business activity.{% endblocktrans %}
       {% else %}
-      {% blocktrans %}Hello, {{ user.first_name|default:user.username }}! Here is an overview of your hosting services
-      and account.{% endblocktrans %}
+      {% blocktrans with first_name=user.first_name|default:user.username %}Hello, {{ first_name }}! Here is an overview of your hosting services and account.{% endblocktrans %}
       {% endif %}
     </p>
   </div>
