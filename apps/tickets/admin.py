@@ -3,18 +3,20 @@ Django admin configuration for support ticket models.
 Romanian hosting provider customer support system administration.
 """
 
+
 from django.contrib import admin
-from django.utils.html import format_html
+from django.db.models import Sum
 from django.utils import timezone
+from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
-from django.db.models import Count, Avg, Sum
-from datetime import timedelta
 
 from .models import (
-    SupportCategory, Ticket, TicketComment, 
-    TicketAttachment, TicketWorklog
+    SupportCategory,
+    Ticket,
+    TicketAttachment,
+    TicketComment,
+    TicketWorklog,
 )
-
 
 # ===============================================================================
 # SUPPORT CATEGORY ADMIN
@@ -23,7 +25,7 @@ from .models import (
 @admin.register(SupportCategory)
 class SupportCategoryAdmin(admin.ModelAdmin):
     """Support ticket categories management"""
-    
+
     list_display = [
         'name',
         'name_en',
@@ -40,7 +42,7 @@ class SupportCategoryAdmin(admin.ModelAdmin):
     ]
     search_fields = ['name', 'name_en', 'description']
     ordering = ['sort_order', 'name']
-    
+
     fieldsets = (
         (_('Category Information'), {
             'fields': (
@@ -68,7 +70,7 @@ class SupportCategoryAdmin(admin.ModelAdmin):
         }),
     )
     readonly_fields = ['created_at']
-    
+
     def icon_display(self, obj):
         """Display category icon with color"""
         return format_html(
@@ -98,7 +100,7 @@ class TicketAttachmentInline(admin.TabularInline):
     extra = 0
     fields = ['filename', 'file_size_display', 'content_type', 'is_safe', 'uploaded_at']
     readonly_fields = ['file_size_display', 'uploaded_at']
-    
+
     def file_size_display(self, obj):
         """Display file size in human readable format"""
         if obj.pk:
@@ -122,7 +124,7 @@ class TicketWorklogInline(admin.TabularInline):
 @admin.register(Ticket)
 class TicketAdmin(admin.ModelAdmin):
     """Support ticket management"""
-    
+
     list_display = [
         'ticket_number',
         'title_truncated',
@@ -167,7 +169,7 @@ class TicketAdmin(admin.ModelAdmin):
     ]
     inlines = [TicketCommentInline, TicketAttachmentInline, TicketWorklogInline]
     ordering = ['-created_at']
-    
+
     fieldsets = (
         (_('Ticket Information'), {
             'fields': (
@@ -233,14 +235,14 @@ class TicketAdmin(admin.ModelAdmin):
             'classes': ('collapse',),
         }),
     )
-    
+
     def title_truncated(self, obj):
         """Display truncated title"""
         if len(obj.title) > 50:
             return f"{obj.title[:47]}..."
         return obj.title
     title_truncated.short_description = _('Title')
-    
+
     def status_display(self, obj):
         """Display status with colors"""
         color = obj.get_status_color()
@@ -250,7 +252,7 @@ class TicketAdmin(admin.ModelAdmin):
             obj.get_status_display()
         )
     status_display.short_description = _('Status')
-    
+
     def priority_display(self, obj):
         """Display priority with colors"""
         color = obj.get_priority_color()
@@ -260,11 +262,11 @@ class TicketAdmin(admin.ModelAdmin):
             obj.get_priority_display()
         )
     priority_display.short_description = _('Priority')
-    
+
     def sla_status(self, obj):
         """Display SLA status with warnings"""
         now = timezone.now()
-        
+
         # Response SLA
         if not obj.first_response_at and obj.sla_response_due:
             if now > obj.sla_response_due:
@@ -275,7 +277,7 @@ class TicketAdmin(admin.ModelAdmin):
                 response_status = format_html('<span style="color: green;">✅ Response On Time</span>')
         else:
             response_status = format_html('<span style="color: green;">✅ Response Complete</span>')
-        
+
         # Resolution SLA
         if not obj.resolved_at and obj.sla_resolution_due:
             if now > obj.sla_resolution_due:
@@ -286,14 +288,14 @@ class TicketAdmin(admin.ModelAdmin):
                 resolution_status = format_html('<span style="color: green;">✅ Resolution On Time</span>')
         else:
             resolution_status = format_html('<span style="color: green;">✅ Resolution Complete</span>')
-        
+
         return format_html(
             '{}<br/>{}',
             response_status,
             resolution_status
         )
     sla_status.short_description = _('SLA Status')
-    
+
     def satisfaction_display(self, obj):
         """Display customer satisfaction rating"""
         if obj.satisfaction_rating:
@@ -307,14 +309,14 @@ class TicketAdmin(admin.ModelAdmin):
             )
         return '-'
     satisfaction_display.short_description = _('Satisfaction')
-    
+
     actions = [
         'assign_to_me',
         'mark_resolved',
         'escalate_tickets',
         'require_customer_response',
     ]
-    
+
     def assign_to_me(self, request, queryset):
         """Assign selected tickets to current user"""
         updated = queryset.filter(status__in=['new', 'open']).update(
@@ -323,7 +325,7 @@ class TicketAdmin(admin.ModelAdmin):
         )
         self.message_user(request, f'Successfully assigned {updated} tickets to you.')
     assign_to_me.short_description = _('Assign to me')
-    
+
     def mark_resolved(self, request, queryset):
         """Mark selected tickets as resolved"""
         now = timezone.now()
@@ -336,13 +338,13 @@ class TicketAdmin(admin.ModelAdmin):
                 updated += 1
         self.message_user(request, f'Successfully resolved {updated} tickets.')
     mark_resolved.short_description = _('Mark as resolved')
-    
+
     def escalate_tickets(self, request, queryset):
         """Escalate selected tickets"""
         updated = queryset.update(is_escalated=True, priority='urgent')
         self.message_user(request, f'Successfully escalated {updated} tickets.')
     escalate_tickets.short_description = _('Escalate tickets')
-    
+
     def require_customer_response(self, request, queryset):
         """Mark tickets as requiring customer response"""
         updated = queryset.update(
@@ -360,7 +362,7 @@ class TicketAdmin(admin.ModelAdmin):
 @admin.register(TicketComment)
 class TicketCommentAdmin(admin.ModelAdmin):
     """Ticket comment management"""
-    
+
     list_display = [
         'created_at',
         'ticket',
@@ -389,7 +391,7 @@ class TicketCommentAdmin(admin.ModelAdmin):
     date_hierarchy = 'created_at'
     readonly_fields = ['created_at', 'updated_at']
     ordering = ['-created_at']
-    
+
     fieldsets = (
         (_('Comment Information'), {
             'fields': (
@@ -420,7 +422,7 @@ class TicketCommentAdmin(admin.ModelAdmin):
             'classes': ('collapse',),
         }),
     )
-    
+
     def author_display(self, obj):
         """Display comment author"""
         if obj.author:
@@ -437,7 +439,7 @@ class TicketCommentAdmin(admin.ModelAdmin):
             )
         return 'Anonymous'
     author_display.short_description = _('Author')
-    
+
     def content_preview(self, obj):
         """Display content preview"""
         if len(obj.content) > 100:
@@ -453,7 +455,7 @@ class TicketCommentAdmin(admin.ModelAdmin):
 @admin.register(TicketWorklog)
 class TicketWorklogAdmin(admin.ModelAdmin):
     """Ticket work time tracking"""
-    
+
     list_display = [
         'work_date',
         'ticket',
@@ -480,7 +482,7 @@ class TicketWorklogAdmin(admin.ModelAdmin):
     date_hierarchy = 'work_date'
     readonly_fields = ['created_at', 'total_cost_display']
     ordering = ['-work_date']
-    
+
     fieldsets = (
         (_('Work Information'), {
             'fields': (
@@ -505,7 +507,7 @@ class TicketWorklogAdmin(admin.ModelAdmin):
             'classes': ('collapse',),
         }),
     )
-    
+
     def total_cost_display(self, obj):
         """Display total cost if billable"""
         if obj.is_billable and obj.hourly_rate:
@@ -513,21 +515,21 @@ class TicketWorklogAdmin(admin.ModelAdmin):
             return f"{total:.2f} RON"
         return '-'
     total_cost_display.short_description = _('Total Cost')
-    
+
     def description_preview(self, obj):
         """Display description preview"""
         if len(obj.description) > 80:
             return f"{obj.description[:77]}..."
         return obj.description
     description_preview.short_description = _('Description')
-    
+
     def changelist_view(self, request, extra_context=None):
         """Add summary statistics to changelist"""
         response = super().changelist_view(request, extra_context=extra_context)
-        
+
         if hasattr(response, 'context_data'):
             queryset = response.context_data['cl'].queryset
-            
+
             # Calculate summary statistics
             summary = queryset.aggregate(
                 total_hours=Sum('time_spent'),
@@ -537,13 +539,13 @@ class TicketWorklogAdmin(admin.ModelAdmin):
                     filter=models.Q(is_billable=True)
                 )
             )
-            
+
             response.context_data['summary'] = {
                 'total_hours': summary['total_hours'] or 0,
                 'billable_hours': summary['billable_hours'] or 0,
                 'total_cost': summary['total_cost'] or 0,
             }
-        
+
         return response
 
 
@@ -554,7 +556,7 @@ class TicketWorklogAdmin(admin.ModelAdmin):
 @admin.register(TicketAttachment)
 class TicketAttachmentAdmin(admin.ModelAdmin):
     """Ticket file attachment management"""
-    
+
     list_display = [
         'uploaded_at',
         'ticket',
@@ -579,7 +581,7 @@ class TicketAttachmentAdmin(admin.ModelAdmin):
     date_hierarchy = 'uploaded_at'
     readonly_fields = ['uploaded_at', 'file_size_display']
     ordering = ['-uploaded_at']
-    
+
     fieldsets = (
         (_('Attachment Information'), {
             'fields': (
@@ -605,14 +607,14 @@ class TicketAttachmentAdmin(admin.ModelAdmin):
             'classes': ('collapse',),
         }),
     )
-    
+
     def file_size_display(self, obj):
         """Display file size in human readable format"""
         if obj.pk:
             return obj.get_file_size_display()
         return '-'
     file_size_display.short_description = _('File Size')
-    
+
     def is_safe_display(self, obj):
         """Display safety status with colors"""
         if obj.is_safe:

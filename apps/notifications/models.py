@@ -5,11 +5,10 @@ Aligned with PostgreSQL hosting panel schema v1.
 """
 
 import uuid
+
+from django.core.validators import EmailValidator
 from django.db import models
 from django.utils.translation import gettext_lazy as _
-from django.utils import timezone
-from django.core.validators import EmailValidator
-
 
 # ===============================================================================
 # EMAIL TEMPLATE SYSTEM
@@ -21,10 +20,10 @@ class EmailTemplate(models.Model):
     Supports multilingual templates for Romanian/English customer base.
     Aligned with PostgreSQL email_template table.
     """
-    
+
     # Use UUID for better security and external references
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    
+
     # Template identification
     key = models.CharField(
         max_length=100,
@@ -35,7 +34,7 @@ class EmailTemplate(models.Model):
         default='ro',
         help_text=_("Language/locale code (ro, en)")
     )
-    
+
     # Template content
     subject = models.CharField(
         max_length=255,
@@ -48,7 +47,7 @@ class EmailTemplate(models.Model):
         blank=True,
         help_text=_("Plain text fallback (auto-generated if empty)")
     )
-    
+
     # Template metadata
     description = models.TextField(
         blank=True,
@@ -59,7 +58,7 @@ class EmailTemplate(models.Model):
         blank=True,
         help_text=_("Available template variables and their descriptions")
     )
-    
+
     # Status and versioning
     is_active = models.BooleanField(
         default=True,
@@ -69,7 +68,7 @@ class EmailTemplate(models.Model):
         default=1,
         help_text=_("Template version for change tracking")
     )
-    
+
     # Romanian hosting provider categories
     CATEGORY_CHOICES = [
         ('billing', _('Billing & Invoices')),
@@ -93,7 +92,7 @@ class EmailTemplate(models.Model):
         default='system',
         help_text=_("Template category for organization")
     )
-    
+
     # Audit fields
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -104,7 +103,7 @@ class EmailTemplate(models.Model):
         related_name='created_email_templates',
         help_text=_("User who created this template")
     )
-    
+
     class Meta:
         db_table = 'email_template'
         verbose_name = _('Email Template')
@@ -116,10 +115,10 @@ class EmailTemplate(models.Model):
             models.Index(fields=['created_at']),
         ]
         ordering = ['category', 'key', 'locale']
-    
+
     def __str__(self):
         return f"{self.key} ({self.locale}): {self.subject}"
-    
+
     def get_subject_display(self):
         """Truncated subject for admin display"""
         if len(self.subject) > 50:
@@ -137,10 +136,10 @@ class EmailLog(models.Model):
     Tracks all outbound emails for compliance and debugging.
     Aligned with PostgreSQL email_log table.
     """
-    
+
     # Use UUID for better security and external references
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    
+
     # Email identification
     customer = models.ForeignKey(
         'customers.Customer',
@@ -162,7 +161,7 @@ class EmailLog(models.Model):
         blank=True,
         help_text=_("Reply-to email address")
     )
-    
+
     # Email content
     template_key = models.CharField(
         max_length=100,
@@ -181,7 +180,7 @@ class EmailLog(models.Model):
         blank=True,
         help_text=_("HTML version of email body")
     )
-    
+
     # Delivery tracking
     STATUS_CHOICES = [
         ('queued', _('Queued')),           # Waiting to be sent
@@ -200,7 +199,7 @@ class EmailLog(models.Model):
         default='queued',
         help_text=_("Current delivery status")
     )
-    
+
     # Provider integration
     provider = models.CharField(
         max_length=50,
@@ -217,7 +216,7 @@ class EmailLog(models.Model):
         blank=True,
         help_text=_("Raw provider response for debugging")
     )
-    
+
     # Timing and tracking
     sent_at = models.DateTimeField(
         auto_now_add=True,
@@ -238,14 +237,14 @@ class EmailLog(models.Model):
         blank=True,
         help_text=_("When email links were first clicked")
     )
-    
+
     # Additional metadata
     meta = models.JSONField(
         default=dict,
         blank=True,
         help_text=_("Additional email metadata (variables used, campaign info, etc.)")
     )
-    
+
     # Romanian hosting context
     priority = models.CharField(
         max_length=10,
@@ -258,7 +257,7 @@ class EmailLog(models.Model):
         default='normal',
         help_text=_("Email priority level")
     )
-    
+
     # User context
     sent_by = models.ForeignKey(
         'users.User',
@@ -268,7 +267,7 @@ class EmailLog(models.Model):
         related_name='sent_emails',
         help_text=_("User who triggered this email (if manual)")
     )
-    
+
     class Meta:
         db_table = 'email_log'
         verbose_name = _('Email Log')
@@ -282,15 +281,15 @@ class EmailLog(models.Model):
             models.Index(fields=['-sent_at']),  # Most recent emails
         ]
         ordering = ['-sent_at']
-    
+
     def __str__(self):
         return f"{self.subject} → {self.to_addr} ({self.status})"
-    
+
     def get_status_display_color(self):
         """Get color for status display in admin"""
         status_colors = {
             'queued': '#6B7280',      # Gray
-            'sending': '#3B82F6',     # Blue  
+            'sending': '#3B82F6',     # Blue
             'sent': '#10B981',        # Green
             'delivered': '#059669',   # Dark green
             'bounced': '#EF4444',     # Red
@@ -300,11 +299,11 @@ class EmailLog(models.Model):
             'rejected': '#DC2626',    # Dark red
         }
         return status_colors.get(self.status, '#6B7280')
-    
+
     def is_successful(self):
         """Check if email was successfully delivered"""
         return self.status in ['sent', 'delivered']
-    
+
     def is_failed(self):
         """Check if email failed to deliver"""
         return self.status in ['bounced', 'failed', 'rejected']
@@ -319,10 +318,10 @@ class EmailCampaign(models.Model):
     Email campaigns for bulk notifications and marketing.
     Romanian hosting provider specific campaign management.
     """
-    
+
     # Use UUID for better security and external references
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    
+
     # Campaign identification
     name = models.CharField(
         max_length=200,
@@ -332,14 +331,14 @@ class EmailCampaign(models.Model):
         blank=True,
         help_text=_("Campaign description and purpose")
     )
-    
+
     # Campaign configuration
     template = models.ForeignKey(
         EmailTemplate,
         on_delete=models.PROTECT,
         help_text=_("Email template to use for this campaign")
     )
-    
+
     # Targeting
     AUDIENCE_CHOICES = [
         ('all_customers', _('All Customers')),
@@ -360,7 +359,7 @@ class EmailCampaign(models.Model):
         blank=True,
         help_text=_("Custom filter criteria for audience selection")
     )
-    
+
     # Campaign status
     STATUS_CHOICES = [
         ('draft', _('Draft')),           # Being prepared
@@ -377,7 +376,7 @@ class EmailCampaign(models.Model):
         default='draft',
         help_text=_("Current campaign status")
     )
-    
+
     # Scheduling
     scheduled_at = models.DateTimeField(
         null=True,
@@ -394,7 +393,7 @@ class EmailCampaign(models.Model):
         blank=True,
         help_text=_("When campaign sending completed")
     )
-    
+
     # Results tracking
     total_recipients = models.PositiveIntegerField(
         default=0,
@@ -408,7 +407,7 @@ class EmailCampaign(models.Model):
         default=0,
         help_text=_("Number of emails that failed to send")
     )
-    
+
     # Romanian business context
     is_transactional = models.BooleanField(
         default=False,
@@ -418,7 +417,7 @@ class EmailCampaign(models.Model):
         default=True,
         help_text=_("Requires explicit customer consent (GDPR compliance)")
     )
-    
+
     # Audit fields
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -429,7 +428,7 @@ class EmailCampaign(models.Model):
         related_name='created_campaigns',
         help_text=_("User who created this campaign")
     )
-    
+
     class Meta:
         db_table = 'email_campaign'
         verbose_name = _('Email Campaign')
@@ -440,20 +439,20 @@ class EmailCampaign(models.Model):
             models.Index(fields=['-created_at']),
         ]
         ordering = ['-created_at']
-    
+
     def __str__(self):
         return f"{self.name} ({self.get_status_display()})"
-    
+
     def get_success_rate(self):
         """Calculate campaign success rate percentage"""
         if self.total_recipients == 0:
             return 0
         return round((self.emails_sent / self.total_recipients) * 100, 1)
-    
+
     def can_be_sent(self):
         """Check if campaign can be sent"""
         return self.status in ['draft', 'scheduled', 'paused']
-    
+
     def is_completed(self):
         """Check if campaign is completed"""
         return self.status in ['sent', 'cancelled', 'failed']

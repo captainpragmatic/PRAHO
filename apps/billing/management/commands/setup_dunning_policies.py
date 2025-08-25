@@ -4,6 +4,7 @@ Creates standard retry schedules for different customer tiers and payment scenar
 """
 
 from django.core.management.base import BaseCommand
+
 from apps.billing.models import PaymentRetryPolicy
 
 
@@ -19,13 +20,13 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         """Set up standard payment retry policies"""
-        
+
         force = options.get('force', False)
         created_count = 0
         updated_count = 0
-        
+
         self.stdout.write("💳 Setting up payment retry policies...")
-        
+
         # Standard retry policies for different scenarios
         policies = [
             {
@@ -149,17 +150,17 @@ class Command(BaseCommand):
                 }
             }
         ]
-        
+
         # Create or update policies
         for policy_data in policies:
             existing = PaymentRetryPolicy.objects.filter(
                 name=policy_data['name']
             ).first()
-            
+
             if existing and not force:
                 self.stdout.write(f"  ⏭️  Skipping existing: {existing.name}")
                 continue
-            
+
             if existing and force:
                 # Update existing policy
                 for key, value in policy_data.items():
@@ -172,7 +173,7 @@ class Command(BaseCommand):
                 policy = PaymentRetryPolicy.objects.create(**policy_data)
                 created_count += 1
                 self.stdout.write(f"  ✅ Created: {policy.name}")
-        
+
         # Ensure only one default policy
         default_policies = PaymentRetryPolicy.objects.filter(is_default=True)
         if default_policies.count() > 1:
@@ -182,15 +183,15 @@ class Command(BaseCommand):
                 policy.is_default = False
                 policy.save()
                 self.stdout.write(f"  🔧 Removed default from: {policy.name}")
-        
+
         # Summary
         self.stdout.write("\n" + "="*60)
-        self.stdout.write(f"📋 Payment Retry Policies Setup Complete!")
+        self.stdout.write("📋 Payment Retry Policies Setup Complete!")
         self.stdout.write(f"   ✅ Created: {created_count} new policies")
         if updated_count > 0:
             self.stdout.write(f"   🔄 Updated: {updated_count} existing policies")
         self.stdout.write(f"   📊 Total policies: {PaymentRetryPolicy.objects.count()}")
-        
+
         # Show active policies
         self.stdout.write("\n💳 Active Retry Policies:")
         active_policies = PaymentRetryPolicy.objects.filter(is_active=True).order_by('name')
@@ -202,7 +203,7 @@ class Command(BaseCommand):
             self.stdout.write(f"     └─ {attempts} attempts over {max_days} days")
             if policy.suspend_service_after_days:
                 self.stdout.write(f"     └─ Suspend after {policy.suspend_service_after_days} days")
-        
+
         # Show default policy details
         default_policy = PaymentRetryPolicy.objects.filter(is_default=True).first()
         if default_policy:
@@ -210,7 +211,7 @@ class Command(BaseCommand):
             self.stdout.write(f"   Retry schedule: {default_policy.retry_intervals_days}")
             self.stdout.write(f"   Service suspension: {default_policy.suspend_service_after_days} days")
             self.stdout.write(f"   Service termination: {default_policy.terminate_service_after_days} days")
-        
+
         self.stdout.write("\n💡 Next steps:")
         self.stdout.write("   1. Configure email templates for dunning campaigns")
         self.stdout.write("   2. Set up cron job for: python manage.py run_payment_collection")

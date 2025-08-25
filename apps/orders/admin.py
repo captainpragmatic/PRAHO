@@ -4,15 +4,16 @@ Romanian hosting provider order management interface.
 """
 
 from django.contrib import admin
+
 from .models import Order, OrderItem, OrderStatusHistory
 
 
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
     """Admin interface for orders."""
-    
+
     list_display = [
-        'order_number', 'customer', 'status', 'total_cents', 
+        'order_number', 'customer', 'status', 'total_cents',
         'currency', 'created_at'
     ]
     list_filter = [
@@ -23,7 +24,7 @@ class OrderAdmin(admin.ModelAdmin):
         'billing_company_name'
     ]
     readonly_fields = ('created_at', 'updated_at', 'order_number')
-    
+
     fieldsets = (
         ('Order Information', {
             'fields': ('order_number', 'customer', 'status')
@@ -60,7 +61,7 @@ class OrderItemInline(admin.TabularInline):
     extra = 0
     readonly_fields = ('created_at',)
     fields = (
-        'product', 'service', 'quantity', 'unit_price_cents', 
+        'product', 'service', 'quantity', 'unit_price_cents',
         'line_total_cents', 'provisioning_status', 'created_at'
     )
 
@@ -72,9 +73,9 @@ OrderAdmin.inlines = [OrderItemInline]
 @admin.register(OrderItem)
 class OrderItemAdmin(admin.ModelAdmin):
     """Admin interface for order items."""
-    
+
     list_display = [
-        'order', 'product', 'quantity', 'unit_price_cents', 
+        'order', 'product', 'quantity', 'unit_price_cents',
         'line_total_cents', 'provisioning_status', 'created_at'
     ]
     list_filter = ['provisioning_status', 'created_at']
@@ -82,7 +83,7 @@ class OrderItemAdmin(admin.ModelAdmin):
         'order__order_number', 'product__name', 'description'
     ]
     readonly_fields = ('created_at', 'updated_at')
-    
+
     fieldsets = (
         ('Order & Product', {
             'fields': ('order', 'product', 'service')
@@ -107,14 +108,14 @@ class OrderItemAdmin(admin.ModelAdmin):
 @admin.register(OrderStatusHistory)
 class OrderStatusHistoryAdmin(admin.ModelAdmin):
     """Admin interface for order status history."""
-    
+
     list_display = [
         'order', 'old_status', 'new_status', 'changed_by', 'created_at'
     ]
     list_filter = ['old_status', 'new_status', 'created_at']
     search_fields = ['order__order_number', 'notes']
     readonly_fields = ('created_at',)
-    
+
     fieldsets = (
         ('Status Change', {
             'fields': ('order', 'old_status', 'new_status', 'changed_by')

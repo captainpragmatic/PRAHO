@@ -69,6 +69,17 @@ facturi/
 backup/
 temp/
 
+# Screenshots and Images
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.svg
+login_failure_*.png
+screenshot_*.png
+
 # LLM Assistant Files
 CLAUDE.md
 .claude*

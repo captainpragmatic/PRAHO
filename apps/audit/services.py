@@ -3,22 +3,22 @@ Audit services for PRAHO Platform
 Centralized audit logging for Romanian compliance and security.
 """
 
-from django.contrib.auth import get_user_model
-from django.contrib.contenttypes.models import ContentType
-from django.utils import timezone
-from django.db import transaction
-from django.core.files.storage import default_storage
-from django.conf import settings
-from typing import Optional, Dict, Any, TYPE_CHECKING
+import json
 import logging
 import uuid
-import json
-import tempfile
+from typing import TYPE_CHECKING, Any, Tuple
+
+from django.contrib.auth import get_user_model
+from django.contrib.contenttypes.models import ContentType
+from django.core.files.storage import default_storage
+from django.db import transaction
+from django.utils import timezone
 
 from .models import AuditEvent, ComplianceLog
 
 if TYPE_CHECKING:
-    from django.contrib.auth.models import AbstractUser
+    from apps.common.types import Result
+    from .models import DataExport
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -26,25 +26,25 @@ logger = logging.getLogger(__name__)
 
 class AuditService:
     """Centralized audit logging service"""
-    
+
     @staticmethod
     def log_event(
         event_type: str,
         user = None,
-        content_object: Optional[Any] = None,
-        old_values: Optional[Dict] = None,
-        new_values: Optional[Dict] = None,
+        content_object: Any | None = None,
+        old_values: dict | None = None,
+        new_values: dict | None = None,
         description: str = '',
-        ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None,
-        request_id: Optional[str] = None,
-        session_key: Optional[str] = None,
-        metadata: Optional[Dict] = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+        request_id: str | None = None,
+        session_key: str | None = None,
+        metadata: dict | None = None,
         actor_type: str = 'user'
     ) -> AuditEvent:
         """
         🔐 Log an audit event with full context
-        
+
         Args:
             event_type: Type of event (from ACTION_CHOICES or custom 2FA events)
             user: User performing the action
@@ -66,7 +66,7 @@ class AuditService:
             if content_object:
                 content_type = ContentType.objects.get_for_model(content_object)
                 object_id = content_object.pk
-            
+
             # Create audit event
             audit_event = AuditEvent.objects.create(
                 user=user,
@@ -83,31 +83,31 @@ class AuditService:
                 session_key=session_key or '',
                 metadata=metadata or {}
             )
-            
+
             logger.info(
                 f"✅ [Audit] {event_type} event logged for user {user.email if user else 'System'}"
             )
-            
+
             return audit_event
-            
+
         except Exception as e:
             logger.error(f"🔥 [Audit] Failed to log event {event_type}: {e}")
             raise
-    
+
     @staticmethod
     def log_2fa_event(
         event_type: str,
         user,
-        ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None,
-        metadata: Optional[Dict] = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+        metadata: dict | None = None,
         description: str = '',
-        request_id: Optional[str] = None,
-        session_key: Optional[str] = None
+        request_id: str | None = None,
+        session_key: str | None = None
     ) -> AuditEvent:
         """
         🔐 Log 2FA-specific audit event
-        
+
         Supported event types:
         - 2fa_enabled
         - 2fa_disabled
@@ -125,14 +125,14 @@ class AuditService:
             'timestamp': timezone.now().isoformat(),
             **(metadata or {})
         }
-        
+
         # Add user 2FA status to metadata
         if user:
             enhanced_metadata.update({
                 'user_2fa_enabled': user.two_factor_enabled,
                 'backup_codes_count': len(user.backup_tokens) if user.backup_tokens else 0
             })
-        
+
         return AuditService.log_event(
             event_type=event_type,
             user=user,
@@ -144,7 +144,7 @@ class AuditService:
             session_key=session_key,
             metadata=enhanced_metadata
         )
-    
+
     @staticmethod
     def log_compliance_event(
         compliance_type: str,
@@ -152,8 +152,8 @@ class AuditService:
         description: str,
         user = None,
         status: str = 'success',
-        evidence: Optional[Dict] = None,
-        metadata: Optional[Dict] = None
+        evidence: dict | None = None,
+        metadata: dict | None = None
     ) -> ComplianceLog:
         """
         📋 Log Romanian compliance event
@@ -168,13 +168,13 @@ class AuditService:
                 evidence=evidence or {},
                 metadata=metadata or {}
             )
-            
+
             logger.info(
                 f"📋 [Compliance] {compliance_type} logged: {reference_id}"
             )
-            
+
             return compliance_log
-            
+
         except Exception as e:
             logger.error(f"🔥 [Compliance] Failed to log {compliance_type}: {e}")
             raise
@@ -199,19 +199,19 @@ class GDPRExportService:
     - Comprehensive audit logging
     - Romanian business compliance
     """
-    
+
     @classmethod
     @transaction.atomic
     def create_data_export_request(
-        cls, 
-        user: User, 
+        cls,
+        user: User,
         request_ip: str = None,
-        export_scope: Dict[str, Any] = None
+        export_scope: dict[str, Any] = None
     ) -> 'Result[DataExport, str]':
         """Create a new GDPR data export request"""
-        from apps.common.types import Ok, Err
-        from django.db import transaction
-        
+
+        from apps.common.types import Err, Ok
+
         try:
             # Default export scope - comprehensive user data
             if not export_scope:
@@ -224,7 +224,7 @@ class GDPRExportService:
                     'include_sessions': False,  # Security sensitive
                     'format': 'json'
                 }
-            
+
             # Create export request
             from .models import DataExport
             export_request = DataExport.objects.create(
@@ -234,7 +234,7 @@ class GDPRExportService:
                 status='pending',
                 expires_at=timezone.now() + timezone.timedelta(days=7)  # 7 days to download
             )
-            
+
             # Log GDPR export request
             audit_service.log_compliance_event(
                 compliance_type='gdpr_consent',
@@ -245,48 +245,47 @@ class GDPRExportService:
                 evidence={'export_id': str(export_request.id), 'scope': export_scope},
                 metadata={'ip_address': request_ip}
             )
-            
+
             logger.info(f"🔒 [GDPR Export] Request created for {user.email}: {export_request.id}")
             return Ok(export_request)
-            
+
         except Exception as e:
             logger.error(f"🔥 [GDPR Export] Failed to create request for {user.email}: {e}")
             return Err(f"Failed to create export request: {str(e)}")
-    
+
     @classmethod
     @transaction.atomic
     def process_data_export(cls, export_request: 'DataExport') -> 'Result[str, str]':
         """Process and generate the actual data export file"""
-        from apps.common.types import Ok, Err
-        from django.db import transaction
-        from django.core.files.base import ContentFile
-        from django.core.files.storage import default_storage
-        import json
         import hashlib
-        
+
+        from django.core.files.base import ContentFile
+
+        from apps.common.types import Err, Ok
+
         try:
             user = export_request.requested_by
             export_request.status = 'processing'
             export_request.started_at = timezone.now()
             export_request.save(update_fields=['status', 'started_at'])
-            
+
             # Collect all user data
             user_data = cls._collect_user_data(user, export_request.scope)
-            
+
             # Generate export file
             export_content = json.dumps(user_data, indent=2, default=str, ensure_ascii=False)
-            
+
             # Generate secure filename
             file_hash = hashlib.sha256(export_content.encode()).hexdigest()[:16]
             filename = f"gdpr_export_{user.id}_{file_hash}.json"
-            
+
             # Save to secure storage
             file_path = f"gdpr_exports/{filename}"
             saved_path = default_storage.save(
-                file_path, 
+                file_path,
                 ContentFile(export_content.encode('utf-8'))
             )
-            
+
             # Update export request
             export_request.status = 'completed'
             export_request.completed_at = timezone.now()
@@ -296,7 +295,7 @@ class GDPRExportService:
             export_request.save(update_fields=[
                 'status', 'completed_at', 'file_path', 'file_size', 'record_count'
             ])
-            
+
             # Log completion
             audit_service.log_compliance_event(
                 compliance_type='gdpr_consent',
@@ -310,21 +309,21 @@ class GDPRExportService:
                     'completion_time': export_request.completed_at.isoformat()
                 }
             )
-            
+
             logger.info(f"✅ [GDPR Export] Completed for {user.email}: {export_request.file_size} bytes, {export_request.record_count} records")
             return Ok(saved_path)
-            
+
         except Exception as e:
             # Mark as failed
             export_request.status = 'failed'
             export_request.error_message = str(e)
             export_request.save(update_fields=['status', 'error_message'])
-            
+
             logger.error(f"🔥 [GDPR Export] Processing failed for {user.email}: {e}")
             return Err(f"Export processing failed: {str(e)}")
-    
+
     @classmethod
-    def _collect_user_data(cls, user: User, scope: Dict[str, Any]) -> Dict[str, Any]:
+    def _collect_user_data(cls, user: User, scope: dict[str, Any]) -> dict[str, Any]:
         """Collect comprehensive user data based on export scope"""
         data = {
             'metadata': {
@@ -341,7 +340,7 @@ class GDPRExportService:
             'support_tickets': [],
             'audit_summary': {}
         }
-        
+
         # Core user profile data
         if scope.get('include_profile', True):
             data['user_profile'] = {
@@ -357,7 +356,7 @@ class GDPRExportService:
                 'last_privacy_policy_accepted': user.last_privacy_policy_accepted.isoformat() if user.last_privacy_policy_accepted else None,
                 'account_status': 'active' if user.is_active else 'inactive'
             }
-        
+
         # Customer relationships and data
         if scope.get('include_customers', True):
             try:
@@ -376,7 +375,7 @@ class GDPRExportService:
                     data['customers'].append(customer_data)
             except AttributeError:
                 data['customers'] = {'note': 'Customer relationships not available'}
-        
+
         # Support tickets
         if scope.get('include_tickets', True):
             try:
@@ -393,7 +392,7 @@ class GDPRExportService:
                     })
             except ImportError:
                 data['support_tickets'] = {'note': 'Support tickets not available'}
-        
+
         # Audit trail summary (privacy-focused)
         if scope.get('include_audit_logs', True):
             from .models import AuditEvent
@@ -409,11 +408,11 @@ class GDPRExportService:
                     for event in audit_events[:10]  # Last 10 activities
                 ]
             }
-        
+
         return data
-    
+
     @classmethod
-    def _count_records(cls, user_data: Dict[str, Any]) -> int:
+    def _count_records(cls, user_data: dict[str, Any]) -> int:
         """Count total records in the export"""
         count = 1  # User profile
         count += len(user_data.get('customers', []))
@@ -434,7 +433,7 @@ class GDPRDeletionService:
     - Audit trail preservation
     - Romanian business law compliance
     """
-    
+
     ANONYMIZATION_MAP = {
         'email': lambda: f"anonymized_{uuid.uuid4().hex[:8]}@example.com",
         'first_name': lambda: "Anonymized",
@@ -442,37 +441,37 @@ class GDPRDeletionService:
         'phone': lambda: "+40700000000",
         'ip_address': lambda: "0.0.0.0",
     }
-    
+
     @classmethod
     @transaction.atomic
     def create_deletion_request(
-        cls, 
-        user: User, 
+        cls,
+        user: User,
         deletion_type: str = 'anonymize',  # 'anonymize' or 'delete'
         request_ip: str = None,
         reason: str = None
     ) -> 'Result[ComplianceLog, str]':
         """Create a GDPR data deletion request"""
-        from apps.common.types import Ok, Err
-        from django.db import transaction
-        from .models import ComplianceLog
-        
+
+        from apps.common.types import Err, Ok
+
+
         try:
             # Validate deletion type
             if deletion_type not in ['anonymize', 'delete']:
                 return Err("Invalid deletion type. Must be 'anonymize' or 'delete'")
-            
+
             # Check if user can be deleted (business rules)
             can_delete, restriction_reason = cls._can_user_be_deleted(user)
             if not can_delete and deletion_type == 'delete':
                 logger.warning(f"⚠️ [GDPR Deletion] Full deletion blocked for {user.email}: {restriction_reason}")
                 deletion_type = 'anonymize'  # Force anonymization instead
-            
+
             # Create compliance log entry
             deletion_request = audit_service.log_compliance_event(
                 compliance_type='gdpr_deletion',
                 reference_id=f"deletion_{user.id}_{uuid.uuid4().hex[:8]}",
-                description=f"GDPR {deletion_type} requested by {user.email}. Reason: {reason or 'User request'}" + 
+                description=f"GDPR {deletion_type} requested by {user.email}. Reason: {reason or 'User request'}" +
                            (". This action is irreversible." if deletion_type == 'delete' else ""),
                 user=user,
                 status='requested',
@@ -485,25 +484,25 @@ class GDPRDeletionService:
                 },
                 metadata={'ip_address': request_ip}
             )
-            
+
             logger.info(f"🔒 [GDPR Deletion] {deletion_type.capitalize()} request created for {user.email}")
             return Ok(deletion_request)
-            
+
         except Exception as e:
             logger.error(f"🔥 [GDPR Deletion] Failed to create request for {user.email}: {e}")
             return Err(f"Failed to create deletion request: {str(e)}")
-    
+
     @classmethod
-    @transaction.atomic  
+    @transaction.atomic
     def process_deletion_request(cls, deletion_request: 'ComplianceLog') -> 'Result[str, str]':
         """Process the actual data deletion/anonymization"""
-        from apps.common.types import Ok, Err
-        from django.db import transaction
-        
+
+        from apps.common.types import Err, Ok
+
         try:
             user_email = deletion_request.evidence.get('user_email', 'unknown')
             deletion_type = deletion_request.evidence.get('deletion_type', 'anonymize')
-            
+
             # Get user (might be already deleted)
             try:
                 user = deletion_request.user
@@ -516,68 +515,68 @@ class GDPRDeletionService:
                 deletion_request.status = 'completed'
                 deletion_request.save(update_fields=['status'])
                 return Ok("User already deleted")
-            
+
             # Update request status
             deletion_request.status = 'processing'
             deletion_request.save(update_fields=['status'])
-            
+
             if deletion_type == 'anonymize':
                 result = cls._anonymize_user_data(user)
                 action_taken = "anonymized"
             else:
                 result = cls._delete_user_data(user)
                 action_taken = "deleted"
-            
+
             if result.is_err():
                 deletion_request.status = 'failed'
                 deletion_request.evidence['error'] = result.error
                 deletion_request.save(update_fields=['status', 'evidence'])
                 return result
-            
+
             # Mark as completed
             deletion_request.status = 'completed'
             deletion_request.evidence['completed_at'] = timezone.now().isoformat()
             deletion_request.evidence['action_taken'] = action_taken
             deletion_request.save(update_fields=['status', 'evidence'])
-            
+
             logger.info(f"✅ [GDPR Deletion] User data {action_taken} for {user_email}")
             return Ok(f"User data successfully {action_taken}")
-            
+
         except Exception as e:
             deletion_request.status = 'failed'
             deletion_request.evidence['error'] = str(e)
             deletion_request.save(update_fields=['status', 'evidence'])
             logger.error(f"🔥 [GDPR Deletion] Processing failed: {e}")
             return Err(f"Deletion processing failed: {str(e)}")
-    
+
     @classmethod
-    def _can_user_be_deleted(cls, user: User) -> 'Tuple[bool, Optional[str]]':
+    def _can_user_be_deleted(cls, user: User) -> 'Tuple[bool, str | None]':
         """Check if user can be completely deleted based on business rules"""
-        from typing import Tuple, Optional
-        
+
         restrictions = []
-        
+
         # Romanian business law - must keep tax records for 7 years
         try:
             if hasattr(user, 'customer_memberships') and user.customer_memberships.exists():
                 restrictions.append("Customer relationship exists - Romanian business law compliance")
         except AttributeError:
             pass
-        
+
         if restrictions:
             return False, "; ".join(restrictions)
         return True, None
-    
+
     @classmethod
     def _anonymize_user_data(cls, user: User) -> 'Result[str, str]':
         """Anonymize user data while preserving business relationships"""
-        from apps.common.types import Ok, Err
+        from apps.common.types import Err, Ok
+
         from .models import AuditEvent
-        
+
         try:
             # Store original email for logging
             original_email = user.email
-            
+
             # Anonymize core user fields
             user.email = cls.ANONYMIZATION_MAP['email']()
             user.first_name = cls.ANONYMIZATION_MAP['first_name']()
@@ -587,47 +586,48 @@ class GDPRDeletionService:
             user.accepts_marketing = False
             user.gdpr_consent_date = None
             user.last_privacy_policy_accepted = None
-            
+
             # Clear sensitive fields
             user.set_unusable_password()
             if hasattr(user, 'two_factor_enabled'):
                 user.two_factor_enabled = False
                 user.two_factor_secret = ''
                 user.backup_tokens = []
-            
+
             user.save()
-            
+
             # Anonymize audit logs (IP addresses only)
             AuditEvent.objects.filter(user=user).update(
                 ip_address=cls.ANONYMIZATION_MAP['ip_address'](),
                 user_agent='Anonymized'
             )
-            
+
             logger.info(f"✅ [GDPR Anonymization] User {original_email} anonymized successfully")
             return Ok("User data anonymized successfully")
-            
+
         except Exception as e:
             logger.error(f"🔥 [GDPR Anonymization] Failed to anonymize user {user.email}: {e}")
             return Err(f"Anonymization failed: {str(e)}")
-    
+
     @classmethod
     def _delete_user_data(cls, user: User) -> 'Result[str, str]':
         """Complete data deletion (only when legally permitted)"""
-        from apps.common.types import Ok, Err
+        from apps.common.types import Err, Ok
+
         from .models import AuditEvent
-        
+
         try:
             original_email = user.email
-            
+
             # Delete related data that can be safely removed
             AuditEvent.objects.filter(user=user).delete()
-            
+
             # Delete user account
             user.delete()
-            
+
             logger.info(f"✅ [GDPR Deletion] User {original_email} deleted successfully")
             return Ok("User data deleted successfully")
-            
+
         except Exception as e:
             logger.error(f"🔥 [GDPR Deletion] Failed to delete user {user.email}: {e}")
             return Err(f"Deletion failed: {str(e)}")
@@ -643,54 +643,54 @@ class GDPRConsentService:
     - Marketing consent granular control
     - Audit trail for all consent changes
     """
-    
+
     @classmethod
     @transaction.atomic
     def withdraw_consent(
-        cls, 
-        user: User, 
+        cls,
+        user: User,
         consent_types: 'List[str]',
         request_ip: str = None
     ) -> 'Result[str, str]':
         """Withdraw specific types of consent"""
-        from apps.common.types import Ok, Err
-        from django.db import transaction
-        from typing import List
-        
+
+
+        from apps.common.types import Err, Ok
+
         try:
             valid_types = ['data_processing', 'marketing', 'analytics', 'cookies']
             invalid_types = [ct for ct in consent_types if ct not in valid_types]
             if invalid_types:
                 return Err(f"Invalid consent types: {invalid_types}")
-            
+
             changes_made = []
-            
+
             # Handle marketing consent withdrawal
             if 'marketing' in consent_types and user.accepts_marketing:
                 user.accepts_marketing = False
                 changes_made.append('marketing_communications')
-            
+
             # Data processing consent withdrawal triggers anonymization
             if 'data_processing' in consent_types:
                 # This is a full GDPR deletion request
                 deletion_result = GDPRDeletionService.create_deletion_request(
-                    user, 'anonymize', request_ip, 
+                    user, 'anonymize', request_ip,
                     "Data processing consent withdrawn"
                 )
                 if deletion_result.is_err():
                     return Err(f"Failed to process consent withdrawal: {deletion_result.error}")
-                
+
                 # Immediately process the deletion request
                 deletion_request = deletion_result.value
                 process_result = GDPRDeletionService.process_deletion_request(deletion_request)
                 if process_result.is_err():
                     return Err(f"Failed to anonymize user data: {process_result.error}")
-                
+
                 changes_made.append('data_processing')
-            
+
             if changes_made:
                 user.save()
-                
+
                 # Log consent withdrawal
                 audit_service.log_compliance_event(
                     compliance_type='gdpr_consent',
@@ -705,26 +705,25 @@ class GDPRConsentService:
                     },
                     metadata={'ip_address': request_ip}
                 )
-            
+
             logger.info(f"✅ [GDPR Consent] Consent withdrawn for {user.email}: {changes_made}")
             return Ok(f"Consent withdrawn for: {', '.join(changes_made)}")
-            
+
         except Exception as e:
             logger.error(f"🔥 [GDPR Consent] Failed to withdraw consent for {user.email}: {e}")
             return Err(f"Consent withdrawal failed: {str(e)}")
-    
+
     @classmethod
-    def get_consent_history(cls, user: User) -> 'List[Dict[str, Any]]':
+    def get_consent_history(cls, user: User) -> 'List[dict[str, Any]]':
         """Get user's consent history for transparency"""
-        from typing import List, Dict, Any
         from .models import ComplianceLog
-        
+
         try:
             consent_logs = ComplianceLog.objects.filter(
                 compliance_type='gdpr_consent',
                 user=user
             ).order_by('-timestamp')
-            
+
             history = []
             for log in consent_logs:
                 history.append({
@@ -734,9 +733,9 @@ class GDPRConsentService:
                     'status': log.status,
                     'evidence': log.evidence
                 })
-            
+
             return history
-            
+
         except Exception as e:
             logger.error(f"🔥 [GDPR Consent] Failed to get consent history for {user.email}: {e}")
             return []
@@ -744,5 +743,5 @@ class GDPRConsentService:
 
 # Global GDPR service instances
 gdpr_export_service = GDPRExportService()
-gdpr_deletion_service = GDPRDeletionService()  
+gdpr_deletion_service = GDPRDeletionService()
 gdpr_consent_service = GDPRConsentService()

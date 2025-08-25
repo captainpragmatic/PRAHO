@@ -8,7 +8,7 @@ import os
 def encrypt_existing_2fa_secrets(apps, schema_editor):
     """Encrypt existing plain-text 2FA secrets"""
     User = apps.get_model('users', 'User')
-    
+
     # Only encrypt if we have an encryption key
     encryption_key = os.environ.get('DJANGO_ENCRYPTION_KEY')
     if not encryption_key:
@@ -21,26 +21,26 @@ def encrypt_existing_2fa_secrets(apps, schema_editor):
             backup_tokens=[]
         )
         return
-    
+
     from cryptography.fernet import Fernet
     import base64
-    
+
     try:
         key = encryption_key.encode() if isinstance(encryption_key, str) else encryption_key
         fernet = Fernet(key)
-        
+
         # Encrypt existing secrets
         for user in User.objects.filter(two_factor_enabled=True, two_factor_secret__isnull=False).exclude(two_factor_secret=''):  # nosec B106
             if user.two_factor_secret:
                 # Encrypt the secret
                 encrypted_bytes = fernet.encrypt(user.two_factor_secret.encode('utf-8'))
                 encrypted_string = base64.b64encode(encrypted_bytes).decode('utf-8')
-                
+
                 # Update the new field
                 user._two_factor_secret = encrypted_string
                 user.save(update_fields=['_two_factor_secret'])
                 print(f"Encrypted 2FA secret for user: {user.email}")
-    
+
     except Exception as e:
         print(f"Error encrypting 2FA secrets: {e}")
         # Clear secrets if encryption fails
@@ -64,7 +64,7 @@ def reverse_encrypt_2fa_secrets(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-    
+
     dependencies = [
         ('users', '0002_alter_user_managers_remove_user_username'),
     ]
@@ -76,13 +76,13 @@ class Migration(migrations.Migration):
             name='_two_factor_secret',
             field=models.CharField(blank=True, max_length=256, help_text='Encrypted 2FA secret'),
         ),
-        
+
         # Migrate existing data
         migrations.RunPython(
             encrypt_existing_2fa_secrets,
             reverse_encrypt_2fa_secrets,
         ),
-        
+
         # Remove the old plain text field
         migrations.RemoveField(
             model_name='user',

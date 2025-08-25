@@ -3,7 +3,6 @@ Test settings for PRAHO Platform
 Fast, isolated testing environment.
 """
 
-import os
 from .base import *
 
 # ===============================================================================

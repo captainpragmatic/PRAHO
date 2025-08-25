@@ -3,6 +3,7 @@ ASGI config for PRAHO Platform
 """
 
 import os
+
 from django.core.asgi import get_asgi_application
 
 # Set default Django settings module

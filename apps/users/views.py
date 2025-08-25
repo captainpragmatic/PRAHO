@@ -22,12 +22,12 @@ from django.contrib.auth.views import (
     PasswordResetView,
 )
 from django.core.exceptions import ValidationError
+from django.db import models
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils.decorators import method_decorator
 from django.utils.translation import gettext as _
-from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_http_methods
 from django.views.generic import DetailView, ListView
 from django_ratelimit.decorators import ratelimit
@@ -152,7 +152,7 @@ def register_view(request: HttpRequest) -> HttpResponse:
         form = CustomerOnboardingRegistrationForm(request.POST)
         if form.is_valid():
             try:
-                user = form.save()
+                form.save()
                 messages.success(
                     request,
                     _('Account created successfully! Please check your email for next steps.')
@@ -211,11 +211,6 @@ class SecurePasswordResetView(PasswordResetView):
 
     def form_valid(self, form):
         # Log password reset attempt for audit trail
-        email = form.cleaned_data['email']
-
-        # Check if user exists (for internal logging only, don't reveal to user)
-        user_exists = User.objects.filter(email=email).exists()
-
         UserLoginLog.objects.create(
             user=None,  # Don't reveal if user exists in logs
             ip_address=_get_client_ip(self.request),
@@ -696,12 +691,12 @@ class UserListView(LoginRequiredMixin, ListView):
         return super().dispatch(request, *args, **kwargs)
 
     def get_queryset(self):
-        queryset = User.objects.select_related('primary_customer').order_by('-date_joined')
+        queryset = User.objects.select_related('profile').order_by('-date_joined')
 
-        # Filter by role
-        role = self.request.GET.get('role')
-        if role:
-            queryset = queryset.filter(role=role)
+        # Filter by staff role
+        staff_role = self.request.GET.get('staff_role')
+        if staff_role:
+            queryset = queryset.filter(staff_role=staff_role)
 
         # Search
         search = self.request.GET.get('search')
@@ -763,7 +758,7 @@ class UserDetailView(LoginRequiredMixin, DetailView):
 @ratelimit(key='ip', rate='30/m', method='POST', block=True)  # Rate limit to prevent abuse
 def api_check_email(request: HttpRequest) -> JsonResponse:
     """Check if email is already registered
-    
+
     🔒 SECURITY: CSRF protection enabled, rate limited to prevent enumeration attacks.
     This endpoint validates email uniqueness for registration forms.
     """

@@ -4,20 +4,19 @@ Shared helper functions and decorators.
 """
 
 import hashlib
-import secrets
 import re
-from datetime import datetime, timezone
-from functools import wraps
-from typing import Optional, Dict, Any, Callable
+import secrets
+from collections.abc import Callable
+from datetime import datetime
 from decimal import Decimal
+from functools import wraps
+from typing import Any
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.http import HttpResponse, JsonResponse
-from django.shortcuts import redirect
 from django.utils.translation import gettext_lazy as _
-
 
 # ===============================================================================
 # ROMANIAN VALIDATION UTILITIES
@@ -34,7 +33,7 @@ def format_romanian_phone(phone: str) -> str:
     """Format phone number to Romanian standard"""
     # Remove all non-digits
     digits = re.sub(r'\D', '', phone)
-    
+
     # Handle different input formats
     if digits.startswith('40') and len(digits) == 11:
         # +40XXXXXXXXX -> +40.XX.XXX.XXXX
@@ -42,18 +41,18 @@ def format_romanian_phone(phone: str) -> str:
     elif digits.startswith('07') and len(digits) == 10:
         # 07XXXXXXXX -> +40.7X.XXX.XXXX
         return f"+40.{digits[1:3]}.{digits[3:6]}.{digits[6:]}"
-    
+
     return phone  # Return original if can't format
 
 
-def calculate_romanian_vat(amount: Decimal, vat_rate: int = 19) -> Dict[str, Decimal]:
+def calculate_romanian_vat(amount: Decimal, vat_rate: int = 19) -> dict[str, Decimal]:
     """Calculate Romanian VAT breakdown"""
     vat_multiplier = Decimal(vat_rate) / Decimal(100)
-    
+
     # Amount includes VAT
     amount_without_vat = amount / (Decimal(1) + vat_multiplier)
     vat_amount = amount - amount_without_vat
-    
+
     return {
         'amount_without_vat': amount_without_vat.quantize(Decimal('0.01')),
         'vat_amount': vat_amount.quantize(Decimal('0.01')),
@@ -81,7 +80,7 @@ def mask_sensitive_data(data: str, show_last: int = 4) -> str:
     """Mask sensitive data for display"""
     if len(data) <= show_last:
         return '*' * len(data)
-    
+
     return '*' * (len(data) - show_last) + data[-show_last:]
 
 
@@ -157,25 +156,25 @@ def format_romanian_datetime(dt: datetime) -> str:
 # BUSINESS LOGIC HELPERS
 # ===============================================================================
 
-def generate_invoice_number(year: Optional[int] = None) -> str:
+def generate_invoice_number(year: int | None = None) -> str:
     """Generate Romanian invoice number format"""
     if year is None:
         year = get_romanian_now().year
-    
+
     # Format: YYYY-000001 (sequential per year)
     from apps.billing.models import Invoice
-    
+
     # Get next invoice number for this year
     last_invoice = Invoice.objects.filter(
         invoice_number__startswith=f"{year}-"
     ).order_by('invoice_number').last()
-    
+
     if last_invoice:
         last_num = int(last_invoice.invoice_number.split('-')[1])
         next_num = last_num + 1
     else:
         next_num = 1
-    
+
     return f"{year}-{next_num:06d}"
 
 
@@ -195,10 +194,10 @@ def json_success(data: Any = None, message: str = "Success") -> JsonResponse:
         'success': True,
         'message': message,
     }
-    
+
     if data is not None:
         response_data['data'] = data
-    
+
     return JsonResponse(response_data)
 
 

@@ -6,11 +6,8 @@ Email templates and communication logging for Romanian hosting provider.
 from django.contrib import admin
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
-from django.urls import reverse
-from django.utils.safestring import mark_safe
 
-from .models import EmailTemplate, EmailLog, EmailCampaign
-
+from .models import EmailCampaign, EmailLog, EmailTemplate
 
 # ===============================================================================
 # EMAIL TEMPLATE ADMIN
@@ -19,7 +16,7 @@ from .models import EmailTemplate, EmailLog, EmailCampaign
 @admin.register(EmailTemplate)
 class EmailTemplateAdmin(admin.ModelAdmin):
     """Admin interface for email templates"""
-    
+
     list_display = [
         'key', 'locale', 'get_subject_display', 'category',
         'is_active', 'version', 'created_at'
@@ -29,7 +26,7 @@ class EmailTemplateAdmin(admin.ModelAdmin):
     ]
     search_fields = ['key', 'subject', 'description']
     readonly_fields = ['created_at', 'updated_at']
-    
+
     fieldsets = (
         (_('Template Identification'), {
             'fields': ('key', 'locale', 'category', 'description')
@@ -46,12 +43,12 @@ class EmailTemplateAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
-    
+
     def get_subject_display(self, obj):
         """Display truncated subject"""
         return obj.get_subject_display()
     get_subject_display.short_description = _('Subject')
-    
+
     def save_model(self, request, obj, form, change):
         """Set created_by on new templates"""
         if not change and not obj.created_by:
@@ -66,7 +63,7 @@ class EmailTemplateAdmin(admin.ModelAdmin):
 @admin.register(EmailLog)
 class EmailLogAdmin(admin.ModelAdmin):
     """Admin interface for email delivery logs"""
-    
+
     list_display = [
         'subject', 'to_addr', 'get_status_display_colored',
         'provider', 'template_key', 'sent_at'
@@ -80,7 +77,7 @@ class EmailLogAdmin(admin.ModelAdmin):
         'provider_response', 'meta'
     ]
     date_hierarchy = 'sent_at'
-    
+
     fieldsets = (
         (_('Email Details'), {
             'fields': ('to_addr', 'from_addr', 'reply_to', 'subject')
@@ -103,12 +100,12 @@ class EmailLogAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
-    
+
     def get_status_display_colored(self, obj):
         """Display status with color coding"""
         color = obj.get_status_display_color()
         status_text = obj.get_status_display()
-        
+
         # Add emoji indicators
         status_emoji = {
             'queued': '⏳',
@@ -122,18 +119,18 @@ class EmailLogAdmin(admin.ModelAdmin):
             'rejected': '🚫',
         }
         emoji = status_emoji.get(obj.status, '❓')
-        
+
         return format_html(
             '<span style="color: {};">{} {}</span>',
             color, emoji, status_text
         )
     get_status_display_colored.short_description = _('Status')
     get_status_display_colored.admin_order_field = 'status'
-    
+
     def has_add_permission(self, request):
         """Email logs are created by system, not manually"""
         return False
-    
+
     def has_change_permission(self, request, obj=None):
         """Email logs are immutable for audit purposes"""
         return False
@@ -146,7 +143,7 @@ class EmailLogAdmin(admin.ModelAdmin):
 @admin.register(EmailCampaign)
 class EmailCampaignAdmin(admin.ModelAdmin):
     """Admin interface for email campaigns"""
-    
+
     list_display = [
         'name', 'get_status_display_colored', 'audience',
         'get_progress_display', 'get_success_rate_display',
@@ -162,7 +159,7 @@ class EmailCampaignAdmin(admin.ModelAdmin):
         'started_at', 'completed_at', 'created_at', 'updated_at'
     ]
     date_hierarchy = 'created_at'
-    
+
     fieldsets = (
         (_('Campaign Details'), {
             'fields': ('name', 'description', 'template')
@@ -188,7 +185,7 @@ class EmailCampaignAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
-    
+
     def get_status_display_colored(self, obj):
         """Display campaign status with color coding"""
         status_colors = {
@@ -200,7 +197,7 @@ class EmailCampaignAdmin(admin.ModelAdmin):
             'cancelled': '#6B7280',   # Gray
             'failed': '#EF4444',      # Red
         }
-        
+
         status_emoji = {
             'draft': '📝',
             'scheduled': '⏰',
@@ -210,23 +207,23 @@ class EmailCampaignAdmin(admin.ModelAdmin):
             'cancelled': '❌',
             'failed': '💥',
         }
-        
+
         color = status_colors.get(obj.status, '#6B7280')
         emoji = status_emoji.get(obj.status, '❓')
         status_text = obj.get_status_display()
-        
+
         return format_html(
             '<span style="color: {};">{} {}</span>',
             color, emoji, status_text
         )
     get_status_display_colored.short_description = _('Status')
     get_status_display_colored.admin_order_field = 'status'
-    
+
     def get_progress_display(self, obj):
         """Display campaign progress"""
         if obj.total_recipients == 0:
             return _('No recipients')
-        
+
         progress = (obj.emails_sent + obj.emails_failed) / obj.total_recipients * 100
         return format_html(
             '{}/{} ({}%)',
@@ -235,11 +232,11 @@ class EmailCampaignAdmin(admin.ModelAdmin):
             round(progress, 1)
         )
     get_progress_display.short_description = _('Progress')
-    
+
     def get_success_rate_display(self, obj):
         """Display success rate with color coding"""
         rate = obj.get_success_rate()
-        
+
         if rate >= 95:
             color = '#10B981'  # Green
             emoji = '🎯'
@@ -249,13 +246,13 @@ class EmailCampaignAdmin(admin.ModelAdmin):
         else:
             color = '#EF4444'  # Red
             emoji = '❌'
-        
+
         return format_html(
             '<span style="color: {};">{} {}%</span>',
             color, emoji, rate
         )
     get_success_rate_display.short_description = _('Success Rate')
-    
+
     def save_model(self, request, obj, form, change):
         """Set created_by on new campaigns"""
         if not change and not obj.created_by:

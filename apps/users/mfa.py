@@ -4,7 +4,7 @@ MULTI-FACTOR AUTHENTICATION (MFA) MODULE 🔐
 ===============================================================================
 
 Unified module for all MFA methods in PRAHO Platform:
-- TOTP (Time-based One-Time Passwords) 
+- TOTP (Time-based One-Time Passwords)
 - Backup codes
 - WebAuthn/Passkeys
 - SMS (future)
@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 class WebAuthnCredential(models.Model):
     """
     🔐 WebAuthn/Passkey credentials for passwordless authentication
-    
+
     This model stores WebAuthn credentials (passkeys) for users.
     Implementation ready for future WebAuthn integration.
     """
@@ -127,7 +127,7 @@ class WebAuthnCredential(models.Model):
 class TOTPService:
     """
     🔐 Time-based One-Time Password (TOTP) Service
-    
+
     Handles TOTP generation, verification, and QR code creation for 2FA.
     """
 
@@ -174,7 +174,7 @@ class TOTPService:
     def generate_qr_code(user, secret: str) -> str:
         """
         📱 Generate QR code for authenticator app setup
-        
+
         Returns:
             Base64-encoded PNG image data
         """
@@ -218,7 +218,7 @@ class TOTPService:
 class BackupCodeService:
     """
     🎫 Backup Code Service
-    
+
     Handles generation, verification, and management of backup codes for 2FA recovery.
     """
 
@@ -229,7 +229,7 @@ class BackupCodeService:
     def generate_codes(user) -> list[str]:
         """
         Generate new backup codes and store hashed versions in user model
-        
+
         Returns:
             List of plain text backup codes (for one-time display)
         """
@@ -248,7 +248,7 @@ class BackupCodeService:
     def verify_and_consume_code(user, code: str) -> bool:
         """
         Verify and consume a backup code (one-time use)
-        
+
         Returns:
             True if code was valid and consumed
         """
@@ -277,7 +277,7 @@ class BackupCodeService:
 class WebAuthnService:
     """
     🔐 WebAuthn/Passkeys Service
-    
+
     Handles FIDO2/WebAuthn authentication for passwordless login.
     Currently a framework for future implementation.
     """
@@ -286,7 +286,7 @@ class WebAuthnService:
     def is_supported() -> bool:
         """
         Check if WebAuthn is supported and configured
-        
+
         Returns:
             False for now, True when implemented
         """
@@ -296,10 +296,10 @@ class WebAuthnService:
     def generate_registration_options(user) -> dict[str, Any] | None:
         """
         Generate WebAuthn registration options for a user
-        
+
         Args:
             user: User to generate options for
-            
+
         Returns:
             WebAuthn registration options or None if not supported
         """
@@ -317,11 +317,11 @@ class WebAuthnService:
     def verify_registration(user, credential_data: dict[str, Any]) -> bool:
         """
         Verify and store a new WebAuthn credential
-        
+
         Args:
             user: User registering the credential
             credential_data: WebAuthn credential data
-            
+
         Returns:
             True if credential was successfully registered
         """
@@ -336,10 +336,10 @@ class WebAuthnService:
     def generate_authentication_options(user) -> dict[str, Any] | None:
         """
         Generate WebAuthn authentication options
-        
+
         Args:
             user: User to authenticate
-            
+
         Returns:
             WebAuthn authentication options or None
         """
@@ -353,11 +353,11 @@ class WebAuthnService:
     def verify_authentication(user, authentication_data: dict[str, Any]) -> bool:
         """
         Verify WebAuthn authentication
-        
+
         Args:
             user: User to authenticate
             authentication_data: WebAuthn authentication data
-            
+
         Returns:
             True if authentication is valid
         """
@@ -375,13 +375,13 @@ class WebAuthnService:
 class MFAService:
     """
     🔐 Multi-Factor Authentication Service (Orchestrator)
-    
+
     This is the main service that coordinates all MFA methods:
     - TOTP/2FA
-    - Backup codes  
+    - Backup codes
     - WebAuthn/Passkeys
     - Future methods (SMS, biometrics, etc.)
-    
+
     Includes comprehensive audit logging and security features.
     """
 
@@ -389,7 +389,7 @@ class MFAService:
     def enable_totp(user, request=None) -> tuple[str, list[str]]:
         """
         🔐 Enable TOTP/2FA for user with audit logging
-        
+
         Returns:
             Tuple of (totp_secret, backup_codes)
         """
@@ -443,7 +443,7 @@ class MFAService:
     def disable_totp(user, admin_user=None, reason: str | None = None, request=None) -> bool:
         """
         🔓 Disable TOTP/2FA with audit trail
-        
+
         Args:
             user: User to disable TOTP for
             admin_user: Admin performing the action (if any)
@@ -533,7 +533,7 @@ class MFAService:
     def verify_mfa_code(user, code: str, request=None) -> dict[str, Any]:
         """
         🔍 Verify MFA code (TOTP or backup code) with enhanced security and audit logging
-        
+
         Returns:
             {
                 'success': bool,
@@ -627,7 +627,7 @@ class MFAService:
     def generate_qr_code(user, secret: str) -> str:
         """
         📱 Generate QR code for TOTP setup
-        
+
         Returns:
             Base64-encoded PNG image data
         """
@@ -637,7 +637,7 @@ class MFAService:
     def get_user_mfa_status(user) -> dict[str, Any]:
         """
         📊 Get comprehensive MFA status for a user
-        
+
         Returns:
             {
                 'totp_enabled': bool,

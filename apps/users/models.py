@@ -136,7 +136,7 @@ class User(AbstractUser):
     @property
     def is_customer_user(self) -> bool:
         """Check if user belongs to customer organizations
-        
+
         🚀 Performance: Uses prefetched customer_memberships if available,
         falls back to database query if not prefetched.
         """
@@ -151,7 +151,7 @@ class User(AbstractUser):
     @property
     def primary_customer(self):
         """Get user's primary customer organization
-        
+
         🚀 Performance: Uses prefetched customer_memberships if available,
         falls back to optimized database query if not prefetched.
         """
@@ -173,7 +173,7 @@ class User(AbstractUser):
 
     def get_accessible_customers(self):
         """Get all customers this user can access
-        
+
         🚀 Performance: Uses prefetched customer_memberships if available,
         falls back to optimized database query if not prefetched.
         """

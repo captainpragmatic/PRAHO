@@ -4,13 +4,13 @@ PRAHO PLATFORM - Background Worker System
 Redis Queue (RQ) worker for background job processing in Romanian hosting provider
 """
 
+import logging
 import os
 import sys
+
 import django
-from rq import Worker, Queue, Connection
 from redis import Redis
-import logging
-from typing import List, Optional
+from rq import Connection, Queue, Worker
 
 # Setup Django environment
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.dev')
@@ -42,8 +42,8 @@ class PragmaticHostWorker:
     - Payment processing webhooks
     - System monitoring and alerts
     """
-    
-    def __init__(self, queues: Optional[List[str]] = None):
+
+    def __init__(self, queues: list[str] | None = None):
         """
         Initialize worker with Redis connection and queues
         
@@ -51,10 +51,10 @@ class PragmaticHostWorker:
             queues: List of queue names to process (defaults to all)
         """
         self.redis_conn = Redis.from_url(
-            settings.REDIS_URL if hasattr(settings, 'REDIS_URL') 
+            settings.REDIS_URL if hasattr(settings, 'REDIS_URL')
             else 'redis://localhost:6379/0'
         )
-        
+
         # Default queue configuration for Romanian hosting operations
         self.default_queues = [
             'high',      # Critical: payment processing, security alerts
@@ -63,36 +63,36 @@ class PragmaticHostWorker:
             'email',     # Email notifications and marketing
             'reports',   # Analytics and business intelligence
         ]
-        
+
         self.queue_names = queues or self.default_queues
         self.queues = [Queue(name, connection=self.redis_conn) for name in self.queue_names]
-        
+
         logger.info(f"Initialized PragmaticHost worker for queues: {self.queue_names}")
-    
+
     def start(self):
         """Start the worker process"""
         try:
             logger.info("Starting PragmaticHost background worker...")
-            
+
             with Connection(self.redis_conn):
                 worker = Worker(
                     self.queues,
                     name=f'pragmatichost-worker-{os.getpid()}',
                     exception_handlers=[self._handle_job_exception]
                 )
-                
+
                 # Register shutdown handlers
                 worker.push_exc_handler(self._handle_job_exception)
-                
+
                 logger.info(f"Worker {worker.name} started successfully")
                 worker.work(with_scheduler=True)
-                
+
         except KeyboardInterrupt:
             logger.info("Worker shutdown requested by user")
         except Exception as e:
             logger.error(f"Worker failed to start: {e}")
             raise
-    
+
     def _handle_job_exception(self, job, exc_type, exc_value, traceback):
         """
         Handle job exceptions with Romanian business context
@@ -113,7 +113,7 @@ class PragmaticHostWorker:
                 'queue': job.origin,
             }
         )
-        
+
         # Send alert to admin for critical failures
         if job.origin == 'high':
             try:
@@ -121,7 +121,7 @@ class PragmaticHostWorker:
                 logger.critical(f"ADMIN ALERT: Critical job failed - {job.func_name}")
             except Exception as e:
                 logger.error(f"Failed to send admin alert: {e}")
-    
+
     def get_queue_stats(self) -> dict:
         """Get statistics for all queues"""
         stats = {}
@@ -133,8 +133,8 @@ class PragmaticHostWorker:
                 'started': queue.started_job_registry.count,
             }
         return stats
-    
-    def clear_failed_jobs(self, queue_name: Optional[str] = None):
+
+    def clear_failed_jobs(self, queue_name: str | None = None):
         """Clear failed jobs from queue(s)"""
         if queue_name:
             queue = Queue(queue_name, connection=self.redis_conn)
@@ -156,16 +156,16 @@ class PragmaticHostWorker:
 def main():
     """Main worker entry point"""
     import argparse
-    
+
     parser = argparse.ArgumentParser(description='PragmaticHost Background Worker')
     parser.add_argument(
-        '--queues', 
-        nargs='+', 
+        '--queues',
+        nargs='+',
         help='Specific queues to process',
         default=None
     )
     parser.add_argument(
-        '--verbose', 
+        '--verbose',
         action='store_true',
         help='Enable verbose logging'
     )
@@ -179,14 +179,14 @@ def main():
         action='store_true',
         help='Clear failed jobs and exit'
     )
-    
+
     args = parser.parse_args()
-    
+
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
-    
+
     worker = PragmaticHostWorker(queues=args.queues)
-    
+
     if args.stats:
         stats = worker.get_queue_stats()
         print("\nPragmaticHost Queue Statistics:")
@@ -196,12 +196,12 @@ def main():
             for stat_name, count in queue_stats.items():
                 print(f"  {stat_name.capitalize()}: {count}")
         return
-    
+
     if args.clear_failed:
         worker.clear_failed_jobs()
         print("Failed jobs cleared successfully")
         return
-    
+
     # Start the worker
     worker.start()
 

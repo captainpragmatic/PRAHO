@@ -3,12 +3,11 @@ URL configuration for PRAHO Platform
 Romanian hosting provider with security-first routing.
 """
 
-from django.contrib import admin
-from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from django.contrib import admin
+from django.urls import include, path
 from django.views.generic import RedirectView
-from django.contrib.auth.decorators import login_required
 
 # Import dashboard view
 from apps.common.views import dashboard_view
@@ -27,31 +26,31 @@ def root_redirect(request):
 urlpatterns = [
     # Admin panel (customizable URL for security)
     path(settings.ADMIN_URL if hasattr(settings, 'ADMIN_URL') else 'admin/', admin.site.urls),
-    
+
     # Root redirect - to dashboard if authenticated, to login if not
     path('', root_redirect, name='root'),
-    
+
     # Dashboard - main app after login
     path('app/', dashboard_view, name='dashboard'),
-    
+
     # Authentication URLs
     path('auth/', include('apps.users.urls')),
-    
+
     # Django i18n for language switching
     path('i18n/', include('django.conf.urls.i18n')),
-    
+
     # Core business apps
     path('app/customers/', include('apps.customers.urls')),
     path('app/billing/', include('apps.billing.urls')),
     path('app/tickets/', include('apps.tickets.urls')),
     path('app/provisioning/', include('apps.provisioning.urls')),
-    
+
     # External integrations & webhooks
     path('integrations/', include('apps.integrations.urls')),
-    
+
     # GDPR compliance and audit
     path('app/audit/', include('apps.audit.urls')),
-    
+
     # Background job monitoring (DISABLED - Redis not needed yet)
     # path('django-rq/', include('django_rq.urls')),
 ]
@@ -63,7 +62,7 @@ urlpatterns = [
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
-    
+
     # Debug toolbar
     if 'debug_toolbar' in settings.INSTALLED_APPS:
         import debug_toolbar

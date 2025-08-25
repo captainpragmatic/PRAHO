@@ -2,21 +2,22 @@
 # CUSTOMER FORMS - NORMALIZED MODEL STRUCTURE
 # ===============================================================================
 
-from django import forms
-from django.core.exceptions import ValidationError
-from django.utils.translation import gettext_lazy as _
-from django.contrib.auth import get_user_model
 import re
 
-from .models import (
-    Customer, 
-    CustomerTaxProfile, 
-    CustomerBillingProfile, 
-    CustomerAddress, 
-    CustomerPaymentMethod,
-    CustomerNote
-)
+from django import forms
+from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
+from django.utils.translation import gettext_lazy as _
+
 from apps.users.models import CustomerMembership
+
+from .models import (
+    Customer,
+    CustomerAddress,
+    CustomerBillingProfile,
+    CustomerNote,
+    CustomerTaxProfile,
+)
 
 User = get_user_model()
 
@@ -30,21 +31,21 @@ class CustomerForm(forms.ModelForm):
     Core customer information form.
     Only essential identifying information.
     """
-    
+
     class Meta:
         model = Customer
         fields = [
-            'name', 
-            'customer_type', 
-            'company_name', 
-            'primary_email', 
+            'name',
+            'customer_type',
+            'company_name',
+            'primary_email',
             'primary_phone',
             'industry',
             'website',
-            'data_processing_consent', 
+            'data_processing_consent',
             'marketing_consent'
         ]
-        
+
         widgets = {
             'name': forms.TextInput(attrs={
                 'class': 'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500',
@@ -71,15 +72,15 @@ class CustomerForm(forms.ModelForm):
                 'placeholder': _('https://example.com')
             }),
         }
-    
+
     def clean_company_name(self):
         """Require company name for companies"""
         customer_type = self.cleaned_data.get('customer_type')
         company_name = self.cleaned_data.get('company_name')
-        
+
         if customer_type == 'company' and not company_name:
             raise ValidationError(_('Company name is required for companies'))
-        
+
         return company_name
 
 
@@ -91,18 +92,18 @@ class CustomerTaxProfileForm(forms.ModelForm):
     """
     Romanian tax compliance form - CUI, VAT, registration.
     """
-    
+
     class Meta:
         model = CustomerTaxProfile
         fields = [
             'cui',
-            'registration_number', 
+            'registration_number',
             'is_vat_payer',
             'vat_number',
             'vat_rate',
             'reverse_charge_eligible'
         ]
-        
+
         widgets = {
             'cui': forms.TextInput(attrs={
                 'class': 'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500',
@@ -123,25 +124,25 @@ class CustomerTaxProfileForm(forms.ModelForm):
                 'max': '100'
             }),
         }
-    
+
     def clean_cui(self):
         """Validate Romanian CUI format"""
         cui = self.cleaned_data.get('cui')
         if cui and not re.match(r'^RO\d{2,10}$', cui):
             raise ValidationError(_('CUI must be in format RO followed by 2-10 digits'))
         return cui
-    
+
     def clean_vat_number(self):
         """Validate VAT number format"""
         vat_number = self.cleaned_data.get('vat_number')
         is_vat_payer = self.cleaned_data.get('is_vat_payer')
-        
+
         if is_vat_payer and not vat_number:
             raise ValidationError(_('VAT number is required for VAT payers'))
-        
+
         if vat_number and not re.match(r'^RO\d{2,10}$', vat_number):
             raise ValidationError(_('VAT number must be in format RO followed by 2-10 digits'))
-        
+
         return vat_number
 
 
@@ -153,7 +154,7 @@ class CustomerBillingProfileForm(forms.ModelForm):
     """
     Customer billing and financial information form.
     """
-    
+
     class Meta:
         model = CustomerBillingProfile
         fields = [
@@ -163,7 +164,7 @@ class CustomerBillingProfileForm(forms.ModelForm):
             'invoice_delivery_method',
             'auto_payment_enabled'
         ]
-        
+
         widgets = {
             'payment_terms': forms.NumberInput(attrs={
                 'class': 'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500',
@@ -176,7 +177,7 @@ class CustomerBillingProfileForm(forms.ModelForm):
                 'min': '0'
             }),
         }
-    
+
     def clean_credit_limit(self):
         """Ensure credit limit is not negative"""
         credit_limit = self.cleaned_data.get('credit_limit')
@@ -193,19 +194,19 @@ class CustomerAddressForm(forms.ModelForm):
     """
     Customer address form with Romanian fields.
     """
-    
+
     class Meta:
         model = CustomerAddress
         fields = [
             'address_type',
             'address_line1',
-            'address_line2', 
+            'address_line2',
             'city',
             'county',
             'postal_code',
             'country'
         ]
-        
+
         widgets = {
             'address_line1': forms.TextInput(attrs={
                 'class': 'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500',
@@ -232,16 +233,16 @@ class CustomerAddressForm(forms.ModelForm):
                 'value': _('Romania')
             }),
         }
-    
+
     def clean_postal_code(self):
         """Validate Romanian postal code format"""
         postal_code = self.cleaned_data.get('postal_code')
         country = self.cleaned_data.get('country')
-        
+
         if country == 'România' and postal_code:
             if not re.match(r'^\d{6}$', postal_code):
                 raise ValidationError(_('Romanian postal codes must be 6 digits'))
-        
+
         return postal_code
 
 
@@ -253,7 +254,7 @@ class CustomerNoteForm(forms.ModelForm):
     """
     Customer interaction notes form.
     """
-    
+
     class Meta:
         model = CustomerNote
         fields = [
@@ -263,7 +264,7 @@ class CustomerNoteForm(forms.ModelForm):
             'is_important',
             'is_private'
         ]
-        
+
         widgets = {
             'title': forms.TextInput(attrs={
                 'class': 'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500',
@@ -286,7 +287,7 @@ class CustomerCreationForm(forms.Form):
     Composite form for creating a customer with all profiles.
     Aligned with registration form structure for consistency.
     """
-    
+
     # User Account Assignment
     user_action = forms.ChoiceField(
         choices=[
@@ -301,7 +302,7 @@ class CustomerCreationForm(forms.Form):
             'class': 'user-action-radio'
         })
     )
-    
+
     existing_user = forms.ModelChoiceField(
         queryset=User.objects.filter(is_active=True),
         required=False,
@@ -314,7 +315,7 @@ class CustomerCreationForm(forms.Form):
         }),
         empty_label=_('Select a user...')
     )
-    
+
     send_welcome_email = forms.BooleanField(
         initial=True,
         required=False,
@@ -326,10 +327,10 @@ class CustomerCreationForm(forms.Form):
             'x-cloak': 'true'
         })
     )
-    
+
     # Personal/Contact Information (matching registration)
     first_name = forms.CharField(
-        max_length=150, 
+        max_length=150,
         label=_('First Name'),
         widget=forms.TextInput(attrs={
             'class': 'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500',
@@ -337,7 +338,7 @@ class CustomerCreationForm(forms.Form):
         })
     )
     last_name = forms.CharField(
-        max_length=150, 
+        max_length=150,
         label=_('Last Name'),
         widget=forms.TextInput(attrs={
             'class': 'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500',
@@ -352,7 +353,7 @@ class CustomerCreationForm(forms.Form):
         })
     )
     phone = forms.CharField(
-        max_length=20, 
+        max_length=20,
         label=_('Primary Phone'),
         help_text=_('Format: +40 21 123 4567 or 0712 345 678'),
         widget=forms.TextInput(attrs={
@@ -360,7 +361,7 @@ class CustomerCreationForm(forms.Form):
             'placeholder': _('+40 721 123 456')
         })
     )
-    
+
     # Business Information (matching registration)
     customer_type = forms.ChoiceField(
         choices=Customer.CUSTOMER_TYPE_CHOICES,
@@ -371,8 +372,8 @@ class CustomerCreationForm(forms.Form):
         })
     )
     company_name = forms.CharField(
-        max_length=255, 
-        required=False, 
+        max_length=255,
+        required=False,
         label=_('Company Name'),
         help_text=_('Required for companies, PFA, and NGOs'),
         widget=forms.TextInput(attrs={
@@ -381,8 +382,8 @@ class CustomerCreationForm(forms.Form):
         })
     )
     industry = forms.CharField(
-        max_length=100, 
-        required=False, 
+        max_length=100,
+        required=False,
         label=_('Industry'),
         widget=forms.TextInput(attrs={
             'class': 'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500',
@@ -390,18 +391,18 @@ class CustomerCreationForm(forms.Form):
         })
     )
     website = forms.URLField(
-        required=False, 
+        required=False,
         label=_('Website'),
         widget=forms.URLInput(attrs={
             'class': 'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500',
             'placeholder': _('https://example.com')
         })
     )
-    
-    # Romanian Tax Information  
+
+    # Romanian Tax Information
     cui = forms.CharField(
-        max_length=20, 
-        required=False, 
+        max_length=20,
+        required=False,
         label=_('CUI/CIF'),
         help_text=_('Format: RO12345678 (6-10 digits after RO)'),
         widget=forms.TextInput(attrs={
@@ -410,8 +411,8 @@ class CustomerCreationForm(forms.Form):
         })
     )
     vat_number = forms.CharField(
-        max_length=20, 
-        required=False, 
+        max_length=20,
+        required=False,
         label=_('VAT Number'),
         help_text=_('Romanian VAT registration number'),
         widget=forms.TextInput(attrs={
@@ -420,17 +421,17 @@ class CustomerCreationForm(forms.Form):
         })
     )
     is_vat_payer = forms.BooleanField(
-        required=False, 
+        required=False,
         label=_('VAT Payer'),
         help_text=_('Customer is registered for VAT'),
         widget=forms.CheckboxInput(attrs={
             'class': 'rounded border-slate-600 bg-slate-700 text-blue-600 focus:ring-blue-500'
         })
     )
-    
+
     # Address Information (matching registration)
     address_line1 = forms.CharField(
-        max_length=200, 
+        max_length=200,
         label=_('Address Line 1'),
         widget=forms.TextInput(attrs={
             'class': 'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500',
@@ -438,8 +439,8 @@ class CustomerCreationForm(forms.Form):
         })
     )
     address_line2 = forms.CharField(
-        max_length=200, 
-        required=False, 
+        max_length=200,
+        required=False,
         label=_('Address Line 2'),
         help_text=_('Apartment, suite, unit, building, floor, etc.'),
         widget=forms.TextInput(attrs={
@@ -448,7 +449,7 @@ class CustomerCreationForm(forms.Form):
         })
     )
     city = forms.CharField(
-        max_length=100, 
+        max_length=100,
         label=_('City'),
         widget=forms.TextInput(attrs={
             'class': 'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500',
@@ -456,7 +457,7 @@ class CustomerCreationForm(forms.Form):
         })
     )
     county = forms.CharField(
-        max_length=100, 
+        max_length=100,
         label=_('County'),
         widget=forms.TextInput(attrs={
             'class': 'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500',
@@ -464,7 +465,7 @@ class CustomerCreationForm(forms.Form):
         })
     )
     postal_code = forms.CharField(
-        max_length=10, 
+        max_length=10,
         label=_('Postal Code'),
         help_text=_('Romanian postal codes are 6 digits'),
         widget=forms.TextInput(attrs={
@@ -472,10 +473,10 @@ class CustomerCreationForm(forms.Form):
             'placeholder': _('010101')
         })
     )
-    
+
     # Billing Configuration
     payment_terms = forms.IntegerField(
-        initial=30, 
+        initial=30,
         label=_('Payment Terms (days)'),
         help_text=_('Number of days for payment'),
         widget=forms.NumberInput(attrs={
@@ -485,9 +486,9 @@ class CustomerCreationForm(forms.Form):
         })
     )
     credit_limit = forms.DecimalField(
-        max_digits=10, 
-        decimal_places=2, 
-        initial=0, 
+        max_digits=10,
+        decimal_places=2,
+        initial=0,
         label=_('Credit Limit (RON)'),
         help_text=_('Maximum credit allowed'),
         widget=forms.NumberInput(attrs={
@@ -504,10 +505,10 @@ class CustomerCreationForm(forms.Form):
             'class': 'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500'
         })
     )
-    
+
     # GDPR Compliance (matching registration)
     data_processing_consent = forms.BooleanField(
-        required=True, 
+        required=True,
         label=_('Data Processing Consent'),
         help_text=_('Customer has given consent for personal data processing according to GDPR'),
         widget=forms.CheckboxInput(attrs={
@@ -515,14 +516,14 @@ class CustomerCreationForm(forms.Form):
         })
     )
     marketing_consent = forms.BooleanField(
-        required=False, 
+        required=False,
         label=_('Marketing Communications Consent'),
         help_text=_('Customer consents to receive marketing communications'),
         widget=forms.CheckboxInput(attrs={
             'class': 'rounded border-slate-600 bg-slate-700 text-blue-600 focus:ring-blue-500'
         })
     )
-    
+
     def clean_phone(self):
         """Validate Romanian phone number using centralized validation"""
         phone = self.cleaned_data.get('phone')
@@ -545,41 +546,41 @@ class CustomerCreationForm(forms.Form):
         user_action = cleaned_data.get('user_action')
         existing_user = cleaned_data.get('existing_user')
         email = cleaned_data.get('email')
-        
+
         # Require company name for companies, PFA, and NGOs
         if customer_type in ['company', 'pfa', 'ngo'] and not company_name:
             raise ValidationError(_('Company name is required for companies, PFA, and NGOs'))
-        
+
         # Validate CUI format
         if cui and not re.match(r'^RO\d{6,10}$', cui):
             raise ValidationError(_('CUI must be in format RO followed by 6-10 digits'))
-        
+
         # Validate VAT number format and requirement
         if is_vat_payer and not vat_number:
             raise ValidationError(_('VAT number is required for VAT payers'))
-        
+
         if vat_number and not re.match(r'^RO\d{6,10}$', vat_number):
             raise ValidationError(_('VAT number must be in format RO followed by 6-10 digits'))
-        
+
         # User action validation
         if user_action == 'link' and not existing_user:
             raise ValidationError(_('Please select an existing user to link.'))
-        
+
         if user_action == 'create' and email:
             if User.objects.filter(email=email).exists():
                 raise ValidationError(
                     _('A user with email {email} already exists. Please choose "Link existing user" instead.').format(email=email)
                 )
-        
+
         return cleaned_data
-    
+
     def save(self, user=None):
         """Create customer with all related profiles and handle user assignment"""
         data = self.cleaned_data
-        
+
         # Build customer name from first_name + last_name
         full_name = f"{data['first_name']} {data['last_name']}".strip()
-        
+
         # Create core customer
         customer = Customer.objects.create(
             name=full_name,
@@ -593,7 +594,7 @@ class CustomerCreationForm(forms.Form):
             marketing_consent=data.get('marketing_consent', False),
             created_by=user
         )
-        
+
         # Create tax profile
         CustomerTaxProfile.objects.create(
             customer=customer,
@@ -602,7 +603,7 @@ class CustomerCreationForm(forms.Form):
             vat_number=data.get('vat_number', ''),
             vat_rate=19.0 if data.get('is_vat_payer', False) else 0.0
         )
-        
+
         # Create billing profile
         CustomerBillingProfile.objects.create(
             customer=customer,
@@ -610,7 +611,7 @@ class CustomerCreationForm(forms.Form):
             credit_limit=data['credit_limit'],
             preferred_currency=data.get('preferred_currency', 'RON')
         )
-        
+
         # Create primary address
         CustomerAddress.objects.create(
             customer=customer,
@@ -623,7 +624,7 @@ class CustomerCreationForm(forms.Form):
             country='Romania',
             is_current=True
         )
-        
+
         # Return customer and user action data for view to handle
         return {
             'customer': customer,
@@ -642,13 +643,13 @@ class CustomerUserAssignmentForm(forms.Form):
     🔗 Form for assigning users to existing customers
     Provides the same three options as customer creation
     """
-    
+
     USER_ACTION_CHOICES = [
         ('create', _('Create new user account')),
         ('link', _('Link existing user')),
         ('skip', _('Skip user assignment')),
     ]
-    
+
     user_action = forms.ChoiceField(
         choices=USER_ACTION_CHOICES,
         widget=forms.RadioSelect,
@@ -656,7 +657,7 @@ class CustomerUserAssignmentForm(forms.Form):
         initial='create',
         help_text=_('Choose how to assign a user to this customer')
     )
-    
+
     # Fields for creating new user
     first_name = forms.CharField(
         max_length=30,
@@ -667,7 +668,7 @@ class CustomerUserAssignmentForm(forms.Form):
             'placeholder': _('John')
         })
     )
-    
+
     last_name = forms.CharField(
         max_length=30,
         required=False,
@@ -677,7 +678,7 @@ class CustomerUserAssignmentForm(forms.Form):
             'placeholder': _('Doe')
         })
     )
-    
+
     # Link existing user
     existing_user = forms.ModelChoiceField(
         queryset=User.objects.filter(is_active=True),
@@ -688,7 +689,7 @@ class CustomerUserAssignmentForm(forms.Form):
             'class': 'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500'
         })
     )
-    
+
     # User role in customer organization
     role = forms.ChoiceField(
         choices=CustomerMembership.CUSTOMER_ROLE_CHOICES,
@@ -699,7 +700,7 @@ class CustomerUserAssignmentForm(forms.Form):
             'class': 'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500'
         })
     )
-    
+
     # Email options
     send_welcome_email = forms.BooleanField(
         required=False,
@@ -710,17 +711,17 @@ class CustomerUserAssignmentForm(forms.Form):
             'class': 'text-blue-600 focus:ring-blue-500 border-slate-500 bg-slate-700 rounded'
         })
     )
-    
+
     def __init__(self, customer=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.customer = customer
-        
+
         # Exclude users who are already members of this customer
         if customer:
             existing_member_ids = CustomerMembership.objects.filter(
                 customer=customer
             ).values_list('user_id', flat=True)
-            
+
             # Update the queryset for existing_user field
             from django.forms.models import ModelChoiceField
             existing_user_field = self.fields['existing_user']
@@ -728,25 +729,25 @@ class CustomerUserAssignmentForm(forms.Form):
                 existing_user_field.queryset = User.objects.filter(
                     is_active=True
                 ).exclude(id__in=existing_member_ids)
-    
+
     def clean(self):
         cleaned_data = super().clean()
         user_action = cleaned_data.get('user_action')
-        
+
         if user_action == 'create':
             # Validate required fields for user creation
             if not cleaned_data.get('first_name'):
                 self.add_error('first_name', _('First name is required when creating a new user'))
             if not cleaned_data.get('last_name'):
                 self.add_error('last_name', _('Last name is required when creating a new user'))
-                
+
         elif user_action == 'link':
             # Validate existing user selection
             if not cleaned_data.get('existing_user'):
                 self.add_error('existing_user', _('Please select a user to link'))
-        
+
         return cleaned_data
-    
+
     def save(self, customer, created_by):
         """
         Process the user assignment
@@ -754,7 +755,7 @@ class CustomerUserAssignmentForm(forms.Form):
         """
         data = self.cleaned_data
         user_action = data['user_action']
-        
+
         if user_action == 'create':
             # Create new user using customer's email
             return {

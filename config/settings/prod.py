@@ -94,7 +94,7 @@ if SENTRY_DSN and HAS_SENTRY:
         level=logging.INFO,
         event_level=logging.ERROR
     )
-    
+
     sentry_sdk.init(
         dsn=SENTRY_DSN,
         integrations=[

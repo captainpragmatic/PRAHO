@@ -3,15 +3,13 @@ Django admin configuration for provisioning models.
 Romanian hosting provider service provisioning and server management.
 """
 
+
 from django.contrib import admin
-from django.utils.html import format_html
 from django.utils import timezone
+from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
-from django.db.models import Count, Avg
-from decimal import Decimal
 
-from .models import ServicePlan, Server, Service, ProvisioningTask
-
+from .models import ProvisioningTask, Server, Service, ServicePlan
 
 # ===============================================================================
 # SERVICE PLAN ADMIN
@@ -20,7 +18,7 @@ from .models import ServicePlan, Server, Service, ProvisioningTask
 @admin.register(ServicePlan)
 class ServicePlanAdmin(admin.ModelAdmin):
     """Hosting service plans management"""
-    
+
     list_display = [
         'name',
         'plan_type',
@@ -43,7 +41,7 @@ class ServicePlanAdmin(admin.ModelAdmin):
         'description',
     ]
     ordering = ['plan_type', 'sort_order', 'price_monthly']
-    
+
     fieldsets = (
         (_('Basic Information'), {
             'fields': (
@@ -97,40 +95,40 @@ class ServicePlanAdmin(admin.ModelAdmin):
         }),
     )
     readonly_fields = ['created_at', 'updated_at']
-    
+
     def price_monthly_display(self, obj):
         """Display monthly price with VAT indicator"""
         vat_text = " (incl. VAT)" if obj.includes_vat else " (excl. VAT)"
         return f"{obj.price_monthly:.2f} RON{vat_text}"
     price_monthly_display.short_description = _('Monthly Price')
-    
+
     def setup_fee_display(self, obj):
         """Display setup fee"""
         if obj.setup_fee > 0:
             return f"{obj.setup_fee:.2f} RON"
         return format_html('<span style="color: green;">Free</span>')
     setup_fee_display.short_description = _('Setup Fee')
-    
+
     actions = ['activate_plans', 'deactivate_plans', 'make_public', 'make_private']
-    
+
     def activate_plans(self, request, queryset):
         """Activate selected service plans"""
         updated = queryset.update(is_active=True)
         self.message_user(request, f'Successfully activated {updated} service plans.')
     activate_plans.short_description = _('Activate selected plans')
-    
+
     def deactivate_plans(self, request, queryset):
         """Deactivate selected service plans"""
         updated = queryset.update(is_active=False)
         self.message_user(request, f'Successfully deactivated {updated} service plans.')
     deactivate_plans.short_description = _('Deactivate selected plans')
-    
+
     def make_public(self, request, queryset):
         """Make plans public on website"""
         updated = queryset.update(is_public=True)
         self.message_user(request, f'Successfully made {updated} plans public.')
     make_public.short_description = _('Make public on website')
-    
+
     def make_private(self, request, queryset):
         """Make plans private (admin only)"""
         updated = queryset.update(is_public=False)
@@ -145,7 +143,7 @@ class ServicePlanAdmin(admin.ModelAdmin):
 @admin.register(Server)
 class ServerAdmin(admin.ModelAdmin):
     """Physical/virtual server management"""
-    
+
     list_display = [
         'name',
         'hostname',
@@ -174,7 +172,7 @@ class ServerAdmin(admin.ModelAdmin):
         'provider_instance_id',
     ]
     ordering = ['location', 'name']
-    
+
     fieldsets = (
         (_('Basic Information'), {
             'fields': (
@@ -237,7 +235,7 @@ class ServerAdmin(admin.ModelAdmin):
         }),
     )
     readonly_fields = ['created_at', 'updated_at']
-    
+
     def status_display(self, obj):
         """Display status with colors"""
         colors = {
@@ -253,7 +251,7 @@ class ServerAdmin(admin.ModelAdmin):
             obj.get_status_display()
         )
     status_display.short_description = _('Status')
-    
+
     def active_services_display(self, obj):
         """Display active services count"""
         count = obj.active_services_count
@@ -272,7 +270,7 @@ class ServerAdmin(admin.ModelAdmin):
             )
         return str(count)
     active_services_display.short_description = _('Services')
-    
+
     def resource_usage_display(self, obj):
         """Display average resource usage"""
         avg_usage = obj.resource_usage_average
@@ -282,7 +280,7 @@ class ServerAdmin(admin.ModelAdmin):
             color = 'orange'
         else:
             color = 'green'
-        
+
         return format_html(
             '<span style="color: {};">{:.1f}%</span><br/>'
             '<small>CPU: {}% | RAM: {}% | Disk: {}%</small>',
@@ -292,22 +290,22 @@ class ServerAdmin(admin.ModelAdmin):
             obj.disk_usage_percent or 0
         )
     resource_usage_display.short_description = _('Resource Usage')
-    
+
     def monthly_cost_display(self, obj):
         """Display monthly cost"""
         if obj.monthly_cost > 0:
             return f"{obj.monthly_cost:.2f} RON"
         return '-'
     monthly_cost_display.short_description = _('Monthly Cost')
-    
+
     actions = ['mark_maintenance', 'mark_active']
-    
+
     def mark_maintenance(self, request, queryset):
         """Mark servers as under maintenance"""
         updated = queryset.update(status='maintenance')
         self.message_user(request, f'Successfully marked {updated} servers as under maintenance.')
     mark_maintenance.short_description = _('Mark as under maintenance')
-    
+
     def mark_active(self, request, queryset):
         """Mark servers as active"""
         updated = queryset.update(status='active')
@@ -322,7 +320,7 @@ class ServerAdmin(admin.ModelAdmin):
 @admin.register(Service)
 class ServiceAdmin(admin.ModelAdmin):
     """Customer service management"""
-    
+
     list_display = [
         'service_name',
         'customer',
@@ -358,7 +356,7 @@ class ServiceAdmin(admin.ModelAdmin):
         'price_display',
         'days_until_expiry_display',
     ]
-    
+
     fieldsets = (
         (_('Service Information'), {
             'fields': (
@@ -414,7 +412,7 @@ class ServiceAdmin(admin.ModelAdmin):
             'classes': ('collapse',),
         }),
     )
-    
+
     def status_display(self, obj):
         """Display status with colors"""
         colors = {
@@ -432,12 +430,12 @@ class ServiceAdmin(admin.ModelAdmin):
             obj.get_status_display()
         )
     status_display.short_description = _('Status')
-    
+
     def price_display(self, obj):
         """Display service price"""
         return f"{obj.price:.2f} RON"
     price_display.short_description = _('Price')
-    
+
     def days_until_expiry_display(self, obj):
         """Display days until expiry with color coding"""
         days = obj.days_until_expiry
@@ -452,9 +450,9 @@ class ServiceAdmin(admin.ModelAdmin):
         else:
             return format_html('<span style="color: green;">{} days</span>', days)
     days_until_expiry_display.short_description = _('Days to Expiry')
-    
+
     actions = ['activate_services', 'suspend_services', 'extend_expiry']
-    
+
     def activate_services(self, request, queryset):
         """Activate selected services"""
         updated = 0
@@ -464,7 +462,7 @@ class ServiceAdmin(admin.ModelAdmin):
                 updated += 1
         self.message_user(request, f'Successfully activated {updated} services.')
     activate_services.short_description = _('Activate selected services')
-    
+
     def suspend_services(self, request, queryset):
         """Suspend selected services"""
         updated = 0
@@ -483,7 +481,7 @@ class ServiceAdmin(admin.ModelAdmin):
 @admin.register(ProvisioningTask)
 class ProvisioningTaskAdmin(admin.ModelAdmin):
     """Automated provisioning task management"""
-    
+
     list_display = [
         'created_at',
         'service',
@@ -514,7 +512,7 @@ class ProvisioningTaskAdmin(admin.ModelAdmin):
         'completed_at',
     ]
     ordering = ['-created_at']
-    
+
     fieldsets = (
         (_('Task Information'), {
             'fields': (
@@ -548,7 +546,7 @@ class ProvisioningTaskAdmin(admin.ModelAdmin):
             )
         }),
     )
-    
+
     def status_display(self, obj):
         """Display status with colors"""
         colors = {
@@ -565,7 +563,7 @@ class ProvisioningTaskAdmin(admin.ModelAdmin):
             obj.get_status_display()
         )
     status_display.short_description = _('Status')
-    
+
     def retry_count_display(self, obj):
         """Display retry count with progress"""
         if obj.max_retries > 0:
@@ -582,7 +580,7 @@ class ProvisioningTaskAdmin(admin.ModelAdmin):
             )
         return f"{obj.retry_count}/∞"
     retry_count_display.short_description = _('Retries')
-    
+
     def duration_display(self, obj):
         """Display task duration"""
         duration = obj.duration_seconds
@@ -597,9 +595,9 @@ class ProvisioningTaskAdmin(admin.ModelAdmin):
                 return f"{hours}h {minutes}m"
         return '-'
     duration_display.short_description = _('Duration')
-    
+
     actions = ['retry_failed_tasks', 'cancel_pending_tasks']
-    
+
     def retry_failed_tasks(self, request, queryset):
         """Retry failed tasks that can be retried"""
         retried = 0
@@ -611,7 +609,7 @@ class ProvisioningTaskAdmin(admin.ModelAdmin):
                 retried += 1
         self.message_user(request, f'Successfully queued {retried} tasks for retry.')
     retry_failed_tasks.short_description = _('Retry failed tasks')
-    
+
     def cancel_pending_tasks(self, request, queryset):
         """Cancel pending tasks"""
         cancelled = queryset.filter(status='pending').update(status='failed', error_message='Cancelled by admin')

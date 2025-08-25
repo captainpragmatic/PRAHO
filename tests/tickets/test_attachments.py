@@ -3,16 +3,15 @@ Test ticket attachment functionality
 """
 
 import os
-import tempfile
-from django.test import TestCase, Client
+
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import Client, TestCase
 from django.urls import reverse
-from django.conf import settings
 
 from apps.customers.models import Customer, CustomerTaxProfile
+from apps.tickets.models import SupportCategory, Ticket, TicketAttachment, TicketComment
 from apps.users.models import CustomerMembership
-from apps.tickets.models import Ticket, SupportCategory, TicketComment, TicketAttachment
 
 User = get_user_model()
 
@@ -29,7 +28,7 @@ class TicketAttachmentTest(TestCase):
             first_name='Test',
             last_name='User'
         )
-        
+
         # Create test customer
         self.customer = Customer.objects.create(
             name='Test Company SRL',
@@ -39,14 +38,14 @@ class TicketAttachmentTest(TestCase):
             primary_email='test@example.com',
             primary_phone='+40712345678'
         )
-        
+
         # Create customer tax profile
         CustomerTaxProfile.objects.create(
             customer=self.customer,
             vat_number='RO12345678',
             registration_number='12345678'
         )
-        
+
         # Create customer membership
         CustomerMembership.objects.create(
             user=self.user,
@@ -54,7 +53,7 @@ class TicketAttachmentTest(TestCase):
             role='owner',
             is_primary=True
         )
-        
+
         # Create support category
         self.category = SupportCategory.objects.create(
             name='Technical Support',
@@ -62,7 +61,7 @@ class TicketAttachmentTest(TestCase):
             sla_response_hours=24,
             sla_resolution_hours=72
         )
-        
+
         # Create test ticket
         self.ticket = Ticket.objects.create(
             title='Test Ticket',
@@ -73,7 +72,7 @@ class TicketAttachmentTest(TestCase):
             priority='normal',
             created_by=self.user
         )
-        
+
         self.client = Client()
         self.client.login(email='testuser@example.com', password='testpass123')
 
@@ -86,7 +85,7 @@ class TicketAttachmentTest(TestCase):
             test_content,
             content_type='text/plain'
         )
-        
+
         # Submit reply with attachment
         response = self.client.post(
             reverse('tickets:reply', kwargs={'pk': self.ticket.pk}),
@@ -95,15 +94,15 @@ class TicketAttachmentTest(TestCase):
                 'attachments': test_file
             }
         )
-        
+
         # Should redirect or return success
         self.assertIn(response.status_code, [200, 302])
-        
+
         # Check comment was created
         comment = TicketComment.objects.filter(ticket=self.ticket).first()
         self.assertIsNotNone(comment)
         self.assertEqual(comment.content, 'This is a test reply with attachment')
-        
+
         # Check attachment was created
         attachment = TicketAttachment.objects.filter(comment=comment).first()
         self.assertIsNotNone(attachment)
@@ -120,7 +119,7 @@ class TicketAttachmentTest(TestCase):
             large_content,
             content_type='text/plain'
         )
-        
+
         response = self.client.post(
             reverse('tickets:reply', kwargs={'pk': self.ticket.pk}),
             {
@@ -128,11 +127,11 @@ class TicketAttachmentTest(TestCase):
                 'attachments': large_file
             }
         )
-        
+
         # Should still create comment but not attachment
         comment = TicketComment.objects.filter(ticket=self.ticket).first()
         self.assertIsNotNone(comment)
-        
+
         # Should not create attachment
         attachment_count = TicketAttachment.objects.filter(comment=comment).count()
         self.assertEqual(attachment_count, 0)
@@ -146,7 +145,7 @@ class TicketAttachmentTest(TestCase):
             exe_content,
             content_type='application/x-executable'
         )
-        
+
         response = self.client.post(
             reverse('tickets:reply', kwargs={'pk': self.ticket.pk}),
             {
@@ -154,11 +153,11 @@ class TicketAttachmentTest(TestCase):
                 'attachments': exe_file
             }
         )
-        
+
         # Should create comment but not attachment
         comment = TicketComment.objects.filter(ticket=self.ticket).first()
         self.assertIsNotNone(comment)
-        
+
         # Should not create attachment
         attachment_count = TicketAttachment.objects.filter(comment=comment).count()
         self.assertEqual(attachment_count, 0)
@@ -172,14 +171,14 @@ class TicketAttachmentTest(TestCase):
             test_content,
             content_type='text/plain'
         )
-        
+
         # Create comment and attachment
         comment = TicketComment.objects.create(
             ticket=self.ticket,
             content='Test comment',
             author=self.user
         )
-        
+
         attachment = TicketAttachment.objects.create(
             ticket=self.ticket,
             comment=comment,
@@ -189,14 +188,14 @@ class TicketAttachmentTest(TestCase):
             content_type='text/plain',
             uploaded_by=self.user
         )
-        
+
         # Test authorized download
         response = self.client.get(
             reverse('tickets:download_attachment', kwargs={'attachment_id': attachment.id})
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'text/plain')
-        
+
         # Test unauthorized access (different user)
         unauthorized_user = User.objects.create_user(
             email='unauthorized@example.com',
@@ -204,10 +203,10 @@ class TicketAttachmentTest(TestCase):
             first_name='Unauthorized',
             last_name='User'
         )
-        
+
         unauthorized_client = Client()
         unauthorized_client.login(email='unauthorized@example.com', password='testpass123')
-        
+
         response = unauthorized_client.get(
             reverse('tickets:download_attachment', kwargs={'attachment_id': attachment.id})
         )

@@ -3,10 +3,10 @@ Security-focused template tags for PRAHO Platform
 Safe HTML rendering and XSS prevention utilities.
 """
 
-from django import template
-from django.utils.html import format_html, escape
-from django.utils.safestring import mark_safe
 import bleach
+from django import template
+from django.utils.html import escape, format_html
+from django.utils.safestring import mark_safe
 
 register = template.Library()
 
@@ -21,19 +21,19 @@ def safe_message(value):
     """
     if not value:
         return ''
-    
+
     # Allow only safe HTML tags
     allowed_tags = ['b', 'i', 'strong', 'em', 'u']
     allowed_attributes = {}
-    
+
     # Clean the HTML to prevent XSS
     cleaned = bleach.clean(
-        str(value), 
-        tags=allowed_tags, 
+        str(value),
+        tags=allowed_tags,
         attributes=allowed_attributes,
         strip=True
     )
-    
+
     return mark_safe(cleaned)  # nosec B308 B703 - Input sanitized by bleach
 
 
@@ -46,7 +46,7 @@ def escape_message(value):
     """
     if not value:
         return ''
-    
+
     return escape(str(value))
 
 
@@ -58,16 +58,16 @@ def secure_alert(message, alert_type='info', dismissible=True):
     🔒 SECURITY: All content is escaped to prevent XSS
     """
     escaped_message = escape(str(message))
-    
+
     css_classes = {
         'success': 'bg-green-900 border-green-700 text-green-100',
         'error': 'bg-red-900 border-red-700 text-red-100',
         'warning': 'bg-yellow-900 border-yellow-700 text-yellow-100',
         'info': 'bg-blue-900 border-blue-700 text-blue-100'
     }
-    
+
     class_str = css_classes.get(alert_type, css_classes['info'])
-    
+
     dismiss_button = ''
     if dismissible:
         dismiss_button = '''
@@ -78,7 +78,7 @@ def secure_alert(message, alert_type='info', dismissible=True):
           </svg>
         </button>
         '''
-    
+
     return format_html(
         '''
         <div class="flex p-4 mb-4 border rounded-lg {}" role="alert">

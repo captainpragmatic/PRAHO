@@ -2,14 +2,13 @@
 Test ticket internal comments security and visibility
 """
 
-from django.test import TestCase, Client
 from django.contrib.auth import get_user_model
+from django.test import Client, TestCase
 from django.urls import reverse
-from django.utils import timezone
 
 from apps.customers.models import Customer, CustomerTaxProfile
-from apps.users.models import CustomerMembership
 from apps.tickets.models import Ticket, TicketComment
+from apps.users.models import CustomerMembership
 
 User = get_user_model()
 
@@ -29,7 +28,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
         self.staff_user.is_staff = True
         self.staff_user.staff_role = 'admin'
         self.staff_user.save()
-        
+
         # Create support staff user
         self.support_user = User.objects.create_user(
             email='support@example.com',
@@ -40,7 +39,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
         self.support_user.is_staff = True
         self.support_user.staff_role = 'support'
         self.support_user.save()
-        
+
         # Create customer user (non-staff)
         self.customer_user = User.objects.create_user(
             email='customer@example.com',
@@ -49,7 +48,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
         self.customer_user.first_name = 'Customer'
         self.customer_user.last_name = 'User'
         self.customer_user.save()
-        
+
         # Create test customer organization
         self.customer = Customer.objects.create(
             name='Test Company SRL',
@@ -59,14 +58,14 @@ class TicketInternalCommentsSecurityTest(TestCase):
             primary_email='customer@example.com',
             primary_phone='+40712345678'
         )
-        
+
         # Create customer tax profile
         CustomerTaxProfile.objects.create(
             customer=self.customer,
             vat_number='RO12345678',
             registration_number='12345678'
         )
-        
+
         # Create customer membership for customer user
         CustomerMembership.objects.create(
             user=self.customer_user,
@@ -74,7 +73,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
             role='owner',
             is_primary=True
         )
-        
+
         # Create test ticket
         self.ticket = Ticket.objects.create(
             customer=self.customer,
@@ -84,7 +83,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
             status='open',
             created_by=self.customer_user
         )
-        
+
         # Create different types of comments
         self.customer_comment = TicketComment.objects.create(
             ticket=self.ticket,
@@ -95,7 +94,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
             author_email=self.customer_user.email,
             is_public=True
         )
-        
+
         self.support_comment = TicketComment.objects.create(
             ticket=self.ticket,
             content='Support comment - visible to all',
@@ -105,7 +104,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
             author_email=self.support_user.email,
             is_public=True
         )
-        
+
         self.internal_comment = TicketComment.objects.create(
             ticket=self.ticket,
             content='Internal staff note - CONFIDENTIAL - customer should not see this',
@@ -115,7 +114,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
             author_email=self.staff_user.email,
             is_public=False
         )
-        
+
         self.client = Client()
 
     def test_staff_can_see_all_comments(self):
@@ -124,18 +123,18 @@ class TicketInternalCommentsSecurityTest(TestCase):
         self.client.login(email='admin@example.com', password='admin123')
         response = self.client.get(reverse('tickets:detail', kwargs={'pk': self.ticket.pk}))
         self.assertEqual(response.status_code, 200)
-        
+
         # Check that admin sees all comment types
         self.assertContains(response, 'Customer comment - visible to all')
         self.assertContains(response, 'Support comment - visible to all')
         self.assertContains(response, 'Internal staff note - CONFIDENTIAL')
         self.assertContains(response, 'STAFF INTERNAL NOTE')
-        
+
         # Test support user
         self.client.login(email='support@example.com', password='support123')
         response = self.client.get(reverse('tickets:detail', kwargs={'pk': self.ticket.pk}))
         self.assertEqual(response.status_code, 200)
-        
+
         # Check that support sees all comment types
         self.assertContains(response, 'Customer comment - visible to all')
         self.assertContains(response, 'Support comment - visible to all')
@@ -147,11 +146,11 @@ class TicketInternalCommentsSecurityTest(TestCase):
         self.client.login(email='customer@example.com', password='customer123')
         response = self.client.get(reverse('tickets:detail', kwargs={'pk': self.ticket.pk}))
         self.assertEqual(response.status_code, 200)
-        
+
         # Check that customer sees public comments only
         self.assertContains(response, 'Customer comment - visible to all')
         self.assertContains(response, 'Support comment - visible to all')
-        
+
         # Check that customer does NOT see internal comments
         self.assertNotContains(response, 'Internal staff note - CONFIDENTIAL')
         self.assertNotContains(response, 'STAFF INTERNAL NOTE')
@@ -165,11 +164,11 @@ class TicketInternalCommentsSecurityTest(TestCase):
             HTTP_HX_REQUEST='true'
         )
         self.assertEqual(response.status_code, 200)
-        
+
         # Staff should see internal comments in HTMX response
         self.assertContains(response, 'Internal staff note - CONFIDENTIAL')
         self.assertContains(response, 'STAFF INTERNAL NOTE')
-        
+
         # Test customer user via HTMX
         self.client.login(email='customer@example.com', password='customer123')
         response = self.client.get(
@@ -177,7 +176,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
             HTTP_HX_REQUEST='true'
         )
         self.assertEqual(response.status_code, 200)
-        
+
         # Customer should NOT see internal comments in HTMX response
         self.assertNotContains(response, 'Internal staff note - CONFIDENTIAL')
         self.assertNotContains(response, 'STAFF INTERNAL NOTE')
@@ -188,16 +187,16 @@ class TicketInternalCommentsSecurityTest(TestCase):
         self.client.login(email='admin@example.com', password='admin123')
         response = self.client.get(reverse('tickets:detail', kwargs={'pk': self.ticket.pk}))
         self.assertEqual(response.status_code, 200)
-        
+
         # Staff should see all 3 comments
         comments_in_context = response.context['comments']
         self.assertEqual(comments_in_context.count(), 3)
-        
+
         # Test with customer user - should see only public comments
         self.client.login(email='customer@example.com', password='customer123')
         response = self.client.get(reverse('tickets:detail', kwargs={'pk': self.ticket.pk}))
         self.assertEqual(response.status_code, 200)
-        
+
         # Customer should see only 2 public comments
         comments_in_context = response.context['comments']
         self.assertEqual(comments_in_context.count(), 2)
@@ -206,7 +205,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
         """Test that internal comments have proper styling when visible to staff"""
         self.client.login(email='admin@example.com', password='admin123')
         response = self.client.get(reverse('tickets:detail', kwargs={'pk': self.ticket.pk}))
-        
+
         # Check for internal comment styling
         self.assertContains(response, 'bg-amber-900/50')  # Internal comment background
         self.assertContains(response, 'border-amber-600')  # Internal comment border
@@ -218,11 +217,11 @@ class TicketInternalCommentsSecurityTest(TestCase):
         self.assertTrue(self.staff_user.is_staff)
         self.assertTrue(self.staff_user.is_staff_user)
         self.assertEqual(self.staff_user.staff_role, 'admin')
-        
+
         self.assertTrue(self.support_user.is_staff)
         self.assertTrue(self.support_user.is_staff_user)
         self.assertEqual(self.support_user.staff_role, 'support')
-        
+
         # Test customer user properties
         self.assertFalse(self.customer_user.is_staff)
         self.assertFalse(self.customer_user.is_staff_user)
@@ -239,7 +238,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
             primary_email='other@example.com',
             primary_phone='+40712345679'
         )
-        
+
         other_user = User.objects.create_user(
             email='other@example.com',
             password='other123'
@@ -247,18 +246,18 @@ class TicketInternalCommentsSecurityTest(TestCase):
         other_user.first_name = 'Other'
         other_user.last_name = 'User'
         other_user.save()
-        
+
         CustomerMembership.objects.create(
             user=other_user,
             customer=other_customer,
             role='owner',
             is_primary=True
         )
-        
+
         # Try to access ticket from different customer
         self.client.login(email='other@example.com', password='other123')
         response = self.client.get(reverse('tickets:detail', kwargs={'pk': self.ticket.pk}))
-        
+
         # Should redirect with error message
         self.assertEqual(response.status_code, 302)  # Redirect due to no permission
 
@@ -268,7 +267,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
         all_comments = TicketComment.objects.filter(ticket=self.ticket)
         customer_comments = all_comments.filter(comment_type__in=['customer', 'support'])
         internal_comments = all_comments.filter(comment_type='internal')
-        
+
         self.assertEqual(all_comments.count(), 3)  # Total comments
         self.assertEqual(customer_comments.count(), 2)  # Public comments
         self.assertEqual(internal_comments.count(), 1)  # Internal comments
@@ -277,12 +276,12 @@ class TicketInternalCommentsSecurityTest(TestCase):
         """Test that comment author information is properly displayed"""
         self.client.login(email='admin@example.com', password='admin123')
         response = self.client.get(reverse('tickets:detail', kwargs={'pk': self.ticket.pk}))
-        
+
         # Check that author names are displayed
         self.assertContains(response, self.customer_user.get_full_name())
         self.assertContains(response, self.support_user.get_full_name())
         self.assertContains(response, self.staff_user.get_full_name())
-        
+
         # Check role badges
         self.assertContains(response, 'Customer')  # Customer badge
         self.assertContains(response, 'Support')   # Support badge
@@ -290,4 +289,3 @@ class TicketInternalCommentsSecurityTest(TestCase):
     def tearDown(self):
         """Clean up test data"""
         # Django handles cleanup automatically, but good practice
-        pass

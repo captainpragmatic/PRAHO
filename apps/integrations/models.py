@@ -1,11 +1,11 @@
-import uuid
-import json
 import hashlib
+import json
+import uuid
+
+from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
-from django.core.validators import MinValueValidator
-
 
 # ===============================================================================
 # WEBHOOK DEDUPLICATION SYSTEM
@@ -24,14 +24,14 @@ class WebhookEvent(models.Model):
     Critical for production reliability - prevents duplicate charges,
     double provisioning, and data corruption from retried webhooks.
     """
-    
+
     STATUS_CHOICES = [
         ('pending', _('⏳ Pending')),
         ('processed', _('✅ Processed')),
         ('failed', _('❌ Failed')),
         ('skipped', _('⏭️ Skipped')),  # Duplicate or irrelevant
     ]
-    
+
     SOURCE_CHOICES = [
         ('stripe', _('💳 Stripe')),
         ('paypal', _('🟡 PayPal')),
@@ -44,11 +44,11 @@ class WebhookEvent(models.Model):
         ('efactura', _('🇷🇴 e-Factura')),
         ('other', _('🔌 Other')),
     ]
-    
+
     # Core identification
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     source = models.CharField(
-        max_length=50, 
+        max_length=50,
         choices=SOURCE_CHOICES,
         help_text=_("External service that sent the webhook")
     )
@@ -60,25 +60,25 @@ class WebhookEvent(models.Model):
         max_length=100,
         help_text=_("Type of event (e.g., 'payment.succeeded', 'domain.created')")
     )
-    
+
     # Processing status
     status = models.CharField(
-        max_length=20, 
-        choices=STATUS_CHOICES, 
+        max_length=20,
+        choices=STATUS_CHOICES,
         default='pending'
     )
-    
+
     # Timing
     received_at = models.DateTimeField(
         default=timezone.now,
         help_text=_("When webhook was received by our system")
     )
     processed_at = models.DateTimeField(
-        null=True, 
+        null=True,
         blank=True,
         help_text=_("When webhook processing completed")
     )
-    
+
     # Data storage
     payload = models.JSONField(
         help_text=_("Complete webhook payload from external service")
@@ -87,7 +87,7 @@ class WebhookEvent(models.Model):
         blank=True,
         help_text=_("Webhook signature for verification (e.g., Stripe signature)")
     )
-    
+
     # Error handling
     error_message = models.TextField(
         blank=True,
@@ -103,7 +103,7 @@ class WebhookEvent(models.Model):
         blank=True,
         help_text=_("When to retry processing (for failed webhooks)")
     )
-    
+
     # Metadata
     ip_address = models.GenericIPAddressField(
         null=True,
@@ -119,18 +119,18 @@ class WebhookEvent(models.Model):
         blank=True,
         help_text=_("HTTP headers from webhook request")
     )
-    
+
     # Audit trail
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         verbose_name = _('🔄 Webhook Event')
         verbose_name_plural = _('🔄 Webhook Events')
-        
+
         # Prevent duplicate processing
         unique_together = ('source', 'event_id')
-        
+
         indexes = [
             # Query pending webhooks for processing
             models.Index(
@@ -150,51 +150,51 @@ class WebhookEvent(models.Model):
                 name='webhook_source_type_idx'
             ),
         ]
-        
+
         ordering = ['-received_at']
-    
+
     def __str__(self):
         return f"🔄 {self.get_source_display()} | {self.event_type} | {self.status}"
-    
+
     @property
     def payload_hash(self):
         """📋 Generate hash of payload for deduplication by content"""
         payload_str = json.dumps(self.payload, sort_keys=True)
         return hashlib.sha256(payload_str.encode()).hexdigest()[:16]
-    
+
     @property
     def processing_duration(self):
         """⏱️ Time taken to process webhook"""
         if self.processed_at and self.received_at:
             return self.processed_at - self.received_at
         return None
-    
+
     def mark_processed(self, save=True):
         """✅ Mark webhook as successfully processed"""
         self.status = 'processed'
         self.processed_at = timezone.now()
         if save:
             self.save(update_fields=['status', 'processed_at', 'updated_at'])
-    
+
     def mark_failed(self, error_message, save=True):
         """❌ Mark webhook as failed with error details"""
         self.status = 'failed'
         self.error_message = error_message
         self.retry_count += 1
         self.processed_at = timezone.now()
-        
+
         # Calculate next retry (exponential backoff)
         retry_delays = [300, 900, 3600, 7200, 21600]  # 5m, 15m, 1h, 2h, 6h
         if self.retry_count <= len(retry_delays):
             delay_seconds = retry_delays[self.retry_count - 1]
             self.next_retry_at = timezone.now() + timezone.timedelta(seconds=delay_seconds)
-        
+
         if save:
             self.save(update_fields=[
-                'status', 'error_message', 'retry_count', 
+                'status', 'error_message', 'retry_count',
                 'processed_at', 'next_retry_at', 'updated_at'
             ])
-    
+
     def mark_skipped(self, reason="Duplicate or irrelevant", save=True):
         """⏭️ Mark webhook as skipped (duplicate/irrelevant)"""
         self.status = 'skipped'
@@ -202,12 +202,12 @@ class WebhookEvent(models.Model):
         self.processed_at = timezone.now()
         if save:
             self.save(update_fields=['status', 'error_message', 'processed_at', 'updated_at'])
-    
+
     @classmethod
     def is_duplicate(cls, source, event_id):
         """🔍 Check if webhook has already been received"""
         return cls.objects.filter(source=source, event_id=event_id).exists()
-    
+
     @classmethod
     def get_pending_webhooks(cls, source=None, limit=100):
         """📋 Get pending webhooks for processing"""
@@ -215,7 +215,7 @@ class WebhookEvent(models.Model):
         if source:
             queryset = queryset.filter(source=source)
         return queryset[:limit]
-    
+
     @classmethod
     def get_failed_webhooks_for_retry(cls, source=None):
         """🔄 Get failed webhooks ready for retry"""
@@ -243,17 +243,17 @@ class WebhookDelivery(models.Model):
     - service.provisioned, service.suspended
     - domain.registered, domain.expired
     """
-    
+
     STATUS_CHOICES = [
         ('pending', _('⏳ Pending')),
         ('delivered', _('✅ Delivered')),
         ('failed', _('❌ Failed')),
         ('disabled', _('🚫 Disabled')),
     ]
-    
+
     # Core identification
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    
+
     # Customer endpoint
     customer = models.ForeignKey(
         'customers.Customer',
@@ -263,7 +263,7 @@ class WebhookDelivery(models.Model):
     endpoint_url = models.URLField(
         help_text=_("Customer's webhook endpoint URL")
     )
-    
+
     # Event details
     event_type = models.CharField(
         max_length=100,
@@ -272,7 +272,7 @@ class WebhookDelivery(models.Model):
     payload = models.JSONField(
         help_text=_("Webhook payload sent to customer")
     )
-    
+
     # Delivery tracking
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     http_status = models.PositiveIntegerField(
@@ -284,24 +284,24 @@ class WebhookDelivery(models.Model):
         blank=True,
         help_text=_("Response body from customer endpoint")
     )
-    
+
     # Timing
     scheduled_at = models.DateTimeField(default=timezone.now)
     delivered_at = models.DateTimeField(null=True, blank=True)
-    
+
     # Retry logic
     retry_count = models.PositiveIntegerField(default=0)
     next_retry_at = models.DateTimeField(null=True, blank=True)
-    
+
     # Audit
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         verbose_name = _('📤 Webhook Delivery')
         verbose_name_plural = _('📤 Webhook Deliveries')
         ordering = ['-scheduled_at']
-        
+
         indexes = [
             models.Index(
                 fields=['status', 'scheduled_at'],
@@ -312,6 +312,6 @@ class WebhookDelivery(models.Model):
                 name='delivery_customer_idx'
             ),
         ]
-    
+
     def __str__(self):
         return f"📤 {self.customer} | {self.event_type} | {self.status}"

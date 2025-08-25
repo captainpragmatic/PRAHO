@@ -4,17 +4,17 @@ PRAHO PLATFORM - Beat Scheduler
 Periodic task scheduler for Romanian hosting provider operations
 """
 
+import logging
 import os
 import sys
-import django
-from rq import Queue
-from redis import Redis
-import logging
-from datetime import datetime, timedelta, time as dt_time
-from typing import Dict, Any, Callable, Optional
 import time
-import threading
 from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Any
+
+import django
+from redis import Redis
+from rq import Queue
 
 # Setup Django environment
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.dev')
@@ -44,8 +44,8 @@ class ScheduledTask:
     interval: int = 0  # Interval in minutes for recurring tasks
     queue: str = 'default'
     description: str = ''
-    last_run: Optional[datetime] = None
-    next_run: Optional[datetime] = None
+    last_run: datetime | None = None
+    next_run: datetime | None = None
 
 
 class PragmaticHostScheduler:
@@ -60,14 +60,14 @@ class PragmaticHostScheduler:
     - Database maintenance
     - Report generation
     """
-    
+
     def __init__(self):
         """Initialize scheduler with Redis connection"""
         self.redis_conn = Redis.from_url(
-            settings.REDIS_URL if hasattr(settings, 'REDIS_URL') 
+            settings.REDIS_URL if hasattr(settings, 'REDIS_URL')
             else 'redis://localhost:6379/0'
         )
-        
+
         self.queues = {
             'high': Queue('high', connection=self.redis_conn),
             'default': Queue('default', connection=self.redis_conn),
@@ -75,15 +75,15 @@ class PragmaticHostScheduler:
             'email': Queue('email', connection=self.redis_conn),
             'reports': Queue('reports', connection=self.redis_conn),
         }
-        
+
         self.tasks = []
         self.running = False
         self._setup_tasks()
         logger.info("Initialized PragmaticHost beat scheduler")
-    
+
     def _setup_tasks(self):
         """Setup all periodic tasks for Romanian hosting operations"""
-        
+
         # Daily tasks
         self.tasks.extend([
             ScheduledTask(
@@ -127,7 +127,7 @@ class PragmaticHostScheduler:
                 description='Generate daily business reports'
             ),
         ])
-        
+
         # Hourly/interval tasks
         self.tasks.extend([
             ScheduledTask(
@@ -163,84 +163,84 @@ class PragmaticHostScheduler:
                 description='Check for system alerts'
             ),
         ])
-        
+
         # Calculate initial run times
         self._calculate_next_runs()
         logger.info(f"Setup {len(self.tasks)} periodic tasks")
-    
+
     def _calculate_next_runs(self):
         """Calculate next run times for all tasks"""
         now = datetime.now()
-        
+
         for task in self.tasks:
             if task.schedule_type == 'daily':
                 # Parse time and set for today or tomorrow
                 hour, minute = map(int, task.time.split(':'))
                 today_run = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-                
+
                 if today_run <= now:
                     task.next_run = today_run + timedelta(days=1)
                 else:
                     task.next_run = today_run
-                    
+
             elif task.schedule_type == 'hourly':
                 # Set next run based on interval
                 task.next_run = now + timedelta(minutes=task.interval)
-    
+
     def _enqueue_task(self, task: ScheduledTask):
         """Enqueue a task for execution"""
         try:
             # Import the function dynamically
             module_path, func_name = task.func_path.rsplit('.', 1)
-            
+
             # For now, just log the task (actual implementation would import and execute)
             logger.info(f"Would execute task: {task.description} ({task.func_path})")
-            
+
             # Update run times
             task.last_run = datetime.now()
-            
+
             if task.schedule_type == 'daily' and task.next_run:
                 task.next_run = task.next_run + timedelta(days=1)
             elif task.schedule_type == 'hourly' and task.next_run:
                 task.next_run = task.next_run + timedelta(minutes=task.interval)
-                
+
         except Exception as e:
             logger.error(f"Failed to execute task {task.name}: {e}")
-    
+
     def start(self):
         """Start the beat scheduler"""
         try:
             logger.info("Starting PragmaticHost beat scheduler...")
             self.running = True
-            
+
             while self.running:
                 now = datetime.now()
-                
+
                 # Check each task
                 for task in self.tasks:
                     if task.next_run and now >= task.next_run:
                         logger.info(f"Executing scheduled task: {task.description}")
                         self._enqueue_task(task)
-                
+
                 # Sleep for 30 seconds before next check
                 time.sleep(30)
-                
+
         except KeyboardInterrupt:
             logger.info("Scheduler shutdown requested by user")
             self.running = False
         except Exception as e:
             logger.error(f"Scheduler failed: {e}")
             raise
-    
+
     def stop(self):
         """Stop the scheduler"""
         self.running = False
         logger.info("Scheduler stopped")
-    
-    def get_scheduled_tasks(self) -> Dict[str, Any]:
+
+    def get_scheduled_tasks(self) -> dict[str, Any]:
         """Get information about scheduled tasks"""
         task_info = []
-        
+
         for task in self.tasks:
             task_info.append({
                 'name': task.name,
@@ -251,7 +251,7 @@ class PragmaticHostScheduler:
                 'last_run': task.last_run.isoformat() if task.last_run else None,
                 'next_run': task.next_run.isoformat() if task.next_run else None,
             })
-        
+
         return {
             'total_tasks': len(self.tasks),
             'tasks': task_info
@@ -261,10 +261,10 @@ class PragmaticHostScheduler:
 def main():
     """Main scheduler entry point"""
     import argparse
-    
+
     parser = argparse.ArgumentParser(description='PragmaticHost Beat Scheduler')
     parser.add_argument(
-        '--verbose', 
+        '--verbose',
         action='store_true',
         help='Enable verbose logging'
     )
@@ -273,14 +273,14 @@ def main():
         action='store_true',
         help='List scheduled tasks and exit'
     )
-    
+
     args = parser.parse_args()
-    
+
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
-    
+
     scheduler = PragmaticHostScheduler()
-    
+
     if args.list_tasks:
         tasks_info = scheduler.get_scheduled_tasks()
         print(f"\nPragmaticHost Scheduled Tasks ({tasks_info['total_tasks']} total):")
@@ -293,7 +293,7 @@ def main():
             print(f"Last run: {task['last_run'] or 'Never'}")
             print(f"Next run: {task['next_run'] or 'Not scheduled'}")
         return
-    
+
     # Start the scheduler
     scheduler.start()
 

@@ -17,13 +17,14 @@ Test Discovery:
 """
 
 import os
+
 import django
-from django.conf import settings
+
 
 def pytest_configure():
     """Configure Django settings for pytest"""
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.test')
-    
+
     # Configure Django
     django.setup()
 
@@ -31,17 +32,17 @@ def pytest_configure():
 # PYTEST FIXTURES - UPDATED FOR NORMALIZED CUSTOMER MODEL
 # ===============================================================================
 
-import pytest
-from django.contrib.auth import get_user_model
 from decimal import Decimal
 
+import pytest
+from django.contrib.auth import get_user_model
+
 from apps.customers.models import (
-    Customer, 
-    CustomerTaxProfile, 
+    Customer,
+    CustomerAddress,
     CustomerBillingProfile,
-    CustomerAddress
+    CustomerTaxProfile,
 )
-from apps.users.models import CustomerMembership
 
 User = get_user_model()
 
@@ -81,7 +82,7 @@ def romanian_customer(admin_user):
         data_processing_consent=True,
         created_by=admin_user
     )
-    
+
     # Create tax profile
     CustomerTaxProfile.objects.create(
         customer=customer,
@@ -91,7 +92,7 @@ def romanian_customer(admin_user):
         is_vat_payer=True,
         vat_rate=Decimal('19.00')
     )
-    
+
     # Create billing profile
     CustomerBillingProfile.objects.create(
         customer=customer,
@@ -99,7 +100,7 @@ def romanian_customer(admin_user):
         credit_limit=Decimal('5000.00'),
         preferred_currency='RON'
     )
-    
+
     # Create legal address
     CustomerAddress.objects.create(
         customer=customer,
@@ -111,7 +112,7 @@ def romanian_customer(admin_user):
         country='România',
         is_current=True
     )
-    
+
     return customer
 
 @pytest.fixture

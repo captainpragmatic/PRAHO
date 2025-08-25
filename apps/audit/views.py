@@ -4,20 +4,24 @@ Comprehensive data subject rights implementation with industry-standard UI/UX.
 """
 
 import logging
-from django.shortcuts import render, redirect, get_object_or_404
-from django.contrib.auth.decorators import login_required
-from django.contrib import messages
-from django.http import JsonResponse, HttpResponse, Http404
-from django.core.files.storage import default_storage
-from django.utils.translation import gettext as _
-from django.views.decorators.http import require_POST
-from django.views.decorators.csrf import csrf_protect
-from django.utils import timezone
-from django.conf import settings
 
-from .services import gdpr_export_service, gdpr_deletion_service, gdpr_consent_service, audit_service
-from .models import DataExport, ComplianceLog
-from apps.common.types import Ok, Err
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+from django.core.files.storage import default_storage
+from django.http import Http404, HttpResponse
+from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
+from django.utils.translation import gettext as _
+from django.views.decorators.csrf import csrf_protect
+from django.views.decorators.http import require_POST
+
+from .models import ComplianceLog, DataExport
+from .services import (
+    audit_service,
+    gdpr_consent_service,
+    gdpr_deletion_service,
+    gdpr_export_service,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,25 +43,25 @@ def gdpr_dashboard(request):
     """GDPR privacy dashboard - main entry point for data subject rights"""
     # Get user's consent history
     consent_history = gdpr_consent_service.get_consent_history(request.user)
-    
+
     # Get recent export requests
     recent_exports = DataExport.objects.filter(
         requested_by=request.user
     ).order_by('-requested_at')[:5]
-    
+
     # Get recent deletion requests
     recent_deletions = ComplianceLog.objects.filter(
         compliance_type='gdpr_deletion',
         user=request.user
     ).order_by('-timestamp')[:5]
-    
+
     # Calculate current consent status
     consent_status = {
         'data_processing': bool(request.user.gdpr_consent_date),
         'marketing': request.user.accepts_marketing,
         'last_updated': request.user.gdpr_consent_date.isoformat() if request.user.gdpr_consent_date else None
     }
-    
+
     context = {
         'consent_history': consent_history,
         'recent_exports': recent_exports,
@@ -65,7 +69,7 @@ def gdpr_dashboard(request):
         'consent_status': consent_status,
         'user': request.user
     }
-    
+
     return render(request, 'audit/gdpr_dashboard.html', context)
 
 
@@ -84,23 +88,23 @@ def request_data_export(request):
             'include_audit_logs': request.POST.get('include_audit_logs') == 'on',
             'format': 'json'
         }
-        
+
         # Create export request
         result = gdpr_export_service.create_data_export_request(
             user=request.user,
             request_ip=_get_client_ip(request),
             export_scope=export_scope
         )
-        
+
         if result.is_ok():
             export_request = result.value
             messages.success(
-                request, 
+                request,
                 _('Your data export request has been created. You will receive an email when it is ready for download. Request ID: {}').format(
                     str(export_request.id)[:8]
                 )
             )
-            
+
             # Process export asynchronously (in a real app, use Celery)
             # For now, process immediately for demo
             processing_result = gdpr_export_service.process_data_export(export_request)
@@ -108,48 +112,47 @@ def request_data_export(request):
                 messages.success(request, _('Your data export is ready for download!'))
             else:
                 messages.warning(request, _('Export is being processed. Please check back in a few minutes.'))
-                
+
         else:
             messages.error(
                 request,
                 _('Failed to create data export request: {}').format(result.error)
             )
-    
+
     except Exception as e:
         logger.error(f"🔥 [GDPR Export] Request creation failed for {request.user.email}: {e}")
         messages.error(request, _('An error occurred while creating your export request. Please try again.'))
-    
+
     return redirect('audit:gdpr_dashboard')
 
 
-@login_required  
+@login_required
 def download_data_export(request, export_id):
     """Download completed GDPR data export"""
-    from django.http import Http404
-    
+
     try:
         # Get export request (ensure it belongs to the user)
         export_request = get_object_or_404(
-            DataExport, 
-            id=export_id, 
+            DataExport,
+            id=export_id,
             requested_by=request.user,
             status='completed'
         )
-        
+
         # Check if expired
         if timezone.now() > export_request.expires_at:
             messages.error(request, _('This export has expired and is no longer available for download.'))
             return redirect('audit:gdpr_dashboard')
-        
+
         # Check if file exists
         if not export_request.file_path or not default_storage.exists(export_request.file_path):
             messages.error(request, _('Export file not found. Please contact support.'))
             return redirect('audit:gdpr_dashboard')
-        
+
         # Increment download count
         export_request.download_count += 1
         export_request.save(update_fields=['download_count'])
-        
+
         # Log download
         audit_service.log_compliance_event(
             compliance_type='gdpr_consent',
@@ -164,15 +167,15 @@ def download_data_export(request, export_id):
             },
             metadata={'ip_address': _get_client_ip(request)}
         )
-        
+
         # Serve file
         file_content = default_storage.open(export_request.file_path).read()
         response = HttpResponse(file_content, content_type='application/json')
         response['Content-Disposition'] = f'attachment; filename="gdpr_export_{request.user.id}.json"'
         response['Content-Length'] = len(file_content)
-        
+
         return response
-        
+
     except Http404:
         # Re-raise 404 errors to get proper 404 response
         raise
@@ -183,7 +186,7 @@ def download_data_export(request, export_id):
 
 
 # ===============================================================================
-# GDPR DATA DELETION VIEWS  
+# GDPR DATA DELETION VIEWS
 # ===============================================================================
 
 @login_required
@@ -194,11 +197,11 @@ def request_data_deletion(request):
     try:
         deletion_type = request.POST.get('deletion_type', 'anonymize')
         reason = request.POST.get('reason', '').strip()
-        
+
         if not reason:
             messages.error(request, _('Please provide a reason for your deletion request.'))
             return redirect('audit:gdpr_dashboard')
-        
+
         # Create deletion request
         result = gdpr_deletion_service.create_deletion_request(
             user=request.user,
@@ -206,7 +209,7 @@ def request_data_deletion(request):
             request_ip=_get_client_ip(request),
             reason=reason
         )
-        
+
         if result.is_ok():
             deletion_request = result.value
             messages.warning(
@@ -215,7 +218,7 @@ def request_data_deletion(request):
                     deletion_request.reference_id[:16]
                 )
             )
-            
+
             # For demo purposes, process immediately
             # In production, this would be handled by staff or automated process
             if request.POST.get('confirm_immediate') == 'yes':
@@ -229,17 +232,17 @@ def request_data_deletion(request):
                         return redirect('users:login')
                 else:
                     messages.error(request, _('Processing failed: {}').format(processing_result.error))
-            
+
         else:
             messages.error(
                 request,
                 _('Failed to create deletion request: {}').format(result.error)
             )
-    
+
     except Exception as e:
         logger.error(f"🔥 [GDPR Deletion] Request creation failed for {request.user.email}: {e}")
         messages.error(request, _('An error occurred while creating your deletion request. Please try again.'))
-    
+
     return redirect('audit:gdpr_dashboard')
 
 
@@ -248,30 +251,30 @@ def request_data_deletion(request):
 # ===============================================================================
 
 @login_required
-@require_POST 
+@require_POST
 @csrf_protect
 def withdraw_consent(request):
     """Withdraw specific GDPR consents"""
     try:
         consent_types = request.POST.getlist('consent_types')
-        
+
         if not consent_types:
             messages.error(request, _('Please select at least one consent type to withdraw.'))
             return redirect('audit:gdpr_dashboard')
-        
+
         # Process consent withdrawal
         result = gdpr_consent_service.withdraw_consent(
             user=request.user,
             consent_types=consent_types,
             request_ip=_get_client_ip(request)
         )
-        
+
         if result.is_ok():
             messages.success(
                 request,
                 _('Your consent has been withdrawn for: {}').format(result.value)
             )
-            
+
             # If data processing consent withdrawn, warn about anonymization
             if 'data_processing' in consent_types:
                 messages.warning(
@@ -283,11 +286,11 @@ def withdraw_consent(request):
                 request,
                 _('Failed to withdraw consent: {}').format(result.error)
             )
-    
+
     except Exception as e:
         logger.error(f"🔥 [GDPR Consent] Withdrawal failed for {request.user.email}: {e}")
         messages.error(request, _('An error occurred while processing your consent withdrawal. Please try again.'))
-    
+
     return redirect('audit:gdpr_dashboard')
 
 
@@ -295,12 +298,12 @@ def withdraw_consent(request):
 def consent_history(request):
     """Display detailed consent history"""
     history = gdpr_consent_service.get_consent_history(request.user)
-    
+
     context = {
         'consent_history': history,
         'user': request.user
     }
-    
+
     return render(request, 'audit/consent_history.html', context)
 
 
@@ -316,7 +319,7 @@ def audit_log(request):
 
 
 # Legacy export endpoint - redirect to new GDPR system
-@login_required  
+@login_required
 def export_data(request):
     """Legacy data export endpoint - redirect to GDPR dashboard"""
     messages.info(request, _('Data export has moved to the GDPR Privacy Dashboard.'))

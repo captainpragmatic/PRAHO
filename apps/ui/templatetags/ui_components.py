@@ -4,10 +4,10 @@ PRAHO PLATFORM - UI Components Template Tags
 HTMX-powered reusable components for Romanian hosting provider interface
 """
 
+from typing import Any
+
 from django import template
 from django.utils.safestring import mark_safe
-from django.urls import reverse
-from typing import Dict, Any, Optional
 
 register = template.Library()
 
@@ -18,28 +18,28 @@ def button(
     *,
     variant: str = 'primary',
     size: str = 'md',
-    href: Optional[str] = None,
+    href: str | None = None,
     type: str = 'button',
-    hx_get: Optional[str] = None,
-    hx_post: Optional[str] = None,
-    hx_put: Optional[str] = None,
-    hx_patch: Optional[str] = None,
-    hx_delete: Optional[str] = None,
-    hx_target: Optional[str] = None,
-    hx_swap: Optional[str] = None,
-    hx_trigger: Optional[str] = None,
-    hx_confirm: Optional[str] = None,
-    hx_indicator: Optional[str] = None,
-    hx_push_url: Optional[str] = None,
-    hx_select: Optional[str] = None,
+    hx_get: str | None = None,
+    hx_post: str | None = None,
+    hx_put: str | None = None,
+    hx_patch: str | None = None,
+    hx_delete: str | None = None,
+    hx_target: str | None = None,
+    hx_swap: str | None = None,
+    hx_trigger: str | None = None,
+    hx_confirm: str | None = None,
+    hx_indicator: str | None = None,
+    hx_push_url: str | None = None,
+    hx_select: str | None = None,
     hx_boost: bool = False,
-    icon: Optional[str] = None,
+    icon: str | None = None,
     icon_right: bool = False,
     disabled: bool = False,
     class_: str = '',
     attrs: str = '',
     **kwargs
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Romanian hosting provider button component with full HTMX support
     
@@ -61,7 +61,7 @@ def button(
         class_: Additional CSS classes
         attrs: Additional HTML attributes
     """
-    
+
     return {
         'text': text,
         'variant': variant,
@@ -94,27 +94,27 @@ def input_field(
     name: str,
     *,
     input_type: str = 'text',
-    value: Optional[str] = None,
-    label: Optional[str] = None,
-    placeholder: Optional[str] = None,
+    value: str | None = None,
+    label: str | None = None,
+    placeholder: str | None = None,
     required: bool = False,
     disabled: bool = False,
     readonly: bool = False,
-    error: Optional[str] = None,
-    help_text: Optional[str] = None,
-    icon_left: Optional[str] = None,
-    icon_right: Optional[str] = None,
+    error: str | None = None,
+    help_text: str | None = None,
+    icon_left: str | None = None,
+    icon_right: str | None = None,
     css_class: str = '',
-    html_id: Optional[str] = None,
-    hx_get: Optional[str] = None,
-    hx_post: Optional[str] = None,
-    hx_trigger: Optional[str] = None,
-    hx_target: Optional[str] = None,
-    hx_swap: Optional[str] = None,
-    options: Optional[list] = None,
+    html_id: str | None = None,
+    hx_get: str | None = None,
+    hx_post: str | None = None,
+    hx_trigger: str | None = None,
+    hx_target: str | None = None,
+    hx_swap: str | None = None,
+    options: list | None = None,
     romanian_validation: bool = True,
     **kwargs
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Romanian hosting provider input component with HTMX support
     
@@ -122,11 +122,11 @@ def input_field(
         {% input_field "email" label="Email" input_type="email" required=True %}
         {% input_field "search" label="Căutare client" icon_left="search" hx_get="/customers/search/" hx_trigger="keyup changed delay:300ms" %}
     """
-    
+
     # Auto-generate ID if not provided
     if not html_id:
         html_id = f"input-{name}"
-    
+
     return {
         'name': name,
         'input_type': input_type,
@@ -158,25 +158,25 @@ def input_field(
 def checkbox_field(
     name: str,
     *,
-    label: Optional[str] = None,
-    value: Optional[str] = None,
+    label: str | None = None,
+    value: str | None = None,
     checked: bool = False,
     required: bool = False,
     disabled: bool = False,
-    error: Optional[str] = None,
-    help_text: Optional[str] = None,
+    error: str | None = None,
+    help_text: str | None = None,
     variant: str = 'primary',
     css_class: str = '',
     container_class: str = '',
-    html_id: Optional[str] = None,
-    hx_get: Optional[str] = None,
-    hx_post: Optional[str] = None,
-    hx_trigger: Optional[str] = None,
-    hx_target: Optional[str] = None,
-    hx_swap: Optional[str] = None,
-    data_attrs: Optional[dict] = None,
+    html_id: str | None = None,
+    hx_get: str | None = None,
+    hx_post: str | None = None,
+    hx_trigger: str | None = None,
+    hx_target: str | None = None,
+    hx_swap: str | None = None,
+    data_attrs: dict | None = None,
     **kwargs
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Romanian hosting provider checkbox component with proper text centering
     
@@ -201,15 +201,15 @@ def checkbox_field(
         hx_*: HTMX attributes for dynamic behavior
         data_attrs: Dictionary of data attributes
     """
-    
+
     # Auto-generate ID if not provided
     if not html_id:
         html_id = f"checkbox-{name}"
-    
+
     # Default value for checkboxes
     if not value:
         value = "on"
-    
+
     return {
         'name': name,
         'label': label,
@@ -238,13 +238,13 @@ def alert(
     message: str,
     *,
     variant: str = 'info',
-    title: Optional[str] = None,
+    title: str | None = None,
     dismissible: bool = False,
     show_icon: bool = True,
     css_class: str = '',
-    html_id: Optional[str] = None,
+    html_id: str | None = None,
     **kwargs
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Romanian hosting provider alert component
     
@@ -272,11 +272,11 @@ def modal(
     size: str = 'md',
     closeable: bool = True,
     show_footer: bool = True,
-    content: Optional[str] = None,
+    content: str | None = None,
     css_class: str = '',
-    html_id: Optional[str] = None,
+    html_id: str | None = None,
     **kwargs
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     HTMX modal component for Romanian business workflows
     
@@ -315,11 +315,11 @@ def data_table(
     sortable: bool = True,
     searchable: bool = True,
     pagination: bool = True,
-    actions: Optional[list] = None,
+    actions: list | None = None,
     css_class: str = '',
     empty_message: str = 'Nu există date disponibile.',
     **kwargs
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Romanian data table component with sorting and pagination
     
@@ -356,9 +356,9 @@ def toast(
     variant: str = 'info',
     dismissible: bool = True,
     auto_dismiss: int = 5000,
-    toast_id: Optional[str] = None,
+    toast_id: str | None = None,
     **kwargs
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Romanian notification toast component
     
@@ -384,14 +384,14 @@ def toast(
 
 @register.inclusion_tag('components/card.html')
 def card(
-    title: Optional[str] = None,
+    title: str | None = None,
     *,
-    subtitle: Optional[str] = None,
-    footer: Optional[str] = None,
+    subtitle: str | None = None,
+    footer: str | None = None,
     css_class: str = '',
-    actions: Optional[list] = None,
+    actions: list | None = None,
     **kwargs
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Romanian business card component
     
@@ -424,7 +424,7 @@ def breadcrumb(
     css_class: str = '',
     separator: str = '/',
     **kwargs
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Romanian navigation breadcrumb component
     
@@ -463,33 +463,34 @@ def icon(
         size: xs|sm|md|lg|xl
         css_class: Additional CSS classes
     """
-    
+
     # Icon size mapping
     size_classes = {
         'xs': 'w-3 h-3',
-        'sm': 'w-4 h-4', 
+        'sm': 'w-4 h-4',
         'md': 'w-5 h-5',
         'lg': 'w-6 h-6',
         'xl': 'w-8 h-8',
     }
-    
+
     # Validate and sanitize inputs to prevent XSS
-    from django.utils.html import escape
     import re
-    
+
+    from django.utils.html import escape
+
     # Sanitize icon name - only allow alphanumeric and hyphens
     if not re.match(r'^[a-zA-Z0-9\-_]+$', name):
         name = 'default'  # Fallback to safe default
-    
+
     # Build CSS classes with escaped input
     classes = f"inline-block {size_classes.get(size, size_classes['md'])}"
     if css_class:
         classes += f" {escape(css_class)}"
-    
+
     # Escape all inputs before rendering
     safe_name = escape(name)
     safe_classes = escape(classes)
-    
+
     # For now, return a placeholder - will be replaced with actual SVG icons
     return mark_safe(f'<svg class="{safe_classes}" data-icon="{safe_name}"><use href="#icon-{safe_name}"></use></svg>')  # nosec B308 B703 - All inputs are validated and escaped
 
@@ -510,13 +511,13 @@ def active_link(context, url_name: str, css_class: str = 'active') -> str:
     if request and request.resolver_match:
         current_url_name = request.resolver_match.url_name
         current_namespace = request.resolver_match.namespace
-        
+
         # Build full URL name with namespace
         full_current = f"{current_namespace}:{current_url_name}" if current_namespace else current_url_name
-        
+
         if full_current == url_name:
             return css_class
-    
+
     return ''
 
 
@@ -534,15 +535,15 @@ def format_bytes(bytes_value: int) -> str:
     """
     if bytes_value == 0:
         return "0 B"
-    
+
     units = ['B', 'KB', 'MB', 'GB', 'TB']
     size = bytes_value
     unit_index = 0
-    
+
     while size >= 1024 and unit_index < len(units) - 1:
         size /= 1024
         unit_index += 1
-    
+
     if unit_index == 0:
         return f"{int(size)} {units[unit_index]}"
     else:

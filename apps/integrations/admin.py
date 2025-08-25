@@ -2,8 +2,8 @@ from django.contrib import admin
 from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
-from .models import WebhookEvent, WebhookDelivery
 
+from .models import WebhookDelivery, WebhookEvent
 
 # ===============================================================================
 # WEBHOOK EVENT ADMINISTRATION
@@ -12,10 +12,10 @@ from .models import WebhookEvent, WebhookDelivery
 @admin.register(WebhookEvent)
 class WebhookEventAdmin(admin.ModelAdmin):
     """🔄 Webhook event administration with deduplication tracking"""
-    
+
     list_display = [
         'received_at',
-        'source_display', 
+        'source_display',
         'event_type_short',
         'status_display',
         'retry_count',
@@ -25,7 +25,7 @@ class WebhookEventAdmin(admin.ModelAdmin):
     list_filter = [
         'source',
         'status',
-        'event_type', 
+        'event_type',
         'received_at',
         'retry_count',
     ]
@@ -43,13 +43,13 @@ class WebhookEventAdmin(admin.ModelAdmin):
         'updated_at',
     ]
     date_hierarchy = 'received_at'
-    
+
     fieldsets = (
         (_('🔍 Event Information'), {
             'fields': (
                 'id',
                 'source',
-                'event_id', 
+                'event_id',
                 'event_type',
                 'status',
                 'received_at',
@@ -89,12 +89,12 @@ class WebhookEventAdmin(admin.ModelAdmin):
             'classes': ('collapse',),
         }),
     )
-    
+
     def source_display(self, obj):
         """🔌 Display source with icon"""
         source_icons = {
             'stripe': '💳',
-            'paypal': '🟡', 
+            'paypal': '🟡',
             'virtualmin': '🖥️',
             'cpanel': '🌐',
             'registrar_namecheap': '🏷️',
@@ -107,14 +107,14 @@ class WebhookEventAdmin(admin.ModelAdmin):
         icon = source_icons.get(obj.source, '🔌')
         return f"{icon} {obj.get_source_display()}"
     source_display.short_description = _('Source')
-    
+
     def event_type_short(self, obj):
         """📝 Shortened event type for display"""
         if len(obj.event_type) > 30:
             return f"{obj.event_type[:27]}..."
         return obj.event_type
     event_type_short.short_description = _('Event Type')
-    
+
     def status_display(self, obj):
         """📊 Status with color indicators"""
         status_colors = {
@@ -124,15 +124,15 @@ class WebhookEventAdmin(admin.ModelAdmin):
             'skipped': '#6b7280',      # Gray
         }
         color = status_colors.get(obj.status, '#6b7280')
-        
+
         status_icons = {
             'pending': '⏳',
-            'processed': '✅', 
+            'processed': '✅',
             'failed': '❌',
             'skipped': '⏭️',
         }
         icon = status_icons.get(obj.status, '❓')
-        
+
         return format_html(
             '<span style="color: {};">{} {}</span>',
             color,
@@ -140,7 +140,7 @@ class WebhookEventAdmin(admin.ModelAdmin):
             obj.get_status_display()
         )
     status_display.short_description = _('Status')
-    
+
     def processing_time(self, obj):
         """⏱️ Processing duration"""
         if obj.processing_duration:
@@ -151,33 +151,33 @@ class WebhookEventAdmin(admin.ModelAdmin):
                 return f"{seconds:.1f}s"
         return "-"
     processing_time.short_description = _('Duration')
-    
+
     def payload_size(self, obj):
         """📦 Payload size in KB"""
         import json
         payload_str = json.dumps(obj.payload)
         size_bytes = len(payload_str.encode('utf-8'))
         size_kb = size_bytes / 1024
-        
+
         if size_kb < 1:
             return f"{size_bytes}B"
         else:
             return f"{size_kb:.1f}KB"
     payload_size.short_description = _('Size')
-    
+
     def get_queryset(self, request):
         """🚀 Optimize admin queries"""
         return super().get_queryset(request).order_by('-received_at')
 
 
 # ===============================================================================
-# WEBHOOK DELIVERY ADMINISTRATION  
+# WEBHOOK DELIVERY ADMINISTRATION
 # ===============================================================================
 
 @admin.register(WebhookDelivery)
 class WebhookDeliveryAdmin(admin.ModelAdmin):
     """📤 Outgoing webhook delivery administration"""
-    
+
     list_display = [
         'scheduled_at',
         'customer_link',
@@ -207,7 +207,7 @@ class WebhookDeliveryAdmin(admin.ModelAdmin):
         'updated_at',
     ]
     date_hierarchy = 'scheduled_at'
-    
+
     fieldsets = (
         (_('📤 Delivery Information'), {
             'fields': (
@@ -247,13 +247,13 @@ class WebhookDeliveryAdmin(admin.ModelAdmin):
             'classes': ('collapse',),
         }),
     )
-    
+
     def customer_link(self, obj):
         """🔗 Link to customer admin"""
         url = reverse('admin:customers_customer_change', args=[obj.customer.id])
         return format_html('<a href="{}">{}</a>', url, str(obj.customer))
     customer_link.short_description = _('Customer')
-    
+
     def status_display(self, obj):
         """📊 Status with color indicators"""
         status_colors = {
@@ -263,15 +263,15 @@ class WebhookDeliveryAdmin(admin.ModelAdmin):
             'disabled': '#6b7280',     # Gray
         }
         color = status_colors.get(obj.status, '#6b7280')
-        
+
         status_icons = {
             'pending': '⏳',
             'delivered': '✅',
-            'failed': '❌', 
+            'failed': '❌',
             'disabled': '🚫',
         }
         icon = status_icons.get(obj.status, '❓')
-        
+
         return format_html(
             '<span style="color: {};">{} {}</span>',
             color,
@@ -279,7 +279,7 @@ class WebhookDeliveryAdmin(admin.ModelAdmin):
             obj.get_status_display()
         )
     status_display.short_description = _('Status')
-    
+
     def delivery_time(self, obj):
         """⏱️ Delivery duration"""
         if obj.delivered_at and obj.scheduled_at:
@@ -291,7 +291,7 @@ class WebhookDeliveryAdmin(admin.ModelAdmin):
                 return f"{seconds:.1f}s"
         return "-"
     delivery_time.short_description = _('Duration')
-    
+
     def get_queryset(self, request):
         """🚀 Optimize admin queries"""
         return super().get_queryset(request).select_related(

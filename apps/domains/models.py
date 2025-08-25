@@ -1,10 +1,10 @@
 import uuid
+
+from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
-from django.core.validators import MinValueValidator, MaxValueValidator
-from django.core.exceptions import ValidationError
-
 
 # ===============================================================================
 # TLD (TOP-LEVEL DOMAIN) MANAGEMENT
@@ -20,10 +20,10 @@ class TLD(models.Model):
     - European TLDs: .eu
     - Special TLDs: .tech, .online, .site
     """
-    
+
     # Core TLD information
     extension = models.CharField(
-        max_length=10, 
+        max_length=10,
         unique=True,
         help_text=_("TLD extension (e.g., 'com', 'ro', 'eu')")
     )
@@ -31,7 +31,7 @@ class TLD(models.Model):
         max_length=200,
         help_text=_("Human-readable description of TLD")
     )
-    
+
     # Pricing (in cents to avoid floating point issues)
     registration_price_cents = models.BigIntegerField(
         validators=[MinValueValidator(0)],
@@ -45,14 +45,14 @@ class TLD(models.Model):
         validators=[MinValueValidator(0)],
         help_text=_("Transfer price in cents (customer pays)")
     )
-    
+
     # Registrar costs (for profit calculation)
     registrar_cost_cents = models.BigIntegerField(
         validators=[MinValueValidator(0)],
         default=0,
         help_text=_("Cost from registrar in cents")
     )
-    
+
     # TLD configuration
     min_registration_period = models.PositiveIntegerField(
         default=1,
@@ -64,7 +64,7 @@ class TLD(models.Model):
         validators=[MinValueValidator(1), MaxValueValidator(10)],
         help_text=_("Maximum registration period in years")
     )
-    
+
     # Domain features
     whois_privacy_available = models.BooleanField(
         default=True,
@@ -79,7 +79,7 @@ class TLD(models.Model):
         default=0,
         help_text=_("Additional fee for domain redemption")
     )
-    
+
     # Romanian-specific fields
     requires_local_presence = models.BooleanField(
         default=False,
@@ -89,41 +89,41 @@ class TLD(models.Model):
         blank=True,
         help_text=_("Special registration requirements")
     )
-    
+
     # Status
     is_active = models.BooleanField(default=True)
     is_featured = models.BooleanField(
         default=False,
         help_text=_("Show in featured TLD list")
     )
-    
+
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         verbose_name = _('🌐 TLD')
         verbose_name_plural = _('🌐 TLDs')
         ordering = ['extension']
-    
+
     def __str__(self):
         return f".{self.extension}"
-    
+
     @property
     def registration_price(self):
         """💰 Registration price in RON"""
         return self.registration_price_cents / 100
-    
+
     @property
     def renewal_price(self):
         """💰 Renewal price in RON"""
         return self.renewal_price_cents / 100
-    
+
     @property
     def profit_margin_cents(self):
         """📊 Profit margin in cents"""
         return self.registration_price_cents - self.registrar_cost_cents
-    
+
     @property
     def profit_margin_percentage(self):
         """📊 Profit margin as percentage"""
@@ -145,18 +145,18 @@ class Registrar(models.Model):
     - GoDaddy: Backup for international
     - ROTLD: Romanian .ro domains
     """
-    
+
     STATUS_CHOICES = [
         ('active', _('🟢 Active')),
         ('suspended', _('🟡 Suspended')),
         ('disabled', _('🔴 Disabled')),
     ]
-    
+
     # Basic information
     name = models.CharField(max_length=100, unique=True)
     display_name = models.CharField(max_length=100)
     website_url = models.URLField()
-    
+
     # API configuration
     api_endpoint = models.URLField(
         help_text=_("Base API endpoint URL")
@@ -164,10 +164,10 @@ class Registrar(models.Model):
     api_username = models.CharField(max_length=100, blank=True)
     api_key = models.CharField(max_length=255, blank=True)
     api_secret = models.CharField(max_length=255, blank=True)
-    
+
     # Webhook configuration
     webhook_secret = models.CharField(
-        max_length=255, 
+        max_length=255,
         blank=True,
         help_text=_("Secret for webhook signature verification")
     )
@@ -175,7 +175,7 @@ class Registrar(models.Model):
         blank=True,
         help_text=_("Our webhook endpoint for this registrar")
     )
-    
+
     # Operational settings
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
     default_nameservers = models.JSONField(
@@ -183,7 +183,7 @@ class Registrar(models.Model):
         blank=True,
         help_text=_("Default nameservers for new domains")
     )
-    
+
     # Cost tracking
     currency = models.CharField(max_length=3, default='USD')
     monthly_fee_cents = models.BigIntegerField(
@@ -191,24 +191,24 @@ class Registrar(models.Model):
         default=0,
         help_text=_("Monthly account fee in cents")
     )
-    
+
     # Statistics
     total_domains = models.PositiveIntegerField(default=0)
     last_sync_at = models.DateTimeField(null=True, blank=True)
     last_error = models.TextField(blank=True)
-    
+
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         verbose_name = _('🏢 Registrar')
         verbose_name_plural = _('🏢 Registrars')
         ordering = ['name']
-    
+
     def __str__(self):
         return self.display_name
-    
+
     def get_supported_tlds(self):
         """🌐 Get TLDs supported by this registrar"""
         return TLD.objects.filter(registrar_assignments__registrar=self)
@@ -226,18 +226,18 @@ class TLDRegistrarAssignment(models.Model):
     - Primary registrar for normal operations
     - Fallback registrars if primary fails
     """
-    
+
     tld = models.ForeignKey(
-        TLD, 
+        TLD,
         on_delete=models.CASCADE,
         related_name='registrar_assignments'
     )
     registrar = models.ForeignKey(
-        Registrar, 
+        Registrar,
         on_delete=models.CASCADE,
         related_name='tld_assignments'
     )
-    
+
     # Assignment configuration
     is_primary = models.BooleanField(
         default=False,
@@ -247,7 +247,7 @@ class TLDRegistrarAssignment(models.Model):
         default=1,
         help_text=_("Priority order (1 = highest)")
     )
-    
+
     # Cost override (if different from TLD default)
     cost_override_cents = models.BigIntegerField(
         validators=[MinValueValidator(0)],
@@ -255,20 +255,20 @@ class TLDRegistrarAssignment(models.Model):
         blank=True,
         help_text=_("Override cost for this registrar-TLD combination")
     )
-    
+
     # Status
     is_active = models.BooleanField(default=True)
-    
+
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         verbose_name = _('🔗 TLD-Registrar Assignment')
         verbose_name_plural = _('🔗 TLD-Registrar Assignments')
         unique_together = ('tld', 'registrar')
         ordering = ['tld__extension', 'priority']
-    
+
     def __str__(self):
         primary = " (Primary)" if self.is_primary else ""
         return f"{self.tld} → {self.registrar}{primary}"
@@ -288,7 +288,7 @@ class Domain(models.Model):
     - WHOIS privacy and lock status
     - Nameserver management
     """
-    
+
     STATUS_CHOICES = [
         ('pending', _('⏳ Pending Registration')),
         ('active', _('🟢 Active')),
@@ -298,7 +298,7 @@ class Domain(models.Model):
         ('transfer_out', _('📤 Transfer Out Progress')),
         ('cancelled', _('❌ Cancelled')),
     ]
-    
+
     # Core domain information
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(
@@ -316,19 +316,19 @@ class Domain(models.Model):
         on_delete=models.PROTECT,
         related_name='domains'
     )
-    
+
     # Customer relationship
     customer = models.ForeignKey(
         'customers.Customer',
         on_delete=models.PROTECT,
         related_name='domains'
     )
-    
+
     # Domain status and lifecycle
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     registered_at = models.DateTimeField(null=True, blank=True)
     expires_at = models.DateTimeField(null=True, blank=True)
-    
+
     # Registrar information
     registrar_domain_id = models.CharField(
         max_length=100,
@@ -340,7 +340,7 @@ class Domain(models.Model):
         blank=True,
         help_text=_("EPP/Auth code for transfers")
     )
-    
+
     # Domain settings
     auto_renew = models.BooleanField(
         default=True,
@@ -354,35 +354,35 @@ class Domain(models.Model):
         default=True,
         help_text=_("Domain lock to prevent unauthorized transfers")
     )
-    
+
     # Nameservers
     nameservers = models.JSONField(
         default=list,
         blank=True,
         help_text=_("Current nameservers for domain")
     )
-    
+
     # Notifications
     renewal_notices_sent = models.PositiveIntegerField(default=0)
     last_renewal_notice = models.DateTimeField(null=True, blank=True)
-    
+
     # Costs and billing
     last_paid_amount_cents = models.BigIntegerField(
         validators=[MinValueValidator(0)],
         default=0,
         help_text=_("Last amount paid for this domain")
     )
-    
+
     # Metadata
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         verbose_name = _('🌍 Domain')
         verbose_name_plural = _('🌍 Domains')
         ordering = ['-created_at']
-        
+
         indexes = [
             # Query domains expiring soon
             models.Index(
@@ -410,10 +410,10 @@ class Domain(models.Model):
                 name='domain_registrar_expiry_idx'
             ),
         ]
-    
+
     def __str__(self):
         return self.name
-    
+
     @property
     def days_until_expiry(self):
         """📅 Days until domain expires"""
@@ -421,32 +421,32 @@ class Domain(models.Model):
             delta = self.expires_at - timezone.now()
             return delta.days
         return None
-    
+
     @property
     def is_expired(self):
         """🔴 Check if domain is expired"""
         if self.expires_at:
             return timezone.now() > self.expires_at
         return False
-    
+
     @property
     def is_expiring_soon(self, days=30):
         """⚠️ Check if domain expires within specified days"""
         days_left = self.days_until_expiry
         return days_left is not None and 0 <= days_left <= days
-    
+
     @property
     def last_paid_amount(self):
         """💰 Last paid amount in RON"""
         return self.last_paid_amount_cents / 100
-    
+
     def clean(self):
         """🔍 Validate domain data"""
         if self.name:
             # Basic domain validation
             if not self.name.replace('-', '').replace('.', '').isalnum():
                 raise ValidationError(_("Domain name contains invalid characters"))
-            
+
             # Extract TLD from domain name if not set
             if not self.tld_id and '.' in self.name:
                 domain_tld = self.name.split('.')[-1].lower()
@@ -469,20 +469,20 @@ class DomainOrderItem(models.Model):
     - Domain renewals and transfers
     - Multi-year purchases
     """
-    
+
     ACTION_CHOICES = [
         ('register', _('🆕 Register')),
         ('renew', _('🔄 Renew')),
         ('transfer', _('📥 Transfer')),
     ]
-    
+
     # Order relationship
     order = models.ForeignKey(
         'orders.Order',
         on_delete=models.CASCADE,
         related_name='domain_items'
     )
-    
+
     # Domain information
     domain_name = models.CharField(
         max_length=255,
@@ -493,7 +493,7 @@ class DomainOrderItem(models.Model):
         on_delete=models.PROTECT,
         related_name='order_items'
     )
-    
+
     # Action and pricing
     action = models.CharField(max_length=20, choices=ACTION_CHOICES)
     years = models.PositiveIntegerField(
@@ -501,7 +501,7 @@ class DomainOrderItem(models.Model):
         default=1,
         help_text=_("Registration/renewal period in years")
     )
-    
+
     # Pricing (at time of order)
     unit_price_cents = models.BigIntegerField(
         validators=[MinValueValidator(0)],
@@ -511,7 +511,7 @@ class DomainOrderItem(models.Model):
         validators=[MinValueValidator(0)],
         help_text=_("Total price for all years")
     )
-    
+
     # Domain options
     whois_privacy = models.BooleanField(
         default=False,
@@ -521,14 +521,14 @@ class DomainOrderItem(models.Model):
         default=True,
         help_text=_("Enable auto-renewal for this domain")
     )
-    
+
     # Transfer-specific fields
     epp_code = models.CharField(
         max_length=100,
         blank=True,
         help_text=_("EPP/Auth code for domain transfer")
     )
-    
+
     # Linked domain (after processing)
     domain = models.ForeignKey(
         Domain,
@@ -538,30 +538,30 @@ class DomainOrderItem(models.Model):
         related_name='order_items',
         help_text=_("Created/renewed domain after order processing")
     )
-    
+
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         verbose_name = _('🛒 Domain Order Item')
         verbose_name_plural = _('🛒 Domain Order Items')
         ordering = ['-created_at']
-    
+
     def __str__(self):
         action_display = self.get_action_display()
         return f"{action_display} {self.domain_name} ({self.years} years)"
-    
+
     @property
     def unit_price(self):
         """💰 Unit price in RON"""
         return self.unit_price_cents / 100
-    
+
     @property
     def total_price(self):
         """💰 Total price in RON"""
         return self.total_price_cents / 100
-    
+
     def save(self, *args, **kwargs):
         """💾 Calculate total price on save"""
         if self.unit_price_cents and self.years:

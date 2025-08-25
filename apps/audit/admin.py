@@ -5,16 +5,15 @@ Romanian PRAHO Platform audit trail management with security focus.
 
 from django.contrib import admin
 from django.utils.html import format_html
-from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from .models import AuditEvent, DataExport, ComplianceLog
+from .models import AuditEvent, ComplianceLog, DataExport
 
 
 @admin.register(AuditEvent)
 class AuditEventAdmin(admin.ModelAdmin):
     """Audit event admin interface"""
-    
+
     list_display = [
         'timestamp',
         'action',
@@ -56,7 +55,7 @@ class AuditEventAdmin(admin.ModelAdmin):
         'session_key',
         'metadata',
     ]
-    
+
     fieldsets = (
         (_('Event Information'), {
             'fields': (
@@ -92,7 +91,7 @@ class AuditEventAdmin(admin.ModelAdmin):
             'classes': ('collapse',),
         }),
     )
-    
+
     def user_display(self, obj):
         """Display user with icon"""
         if obj.user:
@@ -103,15 +102,15 @@ class AuditEventAdmin(admin.ModelAdmin):
             )
         return format_html('🤖 System')
     user_display.short_description = _('User')
-    
+
     def has_add_permission(self, request):
         """Audit events cannot be manually created"""
         return False
-    
+
     def has_change_permission(self, request, obj=None):
         """Audit events are immutable"""
         return False
-    
+
     def has_delete_permission(self, request, obj=None):
         """Audit events cannot be deleted"""
         return False
@@ -120,7 +119,7 @@ class AuditEventAdmin(admin.ModelAdmin):
 @admin.register(DataExport)
 class DataExportAdmin(admin.ModelAdmin):
     """Data export admin interface for GDPR compliance"""
-    
+
     list_display = [
         'requested_at',
         'export_type',
@@ -154,7 +153,7 @@ class DataExportAdmin(admin.ModelAdmin):
         'record_count',
         'download_count',
     ]
-    
+
     fieldsets = (
         (_('Export Request'), {
             'fields': (
@@ -187,12 +186,12 @@ class DataExportAdmin(admin.ModelAdmin):
             )
         }),
     )
-    
+
     def file_size_display(self, obj):
         """Display file size in human readable format"""
         if not obj.file_size:
             return '-'
-        
+
         size = obj.file_size
         for unit in ['B', 'KB', 'MB', 'GB']:
             if size < 1024.0:
@@ -200,7 +199,7 @@ class DataExportAdmin(admin.ModelAdmin):
             size /= 1024.0
         return f"{size:.1f} TB"
     file_size_display.short_description = _('File Size')
-    
+
     def get_queryset(self, request):
         """Filter exports by user permissions"""
         qs = super().get_queryset(request)
@@ -213,7 +212,7 @@ class DataExportAdmin(admin.ModelAdmin):
 @admin.register(ComplianceLog)
 class ComplianceLogAdmin(admin.ModelAdmin):
     """Romanian compliance logging admin"""
-    
+
     list_display = [
         'timestamp',
         'compliance_type_display',
@@ -245,7 +244,7 @@ class ComplianceLogAdmin(admin.ModelAdmin):
         'evidence',
         'metadata',
     ]
-    
+
     fieldsets = (
         (_('Compliance Event'), {
             'fields': (
@@ -270,7 +269,7 @@ class ComplianceLogAdmin(admin.ModelAdmin):
             'classes': ('collapse',),
         }),
     )
-    
+
     def compliance_type_display(self, obj):
         """Display compliance type with icon"""
         icons = {
@@ -288,7 +287,7 @@ class ComplianceLogAdmin(admin.ModelAdmin):
             obj.get_compliance_type_display()
         )
     compliance_type_display.short_description = _('Type')
-    
+
     def status_display(self, obj):
         """Display status with color"""
         if obj.status == 'success':
@@ -307,7 +306,7 @@ class ComplianceLogAdmin(admin.ModelAdmin):
                 obj.status.title()
             )
     status_display.short_description = _('Status')
-    
+
     def user_display(self, obj):
         """Display user with icon"""
         if obj.user:
@@ -317,15 +316,15 @@ class ComplianceLogAdmin(admin.ModelAdmin):
             )
         return format_html('🤖 System')
     user_display.short_description = _('User')
-    
+
     def has_add_permission(self, request):
         """Compliance logs cannot be manually created"""
         return False
-    
+
     def has_change_permission(self, request, obj=None):
         """Compliance logs are immutable"""
         return False
-    
+
     def has_delete_permission(self, request, obj=None):
         """Compliance logs cannot be deleted for audit trail"""
         return False

@@ -5,7 +5,6 @@ Romanian hosting provider with security-first approach.
 
 import os
 from pathlib import Path
-from typing import List
 
 # ===============================================================================
 # CORE DJANGO SETTINGS

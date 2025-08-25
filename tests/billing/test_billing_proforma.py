@@ -2,24 +2,23 @@
 # BILLING PROFORMA TESTS (Django TestCase Format)
 # ===============================================================================
 
+from datetime import timedelta
 from decimal import Decimal
-from datetime import date, timedelta
-from django.test import TestCase
+
 from django.contrib.auth import get_user_model
-from django.core.exceptions import ValidationError
-from django.db import IntegrityError
+from django.test import TestCase
 from django.utils import timezone
 
-from apps.billing.models import ProformaInvoice, ProformaLine, Currency
-from apps.provisioning.models import Service, ServicePlan
+from apps.billing.models import Currency, ProformaInvoice, ProformaLine
 from apps.customers.models import Customer
+from apps.provisioning.models import Service, ServicePlan
 
 User = get_user_model()
 
 
 class ProformaInvoiceTestCase(TestCase):
     """Test ProformaInvoice model functionality"""
-    
+
     def setUp(self):
         """Create test data"""
         self.currency = Currency.objects.create(code='EUR', symbol='€', decimals=2)
@@ -28,7 +27,7 @@ class ProformaInvoiceTestCase(TestCase):
             company_name='Test Company SRL',
             status='active'
         )
-    
+
     def test_create_proforma_invoice(self):
         """Test basic proforma invoice creation"""
         proforma = ProformaInvoice.objects.create(
@@ -39,14 +38,14 @@ class ProformaInvoiceTestCase(TestCase):
             tax_cents=950,
             total_cents=5950
         )
-        
+
         self.assertEqual(proforma.customer, self.customer)
         self.assertEqual(proforma.currency, self.currency)
         self.assertEqual(proforma.number, 'PRO-001')
         self.assertEqual(proforma.subtotal_cents, 5000)
         self.assertEqual(proforma.tax_cents, 950)
         self.assertEqual(proforma.total_cents, 5950)
-    
+
     def test_proforma_invoice_str_representation(self):
         """Test string representation"""
         proforma = ProformaInvoice.objects.create(
@@ -55,16 +54,16 @@ class ProformaInvoiceTestCase(TestCase):
             number='PRO-STR-001',
             total_cents=10000
         )
-        
+
         str_repr = str(proforma)
         self.assertIn('PRO-STR-001', str_repr)
         self.assertIn('Test Company SRL', str_repr)
-    
+
     def test_proforma_invoice_valid_until(self):
         """Test valid_until field and is_expired property"""
         future_date = timezone.now() + timedelta(days=30)
         past_date = timezone.now() - timedelta(days=1)
-        
+
         # Future valid_until
         proforma_valid = ProformaInvoice.objects.create(
             customer=self.customer,
@@ -74,7 +73,7 @@ class ProformaInvoiceTestCase(TestCase):
             valid_until=future_date
         )
         self.assertFalse(proforma_valid.is_expired)
-        
+
         # Past valid_until
         proforma_expired = ProformaInvoice.objects.create(
             customer=self.customer,
@@ -84,7 +83,7 @@ class ProformaInvoiceTestCase(TestCase):
             valid_until=past_date
         )
         self.assertTrue(proforma_expired.is_expired)
-    
+
     def test_proforma_invoice_customer_relationship(self):
         """Test customer relationship"""
         proforma = ProformaInvoice.objects.create(
@@ -93,9 +92,9 @@ class ProformaInvoiceTestCase(TestCase):
             number='PRO-CUSTOMER',
             total_cents=1000
         )
-        
+
         self.assertEqual(proforma.customer, self.customer)
-    
+
     def test_proforma_invoice_currency_relationship(self):
         """Test currency relationship"""
         proforma = ProformaInvoice.objects.create(
@@ -104,9 +103,9 @@ class ProformaInvoiceTestCase(TestCase):
             number='PRO-CURRENCY',
             total_cents=1000
         )
-        
+
         self.assertEqual(proforma.currency, self.currency)
-    
+
     def test_proforma_invoice_calculation_consistency(self):
         """Test that subtotal + tax = total"""
         proforma = ProformaInvoice.objects.create(
@@ -117,10 +116,10 @@ class ProformaInvoiceTestCase(TestCase):
             tax_cents=950,
             total_cents=5950
         )
-        
+
         calculated_total = proforma.subtotal_cents + proforma.tax_cents
         self.assertEqual(calculated_total, proforma.total_cents)
-    
+
     def test_proforma_invoice_properties(self):
         """Test decimal properties"""
         proforma = ProformaInvoice.objects.create(
@@ -131,11 +130,11 @@ class ProformaInvoiceTestCase(TestCase):
             tax_cents=1900,        # 19.00
             total_cents=11900      # 119.00
         )
-        
+
         self.assertEqual(proforma.subtotal, Decimal('100.00'))
         self.assertEqual(proforma.tax_amount, Decimal('19.00'))
         self.assertEqual(proforma.total, Decimal('119.00'))
-    
+
     def test_proforma_invoice_meta_json_field(self):
         """Test meta JSON field"""
         proforma = ProformaInvoice.objects.create(
@@ -145,10 +144,10 @@ class ProformaInvoiceTestCase(TestCase):
             total_cents=1000,
             meta={'source': 'web', 'campaign': 'spring2024'}
         )
-        
+
         self.assertEqual(proforma.meta['source'], 'web')
         self.assertEqual(proforma.meta['campaign'], 'spring2024')
-    
+
     def test_proforma_invoice_billing_address(self):
         """Test billing address snapshot fields"""
         proforma = ProformaInvoice.objects.create(
@@ -164,7 +163,7 @@ class ProformaInvoiceTestCase(TestCase):
             bill_to_postal='010101',
             bill_to_country='RO'
         )
-        
+
         self.assertEqual(proforma.bill_to_name, 'Test Company SRL')
         self.assertEqual(proforma.bill_to_tax_id, 'RO12345678')
         self.assertEqual(proforma.bill_to_city, 'Bucuresti')
@@ -172,7 +171,7 @@ class ProformaInvoiceTestCase(TestCase):
 
 class ProformaLineTestCase(TestCase):
     """Test ProformaLine model functionality"""
-    
+
     def setUp(self):
         """Create test data"""
         self.currency = Currency.objects.create(code='EUR', symbol='€', decimals=2)
@@ -202,7 +201,7 @@ class ProformaLineTestCase(TestCase):
             price=Decimal('99.99'),
             status='active'
         )
-    
+
     def test_create_proforma_line(self):
         """Test basic proforma line creation"""
         line = ProformaLine.objects.create(
@@ -214,7 +213,7 @@ class ProformaLineTestCase(TestCase):
             unit_price_cents=2999,
             line_total_cents=2999
         )
-        
+
         self.assertEqual(line.proforma, self.proforma)
         self.assertEqual(line.service, self.service)
         self.assertEqual(line.kind, 'service')
@@ -222,11 +221,11 @@ class ProformaLineTestCase(TestCase):
         self.assertEqual(line.quantity, Decimal('1.000'))
         self.assertEqual(line.unit_price_cents, 2999)
         self.assertEqual(line.line_total_cents, 2999)
-    
+
     def test_proforma_line_kind_choices(self):
         """Test valid kind choices"""
         valid_kinds = ['service', 'setup', 'discount', 'misc']
-        
+
         for i, kind in enumerate(valid_kinds):
             line = ProformaLine.objects.create(
                 proforma=self.proforma,
@@ -237,7 +236,7 @@ class ProformaLineTestCase(TestCase):
                 line_total_cents=1000
             )
             self.assertEqual(line.kind, kind)
-    
+
     def test_proforma_line_quantity_calculation(self):
         """Test quantity and unit price relationship"""
         line = ProformaLine.objects.create(
@@ -248,13 +247,13 @@ class ProformaLineTestCase(TestCase):
             unit_price_cents=1500,
             line_total_cents=4500
         )
-        
+
         # Check quantity precision
         self.assertEqual(line.quantity, Decimal('3.000'))
         # Check total makes sense (though not automatically calculated)
         expected_total = int(line.quantity * line.unit_price_cents)
         self.assertEqual(line.line_total_cents, expected_total)
-    
+
     def test_proforma_line_without_service(self):
         """Test proforma line without service (custom item)"""
         line = ProformaLine.objects.create(
@@ -265,11 +264,11 @@ class ProformaLineTestCase(TestCase):
             unit_price_cents=5000,
             line_total_cents=5000
         )
-        
+
         self.assertIsNone(line.service)
         self.assertEqual(line.description, 'Custom Setup Fee')
         self.assertEqual(line.kind, 'setup')
-    
+
     def test_proforma_line_tax_rate(self):
         """Test tax rate field"""
         line = ProformaLine.objects.create(
@@ -281,9 +280,9 @@ class ProformaLineTestCase(TestCase):
             tax_rate=Decimal('0.1900'),  # 19% VAT
             line_total_cents=11900
         )
-        
+
         self.assertEqual(line.tax_rate, Decimal('0.1900'))
-    
+
     def test_proforma_line_properties(self):
         """Test decimal properties"""
         line = ProformaLine.objects.create(
@@ -294,10 +293,10 @@ class ProformaLineTestCase(TestCase):
             unit_price_cents=2550,    # 25.50
             line_total_cents=2550
         )
-        
+
         self.assertEqual(line.unit_price, Decimal('25.50'))
         self.assertEqual(line.line_total, Decimal('25.50'))
-    
+
     def test_proforma_line_discount(self):
         """Test discount line with negative amount"""
         line = ProformaLine.objects.create(
@@ -308,7 +307,7 @@ class ProformaLineTestCase(TestCase):
             unit_price_cents=-1000,  # Negative for discount
             line_total_cents=-1000
         )
-        
+
         self.assertEqual(line.kind, 'discount')
         self.assertEqual(line.unit_price_cents, -1000)
         self.assertEqual(line.line_total_cents, -1000)
@@ -316,7 +315,7 @@ class ProformaLineTestCase(TestCase):
 
 class ProformaIntegrationTestCase(TestCase):
     """Test ProformaInvoice integration scenarios"""
-    
+
     def setUp(self):
         """Create test data"""
         self.currency = Currency.objects.create(code='EUR', symbol='€', decimals=2)
@@ -351,7 +350,7 @@ class ProformaIntegrationTestCase(TestCase):
             price=Decimal('12.99'),
             status='active'
         )
-    
+
     def test_multi_line_proforma(self):
         """Test proforma with multiple lines"""
         proforma = ProformaInvoice.objects.create(
@@ -362,7 +361,7 @@ class ProformaIntegrationTestCase(TestCase):
             tax_cents=1197,       # 19% VAT
             total_cents=7495      # Total with VAT
         )
-        
+
         # Hosting line
         ProformaLine.objects.create(
             proforma=proforma,
@@ -373,7 +372,7 @@ class ProformaIntegrationTestCase(TestCase):
             unit_price_cents=4999,
             line_total_cents=4999
         )
-        
+
         # Domain line
         ProformaLine.objects.create(
             proforma=proforma,
@@ -384,18 +383,18 @@ class ProformaIntegrationTestCase(TestCase):
             unit_price_cents=1299,
             line_total_cents=1299
         )
-        
+
         self.assertEqual(proforma.lines.count(), 2)
-        
+
         # Calculate line totals
         line_total = sum(line.line_total_cents for line in proforma.lines.all())
         self.assertEqual(line_total, proforma.subtotal_cents)
-    
+
     def test_proforma_expiration_workflow(self):
         """Test proforma expiration logic"""
         tomorrow = timezone.now() + timedelta(days=1)
         yesterday = timezone.now() - timedelta(days=1)
-        
+
         # Valid proforma
         valid_proforma = ProformaInvoice.objects.create(
             customer=self.customer,
@@ -404,7 +403,7 @@ class ProformaIntegrationTestCase(TestCase):
             total_cents=1000,
             valid_until=tomorrow
         )
-        
+
         # Expired proforma
         expired_proforma = ProformaInvoice.objects.create(
             customer=self.customer,
@@ -413,10 +412,10 @@ class ProformaIntegrationTestCase(TestCase):
             total_cents=1000,
             valid_until=yesterday
         )
-        
+
         self.assertFalse(valid_proforma.is_expired)
         self.assertTrue(expired_proforma.is_expired)
-    
+
     def test_proforma_with_discount(self):
         """Test proforma with discount line"""
         proforma = ProformaInvoice.objects.create(
@@ -427,7 +426,7 @@ class ProformaIntegrationTestCase(TestCase):
             tax_cents=760,        # VAT on discounted amount
             total_cents=4759
         )
-        
+
         # Regular line
         ProformaLine.objects.create(
             proforma=proforma,
@@ -438,7 +437,7 @@ class ProformaIntegrationTestCase(TestCase):
             unit_price_cents=4999,
             line_total_cents=4999
         )
-        
+
         # Discount line (negative amount)
         ProformaLine.objects.create(
             proforma=proforma,
@@ -448,15 +447,15 @@ class ProformaIntegrationTestCase(TestCase):
             unit_price_cents=-1000,  # Negative for discount
             line_total_cents=-1000
         )
-        
+
         lines = proforma.lines.all()
         self.assertEqual(len(lines), 2)
-        
+
         # One positive, one negative
         amounts = [line.line_total_cents for line in lines]
         self.assertIn(4999, amounts)
         self.assertIn(-1000, amounts)
-    
+
     def test_proforma_conversion_tracking(self):
         """Test tracking conversion to invoice"""
         proforma = ProformaInvoice.objects.create(
@@ -466,12 +465,12 @@ class ProformaIntegrationTestCase(TestCase):
             total_cents=10000,
             meta={'converted_to_invoice': 'INV-123', 'conversion_date': '2024-01-15'}
         )
-        
+
         self.assertEqual(proforma.meta['converted_to_invoice'], 'INV-123')
-        
+
         # Test conversion method exists (even if not implemented)
         self.assertTrue(hasattr(proforma, 'convert_to_invoice'))
-    
+
     def test_complex_proforma_scenario(self):
         """Test complex proforma with multiple services and fees"""
         proforma = ProformaInvoice.objects.create(
@@ -485,7 +484,7 @@ class ProformaIntegrationTestCase(TestCase):
             bill_to_tax_id='RO98765432',
             meta={'project': 'new_customer_onboarding'}
         )
-        
+
         # Hosting service
         ProformaLine.objects.create(
             proforma=proforma,
@@ -496,7 +495,7 @@ class ProformaIntegrationTestCase(TestCase):
             unit_price_cents=4999,
             line_total_cents=29994
         )
-        
+
         # Domain
         ProformaLine.objects.create(
             proforma=proforma,
@@ -507,7 +506,7 @@ class ProformaIntegrationTestCase(TestCase):
             unit_price_cents=1299,
             line_total_cents=1299
         )
-        
+
         # Setup fee
         ProformaLine.objects.create(
             proforma=proforma,
@@ -517,7 +516,7 @@ class ProformaIntegrationTestCase(TestCase):
             unit_price_cents=5000,
             line_total_cents=5000
         )
-        
+
         # Volume discount
         ProformaLine.objects.create(
             proforma=proforma,
@@ -527,6 +526,6 @@ class ProformaIntegrationTestCase(TestCase):
             unit_price_cents=-22996,  # Significant discount
             line_total_cents=-22996
         )
-        
+
         self.assertEqual(proforma.lines.count(), 4)
         self.assertEqual(proforma.meta['project'], 'new_customer_onboarding')

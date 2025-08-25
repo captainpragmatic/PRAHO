@@ -6,9 +6,10 @@ Creates comprehensive test data for development environment.
 
 import os
 import sys
-import django
+from datetime import timedelta
 from decimal import Decimal
-from datetime import date, timedelta
+
+import django
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -20,11 +21,17 @@ django.setup()
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
-from apps.customers.models import Customer, CustomerTaxProfile, CustomerBillingProfile, CustomerAddress
-from apps.users.models import CustomerMembership
-from apps.billing.models import ProformaInvoice, Invoice, Currency
+
+from apps.billing.models import Currency, Invoice, ProformaInvoice
+from apps.customers.models import (
+    Customer,
+    CustomerAddress,
+    CustomerBillingProfile,
+    CustomerTaxProfile,
+)
 from apps.provisioning.models import Service, ServicePlan
-from apps.tickets.models import Ticket, TicketComment, SupportCategory
+from apps.tickets.models import SupportCategory, Ticket, TicketComment
+from apps.users.models import CustomerMembership
 
 User = get_user_model()
 
@@ -33,7 +40,7 @@ def check_existing_data():
     users_count = User.objects.count()
     customers_count = Customer.objects.count()
     memberships_count = CustomerMembership.objects.count()
-    
+
     if users_count > 0 or customers_count > 0 or memberships_count > 0:
         print(f"ℹ️  Found existing data: {users_count} users, {customers_count} customers, {memberships_count} memberships")
         return True
@@ -42,7 +49,7 @@ def check_existing_data():
 def create_test_data():
     """Create comprehensive test data for all models."""
     print("🚀 Creating comprehensive test data...")
-    
+
     with transaction.atomic():
         # 1. Create superuser
         superuser, created = User.objects.get_or_create(
@@ -172,7 +179,7 @@ def create_test_data():
             )
             if plan_created:
                 print("✅ Created service plan")
-            
+
             # Now create the service
             service, created = Service.objects.get_or_create(
                 customer=customer,
@@ -222,7 +229,7 @@ def create_service_if_missing(customer):
         )
         if plan_created:
             print("✅ Created service plan")
-        
+
         # Now create the service for this customer
         service, created = Service.objects.get_or_create(
             customer=customer,
@@ -238,7 +245,7 @@ def create_service_if_missing(customer):
         )
         if created:
             print(f"✅ Created test service for {customer.name}")
-        
+
         # Create invoices and proformas
         create_billing_data_if_missing(customer)
     except Exception as e:
@@ -249,14 +256,14 @@ def create_billing_data_if_missing(customer):
     try:
         # Ensure currencies exist
         ron_currency, _ = Currency.objects.get_or_create(
-            code='RON', 
+            code='RON',
             defaults={'symbol': 'LEI', 'decimals': 2}
         )
         eur_currency, _ = Currency.objects.get_or_create(
-            code='EUR', 
+            code='EUR',
             defaults={'symbol': '€', 'decimals': 2}
         )
-        
+
         # Create 4 invoices
         invoices_data = [
             {
@@ -268,7 +275,7 @@ def create_billing_data_if_missing(customer):
                 'description': 'RON Invoice with VAT'
             },
             {
-                'number': 'INV-2025-002', 
+                'number': 'INV-2025-002',
                 'currency': ron_currency,
                 'subtotal_cents': 5000,   # 50.00 RON
                 'tax_cents': 0,           # No VAT
@@ -292,7 +299,7 @@ def create_billing_data_if_missing(customer):
                 'description': 'EUR Invoice without VAT'
             }
         ]
-        
+
         invoice_count = 0
         for invoice_data in invoices_data:
             invoice, created = Invoice.objects.get_or_create(
@@ -312,10 +319,10 @@ def create_billing_data_if_missing(customer):
             )
             if created:
                 invoice_count += 1
-        
+
         if invoice_count > 0:
             print(f"✅ Created {invoice_count} test invoices")
-        
+
         # Create 4 proformas
         proformas_data = [
             {
@@ -351,7 +358,7 @@ def create_billing_data_if_missing(customer):
                 'description': 'EUR Proforma without VAT'
             }
         ]
-        
+
         proforma_count = 0
         for proforma_data in proformas_data:
             proforma, created = ProformaInvoice.objects.get_or_create(
@@ -369,10 +376,10 @@ def create_billing_data_if_missing(customer):
             )
             if created:
                 proforma_count += 1
-        
+
         if proforma_count > 0:
             print(f"✅ Created {proforma_count} test proformas")
-            
+
     except Exception as e:
         print(f"⚠️  Billing data creation failed: {e}")
 
@@ -428,7 +435,7 @@ def create_tickets_if_missing(customer, customer_user, superuser):
         for i, ticket_data in enumerate(tickets_data, 1):
             # Generate unique ticket number
             ticket_number = f'TKT-2025-{i:03d}'
-            
+
             ticket, created = Ticket.objects.get_or_create(
                 ticket_number=ticket_number,
                 defaults={
@@ -445,10 +452,10 @@ def create_tickets_if_missing(customer, customer_user, superuser):
                     'assigned_to': superuser,
                 }
             )
-            
+
             if created:
                 tickets_created += 1
-                
+
                 # Create replies based on the ticket scenario
                 if ticket_data['replies'] == 1:
                     # Single solution reply for the closed ticket
@@ -461,7 +468,7 @@ def create_tickets_if_missing(customer, customer_user, superuser):
                         is_solution=True,
                         time_spent=0.5,
                     )
-                    
+
                 elif ticket_data['replies'] == 5:
                     # 5-reply conversation between customer and support
                     comments_data = [
@@ -496,7 +503,7 @@ def create_tickets_if_missing(customer, customer_user, superuser):
                             'time_spent': 0.33,
                         },
                     ]
-                    
+
                     # Create comments with time delays
                     base_time = timezone.now() - timedelta(days=2)
                     for j, comment_data in enumerate(comments_data):
@@ -514,7 +521,7 @@ def create_tickets_if_missing(customer, customer_user, superuser):
 
         if tickets_created > 0:
             print(f"✅ Created {tickets_created} test tickets with replies")
-            
+
     except Exception as e:
         print(f"⚠️  Ticket creation failed: {e}")
 
@@ -527,38 +534,38 @@ def print_credentials(superuser, customer_user, customer):
     print(f"   🔐 Superuser: {superuser.email} / admin123")
     print(f"   👤 Customer user: {customer_user.email} / admin123")
     print(f"   🏢 Customer: {customer.name}")
-    
+
     try:
         tax = customer.tax_profile
         print(f"   💼 Tax info: CUI {tax.cui}")
     except:
         print("   💼 Tax info: Not configured")
-    
-    print(f"\n🌐 Access URLs:")
-    print(f"   📊 Dashboard: http://localhost:8001/app/")
-    print(f"   🔐 Admin: http://localhost:8001/admin/")
-    print(f"   🎯 Login: http://localhost:8001/auth/login/")
-    
-    print(f"\n📊 Database stats:")
+
+    print("\n🌐 Access URLs:")
+    print("   📊 Dashboard: http://localhost:8001/app/")
+    print("   🔐 Admin: http://localhost:8001/admin/")
+    print("   🎯 Login: http://localhost:8001/auth/login/")
+
+    print("\n📊 Database stats:")
     print(f"   👥 Users: {User.objects.count()}")
     customers_count = Customer.objects.count()
     print(f"   🏢 Customers: {customers_count}")
     memberships_count = CustomerMembership.objects.count()
     print(f"   🔗 Memberships: {memberships_count}")
-    
+
     if customers_count > 1:
-        print(f"   ℹ️  Multiple customers found (multi-tenant setup from sample data)")
-    
+        print("   ℹ️  Multiple customers found (multi-tenant setup from sample data)")
+
     # Check optional models
     try:
         from apps.provisioning.models import Service
         services_count = Service.objects.count()
         print(f"   🚀 Services: {services_count}")
         if services_count == 0:
-            print(f"   ➡️  Create services via Admin: http://localhost:8001/admin/provisioning/service/")
+            print("   ➡️  Create services via Admin: http://localhost:8001/admin/provisioning/service/")
     except:
         pass
-    
+
     try:
         from apps.billing.models import Invoice, ProformaInvoice
         invoices_count = Invoice.objects.count()
@@ -566,19 +573,19 @@ def print_credentials(superuser, customer_user, customer):
         print(f"   🧾 Invoices: {invoices_count}")
         print(f"   📄 Proformas: {proformas_count}")
         if invoices_count == 0:
-            print(f"   ➡️  Create invoices via Admin: http://localhost:8001/admin/billing/invoice/")
+            print("   ➡️  Create invoices via Admin: http://localhost:8001/admin/billing/invoice/")
     except:
         pass
-    
+
     try:
         from apps.tickets.models import Ticket
         tickets_count = Ticket.objects.count()
         print(f"   🎫 Tickets: {tickets_count}")
         if tickets_count == 0:
-            print(f"   ➡️  Create tickets via Dashboard: http://localhost:8001/app/tickets/create/")
+            print("   ➡️  Create tickets via Dashboard: http://localhost:8001/app/tickets/create/")
     except:
         pass
-    
+
     print("\n🚀 Ready to develop!")
     print("="*60)
 
@@ -586,7 +593,7 @@ def main():
     """Main function."""
     if check_existing_data():
         print("ℹ️  Test data already exists. Retrieving existing data...")
-        
+
         try:
             # Get existing test accounts - try both possible emails
             superuser = None
@@ -596,10 +603,10 @@ def main():
                     break
                 except User.DoesNotExist:
                     continue
-            
+
             if not superuser:
                 superuser = User.objects.filter(is_staff=True, is_superuser=True).first()
-            
+
             # Try to find customer user (could be different email)
             customer_user = None
             for email in ['customer@pragmatichost.com', 'user@testcompany.com', 'customer@test.com']:
@@ -608,10 +615,10 @@ def main():
                     break
                 except User.DoesNotExist:
                     continue
-            
+
             if not customer_user:
                 customer_user = User.objects.filter(is_staff=False).first()
-            
+
             # Try to find customer
             customer = None
             for name in ['Test Company SRL', 'Test Customer']:
@@ -620,10 +627,10 @@ def main():
                     break
                 except Customer.DoesNotExist:
                     continue
-            
+
             if not customer:
                 customer = Customer.objects.first()
-            
+
             # Always try to create missing service data
             if customer:
                 try:
@@ -632,7 +639,7 @@ def main():
                     create_tickets_if_missing(customer, customer_user, superuser)
                 except Exception as e:
                     print(f"⚠️  Data creation failed: {e}")
-            
+
             if customer_user and customer:
                 print_credentials(superuser, customer_user, customer)
             else:
@@ -642,7 +649,7 @@ def main():
             print(f"⚠️  Could not find expected test data: {e}")
             print("   Use 'python manage.py flush' to reset database and recreate test data.")
         return
-    
+
     try:
         superuser, customer_user, customer = create_test_data()
         print_credentials(superuser, customer_user, customer)

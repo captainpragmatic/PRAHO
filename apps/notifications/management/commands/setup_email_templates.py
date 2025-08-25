@@ -4,7 +4,6 @@ Creates essential templates for billing, provisioning, and customer communicatio
 """
 
 from django.core.management.base import BaseCommand
-from django.utils.translation import gettext_lazy as _
 
 from apps.notifications.models import EmailTemplate
 
@@ -21,11 +20,11 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         """Create email templates for Romanian hosting provider"""
-        
+
         self.stdout.write(
             self.style.SUCCESS('🏗️ Setting up email templates for PRAHO Platform...')
         )
-        
+
         # Email templates to create
         templates = [
             # ===============================================================================
@@ -93,7 +92,7 @@ class Command(BaseCommand):
                     'invoice_url': 'Link to invoice'
                 }
             },
-            
+
             # ===============================================================================
             # PAYMENT DUNNING TEMPLATES
             # ===============================================================================
@@ -201,7 +200,7 @@ class Command(BaseCommand):
                     'payment_url': 'Payment link'
                 }
             },
-            
+
             # ===============================================================================
             # PROVISIONING TEMPLATES
             # ===============================================================================
@@ -273,7 +272,7 @@ class Command(BaseCommand):
                     'server_name': 'Server name'
                 }
             },
-            
+
             # ===============================================================================
             # SUPPORT TEMPLATES
             # ===============================================================================
@@ -337,7 +336,7 @@ class Command(BaseCommand):
                     'ticket_url': 'Ticket link'
                 }
             },
-            
+
             # ===============================================================================
             # ORDER TEMPLATES
             # ===============================================================================
@@ -431,7 +430,7 @@ class Command(BaseCommand):
                     'order_url': 'Order link'
                 }
             },
-            
+
             # ===============================================================================
             # WELCOME TEMPLATES
             # ===============================================================================
@@ -504,14 +503,14 @@ class Command(BaseCommand):
                 }
             },
         ]
-        
+
         created_count = 0
         updated_count = 0
-        
+
         for template_data in templates:
             key = template_data['key']
             locale = template_data['locale']
-            
+
             # Check if template already exists
             try:
                 template = EmailTemplate.objects.get(key=key, locale=locale)
@@ -530,7 +529,7 @@ class Command(BaseCommand):
                 EmailTemplate.objects.create(**template_data)
                 created_count += 1
                 self.stdout.write(f'✅ Created: {key} ({locale})')
-        
+
         # Summary
         self.stdout.write(
             self.style.SUCCESS(
@@ -540,11 +539,11 @@ class Command(BaseCommand):
                 f'📧 Total templates: {EmailTemplate.objects.count()}'
             )
         )
-        
+
         # Show template categories
         categories = EmailTemplate.objects.values_list('category', flat=True).distinct()
         self.stdout.write(f'\n📂 Available categories: {", ".join(categories)}')
-        
+
         self.stdout.write(
             self.style.WARNING(
                 '\n💡 Next steps:\n'

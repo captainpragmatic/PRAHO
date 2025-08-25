@@ -3,21 +3,31 @@ Django admin configuration for billing models.
 Romanian hosting provider billing management with VAT compliance.
 """
 
-from django.contrib import admin
-from django.utils.html import format_html
-from django.utils import timezone
-from django.utils.translation import gettext_lazy as _
-from django.urls import reverse
-from django.http import HttpResponse
 from decimal import Decimal
 
-from .models import (
-    Currency, FXRate, InvoiceSequence, ProformaSequence,
-    ProformaInvoice, ProformaLine, Invoice, InvoiceLine, 
-    Payment, CreditLedger, TaxRule, VATValidation,
-    PaymentRetryPolicy, PaymentRetryAttempt, PaymentCollectionRun
-)
+from django.contrib import admin
+from django.urls import reverse
+from django.utils import timezone
+from django.utils.html import format_html
+from django.utils.translation import gettext_lazy as _
 
+from .models import (
+    CreditLedger,
+    Currency,
+    FXRate,
+    Invoice,
+    InvoiceLine,
+    InvoiceSequence,
+    Payment,
+    PaymentCollectionRun,
+    PaymentRetryAttempt,
+    PaymentRetryPolicy,
+    ProformaInvoice,
+    ProformaLine,
+    ProformaSequence,
+    TaxRule,
+    VATValidation,
+)
 
 # ===============================================================================
 # CURRENCY & FX ADMIN
@@ -26,7 +36,7 @@ from .models import (
 @admin.register(Currency)
 class CurrencyAdmin(admin.ModelAdmin):
     """Currency management"""
-    
+
     list_display = ['code', 'symbol', 'decimals']
     search_fields = ['code', 'symbol']
     ordering = ['code']
@@ -35,7 +45,7 @@ class CurrencyAdmin(admin.ModelAdmin):
 @admin.register(FXRate)
 class FXRateAdmin(admin.ModelAdmin):
     """Foreign exchange rates"""
-    
+
     list_display = ['base_code', 'quote_code', 'rate', 'as_of']
     list_filter = ['base_code', 'quote_code', 'as_of']
     ordering = ['-as_of', 'base_code', 'quote_code']
@@ -49,10 +59,10 @@ class FXRateAdmin(admin.ModelAdmin):
 @admin.register(InvoiceSequence)
 class InvoiceSequenceAdmin(admin.ModelAdmin):
     """Invoice numbering sequences"""
-    
+
     list_display = ['scope', 'last_value', 'next_number_preview']
     search_fields = ['scope']
-    
+
     def next_number_preview(self, obj):
         """Preview next number without incrementing"""
         return f"INV-{obj.last_value + 1:06d}"
@@ -62,10 +72,10 @@ class InvoiceSequenceAdmin(admin.ModelAdmin):
 @admin.register(ProformaSequence)
 class ProformaSequenceAdmin(admin.ModelAdmin):
     """Proforma invoice numbering sequences"""
-    
+
     list_display = ['scope', 'last_value', 'next_number_preview']
     search_fields = ['scope']
-    
+
     def next_number_preview(self, obj):
         """Preview next number without incrementing"""
         return f"PRO-{obj.last_value + 1:06d}"
@@ -81,7 +91,7 @@ class ProformaLineInline(admin.TabularInline):
     model = ProformaLine
     extra = 0
     readonly_fields = ['line_total_display']
-    
+
     def line_total_display(self, obj):
         if obj.pk:
             return f"€{obj.line_total:.2f}"
@@ -92,7 +102,7 @@ class ProformaLineInline(admin.TabularInline):
 @admin.register(ProformaInvoice)
 class ProformaInvoiceAdmin(admin.ModelAdmin):
     """Proforma invoice management"""
-    
+
     list_display = [
         'number',
         'customer',
@@ -123,7 +133,7 @@ class ProformaInvoiceAdmin(admin.ModelAdmin):
         'created_at',
     ]
     inlines = [ProformaLineInline]
-    
+
     fieldsets = (
         (_('Proforma Information'), {
             'fields': (
@@ -163,19 +173,19 @@ class ProformaInvoiceAdmin(admin.ModelAdmin):
             'classes': ('collapse',),
         }),
     )
-    
+
     def total_display(self, obj):
         return f"{obj.currency.symbol}{obj.total:.2f}"
     total_display.short_description = _('Total')
-    
+
     def subtotal_display(self, obj):
         return f"{obj.currency.symbol}{obj.subtotal:.2f}"
     subtotal_display.short_description = _('Subtotal')
-    
+
     def tax_display(self, obj):
         return f"{obj.currency.symbol}{obj.tax_amount:.2f}"
     tax_display.short_description = _('Tax')
-    
+
     def is_expired_display(self, obj):
         if obj.is_expired:
             return format_html('<span style="color: red;">❌ Expired</span>')
@@ -192,7 +202,7 @@ class InvoiceLineInline(admin.TabularInline):
     model = InvoiceLine
     extra = 0
     readonly_fields = ['line_total_display']
-    
+
     def line_total_display(self, obj):
         if obj.pk:
             return f"€{obj.line_total:.2f}"
@@ -203,7 +213,7 @@ class InvoiceLineInline(admin.TabularInline):
 @admin.register(Invoice)
 class InvoiceAdmin(admin.ModelAdmin):
     """Romanian compliant invoice management"""
-    
+
     list_display = [
         'number',
         'customer',
@@ -242,7 +252,7 @@ class InvoiceAdmin(admin.ModelAdmin):
         'remaining_amount_display',
     ]
     inlines = [InvoiceLineInline]
-    
+
     fieldsets = (
         (_('Invoice Information'), {
             'fields': (
@@ -306,7 +316,7 @@ class InvoiceAdmin(admin.ModelAdmin):
             'classes': ('collapse',),
         }),
     )
-    
+
     def status_display(self, obj):
         """Display status with colors"""
         colors = {
@@ -324,19 +334,19 @@ class InvoiceAdmin(admin.ModelAdmin):
             obj.get_status_display()
         )
     status_display.short_description = _('Status')
-    
+
     def total_display(self, obj):
         return f"{obj.currency.symbol}{obj.total:.2f}"
     total_display.short_description = _('Total')
-    
+
     def subtotal_display(self, obj):
         return f"{obj.currency.symbol}{obj.subtotal:.2f}"
     subtotal_display.short_description = _('Subtotal')
-    
+
     def tax_display(self, obj):
         return f"{obj.currency.symbol}{obj.tax_amount:.2f}"
     tax_display.short_description = _('Tax')
-    
+
     def remaining_amount_display(self, obj):
         remaining_cents = obj.get_remaining_amount()
         remaining = Decimal(remaining_cents) / 100
@@ -348,7 +358,7 @@ class InvoiceAdmin(admin.ModelAdmin):
             )
         return format_html('<span style="color: green;">Paid</span>')
     remaining_amount_display.short_description = _('Remaining')
-    
+
     def efactura_status(self, obj):
         """e-Factura submission status"""
         if obj.efactura_sent:
@@ -359,9 +369,9 @@ class InvoiceAdmin(admin.ModelAdmin):
             )
         return format_html('<span style="color: orange;">⏳ Pending</span>')
     efactura_status.short_description = _('e-Factura')
-    
+
     actions = ['mark_as_paid', 'send_efactura']
-    
+
     def mark_as_paid(self, request, queryset):
         """Mark selected invoices as paid"""
         updated = 0
@@ -369,7 +379,7 @@ class InvoiceAdmin(admin.ModelAdmin):
             if invoice.status in ['issued', 'overdue']:
                 invoice.mark_as_paid()
                 updated += 1
-        
+
         self.message_user(
             request,
             f'Successfully marked {updated} invoices as paid.'
@@ -384,7 +394,7 @@ class InvoiceAdmin(admin.ModelAdmin):
 @admin.register(Payment)
 class PaymentAdmin(admin.ModelAdmin):
     """Payment tracking administration"""
-    
+
     list_display = [
         'received_at',
         'customer',
@@ -415,7 +425,7 @@ class PaymentAdmin(admin.ModelAdmin):
         'amount_display',
         'created_at',
     ]
-    
+
     fieldsets = (
         (_('Payment Information'), {
             'fields': (
@@ -440,11 +450,11 @@ class PaymentAdmin(admin.ModelAdmin):
             'classes': ('collapse',),
         }),
     )
-    
+
     def amount_display(self, obj):
         return f"{obj.currency.symbol}{obj.amount:.2f}"
     amount_display.short_description = _('Amount')
-    
+
     def status_display(self, obj):
         """Display status with colors"""
         colors = {
@@ -470,7 +480,7 @@ class PaymentAdmin(admin.ModelAdmin):
 @admin.register(CreditLedger)
 class CreditLedgerAdmin(admin.ModelAdmin):
     """Customer credit/balance tracking"""
-    
+
     list_display = [
         'created_at',
         'customer',
@@ -491,7 +501,7 @@ class CreditLedgerAdmin(admin.ModelAdmin):
     ]
     date_hierarchy = 'created_at'
     readonly_fields = ['created_at', 'delta_display']
-    
+
     fieldsets = (
         (_('Credit Entry'), {
             'fields': (
@@ -509,7 +519,7 @@ class CreditLedgerAdmin(admin.ModelAdmin):
             )
         }),
     )
-    
+
     def delta_display(self, obj):
         """Display credit change with color"""
         if obj.delta >= 0:
@@ -523,7 +533,7 @@ class CreditLedgerAdmin(admin.ModelAdmin):
                 obj.delta
             )
     delta_display.short_description = _('Credit Change')
-    
+
     def get_queryset(self, request):
         """Order by most recent first"""
         return super().get_queryset(request).order_by('-created_at')
@@ -536,18 +546,18 @@ class CreditLedgerAdmin(admin.ModelAdmin):
 @admin.register(TaxRule)
 class TaxRuleAdmin(admin.ModelAdmin):
     """Tax rule management for EU VAT compliance"""
-    
+
     list_display = [
-        'country_code', 'tax_type', 'rate_display', 'valid_from', 
+        'country_code', 'tax_type', 'rate_display', 'valid_from',
         'valid_to', 'is_eu_member', 'reverse_charge_eligible', 'is_active_now'
     ]
     list_filter = [
-        'tax_type', 'is_eu_member', 'reverse_charge_eligible', 
+        'tax_type', 'is_eu_member', 'reverse_charge_eligible',
         'applies_to_b2b', 'applies_to_b2c', 'vies_required'
     ]
     search_fields = ['country_code', 'region']
     date_hierarchy = 'valid_from'
-    
+
     fieldsets = (
         ('Geographic Scope', {
             'fields': ('country_code', 'region')
@@ -570,20 +580,20 @@ class TaxRuleAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         })
     )
-    
+
     readonly_fields = ('created_at', 'updated_at')
-    
+
     def rate_display(self, obj):
         """Display rate as percentage"""
         return f"{obj.rate * 100:.2f}%"
     rate_display.short_description = _('Rate')
-    
+
     def is_active_now(self, obj):
         """Show if rule is currently active"""
         return obj.is_active()
     is_active_now.boolean = True
     is_active_now.short_description = _('Active Now')
-    
+
     def get_queryset(self, request):
         """Order by country and validity"""
         return super().get_queryset(request).select_related().order_by(
@@ -594,7 +604,7 @@ class TaxRuleAdmin(admin.ModelAdmin):
 @admin.register(VATValidation)
 class VATValidationAdmin(admin.ModelAdmin):
     """VAT number validation results"""
-    
+
     list_display = [
         'full_vat_number', 'company_name', 'is_valid', 'is_active',
         'validation_date', 'validation_source', 'is_expired_now'
@@ -605,7 +615,7 @@ class VATValidationAdmin(admin.ModelAdmin):
     search_fields = ['full_vat_number', 'vat_number', 'company_name']
     readonly_fields = ('validation_date',)
     date_hierarchy = 'validation_date'
-    
+
     fieldsets = (
         ('VAT Number', {
             'fields': ('country_code', 'vat_number', 'full_vat_number')
@@ -621,13 +631,13 @@ class VATValidationAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         })
     )
-    
+
     def is_expired_now(self, obj):
         """Show if validation has expired"""
         return obj.is_expired()
     is_expired_now.boolean = True
     is_expired_now.short_description = _('Expired')
-    
+
     def get_queryset(self, request):
         """Order by most recent validations"""
         return super().get_queryset(request).order_by('-validation_date')
@@ -640,14 +650,14 @@ class VATValidationAdmin(admin.ModelAdmin):
 @admin.register(PaymentRetryPolicy)
 class PaymentRetryPolicyAdmin(admin.ModelAdmin):
     """Payment retry policy management"""
-    
+
     list_display = [
-        'name', 'max_attempts', 'retry_schedule_display', 
+        'name', 'max_attempts', 'retry_schedule_display',
         'suspend_after_days', 'is_default', 'is_active'
     ]
     list_filter = ['is_default', 'is_active', 'send_dunning_emails']
     search_fields = ['name', 'description']
-    
+
     fieldsets = (
         ('Policy Information', {
             'fields': ('name', 'description', 'is_default', 'is_active')
@@ -666,9 +676,9 @@ class PaymentRetryPolicyAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         })
     )
-    
+
     readonly_fields = ('created_at', 'updated_at')
-    
+
     def retry_schedule_display(self, obj):
         """Display retry schedule in readable format"""
         if not obj.retry_intervals_days:
@@ -679,7 +689,7 @@ class PaymentRetryPolicyAdmin(admin.ModelAdmin):
             schedule += "..."
         return schedule
     retry_schedule_display.short_description = _('Retry Schedule')
-    
+
     def suspend_after_days(self, obj):
         """Display suspension period"""
         return f"{obj.suspend_service_after_days} days" if obj.suspend_service_after_days else "Never"
@@ -689,9 +699,9 @@ class PaymentRetryPolicyAdmin(admin.ModelAdmin):
 @admin.register(PaymentRetryAttempt)
 class PaymentRetryAttemptAdmin(admin.ModelAdmin):
     """Payment retry attempt tracking"""
-    
+
     list_display = [
-        'payment_link', 'attempt_number', 'status', 'scheduled_at', 
+        'payment_link', 'attempt_number', 'status', 'scheduled_at',
         'executed_at', 'dunning_email_sent', 'policy'
     ]
     list_filter = [
@@ -700,7 +710,7 @@ class PaymentRetryAttemptAdmin(admin.ModelAdmin):
     search_fields = ['payment__id', 'failure_reason']
     readonly_fields = ('created_at', 'updated_at')
     date_hierarchy = 'scheduled_at'
-    
+
     fieldsets = (
         ('Retry Information', {
             'fields': ('payment', 'policy', 'attempt_number')
@@ -715,13 +725,13 @@ class PaymentRetryAttemptAdmin(admin.ModelAdmin):
             'fields': ('dunning_email_sent', 'dunning_email_sent_at')
         })
     )
-    
+
     def payment_link(self, obj):
         """Link to payment admin"""
         url = reverse('admin:billing_payment_change', args=[obj.payment.id])
         return format_html('<a href="{}">{}</a>', url, str(obj.payment.id)[:8])
     payment_link.short_description = _('Payment')
-    
+
     def get_queryset(self, request):
         """Optimize queries"""
         return super().get_queryset(request).select_related(
@@ -732,7 +742,7 @@ class PaymentRetryAttemptAdmin(admin.ModelAdmin):
 @admin.register(PaymentCollectionRun)
 class PaymentCollectionRunAdmin(admin.ModelAdmin):
     """Payment collection run monitoring"""
-    
+
     list_display = [
         'started_at', 'run_type', 'status', 'duration_display',
         'success_rate_display', 'amount_recovered_display', 'triggered_by'
@@ -744,7 +754,7 @@ class PaymentCollectionRunAdmin(admin.ModelAdmin):
         'fees_charged_cents'
     )
     date_hierarchy = 'started_at'
-    
+
     fieldsets = (
         ('Run Information', {
             'fields': ('run_type', 'triggered_by', 'status')
@@ -769,7 +779,7 @@ class PaymentCollectionRunAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         })
     )
-    
+
     def duration_display(self, obj):
         """Display run duration"""
         if not obj.completed_at:
@@ -777,16 +787,16 @@ class PaymentCollectionRunAdmin(admin.ModelAdmin):
                 duration = timezone.now() - obj.started_at
                 return f"Running ({duration.total_seconds():.0f}s)"
             return "N/A"
-        
+
         duration = obj.completed_at - obj.started_at
         return f"{duration.total_seconds():.0f}s"
     duration_display.short_description = _('Duration')
-    
+
     def success_rate_display(self, obj):
         """Display success rate percentage"""
         if obj.total_processed == 0:
             return "N/A"
-        
+
         rate = (obj.total_successful / obj.total_processed) * 100
         color = "green" if rate >= 50 else "orange" if rate >= 25 else "red"
         return format_html(
@@ -794,19 +804,19 @@ class PaymentCollectionRunAdmin(admin.ModelAdmin):
             color, rate
         )
     success_rate_display.short_description = _('Success Rate')
-    
+
     def amount_recovered_display(self, obj):
         """Display recovered amount with currency"""
         if obj.amount_recovered_cents == 0:
             return "€0.00"
-        
+
         amount = obj.amount_recovered
         return format_html(
             '<span style="color: green; font-weight: bold;">€{:.2f}</span>',
             amount
         )
     amount_recovered_display.short_description = _('Recovered Amount')
-    
+
     def get_queryset(self, request):
         """Order by most recent runs"""
         return super().get_queryset(request).select_related('triggered_by').order_by('-started_at')

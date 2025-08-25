@@ -5,10 +5,10 @@ Secure encryption/decryption for sensitive data like 2FA secrets.
 
 import base64
 import os
+
 from cryptography.fernet import Fernet
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
-from typing import Optional
 
 
 def get_encryption_key() -> bytes:
@@ -17,21 +17,21 @@ def get_encryption_key() -> bytes:
     Uses DJANGO_ENCRYPTION_KEY environment variable or generates one.
     """
     encryption_key = getattr(settings, 'ENCRYPTION_KEY', None)
-    
+
     if not encryption_key:
         # Try to get from environment
         encryption_key = os.environ.get('DJANGO_ENCRYPTION_KEY')
-        
+
     if not encryption_key:
         raise ImproperlyConfigured(
             "DJANGO_ENCRYPTION_KEY environment variable must be set. "
             "Generate one with: from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
         )
-    
+
     # Handle both string and bytes
     if isinstance(encryption_key, str):
         encryption_key = encryption_key.encode()
-    
+
     return encryption_key
 
 
@@ -47,7 +47,7 @@ def encrypt_sensitive_data(data: str) -> str:
     """
     if not data:
         return ''
-    
+
     key = get_encryption_key()
     fernet = Fernet(key)
     encrypted_bytes = fernet.encrypt(data.encode('utf-8'))
@@ -66,7 +66,7 @@ def decrypt_sensitive_data(encrypted_data: str) -> str:
     """
     if not encrypted_data:
         return ''
-    
+
     try:
         key = get_encryption_key()
         fernet = Fernet(key)
@@ -92,13 +92,13 @@ def generate_backup_codes(count: int = 8) -> list[str]:
         List of secure backup codes (8 digits each)
     """
     import secrets
-    
+
     backup_codes = []
     for _ in range(count):
         # Generate 8-digit backup code
         code = ''.join(secrets.choice('0123456789') for _ in range(8))
         backup_codes.append(code)
-    
+
     return backup_codes
 
 

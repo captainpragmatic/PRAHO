@@ -3,12 +3,13 @@ Context processors for PRAHO Platform templates
 Romanian business context and common template variables.
 """
 
+from typing import Any
+
 from django.conf import settings
 from django.http import HttpRequest
-from typing import Dict, Any
 
 
-def romanian_business_context(request: HttpRequest) -> Dict[str, Any]:
+def romanian_business_context(request: HttpRequest) -> dict[str, Any]:
     """Romanian business information for templates"""
     return {
         'company_name': 'PragmaticHost SRL',
@@ -24,7 +25,7 @@ def romanian_business_context(request: HttpRequest) -> Dict[str, Any]:
     }
 
 
-def feature_flags(request: HttpRequest) -> Dict[str, Any]:
+def feature_flags(request: HttpRequest) -> dict[str, Any]:
     """Feature flags for gradual rollout"""
     return {
         'features': {
@@ -37,7 +38,7 @@ def feature_flags(request: HttpRequest) -> Dict[str, Any]:
     }
 
 
-def user_permissions(request: HttpRequest) -> Dict[str, Any]:
+def user_permissions(request: HttpRequest) -> dict[str, Any]:
     """User permissions and role information"""
     if not request.user.is_authenticated:
         return {
@@ -45,7 +46,7 @@ def user_permissions(request: HttpRequest) -> Dict[str, Any]:
             'user_role': 'anonymous',
             'can_access_admin': False,
         }
-    
+
     return {
         'user_permissions': {
             'can_view_billing': request.user.has_perm('billing.view_invoice'),
@@ -59,7 +60,7 @@ def user_permissions(request: HttpRequest) -> Dict[str, Any]:
     }
 
 
-def navigation_context(request: HttpRequest) -> Dict[str, Any]:
+def navigation_context(request: HttpRequest) -> dict[str, Any]:
     """Navigation context for templates"""
     nav_items = [
         {
@@ -97,27 +98,25 @@ def navigation_context(request: HttpRequest) -> Dict[str, Any]:
             'permission': 'provisioning.view_service',
         },
     ]
-    
+
     # Filter navigation by permissions
     if request.user.is_authenticated:
         filtered_nav = []
         for item in nav_items:
-            if 'permission' not in item:
-                filtered_nav.append(item)
-            elif request.user.has_perm(item['permission']):
+            if 'permission' not in item or request.user.has_perm(item['permission']):
                 filtered_nav.append(item)
         nav_items = filtered_nav
     else:
         # Anonymous users see limited navigation
         nav_items = [item for item in nav_items if 'permission' not in item]
-    
+
     return {
         'nav_items': nav_items,
         'current_path': request.path,
     }
 
 
-def system_status(request: HttpRequest) -> Dict[str, Any]:
+def system_status(request: HttpRequest) -> dict[str, Any]:
     """System status information"""
     return {
         'system_status': {
@@ -129,7 +128,7 @@ def system_status(request: HttpRequest) -> Dict[str, Any]:
     }
 
 
-def gdpr_compliance(request: HttpRequest) -> Dict[str, Any]:
+def gdpr_compliance(request: HttpRequest) -> dict[str, Any]:
     """GDPR compliance context"""
     return {
         'gdpr': {
@@ -141,7 +140,7 @@ def gdpr_compliance(request: HttpRequest) -> Dict[str, Any]:
     }
 
 
-def current_customer(request: HttpRequest) -> Dict[str, Any]:
+def current_customer(request: HttpRequest) -> dict[str, Any]:
     """
     Provide the current customer context for templates.
     Updated for new CustomerMembership model with hybrid approach.
@@ -168,7 +167,7 @@ def current_customer(request: HttpRequest) -> Dict[str, Any]:
     return {'current_customer': primary_customer}
 
 
-def feature_flags(request: HttpRequest) -> Dict[str, Any]:
+def feature_flags(request: HttpRequest) -> dict[str, Any]:
     """Feature flags for gradual rollout"""
     return {
         'features': {
@@ -181,7 +180,7 @@ def feature_flags(request: HttpRequest) -> Dict[str, Any]:
     }
 
 
-def user_permissions(request: HttpRequest) -> Dict[str, Any]:
+def user_permissions(request: HttpRequest) -> dict[str, Any]:
     """User permissions and role information"""
     if not request.user.is_authenticated:
         return {
@@ -189,7 +188,7 @@ def user_permissions(request: HttpRequest) -> Dict[str, Any]:
             'user_role': 'anonymous',
             'can_access_admin': False,
         }
-    
+
     return {
         'user_permissions': {
             'can_view_billing': request.user.has_perm('billing.view_invoice'),
@@ -203,7 +202,7 @@ def user_permissions(request: HttpRequest) -> Dict[str, Any]:
     }
 
 
-def navigation_context(request: HttpRequest) -> Dict[str, Any]:
+def navigation_context(request: HttpRequest) -> dict[str, Any]:
     """Navigation context for templates"""
     nav_items = [
         {
@@ -241,27 +240,25 @@ def navigation_context(request: HttpRequest) -> Dict[str, Any]:
             'permission': 'provisioning.view_service',
         },
     ]
-    
+
     # Filter navigation by permissions
     if request.user.is_authenticated:
         filtered_nav = []
         for item in nav_items:
-            if 'permission' not in item:
-                filtered_nav.append(item)
-            elif request.user.has_perm(item['permission']):
+            if 'permission' not in item or request.user.has_perm(item['permission']):
                 filtered_nav.append(item)
         nav_items = filtered_nav
     else:
         # Anonymous users see limited navigation
         nav_items = [item for item in nav_items if 'permission' not in item]
-    
+
     return {
         'nav_items': nav_items,
         'current_path': request.path,
     }
 
 
-def system_status(request: HttpRequest) -> Dict[str, Any]:
+def system_status(request: HttpRequest) -> dict[str, Any]:
     """System status information"""
     return {
         'system_status': {
@@ -273,7 +270,7 @@ def system_status(request: HttpRequest) -> Dict[str, Any]:
     }
 
 
-def gdpr_compliance(request: HttpRequest) -> Dict[str, Any]:
+def gdpr_compliance(request: HttpRequest) -> dict[str, Any]:
     """GDPR compliance context"""
     return {
         'gdpr': {
