@@ -2,7 +2,7 @@
 # Romanian hosting provider management system
 
 # Django framework
-Django>=5.0,<5.1
+Django>=5.2,<5.3
 django-environ>=0.11.0
 django-extensions>=3.2.0
 django-debug-toolbar>=4.2.0
