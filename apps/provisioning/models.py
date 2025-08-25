@@ -273,10 +273,7 @@ class Server(models.Model):
         if service_plan.ram_gb and self.ram_gb < service_plan.ram_gb:
             return False
 
-        if service_plan.cpu_cores and self.cpu_cores < service_plan.cpu_cores:
-            return False
-
-        return True
+        return not (service_plan.cpu_cores and self.cpu_cores < service_plan.cpu_cores)
 
 
 class Service(models.Model):
@@ -696,8 +693,8 @@ class ServiceRelationship(models.Model):
                 is_active=True
             ).exclude(id=self.id if self.id else None)
 
-            for rel in child_relationships:
-                stack.append(rel.child_service)
+            # ⚡ PERFORMANCE: Use list extend for better performance than multiple appends
+            stack.extend(rel.child_service for rel in child_relationships)
 
         return False
 
@@ -837,9 +834,8 @@ class ServiceDomain(models.Model):
     def clean(self):
         """🔍 Validate service domain configuration"""
         # Validate subdomain format
-        if self.subdomain:
-            if not self.subdomain.replace('-', '').isalnum():
-                raise ValidationError(_("Subdomain contains invalid characters"))
+        if self.subdomain and not self.subdomain.replace('-', '').isalnum():
+            raise ValidationError(_("Subdomain contains invalid characters"))
 
         # Validate redirect configuration
         if self.domain_type == 'redirect' and not self.redirect_url:

@@ -68,9 +68,16 @@
   // Terminal auto-approve settings for common development commands
   "chat.tools.terminal.autoApprove": {
     "/^make\\s+test(\\s|$)/": true,
+    "/^make\\s+test-fast(\\s|$)/": true,
     "/^make\\s+test-e2e(\\s|$)/": true,
     "/^make\\s+test-with-e2e(\\s|$)/": true,
+    "/^make\\s+lint(\\s|$)/": true,
+    "/^make\\s+lint-security(\\s|$)/": true,
+    "/^make\\s+lint-credentials(\\s|$)/": true,
+    "/^make\\s+lint-performance(\\s|$)/": true,
+    "/^make\\s+lint-fix(\\s|$)/": true,
     "/^make\\s+dev(\\s|$)/": true,
+    "/^\\.venv\\/bin\\/ruff\\s+/": true,
     "/^git\\s+status(\\s|$)/": true,
     "/^git\\s+log(\\s|$)/": true,
     "/^git\\s+diff(\\s|$)/": true,
@@ -81,7 +88,12 @@
     "/^\\.venv\\/bin\\/python\\s+-m\\s+pytest\\s+tests\\/e2e\\/(\\s|$)/": true,
     "/^playwright\\s+install(\\s|$)/": true,
     "/^playwright\\s+test(\\s|$)/": true,
-    "/^\\.venv\\/bin\\/playwright\\s+/": true
+    "/^\\.venv\\/bin\\/playwright\\s+/": true,
+    "/^head\\s+/": true,
+    "/^tail\\s+/": true,
+    "/^cat\\s+/": true,
+    "/^ls\\s+/": true,
+    "/^grep\\s+/": true
   },
   "python.analysis.typeCheckingMode": "standard"
 }

@@ -90,7 +90,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
 
         except Exception as e:
             logger.exception(f"💥 Error handling Stripe event {event_type}")
-            return False, f"Handler error: {str(e)}"
+            return False, f"Handler error: {e!s}"
 
     def handle_payment_intent_event(self, event_type: str, payload: dict[str, Any]) -> tuple[bool, str]:
         """💳 Handle PaymentIntent events"""

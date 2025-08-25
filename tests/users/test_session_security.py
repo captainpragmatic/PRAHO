@@ -45,10 +45,7 @@ class SessionSecurityServiceTestCase(TestCase):
 
     def _get_authenticated_request(self, path='/', method='GET', user=None):
         """Helper to create authenticated request with session"""
-        if method == 'GET':
-            request = self.factory.get(path)
-        else:
-            request = self.factory.post(path)
+        request = self.factory.get(path) if method == 'GET' else self.factory.post(path)
 
         request.user = user or self.user
 

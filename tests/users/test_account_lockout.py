@@ -61,7 +61,7 @@ class AccountLockoutTestCase(TestCase):
         base_time = timezone.now()
 
         # 1st failure (5 min lockout)
-        response = self.client.post(self.login_url, {
+        self.client.post(self.login_url, {
             'email': 'test@example.com',
             'password': 'wrong'
         })
@@ -73,7 +73,7 @@ class AccountLockoutTestCase(TestCase):
         self.user.save()
 
         # 2nd failure (15 min lockout)
-        response = self.client.post(self.login_url, {
+        self.client.post(self.login_url, {
             'email': 'test@example.com',
             'password': 'wrong'
         })
@@ -85,7 +85,7 @@ class AccountLockoutTestCase(TestCase):
         self.user.save()
 
         # Should be able to attempt login again
-        response = self.client.post(self.login_url, {
+        self.client.post(self.login_url, {
             'email': 'test@example.com',
             'password': 'wrong'
         })
@@ -203,7 +203,7 @@ class AccountLockoutTestCase(TestCase):
     def test_multiple_failed_attempts_progression(self):
         """Test multiple failed login attempts show correct progression"""
         # First failed attempt - 5 minute lockout
-        response = self.client.post(self.login_url, {
+        self.client.post(self.login_url, {
             'email': 'test@example.com',
             'password': 'Wrong1'
         })
@@ -218,7 +218,7 @@ class AccountLockoutTestCase(TestCase):
         self.user.account_locked_until = timezone.now() - timedelta(minutes=1)
         self.user.save()
 
-        response = self.client.post(self.login_url, {
+        self.client.post(self.login_url, {
             'email': 'test@example.com',
             'password': 'Wrong2'
         })

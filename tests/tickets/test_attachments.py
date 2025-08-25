@@ -120,7 +120,7 @@ class TicketAttachmentTest(TestCase):
             content_type='text/plain'
         )
 
-        response = self.client.post(
+        self.client.post(
             reverse('tickets:reply', kwargs={'pk': self.ticket.pk}),
             {
                 'reply': 'Test reply with large file',
@@ -146,7 +146,7 @@ class TicketAttachmentTest(TestCase):
             content_type='application/x-executable'
         )
 
-        response = self.client.post(
+        self.client.post(
             reverse('tickets:reply', kwargs={'pk': self.ticket.pk}),
             {
                 'reply': 'Test reply with exe file',
@@ -197,7 +197,7 @@ class TicketAttachmentTest(TestCase):
         self.assertEqual(response['Content-Type'], 'text/plain')
 
         # Test unauthorized access (different user)
-        unauthorized_user = User.objects.create_user(
+        User.objects.create_user(
             email='unauthorized@example.com',
             password='testpass123',
             first_name='Unauthorized',

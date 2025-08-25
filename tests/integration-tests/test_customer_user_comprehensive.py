@@ -112,19 +112,19 @@ class SoftDeleteTestCase(TestCase):
     def test_cascade_behavior_on_hard_delete(self):
         """Test CASCADE behavior when customer is hard deleted"""
         # 🏗️ Create related profiles
-        tax_profile = CustomerTaxProfile.objects.create(
+        CustomerTaxProfile.objects.create(
             customer=self.customer,
             cui='RO12345678',
             is_vat_payer=True
         )
 
-        billing_profile = CustomerBillingProfile.objects.create(
+        CustomerBillingProfile.objects.create(
             customer=self.customer,
             payment_terms=30,
             credit_limit=Decimal('5000.00')
         )
 
-        note = CustomerNote.objects.create(
+        CustomerNote.objects.create(
             customer=self.customer,
             title='Test Note',
             content='Important customer information',
@@ -202,7 +202,7 @@ class CustomerManagementTestCase(TestCase):
         )
 
         # 👤 Create user membership
-        membership = CustomerMembership.objects.create(
+        CustomerMembership.objects.create(
             user=self.customer_user,
             customer=customer,
             role='owner',
@@ -233,7 +233,7 @@ class CustomerManagementTestCase(TestCase):
     def test_customer_validation_rules(self):
         """Test customer model validation enforces business rules"""
         # 🚨 Test company type requires company_name
-        with self.assertRaises(ValidationError) as context:
+        with self.assertRaises(ValidationError):
             customer = Customer(
                 name='Test Company',
                 customer_type='company',
@@ -281,7 +281,7 @@ class UserManagementTestCase(TestCase):
         customer_user = create_test_user('customer', 'user@testcustomer.ro')
 
         # 🔗 Create membership
-        membership = CustomerMembership.objects.create(
+        CustomerMembership.objects.create(
             user=customer_user,
             customer=customer,
             role='owner',
@@ -347,14 +347,14 @@ class DeletionScenariosTestCase(TestCase):
     def test_customer_deletion_preserves_compliance_data(self):
         """Test customer deletion preserves audit trail for Romanian compliance"""
         # 📋 Create compliance-critical data
-        tax_profile = CustomerTaxProfile.objects.create(
+        CustomerTaxProfile.objects.create(
             customer=self.customer_a,
             cui='RO12345678',
             vat_number='RO12345678',
             is_vat_payer=True
         )
 
-        note = CustomerNote.objects.create(
+        CustomerNote.objects.create(
             customer=self.customer_a,
             title='Compliance Note',
             content='Important regulatory information for audit',
@@ -557,7 +557,7 @@ class CustomerUserIntegrationTestCase(TestCase):
         )
 
         # 💰 Step 4: Configure billing profile
-        billing_profile = CustomerBillingProfile.objects.create(
+        CustomerBillingProfile.objects.create(
             customer=customer,
             payment_terms=14,
             credit_limit=Decimal('50000.00'),
@@ -566,7 +566,7 @@ class CustomerUserIntegrationTestCase(TestCase):
         )
 
         # 📍 Step 5: Add Romanian addresses
-        legal_address = CustomerAddress.objects.create(
+        CustomerAddress.objects.create(
             customer=customer,
             address_type='legal',
             address_line1='Strada Principală 100',
@@ -581,7 +581,7 @@ class CustomerUserIntegrationTestCase(TestCase):
         owner_user = create_test_user('owner', 'owner@onboardingtest.ro')
 
         # 🔗 Step 7: Create ownership with Romanian preferences
-        owner_membership = CustomerMembership.objects.create(
+        CustomerMembership.objects.create(
             user=owner_user,
             customer=customer,
             role='owner',
@@ -596,7 +596,7 @@ class CustomerUserIntegrationTestCase(TestCase):
         # 👨‍💻 Step 8: Add technical user
         tech_user = create_test_user('tech', 'tech@onboardingtest.ro')
 
-        tech_membership = CustomerMembership.objects.create(
+        CustomerMembership.objects.create(
             user=tech_user,
             customer=customer,
             role='tech',
@@ -607,7 +607,7 @@ class CustomerUserIntegrationTestCase(TestCase):
         )
 
         # 📝 Step 9: Add operational note
-        setup_note = CustomerNote.objects.create(
+        CustomerNote.objects.create(
             customer=customer,
             title='Onboarding Complete',
             content='Customer successfully onboarded with all Romanian compliance requirements.',

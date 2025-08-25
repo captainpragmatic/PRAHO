@@ -33,13 +33,12 @@ def dashboard_view(request):
     if isinstance(accessible_customers_list, QuerySet):
         # It's already a QuerySet (staff users)
         accessible_customers = accessible_customers_list
+    # It's a list, convert to QuerySet
+    elif accessible_customers_list:
+        customer_ids = [c.id for c in accessible_customers_list]
+        accessible_customers = Customer.objects.filter(id__in=customer_ids)
     else:
-        # It's a list, convert to QuerySet
-        if accessible_customers_list:
-            customer_ids = [c.id for c in accessible_customers_list]
-            accessible_customers = Customer.objects.filter(id__in=customer_ids)
-        else:
-            accessible_customers = Customer.objects.none()
+        accessible_customers = Customer.objects.none()
 
     # Calculate key statistics
     stats = {

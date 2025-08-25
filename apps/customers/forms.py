@@ -239,9 +239,8 @@ class CustomerAddressForm(forms.ModelForm):
         postal_code = self.cleaned_data.get('postal_code')
         country = self.cleaned_data.get('country')
 
-        if country == 'România' and postal_code:
-            if not re.match(r'^\d{6}$', postal_code):
-                raise ValidationError(_('Romanian postal codes must be 6 digits'))
+        if country == 'România' and postal_code and not re.match(r'^\d{6}$', postal_code):
+            raise ValidationError(_('Romanian postal codes must be 6 digits'))
 
         return postal_code
 

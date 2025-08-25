@@ -434,7 +434,7 @@ class CreditLedgerIntegrationTestCase(TestCase):
 
     def test_credit_ledger_cascade_behavior(self):
         """Test cascade behavior when customer is deleted"""
-        entry = CreditLedger.objects.create(
+        CreditLedger.objects.create(
             customer=self.customer,
             delta_cents=1000,
             reason='Test cascade'

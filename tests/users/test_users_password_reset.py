@@ -261,7 +261,7 @@ class SecurePasswordResetTestCase(TestCase):
             'token': token
         })
 
-        response = self.client.post(confirm_url, {
+        self.client.post(confirm_url, {
             'new_password1': 'NewPassword123!',
             'new_password2': 'NewPassword123!'
         })
@@ -313,7 +313,7 @@ class PasswordResetIntegrationTestCase(TestCase):
             'token': token
         })
 
-        response = Client().post(confirm_url, {
+        Client().post(confirm_url, {
             'new_password1': 'NewSecurePassword123!',
             'new_password2': 'NewSecurePassword123!'
         })
@@ -364,7 +364,7 @@ class PasswordResetIntegrationTestCase(TestCase):
         if get_response.status_code == 302:
             post_url = get_response['Location']
 
-        confirm_response = client.post(post_url, {
+        client.post(post_url, {
             'new_password1': 'AuditTestPassword123!',
             'new_password2': 'AuditTestPassword123!'
         })

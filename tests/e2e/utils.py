@@ -11,10 +11,9 @@ Centralizes common functionality like:
 - Common test configurations
 """
 
-import pytest
-from playwright.sync_api import Page, expect
-from typing import Optional, List, Dict, Any
 
+import pytest
+from playwright.sync_api import Page
 
 # ===============================================================================
 # TEST CONFIGURATION
@@ -52,7 +51,7 @@ def setup_console_monitoring(page: Page):
     page.on("console", handle_console)
     
     # Make console_errors available to tests (dynamic attribute)
-    setattr(page, 'console_errors', console_errors)
+    page.console_errors = console_errors
     yield page
 
 
@@ -196,7 +195,7 @@ def navigate_to_dashboard(page: Page) -> bool:
         return False
 
 
-def navigate_to_page(page: Page, path: str, expected_url_fragment: Optional[str] = None) -> bool:
+def navigate_to_page(page: Page, path: str, expected_url_fragment: str | None = None) -> bool:
     """
     Navigate to a specific page and verify the navigation.
     
@@ -279,7 +278,7 @@ def assert_no_console_errors(page: Page) -> None:
 # ELEMENT INTERACTION UTILITIES
 # ===============================================================================
 
-def safe_click_element(page: Page, selector: str, description: Optional[str] = None) -> bool:
+def safe_click_element(page: Page, selector: str, description: str | None = None) -> bool:
     """
     Safely click an element with proper error handling.
     
@@ -324,7 +323,7 @@ def safe_click_element(page: Page, selector: str, description: Optional[str] = N
         return False
 
 
-def count_elements(page: Page, selector: str, description: Optional[str] = None) -> int:
+def count_elements(page: Page, selector: str, description: str | None = None) -> int:
     """
     Count elements matching a selector with logging.
     

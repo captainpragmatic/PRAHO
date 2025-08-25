@@ -234,9 +234,8 @@ def iban_format(value: str) -> str:
         return value  # Return original if invalid
 
     # Format in groups of 4 characters
-    formatted_parts = []
-    for i in range(0, len(iban), 4):
-        formatted_parts.append(iban[i:i+4])
+    # ⚡ PERFORMANCE: Use list comprehension for better performance
+    formatted_parts = [iban[i:i+4] for i in range(0, len(iban), 4)]
 
     return ' '.join(formatted_parts)
 

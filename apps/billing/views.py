@@ -67,11 +67,12 @@ def billing_list(request):
         )
 
     # Combine and annotate with type
+    # ⚡ PERFORMANCE: Use list extend for better performance than multiple appends
     combined_documents = []
 
     if doc_type in ['all', 'proforma']:
-        for proforma in proformas:
-            combined_documents.append({
+        combined_documents.extend([
+            {
                 'type': 'proforma',
                 'obj': proforma,
                 'id': proforma.id,
@@ -83,11 +84,13 @@ def billing_list(request):
                 'status': 'valid' if not proforma.is_expired else 'expired',
                 'can_edit': True,
                 'can_convert': not proforma.is_expired,
-            })
+            }
+            for proforma in proformas
+        ])
 
     if doc_type in ['all', 'invoice']:
-        for invoice in invoices:
-            combined_documents.append({
+        combined_documents.extend([
+            {
                 'type': 'invoice',
                 'obj': invoice,
                 'id': invoice.id,
@@ -99,7 +102,9 @@ def billing_list(request):
                 'status': invoice.status,
                 'can_edit': False,  # Invoices are immutable
                 'can_convert': False,
-            })
+            }
+            for invoice in invoices
+        ])
 
     # Sort by creation date (newest first)
     combined_documents.sort(key=lambda x: x['created_at'], reverse=True)
@@ -206,7 +211,7 @@ def proforma_create(request):
                     # Copy customer billing info
                     bill_to_name=customer.company_name or customer.name,
                     bill_to_email=customer.primary_email,
-                    bill_to_tax_id=getattr(customer, 'tax_profile', None) and customer.tax_profile.vat_number or '',
+                    bill_to_tax_id=(getattr(customer, 'tax_profile', None) and customer.tax_profile.vat_number) or '',
                 )
         except Exception as e:
             messages.error(request, _("❌ Error creating proforma: {error}").format(error=str(e)))
@@ -280,14 +285,13 @@ def proforma_create(request):
     accessible_customers = request.user.get_accessible_customers()
     if hasattr(accessible_customers, 'all'):
         customers = accessible_customers.select_related('tax_profile', 'billing_profile').all()
+    # Customer is already imported at module level
+    elif isinstance(accessible_customers, list | tuple):
+        customers = Customer.objects.filter(
+            id__in=[c.id for c in accessible_customers]
+        ).select_related('tax_profile', 'billing_profile')
     else:
-        # Customer is already imported at module level
-        if isinstance(accessible_customers, (list, tuple)):
-            customers = Customer.objects.filter(
-                id__in=[c.id for c in accessible_customers]
-            ).select_related('tax_profile', 'billing_profile')
-        else:
-            customers = accessible_customers.select_related('tax_profile', 'billing_profile')
+        customers = accessible_customers.select_related('tax_profile', 'billing_profile')
 
     context = {
         'customers': customers,
@@ -424,7 +428,7 @@ def process_proforma_payment(request, pk):
         convert_request.user = request.user
 
         # Call conversion view
-        response = proforma_to_invoice(convert_request, pk)
+        proforma_to_invoice(convert_request, pk)
 
         # If conversion successful, process payment on the new invoice
         invoice = Invoice.objects.filter(meta__proforma_id=proforma.id).first()
@@ -433,7 +437,7 @@ def process_proforma_payment(request, pk):
             amount = Decimal(request.POST.get('amount', str(invoice.total)))
             payment_method = request.POST.get('payment_method', 'bank_transfer')
 
-            payment = Payment.objects.create(
+            Payment.objects.create(
                 invoice=invoice,
                 amount=amount,
                 payment_method=payment_method,
@@ -593,14 +597,13 @@ def proforma_edit(request, pk):
     accessible_customers = request.user.get_accessible_customers()
     if hasattr(accessible_customers, 'all'):
         customers = accessible_customers.select_related('tax_profile', 'billing_profile').all()
+    # Customer is already imported at module level
+    elif isinstance(accessible_customers, list | tuple):
+        customers = Customer.objects.filter(
+            id__in=[c.id for c in accessible_customers]
+        ).select_related('tax_profile', 'billing_profile')
     else:
-        # Customer is already imported at module level
-        if isinstance(accessible_customers, (list, tuple)):
-            customers = Customer.objects.filter(
-                id__in=[c.id for c in accessible_customers]
-            ).select_related('tax_profile', 'billing_profile')
-        else:
-            customers = accessible_customers.select_related('tax_profile', 'billing_profile')
+        customers = accessible_customers.select_related('tax_profile', 'billing_profile')
 
     context = {
         'proforma': proforma,
@@ -1021,7 +1024,7 @@ def process_payment(request, pk):
         payment_method = request.POST.get('payment_method', 'bank_transfer')
 
         # Create payment record
-        payment = Payment.objects.create(
+        Payment.objects.create(
             invoice=invoice,
             amount=amount,
             payment_method=payment_method,

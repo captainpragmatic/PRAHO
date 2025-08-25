@@ -138,7 +138,7 @@ class SecureUserRegistrationService:
             registration_number = customer_data.get('registration_number', '').strip()
 
             if vat_number or registration_number:
-                tax_profile = CustomerTaxProfile.objects.create(
+                CustomerTaxProfile.objects.create(
                     customer=customer,
                     vat_number=vat_number,  # RO prefix validated
                     registration_number=registration_number,  # CUI format validated
@@ -173,7 +173,7 @@ class SecureUserRegistrationService:
             )
 
             # Step 7: Associate user as OWNER with security checks
-            membership = CustomerMembership.objects.create(
+            CustomerMembership.objects.create(
                 user=user,
                 customer=customer,
                 role='owner',  # Validated role
@@ -199,8 +199,8 @@ class SecureUserRegistrationService:
 
         except Exception as e:
             # Log unexpected errors without exposing details
-            error_id = hashlib.sha256(f"{str(e)}{time.time()}".encode()).hexdigest()[:8]
-            logger.error(f"🔥 [Secure Registration] Unexpected error {error_id}: {str(e)}")
+            error_id = hashlib.sha256(f"{e!s}{time.time()}".encode()).hexdigest()[:8]
+            logger.error(f"🔥 [Secure Registration] Unexpected error {error_id}: {e!s}")
 
             log_security_event('registration_system_error', {
                 'error_id': error_id,
@@ -629,7 +629,7 @@ class SecureCustomerUserService:
             return True
 
         except Exception as e:
-            logger.error(f"📧 [Secure Email] Failed to send welcome email: {str(e)}")
+            logger.error(f"📧 [Secure Email] Failed to send welcome email: {e!s}")
             log_security_event('welcome_email_failed', {
                 'user_id': user.id,
                 'error': str(e)[:200]
@@ -674,7 +674,7 @@ class SecureCustomerUserService:
             }, request_ip)
 
         except Exception as e:
-            logger.error(f"📧 [Secure Notification] Failed to notify owners: {str(e)}")
+            logger.error(f"📧 [Secure Notification] Failed to notify owners: {e!s}")
 
     @classmethod
     def _send_invitation_email_secure(cls, membership, inviter, request_ip: str = None):
@@ -714,7 +714,7 @@ class SecureCustomerUserService:
             }, request_ip)
 
         except Exception as e:
-            logger.error(f"📧 [Secure Invitation] Failed to send invitation: {str(e)}")
+            logger.error(f"📧 [Secure Invitation] Failed to send invitation: {e!s}")
 
 
 # ===============================================================================
@@ -901,7 +901,7 @@ class SessionSecurityService:
         recent_ips = [ip_data for ip_data in recent_ips if ip_data['timestamp'] > one_hour_ago]
 
         # Check for suspicious pattern (3+ different IPs in 1 hour)
-        unique_ips = set(ip_data['ip'] for ip_data in recent_ips)
+        unique_ips = {ip_data['ip'] for ip_data in recent_ips}
         is_suspicious = len(unique_ips) >= 3
 
         if is_suspicious:

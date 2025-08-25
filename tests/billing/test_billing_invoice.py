@@ -396,7 +396,7 @@ class InvoiceIntegrationTestCase(TestCase):
         """Test that necessary indexes exist for performance"""
         # This is a placeholder test - would need to check actual database indexes
         # in a real performance test
-        invoice = Invoice.objects.create(
+        Invoice.objects.create(
             customer=self.customer,
             currency=self.currency,
             number='INV-PERF'

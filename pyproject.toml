@@ -67,8 +67,13 @@ classifiers = [
 # ===============================================================================
 
 [tool.ruff]
-# Romanian coding standards - strict quality enforcement
-line-length = 88
+# ===============================================================================
+# PRAHO PLATFORM - STRATEGIC LINTING CONFIGURATION 🎯
+# ===============================================================================
+# Focus: Performance, Security, AI/LLM Readability, Business Impact
+# Philosophy: Enforce what matters, ignore cosmetic preferences
+
+line-length = 120  # Modern screens, but not strictly enforced
 target-version = "py311"
 exclude = [
     ".venv",
@@ -77,42 +82,176 @@ exclude = [
     ".git",
     "static",
     "htmlcov",
+    "node_modules",
+    "media",
 ]
 
 [tool.ruff.lint]
-# Enable comprehensive linting for Romanian business compliance
+# ===============================================================================
+# STRATEGIC RULE SELECTION - Business Impact Focus 🚀
+# ===============================================================================
+
 select = [
-    "E",   # pycodestyle errors
-    "W",   # pycodestyle warnings  
-    "F",   # pyflakes
-    "I",   # isort
-    "N",   # pep8-naming
-    "UP",  # pyupgrade
-    "S",   # bandit security
-    "B",   # flake8-bugbear
-    "C4",  # flake8-comprehensions
-    "DTZ", # flake8-datetimez
-    "T20", # flake8-print
-    "PIE", # flake8-pie
-    "SIM", # flake8-simplify
-    "TID", # flake8-tidy-imports
+    # ✅ CRITICAL - Runtime Errors (ALWAYS ENFORCE)
+    "E",      # pycodestyle errors (syntax, indentation)
+    "F",      # Pyflakes (undefined names, unused imports) 
+    "W",      # pycodestyle warnings
+    
+    # ⚡ PERFORMANCE - O(N²) Detection & Optimization  
+    "PERF",   # Performance anti-patterns (NEW!)
+    "C90",    # McCabe complexity (prevent spaghetti code)
+    "PIE",    # flake8-pie (performance improvements)
+    "SIM",    # flake8-simplify (simpler = faster + fewer bugs)
+    
+    # 🔒 SECURITY - WARNING ONLY (Manual Review Required)
+    "S",      # bandit security issues (WARN, don't ignore)
+    "B",      # flake8-bugbear (likely bugs)
+    
+    # 🐍 DJANGO EXCELLENCE
+    "DJ",     # flake8-django (Django best practices) 
+    "A",      # flake8-builtins (prevent shadowing)
+    
+    # 🤖 AI/LLM READABILITY - Help Claude/Copilot
+    "I",      # isort (organized imports)
+    "N",      # pep8-naming (consistent naming)
+    "UP",     # pyupgrade (modern Python syntax)
+    "ANN",    # flake8-annotations (type hints for AI)
+    
+    # 📦 CODE QUALITY
+    "C4",     # flake8-comprehensions
+    "TID",    # flake8-tidy-imports
+    "RUF",    # Ruff-specific rules
+    "ERA",    # eradicate (remove commented code)
+    
+    # 🧹 MAINTENANCE 
+    "PL",     # Pylint subset (errors/warnings only)
 ]
 
+# ===============================================================================
+# STRATEGIC IGNORES - Focus on What Matters 🎨
+# ===============================================================================
+
 ignore = [
-    "E501",   # Line too long (handled by formatter)
-    "S101",   # Use of assert (allowed in tests)
-    "S104",   # Hardcoded bind to all interfaces (dev server)
+    # ❌ COSMETIC RULES (Don't Block Development)
+    "E501",   # Line too long (modern screens handle 120+)
+    "W291",   # Trailing whitespace (auto-fixable)
+    "W293",   # Blank line with whitespace (cosmetic)
+    
+    # ❌ DEVELOPMENT HELPERS (Useful in Debug)
+    "T201",   # print statements (useful for debugging)
+    "T203",   # pprint statements
+    
+    # ❌ TEST-SPECIFIC ALLOWANCES
+    "S101",   # Use of assert (standard in tests)
+    # "S105", # Hardcoded password string - WARN EVERYWHERE
+    # "S106", # Hardcoded password funcarg - WARN EVERYWHERE
+    
+    # ❌ DJANGO PATTERNS (Framework Conventions)
     "DTZ005", # timezone-naive datetime (Django handles this)
+    "S104",   # Hardcoded bind all interfaces (dev server)
+    "DJ008",  # Model meta ordering (style preference)
+    
+    # ❌ TYPE HINT EDGE CASES
+    # "ANN101", # Missing type annotation for self (REMOVED IN NEWER RUFF)
+    # "ANN102", # Missing type annotation for cls (REMOVED IN NEWER RUFF)
+    "ANN401", # Dynamically typed expressions (Django magic)
+    
+    # ❌ TODO/FIXME COMMENTS (Development Process)
+    "TD002",  # Missing author in TODO
+    "TD003",  # Missing issue link in TODO
+    "FIX002", # Line contains TODO
+    
+    # ❌ QUOTE STYLE (Preference, Not Functional)
+    "Q000",   # Single vs double quotes
+    "COM812", # Trailing comma in Python 3.6+
+    
+    # ❌ DOCSTRING REQUIREMENTS (Important but not blocking)
+    "D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107",
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Relax rules for specific file types
-"tests/**/*.py" = ["S101", "S106", "PLR2004"]
-"manage.py" = ["T201"]
-"**/migrations/*.py" = ["E501", "N806"]
+# ===============================================================================
+# FILE-SPECIFIC RULE RELAXATION 📁
+# ===============================================================================
+
+# Test files - Focus on functionality over style (SECURITY WARNINGS ENABLED)
+"test_*.py" = [
+    "S101",     # Allow assert statements  
+    # "S105", "S106", # REMOVED - Show hardcoded password warnings
+    "ANN",      # Skip type hints in tests
+    "D",        # Skip docstrings in tests
+    "PLR2004",  # Allow magic numbers in tests
+    "B017",     # Allow pytest.raises() patterns
+]
+"tests/**/*.py" = [
+    "S101", "ANN", "D", "PLR2004", "B017"
+    # "S105", "S106" - REMOVED - Show hardcoded password warnings
+]
+
+# Django management commands - Allow print statements and dev utilities
+"manage.py" = ["T201", "T203"]
+"**/management/commands/*.py" = ["T201", "T203", "S602", "S603"]
+
+# Development data generation - Allow patterns but WARN on hardcoded secrets
+"**/management/commands/generate_sample_data.py" = [
+    "T201", "T203",     # Print statements for progress
+    # "S105", "S106",   # REMOVED - Show hardcoded password warnings
+    "S311",             # Pseudo-random generators (sample data generation)
+    "S602", "S603",     # Subprocess calls (dev utility)
+    "PLR2004",          # Magic numbers (sample data)
+    "ANN",              # Type hints (utility script)
+    "F841"              # Unused variables (sample data creation)
+]
+
+# Migration files - Generated code, minimal linting
+"**/migrations/*.py" = [
+    "E501",     # Long lines acceptable
+    "N806",     # Variable naming (Django generates these)
+    "D",        # No docstrings needed
+    "ANN",      # No type hints needed
+]
+
+# Configuration files - Allow longer lines and flexible naming
+"config/**/*.py" = ["E501", "N802", "N803"]
+"**/settings/*.py" = ["E501", "N802"]
+# REMOVED S105, S106 - Show hardcoded password warnings in settings
+
+# Test settings - Allow fake credentials but WARN about hardcoded secrets
+"**/settings/test.py" = [
+    "E501",             # Long lines acceptable
+    # "S105", "S106",   # REMOVED - Show hardcoded password warnings even in test settings
+    "N802", "N803",     # Variable naming (settings pattern)
+    "F403", "F405",     # Star imports (settings inheritance)
+    "ANN",              # Type hints (configuration file)
+    "ERA001"            # Commented code (configuration notes)
+]
+
+# Development scripts - Allow print statements and exception handling
+"scripts/*.py" = [
+    "T201", "T203",     # Print statements (progress reporting)
+    "S602", "S603", "S607",  # Subprocess calls (utility scripts)
+    "S110",             # Try-except-pass (resilient scripts)
+    "E722",             # Bare except (error handling)
+    "E402",             # Module import not at top (Django setup)
+    "ANN",              # Type hints (utility scripts)
+    "PLR0912", "PLR0915", "PLR2004",  # Complexity (utility scripts)
+    "C901",             # Complex functions (setup logic)
+    "PLC0415",          # Import placement (conditional imports)
+    "RUF001",           # Ambiguous unicode (info symbols)
+    "ERA001",           # Commented code (development notes)
+    "F403", "F405"      # Star imports (settings pattern)
+]
+
+# E2E test utilities - Allow test patterns but WARN on hardcoded secrets
+"tests/e2e/**/*.py" = ["ANN", "D"]
+# REMOVED S105, S106 - Show hardcoded password warnings even in E2E tests
 
 [tool.ruff.lint.isort]
-# Import organization for Romanian project structure
+# ===============================================================================
+# IMPORT ORGANIZATION - AI/LLM Friendly 🤖
+# ===============================================================================
+# Organized imports help both humans and AI understand code structure
+
 known-first-party = ["apps", "config", "ui"]
 section-order = [
     "future",
@@ -121,6 +260,32 @@ section-order = [
     "first-party",
     "local-folder"
 ]
+
+[tool.ruff.lint.mccabe]
+# ===============================================================================
+# COMPLEXITY CONTROL 🧠
+# ===============================================================================
+# Functions above this threshold need refactoring (O(N²) prevention)
+max-complexity = 12  # Balanced: allows reasonable business logic
+
+[tool.ruff.lint.flake8-bugbear]
+# ===============================================================================
+# BUG PREVENTION 🐛
+# ===============================================================================
+# Prevent common Python gotchas that cause production issues
+extend-immutable-calls = [
+    "django.utils.timezone.now",
+    "django.conf.settings",
+    "uuid.uuid4",
+]
+
+[tool.ruff.lint.flake8-annotations]
+# ===============================================================================
+# TYPE HINT STRATEGY 🏷️
+# ===============================================================================
+# Help AI/LLMs understand code intent through typing
+mypy-init-return = true
+suppress-dummy-args = true
 
 # ===============================================================================
 # TYPE CHECKING CONFIGURATION

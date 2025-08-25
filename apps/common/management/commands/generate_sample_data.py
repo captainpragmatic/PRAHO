@@ -3,21 +3,16 @@ Django management command to generate sample data for PRAHO Platform
 Romanian hosting provider test data generation.
 """
 
-from django.core.management.base import BaseCommand
-fr            {
-                'name': 'VPS01',
-                'hostname': 'vps01.pragmatichost.com',
-                'server_type': 'vps',jango.contrib.auth import get_user_model
-from django.utils import timezone
-from decimal import Decimal
 import random
+from decimal import Decimal
+
+from django.contrib.auth import get_user_model
+from django.core.management.base import BaseCommand
 from faker import Faker
 
-from apps.customers.models import Customer, CustomerContact
-from apps.billing.models import Invoice, InvoiceItem
-from apps.provisioning.models import ServicePlan, Server, Service
+from apps.customers.models import Customer
+from apps.provisioning.models import Server, Service, ServicePlan
 from apps.tickets.models import SupportCategory, Ticket
-
 
 User = get_user_model()
 
@@ -72,7 +67,7 @@ class Command(BaseCommand):
         self.create_tickets(fake, customers, options['tickets'])
         
         self.stdout.write(
-            self.style.SUCCESS(f'✅ Date generate cu succes!')
+            self.style.SUCCESS('✅ Date generate cu succes!')
         )
 
     def create_admin_users(self, fake):

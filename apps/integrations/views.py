@@ -85,7 +85,7 @@ class WebhookView(View):
             logger.exception(f"💥 Critical error processing {self.source_name} webhook")
             return JsonResponse({
                 'status': 'error',
-                'message': f"Internal error: {str(e)}"
+                'message': f"Internal error: {e!s}"
             }, status=500)
 
     def extract_signature(self, request):
@@ -95,10 +95,7 @@ class WebhookView(View):
     def get_client_ip(self, request):
         """🌐 Get client IP address"""
         x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-        if x_forwarded_for:
-            ip = x_forwarded_for.split(',')[0]
-        else:
-            ip = request.META.get('REMOTE_ADDR')
+        ip = x_forwarded_for.split(',')[0] if x_forwarded_for else request.META.get('REMOTE_ADDR')
         return ip
 
 
@@ -153,16 +150,18 @@ def webhook_status(request):
 
     # Recent activity
     recent_webhooks = WebhookEvent.objects.order_by('-received_at')[:10]
-    recent_data = []
-    for webhook in recent_webhooks:
-        recent_data.append({
+    # ⚡ PERFORMANCE: Use list comprehension for better performance
+    recent_data = [
+        {
             'id': str(webhook.id),
             'source': webhook.source,
             'event_type': webhook.event_type,
             'status': webhook.status,
             'received_at': webhook.received_at.isoformat(),
             'processed_at': webhook.processed_at.isoformat() if webhook.processed_at else None,
-        })
+        }
+        for webhook in recent_webhooks
+    ]
 
     return JsonResponse({
         'stats': stats,
@@ -215,5 +214,5 @@ def retry_webhook(request, webhook_id):
     except Exception as e:
         logger.exception(f"Error retrying webhook {webhook_id}")
         return JsonResponse({
-            'error': f'Internal error: {str(e)}'
+            'error': f'Internal error: {e!s}'
         }, status=500)

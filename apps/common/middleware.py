@@ -149,10 +149,7 @@ class AuditMiddleware:
     def _get_client_ip(self, request: HttpRequest) -> str:
         """Get real client IP address"""
         x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-        if x_forwarded_for:
-            ip = x_forwarded_for.split(',')[0]
-        else:
-            ip = request.META.get('REMOTE_ADDR')
+        ip = x_forwarded_for.split(',')[0] if x_forwarded_for else request.META.get('REMOTE_ADDR')
         return ip
 
 
@@ -186,9 +183,8 @@ class JSONResponseMiddleware:
         response = self.get_response(request)
 
         # Add JSON content type for API responses
-        if request.path.startswith('/api/'):
-            if not response.get('Content-Type'):
-                response['Content-Type'] = 'application/json'
+        if request.path.startswith('/api/') and not response.get('Content-Type'):
+            response['Content-Type'] = 'application/json'
 
         return response
 

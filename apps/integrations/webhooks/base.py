@@ -98,14 +98,14 @@ class BaseWebhookProcessor:
                         return False, message, webhook_event
 
                 except Exception as e:
-                    error_msg = f"Processing error: {str(e)}"
+                    error_msg = f"Processing error: {e!s}"
                     webhook_event.mark_failed(error_msg)
                     logger.exception(f"💥 Exception processing {self.source_name} webhook {event_id}")
                     return False, error_msg, webhook_event
 
         except Exception as e:
             logger.exception(f"💥 Critical error processing {self.source_name} webhook")
-            return False, f"Critical error: {str(e)}", None
+            return False, f"Critical error: {e!s}", None
 
     def extract_event_id(self, payload: dict[str, Any]) -> str | None:
         """🔍 Extract unique event ID from payload - override in subclasses"""
@@ -260,10 +260,7 @@ def should_retry_webhook(webhook_event: WebhookEvent, max_retries: int = 5) -> b
 
     # Don't retry if webhook is too old (7 days)
     age_days = (timezone.now() - webhook_event.received_at).days
-    if age_days > 7:
-        return False
-
-    return True
+    return not age_days > 7
 
 
 # ===============================================================================
@@ -301,7 +298,7 @@ def process_pending_webhooks(source: str = None, limit: int = 100) -> dict[str, 
                 stats['failed'] += 1
 
         except Exception as e:
-            webhook_event.mark_failed(f"Processing exception: {str(e)}")
+            webhook_event.mark_failed(f"Processing exception: {e!s}")
             stats['failed'] += 1
             logger.exception(f"💥 Error processing webhook {webhook_event.id}")
 
@@ -347,7 +344,7 @@ def retry_failed_webhooks(source: str = None) -> dict[str, int]:
                 stats['failed'] += 1
 
         except Exception as e:
-            webhook_event.mark_failed(f"Retry exception: {str(e)}")
+            webhook_event.mark_failed(f"Retry exception: {e!s}")
             stats['failed'] += 1
             logger.exception(f"💥 Error retrying webhook {webhook_event.id}")
 

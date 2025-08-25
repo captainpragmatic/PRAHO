@@ -223,7 +223,7 @@ class UserAdmin(BaseUserAdmin):
                     messages.error(request, f'❌ Failed to disable 2FA for {user.email}')
 
             except Exception as e:
-                messages.error(request, f'❌ Error disabling 2FA: {str(e)}')
+                messages.error(request, f'❌ Error disabling 2FA: {e!s}')
 
         return HttpResponseRedirect(reverse('admin:users_user_change', args=[user_id]))
 
@@ -250,7 +250,7 @@ class UserAdmin(BaseUserAdmin):
                 )
 
             except Exception as e:
-                messages.error(request, f'❌ Error generating backup codes: {str(e)}')
+                messages.error(request, f'❌ Error generating backup codes: {e!s}')
 
         return HttpResponseRedirect(reverse('admin:users_user_change', args=[user_id]))
 

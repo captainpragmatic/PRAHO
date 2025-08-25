@@ -171,7 +171,7 @@ def validate_romanian_phone(phone: str) -> Result[str, str]:
         local_digits = digits[2:]
         if len(local_digits) >= 9 and len(local_digits) <= 10:
             # Check if it's a valid Romanian number (starts with 7 for mobile or 2/3 for landline)
-            if local_digits.startswith('7') or local_digits.startswith('2') or local_digits.startswith('3'):
+            if local_digits.startswith(('7', '2', '3')):
                 return Ok(f"+40{local_digits}")
 
     # Handle national format (starts with 0)
@@ -179,13 +179,13 @@ def validate_romanian_phone(phone: str) -> Result[str, str]:
         local_digits = digits[1:]  # Remove leading 0
         if len(local_digits) >= 9 and len(local_digits) <= 10:
             # Check if it's a valid Romanian number
-            if local_digits.startswith('7') or local_digits.startswith('2') or local_digits.startswith('3'):
+            if local_digits.startswith(('7', '2', '3')):
                 return Ok(f"+40{local_digits}")
 
     # Handle direct format (without country code or leading 0)
     elif len(digits) >= 9 and len(digits) <= 10:
         # Check if it's a valid Romanian number
-        if digits.startswith('7') or digits.startswith('2') or digits.startswith('3'):
+        if digits.startswith(('7', '2', '3')):
             return Ok(f"+40{digits}")
 
     return Err("Invalid Romanian phone number format. Expected: +40 721 123 456, 0721 123 456, or 721 123 456")

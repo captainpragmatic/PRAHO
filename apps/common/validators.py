@@ -354,15 +354,14 @@ class SecureInputValidator:
 
         # Boolean fields with type safety
         if 'accepts_marketing' in user_data:
-            if isinstance(user_data['accepts_marketing'], (bool, str)):
+            if isinstance(user_data['accepts_marketing'], bool | str):
                 validated_data['accepts_marketing'] = bool(user_data['accepts_marketing'])
             else:
                 raise ValidationError(_("Invalid input format"))
 
         # GDPR consent validation
-        if 'gdpr_consent_date' in user_data:
-            if user_data['gdpr_consent_date']:
-                validated_data['gdpr_consent_date'] = timezone.now()
+        if user_data.get('gdpr_consent_date'):
+            validated_data['gdpr_consent_date'] = timezone.now()
 
         return validated_data
 
@@ -406,7 +405,7 @@ class SecureInputValidator:
         # Address fields (optional)
         address_fields = ['billing_address', 'billing_city', 'billing_postal_code']
         for field in address_fields:
-            if field in customer_data and customer_data[field]:
+            if customer_data.get(field):
                 value = customer_data[field].strip()
                 SecureInputValidator._check_malicious_patterns(value)
                 validated_data[field] = value
@@ -518,7 +517,7 @@ class BusinessLogicValidator:
         BusinessLogicValidator.validate_user_permissions(inviter, customer, 'owner')
 
         # Validate role
-        validated_role = SecureInputValidator.validate_customer_role(role)
+        SecureInputValidator.validate_customer_role(role)
 
         # Validate invitee email
         validated_email = SecureInputValidator.validate_email_secure(invitee_email, 'invitation')
@@ -547,8 +546,8 @@ class SecureErrorHandler:
         Return safe error messages that don't leak sensitive information
         """
         # Log detailed error for administrators
-        error_id = hashlib.sha256(f"{str(error)}{time.time()}".encode()).hexdigest()[:8]
-        logger.error(f"🔥 [Security] {context} error {error_id}: {str(error)}")
+        error_id = hashlib.sha256(f"{error!s}{time.time()}".encode()).hexdigest()[:8]
+        logger.error(f"🔥 [Security] {context} error {error_id}: {error!s}")
 
         # Return generic error message to user
         generic_messages = {

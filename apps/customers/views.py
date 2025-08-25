@@ -45,12 +45,11 @@ def customer_list(request):
     from django.db.models import QuerySet
     if isinstance(accessible_customers_list, QuerySet):
         customers = accessible_customers_list
+    elif accessible_customers_list:
+        customer_ids = [c.id for c in accessible_customers_list]
+        customers = Customer.objects.filter(id__in=customer_ids)
     else:
-        if accessible_customers_list:
-            customer_ids = [c.id for c in accessible_customers_list]
-            customers = Customer.objects.filter(id__in=customer_ids)
-        else:
-            customers = Customer.objects.none()
+        customers = Customer.objects.none()
 
     # Search functionality - updated for new model structure
     search_query = request.GET.get('search', '')

@@ -10,19 +10,21 @@ This module tests navigation header functionality including:
 Uses shared utilities from tests.e2e.utils for consistency.
 """
 
-import pytest
 from playwright.sync_api import Page
 
 # Import shared utilities
 from tests.e2e.utils import (
-    BASE_URL,
-    SUPERUSER_EMAIL, SUPERUSER_PASSWORD,
-    CUSTOMER_EMAIL, CUSTOMER_PASSWORD,
-    login_user, logout_user, ensure_fresh_session,
+    CUSTOMER_EMAIL,
+    CUSTOMER_PASSWORD,
+    SUPERUSER_EMAIL,
+    SUPERUSER_PASSWORD,
+    assert_no_console_errors,
+    count_elements,
+    ensure_fresh_session,
+    get_test_user_credentials,
+    login_user,
     navigate_to_dashboard,
-    get_serious_console_errors, assert_no_console_errors,
-    safe_click_element, count_elements,
-    get_test_user_credentials
+    safe_click_element,
 )
 
 
@@ -89,10 +91,7 @@ def test_navigation_header_interactions(page: Page):
                                 text = element.inner_text()[:30] or element.get_attribute("title") or "nav element"
                                 
                                 # Skip problematic links
-                                if (href.startswith('mailto:') or href.startswith('tel:') or
-                                    href.startswith('javascript:') or href == '#' or
-                                    'logout' in href.lower() or 'signout' in href.lower() or
-                                    (href and not href.startswith('/'))):
+                                if (href.startswith(('mailto:', 'tel:', 'javascript:')) or href == '#' or 'logout' in href.lower() or 'signout' in href.lower() or (href and not href.startswith('/'))):
                                     print(f"        ⚠️  Skipping: {text} ({href})")
                                     continue
                                 
@@ -108,7 +107,7 @@ def test_navigation_header_interactions(page: Page):
                                     
                                     # If we're no longer on the dashboard, navigate back
                                     if "/app/" not in current_url and "/auth/login/" not in current_url:
-                                        print(f"          🔄 Navigating back to dashboard")
+                                        print("          🔄 Navigating back to dashboard")
                                         navigate_to_dashboard(page)
                                     elif "/auth/login/" in current_url:
                                         # If we got logged out, break out of this user's testing
@@ -282,7 +281,7 @@ def test_mobile_navigation_responsiveness(page: Page):
         if count > 0:
             # Test clicking mobile menu toggle
             if safe_click_element(page, selector, f"mobile {description}"):
-                print(f"      ✅ Mobile menu toggle clicked")
+                print("      ✅ Mobile menu toggle clicked")
                 
                 # Wait for mobile menu animation
                 page.wait_for_timeout(500)
@@ -297,7 +296,7 @@ def test_mobile_navigation_responsiveness(page: Page):
                 
                 for menu_selector in expanded_menu_selectors:
                     if count_elements(page, menu_selector, 'expanded mobile menu') > 0:
-                        print(f"      ✅ Mobile menu expanded successfully")
+                        print("      ✅ Mobile menu expanded successfully")
                         break
     
     print(f"  📱 Mobile navigation elements found: {mobile_elements_found}")

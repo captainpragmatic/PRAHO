@@ -598,7 +598,7 @@ Move to layered architecture when **any 2 apply**:
 - **Service relationships** - Advanced service dependencies and grouping
 - **Webhook deduplication** - Production-ready external service integration infrastructure
 - **Development environment** - Docker, sample data generation
-- **Code quality** - Linting, type hints, security best practices
+- **Code quality** - Strategic linting framework (Ruff + MyPy), performance optimizations, security-first approach
 
 ### 🚧 **In Progress** (Development Stage)
 - **Template system** - Base templates complete, forms need styling consistency

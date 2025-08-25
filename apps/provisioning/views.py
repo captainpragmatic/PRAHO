@@ -75,11 +75,10 @@ def service_create(request):
     accessible_customers = request.user.get_accessible_customers()
     if hasattr(accessible_customers, 'all'):
         customers = accessible_customers.all()
+    elif isinstance(accessible_customers, list | tuple):
+        customers = Customer.objects.filter(id__in=[c.id for c in accessible_customers])
     else:
-        if isinstance(accessible_customers, (list, tuple)):
-            customers = Customer.objects.filter(id__in=[c.id for c in accessible_customers])
-        else:
-            customers = accessible_customers
+        customers = accessible_customers
     plans = ServicePlan.objects.filter(is_active=True)
 
     if request.method == 'POST':
@@ -131,11 +130,10 @@ def service_edit(request, pk):
     accessible_customers = request.user.get_accessible_customers()
     if hasattr(accessible_customers, 'all'):
         customers = accessible_customers.all()
+    elif isinstance(accessible_customers, list | tuple):
+        customers = Customer.objects.filter(id__in=[c.id for c in accessible_customers])
     else:
-        if isinstance(accessible_customers, (list, tuple)):
-            customers = Customer.objects.filter(id__in=[c.id for c in accessible_customers])
-        else:
-            customers = accessible_customers
+        customers = accessible_customers
     plans = ServicePlan.objects.filter(is_active=True)
 
     if request.method == 'POST':

@@ -285,9 +285,11 @@ docker-compose -f docker-compose.prod.yml up -d
 ## 📚 Documentation
 
 - **[Architecture Guide](docs/ARCHITECTURE.md)** - Detailed system design
+- **[Linting Guide](docs/LINTING_GUIDE.md)** - Strategic code quality framework
 - **[API Documentation](docs/API.md)** - REST API reference
 - **[Deployment Guide](docs/DEPLOYMENT.md)** - Production deployment
 - **[Romanian Business Guide](docs/ROMANIAN_COMPLIANCE.md)** - Compliance features
+- **[ADRs](docs/adrs/)** - Architecture decision records
 - **[Changelog](docs/CHANGELOG.md)** - Version history
 
 ## 🤝 Contributing
@@ -300,10 +302,11 @@ docker-compose -f docker-compose.prod.yml up -d
 5. Submit a pull request
 
 ### Code Quality
-- **Ruff** for linting and formatting
-- **MyPy** for type checking
+- **Strategic Linting Framework** - Ruff + MyPy with business-impact focus (see [Linting Guide](docs/LINTING_GUIDE.md))
+- **Performance Optimization** - O(N) list operations, query optimization
+- **Security-First Approach** - Manual credential review, OWASP compliance
+- **AI/LLM Readability** - Consistent patterns, type annotations
 - **Coverage** minimum 85%
-- **Security scanning** with bandit
 
 ## 📞 Support
 

@@ -6,7 +6,7 @@ Centralized audit logging for Romanian compliance and security.
 import json
 import logging
 import uuid
-from typing import TYPE_CHECKING, Any, Tuple
+from typing import TYPE_CHECKING, Any
 
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.models import ContentType
@@ -18,6 +18,7 @@ from .models import AuditEvent, ComplianceLog
 
 if TYPE_CHECKING:
     from apps.common.types import Result
+
     from .models import DataExport
 
 User = get_user_model()
@@ -251,7 +252,7 @@ class GDPRExportService:
 
         except Exception as e:
             logger.error(f"🔥 [GDPR Export] Failed to create request for {user.email}: {e}")
-            return Err(f"Failed to create export request: {str(e)}")
+            return Err(f"Failed to create export request: {e!s}")
 
     @classmethod
     @transaction.atomic
@@ -320,7 +321,7 @@ class GDPRExportService:
             export_request.save(update_fields=['status', 'error_message'])
 
             logger.error(f"🔥 [GDPR Export] Processing failed for {user.email}: {e}")
-            return Err(f"Export processing failed: {str(e)}")
+            return Err(f"Export processing failed: {e!s}")
 
     @classmethod
     def _collect_user_data(cls, user: User, scope: dict[str, Any]) -> dict[str, Any]:
@@ -490,7 +491,7 @@ class GDPRDeletionService:
 
         except Exception as e:
             logger.error(f"🔥 [GDPR Deletion] Failed to create request for {user.email}: {e}")
-            return Err(f"Failed to create deletion request: {str(e)}")
+            return Err(f"Failed to create deletion request: {e!s}")
 
     @classmethod
     @transaction.atomic
@@ -547,10 +548,10 @@ class GDPRDeletionService:
             deletion_request.evidence['error'] = str(e)
             deletion_request.save(update_fields=['status', 'evidence'])
             logger.error(f"🔥 [GDPR Deletion] Processing failed: {e}")
-            return Err(f"Deletion processing failed: {str(e)}")
+            return Err(f"Deletion processing failed: {e!s}")
 
     @classmethod
-    def _can_user_be_deleted(cls, user: User) -> 'Tuple[bool, str | None]':
+    def _can_user_be_deleted(cls, user: User) -> 'tuple[bool, str | None]':
         """Check if user can be completely deleted based on business rules"""
 
         restrictions = []
@@ -607,7 +608,7 @@ class GDPRDeletionService:
 
         except Exception as e:
             logger.error(f"🔥 [GDPR Anonymization] Failed to anonymize user {user.email}: {e}")
-            return Err(f"Anonymization failed: {str(e)}")
+            return Err(f"Anonymization failed: {e!s}")
 
     @classmethod
     def _delete_user_data(cls, user: User) -> 'Result[str, str]':
@@ -630,7 +631,7 @@ class GDPRDeletionService:
 
         except Exception as e:
             logger.error(f"🔥 [GDPR Deletion] Failed to delete user {user.email}: {e}")
-            return Err(f"Deletion failed: {str(e)}")
+            return Err(f"Deletion failed: {e!s}")
 
 
 class GDPRConsentService:
@@ -711,7 +712,7 @@ class GDPRConsentService:
 
         except Exception as e:
             logger.error(f"🔥 [GDPR Consent] Failed to withdraw consent for {user.email}: {e}")
-            return Err(f"Consent withdrawal failed: {str(e)}")
+            return Err(f"Consent withdrawal failed: {e!s}")
 
     @classmethod
     def get_consent_history(cls, user: User) -> 'List[dict[str, Any]]':
@@ -724,15 +725,17 @@ class GDPRConsentService:
                 user=user
             ).order_by('-timestamp')
 
-            history = []
-            for log in consent_logs:
-                history.append({
+            # ⚡ PERFORMANCE: Use list comprehension for better performance
+            history = [
+                {
                     'timestamp': log.timestamp.isoformat(),
                     'action': log.description,
                     'description': log.description,  # Include both for backward compatibility
                     'status': log.status,
                     'evidence': log.evidence
-                })
+                }
+                for log in consent_logs
+            ]
 
             return history
 

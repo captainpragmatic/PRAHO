@@ -126,7 +126,7 @@ class PaymentTestCase(TestCase):
 
     def test_payment_currency_protect_on_delete(self):
         """Test PROTECT on delete when currency is referenced"""
-        payment = Payment.objects.create(
+        Payment.objects.create(
             customer=self.customer,
             currency=self.currency,
             amount_cents=1000,
@@ -139,7 +139,7 @@ class PaymentTestCase(TestCase):
 
     def test_payment_customer_restrict_on_delete(self):
         """Test RESTRICT on delete when customer is referenced"""
-        payment = Payment.objects.create(
+        Payment.objects.create(
             customer=self.customer,
             currency=self.currency,
             amount_cents=1000,
@@ -159,7 +159,6 @@ class PaymentTestCase(TestCase):
             method='card'
         )
 
-        invoice_id = self.invoice.pk
         self.invoice.delete()
 
         payment.refresh_from_db()
@@ -315,7 +314,7 @@ class PaymentIntegrationTestCase(TestCase):
 
     def test_payment_indexes_performance(self):
         """Test payment index performance"""
-        payment = Payment.objects.create(
+        Payment.objects.create(
             customer=self.customer,
             currency=self.currency,
             amount_cents=1000,

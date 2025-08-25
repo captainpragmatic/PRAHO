@@ -239,10 +239,9 @@ class PragmaticHostScheduler:
 
     def get_scheduled_tasks(self) -> dict[str, Any]:
         """Get information about scheduled tasks"""
-        task_info = []
-
-        for task in self.tasks:
-            task_info.append({
+        # ⚡ PERFORMANCE: Use list comprehension instead of append loop
+        task_info = [
+            {
                 'name': task.name,
                 'description': task.description,
                 'schedule_type': task.schedule_type,
@@ -250,7 +249,9 @@ class PragmaticHostScheduler:
                 'queue': task.queue,
                 'last_run': task.last_run.isoformat() if task.last_run else None,
                 'next_run': task.next_run.isoformat() if task.next_run else None,
-            })
+            }
+            for task in self.tasks
+        ]
 
         return {
             'total_tasks': len(self.tasks),

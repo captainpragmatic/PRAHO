@@ -53,9 +53,29 @@ test:
 # Run E2E tests with Django and Playwright
 test-e2e:
 	@echo "🎭 Running E2E tests with pytest-playwright..."
-	@echo "ℹ️  Make sure development server is running: make dev"
-	.venv/bin/pytest tests/e2e/ -v --tb=short
-	@echo "✅ E2E tests completed successfully!"
+	@echo "🚀 Starting development server in background..."
+	@# Kill any existing development servers
+	@pkill -f "manage.py runserver" || true
+	@# Start the development server in background
+	@.venv/bin/python manage.py migrate --settings=config.settings.test > /dev/null 2>&1
+	@.venv/bin/python scripts/setup_test_data.py > /dev/null 2>&1 || true
+	@.venv/bin/python manage.py runserver 0.0.0.0:8001 > /dev/null 2>&1 & 
+	@echo "⏳ Waiting for server to start..."
+	@sleep 3
+	@# Check if server is responding
+	@curl -s -I http://localhost:8001/ | head -1 | grep -q "200\|302" || (echo "❌ Server failed to start" && exit 1)
+	@echo "✅ Development server is ready"
+	@# Run the E2E tests
+	.venv/bin/pytest tests/e2e/ -v --tb=short; \
+	TEST_EXIT_CODE=$$?; \
+	echo "🛑 Stopping development server..."; \
+	pkill -f "manage.py runserver" || true; \
+	if [ $$TEST_EXIT_CODE -eq 0 ]; then \
+		echo "✅ E2E tests completed successfully!"; \
+	else \
+		echo "❌ E2E tests failed"; \
+		exit $$TEST_EXIT_CODE; \
+	fi
 
 # Run all tests including E2E
 test-with-e2e:
@@ -130,12 +150,77 @@ clean:
 	rm -rf .pytest_cache/
 	rm -rf .mypy_cache/
 
-# Code quality checks (keeping existing reliable setup)
+# ===============================================================================
+# LINTING & CODE QUALITY - Strategic Business Focus 🧹
+# ===============================================================================
+
+.PHONY: lint lint-fix lint-check lint-security lint-credentials lint-performance lint-watch
+
+## lint: Run comprehensive strategic linting (Ruff + MyPy) 🔍
 lint:
-	@echo "🔍 Running code quality checks..."
-	.venv/bin/python -m ruff check .
-	.venv/bin/python -m mypy .
-	@echo "✅ Code quality checks complete"
+	@echo "🎯 PRAHO Platform - Strategic Code Quality Check"
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "🔍 1/3: Performance & Security Analysis..."
+	@.venv/bin/ruff check . --statistics
+	@echo ""
+	@echo "🏷️ 2/3: Type Safety Analysis..."  
+	@.venv/bin/mypy apps/ config/ --ignore-missing-imports --show-error-codes
+	@echo ""
+	@echo "📊 3/3: Django Check..."
+	@.venv/bin/python manage.py check --deploy
+	@echo "✅ Strategic linting complete! Focus on performance & security issues."
+
+## lint-fix: Auto-fix strategic issues (safe fixes only) 🔧
+lint-fix:
+	@echo "� Auto-fixing strategic linting issues..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@.venv/bin/ruff check . --fix
+	@.venv/bin/ruff format .
+	@echo "✅ Auto-fix complete! Review changes before committing."
+
+## lint-check: Check only, no fixes (CI/CD friendly) 🤖
+lint-check:
+	@echo "🤖 CI/CD Strategic Lint Check..."
+	@.venv/bin/ruff check . --no-fix --quiet
+	@.venv/bin/mypy apps/ config/ --ignore-missing-imports
+
+## lint-security: Focus on security issues only 🔒
+lint-security:
+	@echo "🔒 Security-focused linting (including hardcoded credentials)..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "⚠️  WARNING: Review all hardcoded credentials below:"
+	@echo ""
+	@.venv/bin/ruff check . --select=S --statistics
+	@echo ""
+	@echo "🔍 Focus areas:"
+	@echo "  • S105/S106: Hardcoded passwords/secrets (REVIEW REQUIRED)"
+	@echo "  • S602/S603: Subprocess security issues"
+	@echo "  • S301-S324: Security anti-patterns"
+
+## lint-credentials: Check for hardcoded credentials everywhere 🔑
+lint-credentials:
+	@echo "🔑 Hardcoded Credentials Security Check"
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "⚠️  REVIEWING ALL HARDCODED PASSWORDS & SECRETS:"
+	@echo ""
+	@.venv/bin/ruff check . --select=S105,S106,S107,S108 --output-format=concise || true
+	@echo ""
+	@echo "📋 Review Guidelines:"
+	@echo "  ✅ Development/Test files: Usually acceptable"
+	@echo "  ⚠️  Configuration files: Should use environment variables"
+	@echo "  🚨 Production code: Never acceptable"
+	@echo "  💡 Use os.environ.get() or Django settings for real secrets"
+
+## lint-performance: Focus on performance issues only ⚡
+lint-performance:
+	@echo "⚡ Performance-focused linting..."
+	@.venv/bin/ruff check . --select=PERF,C90,PIE,SIM --statistics
+
+## lint-watch: Watch for changes and lint automatically 👀
+lint-watch:
+	@echo "👀 Watching for changes... (Ctrl+C to stop)"
+	@command -v watchfiles >/dev/null 2>&1 || (.venv/bin/pip install watchfiles)
+	@.venv/bin/watchfiles ".venv/bin/ruff check . --quiet" apps/ config/
 
 # Production deployment helpers
 deploy-check:

@@ -216,7 +216,6 @@ class GDPRDeletionServiceTest(TestCase):
 
         # Store original values
         original_email = self.user.email
-        original_first_name = self.user.first_name
 
         # Process the deletion
         process_result = gdpr_deletion_service.process_deletion_request(deletion_request)

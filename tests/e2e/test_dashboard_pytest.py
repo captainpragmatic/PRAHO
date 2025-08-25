@@ -10,17 +10,20 @@ This module tests dashboard functionality including:
 Uses shared utilities from tests.e2e.utils for consistency.
 """
 
-import pytest
 from playwright.sync_api import Page
 
 # Import shared utilities
 from tests.e2e.utils import (
     BASE_URL,
-    SUPERUSER_EMAIL, SUPERUSER_PASSWORD,
-    CUSTOMER_EMAIL, CUSTOMER_PASSWORD,
-    login_user, navigate_to_dashboard,
-    get_serious_console_errors, assert_no_console_errors,
-    safe_click_element, count_elements
+    CUSTOMER_EMAIL,
+    CUSTOMER_PASSWORD,
+    SUPERUSER_EMAIL,
+    SUPERUSER_PASSWORD,
+    assert_no_console_errors,
+    count_elements,
+    login_user,
+    navigate_to_dashboard,
+    safe_click_element,
 )
 
 
@@ -224,9 +227,7 @@ def test_dashboard_button_interactions(page: Page):
                         text = element.inner_text()[:30] or element.get_attribute("title") or "element"
                         
                         # Skip problematic links
-                        if (href.startswith('mailto:') or href.startswith('tel:') or
-                            href.startswith('javascript:') or href == '#' or
-                            (href and not href.startswith('/'))):
+                        if (href.startswith(('mailto:', 'tel:', 'javascript:')) or href == '#' or (href and not href.startswith('/'))):
                             print(f"        ⚠️  Skipping: {text} ({href})")
                             continue
                         
@@ -241,7 +242,7 @@ def test_dashboard_button_interactions(page: Page):
                             
                             # Content clicks should keep us on dashboard or related pages
                             if "/app/" not in current_url:
-                                print(f"        🔄 Unexpected navigation, returning to dashboard")
+                                print("        🔄 Unexpected navigation, returning to dashboard")
                                 navigate_to_dashboard(page)
                             
                 except Exception as element_error:

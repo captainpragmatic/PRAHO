@@ -112,10 +112,9 @@ class PragmaticHostDeployment:
             logger.info(f"Starting deployment: {release_name} (branch: {deploy_branch})")
 
             # 1. Create backup (if enabled)
-            if self.config['backup_before_deploy'] and not skip_backup:
-                if not self._create_backup():
-                    logger.error("Backup failed, aborting deployment")
-                    return False
+            if self.config['backup_before_deploy'] and not skip_backup and not self._create_backup():
+                logger.error("Backup failed, aborting deployment")
+                return False
 
             # 2. Clone repository
             if not self._clone_repository(release_dir, deploy_branch):
@@ -130,14 +129,12 @@ class PragmaticHostDeployment:
                 return False
 
             # 5. Run database migrations
-            if self.config['run_migrations']:
-                if not self._run_migrations(release_dir):
-                    return False
+            if self.config['run_migrations'] and not self._run_migrations(release_dir):
+                return False
 
             # 6. Collect static files
-            if self.config['collect_static']:
-                if not self._collect_static_files(release_dir):
-                    return False
+            if self.config['collect_static'] and not self._collect_static_files(release_dir):
+                return False
 
             # 7. Update symlink (atomic deployment)
             if not self._update_current_symlink(release_dir):
@@ -178,7 +175,7 @@ class PragmaticHostDeployment:
                 return True
 
             cmd = [sys.executable, str(backup_script)]
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, check=False, capture_output=True, text=True)
 
             if result.returncode != 0:
                 logger.error(f"Backup failed: {result.stderr}")
@@ -204,7 +201,7 @@ class PragmaticHostDeployment:
                 str(release_dir)
             ]
 
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, check=False, capture_output=True, text=True)
 
             if result.returncode != 0:
                 logger.error(f"Git clone failed: {result.stderr}")
@@ -283,7 +280,7 @@ class PragmaticHostDeployment:
 
             result = subprocess.run(
                 cmd,
-                cwd=str(release_dir),
+                check=False, cwd=str(release_dir),
                 capture_output=True,
                 text=True
             )
@@ -316,7 +313,7 @@ class PragmaticHostDeployment:
 
             result = subprocess.run(
                 cmd,
-                cwd=str(release_dir),
+                check=False, cwd=str(release_dir),
                 env=env,
                 capture_output=True,
                 text=True
@@ -351,7 +348,7 @@ class PragmaticHostDeployment:
 
             result = subprocess.run(
                 cmd,
-                cwd=str(release_dir),
+                check=False, cwd=str(release_dir),
                 env=env,
                 capture_output=True,
                 text=True
@@ -400,7 +397,7 @@ class PragmaticHostDeployment:
                     logger.info(f"Restarting {service}...")
 
                     cmd = ['sudo', 'systemctl', 'restart', service]
-                    result = subprocess.run(cmd, capture_output=True, text=True)
+                    result = subprocess.run(cmd, check=False, capture_output=True, text=True)
 
                     if result.returncode != 0:
                         logger.error(f"Failed to restart {service}: {result.stderr}")
@@ -494,7 +491,7 @@ class PragmaticHostDeployment:
 
             for release in to_remove:
                 logger.info(f"Removing old release: {release.name}")
-                subprocess.run(['rm', '-rf', str(release)])
+                subprocess.run(['rm', '-rf', str(release)], check=False)
 
             logger.info(f"Cleaned up {len(to_remove)} old releases")
 

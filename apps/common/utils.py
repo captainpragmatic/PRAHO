@@ -219,11 +219,10 @@ def maintenance_mode_check(view_func: Callable) -> Callable:
     """Check if system is in maintenance mode"""
     @wraps(view_func)
     def wrapper(request, *args, **kwargs):
-        if getattr(settings, 'MAINTENANCE_MODE', False):
-            if not request.user.is_staff:
-                return HttpResponse(
-                    _("System is under maintenance. Please try again later."),
-                    status=503
-                )
+        if getattr(settings, 'MAINTENANCE_MODE', False) and not request.user.is_staff:
+            return HttpResponse(
+                _("System is under maintenance. Please try again later."),
+                status=503
+            )
         return view_func(request, *args, **kwargs)
     return wrapper

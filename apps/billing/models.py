@@ -699,10 +699,7 @@ class TaxRule(models.Model):
         if date < self.valid_from:
             return False
 
-        if self.valid_to and date > self.valid_to:
-            return False
-
-        return True
+        return not (self.valid_to and date > self.valid_to)
 
     @classmethod
     def get_active_rate(cls, country_code, tax_type='vat', date=None):

@@ -165,7 +165,7 @@ class PragmaticHostBackup:
                 env = os.environ.copy()
                 env['PGPASSWORD'] = db_config['PASSWORD']
 
-                result = subprocess.run(cmd, env=env, capture_output=True, text=True)
+                result = subprocess.run(cmd, check=False, env=env, capture_output=True, text=True)
 
                 if result.returncode != 0:
                     logger.error(f"PostgreSQL backup failed: {result.stderr}")
@@ -227,7 +227,7 @@ class PragmaticHostBackup:
                 f"{media_backup_path}/"
             ]
 
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, check=False, capture_output=True, text=True)
 
             if result.returncode != 0:
                 logger.error(f"Media backup failed: {result.stderr}")
@@ -292,7 +292,7 @@ class PragmaticHostBackup:
                 backup_path.name
             ]
 
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, check=False, capture_output=True, text=True)
 
             if result.returncode != 0:
                 logger.error(f"Archive creation failed: {result.stderr}")
@@ -436,14 +436,17 @@ class PragmaticHostBackup:
                     Prefix='backups/pragmatichost/'
                 )
 
-                for obj in response.get('Contents', []):
-                    backups.append({
+                # ⚡ PERFORMANCE: Use list extend for better performance than multiple appends
+                backups.extend([
+                    {
                         'name': obj['Key'].split('/')[-1],
                         'path': f"s3://{self.s3_bucket}/{obj['Key']}",
                         'size': obj['Size'],
                         'created': obj['LastModified'].replace(tzinfo=None),
                         'location': 's3'
-                    })
+                    }
+                    for obj in response.get('Contents', [])
+                ])
 
             except ClientError as e:
                 logger.warning(f"Failed to list S3 backups: {e}")

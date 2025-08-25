@@ -155,7 +155,7 @@ class MFAAttackPreventionTests(TestCase):
         self.assertTrue(result1['success'])
 
         # Immediate replay within same time window should be detectable
-        result2 = mfa_service.verify_mfa_code(self.user, current_code)
+        mfa_service.verify_mfa_code(self.user, current_code)
         # Note: Current implementation may not have strict replay protection
         # This test documents expected behavior for future enhancement
 
@@ -171,7 +171,7 @@ class MFAAttackPreventionTests(TestCase):
 
         # Attempt multiple wrong codes
         failed_attempts = 0
-        for attempt in range(10):  # Try many attempts
+        for _attempt in range(10):  # Try many attempts
             result = mfa_service.verify_mfa_code(self.user, "000000")
             if not result['success']:
                 failed_attempts += 1
@@ -205,7 +205,7 @@ class MFAAttackPreventionTests(TestCase):
             start_time = time.perf_counter()
 
             try:
-                result = mfa_service.verify_mfa_code(self.user, test_code)
+                mfa_service.verify_mfa_code(self.user, test_code)
             except Exception:
                 pass  # Expected for some cases
 
@@ -310,10 +310,10 @@ class MFAComplianceTests(TestCase):
         # Test successful verification
         totp = pyotp.TOTP(secret)
         current_code = totp.now()
-        result = mfa_service.verify_mfa_code(self.user, current_code)
+        mfa_service.verify_mfa_code(self.user, current_code)
 
         # Test backup code usage
-        result = mfa_service.verify_mfa_code(self.user, backup_codes[0])
+        mfa_service.verify_mfa_code(self.user, backup_codes[0])
 
         # Test 2FA disablement
         mfa_service.disable_totp(self.user)
@@ -365,8 +365,8 @@ class MFAPerformanceSecurityTests(TestCase):
         start_time = time.perf_counter()
 
         for user in self.users:
-            for attempt in range(3):
-                result = mfa_service.verify_mfa_code(user, "000000")
+            for _attempt in range(3):
+                mfa_service.verify_mfa_code(user, "000000")
                 # Expected to fail but should be fast
 
         end_time = time.perf_counter()

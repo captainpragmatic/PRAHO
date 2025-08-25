@@ -243,7 +243,7 @@ class SequenceIntegrationTestCase(TestCase):
 
         # Simulate multiple requests getting numbers
         numbers = []
-        for i in range(5):
+        for _i in range(5):
             number = sequence.get_next_number('CONC')
             numbers.append(number)
 

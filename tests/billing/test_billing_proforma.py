@@ -226,7 +226,7 @@ class ProformaLineTestCase(TestCase):
         """Test valid kind choices"""
         valid_kinds = ['service', 'setup', 'discount', 'misc']
 
-        for i, kind in enumerate(valid_kinds):
+        for _i, kind in enumerate(valid_kinds):
             line = ProformaLine.objects.create(
                 proforma=self.proforma,
                 kind=kind,
