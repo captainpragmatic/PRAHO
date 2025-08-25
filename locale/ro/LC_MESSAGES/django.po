@@ -6110,12 +6110,6 @@ msgstr "Tichete"
 msgid "My Tickets"
 msgstr "Tichete"
 
-#: templates/base.html:108
-#, fuzzy
-#| msgid "Invoices"
-msgid "My Invoices"
-msgstr "Facturi"
-
 #: templates/base.html:112 templates/dashboard.html:91
 #: templates/dashboard.html:307
 #, fuzzy
@@ -6149,14 +6143,114 @@ msgstr ""
 
 #: templates/billing/billing_list.html:16
 msgid "Manage proformas and invoices following Romanian business practices"
-msgstr ""
+msgstr "Gestionează proforme și facturi conform practicilor de afaceri românești"
+
+#: templates/billing/billing_list.html:18
+msgid "View your proformas and invoices"
+msgstr "Vizualizează proforme și facturile tale"
 
 #: templates/billing/billing_list.html:34
 #: templates/billing/proforma_convert.html:33
 #: templates/billing/proforma_detail.html:258
 #: templates/billing/proforma_form.html:48
 msgid "Romanian Business Practice"
-msgstr ""
+msgstr "Practică de afaceri românească"
+
+#: templates/billing/billing_list.html:55
+msgid "Pending Quotes"
+msgstr "Cotatii în așteptare"
+
+#: templates/billing/billing_list.html:66
+msgid "My Invoices" 
+msgstr "Facturile mele"
+
+#: templates/billing/billing_list.html:77
+msgid "Pending Payments"
+msgstr "Plăți în așteptare"
+
+#: templates/billing/proforma_detail.html:303
+msgid "Send to Email"
+msgstr "Trimite prin email"
+
+#: templates/billing/invoice_detail.html:22 templates/billing/proforma_detail.html:14
+msgid "Back to Billing"
+msgstr "Înapoi la facturare"
+
+#: templates/components/pagination.html:25
+msgid "Pagination Navigation"
+msgstr "Navigare pagini"
+
+#: templates/components/pagination.html:30
+msgid "Showing {{ start_index }} to {{ end_index }} of {{ count }} results"
+msgstr "Se afișează {{ start_index }} până la {{ end_index }} din {{ count }} rezultate"
+
+#: templates/components/pagination.html:37
+msgid "Pagination"
+msgstr "Paginare"
+
+#: templates/components/pagination.html:42
+msgid "Go to previous page"
+msgstr "Mergi la pagina anterioară"
+
+#: templates/components/pagination.html:49
+msgid "Previous page (unavailable)"
+msgstr "Pagina anterioară (indisponibilă)"
+
+#: templates/components/pagination.html:56
+msgid "Go to page 1"
+msgstr "Mergi la pagina 1"
+
+#: templates/components/pagination.html:67
+msgid "Go to page {{ page }}"
+msgstr "Mergi la pagina {{ page }}"
+
+#: templates/components/pagination.html:72
+msgid "Current page, page {{ page }}"
+msgstr "Pagina curentă, pagina {{ page }}"
+
+#: templates/components/pagination.html:77
+msgid "Go to page {{ page }}"
+msgstr "Mergi la pagina {{ page }}"
+
+#: templates/components/pagination.html:90
+msgid "Go to page {{ page }}"
+msgstr "Mergi la pagina {{ page }}"
+
+#: templates/components/pagination.html:98
+msgid "Go to next page"
+msgstr "Mergi la pagina următoare"
+
+#: templates/components/pagination.html:105
+msgid "Next page (unavailable)"
+msgstr "Pagina următoare (indisponibilă)"
+
+#: templates/components/pagination.html:120
+msgid "Previous"
+msgstr "Anterior"
+
+#: templates/components/pagination.html:126
+msgid "Previous"
+msgstr "Anterior"
+
+#: templates/components/pagination.html:133
+msgid "{{ current }} / {{ total }}"
+msgstr "{{ current }} / {{ total }}"
+
+#: templates/components/pagination.html:140
+msgid "Next"
+msgstr "Următorul"
+
+#: templates/components/pagination.html:146
+msgid "Next"
+msgstr "Următorul"
+
+#: templates/components/pagination.html:155
+msgid "{{ start_index }}-{{ end_index }} of {{ count }}"
+msgstr "{{ start_index }}-{{ end_index }} din {{ count }}"
+
+#: templates/billing/billing_list.html:88
+msgid "Total Spent"
+msgstr "Total cheltuit"
 
 #: templates/billing/billing_list.html:36
 msgid ""
@@ -6799,12 +6893,7 @@ msgstr ""
 msgid "Conversion Actions"
 msgstr ""
 
-#: templates/billing/proforma_detail.html:14
-#: templates/billing/proforma_form.html:20
-#, fuzzy
-#| msgid "Back to login"
-msgid "Back to Billing"
-msgstr "Înapoi la conectare"
+
 
 #: templates/billing/proforma_detail.html:21
 #, fuzzy

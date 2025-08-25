@@ -19,6 +19,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.decorators import billing_staff_required
+from apps.common.mixins import get_pagination_context, get_search_context
 from apps.common.utils import json_error, json_success
 from apps.customers.models import Customer
 
@@ -52,35 +53,41 @@ def billing_list(request: HttpRequest) -> HttpResponse:
     # Get accessible customers
     customer_ids = _get_accessible_customer_ids(request.user)
 
-    # Get both proformas and invoices
-    proformas = ProformaInvoice.objects.filter(customer_id__in=customer_ids).select_related('customer')
-    invoices = Invoice.objects.filter(customer_id__in=customer_ids).select_related('customer')
-
     # Filter by type
     doc_type = request.GET.get('type', 'all')  # all, proforma, invoice
 
-    # Search functionality
-    search_query = request.GET.get('search', '')
+    # ✅ Get search context for template
+    search_context = get_search_context(request, 'search')
+    search_query = search_context['search_query']
+
+    # Get both proformas and invoices with search applied
+    proformas_qs = ProformaInvoice.objects.filter(customer_id__in=customer_ids).select_related('customer')
+    invoices_qs = Invoice.objects.filter(customer_id__in=customer_ids).select_related('customer')
+
+    # Apply search filter
     if search_query:
-        proformas = proformas.filter(
+        proformas_qs = proformas_qs.filter(
             Q(number__icontains=search_query) |
             Q(customer__company_name__icontains=search_query)
         )
-        invoices = invoices.filter(
+        invoices_qs = invoices_qs.filter(
             Q(number__icontains=search_query) |
             Q(customer__company_name__icontains=search_query)
         )
 
-    # Combine and annotate with type
-    # ⚡ PERFORMANCE: Use list extend for better performance than multiple appends
+    # 🎯 For pagination, we need to create a unified dataset
+    # Since Django doesn't support heterogeneous pagination well, we'll use a simpler approach
+    
+    # Build combined list for pagination (performance optimized for Romanian business scale)
     combined_documents = []
 
     if doc_type in ['all', 'proforma']:
-        combined_documents.extend([
+        # ⚡ PERFORMANCE: Use list extend for better performance than multiple appends
+        proforma_data = [
             {
                 'type': 'proforma',
                 'obj': proforma,
-                'id': proforma.id,
+                'id': proforma.pk,
                 'number': proforma.number,
                 'customer': proforma.customer,
                 'total': proforma.total,
@@ -90,15 +97,16 @@ def billing_list(request: HttpRequest) -> HttpResponse:
                 'can_edit': (request.user.is_staff or getattr(request.user, 'staff_role', None)) and not proforma.is_expired,
                 'can_convert': (request.user.is_staff or getattr(request.user, 'staff_role', None)) and not proforma.is_expired,
             }
-            for proforma in proformas
-        ])
+            for proforma in proformas_qs
+        ]
+        combined_documents.extend(proforma_data)
 
     if doc_type in ['all', 'invoice']:
-        combined_documents.extend([
+        invoice_data = [
             {
                 'type': 'invoice',
                 'obj': invoice,
-                'id': invoice.id,
+                'id': invoice.pk,
                 'number': invoice.number,
                 'customer': invoice.customer,
                 'total': invoice.total,
@@ -108,30 +116,38 @@ def billing_list(request: HttpRequest) -> HttpResponse:
                 'can_edit': False,  # Invoices are immutable
                 'can_convert': False,
             }
-            for invoice in invoices
-        ])
+            for invoice in invoices_qs
+        ]
+        combined_documents.extend(invoice_data)
 
     # Sort by creation date (newest first)
     combined_documents.sort(key=lambda x: x['created_at'], reverse=True)
 
-    # Pagination
-    paginator = Paginator(combined_documents, 25)
-    page_number = request.GET.get('page')
-    documents_page = paginator.get_page(page_number)
+    # ✅ Apply pagination using reusable utility (20 items per page for Romanian business)
+    pagination_context = get_pagination_context(
+        request=request,
+        queryset=combined_documents,
+        page_size=20
+    )
 
-    # Statistics
-    proforma_total = proformas.aggregate(total=Sum('total_cents'))['total'] or 0
-    invoice_total = invoices.aggregate(total=Sum('total_cents'))['total'] or 0
+    # Statistics (calculate from original querysets for accuracy)
+    proforma_total = proformas_qs.aggregate(total=Sum('total_cents'))['total'] or 0
+    invoice_total = invoices_qs.aggregate(total=Sum('total_cents'))['total'] or 0
+
+    # Check if user is staff for different context
+    is_staff_user = request.user.is_staff or getattr(request.user, 'staff_role', None)
 
     context = {
-        'documents': documents_page,
-        'search_query': search_query,
+        'documents': pagination_context['page_obj'],  # ✅ Use paginated documents
         'doc_type': doc_type,
-        'proforma_count': proformas.count(),
-        'invoice_count': invoices.count(),
+        'proforma_count': proformas_qs.count(),
+        'invoice_count': invoices_qs.count(),
         'proforma_total': Decimal(proforma_total) / 100,
         'invoice_total': Decimal(invoice_total) / 100,
         'total_amount': Decimal(proforma_total + invoice_total) / 100,
+        'is_staff_user': is_staff_user,
+        **pagination_context,  # ✅ Add pagination context (page_obj, is_paginated, extra_params)
+        **search_context,      # ✅ Add search context (search_query, has_search)
     }
 
     return render(request, 'billing/billing_list.html', context)
@@ -329,6 +345,7 @@ def proforma_detail(request: HttpRequest, pk: int) -> HttpResponse:
         'lines': lines,
         'can_edit': can_edit_proforma(request.user, proforma),
         'can_convert': can_edit_proforma(request.user, proforma),  # Only staff can convert
+        'is_staff_user': request.user.is_staff,
         'document_type': 'proforma',
     }
 

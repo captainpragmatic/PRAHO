@@ -7,14 +7,10 @@
 {% block content %}
 <div class="px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto">
   <!-- Header -->
+  <!-- Header -->
   <div class="sm:flex sm:items-center mb-6">
     <div class="sm:flex-auto">
-      <div class="flex items-center space-x-4">
-        <a href="{% url 'billing:invoice_list' %}" class="text-slate-400 hover:text-white">
-          ← {% trans 'Back to Billing' %}
-        </a>
-      </div>
-      <h1 class="text-3xl font-bold text-white mt-4">
+      <h1 class="text-3xl font-bold text-white">
         📄 {% trans "Proforma" %} {{ proforma.number }}
       </h1>
       <p class="mt-2 text-slate-400">
@@ -22,7 +18,16 @@
       </p>
     </div>
     <div class="mt-4 sm:ml-16 sm:mt-0 sm:flex-none">
-      <div class="flex space-x-3">
+      <a href="{% url 'billing:invoice_list' %}"
+         class="inline-flex items-center justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700">
+        ← {% trans "Back to Billing" %}
+      </a>
+    </div>
+  </div>
+
+  <!-- Action Buttons -->
+  <div class="mb-6">
+    <div class="flex space-x-3">
         {% if can_edit %}
           <a href="{% url 'billing:proforma_edit' proforma.pk %}" 
              class="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition-colors">
@@ -42,7 +47,7 @@
           📄 {% trans 'Download PDF' %}
         </a>
       </div>
-    </div>
+  </div>
   </div>
 
   <!-- Status Banner -->
@@ -299,7 +304,11 @@
           
           <button onclick="sendProforma({{ proforma.pk }})"
                   class="block w-full text-center px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md font-medium transition-colors">
-            📧 {% trans 'Send to Customer' %}
+            {% if is_staff_user %}
+              📧 {% trans 'Send to Customer' %}
+            {% else %}
+              📧 {% trans 'Send to Email' %}
+            {% endif %}
           </button>
           
           {% if can_edit %}

@@ -13,7 +13,11 @@
         🧾 {% trans "Billing Management" %}
       </h1>
       <p class="mt-2 text-slate-400">
-        {% trans "Manage proformas and invoices following Romanian business practices" %}
+        {% if is_staff_user %}
+          {% trans "Manage proformas and invoices following Romanian business practices" %}
+        {% else %}
+          {% trans "View your proformas and invoices" %}
+        {% endif %}
       </p>
     </div>
     <div class="mt-4 sm:ml-16 sm:mt-0 sm:flex-none">
@@ -24,7 +28,8 @@
     </div>
   </div>
 
-  <!-- Romanian Business Notice -->
+  <!-- Romanian Business Notice - Staff Only -->
+  {% if is_staff_user %}
   <div class="bg-blue-900 border border-blue-700 rounded-lg p-4 mb-6">
     <div class="flex items-start">
       <div class="flex-shrink-0">
@@ -38,6 +43,7 @@
       </div>
     </div>
   </div>
+  {% endif %}
 
   <!-- Statistics Cards -->
   <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
@@ -47,7 +53,11 @@
           <div class="w-8 h-8 text-2xl">📄</div>
         </div>
         <div class="ml-4">
-          <p class="text-sm font-medium text-slate-400">{% trans 'Active Proformas' %}</p>
+          {% if is_staff_user %}
+            <p class="text-sm font-medium text-slate-400">{% trans 'Active Proformas' %}</p>
+          {% else %}
+            <p class="text-sm font-medium text-slate-400">{% trans 'Pending Quotes' %}</p>
+          {% endif %}
           <p class="text-2xl font-semibold text-white">{{ proforma_count }}</p>
         </div>
       </div>
@@ -59,7 +69,11 @@
           <div class="w-8 h-8 text-2xl">🧾</div>
         </div>
         <div class="ml-4">
-          <p class="text-sm font-medium text-slate-400">{% trans 'Total Invoices' %}</p>
+          {% if is_staff_user %}
+            <p class="text-sm font-medium text-slate-400">{% trans 'Total Invoices' %}</p>
+          {% else %}
+            <p class="text-sm font-medium text-slate-400">{% trans 'My Invoices' %}</p>
+          {% endif %}
           <p class="text-2xl font-semibold text-white">{{ invoice_count }}</p>
         </div>
       </div>
@@ -71,7 +85,11 @@
           <div class="w-8 h-8 text-2xl">💰</div>
         </div>
         <div class="ml-4">
-          <p class="text-sm font-medium text-slate-400">{% trans 'Proforma Value' %}</p>
+          {% if is_staff_user %}
+            <p class="text-sm font-medium text-slate-400">{% trans 'Proforma Value' %}</p>
+          {% else %}
+            <p class="text-sm font-medium text-slate-400">{% trans 'Pending Payments' %}</p>
+          {% endif %}
           <p class="text-2xl font-semibold text-white">{{ proforma_total|floatformat:0 }} RON</p>
         </div>
       </div>
@@ -83,7 +101,11 @@
           <div class="w-8 h-8 text-2xl">💳</div>
         </div>
         <div class="ml-4">
-          <p class="text-sm font-medium text-slate-400">{% trans 'Invoice Revenue' %}</p>
+          {% if is_staff_user %}
+            <p class="text-sm font-medium text-slate-400">{% trans 'Invoice Revenue' %}</p>
+          {% else %}
+            <p class="text-sm font-medium text-slate-400">{% trans 'Total Spent' %}</p>
+          {% endif %}
           <p class="text-2xl font-semibold text-white">{{ invoice_total|floatformat:0 }} RON</p>
         </div>
       </div>
@@ -238,6 +260,9 @@
                   <a href="{% url 'billing:proforma_detail' document.id %}" 
                      class="text-blue-400 hover:text-blue-300">👁️ {% trans 'View' %}</a>
                   
+                  <a href="{% url 'billing:proforma_pdf' document.id %}" 
+                     class="text-slate-400 hover:text-slate-300">📄 {% trans 'PDF' %}</a>
+                  
                   {% if document.can_convert %}
                     <a href="{% url 'billing:proforma_to_invoice' document.id %}" 
                        class="text-green-400 hover:text-green-300">🔄 {% trans 'Convert' %}</a>
@@ -280,61 +305,8 @@
       </table>
     </div>
 
-    <!-- Pagination -->
-    {% if documents.has_other_pages %}
-    <div class="px-6 py-4 bg-slate-900 border-t border-slate-700 flex items-center justify-between">
-      <div class="flex-1 flex justify-between sm:hidden">
-        {% if documents.has_previous %}
-          <a href="?page={{ documents.previous_page_number }}{% if search_query %}&search={{ search_query }}{% endif %}{% if doc_type != 'all' %}&type={{ doc_type }}{% endif %}" 
-             class="relative inline-flex items-center px-4 py-2 border border-slate-600 text-sm font-medium rounded-md text-slate-300 bg-slate-800 hover:bg-slate-700">
-            {% trans 'Previous' %}
-          </a>
-        {% endif %}
-        
-        {% if documents.has_next %}
-          <a href="?page={{ documents.next_page_number }}{% if search_query %}&search={{ search_query }}{% endif %}{% if doc_type != 'all' %}&type={{ doc_type }}{% endif %}" 
-             class="ml-3 relative inline-flex items-center px-4 py-2 border border-slate-600 text-sm font-medium rounded-md text-slate-300 bg-slate-800 hover:bg-slate-700">
-            {% trans 'Next' %}
-          </a>
-        {% endif %}
-      </div>
-      
-      <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
-        <div>
-          <p class="text-sm text-slate-400">
-            {% trans 'Showing' %}
-            <span class="font-medium">{{ documents.start_index }}</span>
-            {% trans 'to' %}
-            <span class="font-medium">{{ documents.end_index }}</span>
-            {% trans 'of' %}
-            <span class="font-medium">{{ documents.paginator.count }}</span>
-            {% trans 'results' %}
-          </p>
-        </div>
-        <div>
-          <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px">
-            {% if documents.has_previous %}
-              <a href="?page={{ documents.previous_page_number }}{% if search_query %}&search={{ search_query }}{% endif %}{% if doc_type != 'all' %}&type={{ doc_type }}{% endif %}"
-                 class="relative inline-flex items-center px-2 py-2 rounded-l-md border border-slate-600 bg-slate-800 text-sm font-medium text-slate-400 hover:bg-slate-700">
-                ❮
-              </a>
-            {% endif %}
-            
-            <span class="relative inline-flex items-center px-4 py-2 border border-slate-600 bg-slate-700 text-sm font-medium text-white">
-              {{ documents.number }}
-            </span>
-            
-            {% if documents.has_next %}
-              <a href="?page={{ documents.next_page_number }}{% if search_query %}&search={{ search_query }}{% endif %}{% if doc_type != 'all' %}&type={{ doc_type }}{% endif %}"
-                 class="relative inline-flex items-center px-2 py-2 rounded-r-md border border-slate-600 bg-slate-800 text-sm font-medium text-slate-400 hover:bg-slate-700">
-                ❯
-              </a>
-            {% endif %}
-          </nav>
-        </div>
-      </div>
-    </div>
-    {% endif %}
+    <!-- ✅ Reusable Pagination Component -->
+    {% include 'components/pagination.html' with page_obj=page_obj extra_params=extra_params %}
   </div>
 </div>
 {% endblock %}
