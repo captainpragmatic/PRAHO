@@ -18,6 +18,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.decorators import billing_staff_required
 from apps.common.utils import json_error, json_success
 from apps.customers.models import Customer
 
@@ -86,8 +87,8 @@ def billing_list(request: HttpRequest) -> HttpResponse:
                 'currency': proforma.currency,
                 'created_at': proforma.created_at,
                 'status': 'valid' if not proforma.is_expired else 'expired',
-                'can_edit': True,
-                'can_convert': not proforma.is_expired,
+                'can_edit': (request.user.is_staff or getattr(request.user, 'staff_role', None)) and not proforma.is_expired,
+                'can_convert': (request.user.is_staff or getattr(request.user, 'staff_role', None)) and not proforma.is_expired,
             }
             for proforma in proformas
         ])
@@ -162,7 +163,7 @@ def invoice_detail(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, 'billing/invoice_detail.html', context)
 
 
-@login_required
+@billing_staff_required
 def proforma_create(request: HttpRequest) -> HttpResponse:
     """
     ➕ Create new proforma invoice (Romanian business practice - only proformas can be created manually)
@@ -321,18 +322,20 @@ def proforma_detail(request: HttpRequest, pk: int) -> HttpResponse:
     # Get proforma lines
     lines = proforma.lines.all()
 
+    from apps.common.decorators import can_edit_proforma
+    
     context = {
         'proforma': proforma,
         'lines': lines,
-        'can_edit': not proforma.is_expired,
-        'can_convert': not proforma.is_expired,
+        'can_edit': can_edit_proforma(request.user, proforma),
+        'can_convert': can_edit_proforma(request.user, proforma),  # Only staff can convert
         'document_type': 'proforma',
     }
 
     return render(request, 'billing/proforma_detail.html', context)
 
 
-@login_required
+@billing_staff_required
 def proforma_to_invoice(request: HttpRequest, pk: int) -> HttpResponse:
     """
     🔄 Convert proforma to actual invoice (Romanian business practice)
@@ -413,7 +416,7 @@ def proforma_to_invoice(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, 'billing/proforma_convert.html', context)
 
 
-@login_required
+@billing_staff_required
 def process_proforma_payment(request: HttpRequest, pk: int) -> HttpResponse:
     """
     💳 Process payment for proforma (automatically converts to invoice)
@@ -461,7 +464,7 @@ def process_proforma_payment(request: HttpRequest, pk: int) -> HttpResponse:
     return json_error('Invalid method', status=405)
 
 
-@login_required
+@billing_staff_required
 def proforma_edit(request: HttpRequest, pk: int) -> HttpResponse:
     """
     ✏️ Edit proforma invoice
@@ -745,7 +748,7 @@ def proforma_pdf(request: HttpRequest, pk: int) -> HttpResponse:
     return response
 
 
-@login_required
+@billing_staff_required
 def proforma_send(request: HttpRequest, pk: int) -> HttpResponse:
     """
     📧 Send proforma via email to customer
@@ -764,7 +767,7 @@ def proforma_send(request: HttpRequest, pk: int) -> HttpResponse:
     return JsonResponse({'error': 'Invalid method'}, status=405)
 
 
-@login_required
+@billing_staff_required
 def invoice_edit(request: HttpRequest, pk: int) -> HttpResponse:
     """
     ✏️ Edit draft invoice
@@ -934,7 +937,7 @@ def invoice_pdf(request: HttpRequest, pk: int) -> HttpResponse:
     return response
 
 
-@login_required
+@billing_staff_required
 def invoice_send(request: HttpRequest, pk: int) -> HttpResponse:
     """
     📧 Send invoice via email to customer
@@ -958,7 +961,7 @@ def invoice_send(request: HttpRequest, pk: int) -> HttpResponse:
     return JsonResponse({'error': 'Invalid method'}, status=405)
 
 
-@login_required
+@billing_staff_required
 def generate_e_factura(request: HttpRequest, pk: int) -> HttpResponse:
     """
     🇷🇴 Generate e-Factura XML for Romanian tax authorities
@@ -1012,7 +1015,7 @@ def payment_list(request: HttpRequest) -> HttpResponse:
     return render(request, 'billing/payment_list.html', context)
 
 
-@login_required
+@billing_staff_required
 def process_payment(request: HttpRequest, pk: int) -> HttpResponse:
     """
     💳 Process payment for invoice
@@ -1047,7 +1050,7 @@ def process_payment(request: HttpRequest, pk: int) -> HttpResponse:
     return JsonResponse({'error': 'Invalid method'}, status=405)
 
 
-@login_required
+@billing_staff_required
 def billing_reports(request: HttpRequest) -> HttpResponse:
     """
     📊 Billing reports and analytics
@@ -1077,7 +1080,7 @@ def billing_reports(request: HttpRequest) -> HttpResponse:
     return render(request, 'billing/reports.html', context)
 
 
-@login_required
+@billing_staff_required
 def vat_report(request: HttpRequest) -> HttpResponse:
     """
     🇷🇴 VAT report for Romanian tax compliance

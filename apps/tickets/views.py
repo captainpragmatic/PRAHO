@@ -127,16 +127,21 @@ def ticket_reply(request: HttpRequest, pk: int) -> HttpResponse:
         reply_text = request.POST.get('reply')
         is_internal = request.POST.get('is_internal') == 'on'
 
+        # Security check: Only staff can create internal notes
+        if is_internal and not (request.user.is_staff or getattr(request.user, 'staff_role', None)):
+            messages.error(request, _("❌ You do not have permission to create internal notes."))
+            return redirect('tickets:detail', pk=pk)
+
         if reply_text:
-            # Create TicketComment
+            # Create TicketComment with proper permission checks
             comment = TicketComment.objects.create(
                 ticket=ticket,
                 content=reply_text,
-                comment_type='internal' if is_internal else ('support' if request.user.staff_role in ['support', 'admin', 'manager'] else 'customer'),
+                comment_type='internal' if (is_internal and (request.user.is_staff or getattr(request.user, 'staff_role', None))) else ('support' if request.user.staff_role in ['support', 'admin', 'manager'] else 'customer'),
                 author=request.user,
                 author_name=request.user.get_full_name(),
                 author_email=request.user.email,
-                is_public=not is_internal
+                is_public=not (is_internal and (request.user.is_staff or getattr(request.user, 'staff_role', None)))
             )
 
             # Handle file attachments

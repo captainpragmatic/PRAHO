@@ -13,6 +13,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.decorators import staff_required
 from apps.customers.models import Customer
 
 from .models import Server, Service, ServicePlan
@@ -73,7 +74,7 @@ def service_detail(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, 'provisioning/service_detail.html', context)
 
 
-@login_required
+@staff_required
 def service_create(request: HttpRequest) -> HttpResponse:
     """➕ Create new hosting service"""
     # Get user's customers for dropdown
@@ -121,7 +122,7 @@ def service_create(request: HttpRequest) -> HttpResponse:
     return render(request, 'provisioning/service_form.html', context)
 
 
-@login_required
+@staff_required
 def service_edit(request: HttpRequest, pk: int) -> HttpResponse:
     """✏️ Edit existing hosting service"""
     service = get_object_or_404(Service, pk=pk)
@@ -178,7 +179,7 @@ def service_edit(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, 'provisioning/service_form.html', context)
 
 
-@login_required
+@staff_required
 def service_suspend(request: HttpRequest, pk: int) -> HttpResponse:
     """⏸️ Suspend hosting service"""
     service = get_object_or_404(Service, pk=pk)
@@ -198,7 +199,7 @@ def service_suspend(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, 'provisioning/service_suspend.html', {'service': service})
 
 
-@login_required
+@staff_required
 def service_activate(request: HttpRequest, pk: int) -> HttpResponse:
     """▶️ Activate suspended service"""
     service = get_object_or_404(Service, pk=pk)
@@ -227,7 +228,7 @@ def plan_list(request: HttpRequest) -> HttpResponse:
     return render(request, 'provisioning/plan_list.html', context)
 
 
-@login_required
+@staff_required
 def server_list(request: HttpRequest) -> HttpResponse:
     """🖥️ Display server infrastructure"""
     servers = Server.objects.all().order_by('name')

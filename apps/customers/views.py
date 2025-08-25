@@ -12,6 +12,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.decorators import staff_required
 from apps.common.types import Err
 from apps.users.services import CustomerUserService
 
@@ -113,7 +114,7 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
     return render(request, 'customers/detail.html', context)
 
 
-@login_required
+@staff_required
 def customer_create(request: HttpRequest) -> HttpResponse:
     """
     ➕ Create new customer with all profiles and optional user assignment
@@ -228,7 +229,7 @@ def customer_create(request: HttpRequest) -> HttpResponse:
     return render(request, 'customers/form.html', context)
 
 
-@login_required
+@staff_required
 def customer_edit(request: HttpRequest, customer_id: int) -> HttpResponse:
     """
     ✏️ Edit customer core information
@@ -261,7 +262,7 @@ def customer_edit(request: HttpRequest, customer_id: int) -> HttpResponse:
     return render(request, 'customers/form.html', context)
 
 
-@login_required
+@staff_required
 def customer_tax_profile(request: HttpRequest, customer_id: int) -> HttpResponse:
     """
     🧾 Edit customer tax profile (CUI, VAT, compliance)
@@ -297,7 +298,7 @@ def customer_tax_profile(request: HttpRequest, customer_id: int) -> HttpResponse
     return render(request, 'customers/tax_profile_form.html', context)
 
 
-@login_required
+@staff_required
 def customer_billing_profile(request: HttpRequest, customer_id: int) -> HttpResponse:
     """
     💰 Edit customer billing profile (payment terms, credit)
@@ -333,7 +334,7 @@ def customer_billing_profile(request: HttpRequest, customer_id: int) -> HttpResp
     return render(request, 'customers/billing_profile_form.html', context)
 
 
-@login_required
+@staff_required
 def customer_address_add(request: HttpRequest, customer_id: int) -> HttpResponse:
     """
     🏠 Add new address for customer
@@ -381,7 +382,7 @@ def customer_address_add(request: HttpRequest, customer_id: int) -> HttpResponse
     return render(request, 'customers/address_form.html', context)
 
 
-@login_required
+@staff_required
 def customer_note_add(request: HttpRequest, customer_id: int) -> HttpResponse:
     """
     📝 Add customer interaction note
@@ -416,7 +417,7 @@ def customer_note_add(request: HttpRequest, customer_id: int) -> HttpResponse:
     return render(request, 'customers/note_form.html', context)
 
 
-@login_required
+@staff_required
 def customer_delete(request: HttpRequest, customer_id: int) -> HttpResponse:
     """
     🗑️ Soft delete customer (preserves audit trail)
@@ -482,7 +483,7 @@ def customer_search_api(request: HttpRequest) -> JsonResponse:
     return JsonResponse({'results': results})
 
 
-@login_required
+@staff_required
 def customer_assign_user(request: HttpRequest, customer_id: int) -> HttpResponse:
     """
     🔗 Assign user to existing customer (for orphaned customers)
