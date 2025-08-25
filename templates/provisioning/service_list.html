@@ -160,24 +160,26 @@
                   class="text-blue-400 hover:text-blue-300 text-sm">
                   {% trans 'View' %}
                 </a>
-                {% if service.status == 'active' %}
-                <span class="text-slate-600">|</span>
-                <button hx-post="{% url 'provisioning:service_suspend' service.pk %}"
-                  hx-confirm="{% trans 'Suspend service?' %}" class="text-red-400 hover:text-red-300 text-sm">
-                  {% trans 'Suspend' %}
-                </button>
-                {% elif service.status == 'suspended' %}
-                <span class="text-slate-600">|</span>
-                <button hx-post="{% url 'provisioning:service_activate' service.pk %}"
-                  hx-confirm="{% trans 'Reactivate service?' %}" class="text-green-400 hover:text-green-300 text-sm">
-                  {% trans 'Reactivate' %}
-                </button>
+                {% if can_manage_services %}
+                    {% if service.status == 'active' %}
+                    <span class="text-slate-600">|</span>
+                    <button hx-post="{% url 'provisioning:service_suspend' service.pk %}"
+                      hx-confirm="{% trans 'Suspend service?' %}" class="text-red-400 hover:text-red-300 text-sm">
+                      {% trans 'Suspend' %}
+                    </button>
+                    {% elif service.status == 'suspended' %}
+                    <span class="text-slate-600">|</span>
+                    <button hx-post="{% url 'provisioning:service_activate' service.pk %}"
+                      hx-confirm="{% trans 'Reactivate service?' %}" class="text-green-400 hover:text-green-300 text-sm">
+                      {% trans 'Reactivate' %}
+                    </button>
+                    {% endif %}
+                    <span class="text-slate-600">|</span>
+                    <a href="{% url 'provisioning:service_edit' service.pk %}"
+                      class="text-green-400 hover:text-green-300 text-sm">
+                      {% trans 'Edit' %}
+                    </a>
                 {% endif %}
-                <span class="text-slate-600">|</span>
-                <a href="{% url 'provisioning:service_edit' service.pk %}"
-                  class="text-green-400 hover:text-green-300 text-sm">
-                  {% trans 'Edit' %}
-                </a>
               </div>
             </td>
           </tr>

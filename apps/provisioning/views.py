@@ -46,11 +46,15 @@ def service_list(request: HttpRequest) -> HttpResponse:
     page_number = request.GET.get('page')
     services_page = paginator.get_page(page_number)
 
+    # Only staff can manage services (edit/suspend)
+    can_manage_services = request.user.is_staff or getattr(request.user, 'staff_role', None)
+
     context = {
         'services': services_page,
         'status_filter': status_filter,
         'active_count': services.filter(status='active').count(),
         'total_count': services.count(),
+        'can_manage_services': can_manage_services,
     }
 
     return render(request, 'provisioning/service_list.html', context)
@@ -66,9 +70,12 @@ def service_detail(request: HttpRequest, pk: int) -> HttpResponse:
         messages.error(request, _("❌ You do not have permission to access this service."))
         return redirect('provisioning:services')
 
+    # Only staff can manage services (edit/suspend)
+    can_manage = (request.user.is_staff or getattr(request.user, 'staff_role', None)) and service.status in ['active', 'suspended']
+
     context = {
         'service': service,
-        'can_manage': service.status in ['active', 'suspended'],
+        'can_manage': can_manage,
     }
 
     return render(request, 'provisioning/service_detail.html', context)

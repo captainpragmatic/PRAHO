@@ -50,15 +50,17 @@
             
             <!-- Action Bar -->
             <div class="flex flex-wrap gap-2 mt-4 md:mt-0 mobile-stacked">
-                {% if service.status == 'active' and can_manage %}
-                    {% url 'provisioning:service_suspend' service.pk as suspend_url %}
-                    {% button "⏸️ Suspend" variant="danger" hx_post=suspend_url hx_confirm="Suspend this service?" hx_target="#service-status" class="sm:text-sm mobile-full-width" %}
-                {% elif service.status == 'suspended' %}
-                    {% url 'provisioning:service_activate' service.pk as activate_url %}
-                    {% button "▶️ Activate" variant="success" hx_post=activate_url hx_confirm="Reactivate this service?" hx_target="#service-status" class="sm:text-sm mobile-full-width" %}
+                {% if can_manage %}
+                    {% if service.status == 'active' %}
+                        {% url 'provisioning:service_suspend' service.pk as suspend_url %}
+                        {% button "⏸️ Suspend" variant="danger" hx_post=suspend_url hx_confirm="Suspend this service?" hx_target="#service-status" class="sm:text-sm mobile-full-width" %}
+                    {% elif service.status == 'suspended' %}
+                        {% url 'provisioning:service_activate' service.pk as activate_url %}
+                        {% button "▶️ Activate" variant="success" hx_post=activate_url hx_confirm="Reactivate this service?" hx_target="#service-status" class="sm:text-sm mobile-full-width" %}
+                    {% endif %}
+                    {% url 'provisioning:service_edit' service.pk as edit_url %}
+                    {% button "✏️ Edit" variant="secondary" href=edit_url class="sm:text-sm mobile-full-width" %}
                 {% endif %}
-                {% url 'provisioning:service_edit' service.pk as edit_url %}
-                {% button "✏️ Edit" variant="secondary" href=edit_url class="sm:text-sm mobile-full-width" %}
                 {% url 'provisioning:services' as services_url %}
                 {% button "← Back to Services" variant="secondary" href=services_url class="sm:text-sm mobile-full-width" %}
             </div>
