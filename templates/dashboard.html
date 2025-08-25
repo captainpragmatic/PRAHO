@@ -278,10 +278,18 @@
           {% url 'tickets:create' as create_ticket_url %}
           {% url 'provisioning:service_create' as create_service_url %}
 
-          {% button "👤 New Customer" variant="primary" href=create_customer_url %}
-          {% button "📄 New Proforma" variant="success" href=create_proforma_url %}
-          {% button "🎫 New Ticket" variant="secondary" href=create_ticket_url %}
-          {% button "🚀 New Service" variant="warning" href=create_service_url %}
+          <a href="{{ create_customer_url }}" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-red-600 border border-red-600 rounded-lg hover:bg-red-700 focus:ring-4 focus:ring-red-300 transition-all duration-200">
+            👤 {% trans 'New Customer' %}
+          </a>
+          <a href="{{ create_proforma_url }}" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-green-600 border border-green-600 rounded-lg hover:bg-green-700 focus:ring-4 focus:ring-green-300 transition-all duration-200">
+            📄 {% trans 'New Proforma' %}
+          </a>
+          <a href="{{ create_ticket_url }}" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-slate-600 border border-slate-600 rounded-lg hover:bg-slate-700 focus:ring-4 focus:ring-slate-300 transition-all duration-200">
+            🎫 {% trans 'New Ticket' %}
+          </a>
+          <a href="{{ create_service_url }}" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-yellow-500 border border-yellow-500 rounded-lg hover:bg-yellow-600 focus:ring-4 focus:ring-yellow-300 transition-all duration-200">
+            🚀 {% trans 'New Service' %}
+          </a>
         </div>
         {% else %}
         <!-- Customer Actions: Self-Service -->
@@ -291,10 +299,18 @@
           {% url 'provisioning:services' as services_url %}
           {% url 'users:user_profile' as profile_url %}
 
-          {% button "🎫 New Ticket" variant="primary" href=create_ticket_url %}
-          {% button "📄 View Invoices" variant="success" href=invoice_list_url %}
-          {% button "🚀 My Services" variant="secondary" href=services_url %}
-          {% button "👤 My Profile" variant="warning" href=profile_url %}
+          <a href="{{ create_ticket_url }}" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-red-600 border border-red-600 rounded-lg hover:bg-red-700 focus:ring-4 focus:ring-red-300 transition-all duration-200">
+            🎫 {% trans 'New Ticket' %}
+          </a>
+          <a href="{{ invoice_list_url }}" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-green-600 border border-green-600 rounded-lg hover:bg-green-700 focus:ring-4 focus:ring-green-300 transition-all duration-200">
+            📄 {% trans 'View Invoices' %}
+          </a>
+          <a href="{{ services_url }}" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-slate-600 border border-slate-600 rounded-lg hover:bg-slate-700 focus:ring-4 focus:ring-slate-300 transition-all duration-200">
+            🚀 {% trans 'My Services' %}
+          </a>
+          <a href="{{ profile_url }}" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-yellow-500 border border-yellow-500 rounded-lg hover:bg-yellow-600 focus:ring-4 focus:ring-yellow-300 transition-all duration-200">
+            👤 {% trans 'My Profile' %}
+          </a>
         </div>
         {% endif %}
       </div>
