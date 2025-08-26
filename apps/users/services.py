@@ -12,11 +12,17 @@ from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.contrib.auth.tokens import default_token_generator
+from django.contrib.sessions.models import Session
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.mail import send_mail
 from django.db import transaction
+from django.http import HttpRequest
+from django.template.loader import render_to_string
 from django.utils import timezone
+from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_encode
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.constants import (
@@ -252,7 +258,7 @@ class SecureUserRegistrationService:
         company_identifier: str,
         identification_type: str,  # 'name', 'vat_number', 'registration_number'
         request_ip: str | None = None,
-        **kwargs
+        **kwargs: Any
     ) -> Result[dict[str, Any], str]:
         """
         🔒 Secure request to join existing customer with enumeration prevention
@@ -331,13 +337,13 @@ class SecureCustomerUserService:
     @monitor_performance(max_duration_seconds=8.0)
     def create_user_for_customer(
         cls,
-        customer,
+        customer: Customer,
         first_name: str = "",
         last_name: str = "",
         send_welcome: bool = True,
-        created_by=None,
+        created_by: User | None = None,
         request_ip: str | None = None,
-        **kwargs
+        **kwargs: Any
     ) -> Result[tuple[User, bool], str]:
         """
         🔒 Secure user creation for customer with comprehensive validation
@@ -418,12 +424,12 @@ class SecureCustomerUserService:
     def link_existing_user(
         cls,
         user: User,
-        customer,
+        customer: Customer,
         role: str = 'viewer',  # Secure default
         is_primary: bool = False,
-        created_by=None,
+        created_by: User | None = None,
         request_ip: str | None = None,
-        **kwargs
+        **kwargs: Any
     ) -> Result[Any, str]:
         """
         🔒 Secure linking of existing user to customer
@@ -470,13 +476,13 @@ class SecureCustomerUserService:
     @monitor_performance(max_duration_seconds=10.0)
     def invite_user_to_customer(
         cls,
-        inviter,
+        inviter: User,
         invitee_email: str,
-        customer,
+        customer: Customer,
         role: str = 'viewer',
         request_ip: str | None = None,
         user_id: int | None = None,  # For rate limiting
-        **kwargs
+        **kwargs: Any
     ) -> Result[CustomerMembership, str]:
         """
         🔒 Secure user invitation with comprehensive protection
@@ -606,17 +612,12 @@ class SecureCustomerUserService:
                 time.sleep(MIN_RESPONSE_TIME_SECONDS - elapsed)
 
     @classmethod
-    def _send_welcome_email_secure(cls, user: User, customer, request_ip: str | None = None) -> bool:
+    def _send_welcome_email_secure(cls, user: User, customer: Customer, request_ip: str | None = None) -> bool:
         """
         🔒 Secure welcome email with proper token generation
         """
         try:
-            from django.conf import settings
-            from django.contrib.auth.tokens import default_token_generator
-            from django.core.mail import send_mail
-            from django.template.loader import render_to_string
-            from django.utils.encoding import force_bytes
-            from django.utils.http import urlsafe_base64_encode
+            # These imports are already available at module level
 
             # Generate secure password reset token
             token = default_token_generator.make_token(user)
@@ -667,7 +668,7 @@ class SecureCustomerUserService:
             return False
 
     @classmethod
-    def _notify_owners_of_join_request_secure(cls, customer, requesting_user, request_ip: str | None = None) -> None:
+    def _notify_owners_of_join_request_secure(cls, customer: Customer, requesting_user: User, request_ip: str | None = None) -> None:
         """
         🔒 Secure notification to owners with rate limiting
         """
@@ -707,7 +708,7 @@ class SecureCustomerUserService:
             logger.error(f"📧 [Secure Notification] Failed to notify owners: {e!s}")
 
     @classmethod
-    def _send_invitation_email_secure(cls, membership, inviter, request_ip: str | None = None) -> None:
+    def _send_invitation_email_secure(cls, membership: CustomerMembership, inviter: User, request_ip: str | None = None) -> None:
         """
         🔒 Secure invitation email with proper tokens and expiration
         """
@@ -771,7 +772,7 @@ class SessionSecurityService:
     }
 
     @classmethod
-    def rotate_session_on_password_change(cls, request, user=None) -> None:
+    def rotate_session_on_password_change(cls, request: HttpRequest, user: User | None = None) -> None:
         """🔒 Rotate session after password change and invalidate other sessions"""
         if not request.user.is_authenticated and not user:
             return
@@ -799,7 +800,7 @@ class SessionSecurityService:
         logger.warning(f"🔄 [SessionSecurity] Session rotated for {target_user.email} after password change")
 
     @classmethod
-    def rotate_session_on_2fa_change(cls, request) -> None:
+    def rotate_session_on_2fa_change(cls, request: HttpRequest) -> None:
         """🔒 Rotate session when 2FA is enabled/disabled"""
         if not request.user.is_authenticated:
             return
@@ -824,7 +825,7 @@ class SessionSecurityService:
         logger.warning(f"🔄 [SessionSecurity] Session rotated for {user.email} after 2FA change")
 
     @classmethod
-    def cleanup_2fa_secrets_on_recovery(cls, user, request_ip=None) -> None:
+    def cleanup_2fa_secrets_on_recovery(cls, user: User, request_ip: str | None = None) -> None:
         """🔒 Clean up 2FA secrets during account recovery"""
         if not user:
             return
@@ -847,7 +848,7 @@ class SessionSecurityService:
         logger.warning(f"🔐 [SessionSecurity] 2FA secrets cleared for {user.email} during recovery")
 
     @classmethod
-    def update_session_timeout(cls, request) -> None:
+    def update_session_timeout(cls, request: HttpRequest) -> None:
         """🔒 Update session timeout based on user context"""
         if not hasattr(request, 'session') or not request.user.is_authenticated:
             return
@@ -863,7 +864,7 @@ class SessionSecurityService:
         }, cls._get_client_ip(request))
 
     @classmethod
-    def get_appropriate_timeout(cls, request) -> int:
+    def get_appropriate_timeout(cls, request: HttpRequest) -> int:
         """Get appropriate timeout based on user role and device context"""
         if not request.user.is_authenticated:
             return cls.TIMEOUT_POLICIES['standard']
@@ -885,7 +886,7 @@ class SessionSecurityService:
         return cls.TIMEOUT_POLICIES['standard']
 
     @classmethod
-    def enable_shared_device_mode(cls, request) -> None:
+    def enable_shared_device_mode(cls, request: HttpRequest) -> None:
         """🔒 Enable shared device mode with enhanced security"""
         if not request.user.is_authenticated:
             return
@@ -908,7 +909,7 @@ class SessionSecurityService:
         logger.info(f"📱 [SessionSecurity] Shared device mode enabled for {request.user.email}")
 
     @classmethod
-    def detect_suspicious_activity(cls, request) -> bool:
+    def detect_suspicious_activity(cls, request: HttpRequest) -> bool:
         """🔒 Detect suspicious session activity patterns"""
         if not request.user.is_authenticated:
             return False
@@ -950,7 +951,7 @@ class SessionSecurityService:
         return is_suspicious
 
     @classmethod
-    def log_session_activity(cls, request, activity_type: str, **extra_data) -> None:
+    def log_session_activity(cls, request: HttpRequest, activity_type: str, **extra_data: Any) -> None:
         """🔒 Log session activity using existing security event system"""
         if not request.user.is_authenticated:
             return
@@ -978,7 +979,6 @@ class SessionSecurityService:
     def _invalidate_other_user_sessions(cls, user_id: int, keep_session_key: str) -> None:
         """Invalidate all sessions for a user except specified one"""
         try:
-            from django.contrib.sessions.models import Session
             count = 0
 
             for session in Session.objects.all():
@@ -1001,7 +1001,6 @@ class SessionSecurityService:
     def _invalidate_all_user_sessions(cls, user_id: int) -> None:
         """Invalidate all sessions for a user"""
         try:
-            from django.contrib.sessions.models import Session
             count = 0
 
             for session in Session.objects.all():
@@ -1021,7 +1020,7 @@ class SessionSecurityService:
             logger.error(f"🔥 [SessionSecurity] Error invalidating all sessions for user {user_id}: {e}")
 
     @classmethod
-    def _clear_sensitive_session_data(cls, request) -> None:
+    def _clear_sensitive_session_data(cls, request: HttpRequest) -> None:
         """Clear sensitive data from session"""
         sensitive_keys = [
             '2fa_secret', 'new_backup_codes', 'password_reset_token',
@@ -1033,7 +1032,7 @@ class SessionSecurityService:
                 del request.session[key]
 
     @classmethod
-    def _get_client_ip(cls, request) -> str:
+    def _get_client_ip(cls, request: HttpRequest) -> str:
         """Get real client IP address"""
         x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
         if x_forwarded_for:

@@ -9,24 +9,25 @@ from decimal import Decimal
 
 from django import template
 from django.utils import timezone
+from django.utils.html import escape  # For XSS prevention
 from django.utils.safestring import mark_safe
 
 from apps.common.constants import (
+    PHONE_LANDLINE_LENGTH,
+    PHONE_MIN_VALID_LENGTH,
+    PHONE_MOBILE_LENGTH,
+    ROMANIAN_IBAN_LENGTH,
     ROMANIAN_PLURAL_FEW_MAX,
     ROMANIAN_PLURAL_FEW_MIN,
     ROMANIAN_PLURAL_SINGLE,
-    SECONDS_PER_MINUTE,
-    SECONDS_PER_HOUR,
+    ROMANIAN_POSTAL_CODE_LENGTH,
+    ROMANIAN_TIME_HOUR_PLURAL_THRESHOLD,
+    ROMANIAN_TIME_MINUTE_PLURAL_THRESHOLD,
     SECONDS_PER_DAY,
+    SECONDS_PER_HOUR,
+    SECONDS_PER_MINUTE,
     SECONDS_PER_TWO_DAYS,
     SECONDS_PER_WEEK,
-    ROMANIAN_TIME_MINUTE_PLURAL_THRESHOLD,
-    ROMANIAN_TIME_HOUR_PLURAL_THRESHOLD,
-    ROMANIAN_IBAN_LENGTH,
-    PHONE_MOBILE_LENGTH,
-    PHONE_LANDLINE_LENGTH,
-    PHONE_MIN_VALID_LENGTH,
-    ROMANIAN_POSTAL_CODE_LENGTH,
 )
 
 register = template.Library()
@@ -517,7 +518,6 @@ def highlight_search(text: str, search_term: str) -> str:
         return text
 
     # First escape HTML to prevent XSS
-    from django.utils.html import escape
     escaped_text = escape(text)
     escaped_search = escape(search_term)
 

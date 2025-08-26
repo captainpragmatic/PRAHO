@@ -4,7 +4,7 @@ Romanian-localized authentication and profile forms.
 """
 
 import logging
-from typing import cast
+from typing import Any, cast
 
 import pyotp
 
@@ -22,6 +22,7 @@ from django.contrib.auth.views import (
     PasswordResetView,
 )
 from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.db import models
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
@@ -50,6 +51,8 @@ from .forms import (
     TwoFactorVerifyForm,
     UserProfileForm,
 )
+from .mfa import MFAService, TOTPService
+from .services import SessionSecurityService
 
 # ===============================================================================
 # AUTHENTICATION VIEWS
@@ -190,11 +193,11 @@ class SecurePasswordResetView(PasswordResetView):
     email_template_name = 'users/password_reset_email.html'
     success_url = reverse_lazy('users:password_reset_done')
 
-    def get_email_subject(self):
+    def get_email_subject(self) -> str:
         """Get translatable email subject"""
         return _("Password reset for your account")
 
-    def dispatch(self, request, *args, **kwargs):
+    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         try:
             return super().dispatch(request, *args, **kwargs)
         except Ratelimited:
@@ -210,7 +213,7 @@ class SecurePasswordResetView(PasswordResetView):
             ))
             return render(request, self.template_name, {'form': self.get_form()})
 
-    def form_valid(self, form):
+    def form_valid(self, form: Any) -> HttpResponse:
         # Log password reset attempt for audit trail
         UserLoginLog.objects.create(
             user=None,  # Don't reveal if user exists in logs
@@ -234,7 +237,7 @@ class SecurePasswordResetConfirmView(PasswordResetConfirmView):
     template_name = 'users/password_reset_confirm.html'
     success_url = reverse_lazy('users:password_reset_complete')
 
-    def dispatch(self, request, *args, **kwargs):
+    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         try:
             return super().dispatch(request, *args, **kwargs)
         except Ratelimited:
@@ -253,7 +256,7 @@ class SecurePasswordResetConfirmView(PasswordResetConfirmView):
                 'validlink': False
             })
 
-    def form_valid(self, form):
+    def form_valid(self, form: Any) -> HttpResponse:
         # Log successful password reset for audit
         user = form.user
 
@@ -280,7 +283,6 @@ class SecurePasswordResetConfirmView(PasswordResetConfirmView):
             )
 
         # 🔒 Clean up 2FA secrets and rotate sessions for security
-        from .services import SessionSecurityService
         SessionSecurityService.cleanup_2fa_secrets_on_recovery(user, _get_client_ip(self.request))
 
         return super().form_valid(form)
@@ -346,7 +348,6 @@ class SecurePasswordChangeView(PasswordChangeView):
         )
 
         # 🔒 Rotate session for security after password change
-        from .services import SessionSecurityService
         SessionSecurityService.rotate_session_on_password_change(self.request)
 
         messages.success(
@@ -414,8 +415,6 @@ def mfa_method_selection(request: HttpRequest) -> HttpResponse:
 @login_required
 def two_factor_setup_totp(request: HttpRequest) -> HttpResponse:
     """Set up 2FA for user account using new MFA service"""
-    from .mfa import MFAService, TOTPService
-
     # Check if user already has 2FA enabled
     if request.user.two_factor_enabled:
         messages.info(request, _('2FA is already enabled for your account.'))
@@ -437,7 +436,6 @@ def two_factor_setup_totp(request: HttpRequest) -> HttpResponse:
                         secret, backup_codes = MFAService.enable_totp(request.user, request)
 
                         # 🔒 Rotate session for security after enabling 2FA
-                        from .services import SessionSecurityService
                         SessionSecurityService.rotate_session_on_2fa_change(request)
 
                         messages.success(request, _('2FA has been enabled successfully!'))
@@ -620,7 +618,6 @@ def two_factor_disable(request: HttpRequest) -> HttpResponse:
         request.user.save(update_fields=['two_factor_enabled', '_two_factor_secret', 'backup_tokens'])
 
         # 🔒 Rotate session for security after disabling 2FA
-        from .services import SessionSecurityService
         SessionSecurityService.rotate_session_on_2fa_change(request)
 
         # Log the action
@@ -770,7 +767,6 @@ def api_check_email(request: HttpRequest) -> JsonResponse:
 
     # ⚠️ Security: Only check email format, don't reveal existence for privacy
     try:
-        from django.core.validators import validate_email
         validate_email(email)
     except ValidationError:
         return json_error(_('Invalid email format'))

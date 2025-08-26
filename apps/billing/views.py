@@ -7,23 +7,32 @@ from __future__ import annotations
 import decimal
 from datetime import datetime
 from decimal import Decimal
+from io import BytesIO
 from typing import Any
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
-from django.db.models import Q, Sum
+from django.db import transaction
+from django.db.models import Count, Q, QuerySet, Sum
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.test import RequestFactory
 from django.utils import timezone
+from django.utils.translation import gettext as _t
 from django.utils.translation import gettext_lazy as _
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import cm
+from reportlab.pdfgen import canvas
 
-from apps.common.decorators import billing_staff_required
+from apps.common.decorators import billing_staff_required, can_edit_proforma
 from apps.common.mixins import get_pagination_context, get_search_context
 from apps.common.utils import json_error, json_success
 from apps.customers.models import Customer
 
 from .models import (
+    Currency,
     Invoice,
     InvoiceLine,
     InvoiceSequence,
@@ -38,7 +47,6 @@ def _get_accessible_customer_ids(user: Any) -> list[int]:
     """Helper to get customer IDs that user can access"""
     accessible_customers = user.get_accessible_customers()
 
-    from django.db.models import QuerySet
     if isinstance(accessible_customers, QuerySet):
         return accessible_customers.values_list('id', flat=True)
     else:
@@ -196,7 +204,6 @@ def proforma_create(request: HttpRequest) -> HttpResponse:
             return redirect('billing:invoice_list')
 
         # Get next proforma number with proper error handling
-        from django.db import transaction
 
         # Get valid until date from form
         valid_until_str = request.POST.get('valid_until', '').strip()
@@ -204,7 +211,6 @@ def proforma_create(request: HttpRequest) -> HttpResponse:
 
         if valid_until_str:
             try:
-                from datetime import datetime
                 valid_until_date = datetime.strptime(valid_until_str, '%Y-%m-%d').date()
                 valid_until = timezone.make_aware(datetime.combine(valid_until_date, datetime.min.time()))
             except ValueError:
@@ -221,7 +227,6 @@ def proforma_create(request: HttpRequest) -> HttpResponse:
                 proforma_number = sequence.get_next_number('PRO')
 
                 # Create proforma
-                from apps.billing.models import Currency
                 ron_currency = Currency.objects.get(code='RON')
 
                 proforma = ProformaInvoice.objects.create(
@@ -337,8 +342,6 @@ def proforma_detail(request: HttpRequest, pk: int) -> HttpResponse:
 
     # Get proforma lines
     lines = proforma.lines.all()
-
-    from apps.common.decorators import can_edit_proforma
     
     context = {
         'proforma': proforma,
@@ -446,7 +449,6 @@ def process_proforma_payment(request: HttpRequest, pk: int) -> HttpResponse:
 
     if request.method == 'POST':
         # Convert proforma to invoice first
-        from django.test import RequestFactory
         factory = RequestFactory()
         convert_request = factory.post('')
         convert_request.user = request.user
@@ -644,15 +646,6 @@ def proforma_pdf(request: HttpRequest, pk: int) -> HttpResponse:
     """
     📄 Generate PDF proforma (Romanian format) using ReportLab
     """
-    from io import BytesIO
-
-    from django.conf import settings
-    from django.utils.translation import (
-        gettext as _t,  # Use gettext for immediate evaluation
-    )
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.units import cm
-    from reportlab.pdfgen import canvas
 
     proforma = get_object_or_404(ProformaInvoice, pk=pk)
 
@@ -818,15 +811,6 @@ def invoice_pdf(request: HttpRequest, pk: int) -> HttpResponse:
     """
     📄 Generate PDF invoice (Romanian format) using ReportLab
     """
-    from io import BytesIO
-
-    from django.conf import settings
-    from django.utils.translation import (
-        gettext as _t,  # Use gettext for immediate evaluation
-    )
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.units import cm
-    from reportlab.pdfgen import canvas
 
     invoice = get_object_or_404(Invoice, pk=pk)
 
@@ -1075,7 +1059,6 @@ def billing_reports(request: HttpRequest) -> HttpResponse:
     customer_ids = _get_accessible_customer_ids(request.user)
 
     # Monthly revenue
-    from django.db.models import Count
     monthly_stats = Invoice.objects.filter(
         customer_id__in=customer_ids,
         status='paid'

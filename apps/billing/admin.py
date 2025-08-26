@@ -4,9 +4,10 @@ Romanian hosting provider billing management with VAT compliance.
 """
 
 from decimal import Decimal
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from django.contrib import admin
+from django.http import HttpRequest
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.html import format_html
@@ -211,7 +212,7 @@ class InvoiceLineInline(admin.TabularInline):
     extra = 0
     readonly_fields: ClassVar[tuple[str, ...]] = ('line_total_display',)
 
-    def line_total_display(self, obj) -> str:
+    def line_total_display(self, obj: InvoiceLine) -> str:
         if obj.pk:
             return f"€{obj.line_total:.2f}"
         return "-"
@@ -325,7 +326,7 @@ class InvoiceAdmin(admin.ModelAdmin):
         }),
     )
 
-    def status_display(self, obj):
+    def status_display(self, obj: Invoice) -> SafeString:
         """Display status with colors"""
         colors = {
             'draft': 'orange',
@@ -343,19 +344,19 @@ class InvoiceAdmin(admin.ModelAdmin):
         )
     status_display.short_description = _('Status')
 
-    def total_display(self, obj) -> str:
+    def total_display(self, obj: Invoice) -> str:
         return f"{obj.currency.symbol}{obj.total:.2f}"
     total_display.short_description = _('Total')
 
-    def subtotal_display(self, obj) -> str:
+    def subtotal_display(self, obj: Invoice) -> str:
         return f"{obj.currency.symbol}{obj.subtotal:.2f}"
     subtotal_display.short_description = _('Subtotal')
 
-    def tax_display(self, obj) -> str:
+    def tax_display(self, obj: Invoice) -> str:
         return f"{obj.currency.symbol}{obj.tax_amount:.2f}"
     tax_display.short_description = _('Tax')
 
-    def remaining_amount_display(self, obj):
+    def remaining_amount_display(self, obj: Invoice) -> SafeString:
         remaining_cents = obj.get_remaining_amount()
         remaining = Decimal(remaining_cents) / 100
         if remaining > 0:
@@ -367,7 +368,7 @@ class InvoiceAdmin(admin.ModelAdmin):
         return format_html('<span style="color: green;">Paid</span>')
     remaining_amount_display.short_description = _('Remaining')
 
-    def efactura_status(self, obj):
+    def efactura_status(self, obj: Invoice) -> SafeString:
         """e-Factura submission status"""
         if obj.efactura_sent:
             return format_html(
@@ -380,7 +381,7 @@ class InvoiceAdmin(admin.ModelAdmin):
 
     actions: ClassVar[list[str]] = ['mark_as_paid', 'send_efactura']
 
-    def mark_as_paid(self, request, queryset) -> None:
+    def mark_as_paid(self, request: HttpRequest, queryset: Any) -> None:
         """Mark selected invoices as paid"""
         updated = 0
         for invoice in queryset:
@@ -459,11 +460,11 @@ class PaymentAdmin(admin.ModelAdmin):
         }),
     )
 
-    def amount_display(self, obj) -> str:
+    def amount_display(self, obj: Payment) -> str:
         return f"{obj.currency.symbol}{obj.amount:.2f}"
     amount_display.short_description = _('Amount')
 
-    def status_display(self, obj):
+    def status_display(self, obj: Payment) -> SafeString:
         """Display status with colors"""
         colors = {
             'pending': 'orange',
@@ -528,7 +529,7 @@ class CreditLedgerAdmin(admin.ModelAdmin):
         }),
     )
 
-    def delta_display(self, obj):
+    def delta_display(self, obj: CreditLedger) -> SafeString:
         """Display credit change with color"""
         if obj.delta >= 0:
             return format_html(
@@ -542,7 +543,7 @@ class CreditLedgerAdmin(admin.ModelAdmin):
             )
     delta_display.short_description = _('Credit Change')
 
-    def get_queryset(self, request):
+    def get_queryset(self, request: HttpRequest) -> Any:
         """Order by most recent first"""
         return super().get_queryset(request).order_by('-created_at')
 
@@ -591,18 +592,18 @@ class TaxRuleAdmin(admin.ModelAdmin):
 
     readonly_fields: ClassVar[list[str]] = ('created_at', 'updated_at')
 
-    def rate_display(self, obj) -> str:
+    def rate_display(self, obj: TaxRule) -> str:
         """Display rate as percentage"""
         return f"{obj.rate * 100:.2f}%"
     rate_display.short_description = _('Rate')
 
-    def is_active_now(self, obj):
+    def is_active_now(self, obj: TaxRule) -> bool:
         """Show if rule is currently active"""
         return obj.is_active()
     is_active_now.boolean = True
     is_active_now.short_description = _('Active Now')
 
-    def get_queryset(self, request):
+    def get_queryset(self, request: HttpRequest) -> Any:
         """Order by country and validity"""
         return super().get_queryset(request).select_related().order_by(
             'country_code', 'tax_type', '-valid_from'
@@ -640,13 +641,13 @@ class VATValidationAdmin(admin.ModelAdmin):
         })
     )
 
-    def is_expired_now(self, obj):
+    def is_expired_now(self, obj: VATValidation) -> bool:
         """Show if validation has expired"""
         return obj.is_expired()
     is_expired_now.boolean = True
     is_expired_now.short_description = _('Expired')
 
-    def get_queryset(self, request):
+    def get_queryset(self, request: HttpRequest) -> Any:
         """Order by most recent validations"""
         return super().get_queryset(request).order_by('-validation_date')
 
@@ -687,7 +688,7 @@ class PaymentRetryPolicyAdmin(admin.ModelAdmin):
 
     readonly_fields: ClassVar[list[str]] = ('created_at', 'updated_at')
 
-    def retry_schedule_display(self, obj):
+    def retry_schedule_display(self, obj: PaymentRetryPolicy) -> str:
         """Display retry schedule in readable format"""
         if not obj.retry_intervals_days:
             return "No retries"
@@ -698,7 +699,7 @@ class PaymentRetryPolicyAdmin(admin.ModelAdmin):
         return schedule
     retry_schedule_display.short_description = _('Retry Schedule')
 
-    def suspend_after_days(self, obj) -> str:
+    def suspend_after_days(self, obj: PaymentRetryPolicy) -> str:
         """Display suspension period"""
         return f"{obj.suspend_service_after_days} days" if obj.suspend_service_after_days else "Never"
     suspend_after_days.short_description = _('Suspend After')
@@ -734,13 +735,13 @@ class PaymentRetryAttemptAdmin(admin.ModelAdmin):
         })
     )
 
-    def payment_link(self, obj):
+    def payment_link(self, obj: PaymentRetryAttempt) -> SafeString:
         """Link to payment admin"""
         url = reverse('admin:billing_payment_change', args=[obj.payment.id])
         return format_html('<a href="{}">{}</a>', url, str(obj.payment.id)[:8])
     payment_link.short_description = _('Payment')
 
-    def get_queryset(self, request):
+    def get_queryset(self, request: HttpRequest) -> Any:
         """Optimize queries"""
         return super().get_queryset(request).select_related(
             'payment', 'policy'
@@ -788,7 +789,7 @@ class PaymentCollectionRunAdmin(admin.ModelAdmin):
         })
     )
 
-    def duration_display(self, obj) -> str:
+    def duration_display(self, obj: PaymentCollectionRun) -> str:
         """Display run duration"""
         if not obj.completed_at:
             if obj.status == 'running':
@@ -800,7 +801,7 @@ class PaymentCollectionRunAdmin(admin.ModelAdmin):
         return f"{duration.total_seconds():.0f}s"
     duration_display.short_description = _('Duration')
 
-    def success_rate_display(self, obj):
+    def success_rate_display(self, obj: PaymentCollectionRun) -> SafeString | str:
         """Display success rate percentage"""
         if obj.total_processed == 0:
             return "N/A"
@@ -813,7 +814,7 @@ class PaymentCollectionRunAdmin(admin.ModelAdmin):
         )
     success_rate_display.short_description = _('Success Rate')
 
-    def amount_recovered_display(self, obj):
+    def amount_recovered_display(self, obj: PaymentCollectionRun) -> SafeString | str:
         """Display recovered amount with currency"""
         if obj.amount_recovered_cents == 0:
             return "€0.00"
@@ -825,6 +826,6 @@ class PaymentCollectionRunAdmin(admin.ModelAdmin):
         )
     amount_recovered_display.short_description = _('Recovered Amount')
 
-    def get_queryset(self, request):
+    def get_queryset(self, request: HttpRequest) -> Any:
         """Order by most recent runs"""
         return super().get_queryset(request).select_related('triggered_by').order_by('-started_at')

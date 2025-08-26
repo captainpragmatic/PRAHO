@@ -2,14 +2,15 @@
 Django admin configuration for Users app
 """
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from django.contrib import admin, messages
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
-from django.http import HttpResponseRedirect
+from django.http import HttpRequest, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, render
 from django.urls import path, reverse
 from django.utils.html import format_html
+from django.utils.safestring import SafeString
 
 from apps.common.constants import BACKUP_CODE_LOW_WARNING_THRESHOLD, USER_AGENT_DISPLAY_LIMIT
 
@@ -36,7 +37,7 @@ class UserAdmin(BaseUserAdmin):
 
     actions: ClassVar[list[str]] = ['go_to_2fa_dashboard']
 
-    def go_to_2fa_dashboard(self, request, queryset):
+    def go_to_2fa_dashboard(self, request: HttpRequest, queryset: Any) -> HttpResponseRedirect:
         """Redirect to 2FA Dashboard"""
         return HttpResponseRedirect(reverse('admin:users_user_2fa_dashboard'))
     go_to_2fa_dashboard.short_description = "🔐 Go to 2FA Security Dashboard"
@@ -84,13 +85,13 @@ class UserAdmin(BaseUserAdmin):
 
     readonly_fields: ClassVar[list[str]] = ('date_joined', 'last_login', 'created_at', 'updated_at', 'backup_codes_count', 'two_factor_actions')
 
-    def is_staff_user(self, obj):
+    def is_staff_user(self, obj: User) -> bool:
         """Check if user is system/staff user"""
         return obj.is_staff_user
     is_staff_user.boolean = True
     is_staff_user.short_description = 'Staff User'
 
-    def primary_customer_name(self, obj):
+    def primary_customer_name(self, obj: User) -> SafeString | str:
         """Get primary customer name"""
         primary = obj.primary_customer
         if primary:
@@ -102,7 +103,7 @@ class UserAdmin(BaseUserAdmin):
         return '-'
     primary_customer_name.short_description = 'Primary Customer'
 
-    def backup_codes_count(self, obj):
+    def backup_codes_count(self, obj: User) -> SafeString | str:
         """Show number of backup codes remaining"""
         if not obj.two_factor_enabled:
             return '-'
@@ -116,7 +117,7 @@ class UserAdmin(BaseUserAdmin):
             return format_html('<span style="color: green;">{}</span>', count)
     backup_codes_count.short_description = 'Backup Codes'
 
-    def two_factor_actions(self, obj):
+    def two_factor_actions(self, obj: User) -> SafeString:
         """Admin actions for 2FA management"""
         if not obj.two_factor_enabled:
             return format_html('<em>2FA not enabled</em>')
@@ -158,7 +159,7 @@ class UserAdmin(BaseUserAdmin):
         return format_html(' '.join(actions))
     two_factor_actions.short_description = '2FA Actions'
 
-    def get_urls(self):
+    def get_urls(self) -> list[Any]:
         """Add custom admin URLs for 2FA management"""
         urls = super().get_urls()
         custom_urls = [
@@ -180,14 +181,14 @@ class UserAdmin(BaseUserAdmin):
         ]
         return custom_urls + urls
 
-    def changelist_view(self, request, extra_context=None):
+    def changelist_view(self, request: HttpRequest, extra_context: dict[str, Any] | None = None) -> Any:
         """Override changelist to add 2FA dashboard link"""
         extra_context = extra_context or {}
         extra_context['show_2fa_dashboard'] = True
         extra_context['dashboard_url'] = reverse('admin:users_user_2fa_dashboard')
         return super().changelist_view(request, extra_context)
 
-    def tfa_dashboard_view(self, request):
+    def tfa_dashboard_view(self, request: HttpRequest) -> Any:
         """🔐 Admin view for 2FA security dashboard"""
 
         # Simple test context first
@@ -205,7 +206,7 @@ class UserAdmin(BaseUserAdmin):
 
         return render(request, 'admin/users/2fa_dashboard.html', context)
 
-    def disable_2fa_view(self, request, user_id):
+    def disable_2fa_view(self, request: HttpRequest, user_id: int) -> HttpResponseRedirect:
         """Admin view to disable 2FA for a user using MFA service"""
         user = get_object_or_404(User, id=user_id)
 
@@ -231,7 +232,7 @@ class UserAdmin(BaseUserAdmin):
 
         return HttpResponseRedirect(reverse('admin:users_user_change', args=[user_id]))
 
-    def reset_backup_codes_view(self, request, user_id):
+    def reset_backup_codes_view(self, request: HttpRequest, user_id: int) -> HttpResponseRedirect:
         """Admin view to reset backup codes for a user using MFA service"""
         user = get_object_or_404(User, id=user_id)
 
@@ -319,7 +320,7 @@ class CustomerMembershipAdmin(admin.ModelAdmin):
 
     readonly_fields: ClassVar[list[str]] = ('created_at', 'updated_at')
 
-    def get_queryset(self, request):
+    def get_queryset(self, request: HttpRequest) -> Any:
         return super().get_queryset(request).select_related(
             'user', 'customer', 'created_by'
         )
@@ -349,7 +350,7 @@ class UserLoginLogAdmin(admin.ModelAdmin):
 
     date_hierarchy = 'timestamp'
 
-    def get_user_display(self, obj):
+    def get_user_display(self, obj: UserLoginLog) -> str:
         """Display user email or 'Unknown User' for null users"""
         if obj.user:
             return obj.user.email
@@ -357,7 +358,7 @@ class UserLoginLogAdmin(admin.ModelAdmin):
     get_user_display.short_description = 'User'
     get_user_display.admin_order_field = 'user__email'
 
-    def get_location(self, obj) -> str:
+    def get_location(self, obj: UserLoginLog) -> str:
         """Display location information"""
         if obj.country and obj.city:
             return f"🌍 {obj.city}, {obj.country}"
@@ -366,7 +367,7 @@ class UserLoginLogAdmin(admin.ModelAdmin):
         return "❓ Unknown"
     get_location.short_description = 'Location'
 
-    def get_user_agent_short(self, obj):
+    def get_user_agent_short(self, obj: UserLoginLog) -> str:
         """Display shortened user agent"""
         ua = obj.user_agent
         if len(ua) > USER_AGENT_DISPLAY_LIMIT:
@@ -374,13 +375,13 @@ class UserLoginLogAdmin(admin.ModelAdmin):
         return ua
     get_user_agent_short.short_description = 'User Agent'
 
-    def has_add_permission(self, request) -> bool:
+    def has_add_permission(self, request: HttpRequest) -> bool:
         """Login logs are created automatically"""
         return False
 
-    def has_change_permission(self, request, obj=None) -> bool:
+    def has_change_permission(self, request: HttpRequest, obj: UserLoginLog | None = None) -> bool:
         """Login logs are read-only"""
         return False
 
-    def get_queryset(self, request):
+    def get_queryset(self, request: HttpRequest) -> Any:
         return super().get_queryset(request).select_related('user')

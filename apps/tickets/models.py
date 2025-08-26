@@ -3,11 +3,13 @@ Support ticket models for PRAHO Platform
 Romanian hosting provider customer support system.
 """
 
+from datetime import timedelta
 from typing import Any, ClassVar
 
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.constants import FILE_SIZE_CONVERSION_FACTOR_FLOAT
@@ -236,10 +238,6 @@ class Ticket(models.Model):
 
         # Set SLA deadlines
         if not self.sla_response_due and self.category:
-            from datetime import timedelta
-
-            from django.utils import timezone
-
             self.sla_response_due = timezone.now() + timedelta(
                 hours=self.category.sla_response_hours
             )
@@ -251,7 +249,6 @@ class Ticket(models.Model):
 
     def _generate_ticket_number(self) -> str:
         """Generate unique ticket number"""
-        from django.utils import timezone
         year = timezone.now().year
 
         # Get last ticket number for this year
@@ -273,7 +270,6 @@ class Ticket(models.Model):
         if not self.sla_response_due or self.first_response_at:
             return False
 
-        from django.utils import timezone
         return timezone.now() > self.sla_response_due
 
     @property
@@ -282,7 +278,6 @@ class Ticket(models.Model):
         if not self.sla_resolution_due or self.resolved_at:
             return False
 
-        from django.utils import timezone
         return timezone.now() > self.sla_resolution_due
 
     def get_priority_color(self) -> str:

@@ -12,6 +12,7 @@ Centralizes common functionality like:
 """
 
 
+import time
 from typing import Any
 
 import pytest
@@ -182,8 +183,6 @@ def wait_for_server_ready(page: Page, max_attempts: int = 10) -> bool:
     Returns:
         bool: True if server is ready, False otherwise
     """
-    import time
-    
     for attempt in range(max_attempts):
         try:
             page.goto(f"{BASE_URL}/auth/login/", timeout=3000)

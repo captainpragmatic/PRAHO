@@ -11,7 +11,10 @@ Refactored to normalized structure with soft deletes and separated concerns:
 """
 
 from decimal import Decimal
-from typing import Any, ClassVar, Optional
+from typing import TYPE_CHECKING, Any, ClassVar, Optional
+
+if TYPE_CHECKING:
+    from apps.billing.models import Invoice  # Imported for balance calculations
 
 from django.core.validators import RegexValidator
 from django.db import models
@@ -353,8 +356,7 @@ class CustomerBillingProfile(SoftDeleteModel):
 
     def get_account_balance(self) -> Decimal:
         """Get customer account balance"""
-        from apps.billing.models import Invoice
-
+        from apps.billing.models import Invoice  # noqa: PLC0415 # Cross-app import for balance calculation
         invoices = Invoice.objects.filter(customer=self.customer)
         total_due = sum(
             invoice.amount_due for invoice in invoices

@@ -8,11 +8,14 @@ from decimal import Decimal
 import pytest
 from django.contrib.auth import get_user_model
 from django.contrib.messages import get_messages
-from django.test import Client, TestCase
+from django.contrib.messages.storage.fallback import FallbackStorage
+from django.http import HttpResponse
+from django.test import Client, RequestFactory, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
 from apps.billing.models import Currency, Invoice, ProformaInvoice
+from apps.common.decorators import billing_staff_required, staff_required  # For testing decorator behavior
 from apps.customers.models import Customer
 from apps.provisioning.models import Server, Service, ServicePlan
 from apps.tickets.models import Ticket, TicketComment
@@ -424,17 +427,13 @@ class SecurityDecoratorsTestCase(TestCase):
 
     def test_staff_required_decorator_allows_staff(self):
         """Test that staff_required decorator allows staff users"""
-        from apps.common.decorators import staff_required
-        
         # Create a simple view with staff_required decorator
         @staff_required
         def test_view(request):
-            from django.http import HttpResponse
             return HttpResponse('success')
         
         # Test with staff user
         self.client.login(email='staff@praho.ro', password='staffpass123')
-        from django.test import RequestFactory
         factory = RequestFactory()
         request = factory.get('/test/')
         request.user = self.staff_user
@@ -445,25 +444,20 @@ class SecurityDecoratorsTestCase(TestCase):
 
     def test_billing_staff_required_decorator_blocks_customers(self):
         """Test that billing_staff_required decorator blocks customer users"""
-        from apps.common.decorators import billing_staff_required
-        from django.contrib.messages.storage.fallback import FallbackStorage
-        
         # Create a simple view with billing_staff_required decorator
         @billing_staff_required  
         def test_view(request):
-            from django.http import HttpResponse
             return HttpResponse('success')
         
         # Test with customer user - should be blocked
         self.client.login(email='customer@example.com', password='customerpass123')
-        from django.test import RequestFactory
         factory = RequestFactory()
         request = factory.get('/test/')
         request.user = self.customer_user
         
         # Add message storage to the request
-        setattr(request, 'session', {})
-        setattr(request, '_messages', FallbackStorage(request))
+        request.session = {}
+        request._messages = FallbackStorage(request)
         
         response = test_view(request)
         self.assertEqual(response.status_code, 302)  # Redirect

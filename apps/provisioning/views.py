@@ -9,6 +9,7 @@ from typing import Any
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
+from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
@@ -23,7 +24,6 @@ def _get_accessible_customer_ids(user: Any) -> list[int]:
     """Helper to get customer IDs that user can access"""
     accessible_customers = user.get_accessible_customers()
 
-    from django.db.models import QuerySet
     if isinstance(accessible_customers, QuerySet):
         return accessible_customers.values_list('id', flat=True)
     else:

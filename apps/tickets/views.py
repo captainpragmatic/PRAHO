@@ -2,15 +2,18 @@
 # TICKETS VIEWS - SUPPORT SYSTEM
 # ===============================================================================
 
+import mimetypes
+import os
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
-from django.http import HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
 
-from .models import Ticket, TicketComment
+from .models import Ticket, TicketAttachment, TicketComment
 
 
 @login_required
@@ -146,10 +149,6 @@ def ticket_reply(request: HttpRequest, pk: int) -> HttpResponse:
 
             # Handle file attachments
             if request.FILES:
-                import mimetypes
-
-                from apps.tickets.models import TicketAttachment
-
                 for uploaded_file in request.FILES.getlist('attachments'):
                     # Basic security checks
                     if uploaded_file.size > 10 * 1024 * 1024:  # 10MB limit
@@ -280,13 +279,6 @@ def ticket_reopen(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 def download_attachment(request: HttpRequest, attachment_id: int) -> HttpResponse:
     """📎 Download ticket attachment"""
-    import os
-
-    from django.core.exceptions import PermissionDenied
-    from django.http import Http404, HttpResponse
-
-    from apps.tickets.models import TicketAttachment
-
     try:
         attachment = TicketAttachment.objects.select_related('ticket__customer').get(id=attachment_id)
     except TicketAttachment.DoesNotExist:

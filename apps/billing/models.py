@@ -4,13 +4,15 @@ Romanian invoice generation with VAT compliance and e-Factura support.
 Aligned with PostgreSQL hosting panel schema v1 with separate proforma handling.
 """
 
+import logging
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, ClassVar
 
 from django.core.validators import MaxValueValidator, MinValueValidator
-from django.db import models
+from django.db import models, transaction
+from django.db.models import F
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -67,9 +69,6 @@ class InvoiceSequence(models.Model):
 
     def get_next_number(self, prefix: str = 'INV') -> str:
         """Get next invoice number and increment sequence atomically"""
-        from django.db import transaction
-        from django.db.models import F
-
         with transaction.atomic():
             # Atomic increment using F() expression to prevent race conditions
             InvoiceSequence.objects.filter(pk=self.pk).update(last_value=F('last_value') + 1)
@@ -90,11 +89,6 @@ class ProformaSequence(models.Model):
 
     def get_next_number(self, prefix: str = 'PRO') -> str:
         """Get next proforma number and increment sequence atomically"""
-        import logging
-
-        from django.db import transaction
-        from django.db.models import F
-
         logger = logging.getLogger(__name__)
 
         with transaction.atomic():
@@ -899,7 +893,6 @@ class PaymentRetryPolicy(models.Model):
             return None
 
         days_to_wait = self.retry_intervals_days[attempt_number]
-        from datetime import timedelta
         return failure_date + timedelta(days=days_to_wait)
 
 

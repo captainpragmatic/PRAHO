@@ -3,6 +3,7 @@ Audit services for PRAHO Platform
 Centralized audit logging for Romanian compliance and security.
 """
 
+import hashlib
 import json
 import logging
 import uuid
@@ -10,11 +11,13 @@ from typing import TYPE_CHECKING, Any, ClassVar, Optional, TypedDict
 
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.models import ContentType
+from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.db import transaction
 from django.utils import timezone
 
-from apps.common.types import EmailAddress, Result
+from apps.common.types import EmailAddress, Err, Ok, Result
+from apps.tickets.models import Ticket  # Import for GDPR data export
 
 from .models import AuditEvent, ComplianceLog, DataExport
 
@@ -245,8 +248,6 @@ class GDPRExportService:
     ) -> Result[DataExport, str]:
         """Create a new GDPR data export request"""
 
-        from apps.common.types import Err, Ok
-
         try:
             # Default export scope - comprehensive user data
             if not export_scope:
@@ -260,8 +261,6 @@ class GDPRExportService:
                     'format': 'json'
                 }
 
-            # Create export request
-            from .models import DataExport
             export_request = DataExport.objects.create(
                 requested_by=user,
                 export_type='gdpr',
@@ -292,12 +291,6 @@ class GDPRExportService:
     @transaction.atomic
     def process_data_export(cls, export_request: 'DataExport') -> Result[str, str]:
         """Process and generate the actual data export file"""
-        import hashlib
-
-        from django.core.files.base import ContentFile
-
-        from apps.common.types import Err, Ok
-
         try:
             user = export_request.requested_by
             export_request.status = 'processing'
@@ -414,7 +407,6 @@ class GDPRExportService:
         # Support tickets
         if scope.get('include_tickets', True):
             try:
-                from apps.tickets.models import Ticket
                 tickets = Ticket.objects.filter(created_by=user)
                 for ticket in tickets:
                     data['support_tickets'].append({
@@ -430,7 +422,6 @@ class GDPRExportService:
 
         # Audit trail summary (privacy-focused)
         if scope.get('include_audit_logs', True):
-            from .models import AuditEvent
             audit_events = AuditEvent.objects.filter(user=user).order_by('-timestamp')[:100]  # Last 100 events
             data['audit_summary'] = {
                 'total_events': audit_events.count(),
@@ -485,10 +476,9 @@ class GDPRDeletionService:
         deletion_type: str = 'anonymize',  # 'anonymize' or 'delete'
         request_ip: str | None = None,
         reason: str | None = None
-    ) -> Result[ComplianceLog, str]:
+    ) -> "Result[DataDeletionRequest, str]":
         """Create a GDPR data deletion request"""
 
-        from apps.common.types import Err, Ok
 
 
         try:
@@ -532,7 +522,6 @@ class GDPRDeletionService:
     def process_deletion_request(cls, deletion_request: 'ComplianceLog') -> Result[str, str]:
         """Process the actual data deletion/anonymization"""
 
-        from apps.common.types import Err, Ok
 
         try:
             user_email = deletion_request.evidence.get('user_email', 'unknown')
@@ -604,9 +593,7 @@ class GDPRDeletionService:
     @classmethod
     def _anonymize_user_data(cls, user: User) -> Result[str, str]:
         """Anonymize user data while preserving business relationships"""
-        from apps.common.types import Err, Ok
 
-        from .models import AuditEvent
 
         try:
             # Store original email for logging
@@ -647,9 +634,7 @@ class GDPRDeletionService:
     @classmethod
     def _delete_user_data(cls, user: User) -> Result[str, str]:
         """Complete data deletion (only when legally permitted)"""
-        from apps.common.types import Err, Ok
 
-        from .models import AuditEvent
 
         try:
             original_email = user.email
@@ -689,7 +674,6 @@ class GDPRConsentService:
     ) -> Result[str, str]:
         """Withdraw specific types of consent"""
 
-        from apps.common.types import Err, Ok
 
         try:
             valid_types = ['data_processing', 'marketing', 'analytics', 'cookies']
@@ -750,7 +734,6 @@ class GDPRConsentService:
     @classmethod
     def get_consent_history(cls, user: User) -> list[dict[str, Any]]:
         """Get user's consent history for transparency"""
-        from .models import ComplianceLog
 
         try:
             consent_logs = ComplianceLog.objects.filter(

@@ -6,6 +6,7 @@ Comprehensive data subject rights implementation with industry-standard UI/UX.
 import logging
 
 from django.contrib import messages
+from django.contrib.auth import logout  # For GDPR deletion logout
 from django.contrib.auth.decorators import login_required
 from django.core.files.storage import default_storage
 from django.http import Http404, HttpRequest, HttpResponse
@@ -227,7 +228,6 @@ def request_data_deletion(request: HttpRequest) -> HttpResponse:
                     messages.success(request, _('Your account data has been processed according to your request.'))
                     # If full deletion, user would be logged out
                     if deletion_type == 'delete':
-                        from django.contrib.auth import logout
                         logout(request)
                         return redirect('users:login')
                 else:

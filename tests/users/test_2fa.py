@@ -12,10 +12,12 @@ Tests for apps/users/mfa.py covering:
 """
 
 import base64
+import time
 from unittest.mock import patch
 
 import pyotp
 from django.contrib.auth import get_user_model
+from django.contrib.sessions.backends.db import SessionStore
 from django.core.cache import cache
 from django.test import RequestFactory, TestCase
 from django.utils import timezone
@@ -450,7 +452,6 @@ class MFAServiceTestCase(TestCase):
 
         # Create request with session
         request = self.factory.post('/')
-        from django.contrib.sessions.backends.db import SessionStore
         session = SessionStore()
         session.create()
         request.session = session
@@ -814,7 +815,6 @@ class MFASecurityTestCase(TestCase):
         cache.clear()
 
         # Test previous time window (should work due to tolerance)
-        import time
         prev_time = int(time.time()) - 30  # 30 seconds ago
         prev_token = totp.at(prev_time)
         result2 = TOTPService.verify_token(self.user, prev_token, request)
@@ -848,7 +848,6 @@ class MFASecurityTestCase(TestCase):
         """Test MFA operations create proper audit trails"""
         # Create request with session
         request = self.factory.post('/')
-        from django.contrib.sessions.backends.db import SessionStore
         session = SessionStore()
         session.create()
         request.session = session
@@ -899,7 +898,6 @@ class MFAIntegrationTestCase(TestCase):
         """Test complete MFA setup and usage workflow"""
         # Create request with session
         request = self.factory.post('/')
-        from django.contrib.sessions.backends.db import SessionStore
         session = SessionStore()
         session.create()
         request.session = session

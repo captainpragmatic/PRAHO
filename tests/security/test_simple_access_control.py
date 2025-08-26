@@ -4,7 +4,18 @@ Tests critical security fixes for customers vs staff access.
 """
 
 from django.contrib.auth import get_user_model
-from django.test import Client, TestCase
+from django.contrib.messages.storage.fallback import FallbackStorage
+from django.http import HttpResponse
+from django.test import Client, RequestFactory, TestCase
+
+from apps.common.decorators import (
+    billing_staff_required,
+    can_create_internal_notes,
+    can_edit_proforma,
+    can_manage_financial_data,
+    can_view_internal_notes,
+    staff_required,
+)
 
 User = get_user_model()
 
@@ -41,10 +52,6 @@ class SimpleAccessControlTestCase(TestCase):
         
         # Create a URL that would use billing_staff_required decorator
         # This tests the decorator itself by making a direct request
-        from django.http import HttpResponse
-        from django.test import RequestFactory
-
-        from apps.common.decorators import billing_staff_required
         
         @billing_staff_required
         def test_view(request):
@@ -55,9 +62,8 @@ class SimpleAccessControlTestCase(TestCase):
         request.user = self.customer_user
         
         # Add message storage to the request
-        from django.contrib.messages.storage.fallback import FallbackStorage
-        setattr(request, 'session', {})
-        setattr(request, '_messages', FallbackStorage(request))
+        request.session = {}
+        request._messages = FallbackStorage(request)
         
         response = test_view(request)
         self.assertEqual(response.status_code, 302)  # Redirect
@@ -65,10 +71,6 @@ class SimpleAccessControlTestCase(TestCase):
 
     def test_staff_required_decorator_blocks_customers(self):
         """Test that staff_required decorator blocks customer users"""
-        from django.http import HttpResponse
-        from django.test import RequestFactory
-
-        from apps.common.decorators import staff_required
         
         @staff_required
         def test_view(request):
@@ -79,9 +81,8 @@ class SimpleAccessControlTestCase(TestCase):
         request.user = self.customer_user
         
         # Add message storage to the request
-        from django.contrib.messages.storage.fallback import FallbackStorage
-        setattr(request, 'session', {})
-        setattr(request, '_messages', FallbackStorage(request))
+        request.session = {}
+        request._messages = FallbackStorage(request)
         
         response = test_view(request)
         self.assertEqual(response.status_code, 302)  # Redirect
@@ -89,10 +90,6 @@ class SimpleAccessControlTestCase(TestCase):
 
     def test_staff_required_decorator_allows_staff(self):
         """Test that staff_required decorator allows staff users"""
-        from django.http import HttpResponse
-        from django.test import RequestFactory
-
-        from apps.common.decorators import staff_required
         
         @staff_required
         def test_view(request):
@@ -108,10 +105,6 @@ class SimpleAccessControlTestCase(TestCase):
 
     def test_billing_staff_required_allows_staff(self):
         """Test that billing_staff_required decorator allows staff users"""
-        from django.http import HttpResponse
-        from django.test import RequestFactory
-
-        from apps.common.decorators import billing_staff_required
         
         @billing_staff_required
         def test_view(request):
@@ -127,7 +120,6 @@ class SimpleAccessControlTestCase(TestCase):
 
     def test_can_edit_proforma_function(self):
         """Test the can_edit_proforma permission function"""
-        from apps.common.decorators import can_edit_proforma
         
         # Mock proforma object
         class MockProforma:
@@ -148,7 +140,6 @@ class SimpleAccessControlTestCase(TestCase):
 
     def test_can_create_internal_notes_function(self):
         """Test the can_create_internal_notes permission function"""
-        from apps.common.decorators import can_create_internal_notes
         
         # Staff should be able to create internal notes
         self.assertTrue(can_create_internal_notes(self.staff_user))
@@ -158,7 +149,6 @@ class SimpleAccessControlTestCase(TestCase):
 
     def test_can_view_internal_notes_function(self):
         """Test the can_view_internal_notes permission function"""
-        from apps.common.decorators import can_view_internal_notes
         
         # Staff should be able to view internal notes
         self.assertTrue(can_view_internal_notes(self.staff_user))
@@ -168,7 +158,6 @@ class SimpleAccessControlTestCase(TestCase):
 
     def test_can_manage_financial_data_function(self):
         """Test the can_manage_financial_data permission function"""
-        from apps.common.decorators import can_manage_financial_data
         
         # Admin staff should be able to manage financial data
         self.assertTrue(can_manage_financial_data(self.staff_user))

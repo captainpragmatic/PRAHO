@@ -1,11 +1,14 @@
-from typing import ClassVar
+import json
+from typing import Any, ClassVar
 
 from django.contrib import admin
+from django.http import HttpRequest
 from django.urls import reverse
 from django.utils.html import format_html
+from django.utils.safestring import SafeString
 from django.utils.translation import gettext_lazy as _
 
-from apps.common.constants import TEXT_TRUNCATE_LIMIT, TEXT_TRUNCATE_DISPLAY
+from apps.common.constants import TEXT_TRUNCATE_DISPLAY, TEXT_TRUNCATE_LIMIT
 
 from .models import WebhookDelivery, WebhookEvent
 
@@ -94,7 +97,7 @@ class WebhookEventAdmin(admin.ModelAdmin):
         }),
     )
 
-    def source_display(self, obj) -> str:
+    def source_display(self, obj: WebhookEvent) -> str:
         """🔌 Display source with icon"""
         source_icons = {
             'stripe': '💳',
@@ -112,14 +115,14 @@ class WebhookEventAdmin(admin.ModelAdmin):
         return f"{icon} {obj.get_source_display()}"
     source_display.short_description = _('Source')
 
-    def event_type_short(self, obj):
+    def event_type_short(self, obj: WebhookEvent) -> str:
         """📝 Shortened event type for display"""
         if len(obj.event_type) > TEXT_TRUNCATE_LIMIT:
             return f"{obj.event_type[:TEXT_TRUNCATE_DISPLAY]}..."
         return obj.event_type
     event_type_short.short_description = _('Event Type')
 
-    def status_display(self, obj):
+    def status_display(self, obj: WebhookEvent) -> SafeString:
         """📊 Status with color indicators"""
         status_colors = {
             'pending': '#fbbf24',      # Yellow
@@ -145,7 +148,7 @@ class WebhookEventAdmin(admin.ModelAdmin):
         )
     status_display.short_description = _('Status')
 
-    def processing_time(self, obj) -> str:
+    def processing_time(self, obj: WebhookEvent) -> str:
         """⏱️ Processing duration"""
         if obj.processing_duration:
             seconds = obj.processing_duration.total_seconds()
@@ -156,9 +159,8 @@ class WebhookEventAdmin(admin.ModelAdmin):
         return "-"
     processing_time.short_description = _('Duration')
 
-    def payload_size(self, obj) -> str:
+    def payload_size(self, obj: WebhookEvent) -> str:
         """📦 Payload size in KB"""
-        import json
         payload_str = json.dumps(obj.payload)
         size_bytes = len(payload_str.encode('utf-8'))
         size_kb = size_bytes / 1024
@@ -169,7 +171,7 @@ class WebhookEventAdmin(admin.ModelAdmin):
             return f"{size_kb:.1f}KB"
     payload_size.short_description = _('Size')
 
-    def get_queryset(self, request):
+    def get_queryset(self, request: HttpRequest) -> Any:
         """🚀 Optimize admin queries"""
         return super().get_queryset(request).order_by('-received_at')
 
@@ -252,13 +254,13 @@ class WebhookDeliveryAdmin(admin.ModelAdmin):
         }),
     )
 
-    def customer_link(self, obj):
+    def customer_link(self, obj: WebhookDelivery) -> SafeString:
         """🔗 Link to customer admin"""
         url = reverse('admin:customers_customer_change', args=[obj.customer.id])
         return format_html('<a href="{}">{}</a>', url, str(obj.customer))
     customer_link.short_description = _('Customer')
 
-    def status_display(self, obj):
+    def status_display(self, obj: WebhookDelivery) -> SafeString:
         """📊 Status with color indicators"""
         status_colors = {
             'pending': '#fbbf24',      # Yellow
@@ -284,7 +286,7 @@ class WebhookDeliveryAdmin(admin.ModelAdmin):
         )
     status_display.short_description = _('Status')
 
-    def delivery_time(self, obj) -> str:
+    def delivery_time(self, obj: WebhookDelivery) -> str:
         """⏱️ Delivery duration"""
         if obj.delivered_at and obj.scheduled_at:
             duration = obj.delivered_at - obj.scheduled_at
@@ -296,7 +298,7 @@ class WebhookDeliveryAdmin(admin.ModelAdmin):
         return "-"
     delivery_time.short_description = _('Duration')
 
-    def get_queryset(self, request):
+    def get_queryset(self, request: HttpRequest) -> Any:
         """🚀 Optimize admin queries"""
         return super().get_queryset(request).select_related(
             'customer'

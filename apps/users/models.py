@@ -5,11 +5,23 @@ Romanian hosting provider authentication with multi-customer support.
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any, ClassVar
 
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+
+# Cross-app imports for core functionality
+from apps.common.encryption import (  # noqa: PLC0415 # Core encryption needed for user model
+    decrypt_sensitive_data,
+    encrypt_sensitive_data,
+    generate_backup_codes,
+    hash_backup_code,
+    verify_backup_code,
+)
+from apps.customers.models import Customer  # noqa: PLC0415 # Cross-app relationship
 
 
 class UserManager(BaseUserManager):
@@ -181,8 +193,6 @@ class User(AbstractUser):
         🚀 Performance: Uses prefetched customer_memberships if available,
         falls back to optimized database query if not prefetched.
         """
-        from apps.customers.models import Customer
-
         # Staff can see all customers
         if self.is_staff or self.staff_role:
             return Customer.objects.all()
@@ -214,14 +224,10 @@ class User(AbstractUser):
         if not self.account_locked_until:
             return False
 
-        from django.utils import timezone
         return timezone.now() < self.account_locked_until
 
     def increment_failed_login_attempts(self) -> None:
         """Increment failed login attempts and apply progressive lockout"""
-        from datetime import timedelta
-
-        from django.utils import timezone
 
         self.failed_login_attempts += 1
 
@@ -248,7 +254,6 @@ class User(AbstractUser):
         if not self.is_account_locked() or not self.account_locked_until:
             return 0
 
-        from django.utils import timezone
         remaining = self.account_locked_until - timezone.now()
         return max(0, int(remaining.total_seconds() / 60))
 
@@ -277,22 +282,18 @@ class User(AbstractUser):
         if not self._two_factor_secret:
             return ''
 
-        from apps.common.encryption import decrypt_sensitive_data
         return decrypt_sensitive_data(self._two_factor_secret)
 
     @two_factor_secret.setter
     def two_factor_secret(self, value: str) -> None:
         """Set encrypted 2FA secret"""
         if value:
-            from apps.common.encryption import encrypt_sensitive_data
             self._two_factor_secret = encrypt_sensitive_data(value)
         else:
             self._two_factor_secret = ''  # nosec B105
 
     def generate_backup_codes(self) -> list[str]:
         """Generate new backup codes and store hashed versions"""
-        from apps.common.encryption import generate_backup_codes, hash_backup_code
-
         # Generate plain text codes
         codes = generate_backup_codes(count=8)
 
@@ -306,8 +307,6 @@ class User(AbstractUser):
 
     def verify_backup_code(self, code: str) -> bool:
         """Verify and consume a backup code"""
-        from apps.common.encryption import verify_backup_code
-
         for i, hashed_code in enumerate(self.backup_tokens):
             if verify_backup_code(code, hashed_code):
                 # Remove used backup code
@@ -534,4 +533,4 @@ class UserLoginLog(models.Model):
 
 
 # Import MFA models to ensure they're recognized by Django
-from .mfa import WebAuthnCredential  # noqa
+from .mfa import WebAuthnCredential

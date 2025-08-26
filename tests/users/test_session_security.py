@@ -10,7 +10,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.core.cache import cache
-from django.test import RequestFactory, TestCase
+from django.test import Client, RequestFactory, TestCase
 from django.utils import timezone
 
 from apps.common.middleware import SessionSecurityMiddleware
@@ -462,8 +462,6 @@ class SessionSecurityIntegrationTest(TestCase):
     @patch('apps.users.services.log_security_event')
     def test_complete_session_security_lifecycle(self, mock_log):
         """Test complete session security lifecycle"""
-        from django.test import Client
-
         client = Client()
 
         # 1. Login (creates session)

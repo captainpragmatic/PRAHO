@@ -6,9 +6,11 @@ Romanian hosting provider service management and provisioning.
 from decimal import Decimal
 from typing import Any, ClassVar
 
+from dateutil.relativedelta import relativedelta
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 
@@ -403,7 +405,6 @@ class Service(models.Model):
         if not self.activated_at:
             return None
 
-        from dateutil.relativedelta import relativedelta
         base_date = self.activated_at.date()
 
         if self.billing_cycle == 'monthly':
@@ -423,7 +424,6 @@ class Service(models.Model):
         if not self.expires_at:
             return False
 
-        from django.utils import timezone
         return timezone.now() > self.expires_at
 
     @property
@@ -432,14 +432,11 @@ class Service(models.Model):
         if not self.expires_at:
             return 999999  # Very large number for no expiry
 
-        from django.utils import timezone
         delta = self.expires_at - timezone.now()
         return max(0, delta.days)
 
     def suspend(self, reason: str = '') -> None:
         """Suspend service"""
-        from django.utils import timezone
-
         self.status = 'suspended'
         self.suspended_at = timezone.now()
         self.suspension_reason = reason
@@ -447,8 +444,6 @@ class Service(models.Model):
 
     def activate(self) -> None:
         """Activate service"""
-        from django.utils import timezone
-
         self.status = 'active'
         if not self.activated_at:
             self.activated_at = timezone.now()

@@ -8,6 +8,7 @@ from typing import Any, ClassVar, TypeVar, cast
 from django import forms
 from django.contrib.auth.forms import UserCreationForm
 from django.core.exceptions import ValidationError
+from django.utils import timezone  # For GDPR consent timestamps
 from django.utils.translation import gettext_lazy as _
 
 from .models import User, UserProfile
@@ -135,7 +136,6 @@ class UserRegistrationForm(UserCreationForm):
             user.save()
 
             # Set GDPR consent date
-            from django.utils import timezone
             user.gdpr_consent_date = timezone.now()
             user.save(update_fields=['gdpr_consent_date'])
 

@@ -4,10 +4,13 @@ Secure encryption/decryption for sensitive data like 2FA secrets.
 """
 
 import base64
+import logging
 import os
+import secrets
 
 from cryptography.fernet import Fernet
 from django.conf import settings
+from django.contrib.auth.hashers import check_password, make_password
 from django.core.exceptions import ImproperlyConfigured
 
 
@@ -75,7 +78,6 @@ def decrypt_sensitive_data(encrypted_data: str) -> str:
         return decrypted_bytes.decode('utf-8')
     except Exception as e:
         # Log error but don't expose decryption details
-        import logging
         logger = logging.getLogger(__name__)
         logger.error(f"Failed to decrypt sensitive data: {type(e).__name__}")
         return ''
@@ -91,8 +93,6 @@ def generate_backup_codes(count: int = 8) -> list[str]:
     Returns:
         List of secure backup codes (8 digits each)
     """
-    import secrets
-
     backup_codes = []
     for _ in range(count):
         # Generate 8-digit backup code
@@ -107,7 +107,6 @@ def hash_backup_code(code: str) -> str:
     Hash backup code for secure storage.
     Uses Django's password hashing for consistency.
     """
-    from django.contrib.auth.hashers import make_password
     return make_password(code)
 
 
@@ -115,5 +114,4 @@ def verify_backup_code(code: str, hashed_code: str) -> bool:
     """
     Verify backup code against stored hash.
     """
-    from django.contrib.auth.hashers import check_password
     return check_password(code, hashed_code)

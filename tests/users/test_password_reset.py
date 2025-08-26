@@ -6,16 +6,19 @@ Tests security measures, rate limiting, audit logging, and integration with exis
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.tokens import default_token_generator
+from django.conf import settings
 from django.core import mail
 from django.core.cache import cache
-from django.test import Client, TestCase, override_settings
+from django.test import Client, RequestFactory, TestCase, override_settings
 from django.test.utils import override_settings
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 
 from apps.customers.models import Customer
-from apps.users.models import UserLoginLog
+from apps.users.models import CustomerMembership, UserLoginLog
+from apps.users.views import _get_client_ip  # For IP extraction testing
 
 User = get_user_model()
 
@@ -96,10 +99,6 @@ class SecurePasswordResetTestCase(TestCase):
     def test_password_reset_rate_limiting(self):
         """Test rate limiting logging functionality"""
         # Create a mock request to test the logging directly
-        from django.test import RequestFactory
-
-        from apps.users.views import _get_client_ip
-
         factory = RequestFactory()
         request = factory.post(self.password_reset_url, {'email': self.user.email})
         request.META['HTTP_USER_AGENT'] = 'TestAgent'
@@ -238,15 +237,12 @@ class SecurePasswordResetTestCase(TestCase):
     @override_settings(PASSWORD_RESET_TIMEOUT=7200)  # 2 hours
     def test_password_reset_timeout_setting(self):
         """Test that 2-hour timeout setting is applied"""
-        from django.conf import settings
         self.assertEqual(settings.PASSWORD_RESET_TIMEOUT, 7200)
 
     def test_account_lockout_reset_on_password_change(self):
         """Test that account lockout is reset when password is successfully changed"""
         # Lock the user account
-        from datetime import timedelta
 
-        from django.utils import timezone
 
         self.user.account_locked_until = timezone.now() + timedelta(hours=1)
         self.user.failed_login_attempts = 5
@@ -293,7 +289,6 @@ class PasswordResetIntegrationTestCase(TestCase):
             created_by=self.user
         )
 
-        from apps.users.models import CustomerMembership
         CustomerMembership.objects.create(
             customer=self.customer,
             user=self.user,

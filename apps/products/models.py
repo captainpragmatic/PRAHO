@@ -273,6 +273,9 @@ class ProductPrice(models.Model):
             models.Index(fields=['is_active']),
         )
 
+    def __str__(self) -> str:
+        return f"{self.product.name} - {self.currency.code} {self.amount} {self.billing_period}"
+
     @property
     def amount(self) -> Decimal:
         """Return amount in currency units (e.g., 29.99)"""
@@ -291,9 +294,6 @@ class ProductPrice(models.Model):
             timezone.now() <= self.promo_valid_until):
             return self.promo_price_cents
         return self.amount_cents
-
-    def __str__(self) -> str:
-        return f"{self.product.name} - {self.currency.code} {self.amount} {self.billing_period}"
 
     @property
     def effective_price(self) -> Decimal:
@@ -492,12 +492,12 @@ class ProductBundleItem(models.Model):
         unique_together: ClassVar[tuple[tuple[str, ...], ...]] = (('bundle', 'product'),)
         ordering: ClassVar[tuple[str, ...]] = ('created_at',)
 
+    def __str__(self) -> str:
+        return f"{self.bundle.name} - {self.product.name} x{self.quantity}"
+
     @property
     def override_price(self) -> Decimal | None:
         """Return override price in currency units"""
         if self.override_price_cents:
             return Decimal(self.override_price_cents) / 100
         return None
-
-    def __str__(self) -> str:
-        return f"{self.bundle.name} - {self.product.name} x{self.quantity}"

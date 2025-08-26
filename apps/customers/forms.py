@@ -10,8 +10,10 @@ from typing import Any, ClassVar, cast
 from django import forms
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.forms.models import ModelChoiceField  # For form field type checking
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.types import validate_romanian_phone  # Romanian phone validation
 from apps.users.models import CustomerMembership
 
 from .models import (
@@ -530,7 +532,6 @@ class CustomerCreationForm(forms.Form):
         """Validate Romanian phone number using centralized validation"""
         phone: str | None = self.cleaned_data.get('phone')
         if phone:
-            from apps.common.types import validate_romanian_phone
             result = validate_romanian_phone(phone.strip())
             if result.is_err():
                 raise ValidationError(result.error)
@@ -725,7 +726,6 @@ class CustomerUserAssignmentForm(forms.Form):
             ).values_list('user_id', flat=True)
 
             # Update the queryset for existing_user field
-            from django.forms.models import ModelChoiceField
             existing_user_field = self.fields['existing_user']
             if isinstance(existing_user_field, ModelChoiceField):
                 existing_user_field.queryset = User.objects.filter(

@@ -7,7 +7,8 @@ User.get_accessible_customers() methods use prefetched data efficiently.
 
 from decimal import Decimal
 
-from django.db import connection
+from django.conf import settings
+from django.db import connection, reset_queries
 from django.test import TestCase
 
 from apps.customers.models import Customer, CustomerBillingProfile, CustomerTaxProfile
@@ -16,8 +17,6 @@ from apps.users.models import CustomerMembership, User
 
 def create_test_user(username_suffix, email, **kwargs):
     """Create a test user with proper defaults"""
-    from apps.users.models import User
-
     user_data = {
         'email': email,
         'first_name': f'Test {username_suffix.title()}',
@@ -194,9 +193,6 @@ class N1QueryOptimizationTestCase(TestCase):
         users_pks = [u.pk for u in self.users[:3]]
 
         # ❌ BAD: Without optimization (N+1 queries)
-        from django.conf import settings
-        from django.db import reset_queries
-
         # Enable query logging temporarily
         old_debug = settings.DEBUG
         settings.DEBUG = True

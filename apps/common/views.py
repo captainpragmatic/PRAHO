@@ -31,7 +31,6 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
     accessible_customers_list = request.user.get_accessible_customers()
 
     # Convert to QuerySet for database queries
-    from django.db.models import QuerySet
     if isinstance(accessible_customers_list, QuerySet):
         # It's already a QuerySet (staff users)
         accessible_customers = accessible_customers_list

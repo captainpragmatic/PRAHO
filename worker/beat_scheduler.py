@@ -4,6 +4,7 @@ PRAHO PLATFORM - Beat Scheduler
 Periodic task scheduler for Romanian hosting provider operations
 """
 
+import argparse
 import logging
 import os
 import sys
@@ -261,8 +262,6 @@ class PragmaticHostScheduler:
 
 def main() -> None:
     """Main scheduler entry point"""
-    import argparse
-
     parser = argparse.ArgumentParser(description='PragmaticHost Beat Scheduler')
     parser.add_argument(
         '--verbose',

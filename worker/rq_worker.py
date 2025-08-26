@@ -4,6 +4,7 @@ PRAHO PLATFORM - Background Worker System
 Redis Queue (RQ) worker for background job processing in Romanian hosting provider
 """
 
+import argparse
 import logging
 import os
 import sys
@@ -155,8 +156,6 @@ class PragmaticHostWorker:
 
 def main() -> None:
     """Main worker entry point"""
-    import argparse
-
     parser = argparse.ArgumentParser(description='PragmaticHost Background Worker')
     parser.add_argument(
         '--queues',

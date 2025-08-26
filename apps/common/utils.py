@@ -9,10 +9,11 @@ import hashlib
 import re
 import secrets
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from functools import wraps
 from typing import Any, TypedDict
+from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
@@ -55,7 +56,7 @@ class VATCalculation(TypedDict):
 
 def calculate_romanian_vat(amount: Decimal, vat_rate: int = 19) -> VATCalculation:
     """Calculate Romanian VAT breakdown (deprecated - use apps.common.types.calculate_romanian_vat)"""
-    from apps.common.types import calculate_romanian_vat as new_calculator
+    from apps.common.types import calculate_romanian_vat as new_calculator  # noqa: PLC0415 # Delayed import to avoid circular dependency
     
     # Convert to cents-based calculation for precision
     amount_cents = int(amount * 100)
@@ -146,7 +147,6 @@ def api_require_permission(permission: str):
 
 def get_romanian_now() -> datetime:
     """Get current time in Romanian timezone"""
-    from zoneinfo import ZoneInfo
     return datetime.now(ZoneInfo('Europe/Bucharest'))
 
 
@@ -170,7 +170,7 @@ def generate_invoice_number(year: int | None = None) -> str:
         year = get_romanian_now().year
 
     # Format: YYYY-000001 (sequential per year)
-    from apps.billing.models import Invoice
+    from apps.billing.models import Invoice  # noqa: PLC0415 # Cross-app import to avoid circular dependencies
 
     # Get next invoice number for this year
     last_invoice = Invoice.objects.filter(
@@ -188,7 +188,6 @@ def generate_invoice_number(year: int | None = None) -> str:
 
 def calculate_due_date(invoice_date: datetime, payment_terms: int = 30) -> datetime:
     """Calculate invoice due date"""
-    from datetime import timedelta
     return invoice_date + timedelta(days=payment_terms)
 
 

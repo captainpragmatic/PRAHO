@@ -15,6 +15,7 @@ Features:
 from typing import Any
 
 from django.core.paginator import Paginator
+from django.db.models import Q
 from django.http import HttpRequest
 
 # 🎯 Romanian business pagination constants
@@ -122,8 +123,6 @@ def filter_queryset_by_search(queryset, search_query: str, search_fields: list):
     """
     if not search_query or not search_fields:
         return queryset
-    
-    from django.db.models import Q
     
     # Build search filter
     search_filter = Q()

@@ -22,6 +22,7 @@ from apps.common.validators import (
     BusinessLogicValidator,
     SecureErrorHandler,
     SecureInputValidator,
+    log_security_event,
 )
 from apps.customers.models import Customer, CustomerTaxProfile
 from apps.users.models import CustomerMembership
@@ -636,8 +637,6 @@ class TestPerformanceAndMonitoring:
     def test_security_event_logging(self):
         """Test security event logging functionality"""
         with patch('apps.common.validators.logger') as mock_logger:
-            from apps.common.validators import log_security_event
-
             log_security_event('test_event', {
                 'user_id': 123,
                 'action': 'registration_attempt'

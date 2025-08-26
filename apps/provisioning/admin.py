@@ -5,7 +5,7 @@ Romanian hosting provider service provisioning and server management.
 
 
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from django.contrib import admin
 from django.db.models import QuerySet
@@ -16,15 +16,15 @@ from django.utils.safestring import SafeString
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.constants import (
-    HIGH_USAGE_THRESHOLD,
-    MEDIUM_USAGE_THRESHOLD,
-    FULL_USAGE_THRESHOLD,
-    RETRY_WARNING_THRESHOLD,
-    NO_EXPIRY_SENTINEL,
     DAYS_CRITICAL_EXPIRY,
     DAYS_WARNING_EXPIRY,
-    SECONDS_PER_MINUTE,
+    FULL_USAGE_THRESHOLD,
+    HIGH_USAGE_THRESHOLD,
+    MEDIUM_USAGE_THRESHOLD,
+    NO_EXPIRY_SENTINEL,
+    RETRY_WARNING_THRESHOLD,
     SECONDS_PER_HOUR,
+    SECONDS_PER_MINUTE,
 )
 
 from .models import ProvisioningTask, Server, Service, ServicePlan
@@ -431,7 +431,7 @@ class ServiceAdmin(admin.ModelAdmin):
         }),
     )
 
-    def status_display(self, obj):
+    def status_display(self, obj: Service) -> SafeString:
         """Display status with colors"""
         colors = {
             'pending': 'orange',
@@ -449,12 +449,12 @@ class ServiceAdmin(admin.ModelAdmin):
         )
     status_display.short_description = _('Status')
 
-    def price_display(self, obj) -> str:
+    def price_display(self, obj: Service) -> str:
         """Display service price"""
         return f"{obj.price:.2f} RON"
     price_display.short_description = _('Price')
 
-    def days_until_expiry_display(self, obj):
+    def days_until_expiry_display(self, obj: Service) -> SafeString | str:
         """Display days until expiry with color coding"""
         days = obj.days_until_expiry
         if days == NO_EXPIRY_SENTINEL:
@@ -471,7 +471,7 @@ class ServiceAdmin(admin.ModelAdmin):
 
     actions: ClassVar[list[str]] = ['activate_services', 'suspend_services', 'extend_expiry']
 
-    def activate_services(self, request, queryset) -> None:
+    def activate_services(self, request: HttpRequest, queryset: Any) -> None:
         """Activate selected services"""
         updated = 0
         for service in queryset:
@@ -481,7 +481,7 @@ class ServiceAdmin(admin.ModelAdmin):
         self.message_user(request, f'Successfully activated {updated} services.')
     activate_services.short_description = _('Activate selected services')
 
-    def suspend_services(self, request, queryset) -> None:
+    def suspend_services(self, request: HttpRequest, queryset: Any) -> None:
         """Suspend selected services"""
         updated = 0
         for service in queryset:
@@ -565,7 +565,7 @@ class ProvisioningTaskAdmin(admin.ModelAdmin):
         }),
     )
 
-    def status_display(self, obj):
+    def status_display(self, obj: ProvisioningTask) -> SafeString:
         """Display status with colors"""
         colors = {
             'pending': 'orange',
@@ -582,7 +582,7 @@ class ProvisioningTaskAdmin(admin.ModelAdmin):
         )
     status_display.short_description = _('Status')
 
-    def retry_count_display(self, obj):
+    def retry_count_display(self, obj: ProvisioningTask) -> SafeString | str:
         """Display retry count with progress"""
         if obj.max_retries > 0:
             percentage = (obj.retry_count / obj.max_retries) * 100
@@ -599,7 +599,7 @@ class ProvisioningTaskAdmin(admin.ModelAdmin):
         return f"{obj.retry_count}/∞"
     retry_count_display.short_description = _('Retries')
 
-    def duration_display(self, obj) -> str:
+    def duration_display(self, obj: ProvisioningTask) -> str:
         """Display task duration"""
         duration = obj.duration_seconds
         if duration > 0:
@@ -616,7 +616,7 @@ class ProvisioningTaskAdmin(admin.ModelAdmin):
 
     actions: ClassVar[list[str]] = ['retry_failed_tasks', 'cancel_pending_tasks']
 
-    def retry_failed_tasks(self, request, queryset) -> None:
+    def retry_failed_tasks(self, request: HttpRequest, queryset: Any) -> None:
         """Retry failed tasks that can be retried"""
         retried = 0
         for task in queryset:
@@ -628,7 +628,7 @@ class ProvisioningTaskAdmin(admin.ModelAdmin):
         self.message_user(request, f'Successfully queued {retried} tasks for retry.')
     retry_failed_tasks.short_description = _('Retry failed tasks')
 
-    def cancel_pending_tasks(self, request, queryset) -> None:
+    def cancel_pending_tasks(self, request: HttpRequest, queryset: Any) -> None:
         """Cancel pending tasks"""
         cancelled = queryset.filter(status='pending').update(status='failed', error_message='Cancelled by admin')
         self.message_user(request, f'Successfully cancelled {cancelled} pending tasks.')

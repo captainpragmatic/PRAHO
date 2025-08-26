@@ -11,4 +11,4 @@ class UsersConfig(AppConfig):
     verbose_name = 'Users'
 
     def ready(self) -> None:
-        import apps.users.signals  # noqa
+        import apps.users.signals  # noqa: PLC0415 # Django app signals pattern requires import in ready()

@@ -30,6 +30,7 @@ from django.core.cache import cache
 from django.db import models
 from django.utils import timezone
 
+from apps.audit.services import audit_service  # For MFA audit logging
 from apps.common.constants import MAX_LOGIN_ATTEMPTS
 
 User = get_user_model()
@@ -411,8 +412,6 @@ class MFAService:
             user.save()
 
             # 📊 Audit log the enablement
-            from apps.audit.services import audit_service
-
             metadata = {
                 'method': 'TOTP',
                 'backup_codes_generated': len(backup_codes),
@@ -463,8 +462,6 @@ class MFAService:
             user.save()
 
             # 📊 Audit log the disablement
-            from apps.audit.services import audit_service
-
             metadata = {
                 'timestamp': timezone.now().isoformat(),
                 'reason': reason or 'User requested',
@@ -510,8 +507,6 @@ class MFAService:
             user.save()
 
             # 📊 Audit log generation
-            from apps.audit.services import audit_service
-
             audit_service.log_2fa_event(
                 event_type='2fa_backup_codes_generated',
                 user=user,
@@ -583,8 +578,6 @@ class MFAService:
                     })
 
                     # 📊 Audit backup code usage
-                    from apps.audit.services import audit_service
-
                     audit_service.log_2fa_event(
                         event_type='2fa_backup_code_used',
                         user=user,
@@ -597,8 +590,6 @@ class MFAService:
                     )
 
             # 📊 Audit verification attempt
-            from apps.audit.services import audit_service
-
             event_type = '2fa_verification_success' if result['success'] else '2fa_verification_failed'
             audit_service.log_2fa_event(
                 event_type=event_type,

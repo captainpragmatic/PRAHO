@@ -6,12 +6,15 @@ Security headers, Romanian compliance, and audit logging.
 import json
 import logging
 import time
+import traceback
 import uuid
 from collections.abc import Callable
+from datetime import datetime, timedelta
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.http import HttpRequest, HttpResponse
+from django.utils import timezone
 
 from apps.common.constants import HTTP_CLIENT_ERROR_THRESHOLD
 
@@ -200,7 +203,6 @@ class JSONResponseMiddleware:
             }
 
             if settings.DEBUG:
-                import traceback
                 error_data['traceback'] = traceback.format_exc()
 
             response = HttpResponse(
@@ -280,7 +282,7 @@ class SessionSecurityMiddleware:
     def _process_session_security(self, request: HttpRequest) -> None:
         """Process session security checks and updates"""
         try:
-            from apps.users.services import SessionSecurityService
+            from apps.users.services import SessionSecurityService  # noqa: PLC0415 # Cross-app import to avoid circular dependencies
 
             # Update session timeout based on current context
             SessionSecurityService.update_session_timeout(request)
@@ -333,10 +335,6 @@ class SessionSecurityMiddleware:
             return
 
         try:
-            from datetime import datetime, timedelta
-
-            from django.utils import timezone
-
             enabled_at = datetime.fromisoformat(enabled_at_str)
             max_shared_duration = timedelta(hours=2)  # Max 2 hours in shared mode
 
@@ -345,7 +343,7 @@ class SessionSecurityMiddleware:
                 request.session.pop('shared_device_mode', None)
                 request.session.pop('shared_device_enabled_at', None)
 
-                from apps.users.services import SessionSecurityService
+                from apps.users.services import SessionSecurityService  # noqa: PLC0415 # Cross-app import to avoid circular dependencies
                 SessionSecurityService.log_session_activity(
                     request,
                     'shared_device_auto_expired',

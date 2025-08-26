@@ -144,7 +144,9 @@ def current_customer(request: HttpRequest) -> dict[str, Any]:
         # Staff can switch customer context via session
         customer_id = request.session.get('staff_customer_context')
         if customer_id:
-            from apps.customers.models import Customer
+            from apps.customers.models import (  # noqa: PLC0415 # Cross-app import to avoid circular dependencies
+                Customer,
+            )
             try:
                 customer = Customer.objects.get(id=customer_id)
                 return {'current_customer': customer}

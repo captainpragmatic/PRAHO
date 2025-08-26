@@ -4,9 +4,11 @@ PRAHO PLATFORM - UI Components Template Tags
 HTMX-powered reusable components for Romanian hosting provider interface
 """
 
+import re
 from typing import Any
 
 from django import template
+from django.utils.html import escape  # For XSS prevention
 from django.utils.safestring import mark_safe
 
 from apps.common.constants import FILE_SIZE_CONVERSION_FACTOR
@@ -476,10 +478,6 @@ def icon(
     }
 
     # Validate and sanitize inputs to prevent XSS
-    import re
-
-    from django.utils.html import escape
-
     # Sanitize icon name - only allow alphanumeric and hyphens
     if not re.match(r'^[a-zA-Z0-9\-_]+$', name):
         name = 'default'  # Fallback to safe default

@@ -7,7 +7,7 @@ from typing import cast
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
-from django.db.models import Q
+from django.db.models import Q, QuerySet
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
@@ -15,6 +15,7 @@ from django.utils.translation import gettext_lazy as _
 from apps.common.constants import SEARCH_QUERY_MIN_LENGTH
 from apps.common.decorators import staff_required
 from apps.common.types import Err
+from apps.users.models import User
 from apps.users.services import CustomerUserService
 
 from .forms import (
@@ -44,7 +45,6 @@ def customer_list(request: HttpRequest) -> HttpResponse:
     accessible_customers_list = request.user.get_accessible_customers()
 
     # Convert to QuerySet for database operations
-    from django.db.models import QuerySet
     if isinstance(accessible_customers_list, QuerySet):
         customers = accessible_customers_list
     elif accessible_customers_list:
@@ -551,7 +551,6 @@ def customer_assign_user(request: HttpRequest, customer_id: int) -> HttpResponse
                     role = assignment_data['role']
 
                     if existing_user:  # Ensure user is not None
-                        from apps.users.models import User
                         if isinstance(existing_user, User):
                             link_result = CustomerUserService.link_existing_user(
                                 user=existing_user,

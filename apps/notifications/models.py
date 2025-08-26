@@ -11,7 +11,7 @@ from django.core.validators import EmailValidator
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
-from apps.common.constants import SUBJECT_PREVIEW_LIMIT, SUBJECT_PREVIEW_DISPLAY
+from apps.common.constants import SUBJECT_PREVIEW_DISPLAY, SUBJECT_PREVIEW_LIMIT
 
 # ===============================================================================
 # EMAIL TEMPLATE SYSTEM

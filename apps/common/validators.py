@@ -77,8 +77,12 @@ from typing import TypeVar, cast
 from apps.common.types import (
     CUIString,
     EmailAddress,
+    Err,
     VATString,
+    validate_romanian_cui,
 )
+from apps.customers.models import Customer, CustomerTaxProfile
+from apps.users.models import CustomerMembership, User
 
 F = TypeVar('F', bound=Callable[..., Any])
 
@@ -236,8 +240,6 @@ class SecureInputValidator:
     @staticmethod
     def validate_cui_romanian(cui: str) -> CUIString:
         """Romanian CUI (Company Unique Identifier) validation - delegating to types module"""
-        from apps.common.types import validate_romanian_cui
-        
         if not cui:
             return CUIString("")  # CUI might be optional for some business types
 
@@ -254,9 +256,6 @@ class SecureInputValidator:
         # Use centralized validation from types module
         result = validate_romanian_cui(cui.strip())
         if result.is_err():
-            from typing import cast
-
-            from apps.common.types import Err
             error_result = cast(Err[str], result)
             raise ValidationError(_(error_result.error))
         
@@ -431,8 +430,6 @@ class BusinessLogicValidator:
         """
         Check company uniqueness with race condition prevention
         """
-        from apps.customers.models import Customer, CustomerTaxProfile
-
         # Rate limiting for enumeration prevention
         cache_key = f"company_check:{request_ip or 'unknown'}"
         current_checks = cache.get(cache_key, 0)
@@ -481,8 +478,6 @@ class BusinessLogicValidator:
         """
         TOCTOU-safe permission validation
         """
-        from apps.users.models import CustomerMembership
-
         # Check current membership atomically
         with transaction.atomic():
             membership = CustomerMembership.objects.select_for_update().filter(
@@ -506,8 +501,6 @@ class BusinessLogicValidator:
         """
         Comprehensive invitation validation with rate limiting
         """
-        from apps.users.models import CustomerMembership, User
-
         # Validate inviter permissions (TOCTOU-safe)
         BusinessLogicValidator.validate_user_permissions(inviter, customer, 'owner')
 

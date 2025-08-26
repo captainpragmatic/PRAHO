@@ -11,10 +11,10 @@ from django.utils.safestring import SafeString
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.constants import (
-    SUCCESS_RATE_EXCELLENT_THRESHOLD, 
-    SUCCESS_RATE_WARNING_THRESHOLD,
     DAYS_CRITICAL_EXPIRY,
     DAYS_WARNING_EXPIRY,
+    SUCCESS_RATE_EXCELLENT_THRESHOLD,
+    SUCCESS_RATE_WARNING_THRESHOLD,
 )
 
 from .models import TLD, Domain, DomainOrderItem, Registrar, TLDRegistrarAssignment
