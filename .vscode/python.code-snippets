@@ -1,0 +1,371 @@
+{
+  // ===============================================================================
+  // PRAHO PLATFORM - PYTHON CODE SNIPPETS
+  // Common Django typing patterns for fast development
+  // ===============================================================================
+  
+  // ┌─────────────────────────────────────────────────────────────────────────┐
+  // │ DJANGO ADMIN TYPING PATTERNS                                              │
+  // └─────────────────────────────────────────────────────────────────────────┘
+  
+  "Django Admin Display Method": {
+    "prefix": "admin_display",
+    "body": [
+      "def ${1:display_method_name}(self, obj: ${2:ModelName}) -> str:",
+      "    \"\"\"${3:Display method description}.\"\"\"",
+      "    return ${4:obj.field_name}",
+      ""
+    ],
+    "description": "Django admin display method with proper typing"
+  },
+  
+  "Django Admin Display Method with HTML": {
+    "prefix": "admin_display_html",
+    "body": [
+      "def ${1:display_method_name}(self, obj: ${2:ModelName}) -> SafeString:",
+      "    \"\"\"${3:Display method with HTML output}.\"\"\"",
+      "    from django.utils.safestring import mark_safe",
+      "    return mark_safe(f'<span class=\"${4:css-class}\">{obj.${5:field_name}}</span>')",
+      ""
+    ],
+    "description": "Django admin display method with HTML output and SafeString return type"
+  },
+  
+  "Django Admin Permission Method": {
+    "prefix": "admin_permission",
+    "body": [
+      "def ${1:has_permission_method}(self, request: HttpRequest, obj: ${2:ModelName} | None = None) -> bool:",
+      "    \"\"\"${3:Permission check description}.\"\"\"",
+      "    return ${4:request.user.is_staff}",
+      ""
+    ],
+    "description": "Django admin permission method with proper typing"
+  },
+  
+  // ┌─────────────────────────────────────────────────────────────────────────┐
+  // │ DJANGO VIEW TYPING PATTERNS                                               │
+  // └─────────────────────────────────────────────────────────────────────────┘
+  
+  "Django Function-Based View": {
+    "prefix": "django_view",
+    "body": [
+      "def ${1:view_name}(request: HttpRequest) -> HttpResponse:",
+      "    \"\"\"${2:View description}.\"\"\"",
+      "    ${3:# View logic here}",
+      "    return render(request, '${4:template_name}.html', {",
+      "        '${5:context_key}': ${6:context_value},",
+      "    })",
+      ""
+    ],
+    "description": "Django function-based view with proper typing"
+  },
+  
+  "Django HTMX View": {
+    "prefix": "htmx_view",
+    "body": [
+      "def ${1:htmx_view_name}(request: HttpRequest) -> HttpResponse:",
+      "    \"\"\"${2:HTMX view description}.\"\"\"",
+      "    if request.htmx:",
+      "        ${3:# HTMX-specific logic}",
+      "        return render(request, '${4:partial_template}.html', {",
+      "            '${5:context_key}': ${6:context_value},",
+      "        })",
+      "    ",
+      "    ${7:# Regular HTTP request}",
+      "    return render(request, '${8:full_template}.html', {",
+      "        '${9:context_key}': ${10:context_value},",
+      "    })",
+      ""
+    ],
+    "description": "Django HTMX view with conditional rendering"
+  },
+  
+  "Django JSON API View": {
+    "prefix": "json_view",
+    "body": [
+      "def ${1:api_view_name}(request: HttpRequest) -> JsonResponse:",
+      "    \"\"\"${2:JSON API view description}.\"\"\"",
+      "    try:",
+      "        ${3:# API logic here}",
+      "        return JsonResponse({",
+      "            'success': True,",
+      "            '${4:data_key}': ${5:data_value},",
+      "        })",
+      "    except Exception as e:",
+      "        return JsonResponse({",
+      "            'success': False,",
+      "            'error': str(e),",
+      "        }, status=400)",
+      ""
+    ],
+    "description": "Django JSON API view with error handling"
+  },
+  
+  // ┌─────────────────────────────────────────────────────────────────────────┐
+  // │ DJANGO MODEL TYPING PATTERNS                                              │
+  // └─────────────────────────────────────────────────────────────────────────┘
+  
+  "Django Model __str__ Method": {
+    "prefix": "model_str",
+    "body": [
+      "def __str__(self) -> str:",
+      "    \"\"\"String representation of ${1:ModelName}.\"\"\"",
+      "    return ${2:self.name}",
+      ""
+    ],
+    "description": "Django model __str__ method with proper typing"
+  },
+  
+  "Django Model Save Method": {
+    "prefix": "model_save",
+    "body": [
+      "def save(self, *args: Any, **kwargs: Any) -> None:",
+      "    \"\"\"Save the model instance with custom logic.\"\"\"",
+      "    ${1:# Custom save logic here}",
+      "    super().save(*args, **kwargs)",
+      ""
+    ],
+    "description": "Django model save method with proper typing"
+  },
+  
+  "Django Model Clean Method": {
+    "prefix": "model_clean",
+    "body": [
+      "def clean(self) -> None:",
+      "    \"\"\"Validate the model instance.\"\"\"",
+      "    ${1:# Validation logic here}",
+      "    super().clean()",
+      ""
+    ],
+    "description": "Django model clean method with proper typing"
+  },
+  
+  "Django Model Property": {
+    "prefix": "model_property",
+    "body": [
+      "@property",
+      "def ${1:property_name}(self) -> ${2:str}:",
+      "    \"\"\"${3:Property description}.\"\"\"",
+      "    return ${4:self.calculated_value}",
+      ""
+    ],
+    "description": "Django model property with proper typing"
+  },
+  
+  // ┌─────────────────────────────────────────────────────────────────────────┐
+  // │ ROMANIAN BUSINESS DOMAIN PATTERNS                                         │
+  // └─────────────────────────────────────────────────────────────────────────┘
+  
+  "CUI Validation Function": {
+    "prefix": "cui_validation",
+    "body": [
+      "def validate_cui(cui: str) -> Result[CUIString, str]:",
+      "    \"\"\"Validate Romanian CUI (Cod Unic de Identificare).\"\"\"",
+      "    from apps.common.validators import romanian_cui_validator",
+      "    from apps.common.types import Result, Ok, Err, CUIString",
+      "    ",
+      "    try:",
+      "        romanian_cui_validator(cui)",
+      "        return Ok(CUIString(cui))",
+      "    except ValidationError as e:",
+      "        return Err(str(e))",
+      ""
+    ],
+    "description": "Romanian CUI validation with Result pattern"
+  },
+  
+  "VAT Calculation Function": {
+    "prefix": "vat_calculation",
+    "body": [
+      "def calculate_vat(amount: Amount, vat_rate: float = 0.19) -> dict[str, Amount]:",
+      "    \"\"\"Calculate Romanian VAT (19%) from base amount.\"\"\"",
+      "    vat_amount = round(amount * vat_rate, 2)",
+      "    total_amount = amount + vat_amount",
+      "    ",
+      "    return {",
+      "        'base_amount': amount,",
+      "        'vat_amount': vat_amount,",
+      "        'total_amount': total_amount,",
+      "        'vat_rate': vat_rate,",
+      "    }",
+      ""
+    ],
+    "description": "Romanian VAT calculation function"
+  },
+  
+  "Invoice Number Generator": {
+    "prefix": "invoice_generator",
+    "body": [
+      "def generate_invoice_number() -> InvoiceNumber:",
+      "    \"\"\"Generate sequential Romanian invoice number.\"\"\"",
+      "    from apps.common.types import InvoiceNumber",
+      "    from django.utils import timezone",
+      "    ",
+      "    year = timezone.now().year",
+      "    # Get last invoice number for current year",
+      "    last_invoice = ${1:Invoice}.objects.filter(",
+      "        created_at__year=year",
+      "    ).order_by('-invoice_number').first()",
+      "    ",
+      "    sequence = 1 if not last_invoice else int(last_invoice.invoice_number.split('-')[1]) + 1",
+      "    ",
+      "    return InvoiceNumber(f\"{year}-{sequence:06d}\")",
+      ""
+    ],
+    "description": "Romanian sequential invoice number generator"
+  },
+  
+  // ┌─────────────────────────────────────────────────────────────────────────┐
+  // │ SERVICE LAYER & RESULT PATTERNS                                           │
+  // └─────────────────────────────────────────────────────────────────────────┘
+  
+  "Service Method with Result Pattern": {
+    "prefix": "service_result",
+    "body": [
+      "def ${1:service_method_name}(self, ${2:param}: ${3:ParamType}) -> Result[${4:SuccessType}, str]:",
+      "    \"\"\"${5:Service method description}.\"\"\"",
+      "    from apps.common.types import Result, Ok, Err",
+      "    ",
+      "    try:",
+      "        ${6:# Business logic here}",
+      "        result = ${7:perform_operation}",
+      "        return Ok(result)",
+      "    except Exception as e:",
+      "        logger.exception(\"${8:Error description}: %s\", e)",
+      "        return Err(str(e))",
+      ""
+    ],
+    "description": "Service method with Result pattern for error handling"
+  },
+  
+  "Repository Method": {
+    "prefix": "repo_method",
+    "body": [
+      "def ${1:get_method_name}(self, ${2:param}: ${3:ParamType}) -> ${4:ModelName} | None:",
+      "    \"\"\"${5:Repository method description}.\"\"\"",
+      "    try:",
+      "        return self.model.objects.get(${6:field}=${7:value})",
+      "    except self.model.DoesNotExist:",
+      "        return None",
+      ""
+    ],
+    "description": "Repository method with proper return type annotation"
+  },
+  
+  // ┌─────────────────────────────────────────────────────────────────────────┐
+  // │ FORM TYPING PATTERNS                                                      │
+  // └─────────────────────────────────────────────────────────────────────────┘
+  
+  "Django Form Clean Method": {
+    "prefix": "form_clean",
+    "body": [
+      "def clean_${1:field_name}(self) -> ${2:str}:",
+      "    \"\"\"Clean and validate ${3:field description}.\"\"\"",
+      "    ${4:field_name} = self.cleaned_data.get('${5:field_name}')",
+      "    ",
+      "    if not ${6:field_name}:",
+      "        raise forms.ValidationError('${7:Error message}')",
+      "    ",
+      "    ${8:# Additional validation logic}",
+      "    ",
+      "    return ${9:field_name}",
+      ""
+    ],
+    "description": "Django form field clean method with proper typing"
+  },
+  
+  "Django Form Save Method": {
+    "prefix": "form_save",
+    "body": [
+      "def save(self, commit: bool = True) -> ${1:ModelName}:",
+      "    \"\"\"Save the form and return the model instance.\"\"\"",
+      "    instance = super().save(commit=False)",
+      "    ",
+      "    ${2:# Additional save logic here}",
+      "    ",
+      "    if commit:",
+      "        instance.save()",
+      "    ",
+      "    return instance",
+      ""
+    ],
+    "description": "Django form save method with proper typing"
+  },
+  
+  // ┌─────────────────────────────────────────────────────────────────────────┐
+  // │ COMMON TYPE IMPORTS                                                       │
+  // └─────────────────────────────────────────────────────────────────────────┘
+  
+  "Import Django Types": {
+    "prefix": "import_django",
+    "body": [
+      "from django.http import HttpRequest, HttpResponse, JsonResponse",
+      "from django.shortcuts import render, redirect, get_object_or_404",
+      "from django.utils.safestring import SafeString, mark_safe",
+      "from django.contrib import admin",
+      ""
+    ],
+    "description": "Common Django type imports"
+  },
+  
+  "Import PRAHO Common Types": {
+    "prefix": "import_praho",
+    "body": [
+      "from apps.common.types import (",
+      "    Result, Ok, Err,",
+      "    CUIString, VATString, InvoiceNumber,",
+      "    EmailAddress, PhoneNumber, Amount,",
+      "    AdminDisplayMethod, FormCleanMethod,",
+      ")",
+      ""
+    ],
+    "description": "Import PRAHO Platform common types"
+  },
+  
+  "Import Typing Essentials": {
+    "prefix": "import_typing",
+    "body": [
+      "from typing import Any, ClassVar, TYPE_CHECKING",
+      "",
+      "if TYPE_CHECKING:",
+      "    ${1:# Type-only imports here}",
+      "    pass",
+      ""
+    ],
+    "description": "Essential typing imports with TYPE_CHECKING block"
+  },
+  
+  // ┌─────────────────────────────────────────────────────────────────────────┐
+  // │ TESTING PATTERNS                                                          │
+  // └─────────────────────────────────────────────────────────────────────────┘
+  
+  "Django Test Method": {
+    "prefix": "test_method",
+    "body": [
+      "def test_${1:test_name}(self) -> None:",
+      "    \"\"\"Test ${2:functionality description}.\"\"\"",
+      "    # Arrange",
+      "    ${3:setup_data}",
+      "    ",
+      "    # Act",
+      "    ${4:result} = ${5:perform_action}",
+      "    ",
+      "    # Assert",
+      "    self.assertEqual(${6:expected}, ${7:actual})",
+      ""
+    ],
+    "description": "Django test method with AAA pattern and proper typing"
+  },
+  
+  "Django Test Setup": {
+    "prefix": "test_setup",
+    "body": [
+      "def setUp(self) -> None:",
+      "    \"\"\"Set up test data.\"\"\"",
+      "    super().setUp()",
+      "    ${1:# Test setup code}",
+      ""
+    ],
+    "description": "Django test setUp method with proper typing"
+  }
+}

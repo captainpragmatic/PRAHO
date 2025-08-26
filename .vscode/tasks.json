@@ -1,0 +1,449 @@
+{
+  // ===============================================================================
+  // PRAHO PLATFORM - VS CODE TASK DEFINITIONS
+  // Type checking and development workflow tasks
+  // ===============================================================================
+  "version": "2.0.0",
+  "tasks": [
+    // ┌─────────────────────────────────────────────────────────────────────────┐
+    // │ TYPE CHECKING TASKS - Phase 2.4                                          │
+    // └─────────────────────────────────────────────────────────────────────────┘
+    {
+      "label": "Type Check - All",
+      "type": "shell",
+      "command": "make",
+      "args": ["lint"],
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": true
+      },
+      "problemMatcher": [
+        {
+          "owner": "mypy",
+          "fileLocation": "absolute",
+          "pattern": [
+            {
+              "regexp": "^(.*):(\\d+):(\\d+): (error|warning|note): (.*)$",
+              "file": 1,
+              "line": 2,
+              "column": 3,
+              "severity": 4,
+              "message": 5
+            }
+          ]
+        }
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      }
+    },
+    {
+      "label": "Type Check - Modified Files Only",
+      "type": "shell",
+      "command": "make",
+      "args": ["type-check-modified"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": true
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      }
+    },
+    {
+      "label": "Type Coverage Report",
+      "type": "shell",
+      "command": "make",
+      "args": ["type-coverage"],
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": true
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      }
+    },
+    {
+      "label": "Auto-Add Types to Current File",
+      "type": "shell",
+      "command": "make",
+      "args": ["type-fix-file", "FILE=${relativeFile}"],
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": true,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": true
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      }
+    },
+    {
+      "label": "Auto-Add Types to Current File (Auto-Approve)",
+      "type": "shell",
+      "command": "make",
+      "args": ["type-fix-file", "FILE=${relativeFile}", "MODE=auto-format"],
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": true
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      }
+    },
+    {
+      "label": "Preview Type Suggestions for Current File",
+      "type": "shell",
+      "command": "make",
+      "args": ["type-fix-file", "FILE=${relativeFile}", "MODE=dry-run"],
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": true
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      }
+    },
+    
+    // ┌─────────────────────────────────────────────────────────────────────────┐
+    // │ DEVELOPMENT WORKFLOW TASKS                                                │
+    // └─────────────────────────────────────────────────────────────────────────┘
+    {
+      "label": "Run Development Server",
+      "type": "shell",
+      "command": "make",
+      "args": ["dev"],
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "dedicated",
+        "showReuseMessage": false,
+        "clear": false
+      },
+      "isBackground": true,
+      "problemMatcher": [
+        {
+          "pattern": [
+            {
+              "regexp": ".",
+              "file": 1,
+              "location": 2,
+              "message": 3
+            }
+          ],
+          "background": {
+            "activeOnStart": true,
+            "beginsPattern": "^Starting development server",
+            "endsPattern": "^Development server is running"
+          }
+        }
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      }
+    },
+    {
+      "label": "Run Tests - All",
+      "type": "shell",
+      "command": "make",
+      "args": ["test"],
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": true
+      },
+      "problemMatcher": [
+        {
+          "owner": "python",
+          "fileLocation": "absolute",
+          "pattern": [
+            {
+              "regexp": "^\\s*File \"(.*)\", line (\\d+), in (.*)$",
+              "file": 1,
+              "line": 2,
+              "message": 3
+            }
+          ]
+        }
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      }
+    },
+    {
+      "label": "Run Tests - Fast",
+      "type": "shell",
+      "command": "make",
+      "args": ["test-fast"],
+      "group": {
+        "kind": "test",
+        "isDefault": false
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": true
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      }
+    },
+    {
+      "label": "Run Tests - E2E",
+      "type": "shell",
+      "command": "make",
+      "args": ["test-e2e"],
+      "group": {
+        "kind": "test",
+        "isDefault": false
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": true
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      }
+    },
+    
+    // ┌─────────────────────────────────────────────────────────────────────────┐
+    // │ CODE QUALITY & LINTING TASKS                                             │
+    // └─────────────────────────────────────────────────────────────────────────┘
+    {
+      "label": "Lint - Strategic (Performance & Security)",
+      "type": "shell",
+      "command": "make",
+      "args": ["lint"],
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": true
+      },
+      "problemMatcher": [
+        {
+          "owner": "ruff",
+          "fileLocation": "absolute",
+          "pattern": [
+            {
+              "regexp": "^(.*?):(\\d+):(\\d+): ([A-Z]\\d+) (.*)$",
+              "file": 1,
+              "line": 2,
+              "column": 3,
+              "code": 4,
+              "message": 5
+            }
+          ]
+        }
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      }
+    },
+    {
+      "label": "Lint - Auto Fix",
+      "type": "shell",
+      "command": "make",
+      "args": ["lint-fix"],
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": true
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      }
+    },
+    {
+      "label": "Security Check - Hardcoded Credentials",
+      "type": "shell",
+      "command": "make",
+      "args": ["lint-credentials"],
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": true
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      }
+    },
+    
+    // ┌─────────────────────────────────────────────────────────────────────────┐
+    // │ PRE-COMMIT & GIT INTEGRATION TASKS                                       │
+    // └─────────────────────────────────────────────────────────────────────────┘
+    {
+      "label": "Pre-Commit - Install Hooks",
+      "type": "shell",
+      "command": "make",
+      "args": ["install-pre-commit"],
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": true
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      }
+    },
+    {
+      "label": "Pre-Commit - Run All Hooks",
+      "type": "shell",
+      "command": "make",
+      "args": ["pre-commit"],
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": true
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      }
+    },
+    
+    // ┌─────────────────────────────────────────────────────────────────────────┐
+    // │ DATABASE & MIGRATION TASKS                                               │
+    // └─────────────────────────────────────────────────────────────────────────┘
+    {
+      "label": "Database - Run Migrations",
+      "type": "shell",
+      "command": "make",
+      "args": ["migrate"],
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": true
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      }
+    },
+    {
+      "label": "Database - Load Sample Data",
+      "type": "shell",
+      "command": "make",
+      "args": ["fixtures"],
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": true
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      }
+    }
+  ]
+}

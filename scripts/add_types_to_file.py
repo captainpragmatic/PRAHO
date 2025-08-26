@@ -1,0 +1,742 @@
+#!/usr/bin/env python3
+"""
+Semi-Automated Type Addition Tool for PRAHO Platform - Enhanced Edition
+
+AST-based analysis to identify missing type annotations and suggest appropriate types.
+Specially designed for Django applications with Romanian business domain support.
+
+Features:
+- 🎯 Django pattern recognition (admin, views, templates, models)
+- 🇷🇴 Romanian business type detection (CUI, VAT, invoices, domains)
+- 🔄 Service layer patterns with Result types
+- 📦 Smart import management for apps.common.types
+- 🎨 Template tag/filter type detection
+- ⚡ Auto-format integration with ruff
+- 🤖 Interactive and automated modes
+
+Part of Phase 2.4 developer tooling for type annotation migration.
+"""
+
+import argparse
+import ast
+import logging
+import re
+import sys
+from pathlib import Path
+from typing import Any
+
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
+
+
+class TypeSuggestionEngine:
+    """Engine for analyzing Python files and suggesting type annotations"""
+    
+    def __init__(self, file_path: Path):
+        self.file_path = file_path
+        self.content = file_path.read_text(encoding='utf-8')
+        self.lines = self.content.splitlines()
+        self.tree: ast.AST | None = None
+        self.suggestions: list[dict[str, Any]] = []
+        self.django_imports = set()
+        self.existing_imports = set()
+        
+    def parse_file(self) -> bool:
+        """Parse the Python file into AST"""
+        try:
+            self.tree = ast.parse(self.content, filename=str(self.file_path))
+            return True
+        except SyntaxError as e:
+            logger.error(f"Syntax error in {self.file_path}: {e}")
+            return False
+    
+    def analyze_imports(self) -> None:
+        """Analyze existing imports to understand available types"""
+        if not self.tree:
+            return
+            
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    self.existing_imports.add(alias.name)
+                    if 'django' in alias.name:
+                        self.django_imports.add(alias.name)
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ''
+                for alias in node.names:
+                    full_name = f"{module}.{alias.name}" if module else alias.name
+                    self.existing_imports.add(full_name)
+                    if 'django' in module:
+                        self.django_imports.add(full_name)
+    
+    def detect_django_patterns(self, node: ast.FunctionDef) -> str | None:
+        """Detect Django-specific patterns and suggest appropriate return types"""
+        method_name = node.name
+        
+        # Check if this is a Django template tag/filter
+        if self._is_template_tag_function(node):
+            return self._get_template_tag_return_type(node)
+        
+        # Django admin patterns
+        admin_display_methods = {
+            'get_full_name': 'str',
+            'staff_role': 'str', 
+            'primary_customer_name': 'str',
+            'two_factor_enabled': 'str | bool',
+            'is_staff_user': 'str | bool',
+            'format_invoice_number': 'str',
+            'format_cui': 'str',
+            'format_phone': 'str',
+            'format_currency': 'str',
+            'billing_status_display': 'str',
+            'payment_status_display': 'str',
+            'service_status_display': 'str',
+        }
+        
+        if method_name in admin_display_methods:
+            return admin_display_methods[method_name]
+        
+        # Django admin display methods (short_description pattern)
+        if hasattr(node, 'name') and any(
+            'short_description' in getattr(stmt, 'attr', '') 
+            for stmt in ast.walk(node) 
+            if isinstance(stmt, ast.Attribute)
+        ):
+            return 'str'  # Admin display methods return strings
+        
+        # Django view patterns
+        if method_name in ['get', 'post', 'put', 'patch', 'delete']:
+            return 'HttpResponse'
+        
+        # Django Class-Based View method patterns
+        if method_name in ['get_context_data', 'get_initial']:
+            return 'dict[str, Any]'
+        
+        if method_name in ['get_success_url', 'get_absolute_url']:
+            return 'str'
+            
+        if method_name == 'dispatch':
+            return 'HttpResponse'
+        
+        if method_name.startswith('get_') and 'context' in method_name:
+            return 'dict[str, Any]'
+        
+        if method_name == 'get_queryset':
+            return 'QuerySet[Any]'  # Will be refined based on model
+        
+        # Django form patterns
+        if method_name == 'clean' or method_name.startswith('clean_'):
+            return 'Any'  # Form clean methods can return various types
+        
+        if method_name == 'save':
+            return 'Any'  # Form save methods typically return model instances
+        
+        # Django model patterns  
+        if method_name == '__str__':
+            return 'str'
+        
+        if method_name == 'get_absolute_url':
+            return 'str'
+        
+        # Service layer patterns (from our common/types.py)
+        if method_name.endswith('_service') or 'service' in self.file_path.parts:
+            return 'Result[Any, str]'
+        
+        # PRAHO Romanian business patterns
+        romanian_methods = {
+            'validate_cui': 'Result[CUIString, str]',
+            'validate_vat': 'Result[VATString, str]',
+            'format_invoice_number': 'InvoiceNumber',
+            'generate_order_number': 'OrderNumber',
+            'calculate_vat': 'dict[str, float]',
+            'get_vat_rate': 'float',
+            'format_money': 'str',
+            'get_payment_reference': 'PaymentReference',
+            'validate_domain': 'Result[DomainName, str]',
+            'validate_email': 'Result[EmailAddress, str]',
+            'send_notification': 'Result[bool, str]',
+            'process_webhook': 'Result[dict[str, Any], str]',
+        }
+        
+        if method_name in romanian_methods:
+            return romanian_methods[method_name]
+        
+        # Repository patterns
+        if method_name.startswith('create_'):
+            return 'Result[Any, str]'  # Could be more specific based on model
+        if method_name.startswith('update_'):
+            return 'Result[Any, str]'
+        if method_name.startswith('delete_'):
+            return 'Result[bool, str]'
+        if method_name.startswith('find_'):
+            return 'Result[Any | None, str]'
+        if method_name.startswith('list_'):
+            return 'Result[list[Any], str]'
+        
+        return None
+    
+    def _is_template_tag_function(self, node: ast.FunctionDef) -> bool:
+        """Check if function is a Django template tag or filter"""
+        # Check for @register.filter or @register.simple_tag decorators
+        for decorator in node.decorator_list:
+            if isinstance(decorator, ast.Attribute):
+                if (isinstance(decorator.value, ast.Name) and 
+                    decorator.value.id == 'register' and 
+                    decorator.attr in ('filter', 'simple_tag', 'inclusion_tag')):
+                    return True
+            elif isinstance(decorator, ast.Call) and isinstance(decorator.func, ast.Attribute):
+                if (isinstance(decorator.func.value, ast.Name) and 
+                    decorator.func.value.id == 'register' and 
+                    decorator.func.attr in ('filter', 'simple_tag', 'inclusion_tag')):
+                    return True
+        return False
+    
+    def _get_template_tag_return_type(self, node: ast.FunctionDef) -> str:
+        """Get appropriate return type for Django template tags/filters"""
+        # Analyze the function to determine return type
+        for stmt in ast.walk(node):
+            if isinstance(stmt, ast.Return) and stmt.value:
+                if isinstance(stmt.value, ast.Call):
+                    if isinstance(stmt.value.func, ast.Name):
+                        func_name = stmt.value.func.id
+                        if func_name == 'mark_safe':
+                            return 'SafeString'  # Need to add import
+                        elif func_name == 'format_html':
+                            return 'SafeString'
+                        elif func_name in ('escape', 'str'):
+                            return 'str'
+        
+        # Default for template tags/filters
+        return 'str'
+
+    def suggest_parameter_types(self, node: ast.FunctionDef) -> list[tuple[str, str]]:
+        """Suggest types for function parameters based on names and context"""
+        suggestions = []
+        
+        for arg in node.args.args:
+            arg_name = arg.arg
+            
+            # Skip self and cls
+            if arg_name in ('self', 'cls'):
+                continue
+            
+            # Skip if already has annotation
+            if arg.annotation:
+                continue
+            
+            suggested_type = None
+            
+            # Django request patterns
+            if arg_name == 'request':
+                suggested_type = 'HttpRequest'
+            
+            # Django queryset patterns
+            elif arg_name == 'queryset':
+                suggested_type = 'QuerySet[Any]'
+            
+            # Common ID patterns
+            elif arg_name.endswith('_id') or arg_name == 'pk':
+                suggested_type = 'int'
+            
+            # Romanian business domain types (CUIString, VATString, etc.)
+            elif arg_name == 'cui':
+                suggested_type = 'CUIString'
+            elif arg_name == 'vat_number':
+                suggested_type = 'VATString'
+            elif arg_name == 'email':
+                suggested_type = 'EmailAddress'
+            elif arg_name == 'phone':
+                suggested_type = 'PhoneNumber'
+            elif arg_name == 'domain':
+                suggested_type = 'DomainName'
+            elif arg_name == 'invoice_number':
+                suggested_type = 'InvoiceNumber'
+            elif arg_name == 'order_number':
+                suggested_type = 'OrderNumber'
+            elif arg_name == 'amount':
+                suggested_type = 'Amount'  # Amount in cents
+            elif arg_name == 'currency':
+                suggested_type = 'Currency'
+            
+            # String-like patterns
+            elif arg_name in ('name', 'title', 'description', 'content', 'message', 'subject'):
+                suggested_type = 'str'
+            
+            # Boolean patterns
+            elif arg_name.startswith('is_') or arg_name.startswith('has_') or arg_name.startswith('can_'):
+                suggested_type = 'bool'
+            
+            # Date/datetime patterns
+            elif 'date' in arg_name or 'time' in arg_name:
+                suggested_type = 'datetime'  # Will need import
+            
+            # Data/dict patterns
+            elif arg_name in ('data', 'params', 'kwargs', 'context', 'config'):
+                suggested_type = 'dict[str, Any]'
+            
+            # Template context patterns
+            elif arg_name == 'template_name':
+                suggested_type = 'TemplateName'
+            elif arg_name in ('css_class', 'css_classes'):
+                suggested_type = 'CSSClass | CSSClasses'
+            
+            # List patterns
+            elif arg_name.endswith('s') and arg_name not in ('cls', 'args', 'address'):
+                suggested_type = 'list[Any]'
+            
+            if suggested_type:
+                suggestions.append((arg_name, suggested_type))
+        
+        return suggestions
+    
+    def suggest_return_type(self, node: ast.FunctionDef) -> str | None:
+        """Suggest return type based on function analysis"""
+        # Skip if already has return annotation
+        if node.returns:
+            return None
+        
+        # First check Django patterns
+        django_suggestion = self.detect_django_patterns(node)
+        if django_suggestion:
+            return django_suggestion
+        
+        # Analyze return statements
+        return_types = set()
+        
+        for stmt in ast.walk(node):
+            if isinstance(stmt, ast.Return):
+                if stmt.value is None:
+                    return_types.add('None')
+                elif isinstance(stmt.value, ast.Constant):
+                    if isinstance(stmt.value.value, str):
+                        return_types.add('str')
+                    elif isinstance(stmt.value.value, bool):
+                        return_types.add('bool')
+                    elif isinstance(stmt.value.value, int):
+                        return_types.add('int')
+                    elif isinstance(stmt.value.value, float):
+                        return_types.add('float')
+                elif isinstance(stmt.value, ast.Dict):
+                    return_types.add('dict[str, Any]')
+                elif isinstance(stmt.value, ast.List):
+                    return_types.add('list[Any]')
+                elif isinstance(stmt.value, ast.Call):
+                    # Try to infer from function call
+                    if isinstance(stmt.value.func, ast.Name):
+                        func_name = stmt.value.func.id
+                        if func_name in ('render', 'redirect'):
+                            return_types.add('HttpResponse')
+                        elif func_name == 'JsonResponse':
+                            return_types.add('JsonResponse')
+        
+        # Combine return types
+        if not return_types:
+            return 'Any'  # No return statements found
+        
+        if len(return_types) == 1:
+            return return_types.pop()
+        
+        if 'None' in return_types:
+            other_types = return_types - {'None'}
+            if len(other_types) == 1:
+                return f"{other_types.pop()} | None"
+            elif len(other_types) > 1:
+                return f"({' | '.join(sorted(other_types))}) | None"
+        
+        return ' | '.join(sorted(return_types))
+    
+    def analyze_functions(self) -> None:
+        """Analyze all function definitions and suggest types"""
+        if not self.tree:
+            return
+        
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.FunctionDef):
+                # Skip functions that already have complete annotations
+                if self._has_complete_annotations(node):
+                    continue
+                
+                suggestion = {
+                    'type': 'function',
+                    'name': node.name,
+                    'line': node.lineno,
+                    'parameters': self.suggest_parameter_types(node),
+                    'return_type': self.suggest_return_type(node),
+                    'original_line': self.lines[node.lineno - 1] if node.lineno <= len(self.lines) else ''
+                }
+                
+                self.suggestions.append(suggestion)
+    
+    def _has_complete_annotations(self, node: ast.FunctionDef) -> bool:
+        """Check if function already has complete type annotations"""
+        if node.returns is None:
+            return False  # Missing return annotation
+        
+        for arg in node.args.args:
+            if arg.arg not in ('self', 'cls') and arg.annotation is None:
+                return False  # Missing parameter annotation
+        
+        return True
+    
+    def generate_needed_imports(self) -> set[str]:
+        """Generate the imports needed for suggested types"""
+        needed_imports = set()
+        
+        # Check what types are used in suggestions
+        for suggestion in self.suggestions:
+            if suggestion['return_type']:
+                self._check_type_imports(suggestion['return_type'], needed_imports)
+            
+            for param_name, param_type in suggestion['parameters']:
+                self._check_type_imports(param_type, needed_imports)
+        
+        # Remove imports that already exist
+        return needed_imports - self.existing_imports
+    
+    def _check_type_imports(self, type_str: str, needed_imports: set[str]) -> None:
+        """Check what imports are needed for a type string"""
+        # Django types
+        if 'HttpRequest' in type_str:
+            needed_imports.add('django.http.HttpRequest')
+        if 'HttpResponse' in type_str:
+            needed_imports.add('django.http.HttpResponse')
+        if 'JsonResponse' in type_str:
+            needed_imports.add('django.http.JsonResponse')
+        if 'QuerySet' in type_str:
+            needed_imports.add('django.db.models.QuerySet')
+        if 'SafeString' in type_str:
+            needed_imports.add('django.utils.safestring.SafeString')
+        
+        # PRAHO common types - check if they're from apps.common.types
+        romanian_types = {
+            'Result', 'CUIString', 'VATString', 'EmailAddress', 'PhoneNumber', 
+            'DomainName', 'InvoiceNumber', 'OrderNumber', 'ProformaNumber',
+            'PaymentReference', 'Amount', 'Currency', 'TemplateName', 'CSSClass',
+            'CSSClasses', 'ValidationResult', 'ServiceResult', 'BusinessResult'
+        }
+        
+        for romanian_type in romanian_types:
+            if romanian_type in type_str:
+                needed_imports.add(f'apps.common.types.{romanian_type}')
+        
+        # Standard library types
+        if 'datetime' in type_str:
+            needed_imports.add('datetime')
+        if 'Any' in type_str:
+            needed_imports.add('typing.Any')
+        if 'Decimal' in type_str:
+            needed_imports.add('decimal.Decimal')
+    
+    def format_function_signature(self, suggestion: dict[str, Any]) -> str:
+        """Format the complete function signature with suggested types"""
+        original_line = suggestion['original_line'].strip()
+        
+        # Extract function definition parts
+        match = re.match(r'^(\s*)(def\s+\w+\s*)\((.*?)\)(\s*:?\s*.*?)$', original_line)
+        if not match:
+            return original_line  # Can't parse, return original
+        
+        indent, func_part, params_part, rest_part = match.groups()
+        
+        # Parse existing parameters
+        params = []
+        if params_part.strip():
+            # Simple parameter parsing (doesn't handle complex cases)
+            for param in params_part.split(','):
+                param = param.strip()
+                if ':' in param:
+                    # Already has type annotation
+                    params.append(param)
+                else:
+                    # Check if we have a suggestion for this parameter
+                    param_name = param.split('=')[0].strip()
+                    suggested_type = None
+                    
+                    for p_name, p_type in suggestion['parameters']:
+                        if p_name == param_name:
+                            suggested_type = p_type
+                            break
+                    
+                    if suggested_type:
+                        if '=' in param:  # Has default value
+                            name_part, default_part = param.split('=', 1)
+                            params.append(f"{name_part.strip()}: {suggested_type} = {default_part.strip()}")
+                        else:
+                            params.append(f"{param}: {suggested_type}")
+                    else:
+                        params.append(param)
+        
+        # Add return type annotation
+        return_type = suggestion['return_type']
+        if return_type and not rest_part.strip().startswith('->'):
+            return_annotation = f" -> {return_type}:"
+        else:
+            return_annotation = ":"
+        
+        # Reconstruct the function definition
+        params_str = ', '.join(params)
+        return f"{indent}{func_part}({params_str}){return_annotation}"
+    
+    def run_analysis(self) -> bool:
+        """Run the complete analysis"""
+        logger.info(f"Analyzing {self.file_path}")
+        
+        if not self.parse_file():
+            return False
+        
+        self.analyze_imports()
+        self.analyze_functions()
+        
+        return True
+
+
+class InteractiveTypeAdder:
+    """Interactive interface for reviewing and applying type suggestions"""
+    
+    def __init__(self, file_path: Path, dry_run: bool = False, format_after: bool = False):
+        self.file_path = file_path
+        self.dry_run = dry_run
+        self.format_after = format_after
+        self.engine = TypeSuggestionEngine(file_path)
+    
+    def run(self) -> None:
+        """Run the interactive type addition process"""
+        if not self.engine.run_analysis():
+            logger.error("Failed to analyze file")
+            return
+        
+        if not self.engine.suggestions:
+            logger.info("No type annotation suggestions found")
+            return
+        
+        logger.info(f"Found {len(self.engine.suggestions)} functions that could benefit from type annotations")
+        
+        # Check needed imports
+        needed_imports = self.engine.generate_needed_imports()
+        if needed_imports:
+            print("\n📦 The following imports will be needed:")
+            for imp in sorted(needed_imports):
+                print(f"  from {imp}")
+            print()
+        
+        approved_changes = []
+        
+        for i, suggestion in enumerate(self.engine.suggestions, 1):
+            print(f"\n--- Function {i}/{len(self.engine.suggestions)} ---")
+            print(f"Function: {suggestion['name']} (line {suggestion['line']})")
+            print(f"Current: {suggestion['original_line'].strip()}")
+            
+            new_signature = self.engine.format_function_signature(suggestion)
+            print(f"Suggested: {new_signature}")
+            
+            if self.dry_run:
+                print("✅ [DRY RUN] Would apply this change")
+                approved_changes.append(suggestion)
+            else:
+                choice = input("\nApply this change? [y/N/q/a]: ").lower().strip()
+                
+                if choice == 'q':
+                    print("Quitting...")
+                    break
+                elif choice == 'a':
+                    print("Applying all remaining changes...")
+                    approved_changes.extend(self.engine.suggestions[i-1:])
+                    break
+                elif choice == 'y':
+                    approved_changes.append(suggestion)
+                    print("✅ Change approved")
+                else:
+                    print("❌ Change skipped")
+        
+        if approved_changes:
+            if self.dry_run:
+                print(f"\n🔍 DRY RUN: Would apply {len(approved_changes)} changes")
+            else:
+                self._apply_changes(approved_changes, needed_imports)
+                print(f"\n✅ Applied {len(approved_changes)} type annotations")
+        else:
+            print("\n🚫 No changes applied")
+    
+    def _apply_changes(self, changes: list[dict[str, Any]], needed_imports: set[str]) -> None:
+        """Apply the approved changes to the file"""
+        lines = self.engine.lines.copy()
+        
+        # Sort changes by line number in reverse order to avoid line number shifts
+        changes.sort(key=lambda x: x['line'], reverse=True)
+        
+        # Apply function signature changes
+        for change in changes:
+            line_idx = change['line'] - 1
+            if line_idx < len(lines):
+                new_signature = self.engine.format_function_signature(change)
+                lines[line_idx] = new_signature
+        
+        # Add needed imports (simplified - add at the top after existing imports)
+        if needed_imports:
+            # Find the last import line
+            last_import_idx = 0
+            for i, line in enumerate(lines):
+                if line.strip().startswith(('import ', 'from ')) and not line.strip().startswith('#'):
+                    last_import_idx = i
+            
+            # Add new imports
+            import_lines = []
+            for imp in sorted(needed_imports):
+                if '.' in imp:
+                    module, name = imp.rsplit('.', 1)
+                    import_lines.append(f"from {module} import {name}")
+                else:
+                    import_lines.append(f"import {imp}")
+            
+            # Insert after last import
+            for i, import_line in enumerate(import_lines):
+                lines.insert(last_import_idx + 1 + i, import_line)
+        
+        # Write back to file
+        self.file_path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+        
+        # Format the file if requested
+        if self.format_after:
+            self._format_file()
+    
+    def _format_file(self) -> None:
+        """Format the file using ruff"""
+        try:
+            import subprocess
+            result = subprocess.run(
+                ['ruff', 'format', str(self.file_path)],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            if result.returncode == 0:
+                logger.info(f"✅ Formatted {self.file_path} with ruff")
+            else:
+                logger.warning(f"⚠️ ruff format failed: {result.stderr}")
+        except FileNotFoundError:
+            logger.warning("⚠️ ruff not found - skipping format")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to format file: {e}")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Semi-automated type addition tool for PRAHO Platform",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s apps/users/admin.py                    # Interactive mode
+  %(prog)s apps/users/admin.py --dry-run          # Preview changes only
+  %(prog)s apps/users/admin.py --auto-approve     # Apply all suggestions automatically
+  %(prog)s apps/users/admin.py --format           # Apply changes and format with ruff
+  %(prog)s apps/users/admin.py --auto-approve --format  # Fully automated
+
+The tool analyzes Python files and suggests type annotations based on:
+
+🎯 DJANGO PATTERNS:
+- Admin display methods: format_*, *_display -> str
+- View methods: get, post, dispatch -> HttpResponse
+- CBV methods: get_context_data -> dict[str, Any]
+- Template tags/filters: @register.filter -> str/SafeString
+- Model methods: __str__ -> str, get_absolute_url -> str
+
+🇷🇴 ROMANIAN BUSINESS PATTERNS:
+- validate_cui -> Result[CUIString, str]
+- validate_vat -> Result[VATString, str]
+- format_invoice_number -> InvoiceNumber
+- calculate_vat -> dict[str, float]
+- validate_email -> Result[EmailAddress, str]
+- validate_domain -> Result[DomainName, str]
+- send_notification -> Result[bool, str]
+- process_webhook -> Result[dict[str, Any], str]
+
+📋 PARAMETER TYPE DETECTION:
+- cui -> CUIString, vat_number -> VATString
+- email -> EmailAddress, phone -> PhoneNumber
+- domain -> DomainName, invoice_number -> InvoiceNumber
+- amount -> Amount, currency -> Currency
+- request -> HttpRequest, queryset -> QuerySet[Any]
+- is_*, has_*, can_* -> bool
+- *_id, pk -> int
+
+🔄 SERVICE LAYER PATTERNS:
+- create_* -> Result[Any, str]
+- update_* -> Result[Any, str] 
+- delete_* -> Result[bool, str]
+- find_* -> Result[Any | None, str]
+- list_* -> Result[list[Any], str]
+
+All suggested types leverage the comprehensive PRAHO common/types.py type system
+with Romanian business domain types and Result pattern for error handling.
+"""
+    )
+    
+    parser.add_argument(
+        'file',
+        type=Path,
+        help='Python file to analyze and add types to'
+    )
+    
+    parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Preview changes without applying them'
+    )
+    
+    parser.add_argument(
+        '--auto-approve', 
+        action='store_true',
+        help='Automatically apply all suggestions without prompting'
+    )
+    
+    parser.add_argument(
+        '--verbose',
+        action='store_true', 
+        help='Enable verbose output'
+    )
+    
+    parser.add_argument(
+        '--format',
+        action='store_true',
+        help='Auto-format the file after applying changes using ruff'
+    )
+    
+    args = parser.parse_args()
+    
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+    
+    if not args.file.exists():
+        logger.error(f"File not found: {args.file}")
+        sys.exit(1)
+    
+    if not args.file.suffix == '.py':
+        logger.error(f"Not a Python file: {args.file}")
+        sys.exit(1)
+    
+    # Override dry_run if auto_approve is set
+    dry_run = args.dry_run and not args.auto_approve
+    
+    adder = InteractiveTypeAdder(args.file, dry_run=dry_run, format_after=args.format)
+    
+    if args.auto_approve:
+        # Patch the input function to always return 'a' (approve all)
+        original_input = input
+        def mock_input(prompt):
+            print(prompt + " a")
+            return 'a'
+        
+        import builtins
+        builtins.input = mock_input
+        
+        try:
+            adder.run()
+        finally:
+            builtins.input = original_input
+    else:
+        adder.run()
+
+
+if __name__ == '__main__':
+    main()

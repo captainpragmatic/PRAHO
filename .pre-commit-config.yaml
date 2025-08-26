@@ -1,0 +1,171 @@
+# ===============================================================================
+# PRAHO PLATFORM - PRE-COMMIT CONFIGURATION
+# ===============================================================================
+# Purpose: Maintain type safety and code quality during development
+# Strategy: Fast feedback with gradual typing support
+
+repos:
+  # ===============================================================================
+  # CORE PYTHON QUALITY - FAST CHECKS ⚡
+  # ===============================================================================
+  
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^migrations/.*\.py$
+      - id: end-of-file-fixer
+        exclude: ^migrations/.*\.py$
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-merge-conflict
+      - id: debug-statements
+        exclude: ^(scripts/.*\.py|.*/management/commands/.*\.py)$
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+
+  # ===============================================================================
+  # RUFF - STRATEGIC LINTING ⚡🔒
+  # ===============================================================================
+  # Uses the strategic configuration from pyproject.toml
+  # Focus: Performance, Security, Type Hints
+  
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.1.8
+    hooks:
+      # Fast linting check - strategic rules only
+      - id: ruff
+        name: "Strategic Linting (Performance & Security)"
+        args: 
+          - --config=pyproject.toml
+          - --statistics
+          - --show-source
+        exclude: ^(migrations/.*\.py|scripts/backup\.py|scripts/deploy\.py)$
+      
+      # Auto-formatting (safe fixes only)
+      - id: ruff-format
+        name: "Auto-format Python Code"
+        args: [--config=pyproject.toml]
+        exclude: ^migrations/.*\.py$
+
+  # ===============================================================================
+  # TYPE SAFETY - GRADUAL IMPLEMENTATION 🏷️
+  # ===============================================================================
+  
+  - repo: local
+    hooks:
+      # Only check modified Python files for performance
+      - id: type-check-modified
+        name: "Type Check Modified Files"
+        entry: .venv/bin/python
+        args: [scripts/check_types_modified.py]
+        language: system
+        files: \.py$
+        exclude: ^(migrations/.*\.py|scripts/backup\.py|scripts/deploy\.py)$
+        pass_filenames: true
+        require_serial: false
+        
+      # Prevent new # type: ignore comments to avoid regression
+      - id: prevent-type-ignore
+        name: "Block New Type Ignore Comments"
+        entry: .venv/bin/python
+        args: [scripts/prevent_type_ignore.py]
+        language: system
+        files: \.py$
+        exclude: ^(migrations/.*\.py|tests/.*\.py)$
+        pass_filenames: true
+        stages: [pre-commit]
+
+  # ===============================================================================
+  # DJANGO TEMPLATE SAFETY 🎨
+  # ===============================================================================
+  # Prevent the template comparison operator spacing issue
+  
+  - repo: local
+    hooks:
+      - id: django-template-check
+        name: "Django Template Syntax Check"
+        entry: .venv/bin/python
+        args: [scripts/fix_template_comparisons.py, --check]
+        language: system
+        files: \.html$
+        exclude: ^(static/|htmlcov/)
+
+  # ===============================================================================
+  # SECURITY CHECKS 🔒
+  # ===============================================================================
+  
+  - repo: local
+    hooks:
+      # Check for hardcoded credentials (warning only)
+      - id: security-credentials-check
+        name: "Security: Check for Hardcoded Credentials"
+        entry: bash
+        args:
+          - -c
+          - |
+            # Use ruff to check for hardcoded credentials
+            .venv/bin/ruff check --select=S105,S106,S107,S108 --output-format=concise --quiet $@ || true
+            # Always pass - this is informational only
+            exit 0
+        language: system
+        files: \.py$
+        exclude: ^(tests/.*\.py|.*/management/commands/.*\.py|.*settings.*\.py)$
+        pass_filenames: true
+        verbose: true
+
+  # ===============================================================================
+  # PERFORMANCE ANALYSIS ⚡
+  # ===============================================================================
+  
+  - repo: local
+    hooks:
+      # Check for performance anti-patterns in modified files
+      - id: performance-check
+        name: "Performance: Check for Anti-patterns"
+        entry: bash
+        args:
+          - -c
+          - |
+            # Check for performance issues in modified files
+            .venv/bin/ruff check --select=PERF,C90,PIE,SIM --output-format=concise --quiet $@ || true
+            # Always pass - this is informational only  
+            exit 0
+        language: system
+        files: \.py$
+        exclude: ^(migrations/.*\.py|tests/.*\.py)$
+        pass_filenames: true
+        verbose: true
+
+# ===============================================================================
+# CONFIGURATION OPTIONS ⚙️
+# ===============================================================================
+
+# Global settings
+default_language_version:
+  python: python3.11
+
+# Hook execution settings
+default_stages: [pre-commit]
+fail_fast: false  # Run all hooks even if one fails
+minimum_pre_commit_version: "3.0.0"
+
+# Repository settings
+repos:
+  # Additional local repository settings if needed
+  - repo: local
+    hooks: []
+
+# CI/CD integration settings
+ci:
+  autofix_commit_msg: |
+    [pre-commit.ci] auto fixes from pre-commit hooks
+
+    for more information, see https://pre-commit.ci
+  autofix_prs: true
+  autoupdate_branch: ''
+  autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
+  autoupdate_schedule: weekly
+  skip: []
+  submodules: false
