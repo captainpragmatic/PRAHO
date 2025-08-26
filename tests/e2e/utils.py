@@ -629,6 +629,11 @@ def check_accessibility_basics(page: Page) -> list[str]:
     """
     Check for basic accessibility issues.
     
+    Automatically filters out Django Debug Toolbar elements since they are:
+    - Development-only tools (disabled in production)
+    - Third-party library code (not our application)
+    - Not part of the user interface
+    
     Args:
         page: Playwright page object
         
@@ -642,8 +647,18 @@ def check_accessibility_basics(page: Page) -> list[str]:
             () => {
                 const issues = [];
                 
-                // Check for missing form labels
+                // Check for missing form labels (exclude Django Debug Toolbar elements)
                 document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"])').forEach(input => {
+                    // Skip Django Debug Toolbar inputs (development only)
+                    if (input.hasAttribute('data-cookie') && input.getAttribute('data-cookie').startsWith('djdt')) {
+                        return;
+                    }
+                    
+                    // Skip inputs inside Django Debug Toolbar container
+                    if (input.closest('#djDebug, .djDebugToolbar, [id*="djdt"], [class*="djdt"]')) {
+                        return;
+                    }
+                    
                     const id = input.id;
                     if (!id || !document.querySelector('label[for="' + id + '"]')) {
                         const ariaLabel = input.getAttribute('aria-label');
@@ -653,8 +668,13 @@ def check_accessibility_basics(page: Page) -> list[str]:
                     }
                 });
                 
-                // Check for buttons without accessible names
+                // Check for buttons without accessible names (exclude Django Debug Toolbar elements)
                 document.querySelectorAll('button:not([aria-label]):not([title])').forEach(button => {
+                    // Skip buttons inside Django Debug Toolbar container
+                    if (button.closest('#djDebug, .djDebugToolbar, [id*="djdt"], [class*="djdt"]')) {
+                        return;
+                    }
+                    
                     if (!button.textContent.trim()) {
                         issues.push('Button without accessible name');
                     }

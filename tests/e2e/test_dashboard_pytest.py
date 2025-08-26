@@ -38,7 +38,7 @@ def test_superuser_dashboard_functionality(page: Page):
                                  check_network=True,
                                  check_html=True,
                                  check_css=True,
-                                 check_accessibility=False,  # Keep fast for now
+                                 check_accessibility=True,   # Enable with DDT filtering
                                  check_performance=False):   # Keep fast for now
         # Ensure fresh session and login
         ensure_fresh_session(page)
@@ -63,7 +63,7 @@ def test_customer_dashboard_functionality(page: Page):
                                  check_network=True,
                                  check_html=True,
                                  check_css=True,
-                                 check_accessibility=False,  # Keep fast for customer test
+                                 check_accessibility=True,   # Enable with DDT filtering
                                  check_performance=False):   # Keep fast for customer test
         # Ensure fresh session and login  
         ensure_fresh_session(page)
@@ -134,7 +134,7 @@ def test_dashboard_actions_and_interactions(page: Page):
                                  check_network=True,
                                  check_html=True,
                                  check_css=True,
-                                 check_accessibility=False,  # Skip a11y for functional testing
+                                 check_accessibility=True,   # Re-enable with DDT filtering
                                  check_performance=False):   # Skip performance for speed
         # Login as superuser for maximum dashboard access
         ensure_fresh_session(page)
