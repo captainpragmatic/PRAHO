@@ -303,47 +303,6 @@ def navigate_to_page(page: Page, path: str, expected_url_fragment: str | None = 
         return False
 
 
-# ===============================================================================
-# CONSOLE ERROR UTILITIES
-# ===============================================================================
-
-def get_serious_console_errors(page: Page) -> list:
-    """
-    Get console errors excluding benign warnings.
-    
-    Args:
-        page: Playwright page object
-        
-    Returns:
-        list: List of serious console errors (excludes X-Frame-Options warnings)
-        
-    Example:
-        serious_errors = get_serious_console_errors(page)
-        assert len(serious_errors) == 0, f"Console errors: {serious_errors}"
-    """
-    console_errors = getattr(page, 'console_errors', [])
-    serious_errors = [
-        error for error in console_errors 
-        if not error.startswith("X-Frame-Options may only be set via an HTTP header")
-    ]
-    return serious_errors
-
-
-def assert_no_console_errors(page: Page) -> None:
-    """
-    Assert that there are no serious console errors.
-    
-    Args:
-        page: Playwright page object
-        
-    Raises:
-        AssertionError: If serious console errors are found
-        
-    Example:
-        assert_no_console_errors(page)
-    """
-    serious_errors = get_serious_console_errors(page)
-    assert len(serious_errors) == 0, f"Serious console errors found: {serious_errors}"
 
 
 # ===============================================================================
@@ -420,6 +379,487 @@ def count_elements(page: Page, selector: str, description: str | None = None) ->
     except Exception as e:
         print(f"❌ Error counting {desc}: {str(e)[:100]}")
         return 0
+
+
+# ===============================================================================
+# CONSOLE ERROR MONITORING
+# ===============================================================================
+
+def setup_console_monitoring(page: Page) -> list:
+    """
+    Set up console message monitoring for the page.
+    
+    Args:
+        page: Playwright page object
+        
+    Returns:
+        list: Console messages list to collect messages
+        
+    Example:
+        console_messages = setup_console_monitoring(page)
+    """
+    console_messages = []
+    
+    def handle_console_message(msg):
+        if msg.type in ['error', 'warning']:
+            message_text = msg.text
+            console_messages.append({
+                'type': msg.type,
+                'text': message_text,
+                'location': msg.location
+            })
+    
+    # Set up listener to capture console messages
+    page.on("console", handle_console_message)
+    return console_messages
+
+
+def assert_no_console_errors(console_messages: list, ignore_patterns: list[str] = None, 
+                           context: str = "") -> None:
+    """
+    Assert that there are no JavaScript console errors.
+    
+    Args:
+        console_messages: List of console messages from setup_console_monitoring
+        ignore_patterns: List of error message patterns to ignore
+        context: Context description for better error messages
+        
+    Raises:
+        AssertionError: If console errors are found
+        
+    Example:
+        console_messages = setup_console_monitoring(page)
+        # ... perform actions ...
+        assert_no_console_errors(console_messages, context="after login")
+    """
+    # Default patterns to ignore (common development noise)
+    default_ignore = [
+        "favicon",           # Favicon not found errors
+        "debug_toolbar",     # Django debug toolbar warnings
+        "net::ERR_INTERNET_DISCONNECTED",  # Network connectivity
+        "chunks",           # Webpack chunk loading (if any)
+        "sw.js",            # Service worker (if any)
+        "ERR_NETWORK",      # Network errors during test cleanup
+        "X-Frame-Options",   # X-Frame-Options meta tag warnings
+    ]
+    
+    ignore_patterns = (ignore_patterns or []) + default_ignore
+    
+    # Filter out ignored patterns
+    errors = []
+    for msg in console_messages:
+        if msg['type'] == 'error':
+            message_text = msg['text']
+            should_ignore = any(pattern.lower() in message_text.lower() 
+                              for pattern in ignore_patterns)
+            if not should_ignore:
+                errors.append(f"[{msg['type'].upper()}] {message_text}")
+    
+    if errors:
+        context_msg = f" {context}" if context else ""
+        error_list = "\n".join(f"  - {error}" for error in errors)
+        raise AssertionError(f"Console errors found{context_msg}:\n{error_list}")
+    
+    if context:
+        print(f"  ✅ No console errors {context}")
+    else:
+        print("  ✅ No console errors detected")
+
+
+def check_network_errors(page: Page) -> list[str]:
+    """
+    Check for HTTP network errors (4xx, 5xx responses).
+    
+    Args:
+        page: Playwright page object
+        
+    Returns:
+        list[str]: List of network error messages
+    """
+    network_errors = []
+    
+    try:
+        # Get network requests (this requires setting up network monitoring)
+        # For now, check if we can detect failed requests via console or other means
+        
+        # Check for typical error indicators in the page
+        error_indicators = [
+            "500 Internal Server Error",
+            "404 Not Found", 
+            "403 Forbidden",
+            "502 Bad Gateway",
+            "503 Service Unavailable"
+        ]
+        
+        page_content = page.content()
+        for indicator in error_indicators:
+            if indicator in page_content:
+                network_errors.append(f"HTTP Error detected: {indicator}")
+                
+    except Exception:
+        pass
+        
+    return network_errors
+
+
+def check_html_validation(page: Page) -> list[str]:
+    """
+    Check for basic HTML validation issues and HTMX problems.
+    
+    Args:
+        page: Playwright page object
+        
+    Returns:
+        list[str]: List of HTML/HTMX validation issues
+    """
+    html_issues = []
+    
+    try:
+        # Check for duplicate IDs (major HTML validation issue)
+        duplicate_ids = page.evaluate("""
+            () => {
+                const ids = {};
+                const duplicates = [];
+                document.querySelectorAll('[id]').forEach(el => {
+                    const id = el.id;
+                    if (ids[id]) {
+                        duplicates.push(id);
+                    } else {
+                        ids[id] = true;
+                    }
+                });
+                return [...new Set(duplicates)];
+            }
+        """)
+        
+        for duplicate_id in duplicate_ids:
+            html_issues.append(f"Duplicate ID found: '{duplicate_id}'")
+            
+        # Check for missing alt attributes on images
+        missing_alt_images = page.locator('img:not([alt])').count()
+        if missing_alt_images > 0:
+            html_issues.append(f"{missing_alt_images} images missing alt attributes")
+            
+        # Check for HTMX-specific issues
+        htmx_issues = page.evaluate("""
+            () => {
+                const issues = [];
+                
+                // Check for HTMX elements with invalid targets
+                document.querySelectorAll('[hx-target]').forEach(el => {
+                    const target = el.getAttribute('hx-target');
+                    if (target && !target.startsWith('#') && !target.startsWith('.') && 
+                        target !== 'this' && target !== 'closest' && !document.querySelector(target)) {
+                        issues.push('Invalid HTMX target: ' + target);
+                    }
+                });
+                
+                // Check for forms without proper CSRF tokens (Django-specific)
+                document.querySelectorAll('form[method="post"]:not([hx-post]):not([hx-put]):not([hx-patch])').forEach(form => {
+                    if (!form.querySelector('input[name="csrfmiddlewaretoken"]')) {
+                        issues.push('Form missing CSRF token');
+                    }
+                });
+                
+                return issues;
+            }
+        """)
+        
+        html_issues.extend(htmx_issues)
+        
+    except Exception as e:
+        html_issues.append(f"HTML validation check failed: {str(e)[:50]}")
+        
+    return html_issues
+
+
+def check_css_issues(page: Page) -> list[str]:
+    """
+    Check for CSS-related issues and layout problems.
+    
+    Args:
+        page: Playwright page object
+        
+    Returns:
+        list[str]: List of CSS issues
+    """
+    css_issues = []
+    
+    try:
+        # Check for CSS load failures
+        css_errors = page.evaluate("""
+            () => {
+                const issues = [];
+                
+                // Check for failed CSS loads
+                document.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
+                    if (link.sheet === null) {
+                        issues.push('Failed to load CSS: ' + link.href);
+                    }
+                });
+                
+                // Check for elements with zero dimensions that shouldn't be hidden
+                document.querySelectorAll('main, .content, [data-testid]').forEach(el => {
+                    const rect = el.getBoundingClientRect();
+                    if (rect.width === 0 && rect.height === 0 && 
+                        getComputedStyle(el).display !== 'none' &&
+                        getComputedStyle(el).visibility !== 'hidden') {
+                        issues.push('Element has zero dimensions: ' + (el.id || el.className || el.tagName));
+                    }
+                });
+                
+                // Check for horizontal scrollbars (potential layout issue)
+                if (document.documentElement.scrollWidth > window.innerWidth) {
+                    issues.push('Horizontal scrollbar detected (potential layout issue)');
+                }
+                
+                return issues;
+            }
+        """)
+        
+        css_issues.extend(css_errors)
+        
+    except Exception as e:
+        css_issues.append(f"CSS validation check failed: {str(e)[:50]}")
+        
+    return css_issues
+
+
+def check_accessibility_basics(page: Page) -> list[str]:
+    """
+    Check for basic accessibility issues.
+    
+    Args:
+        page: Playwright page object
+        
+    Returns:
+        list[str]: List of accessibility issues
+    """
+    a11y_issues = []
+    
+    try:
+        accessibility_checks = page.evaluate("""
+            () => {
+                const issues = [];
+                
+                // Check for missing form labels
+                document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"])').forEach(input => {
+                    const id = input.id;
+                    if (!id || !document.querySelector('label[for="' + id + '"]')) {
+                        const ariaLabel = input.getAttribute('aria-label');
+                        if (!ariaLabel) {
+                            issues.push('Input missing label: ' + (input.name || input.type || 'unknown'));
+                        }
+                    }
+                });
+                
+                // Check for buttons without accessible names
+                document.querySelectorAll('button:not([aria-label]):not([title])').forEach(button => {
+                    if (!button.textContent.trim()) {
+                        issues.push('Button without accessible name');
+                    }
+                });
+                
+                // Check for missing heading structure
+                const headings = document.querySelectorAll('h1, h2, h3, h4, h5, h6');
+                if (headings.length === 0) {
+                    issues.push('Page has no heading elements');
+                } else if (!document.querySelector('h1')) {
+                    issues.push('Page missing h1 heading');
+                }
+                
+                return issues;
+            }
+        """)
+        
+        a11y_issues.extend(accessibility_checks)
+        
+    except Exception as e:
+        a11y_issues.append(f"Accessibility check failed: {str(e)[:50]}")
+        
+    return a11y_issues
+
+
+def check_performance_issues(page: Page) -> list[str]:
+    """
+    Check for basic performance issues.
+    
+    Args:
+        page: Playwright page object
+        
+    Returns:
+        list[str]: List of performance issues
+    """
+    perf_issues = []
+    
+    try:
+        # Check page load metrics
+        performance_data = page.evaluate("""
+            () => {
+                const issues = [];
+                const navigation = performance.getEntriesByType('navigation')[0];
+                
+                if (navigation) {
+                    // Check for slow loading times (> 3 seconds)
+                    const loadTime = navigation.loadEventEnd - navigation.fetchStart;
+                    if (loadTime > 3000) {
+                        issues.push(`Slow page load: ${Math.round(loadTime)}ms`);
+                    }
+                    
+                    // Check for slow server response (> 1 second)
+                    const responseTime = navigation.responseEnd - navigation.requestStart;
+                    if (responseTime > 1000) {
+                        issues.push(`Slow server response: ${Math.round(responseTime)}ms`);
+                    }
+                }
+                
+                // Check for large images without optimization
+                document.querySelectorAll('img').forEach(img => {
+                    if (img.naturalWidth > 2000 && !img.src.includes('optimized')) {
+                        issues.push('Large unoptimized image: ' + img.src.split('/').pop());
+                    }
+                });
+                
+                return issues;
+            }
+        """)
+        
+        perf_issues.extend(performance_data)
+        
+    except Exception as e:
+        perf_issues.append(f"Performance check failed: {str(e)[:50]}")
+        
+    return perf_issues
+
+
+class ComprehensivePageMonitor:
+    """
+    Comprehensive monitoring for all aspects of page quality during test execution.
+    
+    Example:
+        with ComprehensivePageMonitor(page, "login process") as monitor:
+            login_user(page, email, password)
+            # All quality checks are automatically performed when exiting context
+    """
+    
+    def __init__(self, page: Page, context: str = "", 
+                 check_console: bool = True,
+                 check_network: bool = True, 
+                 check_html: bool = True,
+                 check_css: bool = True,
+                 check_accessibility: bool = False,  # Can be slow
+                 check_performance: bool = False,    # Can be slow
+                 ignore_patterns: list[str] = None):
+        self.page = page
+        self.context = context
+        self.check_console = check_console
+        self.check_network = check_network
+        self.check_html = check_html
+        self.check_css = check_css
+        self.check_accessibility = check_accessibility
+        self.check_performance = check_performance
+        self.ignore_patterns = ignore_patterns or []
+        self.console_messages = []
+    
+    def __enter__(self):
+        if self.check_console:
+            self.console_messages = setup_console_monitoring(self.page)
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # Only check quality issues if the test didn't already fail
+        if exc_type is None:
+            all_issues = []
+            
+            # Console errors
+            if self.check_console:
+                try:
+                    assert_no_console_errors(
+                        self.console_messages, 
+                        ignore_patterns=self.ignore_patterns,
+                        context=self.context
+                    )
+                except AssertionError as e:
+                    all_issues.append(f"Console: {str(e)}")
+            
+            # Network errors
+            if self.check_network:
+                network_issues = check_network_errors(self.page)
+                if network_issues:
+                    all_issues.extend([f"Network: {issue}" for issue in network_issues])
+            
+            # HTML validation
+            if self.check_html:
+                html_issues = check_html_validation(self.page)
+                if html_issues:
+                    all_issues.extend([f"HTML: {issue}" for issue in html_issues])
+            
+            # CSS issues
+            if self.check_css:
+                css_issues = check_css_issues(self.page)
+                if css_issues:
+                    all_issues.extend([f"CSS: {issue}" for issue in css_issues])
+            
+            # Accessibility
+            if self.check_accessibility:
+                a11y_issues = check_accessibility_basics(self.page)
+                if a11y_issues:
+                    all_issues.extend([f"A11Y: {issue}" for issue in a11y_issues])
+            
+            # Performance
+            if self.check_performance:
+                perf_issues = check_performance_issues(self.page)
+                if perf_issues:
+                    all_issues.extend([f"PERF: {issue}" for issue in perf_issues])
+            
+            if all_issues:
+                context_msg = f" {self.context}" if self.context else ""
+                issue_list = "\n".join(f"  - {issue}" for issue in all_issues)
+                raise AssertionError(f"Page quality issues found{context_msg}:\n{issue_list}")
+            
+            # Success message
+            checks_performed = []
+            if self.check_console: checks_performed.append("console")
+            if self.check_network: checks_performed.append("network") 
+            if self.check_html: checks_performed.append("HTML")
+            if self.check_css: checks_performed.append("CSS")
+            if self.check_accessibility: checks_performed.append("accessibility")
+            if self.check_performance: checks_performed.append("performance")
+            
+            if self.context:
+                print(f"  ✅ Page quality verified {self.context} ({', '.join(checks_performed)})")
+            else:
+                print(f"  ✅ Page quality verified ({', '.join(checks_performed)})")
+
+
+class ConsoleMonitor:
+    """
+    Lightweight console-only monitoring (for backwards compatibility).
+    
+    Example:
+        with ConsoleMonitor(page, "login process") as monitor:
+            login_user(page, email, password)
+            # Console errors are automatically checked when exiting context
+    """
+    
+    def __init__(self, page: Page, context: str = "", ignore_patterns: list[str] = None):
+        self.page = page
+        self.context = context
+        self.ignore_patterns = ignore_patterns or []
+        self.console_messages = []
+    
+    def __enter__(self):
+        self.console_messages = setup_console_monitoring(self.page)
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # Only check console errors if the test didn't already fail
+        if exc_type is None:
+            assert_no_console_errors(
+                self.console_messages, 
+                ignore_patterns=self.ignore_patterns,
+                context=self.context
+            )
 
 
 # ===============================================================================

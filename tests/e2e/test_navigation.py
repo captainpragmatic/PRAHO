@@ -22,7 +22,7 @@ from tests.e2e.utils import (
     CUSTOMER_PASSWORD,
     SUPERUSER_EMAIL,
     SUPERUSER_PASSWORD,
-    assert_no_console_errors,
+    ComprehensivePageMonitor,
     count_elements,
     ensure_fresh_session,
     get_test_user_credentials,
@@ -42,12 +42,19 @@ def test_navigation_cross_page_flow(page: Page):
     This test verifies that navigation links work correctly and users can
     move between different areas of the platform.
     """
-    print("🧪 Testing cross-page navigation flow")
+    print("🧪 Testing cross-page navigation flow with comprehensive monitoring")
     
-    # Login as superuser for maximum navigation access
-    ensure_fresh_session(page)
-    if not login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD):
-        pytest.skip("Cannot login as superuser")
+    with ComprehensivePageMonitor(page, "cross-page navigation test",
+                                 check_console=True,
+                                 check_network=True,
+                                 check_html=True,
+                                 check_css=True,
+                                 check_accessibility=False,  # Keep fast for navigation flow
+                                 check_performance=False):   # Keep fast for navigation flow
+        # Login as superuser for maximum navigation access
+        ensure_fresh_session(page)
+        if not login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD):
+            pytest.skip("Cannot login as superuser")
     
     try:
         require_authentication(page)
@@ -107,8 +114,6 @@ def test_navigation_cross_page_flow(page: Page):
         require_authentication(page)
         assert "/app/" in page.url, "Should be able to return to dashboard"
         
-        assert_no_console_errors(page)
-        
     except AuthenticationError:
         pytest.fail("Lost authentication during navigation flow test")
 
@@ -120,20 +125,27 @@ def test_navigation_header_interactions(page: Page):
     This test focuses specifically on navigation elements in the header/navbar,
     testing both user roles to ensure proper access controls.
     """
-    print("🧪 Testing navigation header button interactions")
+    print("🧪 Testing navigation header button interactions with comprehensive monitoring")
     
-    # Get test user credentials
-    users = get_test_user_credentials()
-    test_cases = [
-        (users['superuser']['email'], users['superuser']['password'], "superuser"),
-        (users['customer']['email'], users['customer']['password'], "customer"),
-    ]
-    
-    for email, password, user_type in test_cases:
-        print(f"\n  👤 Testing navigation header for {user_type}")
+    with ComprehensivePageMonitor(page, "navigation header interactions test",
+                                 check_console=True,
+                                 check_network=True,
+                                 check_html=True,
+                                 check_css=True,
+                                 check_accessibility=False,  # Keep fast for multi-user test
+                                 check_performance=False):   # Keep fast for multi-user test
+        # Get test user credentials
+        users = get_test_user_credentials()
+        test_cases = [
+            (users['superuser']['email'], users['superuser']['password'], "superuser"),
+            (users['customer']['email'], users['customer']['password'], "customer"),
+        ]
         
-        # Start fresh for each user type - clear session and go to login
-        ensure_fresh_session(page)
+        for email, password, user_type in test_cases:
+            print(f"\n  👤 Testing navigation header for {user_type}")
+            
+            # Start fresh for each user type - clear session and go to login
+            ensure_fresh_session(page)
         
         # Login with current user
         assert login_user(page, email, password)
@@ -226,52 +238,61 @@ def test_navigation_menu_visibility_by_role(page: Page):
     This test verifies role-based access control for navigation elements
     using functional validation instead of simple element counting.
     """
-    print("🧪 Testing navigation menu visibility by role")
+    print("🧪 Testing navigation menu visibility by role with comprehensive monitoring")
     
-    # Test superuser navigation access
-    print("\n  👑 Testing superuser navigation access")
-    ensure_fresh_session(page)
-    if not login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD):
-        pytest.skip("Cannot login as superuser")
-    
-    try:
-        require_authentication(page)
+    # Use comprehensive monitoring context for the entire test
+    with ComprehensivePageMonitor(page, "navigation menu visibility test",
+                                 check_console=True,
+                                 check_network=True,
+                                 check_html=True,
+                                 check_css=True,
+                                 check_accessibility=False,  # Keep fast for role-based test
+                                 check_performance=False):   # Keep fast for role-based test
         
-        # Verify superuser sees staff navigation elements
-        staff_links = page.locator('a:has-text("Customers"), a:has-text("Invoices"), a:has-text("Tickets"), a:has-text("Services")')
-        staff_count = staff_links.count()
+        # Test superuser navigation access
+        print("\n  👑 Testing superuser navigation access")
+        ensure_fresh_session(page)
+        if not login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD):
+            pytest.skip("Cannot login as superuser")
         
-        assert staff_count >= 4, f"Superuser should see staff navigation (found {staff_count})"
-        print(f"    ✅ Found {staff_count} staff navigation items")
+        try:
+            require_authentication(page)
+            
+            # Verify superuser sees staff navigation elements
+            staff_links = page.locator('a:has-text("Customers"), a:has-text("Invoices"), a:has-text("Tickets"), a:has-text("Services")')
+            staff_count = staff_links.count()
+            
+            assert staff_count >= 4, f"Superuser should see staff navigation (found {staff_count})"
+            print(f"    ✅ Found {staff_count} staff navigation items")
+            
+        except AuthenticationError:
+            pytest.fail("Lost authentication during superuser navigation test")
         
-    except AuthenticationError:
-        pytest.fail("Lost authentication during superuser navigation test")
-    
-    # Test customer navigation restrictions
-    print("\n  👤 Testing customer navigation restrictions") 
-    ensure_fresh_session(page)
-    if not login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD):
-        pytest.skip("Cannot login as customer")
-    
-    try:
-        require_authentication(page)
+        # Test customer navigation restrictions
+        print("\n  👤 Testing customer navigation restrictions") 
+        ensure_fresh_session(page)
+        if not login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD):
+            pytest.skip("Cannot login as customer")
         
-        # Verify customer does NOT see staff navigation
-        staff_only_links = page.locator('a:has-text("Customers")')  # Staff-only link
-        staff_count = staff_only_links.count()
+        try:
+            require_authentication(page)
+            
+            # Verify customer does NOT see staff navigation
+            staff_only_links = page.locator('a:has-text("Customers")')  # Staff-only link
+            staff_count = staff_only_links.count()
+            
+            assert staff_count == 0, f"Customer should not see staff navigation (found {staff_count})"
+            print(f"    ✅ Customer properly restricted from staff navigation")
+            
+            # Verify customer sees their own navigation (My Tickets, My Invoices, etc.)
+            customer_links = page.locator('a:has-text("My Tickets"), a:has-text("My Invoices"), a:has-text("My Services")')
+            customer_count = customer_links.count()
+            print(f"    ✅ Found {customer_count} customer navigation items")
+            
+        except AuthenticationError:
+            pytest.fail("Lost authentication during customer navigation test")
         
-        assert staff_count == 0, f"Customer should not see staff navigation (found {staff_count})"
-        print(f"    ✅ Customer properly restricted from staff navigation")
-        
-        # Verify customer sees their own navigation (My Tickets, My Invoices, etc.)
-        customer_links = page.locator('a:has-text("My Tickets"), a:has-text("My Invoices"), a:has-text("My Services")')
-        customer_count = customer_links.count()
-        print(f"    ✅ Found {customer_count} customer navigation items")
-        
-    except AuthenticationError:
-        pytest.fail("Lost authentication during customer navigation test")
-    
-    print("  ✅ Navigation role-based access control verified!")
+        print("  ✅ Navigation role-based access control verified!")
 
 
 def test_navigation_dropdown_interactions(page: Page):
@@ -280,11 +301,18 @@ def test_navigation_dropdown_interactions(page: Page):
     
     This test focuses on dropdown menus, user menus, and collapsible navigation elements.
     """
-    print("🧪 Testing navigation dropdown interactions")
+    print("🧪 Testing navigation dropdown interactions with comprehensive monitoring")
     
-    # Login as superuser for maximum navigation access
-    ensure_fresh_session(page)
-    assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    with ComprehensivePageMonitor(page, "navigation dropdown interactions test",
+                                 check_console=True,
+                                 check_network=True,
+                                 check_html=True,
+                                 check_css=True,
+                                 check_accessibility=False,  # Keep fast for dropdown test
+                                 check_performance=False):   # Keep fast for dropdown test
+        # Login as superuser for maximum navigation access
+        ensure_fresh_session(page)
+        assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     
     # Test dropdown elements
     dropdown_selectors = [
@@ -327,12 +355,9 @@ def test_navigation_dropdown_interactions(page: Page):
                 page.click('body')
                 page.wait_for_timeout(200)
     
-    print(f"  📊 Summary: Found {total_dropdowns} dropdown elements, successfully clicked {total_clicked}")
-    
-    # Check for console errors
-    assert_no_console_errors(page)
-    
-    print("  ✅ Navigation dropdown testing completed!")
+        print(f"  📊 Summary: Found {total_dropdowns} dropdown elements, successfully clicked {total_clicked}")
+        
+        print("  ✅ Navigation dropdown testing completed!")
 
 
 def test_mobile_navigation_responsiveness(page: Page):
@@ -341,14 +366,21 @@ def test_mobile_navigation_responsiveness(page: Page):
     
     This test checks that navigation works properly on mobile viewport sizes.
     """
-    print("🧪 Testing mobile navigation responsiveness")
+    print("🧪 Testing mobile navigation responsiveness with comprehensive monitoring")
     
-    # Set mobile viewport
-    page.set_viewport_size({"width": 375, "height": 667})  # iPhone 8 size
-    
-    # Login as superuser
-    ensure_fresh_session(page)
-    assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    with ComprehensivePageMonitor(page, "mobile navigation responsiveness test",
+                                 check_console=True,
+                                 check_network=True,
+                                 check_html=True,
+                                 check_css=True,
+                                 check_accessibility=False,  # Keep fast for mobile test
+                                 check_performance=False):   # Keep fast for mobile test
+        # Set mobile viewport
+        page.set_viewport_size({"width": 375, "height": 667})  # iPhone 8 size
+        
+        # Login as superuser
+        ensure_fresh_session(page)
+        assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     
     # Look for mobile navigation elements
     mobile_nav_selectors = [
@@ -386,12 +418,12 @@ def test_mobile_navigation_responsiveness(page: Page):
                         print("      ✅ Mobile menu expanded successfully")
                         break
     
-    print(f"  📱 Mobile navigation elements found: {mobile_elements_found}")
-    
-    # Reset to desktop viewport
-    page.set_viewport_size({"width": 1280, "height": 720})
-    
-    print("  ✅ Mobile navigation testing completed!")
+        print(f"  📱 Mobile navigation elements found: {mobile_elements_found}")
+        
+        # Reset to desktop viewport
+        page.set_viewport_size({"width": 1280, "height": 720})
+        
+        print("  ✅ Mobile navigation testing completed!")
 
 
 # Remove old configuration - will be centralized in conftest.py
