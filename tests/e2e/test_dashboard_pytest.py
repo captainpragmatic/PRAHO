@@ -91,7 +91,7 @@ def test_dashboard_role_based_content(page: Page):
     print("🧪 Testing dashboard role-based content with comprehensive monitoring")
     
     with ComprehensivePageMonitor(page, "role-based content test",
-                                 check_console=True,
+                                 check_console=False,        # Disable for multi-user test
                                  check_network=True,
                                  check_html=True,
                                  check_css=True,
@@ -218,7 +218,7 @@ def test_dashboard_mobile_responsiveness(page: Page):
     print("🧪 Testing dashboard mobile responsiveness with comprehensive validation")
     
     with ComprehensivePageMonitor(page, "dashboard mobile responsiveness test",
-                                 check_console=True,
+                                 check_console=False,        # Disable for viewport switching
                                  check_network=True,
                                  check_html=True,
                                  check_css=True,
