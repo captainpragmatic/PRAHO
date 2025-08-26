@@ -19,7 +19,7 @@ import io
 import logging
 import secrets
 import string
-from typing import Any
+from typing import Any, ClassVar
 
 import pyotp
 import qrcode
@@ -29,6 +29,8 @@ from django.contrib.auth.hashers import check_password, make_password
 from django.core.cache import cache
 from django.db import models
 from django.utils import timezone
+
+from apps.common.constants import MAX_LOGIN_ATTEMPTS
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -46,18 +48,18 @@ class WebAuthnCredential(models.Model):
     Implementation ready for future WebAuthn integration.
     """
 
-    CREDENTIAL_TYPE_CHOICES = [
+    CREDENTIAL_TYPE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('public-key', 'Public Key'),
         ('passkey', 'Passkey'),
-    ]
+    )
 
-    TRANSPORT_CHOICES = [
+    TRANSPORT_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('usb', 'USB'),
         ('nfc', 'NFC'),
         ('ble', 'Bluetooth Low Energy'),
         ('internal', 'Internal (Touch ID, Face ID)'),
         ('hybrid', 'Hybrid'),
-    ]
+    )
 
     # Relationships
     user = models.ForeignKey(
@@ -98,7 +100,7 @@ class WebAuthnCredential(models.Model):
         db_table = 'webauthn_credentials'  # Use original table name from migration
         verbose_name = 'WebAuthn Credential'
         verbose_name_plural = 'WebAuthn Credentials'
-        indexes = [
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             # Core performance indexes with consistent 2FA naming
             models.Index(fields=['user', '-created_at'], name='idx_tfa_webauthn_user_created'),
             models.Index(fields=['credential_id'], name='idx_tfa_webauthn_credential_id'),
@@ -109,7 +111,7 @@ class WebAuthnCredential(models.Model):
             models.Index(fields=['aaguid'], name='idx_tfa_webauthn_aaguid'),
             models.Index(fields=['credential_type'], name='idx_tfa_webauthn_type'),
             models.Index(fields=['is_active'], name='idx_tfa_webauthn_active'),
-        ]
+        )
 
     def __str__(self) -> str:
         return f"{self.name} ({self.user.email})"
@@ -666,7 +668,7 @@ class MFAService:
         cache_key = f"mfa_attempts:{user.id}"
         attempts = cache.get(cache_key, 0)
 
-        if attempts >= 5:  # Max 5 attempts per 5 minutes
+        if attempts >= MAX_LOGIN_ATTEMPTS:  # Max attempts per 5 minutes
             logger.error(f"🔥 [MFA] Rate limit exceeded for user {user.email}")
             return False
 

@@ -12,6 +12,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.constants import SEARCH_QUERY_MIN_LENGTH
 from apps.common.decorators import staff_required
 from apps.common.types import Err
 from apps.users.services import CustomerUserService
@@ -451,7 +452,7 @@ def customer_search_api(request: HttpRequest) -> JsonResponse:
     🔍 AJAX customer search for dropdowns
     """
     query = request.GET.get('q', '')
-    if len(query) < 2:
+    if len(query) < SEARCH_QUERY_MIN_LENGTH:
         return JsonResponse({'results': []})
 
     customers = request.user.get_accessible_customers()

@@ -12,11 +12,10 @@ Features:
 ===============================================================================
 """
 
+from typing import Any
+
 from django.core.paginator import Paginator
 from django.http import HttpRequest
-from typing import Any, Dict, Optional
-from urllib.parse import urlencode
-
 
 # 🎯 Romanian business pagination constants
 DEFAULT_PAGE_SIZE = 20
@@ -29,7 +28,7 @@ def get_pagination_context(
     page_size: int = DEFAULT_PAGE_SIZE,
     page_param: str = 'page',
     orphans: int = DEFAULT_ORPHANS
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     📄 Get pagination context for any Django view
     
@@ -85,7 +84,7 @@ def get_pagination_context(
     }
 
 
-def get_search_context(request: HttpRequest, search_param: str = 'search') -> Dict[str, Any]:
+def get_search_context(request: HttpRequest, search_param: str = 'search') -> dict[str, Any]:
     """
     📄 Get search context for templates
     

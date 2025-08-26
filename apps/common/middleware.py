@@ -13,6 +13,8 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.http import HttpRequest, HttpResponse
 
+from apps.common.constants import HTTP_CLIENT_ERROR_THRESHOLD
+
 logger = logging.getLogger(__name__)
 User = get_user_model()
 
@@ -139,7 +141,7 @@ class AuditMiddleware:
         }
 
         # Log errors with more detail
-        if response.status_code >= 400:
+        if response.status_code >= HTTP_CLIENT_ERROR_THRESHOLD:
             audit_data['error'] = True
             if hasattr(response, 'content'):
                 audit_data['response_size'] = len(response.content)

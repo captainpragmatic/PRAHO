@@ -292,13 +292,13 @@ class ProductPrice(models.Model):
             return self.promo_price_cents
         return self.amount_cents
 
+    def __str__(self) -> str:
+        return f"{self.product.name} - {self.currency.code} {self.amount} {self.billing_period}"
+
     @property
     def effective_price(self) -> Decimal:
         """Get effective price in currency units"""
         return Decimal(self.effective_price_cents) / 100
-
-    def __str__(self) -> str:
-        return f"{self.product.name} - {self.currency.code} {self.amount} {self.billing_period}"
 
 
 class ProductRelationship(models.Model):

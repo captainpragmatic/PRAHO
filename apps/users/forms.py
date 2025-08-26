@@ -3,7 +3,7 @@ User forms for PRAHO Platform
 Romanian-localized authentication and profile forms.
 """
 
-from typing import Any, TypeVar, cast
+from typing import Any, ClassVar, TypeVar, cast
 
 from django import forms
 from django.contrib.auth.forms import UserCreationForm
@@ -94,10 +94,10 @@ class UserRegistrationForm(UserCreationForm):
 
     class Meta:
         model = User
-        fields = [
+        fields: ClassVar[list[str]] = (
             'email', 'first_name', 'last_name', 'phone',
             'password1', 'password2', 'accepts_marketing', 'gdpr_consent'
-        ]
+        )
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -169,13 +169,13 @@ class UserProfileForm(forms.ModelForm):
 
     class Meta:
         model = UserProfile
-        fields = [
+        fields: ClassVar[list[str]] = (
             'preferred_language', 'timezone', 'date_format',
             'email_notifications', 'sms_notifications', 'marketing_emails',
             'emergency_contact_name', 'emergency_contact_phone'
-        ]
+        )
 
-        widgets = {
+        widgets: ClassVar[dict[str, forms.Widget]] = {
             'preferred_language': forms.Select(attrs={'class': 'form-select'}),
             'timezone': forms.Select(attrs={'class': 'form-select'}),
             'date_format': forms.Select(attrs={'class': 'form-select'}),
@@ -192,7 +192,7 @@ class UserProfileForm(forms.ModelForm):
             }),
         }
 
-        labels = {
+        labels: ClassVar[dict[str, str]] = {
             'preferred_language': _('Preferred language'),
             'timezone': _('Timezone'),
             'date_format': _('Date format'),
@@ -465,7 +465,7 @@ class CustomerOnboardingRegistrationForm(UserCreationForm):
 
     class Meta:
         model = User
-        fields = ['email', 'first_name', 'last_name', 'phone', 'password1', 'password2']
+        fields: ClassVar[list[str]] = ('email', 'first_name', 'last_name', 'phone', 'password1', 'password2')
 
     def clean_vat_number(self) -> str:
         """Validate VAT number format"""

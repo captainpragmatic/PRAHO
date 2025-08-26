@@ -6,7 +6,7 @@ Romanian hosting provider specific order processing and configuration.
 
 import uuid
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, ClassVar, Optional
 
 if TYPE_CHECKING:
     from apps.provisioning.models import Service
@@ -45,7 +45,7 @@ class Order(models.Model):
     )
 
     # Order status workflow
-    STATUS_CHOICES = [
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('draft', _('Draft')),             # Cart/Quote stage - can be modified
         ('pending', _('Pending')),         # Awaiting payment
         ('processing', _('Processing')),   # Payment received, provisioning in progress
@@ -54,7 +54,7 @@ class Order(models.Model):
         ('failed', _('Failed')),           # Payment or provisioning failed
         ('refunded', _('Refunded')),       # Order was refunded
         ('partially_refunded', _('Partially Refunded')),  # Partial refund processed
-    ]
+    )
     status = models.CharField(
         max_length=20,
         choices=STATUS_CHOICES,
@@ -207,8 +207,8 @@ class Order(models.Model):
         db_table = 'orders'
         verbose_name = _('Order')
         verbose_name_plural = _('Orders')
-        ordering = ['-created_at']
-        indexes = [
+        ordering: ClassVar[tuple[str, ...]] = ('-created_at',)
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=['customer', '-created_at']),
             models.Index(fields=['status', '-created_at']),
             models.Index(fields=['order_number']),
@@ -218,7 +218,7 @@ class Order(models.Model):
             models.Index(fields=['status', 'payment_method', '-created_at']),
             # 🚀 Performance: Customer order history with status
             models.Index(fields=['customer', 'status']),
-        ]
+        )
 
     @property
     def subtotal(self) -> Decimal:
@@ -254,6 +254,28 @@ class Order(models.Model):
     def can_be_cancelled(self) -> bool:
         """Check if order can be cancelled"""
         return self.status in ['draft', 'pending']
+
+    def generate_order_number(self) -> None:
+        """Generate a unique order number"""
+        if not self.order_number:
+            # Format: ORD-YYYYMMDD-XXXXXX
+            date_part = timezone.now().strftime('%Y%m%d')
+            # Get last order number for today
+            today_orders = Order.objects.filter(
+                created_at__date=timezone.now().date(),
+                order_number__isnull=False
+            ).count()
+            sequence = str(today_orders + 1).zfill(6)
+            self.order_number = f"ORD-{date_part}-{sequence}"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Auto-generate order number before saving"""
+        if not self.order_number:
+            self.generate_order_number()
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"Order {self.order_number} - {self.customer_email}"
 
     def calculate_totals(self) -> None:
         """
@@ -291,28 +313,6 @@ class Order(models.Model):
         self.status = 'completed'
         self.completed_at = timezone.now()
         self.save(update_fields=['status', 'completed_at'])
-
-    def generate_order_number(self) -> None:
-        """Generate a unique order number"""
-        if not self.order_number:
-            # Format: ORD-YYYYMMDD-XXXXXX
-            date_part = timezone.now().strftime('%Y%m%d')
-            # Get last order number for today
-            today_orders = Order.objects.filter(
-                created_at__date=timezone.now().date(),
-                order_number__isnull=False
-            ).count()
-            sequence = str(today_orders + 1).zfill(6)
-            self.order_number = f"ORD-{date_part}-{sequence}"
-
-    def save(self, *args: Any, **kwargs: Any) -> None:
-        """Auto-generate order number before saving"""
-        if not self.order_number:
-            self.generate_order_number()
-        super().save(*args, **kwargs)
-
-    def __str__(self) -> str:
-        return f"Order {self.order_number} - {self.customer_email}"
 
 
 class OrderItem(models.Model):
@@ -409,13 +409,13 @@ class OrderItem(models.Model):
     )
 
     # Provisioning status
-    PROVISIONING_STATUS = [
+    PROVISIONING_STATUS: ClassVar[tuple[tuple[str, str], ...]] = (
         ('pending', _('Pending')),
         ('in_progress', _('In Progress')),
         ('completed', _('Completed')),
         ('failed', _('Failed')),
         ('cancelled', _('Cancelled')),
-    ]
+    )
     provisioning_status = models.CharField(
         max_length=20,
         choices=PROVISIONING_STATUS,
@@ -440,8 +440,8 @@ class OrderItem(models.Model):
         db_table = 'order_items'
         verbose_name = _('Order Item')
         verbose_name_plural = _('Order Items')
-        ordering = ['created_at']
-        indexes = [
+        ordering: ClassVar[tuple[str, ...]] = ('created_at',)
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=['order', 'created_at']),
             models.Index(fields=['product']),
             models.Index(fields=['provisioning_status']),
@@ -449,7 +449,7 @@ class OrderItem(models.Model):
             models.Index(fields=['provisioning_status', '-created_at']),
             # 🚀 Performance: Product and order tracking
             models.Index(fields=['product', 'provisioning_status']),
-        ]
+        )
 
     @property
     def unit_price(self) -> Decimal:
@@ -476,7 +476,21 @@ class OrderItem(models.Model):
         """Calculate subtotal before tax"""
         return (self.unit_price_cents * self.quantity) + self.setup_cents
 
-    @property
+    def save(self, *args, **kwargs) -> None:  # type: ignore[override]
+        """Auto-calculate totals before saving"""
+        # Store product details snapshot
+        if self.product and not self.product_name:
+            self.product_name = self.product.name
+            self.product_type = self.product.product_type
+
+        # Calculate totals
+        self.calculate_totals()
+
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"{self.product_name} x{self.quantity} ({self.order.order_number})"
+
     def subtotal(self) -> Decimal:
         """Return subtotal in currency units"""
         return Decimal(self.subtotal_cents) / 100
@@ -499,21 +513,6 @@ class OrderItem(models.Model):
             'provisioned_at',
             'service'
         ])
-
-    def save(self, *args, **kwargs) -> None:  # type: ignore[override]
-        """Auto-calculate totals before saving"""
-        # Store product details snapshot
-        if self.product and not self.product_name:
-            self.product_name = self.product.name
-            self.product_type = self.product.product_type
-
-        # Calculate totals
-        self.calculate_totals()
-
-        super().save(*args, **kwargs)
-
-    def __str__(self) -> str:
-        return f"{self.product_name} x{self.quantity} ({self.order.order_number})"
 
 
 class OrderStatusHistory(models.Model):
@@ -572,10 +571,10 @@ class OrderStatusHistory(models.Model):
         db_table = 'order_status_history'
         verbose_name = _('Order Status History')
         verbose_name_plural = _('Order Status Histories')
-        ordering = ['-created_at']
-        indexes = [
+        ordering: ClassVar[tuple[str, ...]] = ('-created_at',)
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=['order', '-created_at']),
-        ]
+        )
 
     def __str__(self) -> str:
         return f"{self.order.order_number}: {self.old_status} → {self.new_status}"

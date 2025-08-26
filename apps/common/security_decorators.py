@@ -15,6 +15,13 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.constants import (
+    CUSTOMER_DATA_ARG_POSITION,
+    INVITATION_CUSTOMER_ARG_POSITION,
+    INVITATION_ROLE_ARG_POSITION,
+    INVITEE_EMAIL_ARG_POSITION,
+    USER_DATA_ARG_POSITION,
+)
 from apps.common.types import Err, Result
 
 from .validators import (
@@ -261,7 +268,7 @@ def _validate_user_registration_input(args, kwargs) -> None:
     """Validate user registration input data"""
     # Extract user_data from arguments
     user_data = None
-    if len(args) >= 2 and isinstance(args[1], dict):
+    if len(args) >= USER_DATA_ARG_POSITION and isinstance(args[1], dict):
         user_data = args[1]
     elif 'user_data' in kwargs:
         user_data = kwargs['user_data']
@@ -269,7 +276,7 @@ def _validate_user_registration_input(args, kwargs) -> None:
     if user_data:
         validated_user_data = SecureInputValidator.validate_user_data_dict(user_data)
         # Update the arguments with validated data
-        if len(args) >= 2:
+        if len(args) >= USER_DATA_ARG_POSITION:
             args = list(args)
             args[1] = validated_user_data
         else:
@@ -279,7 +286,7 @@ def _validate_user_registration_input(args, kwargs) -> None:
 def _validate_customer_data_input(args, kwargs) -> None:
     """Validate customer data input"""
     customer_data = None
-    if len(args) >= 3 and isinstance(args[2], dict):
+    if len(args) >= CUSTOMER_DATA_ARG_POSITION and isinstance(args[2], dict):
         customer_data = args[2]
     elif 'customer_data' in kwargs:
         customer_data = kwargs['customer_data']
@@ -287,7 +294,7 @@ def _validate_customer_data_input(args, kwargs) -> None:
     if customer_data:
         validated_customer_data = SecureInputValidator.validate_customer_data_dict(customer_data)
         # Update the arguments with validated data
-        if len(args) >= 3:
+        if len(args) >= CUSTOMER_DATA_ARG_POSITION:
             args = list(args)
             args[2] = validated_customer_data
         else:
@@ -302,10 +309,10 @@ def _validate_customer_data_input(args, kwargs) -> None:
 
 def _validate_invitation_input(args, kwargs) -> None:
     """Validate invitation input data"""
-    inviter = kwargs.get('inviter') or (args[1] if len(args) > 1 else None)
-    invitee_email = kwargs.get('invitee_email') or (args[2] if len(args) > 2 else None)
-    customer = kwargs.get('customer') or (args[3] if len(args) > 3 else None)
-    role = kwargs.get('role', 'viewer') or (args[4] if len(args) > 4 else 'viewer')
+    inviter = kwargs.get('inviter') or (args[1] if len(args) > INVITER_ARG_POSITION else None)
+    invitee_email = kwargs.get('invitee_email') or (args[2] if len(args) > INVITEE_EMAIL_ARG_POSITION else None)
+    customer = kwargs.get('customer') or (args[3] if len(args) > INVITATION_CUSTOMER_ARG_POSITION else None)
+    role = kwargs.get('role', 'viewer') or (args[4] if len(args) > INVITATION_ROLE_ARG_POSITION else 'viewer')
 
     if all([inviter, invitee_email, customer, role]):
         # Validate the invitation request

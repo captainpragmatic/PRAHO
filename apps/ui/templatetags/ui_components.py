@@ -9,6 +9,8 @@ from typing import Any
 from django import template
 from django.utils.safestring import mark_safe
 
+from apps.common.constants import FILE_SIZE_CONVERSION_FACTOR
+
 register = template.Library()
 
 
@@ -540,8 +542,8 @@ def format_bytes(bytes_value: int) -> str:
     size = bytes_value
     unit_index = 0
 
-    while size >= 1024 and unit_index < len(units) - 1:
-        size /= 1024
+    while size >= FILE_SIZE_CONVERSION_FACTOR and unit_index < len(units) - 1:
+        size /= FILE_SIZE_CONVERSION_FACTOR
         unit_index += 1
 
     if unit_index == 0:

@@ -11,7 +11,7 @@ Refactored to normalized structure with soft deletes and separated concerns:
 """
 
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Any, ClassVar, Optional
 
 from django.core.validators import RegexValidator
 from django.db import models
@@ -52,8 +52,8 @@ class SoftDeleteModel(models.Model):
         verbose_name='Șters de'
     )
 
-    objects = SoftDeleteManager()
     all_objects = models.Manager()  # Shows all records including deleted
+    objects = SoftDeleteManager()
 
     class Meta:
         abstract = True
@@ -93,19 +93,19 @@ class Customer(SoftDeleteModel):
     """
 
     # Customer Types aligned with PostgreSQL schema
-    CUSTOMER_TYPE_CHOICES = [
+    CUSTOMER_TYPE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('individual', _('Individual')),
         ('company', _('Company')),
         ('pfa', _('PFA/SRL')),
         ('ngo', _('NGO/Association')),
-    ]
+    )
 
-    STATUS_CHOICES = [
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('active', _('Active')),
         ('inactive', _('Inactive')),
         ('suspended', _('Suspended')),
         ('prospect', _('Prospect')),
-    ]
+    )
 
     # Core Identity Fields
     name = models.CharField(max_length=255, verbose_name='Nume')
@@ -175,13 +175,13 @@ class Customer(SoftDeleteModel):
         db_table = 'customers'
         verbose_name = _('Customer')
         verbose_name_plural = _('Customers')
-        indexes = [
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=['primary_email']),
             models.Index(fields=['status']),
             models.Index(fields=['customer_type']),
             models.Index(fields=['created_at']),
             models.Index(fields=['deleted_at']),  # For soft delete queries
-        ]
+        )
 
     def __str__(self) -> str:
         return self.get_display_name()
@@ -275,10 +275,10 @@ class CustomerTaxProfile(SoftDeleteModel):
         db_table = 'customer_tax_profiles'
         verbose_name = _('Customer Tax Profile')
         verbose_name_plural = _('Customer Tax Profiles')
-        indexes = [
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=['cui']),
             models.Index(fields=['vat_number']),
-        ]
+        )
 
     def validate_cui(self) -> bool:
         """Validate Romanian CUI format"""
@@ -374,12 +374,12 @@ class CustomerAddress(SoftDeleteModel):
     🚨 CASCADE: ON DELETE CASCADE from Customer
     """
 
-    ADDRESS_TYPE_CHOICES = [
+    ADDRESS_TYPE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('primary', 'Adresa principală'),
         ('billing', 'Adresa facturare'),
         ('delivery', 'Adresa livrare'),
         ('legal', 'Sediul social'),
-    ]
+    )
 
     customer = models.ForeignKey(
         Customer,
@@ -417,12 +417,12 @@ class CustomerAddress(SoftDeleteModel):
         db_table = 'customer_addresses'
         verbose_name = _('Customer Address')
         verbose_name_plural = _('Customer Addresses')
-        unique_together = ['customer', 'address_type', 'is_current']
-        indexes = [
+        unique_together: ClassVar[tuple[tuple[str, ...], ...]] = (('customer', 'address_type', 'is_current'),)
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=['customer', 'address_type']),
             models.Index(fields=['customer', 'is_current']),
             models.Index(fields=['postal_code']),
-        ]
+        )
 
     def __str__(self) -> str:
         return f"{self.customer.name} - {dict(self.ADDRESS_TYPE_CHOICES)[self.address_type]}"
@@ -450,12 +450,12 @@ class CustomerPaymentMethod(SoftDeleteModel):
     🚨 CASCADE: ON DELETE CASCADE from Customer
     """
 
-    METHOD_TYPE_CHOICES = [
+    METHOD_TYPE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('stripe_card', 'Card Stripe'),
         ('bank_transfer', 'Transfer bancar'),
         ('cash', 'Numerar'),
         ('other', 'Altele'),
-    ]
+    )
 
     customer = models.ForeignKey(
         Customer,
@@ -492,10 +492,10 @@ class CustomerPaymentMethod(SoftDeleteModel):
         db_table = 'customer_payment_methods'
         verbose_name = _('Customer Payment Method')
         verbose_name_plural = _('Customer Payment Methods')
-        indexes = [
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=['customer', 'is_default']),
             models.Index(fields=['stripe_customer_id']),
-        ]
+        )
 
     def __str__(self) -> str:
         return f"{self.customer.name} - {self.display_name}"
@@ -508,14 +508,14 @@ class CustomerPaymentMethod(SoftDeleteModel):
 class CustomerNote(SoftDeleteModel):
     """Customer interaction notes with soft delete"""
 
-    NOTE_TYPE_CHOICES = [
+    NOTE_TYPE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('general', 'Generală'),
         ('call', 'Apel telefonic'),
         ('email', 'Email'),
         ('meeting', 'Întâlnire'),
         ('complaint', 'Reclamație'),
         ('compliment', 'Compliment'),
-    ]
+    )
 
     customer = models.ForeignKey(
         Customer,
@@ -548,11 +548,11 @@ class CustomerNote(SoftDeleteModel):
         db_table = 'customer_notes'
         verbose_name = _('Customer Note')
         verbose_name_plural = _('Customer Notes')
-        ordering = ['-created_at']
-        indexes = [
+        ordering: ClassVar[tuple[str, ...]] = ('-created_at',)
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=['customer', '-created_at']),
             models.Index(fields=['is_important']),
-        ]
+        )
 
     def __str__(self) -> str:
         return f"{self.title} - {self.customer.name}"

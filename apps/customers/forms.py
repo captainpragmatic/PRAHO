@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 from django import forms
 from django.contrib.auth import get_user_model
@@ -37,7 +37,7 @@ class CustomerForm(forms.ModelForm):
 
     class Meta:
         model = Customer
-        fields = [
+        fields: ClassVar[list[str]] = (
             'name',
             'customer_type',
             'company_name',
@@ -47,9 +47,9 @@ class CustomerForm(forms.ModelForm):
             'website',
             'data_processing_consent',
             'marketing_consent'
-        ]
+        )
 
-        widgets = {
+        widgets: ClassVar[dict[str, forms.Widget]] = {
             'name': forms.TextInput(attrs={
                 'class': 'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500',
                 'placeholder': _('Customer name/designation')
@@ -98,16 +98,16 @@ class CustomerTaxProfileForm(forms.ModelForm):
 
     class Meta:
         model = CustomerTaxProfile
-        fields = [
+        fields: ClassVar[list[str]] = (
             'cui',
             'registration_number',
             'is_vat_payer',
             'vat_number',
             'vat_rate',
             'reverse_charge_eligible'
-        ]
+        )
 
-        widgets = {
+        widgets: ClassVar[dict[str, forms.Widget]] = {
             'cui': forms.TextInput(attrs={
                 'class': 'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500',
                 'placeholder': _('RO12345678')
@@ -160,15 +160,15 @@ class CustomerBillingProfileForm(forms.ModelForm):
 
     class Meta:
         model = CustomerBillingProfile
-        fields = [
+        fields: ClassVar[list[str]] = (
             'payment_terms',
             'credit_limit',
             'preferred_currency',
             'invoice_delivery_method',
             'auto_payment_enabled'
-        ]
+        )
 
-        widgets = {
+        widgets: ClassVar[dict[str, forms.Widget]] = {
             'payment_terms': forms.NumberInput(attrs={
                 'class': 'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500',
                 'min': '1',
@@ -200,7 +200,7 @@ class CustomerAddressForm(forms.ModelForm):
 
     class Meta:
         model = CustomerAddress
-        fields = [
+        fields: ClassVar[list[str]] = (
             'address_type',
             'address_line1',
             'address_line2',
@@ -208,9 +208,9 @@ class CustomerAddressForm(forms.ModelForm):
             'county',
             'postal_code',
             'country'
-        ]
+        )
 
-        widgets = {
+        widgets: ClassVar[dict[str, forms.Widget]] = {
             'address_line1': forms.TextInput(attrs={
                 'class': 'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500',
                 'placeholder': _('Example Street, no. 123')
@@ -259,15 +259,15 @@ class CustomerNoteForm(forms.ModelForm):
 
     class Meta:
         model = CustomerNote
-        fields = [
+        fields: ClassVar[list[str]] = (
             'note_type',
             'title',
             'content',
             'is_important',
             'is_private'
-        ]
+        )
 
-        widgets = {
+        widgets: ClassVar[dict[str, forms.Widget]] = {
             'title': forms.TextInput(attrs={
                 'class': 'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500',
                 'placeholder': _('Note Title')
@@ -646,11 +646,11 @@ class CustomerUserAssignmentForm(forms.Form):
     Provides the same three options as customer creation
     """
 
-    USER_ACTION_CHOICES = [
+    USER_ACTION_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('create', _('Create new user account')),
         ('link', _('Link existing user')),
         ('skip', _('Skip user assignment')),
-    ]
+    )
 
     user_action = forms.ChoiceField(
         choices=USER_ACTION_CHOICES,

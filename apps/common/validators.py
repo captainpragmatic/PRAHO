@@ -17,6 +17,8 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.constants import COMPANY_NAME_MIN_LENGTH
+
 logger = logging.getLogger(__name__)
 
 # ===============================================================================
@@ -75,7 +77,6 @@ from typing import TypeVar, cast
 from apps.common.types import (
     CUIString,
     EmailAddress,
-    PhoneNumber,
     VATString,
 )
 
@@ -253,8 +254,9 @@ class SecureInputValidator:
         # Use centralized validation from types module
         result = validate_romanian_cui(cui.strip())
         if result.is_err():
-            from apps.common.types import Err
             from typing import cast
+
+            from apps.common.types import Err
             error_result = cast(Err[str], result)
             raise ValidationError(_(error_result.error))
         
@@ -274,7 +276,7 @@ class SecureInputValidator:
         SecureInputValidator._check_malicious_patterns(company_name)
 
         # Business logic checks
-        if len(company_name.strip()) < 2:
+        if len(company_name.strip()) < COMPANY_NAME_MIN_LENGTH:
             raise ValidationError(_("Company name too short"))
 
         # Check for highly suspicious administrative patterns only

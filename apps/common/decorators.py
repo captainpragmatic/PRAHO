@@ -3,8 +3,9 @@ Security decorators for PRAHO Platform
 Provides role-based access control decorators for views.
 """
 
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Callable
+from typing import Any
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -26,7 +27,7 @@ def staff_required(view_func: Callable[..., HttpResponse]) -> Callable[..., Http
         user = request.user
         
         # Check if user is staff (either Django is_staff or has staff_role)
-        if not (user.is_staff or getattr(user, 'staff_role', None)):
+        if not (user.is_staff or bool(getattr(user, 'staff_role', ''))):
             messages.error(request, _("❌ Access denied. Staff privileges required."))
             return redirect('dashboard')
         
@@ -46,7 +47,7 @@ def admin_required(view_func: Callable[..., HttpResponse]) -> Callable[..., Http
         user = request.user
         
         # Check if user is admin
-        if not (user.is_superuser or getattr(user, 'staff_role', None) == 'admin'):
+        if not (user.is_superuser or getattr(user, 'staff_role', '') == 'admin'):
             messages.error(request, _("❌ Access denied. Administrator privileges required."))
             return redirect('dashboard')
         
@@ -67,7 +68,7 @@ def billing_staff_required(view_func: Callable[..., HttpResponse]) -> Callable[.
         
         # Check if user has billing privileges
         allowed_roles = ['admin', 'billing', 'manager']
-        if not (user.is_superuser or getattr(user, 'staff_role', None) in allowed_roles):
+        if not (user.is_superuser or getattr(user, 'staff_role', '') in allowed_roles):
             messages.error(request, _("❌ Access denied. Billing staff privileges required."))
             return redirect('dashboard')
         
@@ -88,7 +89,7 @@ def support_staff_required(view_func: Callable[..., HttpResponse]) -> Callable[.
         
         # Check if user has support privileges
         allowed_roles = ['admin', 'support', 'manager']
-        if not (user.is_superuser or getattr(user, 'staff_role', None) in allowed_roles):
+        if not (user.is_superuser or getattr(user, 'staff_role', '') in allowed_roles):
             messages.error(request, _("❌ Access denied. Support staff privileges required."))
             return redirect('dashboard')
         
@@ -109,7 +110,7 @@ def customer_or_staff_required(view_func: Callable[..., HttpResponse]) -> Callab
         user = request.user
         
         # Allow access if user is either staff or has customer memberships
-        if user.is_staff or getattr(user, 'staff_role', None) or user.is_customer_user:
+        if user.is_staff or bool(getattr(user, 'staff_role', '')) or user.is_customer_user:
             return view_func(request, *args, **kwargs)
         
         messages.error(request, _("❌ Access denied. Please contact support for account access."))
@@ -124,7 +125,7 @@ def can_edit_proforma(user: User, proforma: Any) -> bool:
     Only staff can edit proformas - customers can only view them.
     """
     # Only staff can edit proformas
-    if not (user.is_staff or getattr(user, 'staff_role', None)):
+    if not (user.is_staff or bool(getattr(user, 'staff_role', ''))):
         return False
     
     # Staff can edit non-expired proformas
@@ -136,7 +137,7 @@ def can_create_internal_notes(user: User) -> bool:
     Business logic check for creating internal notes in tickets.
     Only staff can create internal notes.
     """
-    return user.is_staff or getattr(user, 'staff_role', None) is not None
+    return user.is_staff or bool(getattr(user, 'staff_role', ''))
 
 
 def can_view_internal_notes(user: User) -> bool:
@@ -144,7 +145,7 @@ def can_view_internal_notes(user: User) -> bool:
     Business logic check for viewing internal notes in tickets.
     Only staff can view internal notes.
     """
-    return user.is_staff or getattr(user, 'staff_role', None) is not None
+    return user.is_staff or bool(getattr(user, 'staff_role', ''))
 
 
 def can_manage_financial_data(user: User) -> bool:
@@ -153,7 +154,7 @@ def can_manage_financial_data(user: User) -> bool:
     Only billing staff and admins can manage financial data.
     """
     allowed_roles = ['admin', 'billing', 'manager']
-    return user.is_superuser or getattr(user, 'staff_role', None) in allowed_roles
+    return user.is_superuser or getattr(user, 'staff_role', '') in allowed_roles
 
 
 def can_access_admin_functions(user: User) -> bool:
@@ -162,4 +163,4 @@ def can_access_admin_functions(user: User) -> bool:
     Only admins and managers can access admin functions.
     """
     allowed_roles = ['admin', 'manager']
-    return user.is_superuser or getattr(user, 'staff_role', None) in allowed_roles
+    return user.is_superuser or getattr(user, 'staff_role', '') in allowed_roles

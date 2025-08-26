@@ -5,7 +5,7 @@ Romanian hosting provider authentication with multi-customer support.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
@@ -45,12 +45,12 @@ class User(AbstractUser):
     """
 
     # Staff roles for internal staff (nullable for customer users)
-    STAFF_ROLE_CHOICES = [
+    STAFF_ROLE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('admin', _('System Administrator')),
         ('support', _('Support Agent')),
         ('billing', _('Billing Staff')),
         ('manager', _('Manager')),
-    ]
+    )
 
     # Basic information
     username = None  # Remove username field, using email instead
@@ -65,8 +65,8 @@ class User(AbstractUser):
     staff_role = models.CharField(
         max_length=20,
         choices=STAFF_ROLE_CHOICES,
-        null=True,
         blank=True,
+        default='',
         help_text=_('Staff role for internal staff. Leave empty for customer users.')
     )
 
@@ -109,20 +109,20 @@ class User(AbstractUser):
     objects = UserManager()
 
     USERNAME_FIELD = 'email'
-    REQUIRED_FIELDS = []
+    REQUIRED_FIELDS: ClassVar[list[str]] = []
 
     class Meta:
         db_table = 'users'
         verbose_name = _('User')
         verbose_name_plural = _('Users')
-        indexes = [
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=['email']),
             models.Index(fields=['staff_role']),
             models.Index(fields=['is_staff']),
             # 2FA performance indexes with consistent naming
             models.Index(fields=['two_factor_enabled'], name='idx_users_2fa_enabled'),
             models.Index(fields=['two_factor_enabled', 'is_staff'], name='idx_users_2fa_enabled_staff'),
-        ]
+        )
 
     def __str__(self) -> str:
         return f"{self.get_full_name()} ({self.email})"
@@ -135,7 +135,7 @@ class User(AbstractUser):
     @property
     def is_staff_user(self) -> bool:
         """Check if user is internal staff"""
-        return self.staff_role is not None
+        return bool(self.staff_role)
 
     @property
     def is_customer_user(self) -> bool:
@@ -329,12 +329,12 @@ class CustomerMembership(models.Model):
     """
 
     # PostgreSQL-aligned role choices
-    CUSTOMER_ROLE_CHOICES = [
+    CUSTOMER_ROLE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('owner', _('Owner')),         # Full control of customer organization
         ('billing', _('Billing')),     # Invoices, payments, billing info
         ('tech', _('Technical')),      # Service management, support tickets
         ('viewer', _('Viewer')),       # Read-only access
-    ]
+    )
 
     customer = models.ForeignKey(
         'customers.Customer',
@@ -410,14 +410,14 @@ class CustomerMembership(models.Model):
 
     class Meta:
         db_table = 'customer_membership'  # Match PostgreSQL schema
-        unique_together = [['customer', 'user']]
+        unique_together: ClassVar[tuple[tuple[str, ...], ...]] = (('customer', 'user'),)
         verbose_name = _('Customer Membership')
         verbose_name_plural = _('Customer Memberships')
-        indexes = [
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=['user', 'is_primary']),      # Fast primary lookup
             models.Index(fields=['customer', 'role']),        # Role-based queries
             models.Index(fields=['user', 'created_at']),      # User history
-        ]
+        )
 
     def __str__(self) -> str:
         primary_flag = " (Primary)" if self.is_primary else ""
@@ -489,7 +489,7 @@ class UserProfile(models.Model):
 class UserLoginLog(models.Model):
     """Track user login attempts for security"""
 
-    LOGIN_STATUS_CHOICES = [
+    LOGIN_STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('success', _('Success')),
         ('failed_password', _('Failed Password')),
         ('failed_2fa', _('Failed 2FA')),
@@ -499,7 +499,7 @@ class UserLoginLog(models.Model):
         ('password_reset_completed', _('Password Reset Completed')),
         ('account_lockout_reset', _('Account Lockout Reset')),
         ('password_reset_failed', _('Password Reset Failed')),
-    ]
+    )
 
     user = models.ForeignKey(
         User,
@@ -522,11 +522,11 @@ class UserLoginLog(models.Model):
         db_table = 'user_login_logs'
         verbose_name = _('User Login Log')
         verbose_name_plural = _('User Login Logs')
-        indexes = [
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=['user', 'timestamp']),
             models.Index(fields=['ip_address', 'timestamp']),
             models.Index(fields=['status', 'timestamp']),
-        ]
+        )
 
     def __str__(self) -> str:
         user_display = self.user.email if self.user else "Unknown User"

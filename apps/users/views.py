@@ -33,6 +33,7 @@ from django.views.generic import DetailView, ListView
 from django_ratelimit.decorators import ratelimit
 from django_ratelimit.exceptions import Ratelimited
 
+from apps.common.constants import BACKUP_CODE_LENGTH, BACKUP_CODE_LOW_WARNING_THRESHOLD
 from apps.common.utils import (
     json_error,
     json_success,
@@ -515,7 +516,7 @@ def two_factor_verify(request: HttpRequest) -> HttpResponse:
             backup_code_valid = False
 
             # If TOTP fails, try backup code (8 digits)
-            if not totp_valid and len(token) == 8 and token.isdigit():
+            if not totp_valid and len(token) == BACKUP_CODE_LENGTH and token.isdigit():
                 backup_code_valid = user.verify_backup_code(token)
 
             if totp_valid or backup_code_valid:
@@ -534,7 +535,7 @@ def two_factor_verify(request: HttpRequest) -> HttpResponse:
                             request,
                             _('You have used your last backup code! Please generate new ones in your profile.')
                         )
-                    elif remaining_codes <= 2:
+                    elif remaining_codes <= BACKUP_CODE_LOW_WARNING_THRESHOLD:
                         messages.warning(
                             request,
                             _('You have {count} backup codes remaining. Consider generating new ones.').format(count=remaining_codes)

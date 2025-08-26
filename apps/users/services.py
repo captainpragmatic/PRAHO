@@ -8,7 +8,7 @@ This replaces the existing services.py with security-hardened implementations.
 import hashlib
 import logging
 import time
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -19,6 +19,13 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.constants import (
+    IDENTIFIER_MAX_LENGTH,
+    MAX_CUSTOMER_LOOKUPS_PER_HOUR,
+    MAX_JOIN_NOTIFICATIONS_PER_HOUR,
+    MIN_RESPONSE_TIME_SECONDS,
+    SUSPICIOUS_IP_THRESHOLD,
+)
 from apps.common.security_decorators import (
     atomic_with_retry,
     audit_service_call,
@@ -75,13 +82,11 @@ class SecureUserRegistrationService:
     - Romanian compliance requirements
     """
 
-    CUSTOMER_TYPES = [
-        ('individual', _('Individual Person')),
-        ('srl', _('SRL - Limited Liability Company')),
-        ('pfa', _('PFA - Authorized Physical Person')),
-        ('sa', _('SA - Joint Stock Company')),
-        ('ngo', _('NGO - Non-Governmental Organization')),
-        ('other', _('Other Organization Type')),
+    CUSTOMER_TYPES: ClassVar[list[tuple[str, str]]] = [
+        ('individual', _('Individual')),
+        ('company', _('Company')),
+        ('pfa', _('PFA/SRL')),
+        ('ngo', _('NGO/Association')),
     ]
 
     class UserData(TypedDict):
@@ -559,7 +564,7 @@ class SecureCustomerUserService:
 
         try:
             # Input validation
-            if not identifier or len(identifier) > 200:
+            if not identifier or len(identifier) > IDENTIFIER_MAX_LENGTH:
                 return None
 
             SecureInputValidator._check_malicious_patterns(identifier)
@@ -567,7 +572,7 @@ class SecureCustomerUserService:
             # Rate limit lookups
             cache_key = f"customer_lookup:{request_ip or 'unknown'}"
             lookups = cache.get(cache_key, 0)
-            if lookups >= 20:  # 20 lookups per hour per IP
+            if lookups >= MAX_CUSTOMER_LOOKUPS_PER_HOUR:  # lookups per hour per IP
                 return None
             cache.set(cache_key, lookups + 1, timeout=3600)
 
@@ -597,8 +602,8 @@ class SecureCustomerUserService:
         finally:
             # Ensure consistent timing (prevent timing attacks)
             elapsed = time.time() - start_time
-            if elapsed < 0.1:  # Minimum 100ms
-                time.sleep(0.1 - elapsed)
+            if elapsed < MIN_RESPONSE_TIME_SECONDS:  # Minimum response time
+                time.sleep(MIN_RESPONSE_TIME_SECONDS - elapsed)
 
     @classmethod
     def _send_welcome_email_secure(cls, user: User, customer, request_ip: str | None = None) -> bool:
@@ -670,7 +675,7 @@ class SecureCustomerUserService:
             # Rate limit notifications
             cache_key = f"join_notifications:{customer.id}"
             notifications = cache.get(cache_key, 0)
-            if notifications >= 10:  # Max 10 notifications per hour per customer
+            if notifications >= MAX_JOIN_NOTIFICATIONS_PER_HOUR:  # Max notifications per hour per customer
                 return
             cache.set(cache_key, notifications + 1, timeout=3600)
 
@@ -758,7 +763,7 @@ class SessionSecurityService:
     """
 
     # Session timeout policies (seconds)
-    TIMEOUT_POLICIES = {
+    TIMEOUT_POLICIES: ClassVar[dict[str, int]] = {
         'standard': 3600,        # 1 hour for regular users
         'sensitive': 1800,       # 30 min for admin/billing staff
         'shared_device': 900,    # 15 min for shared device mode
@@ -927,7 +932,7 @@ class SessionSecurityService:
 
         # Check for suspicious pattern (3+ different IPs in 1 hour)
         unique_ips = {ip_data['ip'] for ip_data in recent_ips}
-        is_suspicious = len(unique_ips) >= 3
+        is_suspicious = len(unique_ips) >= SUSPICIOUS_IP_THRESHOLD
 
         if is_suspicious:
             log_security_event('suspicious_activity_detected', {
