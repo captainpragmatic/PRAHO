@@ -235,6 +235,9 @@ class Order(models.Model):
         """Return discount amount in currency units"""
         return Decimal(self.discount_cents) / 100
 
+    def __str__(self) -> str:
+        return f"Order {self.order_number} - {self.customer_email}"
+
     @property
     def total(self) -> Decimal:
         """Return total in currency units"""
@@ -255,8 +258,14 @@ class Order(models.Model):
         """Check if order can be cancelled"""
         return self.status in ['draft', 'pending']
 
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Auto-generate order number before saving"""
+        if not self.order_number:
+            self.generate_order_number()
+        super().save(*args, **kwargs)
+
     def generate_order_number(self) -> None:
-        """Generate a unique order number"""
+        """Generate a unique order number based on date and sequence"""
         if not self.order_number:
             # Format: ORD-YYYYMMDD-XXXXXX
             date_part = timezone.now().strftime('%Y%m%d')
@@ -267,15 +276,6 @@ class Order(models.Model):
             ).count()
             sequence = str(today_orders + 1).zfill(6)
             self.order_number = f"ORD-{date_part}-{sequence}"
-
-    def save(self, *args: Any, **kwargs: Any) -> None:
-        """Auto-generate order number before saving"""
-        if not self.order_number:
-            self.generate_order_number()
-        super().save(*args, **kwargs)
-
-    def __str__(self) -> str:
-        return f"Order {self.order_number} - {self.customer_email}"
 
     def calculate_totals(self) -> None:
         """
@@ -466,15 +466,18 @@ class OrderItem(models.Model):
         """Return tax amount in currency units"""
         return Decimal(self.tax_cents) / 100
 
-    @property
-    def line_total(self) -> Decimal:
-        """Return line total in currency units"""
-        return Decimal(self.line_total_cents) / 100
+    def __str__(self) -> str:
+        return f"{self.product_name} x{self.quantity} ({self.order.order_number})"
 
     @property
     def subtotal_cents(self) -> int:
         """Calculate subtotal before tax"""
         return (self.unit_price_cents * self.quantity) + self.setup_cents
+
+    @property
+    def line_total(self) -> Decimal:
+        """Return line total in currency units"""
+        return Decimal(self.line_total_cents) / 100
 
     def save(self, *args, **kwargs) -> None:  # type: ignore[override]
         """Auto-calculate totals before saving"""
@@ -487,9 +490,6 @@ class OrderItem(models.Model):
         self.calculate_totals()
 
         super().save(*args, **kwargs)
-
-    def __str__(self) -> str:
-        return f"{self.product_name} x{self.quantity} ({self.order.order_number})"
 
     def subtotal(self) -> Decimal:
         """Return subtotal in currency units"""
