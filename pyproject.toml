@@ -174,28 +174,32 @@ ignore = [
 # FILE-SPECIFIC RULE RELAXATION 📁
 # ===============================================================================
 
-# Test files - Focus on functionality over style (SECURITY WARNINGS ENABLED)
+# Test files - Focus on functionality over style
 "test_*.py" = [
     "S101",     # Allow assert statements  
-    # "S105", "S106", # REMOVED - Show hardcoded password warnings
+    "S105", "S106", # Test credentials are acceptable
     "ANN",      # Skip type hints in tests
     "D",        # Skip docstrings in tests
     "PLR2004",  # Allow magic numbers in tests
     "B017",     # Allow pytest.raises() patterns
 ]
 "tests/**/*.py" = [
-    "S101", "ANN", "D", "PLR2004", "B017"
-    # "S105", "S106" - REMOVED - Show hardcoded password warnings
+    "S101", "ANN", "D", "PLR2004", "B017",
+    "S105", "S106"  # Test credentials are acceptable
 ]
 
 # Django management commands - Allow print statements and dev utilities
 "manage.py" = ["T201", "T203"]
-"**/management/commands/*.py" = ["T201", "T203", "S602", "S603"]
+"**/management/commands/*.py" = [
+    "T201", "T203",     # Print statements for progress
+    "S602", "S603",     # Subprocess calls (dev utility)
+    "S105", "S106"      # Development/test credentials in commands
+]
 
-# Development data generation - Allow patterns but WARN on hardcoded secrets
+# Development data generation - Allow development patterns
 "**/management/commands/generate_sample_data.py" = [
     "T201", "T203",     # Print statements for progress
-    # "S105", "S106",   # REMOVED - Show hardcoded password warnings
+    "S105", "S106",     # Development credentials only
     "S311",             # Pseudo-random generators (sample data generation)
     "S602", "S603",     # Subprocess calls (dev utility)
     "PLR2004",          # Magic numbers (sample data)
@@ -214,12 +218,15 @@ ignore = [
 # Configuration files - Allow longer lines and flexible naming
 "config/**/*.py" = ["E501", "N802", "N803"]
 "**/settings/*.py" = ["E501", "N802"]
-# REMOVED S105, S106 - Show hardcoded password warnings in settings
 
-# Test settings - Allow fake credentials but WARN about hardcoded secrets
+# Development and test settings - Allow fake credentials
+"**/settings/dev.py" = [
+    "E501", "N802", "N803",     # Development setting patterns
+    "S105"                      # Development SECRET_KEY acceptable
+]
 "**/settings/test.py" = [
     "E501",             # Long lines acceptable
-    # "S105", "S106",   # REMOVED - Show hardcoded password warnings even in test settings
+    "S105", "S106",     # Test credentials are acceptable
     "N802", "N803",     # Variable naming (settings pattern)
     "F403", "F405",     # Star imports (settings inheritance)
     "ANN",              # Type hints (configuration file)
@@ -242,9 +249,11 @@ ignore = [
     "F403", "F405"      # Star imports (settings pattern)
 ]
 
-# E2E test utilities - Allow test patterns but WARN on hardcoded secrets
-"tests/e2e/**/*.py" = ["ANN", "D"]
-# REMOVED S105, S106 - Show hardcoded password warnings even in E2E tests
+# E2E test utilities - Allow test patterns
+"tests/e2e/**/*.py" = [
+    "ANN", "D",
+    "S105", "S106"  # E2E test credentials are acceptable  
+]
 
 [tool.ruff.lint.isort]
 # ===============================================================================

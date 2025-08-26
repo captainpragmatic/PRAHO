@@ -85,7 +85,7 @@ jobs:
         fi
     
     - name: Upload type coverage report
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: type-coverage-report
         path: type_coverage_report.json

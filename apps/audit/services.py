@@ -6,7 +6,7 @@ Centralized audit logging for Romanian compliance and security.
 import json
 import logging
 import uuid
-from typing import TYPE_CHECKING, Any, Optional, TypedDict
+from typing import TYPE_CHECKING, Any, ClassVar, Optional, TypedDict
 
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.models import ContentType
@@ -469,7 +469,7 @@ class GDPRDeletionService:
     - Romanian business law compliance
     """
 
-    ANONYMIZATION_MAP = {
+    ANONYMIZATION_MAP: ClassVar[dict[str, Any]] = {
         'email': lambda: f"anonymized_{uuid.uuid4().hex[:8]}@example.com",
         'first_name': lambda: "Anonymized",
         'last_name': lambda: "User",
