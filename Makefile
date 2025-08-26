@@ -2,7 +2,7 @@
 # PRAHO PLATFORM - DEVELOPMENT MAKEFILE (Updated for Django Test Runner)
 # ===============================================================================
 
-.PHONY: help install dev test test-e2e test-with-e2e test-coverage test-fast test-file build-css migrate fixtures clean lint type-check type-coverage type-check-modified
+.PHONY: help install dev test test-e2e test-with-e2e test-coverage test-fast test-file build-css migrate fixtures clean lint type-check type-coverage type-check-modified pre-commit install-pre-commit
 
 # Default target
 help:
@@ -23,9 +23,15 @@ help:
 	@echo "  make fixtures        - Load sample data"
 	@echo "  make clean           - Clean build artifacts"
 	@echo "  make lint            - Run code quality checks"
+	@echo "  make type-check      - Run gradual typing configuration test"
+	@echo "  make type-coverage   - Generate type coverage report"
+	@echo "  make type-check-modified - Type check only modified files"
+	@echo "  make type-fix-file FILE=<file> - Auto-add types to specific file"
 	@echo "  make fix-templates   - Fix Django template syntax issues"
 	@echo "  make check-templates - Check for template syntax issues"
 	@echo "  make check-ide-settings - Verify IDE auto-formatting prevention"
+	@echo "  make pre-commit      - Run all pre-commit hooks on staged files"
+	@echo "  make install-pre-commit - Install and configure pre-commit hooks"
 
 # Development environment setup
 install:
@@ -163,8 +169,8 @@ lint:
 	@echo "🔍 1/3: Performance & Security Analysis..."
 	@.venv/bin/ruff check . --statistics
 	@echo ""
-	@echo "🏷️ 2/3: Type Safety Analysis..."  
-	@.venv/bin/mypy apps/ config/ --ignore-missing-imports --show-error-codes
+	@echo "🏷️ 2/3: Type Safety Analysis (Gradual Configuration)..."  
+	@.venv/bin/mypy --config-file=pyproject.toml apps/ config/
 	@echo ""
 	@echo "📊 3/3: Django Check..."
 	@.venv/bin/python manage.py check --deploy
@@ -182,7 +188,7 @@ lint-fix:
 lint-check:
 	@echo "🤖 CI/CD Strategic Lint Check..."
 	@.venv/bin/ruff check . --no-fix --quiet
-	@.venv/bin/mypy apps/ config/ --ignore-missing-imports
+	@.venv/bin/mypy --config-file=pyproject.toml apps/ config/
 
 ## lint-security: Focus on security issues only 🔒
 lint-security:
@@ -267,3 +273,131 @@ check-ide-settings:
 		echo "❌ Pre-commit hook missing"; \
 	fi
 	@echo "📖 For detailed guide: docs/IDE_AUTO_FORMATTING_PREVENTION.md"
+
+# ===============================================================================
+# GRADUAL TYPING TARGETS - Phase 2.2 Implementation 🎯
+# ===============================================================================
+
+type-check:
+	@echo "🏷️ PRAHO Platform - Gradual Typing Check"
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "📋 Running gradual typing configuration test..."
+	@.venv/bin/python scripts/test_gradual_typing.py
+
+type-coverage:
+	@echo "📊 Type coverage analysis..."
+	@if [ -f scripts/type_coverage_report.py ]; then \
+		.venv/bin/python scripts/type_coverage_report.py; \
+	else \
+		echo "❌ Type coverage script not found"; \
+		echo "💡 Run mypy directly: mypy --config-file=pyproject.toml apps/"; \
+	fi
+
+type-check-modified:
+	@echo "🔄 Type checking modified files only..."
+	@if [ -f scripts/check_types_modified.py ]; then \
+		.venv/bin/python scripts/check_types_modified.py; \
+	else \
+		echo "❌ Modified files type check script not found"; \
+		echo "💡 Run mypy on specific files: mypy --config-file=pyproject.toml <file>"; \
+	fi
+
+# Enhanced Type Addition Target - Phase 2.4
+type-fix-file:
+	@echo "🎯 Auto-adding types to specific file..."
+	@if [ -z "$(FILE)" ]; then \
+		echo "❌ Please specify FILE=<path> (e.g., make type-fix-file FILE=apps/users/admin.py)"; \
+		echo "💡 Available modes:"; \
+		echo "  • Interactive (default): Review each suggestion"; \
+		echo "  • Dry run: make type-fix-file FILE=<file> MODE=dry-run"; \
+		echo "  • Auto-approve: make type-fix-file FILE=<file> MODE=auto"; \
+		echo "  • Auto + format: make type-fix-file FILE=<file> MODE=auto-format"; \
+		exit 1; \
+	fi
+	@if [ ! -f "$(FILE)" ]; then \
+		echo "❌ File not found: $(FILE)"; \
+		exit 1; \
+	fi
+	@echo "📝 Processing file: $(FILE)"
+	@if [ "$(MODE)" = "dry-run" ]; then \
+		echo "🔍 Dry run mode - showing suggestions only..."; \
+		.venv/bin/python scripts/add_types_to_file.py "$(FILE)" --dry-run; \
+	elif [ "$(MODE)" = "auto" ]; then \
+		echo "🤖 Auto-approval mode - applying all suggestions..."; \
+		.venv/bin/python scripts/add_types_to_file.py "$(FILE)" --auto-approve; \
+	elif [ "$(MODE)" = "auto-format" ]; then \
+		echo "🤖 Auto-approval + formatting mode..."; \
+		.venv/bin/python scripts/add_types_to_file.py "$(FILE)" --auto-approve --format; \
+	else \
+		echo "💬 Interactive mode - review each suggestion..."; \
+		.venv/bin/python scripts/add_types_to_file.py "$(FILE)"; \
+	fi
+	@echo "✅ Type addition completed for: $(FILE)"
+
+# ===============================================================================
+# PRE-COMMIT HOOKS - TYPE SAFETY & CODE QUALITY 🔗
+# ===============================================================================
+
+install-pre-commit:
+	@echo "🔗 Installing and configuring pre-commit hooks..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@# Install pre-commit if not already installed
+	@if ! .venv/bin/python -c "import pre_commit" 2>/dev/null; then \
+		echo "📦 Installing pre-commit..."; \
+		.venv/bin/pip install pre-commit; \
+	else \
+		echo "✅ pre-commit already installed"; \
+	fi
+	@# Install the git hooks
+	@.venv/bin/pre-commit install
+	@# Install commit-msg hook for conventional commits
+	@.venv/bin/pre-commit install --hook-type commit-msg
+	@echo "✅ Pre-commit hooks installed successfully!"
+	@echo ""
+	@echo "🎯 Pre-commit Features Enabled:"
+	@echo "  • Strategic linting (performance & security focus)"
+	@echo "  • Type checking on modified files only"
+	@echo "  • Prevention of new # type: ignore comments"
+	@echo "  • Django template syntax validation"
+	@echo "  • Security credential scanning"
+	@echo "  • Performance anti-pattern detection"
+	@echo ""
+	@echo "💡 Usage:"
+	@echo "  • Hooks run automatically on git commit"
+	@echo "  • Run manually: make pre-commit"
+	@echo "  • Skip hooks: git commit --no-verify"
+
+pre-commit:
+	@echo "🔗 Running pre-commit hooks on staged files..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@if ! command -v .venv/bin/pre-commit >/dev/null 2>&1; then \
+		echo "❌ pre-commit not found. Installing..."; \
+		$(MAKE) install-pre-commit; \
+	fi
+	@.venv/bin/pre-commit run --all-files
+	@echo "✅ Pre-commit hooks completed!"
+
+pre-commit-modified:
+	@echo "🔗 Running pre-commit hooks on modified files..."
+	@if ! command -v .venv/bin/pre-commit >/dev/null 2>&1; then \
+		echo "❌ pre-commit not found. Installing..."; \
+		$(MAKE) install-pre-commit; \
+	fi
+	@.venv/bin/pre-commit run
+
+# Enhanced development workflow with pre-commit integration
+dev-with-hooks: install-pre-commit
+	@echo "🚀 Starting development server with pre-commit hooks..."
+	@$(MAKE) dev
+
+# CI/CD integration targets
+ci-pre-commit:
+	@echo "🤖 CI/CD Pre-commit validation..."
+	@.venv/bin/pre-commit run --all-files --show-diff-on-failure
+
+# Type safety validation for CI
+ci-type-safety:
+	@echo "🏷️ CI/CD Type safety validation..."
+	@.venv/bin/python scripts/check_types_modified.py --since=HEAD~10 --verbose
+	@.venv/bin/python scripts/prevent_type_ignore.py --check-all --no-strict
+	@.venv/bin/python scripts/type_coverage_report.py
