@@ -5,21 +5,25 @@ Rust-inspired Result pattern and Django-specific type aliases for clean architec
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from django.contrib.admin import ModelAdmin
+from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.db.models import QuerySet
+from django.forms import Form
 from django.http import HttpRequest, HttpResponse
 from django.http import JsonResponse as DjangoJsonResponse
 
 from apps.common.constants import (
-    CUI_MIN_LENGTH,
     CUI_MAX_LENGTH,
-    EMAIL_PARTS_COUNT,
+    CUI_MIN_LENGTH,
     DOMAIN_NAME_MAX_LENGTH,
+    EMAIL_PARTS_COUNT,
 )
 
 if TYPE_CHECKING:
@@ -28,6 +32,11 @@ if TYPE_CHECKING:
 # Type variables for generic Result
 T = TypeVar('T')  # Success type
 E = TypeVar('E')  # Error type
+
+# Additional type variables for Django patterns
+UserT = TypeVar('UserT', bound=AbstractUser)
+FormT = TypeVar('FormT', bound=Form)
+AdminT = TypeVar('AdminT', bound=ModelAdmin)
 
 # ===============================================================================
 # RESULT TYPES
@@ -132,9 +141,13 @@ PhoneNumber = str  # International phone format: "+40721123456"
 # ADMIN PATTERN TYPES
 # ===============================================================================
 
-AdminDisplayMethod = Callable[[ModelAdminGeneric], str]
+AdminDisplayMethod = Callable[[ModelAdminGeneric, M], str]
 AdminPermissionMethod = Callable[[ModelAdminGeneric, HttpRequest], bool]
-AdminActionMethod = Callable[[ModelAdminGeneric, HttpRequest, QuerySetGeneric], None]
+AdminActionMethod = Callable[[ModelAdminGeneric, HttpRequest, QuerySetGeneric], HttpResponse | None]
+AdminGetFieldsMethod = Callable[[ModelAdminGeneric, HttpRequest, M | None], tuple[str, ...]]
+AdminGetReadonlyMethod = Callable[[ModelAdminGeneric, HttpRequest, M | None], tuple[str, ...]]
+AdminFormMethod = Callable[[ModelAdminGeneric, HttpRequest, M | None], type]
+AdminQuerysetMethod = Callable[[ModelAdminGeneric, HttpRequest], QuerySetGeneric]
 
 # ===============================================================================
 # FORM AND VALIDATION TYPES
@@ -143,6 +156,11 @@ AdminActionMethod = Callable[[ModelAdminGeneric, HttpRequest, QuerySetGeneric], 
 FormData = dict[str, Any]
 ValidationErrors = dict[str, list[str]]
 FieldValidator = Callable[[Any], Result[str, str]]
+FormCleanMethod = Callable[..., Any]
+FormSaveMethod = Callable[..., M]
+ChoiceTuple = tuple[str | int, str]
+ChoicesList = list[ChoiceTuple]
+FormFieldType = Any  # Django form fields have complex inheritance
 
 # ===============================================================================
 # RESPONSE TYPES
@@ -152,6 +170,9 @@ JSONResponse = DjangoJsonResponse
 CSVResponse = HttpResponse  # Response with CSV content
 ExcelResponse = HttpResponse  # Response with Excel content
 PDFResponse = HttpResponse  # Response with PDF content
+TemplateResponse = HttpResponse  # Django TemplateResponse
+RedirectResponse = HttpResponse  # Django redirect response
+ErrorResponse = HttpResponse  # Error response with status code
 
 # ===============================================================================
 # SERVICE LAYER TYPES
@@ -321,8 +342,6 @@ def calculate_romanian_vat(amount_cents: int, include_vat: bool = True) -> dict[
 
 def validate_domain_name(domain: str) -> Result[DomainName, str]:
     """Validate domain name format"""
-    import re
-    
     if not domain:
         return Err("Domain name is required")
     
@@ -337,6 +356,158 @@ def validate_domain_name(domain: str) -> Result[DomainName, str]:
     
     return Ok(DomainName(domain.lower()))
 
+
+# ===============================================================================
+# DJANGO MODEL METHOD TYPES
+# ===============================================================================
+
+ModelSaveMethod = Callable[[M], None]
+ModelCleanMethod = Callable[[M], None]
+ModelStrMethod = Callable[[M], str]
+ModelGetAbsoluteUrlMethod = Callable[[M], str]
+ModelDeleteMethod = Callable[[M], tuple[int, dict[str, int]]]
+ModelProperty = property
+
+# ===============================================================================
+# AUTHENTICATION AND AUTHORIZATION TYPES
+# ===============================================================================
+
+PermissionString = str  # Django permission string: "app.permission_model"
+RoleIdentifier = str  # Role identifier for RBAC
+AuthToken = str  # Authentication token
+SessionKey = str  # Django session key
+TwoFactorSecret = str  # TOTP/HOTP secret
+TwoFactorCode = str  # Six-digit 2FA code
+PasswordResetToken = str  # Password reset token
+
+# ===============================================================================
+# HTMX AND FRONTEND TYPES
+# ===============================================================================
+
+HTMXTrigger = str  # HTMX trigger event: "click", "keyup", etc.
+HTMXSwap = str  # HTMX swap strategy: "innerHTML", "outerHTML", etc.
+HTMXTarget = str  # CSS selector for HTMX target
+CSSSelector = str  # CSS selector string
+CSSClass = str  # CSS class name
+CSSClasses = list[str]  # List of CSS class names
+AlpineData = dict[str, Any]  # Alpine.js reactive data
+
+# ===============================================================================
+# TEMPLATE AND CONTEXT TYPES
+# ===============================================================================
+
+TemplateName = str  # Django template name: "app/template.html"
+TemplateContext = dict[str, Any]  # Template context data
+HTMLContent = str  # Raw HTML content
+URLPattern = str  # URL pattern string
+URLName = str  # Django URL name
+
+# ===============================================================================
+# PAGINATION AND FILTERING TYPES
+# ===============================================================================
+
+PageNumber = int  # Pagination page number (1-based)
+PageSize = int  # Number of items per page
+SearchQuery = str  # Search query string
+FilterDict = dict[str, Any]  # Filter parameters
+SortField = str  # Field name for sorting
+SortDirection = str  # "asc" or "desc"
+OrderingTuple = tuple[str, ...]  # Django ordering tuple
+
+# ===============================================================================
+# FILE AND MEDIA TYPES
+# ===============================================================================
+
+FilePath = str  # File system path
+FileName = str  # File name with extension
+FileSize = int  # File size in bytes
+MimeType = str  # MIME type: "image/png", "application/pdf"
+FileUrl = str  # URL to file resource
+ImageDimensions = tuple[int, int]  # (width, height) in pixels
+
+# ===============================================================================
+# LOGGING AND MONITORING TYPES
+# ===============================================================================
+
+LogLevel = str  # Log level: "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"
+LogMessage = str  # Log message content
+LogContext = dict[str, Any]  # Additional log context
+MetricName = str  # Metric identifier
+MetricValue = float | int  # Metric value
+TimestampMs = int  # Unix timestamp in milliseconds
+
+# ===============================================================================
+# INTEGRATION AND API TYPES
+# ===============================================================================
+
+APIKey = str  # External API key
+APISecret = str  # External API secret
+APIEndpoint = str  # API endpoint URL
+APIVersion = str  # API version string
+APIHeaders = dict[str, str]  # HTTP headers for API requests
+APIQueryParams = dict[str, str | int | bool]  # Query parameters
+APIResponseStatus = int  # HTTP status code
+APIResponseHeaders = dict[str, str]  # Response headers
+
+# ===============================================================================
+# BILLING AND FINANCIAL TYPES
+# ===============================================================================
+
+TaxRate = float  # Tax rate as decimal: 0.19 for 19%
+DiscountRate = float  # Discount rate as decimal: 0.10 for 10%
+Amount = int  # Amount in cents/smallest currency unit
+AmountDecimal = float  # Amount as decimal value
+Currency = str  # Currency code: "RON", "EUR", "USD"
+BankAccount = str  # Bank account number
+BankIBAN = str  # International Bank Account Number
+BankBIC = str  # Bank Identifier Code
+
+# ===============================================================================
+# SERVICE AND PROVISIONING TYPES
+# ===============================================================================
+
+ServiceType = str  # Service type: "hosting", "domain", "ssl"
+ServicePlan = str  # Service plan identifier
+ServiceStatus = str  # Service status: "active", "suspended", "cancelled"
+ServerHostname = str  # Server hostname
+ServerIP = str  # Server IP address (IPv4 or IPv6)
+ServerPort = int  # Server port number
+ServiceConfig = dict[str, Any]  # Service configuration parameters
+ProvisioningStatus = str  # Provisioning status
+
+# ===============================================================================
+# NOTIFICATION AND COMMUNICATION TYPES
+# ===============================================================================
+
+NotificationType = str  # Notification type: "email", "sms", "webhook"
+NotificationTemplate = str  # Template identifier
+NotificationSubject = str  # Email/notification subject
+NotificationBody = str  # Notification content
+RecipientList = list[EmailAddress]  # List of notification recipients
+NotificationChannel = str  # Delivery channel
+
+# ===============================================================================
+# DOMAIN AND DNS TYPES
+# ===============================================================================
+
+DomainTLD = str  # Top-level domain: ".com", ".ro"
+DomainRegistrar = str  # Domain registrar name
+DomainStatus = str  # Domain status: "active", "expired", "pending"
+DNSRecordType = str  # DNS record type: "A", "CNAME", "MX", "TXT"
+DNSRecordValue = str  # DNS record value
+DNSRecordTTL = int  # DNS record time-to-live in seconds
+NameserverList = list[str]  # List of nameservers
+
+# ===============================================================================
+# AUDIT AND COMPLIANCE TYPES
+# ===============================================================================
+
+AuditAction = str  # Action type: "create", "update", "delete"
+AuditEntity = str  # Entity type being audited
+AuditChanges = dict[str, Any]  # Changed fields and values
+AuditTrailId = str  # Unique audit trail identifier
+ComplianceRule = str  # Compliance rule identifier
+GDPRProcessingBasis = str  # GDPR legal basis for processing
 
 # ===============================================================================
 # COMMON EXCEPTIONS
@@ -372,3 +543,127 @@ class InvoiceValidationError(ValidationError):
 
 class PaymentValidationError(ValidationError):
     """Payment-specific validation error"""
+
+
+class ServiceProvisioningError(BusinessError):
+    """Service provisioning error"""
+
+
+class IntegrationError(BusinessError):
+    """External integration error"""
+
+
+class APIRateLimitError(BusinessError):
+    """API rate limit exceeded"""
+
+
+# ===============================================================================
+# PROTOCOL DEFINITIONS 📜
+# ===============================================================================
+
+class Serializable:
+    """Protocol for objects that can be serialized to JSON"""
+    def serialize(self) -> dict[str, Any]: ...
+
+
+class Auditable:
+    """Protocol for objects that support audit logging"""
+    def get_audit_data(self) -> AuditChanges: ...
+    def get_audit_entity(self) -> AuditEntity: ...
+
+
+class Billable:
+    """Protocol for objects that can generate billing entries"""
+    def get_billing_amount(self) -> Amount: ...
+    def get_billing_description(self) -> str: ...
+    def get_billing_currency(self) -> Currency: ...
+
+
+class Provisionable:
+    """Protocol for services that can be provisioned"""
+    def provision(self) -> Result[ServiceConfig, str]: ...
+    def deprovision(self) -> Result[bool, str]: ...
+    def get_status(self) -> ServiceStatus: ...
+
+
+class Cacheable:
+    """Protocol for objects that can be cached"""
+    def get_cache_key(self) -> CacheKey: ...
+    def get_cache_ttl(self) -> CacheTTL: ...
+
+
+class Notifiable:
+    """Protocol for objects that can receive notifications"""
+    def get_notification_preferences(self) -> dict[NotificationType, bool]: ...
+    def get_notification_address(self, channel: NotificationChannel) -> str: ...
+
+
+# ===============================================================================
+# COMPLEX TYPE COMBINATIONS 🔄
+# ===============================================================================
+
+# API data types  
+APIResponseData = dict[str, Any] | list[dict[str, Any]]  # API response data
+
+# Common combinations used throughout the platform
+AdminMethodReturnType = str | int | bool | None | HttpResponse
+ValidationResult = Result[Any, ValidationErrors]
+ServiceResult = Result[Any, str]
+APIResult = Result[APIResponseData, str]
+FormResult = Result[FormT, ValidationErrors]
+
+# Repository layer types
+RepoCreateResult = Result[M, str]
+RepoUpdateResult = Result[M, str]
+RepoDeleteResult = Result[bool, str]
+RepoFindResult = Result[M | None, str]
+RepoListResult = Result[list[M], str]
+
+# Service layer combinations
+BusinessResult = Result[Any, BusinessError]
+AuthenticationResult = Result[UserT, str]
+AuthorizationResult = Result[bool, str]
+
+# Integration layer types
+WebhookProcessingResult = Result[dict[str, Any], str]
+PaymentProcessingResult = Result[dict[str, Any], str]
+ProvisioningResult = Result[ServiceConfig, str]
+
+# Template context helpers
+PaginationContext = dict[str, Any]  # Contains page info, has_next, etc.
+FormContext = dict[str, Any]  # Contains form, errors, success messages
+BreadcrumbContext = list[dict[str, str]]  # List of breadcrumb items
+
+# HTMX response helpers
+HTMXTemplateResponse = tuple[TemplateName, TemplateContext]
+HTMXJsonResponse = dict[str, Any]
+HTMXRedirectResponse = str  # URL to redirect to
+
+# Common Django patterns
+ModelFieldValue = str | int | float | bool | Decimal | None
+ModelFieldChoices = list[tuple[ModelFieldValue, str]]
+ModelMetaOptions = dict[str, Any]
+
+# Async variants for future use (when Django adds full async support)
+AsyncRequestHandler = Callable[[HttpRequest], Any]  # Will be Awaitable[HttpResponse]
+AsyncServiceMethod = Callable[..., Any]  # Will be Awaitable[ServiceResult]
+AsyncRepoMethod = Callable[..., Any]  # Will be Awaitable[RepoCreateResult]
+
+# ===============================================================================
+# LEGACY COMPATIBILITY ALIASES 🔄
+# ===============================================================================
+
+# Aliases for common Django types to ease migration from untyped code
+DjangoUser = AbstractUser
+DjangoModel = models.Model
+DjangoForm = Form
+DjangoAdmin = ModelAdmin
+DjangoRequest = HttpRequest
+DjangoResponse = HttpResponse
+DjangoQuerySet = QuerySet
+
+# Backward compatibility for older naming conventions
+UserModel = AbstractUser
+BaseModel = models.Model
+BaseForm = Form
+BaseAdmin = ModelAdmin
