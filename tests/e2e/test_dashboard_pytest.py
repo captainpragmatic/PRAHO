@@ -15,12 +15,12 @@ from playwright.sync_api import Page
 
 # Import shared utilities
 from tests.e2e.utils import (
-    AuthenticationError,
     BASE_URL,
     CUSTOMER_EMAIL,
     CUSTOMER_PASSWORD,
     SUPERUSER_EMAIL,
     SUPERUSER_PASSWORD,
+    AuthenticationError,
     ComprehensivePageMonitor,
     MobileTestContext,
     ensure_fresh_session,
@@ -176,7 +176,7 @@ def test_dashboard_actions_and_interactions(page: Page):
                             # Skip dangerous elements
                             if any(danger in (href + onclick).lower() 
                                    for danger in ['logout', 'delete', 'remove']):
-                                print(f"      ⚠️ Skipping potentially dangerous element")
+                                print("      ⚠️ Skipping potentially dangerous element")
                                 continue
                             
                             # Safe interaction test
@@ -258,11 +258,11 @@ def test_dashboard_mobile_responsiveness(page: Page):
             
             # Report any layout issues (but don't fail the test)
             if layout_issues:
-                print(f"    ⚠️  Mobile layout issues detected:")
+                print("    ⚠️  Mobile layout issues detected:")
                 for issue in layout_issues[:3]:  # Show first 3 issues
                     print(f"      - {issue}")
             
-            print(f"  ✅ Dashboard mobile responsiveness validated across all breakpoints")
+            print("  ✅ Dashboard mobile responsiveness validated across all breakpoints")
                 
         except AuthenticationError:
             pytest.fail("Lost authentication during dashboard mobile responsiveness test")
@@ -314,12 +314,12 @@ def test_dashboard_mobile_specific_features(page: Page):
                     for issue in layout_issues[:2]:  # Show first 2
                         print(f"      - {issue}")
                 else:
-                    print(f"    ✅ No responsive layout issues detected")
+                    print("    ✅ No responsive layout issues detected")
                 
                 # Test touch interactions
                 touch_success = mobile.test_touch_interactions()
                 if not touch_success:
-                    print(f"    ℹ️  Limited touch interactivity (may be normal for this page)")
+                    print("    ℹ️  Limited touch interactivity (may be normal for this page)")
             
             # Test mobile small viewport (older/smaller devices)
             with MobileTestContext(page, 'mobile_small') as mobile_small:
@@ -328,9 +328,9 @@ def test_dashboard_mobile_specific_features(page: Page):
                 # Verify dashboard core functionality still works
                 basic_functionality = verify_dashboard_functionality(page, "superuser")
                 if basic_functionality:
-                    print(f"    ✅ Dashboard works on small mobile viewport")
+                    print("    ✅ Dashboard works on small mobile viewport")
                 else:
-                    print(f"    ⚠️  Dashboard has issues on small mobile viewport")
+                    print("    ⚠️  Dashboard has issues on small mobile viewport")
                 
                 # Check for critical layout problems on small screens
                 small_layout_issues = mobile_small.check_responsive_layout()
@@ -340,9 +340,9 @@ def test_dashboard_mobile_specific_features(page: Page):
                 if critical_issues:
                     print(f"    ⚠️  Critical small-screen issues: {len(critical_issues)}")
                 else:
-                    print(f"    ✅ No critical small-screen layout issues")
+                    print("    ✅ No critical small-screen layout issues")
             
-            print(f"  ✅ Mobile-specific dashboard features tested successfully")
+            print("  ✅ Mobile-specific dashboard features tested successfully")
                 
         except AuthenticationError:
             pytest.fail("Lost authentication during dashboard mobile features test")

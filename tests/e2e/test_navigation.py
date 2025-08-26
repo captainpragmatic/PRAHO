@@ -16,12 +16,11 @@ from playwright.sync_api import Page
 
 # Import shared utilities
 from tests.e2e.utils import (
-    AuthenticationError,
-    BASE_URL,
     CUSTOMER_EMAIL,
     CUSTOMER_PASSWORD,
     SUPERUSER_EMAIL,
     SUPERUSER_PASSWORD,
+    AuthenticationError,
     ComprehensivePageMonitor,
     MobileTestContext,
     count_elements,
@@ -30,10 +29,8 @@ from tests.e2e.utils import (
     login_user,
     navigate_to_dashboard,
     require_authentication,
-    safe_click_element,
     run_responsive_breakpoints_test,
-    verify_admin_access,
-    verify_navigation_completeness,
+    safe_click_element,
 )
 
 
@@ -284,7 +281,7 @@ def test_navigation_menu_visibility_by_role(page: Page):
             staff_count = staff_only_links.count()
             
             assert staff_count == 0, f"Customer should not see staff navigation (found {staff_count})"
-            print(f"    ✅ Customer properly restricted from staff navigation")
+            print("    ✅ Customer properly restricted from staff navigation")
             
             # Verify customer sees their own navigation (My Tickets, My Invoices, etc.)
             customer_links = page.locator('a:has-text("My Tickets"), a:has-text("My Invoices"), a:has-text("My Services")')
@@ -416,7 +413,7 @@ def test_mobile_navigation_responsiveness(page: Page):
             if critical_issues:
                 print(f"    ⚠️  Critical issues on small screens: {len(critical_issues)}")
             else:
-                print(f"    ✅ No critical small-screen issues")
+                print("    ✅ No critical small-screen issues")
         
         print("  ✅ Mobile navigation responsiveness testing completed!")
 
@@ -465,7 +462,7 @@ def test_navigation_responsive_breakpoints(page: Page):
                     if has_navigation:
                         print(f"      ✅ Navigation elements found: {nav_links} links, {nav_buttons} buttons")
                     else:
-                        print(f"      ⚠️  No navigation elements found")
+                        print("      ⚠️  No navigation elements found")
                     
                     return has_navigation
                     
@@ -492,12 +489,12 @@ def test_navigation_responsive_breakpoints(page: Page):
                 layout_issues = mobile_extras.get('layout_issues', [])
                 touch_works = mobile_extras.get('touch_works', False)
                 
-                print(f"\n  📊 Mobile navigation summary:")
+                print("\n  📊 Mobile navigation summary:")
                 print(f"    - Navigation elements: {nav_elements}")
                 print(f"    - Layout issues: {len(layout_issues)}")
                 print(f"    - Touch interactions: {'YES' if touch_works else 'LIMITED'}")
             
-            print(f"  ✅ Navigation validated across all responsive breakpoints")
+            print("  ✅ Navigation validated across all responsive breakpoints")
                 
         except AuthenticationError:
             pytest.fail("Lost authentication during navigation responsive breakpoints test")
