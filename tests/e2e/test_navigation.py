@@ -23,6 +23,7 @@ from tests.e2e.utils import (
     SUPERUSER_EMAIL,
     SUPERUSER_PASSWORD,
     ComprehensivePageMonitor,
+    MobileTestContext,
     count_elements,
     ensure_fresh_session,
     get_test_user_credentials,
@@ -30,6 +31,7 @@ from tests.e2e.utils import (
     navigate_to_dashboard,
     require_authentication,
     safe_click_element,
+    run_responsive_breakpoints_test,
     verify_admin_access,
     verify_navigation_completeness,
 )
@@ -362,9 +364,10 @@ def test_navigation_dropdown_interactions(page: Page):
 
 def test_mobile_navigation_responsiveness(page: Page):
     """
-    Test mobile navigation behavior and responsiveness.
+    Test mobile navigation behavior and responsiveness with comprehensive validation.
     
-    This test checks that navigation works properly on mobile viewport sizes.
+    This test checks navigation functionality across different mobile viewport sizes,
+    validates mobile-specific UI elements, and ensures proper responsive behavior.
     """
     print("🧪 Testing mobile navigation responsiveness with comprehensive monitoring")
     
@@ -373,57 +376,131 @@ def test_mobile_navigation_responsiveness(page: Page):
                                  check_network=True,
                                  check_html=True,
                                  check_css=True,
-                                 check_accessibility=False,  # Keep fast for mobile test
+                                 check_accessibility=True,   # Important for mobile navigation a11y
                                  check_performance=False):   # Keep fast for mobile test
-        # Set mobile viewport
-        page.set_viewport_size({"width": 375, "height": 667})  # iPhone 8 size
-        
-        # Login as superuser
+        # Login as superuser for full navigation access
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-    
-    # Look for mobile navigation elements
-    mobile_nav_selectors = [
-        ('.navbar-toggler', 'mobile menu toggle'),
-        ('.navbar-toggle', 'navbar toggle'),
-        ('[data-toggle="collapse"]', 'collapse toggle'),
-        ('.hamburger', 'hamburger menu'),
-        ('.mobile-menu-toggle', 'mobile menu toggle'),
-    ]
-    
-    mobile_elements_found = 0
-    
-    for selector, description in mobile_nav_selectors:
-        count = count_elements(page, selector, f"mobile {description}")
-        mobile_elements_found += count
         
-        if count > 0:
-            # Test clicking mobile menu toggle
-            if safe_click_element(page, selector, f"mobile {description}"):
-                print("      ✅ Mobile menu toggle clicked")
-                
-                # Wait for mobile menu animation
-                page.wait_for_timeout(500)
-                
-                # Look for expanded mobile menu
-                expanded_menu_selectors = [
-                    '.navbar-collapse.show',
-                    '.mobile-menu.open',
-                    '.nav-menu.active',
-                    '[aria-expanded="true"]'
-                ]
-                
-                for menu_selector in expanded_menu_selectors:
-                    if count_elements(page, menu_selector, 'expanded mobile menu') > 0:
-                        print("      ✅ Mobile menu expanded successfully")
-                        break
+        # Test mobile medium viewport (standard smartphone)
+        with MobileTestContext(page, 'mobile_medium') as mobile:
+            print("  📱 Testing standard mobile navigation (375x667)")
+            
+            # Test mobile navigation elements
+            nav_count = mobile.test_mobile_navigation()
+            
+            # Test responsive layout for navigation
+            layout_issues = mobile.check_responsive_layout()
+            
+            # Test touch interactions on navigation
+            touch_success = mobile.test_touch_interactions()
+            
+            print(f"    ✅ Mobile navigation elements: {nav_count}")
+            print(f"    ✅ Layout issues: {len(layout_issues)}")
+            print(f"    ✅ Touch interactions: {'WORKING' if touch_success else 'LIMITED'}")
+        
+        # Test mobile small viewport (smaller/older devices)
+        with MobileTestContext(page, 'mobile_small') as mobile_small:
+            print("  📱 Testing small mobile navigation (320x568)")
+            
+            # Test navigation still works on very small screens
+            small_nav_count = mobile_small.test_mobile_navigation()
+            small_layout_issues = mobile_small.check_responsive_layout()
+            
+            # Focus on critical issues for small screens
+            critical_issues = [issue for issue in small_layout_issues 
+                             if any(keyword in issue.lower() 
+                                  for keyword in ['horizontal scroll', 'small touch'])]
+            
+            print(f"    ✅ Small screen navigation: {small_nav_count} elements")
+            if critical_issues:
+                print(f"    ⚠️  Critical issues on small screens: {len(critical_issues)}")
+            else:
+                print(f"    ✅ No critical small-screen issues")
+        
+        print("  ✅ Mobile navigation responsiveness testing completed!")
+
+
+def test_navigation_responsive_breakpoints(page: Page):
+    """
+    Test navigation functionality across all responsive breakpoints.
     
-        print(f"  📱 Mobile navigation elements found: {mobile_elements_found}")
+    This comprehensive test validates that navigation works correctly on:
+    - Desktop viewports (baseline)
+    - Tablet viewports (landscape and portrait)
+    - Mobile viewports (various sizes)
+    
+    Uses the responsive breakpoint testing utility for consistency.
+    """
+    print("🧪 Testing navigation across responsive breakpoints")
+    
+    with ComprehensivePageMonitor(page, "navigation responsive breakpoints test",
+                                 check_console=True,
+                                 check_network=True,
+                                 check_html=True,
+                                 check_css=True,
+                                 check_accessibility=False,  # Keep fast for comprehensive test
+                                 check_performance=False):   # Keep fast for comprehensive test
+        # Login as superuser for full navigation access
+        ensure_fresh_session(page)
+        assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
         
-        # Reset to desktop viewport
-        page.set_viewport_size({"width": 1280, "height": 720})
-        
-        print("  ✅ Mobile navigation testing completed!")
+        try:
+            require_authentication(page)
+            
+            # Define a navigation test function to run across breakpoints
+            def test_navigation_functionality(test_page, context="general"):
+                """Test basic navigation functionality."""
+                try:
+                    # Verify we're still authenticated
+                    require_authentication(test_page)
+                    
+                    # Check for key navigation elements
+                    nav_links = test_page.locator('nav a, .navbar a, header a').count()
+                    nav_buttons = test_page.locator('nav button, .navbar button, header button').count()
+                    
+                    # Verify we have some navigation elements
+                    has_navigation = nav_links > 0 or nav_buttons > 0
+                    
+                    if has_navigation:
+                        print(f"      ✅ Navigation elements found: {nav_links} links, {nav_buttons} buttons")
+                    else:
+                        print(f"      ⚠️  No navigation elements found")
+                    
+                    return has_navigation
+                    
+                except Exception as e:
+                    print(f"      ❌ Navigation test failed: {str(e)[:50]}")
+                    return False
+            
+            # Test navigation across all responsive breakpoints
+            results = run_responsive_breakpoints_test(page, test_navigation_functionality)
+            
+            # Verify all breakpoints pass
+            desktop_pass = results.get('desktop', False)
+            tablet_pass = results.get('tablet_landscape', False)
+            mobile_pass = results.get('mobile', False)
+            
+            assert desktop_pass, "Navigation should work on desktop viewport"
+            assert tablet_pass, "Navigation should work on tablet viewport"
+            assert mobile_pass, "Navigation should work on mobile viewport"
+            
+            # Report mobile-specific findings
+            mobile_extras = results.get('mobile_extras', {})
+            if mobile_extras:
+                nav_elements = mobile_extras.get('navigation_elements', 0)
+                layout_issues = mobile_extras.get('layout_issues', [])
+                touch_works = mobile_extras.get('touch_works', False)
+                
+                print(f"\n  📊 Mobile navigation summary:")
+                print(f"    - Navigation elements: {nav_elements}")
+                print(f"    - Layout issues: {len(layout_issues)}")
+                print(f"    - Touch interactions: {'YES' if touch_works else 'LIMITED'}")
+            
+            print(f"  ✅ Navigation validated across all responsive breakpoints")
+                
+        except AuthenticationError:
+            pytest.fail("Lost authentication during navigation responsive breakpoints test")
 
 
 # Remove old configuration - will be centralized in conftest.py

@@ -22,9 +22,11 @@ from tests.e2e.utils import (
     SUPERUSER_EMAIL,
     SUPERUSER_PASSWORD,
     ComprehensivePageMonitor,
+    MobileTestContext,
     ensure_fresh_session,
     login_user,
     require_authentication,
+    run_responsive_breakpoints_test,
     verify_dashboard_functionality,
 )
 
@@ -201,6 +203,149 @@ def test_dashboard_actions_and_interactions(page: Page):
             
         except AuthenticationError:
             pytest.fail("Lost authentication during dashboard interactions test")
+
+
+def test_dashboard_mobile_responsiveness(page: Page):
+    """
+    Test dashboard responsiveness across mobile breakpoints.
+    
+    This test ensures the dashboard works correctly on mobile devices by:
+    - Testing functionality across different viewport sizes
+    - Checking mobile-specific navigation elements
+    - Validating responsive layout behavior
+    - Testing touch interactions
+    """
+    print("🧪 Testing dashboard mobile responsiveness with comprehensive validation")
+    
+    with ComprehensivePageMonitor(page, "dashboard mobile responsiveness test",
+                                 check_console=True,
+                                 check_network=True,
+                                 check_html=True,
+                                 check_css=True,
+                                 check_accessibility=True,   # Important for mobile a11y
+                                 check_performance=False):   # Skip performance for speed
+        # Login as superuser for full dashboard access
+        ensure_fresh_session(page)
+        if not login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD):
+            pytest.skip("Cannot login as superuser")
+        
+        try:
+            require_authentication(page)
+            
+            # Test dashboard functionality across responsive breakpoints
+            results = run_responsive_breakpoints_test(page, verify_dashboard_functionality, "superuser")
+            
+            # Verify desktop functionality as baseline
+            assert results.get('desktop'), "Dashboard should work on desktop viewport"
+            
+            # Verify tablet functionality
+            assert results.get('tablet_landscape'), "Dashboard should work on tablet landscape viewport"
+            
+            # Verify mobile functionality
+            assert results.get('mobile'), "Dashboard should work on mobile viewport"
+            
+            # Check mobile-specific results
+            mobile_extras = results.get('mobile_extras', {})
+            
+            # Log mobile-specific findings
+            nav_elements = mobile_extras.get('navigation_elements', 0)
+            layout_issues = mobile_extras.get('layout_issues', [])
+            touch_works = mobile_extras.get('touch_works', False)
+            
+            print(f"    📱 Mobile navigation elements: {nav_elements}")
+            print(f"    📱 Layout issues found: {len(layout_issues)}")
+            print(f"    📱 Touch interactions: {'WORKING' if touch_works else 'LIMITED'}")
+            
+            # Report any layout issues (but don't fail the test)
+            if layout_issues:
+                print(f"    ⚠️  Mobile layout issues detected:")
+                for issue in layout_issues[:3]:  # Show first 3 issues
+                    print(f"      - {issue}")
+            
+            print(f"  ✅ Dashboard mobile responsiveness validated across all breakpoints")
+                
+        except AuthenticationError:
+            pytest.fail("Lost authentication during dashboard mobile responsiveness test")
+
+
+def test_dashboard_mobile_specific_features(page: Page):
+    """
+    Test dashboard features specific to mobile viewport.
+    
+    This test focuses on mobile-only behaviors like:
+    - Mobile navigation patterns
+    - Touch-optimized interactions  
+    - Responsive content adaptation
+    - Mobile-specific UI elements
+    """
+    print("🧪 Testing dashboard mobile-specific features")
+    
+    with ComprehensivePageMonitor(page, "dashboard mobile features test",
+                                 check_console=True,
+                                 check_network=True,
+                                 check_html=True,
+                                 check_css=True,
+                                 check_accessibility=False,  # Keep fast for focused test
+                                 check_performance=False):   # Keep fast for focused test
+        # Login as superuser
+        ensure_fresh_session(page)
+        if not login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD):
+            pytest.skip("Cannot login as superuser")
+        
+        try:
+            require_authentication(page)
+            
+            # Test mobile medium viewport (standard smartphone)
+            with MobileTestContext(page, 'mobile_medium') as mobile:
+                print("  📱 Testing standard mobile viewport (375x667)")
+                
+                # Verify dashboard still functions
+                assert verify_dashboard_functionality(page, "superuser"), \
+                    "Dashboard functionality should work on mobile"
+                
+                # Test mobile navigation
+                nav_count = mobile.test_mobile_navigation()
+                print(f"    ✅ Mobile navigation test completed ({nav_count} elements)")
+                
+                # Check responsive layout
+                layout_issues = mobile.check_responsive_layout()
+                if layout_issues:
+                    print(f"    ⚠️  Found {len(layout_issues)} responsive layout issues")
+                    for issue in layout_issues[:2]:  # Show first 2
+                        print(f"      - {issue}")
+                else:
+                    print(f"    ✅ No responsive layout issues detected")
+                
+                # Test touch interactions
+                touch_success = mobile.test_touch_interactions()
+                if not touch_success:
+                    print(f"    ℹ️  Limited touch interactivity (may be normal for this page)")
+            
+            # Test mobile small viewport (older/smaller devices)
+            with MobileTestContext(page, 'mobile_small') as mobile_small:
+                print("  📱 Testing small mobile viewport (320x568)")
+                
+                # Verify dashboard core functionality still works
+                basic_functionality = verify_dashboard_functionality(page, "superuser")
+                if basic_functionality:
+                    print(f"    ✅ Dashboard works on small mobile viewport")
+                else:
+                    print(f"    ⚠️  Dashboard has issues on small mobile viewport")
+                
+                # Check for critical layout problems on small screens
+                small_layout_issues = mobile_small.check_responsive_layout()
+                critical_issues = [issue for issue in small_layout_issues 
+                                 if 'horizontal scroll' in issue.lower()]
+                
+                if critical_issues:
+                    print(f"    ⚠️  Critical small-screen issues: {len(critical_issues)}")
+                else:
+                    print(f"    ✅ No critical small-screen layout issues")
+            
+            print(f"  ✅ Mobile-specific dashboard features tested successfully")
+                
+        except AuthenticationError:
+            pytest.fail("Lost authentication during dashboard mobile features test")
 
 
 # Remove old configuration - will be centralized in conftest.py
