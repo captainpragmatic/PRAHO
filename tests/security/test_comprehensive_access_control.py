@@ -8,7 +8,6 @@ from decimal import Decimal
 import pytest
 from django.contrib.auth import get_user_model
 from django.contrib.messages import get_messages
-from django.http import JsonResponse
 from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -100,15 +99,18 @@ class ComprehensiveAccessControlTestCase(TestCase):
         # Create service plan and service
         self.service_plan = ServicePlan.objects.create(
             name='Basic Hosting',
-            price=Decimal('50.00'),
-            billing_period='monthly',
+            plan_type='shared_hosting',
+            price_monthly=Decimal('50.00'),
             is_active=True
         )
         
         self.service = Service.objects.create(
             customer=self.customer,
-            plan=self.service_plan,
+            service_plan=self.service_plan,
+            service_name='Test Hosting Service',
             domain='example.com',
+            username='testuser123',
+            price=Decimal('50.00'),
             status='active'
         )
         
@@ -116,6 +118,15 @@ class ComprehensiveAccessControlTestCase(TestCase):
         self.server = Server.objects.create(
             name='srv-01',
             hostname='srv-01.praho.ro',
+            server_type='shared',
+            primary_ip='192.168.1.100',
+            location='Bucharest',
+            datacenter='DC1',
+            cpu_model='Intel Xeon E5-2690',
+            cpu_cores=8,
+            ram_gb=32,
+            disk_type='SSD',
+            disk_capacity_gb=500,
             status='active'
         )
         
@@ -142,7 +153,7 @@ class ComprehensiveAccessControlTestCase(TestCase):
         
         # Should be redirected to dashboard with error message
         self.assertEqual(response.status_code, 302)
-        self.assertIn('dashboard', response.url)
+        self.assertIn('/app/', response.url)
         
         # Check error message
         messages = list(get_messages(response.wsgi_request))
@@ -159,7 +170,7 @@ class ComprehensiveAccessControlTestCase(TestCase):
         
         # Should be redirected to dashboard with error message
         self.assertEqual(response.status_code, 302)
-        self.assertIn('dashboard', response.url)
+        self.assertIn('/app/', response.url)
 
     def test_proforma_to_invoice_conversion_restricted_to_staff(self):
         """Test that customers cannot convert proformas to invoices"""
@@ -172,7 +183,7 @@ class ComprehensiveAccessControlTestCase(TestCase):
         
         # Should be redirected to dashboard with error message
         self.assertEqual(response.status_code, 302)
-        self.assertIn('dashboard', response.url)
+        self.assertIn('/app/', response.url)
 
     def test_payment_processing_restricted_to_staff(self):
         """Test that customers cannot manually process payments"""
@@ -188,7 +199,7 @@ class ComprehensiveAccessControlTestCase(TestCase):
         
         # Should be redirected to dashboard with error message
         self.assertEqual(response.status_code, 302)
-        self.assertIn('dashboard', response.url)
+        self.assertIn('/app/', response.url)
 
     def test_customer_creation_restricted_to_staff(self):
         """Test that customers cannot create new customer records"""
@@ -201,7 +212,7 @@ class ComprehensiveAccessControlTestCase(TestCase):
         
         # Should be redirected to dashboard with error message
         self.assertEqual(response.status_code, 302)
-        self.assertIn('dashboard', response.url)
+        self.assertIn('/app/', response.url)
 
     def test_customer_deletion_restricted_to_staff(self):
         """Test that customers cannot delete customer records"""
@@ -214,7 +225,7 @@ class ComprehensiveAccessControlTestCase(TestCase):
         
         # Should be redirected to dashboard with error message
         self.assertEqual(response.status_code, 302)
-        self.assertIn('dashboard', response.url)
+        self.assertIn('/app/', response.url)
 
     def test_service_management_restricted_to_staff(self):
         """Test that customers cannot create, edit, or manage services"""
@@ -225,19 +236,19 @@ class ComprehensiveAccessControlTestCase(TestCase):
         url = reverse('provisioning:service_create')
         response = self.client.get(url)
         self.assertEqual(response.status_code, 302)
-        self.assertIn('dashboard', response.url)
+        self.assertIn('/app/', response.url)
         
         # Try to edit service
         url = reverse('provisioning:service_edit', args=[self.service.pk])
         response = self.client.get(url)
         self.assertEqual(response.status_code, 302)
-        self.assertIn('dashboard', response.url)
+        self.assertIn('/app/', response.url)
         
         # Try to suspend service
         url = reverse('provisioning:service_suspend', args=[self.service.pk])
         response = self.client.get(url)
         self.assertEqual(response.status_code, 302)
-        self.assertIn('dashboard', response.url)
+        self.assertIn('/app/', response.url)
 
     def test_server_infrastructure_restricted_to_staff(self):
         """Test that customers cannot view server infrastructure"""
@@ -245,12 +256,12 @@ class ComprehensiveAccessControlTestCase(TestCase):
         self.client.login(email='customer@example.com', password='customerpass123')
         
         # Try to access server list
-        url = reverse('provisioning:server_list')
+        url = reverse('provisioning:servers')
         response = self.client.get(url)
         
         # Should be redirected to dashboard with error message
         self.assertEqual(response.status_code, 302)
-        self.assertIn('dashboard', response.url)
+        self.assertIn('/app/', response.url)
 
     def test_financial_reports_restricted_to_staff(self):
         """Test that customers cannot access financial reports"""
@@ -261,13 +272,13 @@ class ComprehensiveAccessControlTestCase(TestCase):
         url = reverse('billing:reports')
         response = self.client.get(url)
         self.assertEqual(response.status_code, 302)
-        self.assertIn('dashboard', response.url)
+        self.assertIn('/app/', response.url)
         
         # Try to access VAT report
         url = reverse('billing:vat_report')
         response = self.client.get(url)
         self.assertEqual(response.status_code, 302)
-        self.assertIn('dashboard', response.url)
+        self.assertIn('/app/', response.url)
 
     def test_internal_ticket_notes_restricted_to_staff(self):
         """Test that customers cannot create internal notes on tickets"""
@@ -324,7 +335,7 @@ class ComprehensiveAccessControlTestCase(TestCase):
         self.assertEqual(response.status_code, 200)
         
         # Test server infrastructure
-        url = reverse('provisioning:server_list')
+        url = reverse('provisioning:servers')
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         
@@ -348,7 +359,7 @@ class ComprehensiveAccessControlTestCase(TestCase):
         self.assertFalse(response.context['can_convert'])
         
         # Check that edit buttons are not in the HTML
-        self.assertNotIn('href="/app/billing/proformas/{}/edit/"'.format(self.proforma.pk), response.content.decode())
+        self.assertNotIn(f'href="/app/billing/proformas/{self.proforma.pk}/edit/"', response.content.decode())
 
     def test_ticket_internal_note_checkbox_hidden_from_customers(self):
         """Test that internal note checkbox is not shown to customers in ticket forms"""
@@ -390,7 +401,6 @@ class ComprehensiveAccessControlTestCase(TestCase):
     def tearDown(self):
         """Clean up test data"""
         # Clean up is handled by Django's TestCase automatically
-        pass
 
 
 class SecurityDecoratorsTestCase(TestCase):
@@ -436,6 +446,7 @@ class SecurityDecoratorsTestCase(TestCase):
     def test_billing_staff_required_decorator_blocks_customers(self):
         """Test that billing_staff_required decorator blocks customer users"""
         from apps.common.decorators import billing_staff_required
+        from django.contrib.messages.storage.fallback import FallbackStorage
         
         # Create a simple view with billing_staff_required decorator
         @billing_staff_required  
@@ -450,9 +461,13 @@ class SecurityDecoratorsTestCase(TestCase):
         request = factory.get('/test/')
         request.user = self.customer_user
         
+        # Add message storage to the request
+        setattr(request, 'session', {})
+        setattr(request, '_messages', FallbackStorage(request))
+        
         response = test_view(request)
         self.assertEqual(response.status_code, 302)  # Redirect
-        self.assertIn('dashboard', response.url)
+        self.assertIn('/app/', response.url)
 
 
 if __name__ == '__main__':

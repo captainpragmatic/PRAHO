@@ -13,9 +13,7 @@ class InvoiceSequenceConcurrencyTests(TestCase):
     def test_sequential_numbers_unique_and_incrementing(self) -> None:
         seq = InvoiceSequence.objects.create(scope='test_conc', last_value=0)
 
-        numbers: list[str] = []
-        for _ in range(10):
-            numbers.append(seq.get_next_number('TST'))
+        numbers: list[str] = [seq.get_next_number('TST') for _ in range(10)]
 
         # Ensure uniqueness and ascending sequence
         self.assertEqual(len(numbers), len(set(numbers)))

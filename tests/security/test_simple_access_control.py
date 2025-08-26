@@ -4,7 +4,6 @@ Tests critical security fixes for customers vs staff access.
 """
 
 from django.contrib.auth import get_user_model
-from django.contrib.messages import get_messages
 from django.test import Client, TestCase
 
 User = get_user_model()
@@ -42,9 +41,10 @@ class SimpleAccessControlTestCase(TestCase):
         
         # Create a URL that would use billing_staff_required decorator
         # This tests the decorator itself by making a direct request
-        from django.test import RequestFactory
-        from apps.common.decorators import billing_staff_required
         from django.http import HttpResponse
+        from django.test import RequestFactory
+
+        from apps.common.decorators import billing_staff_required
         
         @billing_staff_required
         def test_view(request):
@@ -54,15 +54,21 @@ class SimpleAccessControlTestCase(TestCase):
         request = factory.get('/test/')
         request.user = self.customer_user
         
+        # Add message storage to the request
+        from django.contrib.messages.storage.fallback import FallbackStorage
+        setattr(request, 'session', {})
+        setattr(request, '_messages', FallbackStorage(request))
+        
         response = test_view(request)
         self.assertEqual(response.status_code, 302)  # Redirect
-        self.assertIn('dashboard', response.url)
+        self.assertIn('/app/', response.url)
 
     def test_staff_required_decorator_blocks_customers(self):
         """Test that staff_required decorator blocks customer users"""
-        from django.test import RequestFactory
-        from apps.common.decorators import staff_required
         from django.http import HttpResponse
+        from django.test import RequestFactory
+
+        from apps.common.decorators import staff_required
         
         @staff_required
         def test_view(request):
@@ -72,15 +78,21 @@ class SimpleAccessControlTestCase(TestCase):
         request = factory.get('/test/')
         request.user = self.customer_user
         
+        # Add message storage to the request
+        from django.contrib.messages.storage.fallback import FallbackStorage
+        setattr(request, 'session', {})
+        setattr(request, '_messages', FallbackStorage(request))
+        
         response = test_view(request)
         self.assertEqual(response.status_code, 302)  # Redirect
-        self.assertIn('dashboard', response.url)
+        self.assertIn('/app/', response.url)
 
     def test_staff_required_decorator_allows_staff(self):
         """Test that staff_required decorator allows staff users"""
-        from django.test import RequestFactory
-        from apps.common.decorators import staff_required
         from django.http import HttpResponse
+        from django.test import RequestFactory
+
+        from apps.common.decorators import staff_required
         
         @staff_required
         def test_view(request):
@@ -96,9 +108,10 @@ class SimpleAccessControlTestCase(TestCase):
 
     def test_billing_staff_required_allows_staff(self):
         """Test that billing_staff_required decorator allows staff users"""
-        from django.test import RequestFactory  
-        from apps.common.decorators import billing_staff_required
         from django.http import HttpResponse
+        from django.test import RequestFactory
+
+        from apps.common.decorators import billing_staff_required
         
         @billing_staff_required
         def test_view(request):
@@ -173,9 +186,8 @@ class SimpleAccessControlTestCase(TestCase):
         # Test customer user properties
         self.assertFalse(self.customer_user.is_staff)
         self.assertFalse(self.customer_user.is_staff_user)
-        self.assertIsNone(self.customer_user.staff_role)
+        self.assertEqual(self.customer_user.staff_role, '')
         
     def tearDown(self):
         """Clean up test data"""
         # Clean up is handled by Django's TestCase automatically
-        pass

@@ -6,8 +6,9 @@ Romanian hosting provider test data generation.
 import random
 from decimal import Decimal
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from faker import Faker
 
 from apps.customers.models import Customer
@@ -40,6 +41,13 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        # Simple safety check - must be in DEBUG mode
+        if not settings.DEBUG:
+            raise CommandError(
+                "🚫 Sample data generation only works in DEBUG mode. "
+                "This prevents accidental production usage."
+            )
+        
         fake = Faker('ro_RO')  # Romanian locale
         Faker.seed(42)  # Consistent data
         
@@ -73,13 +81,14 @@ class Command(BaseCommand):
     def create_admin_users(self, fake):
         self.stdout.write('Creez utilizatori admin...')
         
-        # Create superuser
+        # Create superuser with consistent credentials for E2E testing
+        # Note: These are development/test credentials only - DEBUG mode enforced above
         if not User.objects.filter(email='admin@pragmatichost.com').exists():
             admin_user = User.objects.create_superuser(
                 first_name='Admin',
                 last_name='PRAHO',
                 email='admin@pragmatichost.com',
-                password='admin123'
+                password='admin123'  # Dev/test only - protected by DEBUG check
             )
             self.stdout.write(f'  ✓ Admin: {admin_user.email}')
         
@@ -95,7 +104,7 @@ class Command(BaseCommand):
                 user = User.objects.create_user(
                     username=email.split('@')[0],
                     email=email,
-                    password='support123',
+                    password='support123',  # Dev/test only - protected by DEBUG check
                     first_name=first,
                     last_name=last,
                     role='support',

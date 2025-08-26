@@ -277,8 +277,8 @@ class UserManagementTestCase(TestCase):
         # 🏢 Create customer
         customer = create_test_customer('Test Customer Co', self.admin_user)
 
-        # 👤 Create customer user
-        customer_user = create_test_user('customer', 'user@testcustomer.ro')
+        # 👤 Create customer user (explicitly not staff)
+        customer_user = create_test_user('customer', 'user@testcustomer.ro', staff_role=None)
 
         # 🔗 Create membership
         CustomerMembership.objects.create(

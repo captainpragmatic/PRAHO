@@ -2,10 +2,11 @@
 # BILLING PAYMENT TESTS (Django TestCase Format)
 # ===============================================================================
 
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
-from datetime import timedelta
 
 from apps.billing.models import Currency, Invoice, Payment
 from apps.customers.models import Customer

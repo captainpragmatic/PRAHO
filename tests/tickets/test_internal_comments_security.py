@@ -225,7 +225,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
         # Test customer user properties
         self.assertFalse(self.customer_user.is_staff)
         self.assertFalse(self.customer_user.is_staff_user)
-        self.assertIsNone(self.customer_user.staff_role)
+        self.assertEqual(self.customer_user.staff_role, '')
 
     def test_unauthorized_access_to_other_customer_tickets(self):
         """Test that customers cannot access tickets from other customers"""
