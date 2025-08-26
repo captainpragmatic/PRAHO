@@ -97,5 +97,102 @@
     "/^ls\\s+/": true,
     "/^grep\\s+/": true
   },
-  "python.analysis.typeCheckingMode": "standard"
+  "python.analysis.typeCheckingMode": "standard",
+  
+  // ===============================================================================
+  // ENHANCED TYPE CHECKING CONFIGURATION - Phase 2.4
+  // ===============================================================================
+  
+  // Python interpreter and environment
+  "python.defaultInterpreterPath": ".venv/bin/python",
+  "python.terminal.activateEnvironment": true,
+  
+  // Enhanced type checking with MyPy integration
+  "python.linting.enabled": true,
+  "python.linting.mypyEnabled": true,
+  "python.linting.mypyPath": ".venv/bin/mypy",
+  "python.linting.mypyArgs": [
+    "--config-file=pyproject.toml",
+    "--show-column-numbers",
+    "--show-error-context"
+  ],
+  
+  // Type checking enhancements
+  "python.analysis.diagnosticMode": "workspace",
+  "python.analysis.autoImportCompletions": true,
+  "python.analysis.autoSearchPaths": true,
+  "python.analysis.extraPaths": [
+    "./apps",
+    "./config"
+  ],
+  
+  // Django-specific configuration
+  "python.analysis.django.enabled": true,
+  "python.linting.pylintArgs": [
+    "--load-plugins=pylint_django",
+    "--django-settings-module=config.settings.dev"
+  ],
+  
+  // Ruff integration (enhanced)
+  "python.linting.ruffEnabled": true,
+  "python.linting.ruffPath": ".venv/bin/ruff",
+  
+  // Type hint visibility and inline hints
+  "editor.inlayHints.enabled": "on",
+  "python.analysis.inlayHints.functionReturnTypes": true,
+  "python.analysis.inlayHints.variableTypes": false,
+  "python.analysis.inlayHints.parameterNames": true,
+  
+  // Enhanced Python formatting with Ruff
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": "explicit",
+      "source.fixAll.ruff": "explicit"
+    }
+  },
+  
+  // Error and warning display
+  "problems.showCurrentInStatus": true,
+  "editor.showDeprecated": true,
+  "editor.showUnused": true,
+  
+  // Enhanced testing configuration
+  "python.testing.unittestEnabled": true,
+  "python.testing.unittestArgs": [
+    "-v",
+    "-s",
+    "./tests",
+    "-p",
+    "test_*.py"
+  ],
+  "python.testing.autoTestDiscoverOnSaveEnabled": false,
+  
+  // PRAHO Platform specific enhancements
+  "todo-tree.general.tags": [
+    "TODO",
+    "FIXME",
+    "HACK",
+    "XXX",
+    "CUI",
+    "VAT",
+    "GDPR",
+    "INVOICE",
+    "SECURITY"
+  ],
+  "todo-tree.highlights.customHighlight": {
+    "CUI": {
+      "icon": "🇷🇴",
+      "foreground": "#ff6b6b"
+    },
+    "VAT": {
+      "icon": "💰",
+      "foreground": "#4ecdc4"
+    },
+    "SECURITY": {
+      "icon": "🔒",
+      "foreground": "#ffe66d"
+    }
+  }
 }
