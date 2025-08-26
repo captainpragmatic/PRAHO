@@ -1,0 +1,20 @@
+{% extends 'base.html' %}
+{% load i18n %}
+
+{% block title %}{% trans "Server Infrastructure" %}{% endblock %}
+
+{% block content %}
+<div class="bg-slate-900 min-h-screen text-white">
+    <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+        <h1 class="text-3xl font-bold text-white mb-6">
+            {% trans "Server Infrastructure" %}
+        </h1>
+        
+        <div class="bg-slate-800 rounded-lg p-6">
+            <p class="text-slate-300">
+                {% trans "Server management interface - Staff only" %}
+            </p>
+        </div>
+    </div>
+</div>
+{% endblock %}
