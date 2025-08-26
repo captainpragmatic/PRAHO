@@ -112,7 +112,7 @@ class DataExport(models.Model):
     completed_at = models.DateTimeField(null=True, blank=True)
 
     # Results
-    file_path = models.CharField(max_length=255, blank=True, null=True)
+    file_path = models.CharField(max_length=255, blank=True, default='')
     file_size = models.PositiveIntegerField(null=True, blank=True)
     record_count = models.PositiveIntegerField(null=True, blank=True)
 

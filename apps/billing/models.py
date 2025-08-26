@@ -345,6 +345,12 @@ class Invoice(models.Model):
     def __str__(self) -> str:
         return f"{self.number} - {self.customer}"
 
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Calculate subtotal from total and tax on save"""
+        if self.total_cents and self.tax_cents:
+            self.subtotal_cents = self.total_cents - self.tax_cents
+        super().save(*args, **kwargs)
+
     @property
     def subtotal(self) -> Decimal:
         """Convert cents to decimal"""
@@ -372,12 +378,6 @@ class Invoice(models.Model):
             total=models.Sum('amount_cents')
         )['total'] or 0
         return max(0, self.total_cents - paid_amount)
-
-    def save(self, *args: Any, **kwargs: Any) -> None:
-        """Calculate subtotal from total and tax on save"""
-        if self.total_cents and self.tax_cents:
-            self.subtotal_cents = self.total_cents - self.tax_cents
-        super().save(*args, **kwargs)
 
     def mark_as_paid(self) -> None:
         """Mark invoice as paid"""

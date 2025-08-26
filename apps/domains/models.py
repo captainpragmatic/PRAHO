@@ -550,15 +550,15 @@ class DomainOrderItem(models.Model):
         verbose_name_plural = _('🛒 Domain Order Items')
         ordering: ClassVar[tuple[str, ...]] = ('-created_at',)
 
+    def __str__(self) -> str:
+        action_display = self.get_action_display()
+        return f"{action_display} {self.domain_name} ({self.years} years)"
+
     def save(self, *args: Any, **kwargs: Any) -> None:
         """💾 Calculate total price on save"""
         if self.unit_price_cents and self.years:
             self.total_price_cents = self.unit_price_cents * self.years
         super().save(*args, **kwargs)
-
-    def __str__(self) -> str:
-        action_display = self.get_action_display()
-        return f"{action_display} {self.domain_name} ({self.years} years)"
 
     @property
     def unit_price(self) -> float:
