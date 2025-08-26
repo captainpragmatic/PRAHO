@@ -7,7 +7,7 @@ Aligned with PostgreSQL hosting panel schema v1 with separate proforma handling.
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, ClassVar
 
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
@@ -42,10 +42,10 @@ class FXRate(models.Model):
 
     class Meta:
         db_table = 'fx_rate'
-        unique_together = [['base_code', 'quote_code', 'as_of']]
-        indexes = [
+        unique_together = (('base_code', 'quote_code', 'as_of'),)
+        indexes = (
             models.Index(fields=['base_code', 'quote_code', '-as_of']),
-        ]
+        )
 
     def __str__(self) -> str:
         return f"{self.base_code}/{self.quote_code} = {self.rate} ({self.as_of})"
@@ -161,11 +161,11 @@ class ProformaInvoice(models.Model):
         db_table = 'proforma_invoice'
         verbose_name = _('Proforma Invoice')
         verbose_name_plural = _('Proforma Invoices')
-        indexes = [
+        indexes = (
             models.Index(fields=['customer']),
             models.Index(fields=['valid_until']),
             models.Index(fields=['created_at']),
-        ]
+        )
 
     def __str__(self) -> str:
         return f"{self.number} - {self.customer}"
@@ -194,12 +194,12 @@ class ProformaInvoice(models.Model):
 class ProformaLine(models.Model):
     """Proforma line items"""
 
-    KIND_CHOICES = [
+    KIND_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('service', _('Service')),
         ('setup', _('Setup Fee')),
         ('discount', _('Discount')),
         ('misc', _('Miscellaneous')),
-    ]
+    )
 
     proforma = models.ForeignKey(ProformaInvoice, on_delete=models.CASCADE, related_name='lines')
     kind = models.CharField(max_length=20, choices=KIND_CHOICES)
@@ -222,9 +222,9 @@ class ProformaLine(models.Model):
 
     class Meta:
         db_table = 'proforma_line'
-        indexes = [
+        indexes = (
             models.Index(fields=['service']),
-        ]
+        )
 
     @property
     def unit_price(self) -> Decimal:
@@ -246,14 +246,14 @@ class Invoice(models.Model):
     Updated status choices as requested.
     """
 
-    STATUS_CHOICES = [
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('draft', _('Draft')),
         ('issued', _('Issued')),        # Changed from 'sent' to 'issued'
         ('paid', _('Paid')),
         ('overdue', _('Overdue')),
         ('void', _('Void')),            # Changed from 'cancelled' to 'void'
         ('refunded', _('Refunded')),
-    ]
+    )
 
     # Core identification
     customer = models.ForeignKey(
@@ -335,12 +335,12 @@ class Invoice(models.Model):
         db_table = 'invoice'
         verbose_name = _('Invoice')
         verbose_name_plural = _('Invoices')
-        indexes = [
+        indexes = (
             models.Index(fields=['customer', '-created_at']),
             models.Index(fields=['customer'], condition=models.Q(status__in=['issued', 'overdue']), name='bill_inv_cust_pending'),
             models.Index(fields=['status', '-due_at']),
             models.Index(fields=['number']),
-        ]
+        )
 
     def __str__(self) -> str:
         return f"{self.number} - {self.customer}"
@@ -373,6 +373,12 @@ class Invoice(models.Model):
         )['total'] or 0
         return max(0, self.total_cents - paid_amount)
 
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Calculate subtotal from total and tax on save"""
+        if self.total_cents and self.tax_cents:
+            self.subtotal_cents = self.total_cents - self.tax_cents
+        super().save(*args, **kwargs)
+
     def mark_as_paid(self) -> None:
         """Mark invoice as paid"""
         self.status = 'paid'
@@ -386,14 +392,14 @@ class InvoiceLine(models.Model):
     Replaces old InvoiceItem model with better structure from schema.
     """
 
-    KIND_CHOICES = [
+    KIND_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('service', _('Service')),
         ('setup', _('Setup Fee')),
         ('credit', _('Credit')),
         ('discount', _('Discount')),
         ('refund', _('Refund')),
         ('misc', _('Miscellaneous')),
-    ]
+    )
 
     invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name='lines')
     kind = models.CharField(max_length=20, choices=KIND_CHOICES)
@@ -420,10 +426,17 @@ class InvoiceLine(models.Model):
         db_table = 'invoice_line'
         verbose_name = _('Invoice Line')
         verbose_name_plural = _('Invoice Lines')
-        indexes = [
+        indexes = (
             models.Index(fields=['service']),
             models.Index(fields=['invoice', 'kind']),
-        ]
+        )
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        # Calculate line total
+        subtotal = self.quantity * (Decimal(self.unit_price_cents) / 100)
+        tax_amount = subtotal * self.tax_rate
+        self.line_total_cents = int((subtotal + tax_amount) * 100)
+        super().save(*args, **kwargs)
 
     @property
     def unit_price(self) -> Decimal:
@@ -432,13 +445,6 @@ class InvoiceLine(models.Model):
     @property
     def line_total(self) -> Decimal:
         return Decimal(self.line_total_cents) / 100
-
-    def save(self, *args: Any, **kwargs: Any) -> None:
-        # Calculate line total
-        subtotal = self.quantity * (Decimal(self.unit_price_cents) / 100)
-        tax_amount = subtotal * self.tax_rate
-        self.line_total_cents = int((subtotal + tax_amount) * 100)
-        super().save(*args, **kwargs)
 
 
 # ===============================================================================
@@ -451,21 +457,21 @@ class Payment(models.Model):
     Updated to support multiple payment methods and gateway responses.
     """
 
-    STATUS_CHOICES = [
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('pending', _('Pending')),
         ('succeeded', _('Succeeded')),  # Changed from 'completed'
         ('failed', _('Failed')),
         ('refunded', _('Refunded')),
         ('partially_refunded', _('Partially Refunded')),
-    ]
+    )
 
-    METHOD_CHOICES = [
+    METHOD_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('stripe', _('Stripe')),
         ('bank', _('Bank Transfer')),
         ('paypal', _('PayPal')),
         ('cash', _('Cash')),
         ('other', _('Other')),
-    ]
+    )
 
     # Core relationships
     customer = models.ForeignKey(
@@ -511,12 +517,12 @@ class Payment(models.Model):
         db_table = 'payment'
         verbose_name = _('Payment')
         verbose_name_plural = _('Payments')
-        indexes = [
+        indexes = (
             models.Index(fields=['customer', '-received_at']),
             models.Index(fields=['status']),
             models.Index(fields=['method']),
             models.Index(fields=['gateway_txn_id']),
-        ]
+        )
 
     def __str__(self) -> str:
         return f"Payment {self.amount} {self.currency.code} for {self.customer}"
@@ -567,16 +573,16 @@ class CreditLedger(models.Model):
         db_table = 'credit_ledger'
         verbose_name = _('Credit Entry')
         verbose_name_plural = _('Credit Entries')
-        indexes = [
+        indexes = (
             models.Index(fields=['customer', '-created_at']),
-        ]
+        )
+
+    def __str__(self) -> str:
+        return f"{self.customer} - {self.delta} ({self.reason})"
 
     @property
     def delta(self) -> Decimal:
         return Decimal(self.delta_cents) / 100
-
-    def __str__(self) -> str:
-        return f"{self.customer} - {self.delta} ({self.reason})"
 
 
 # ===============================================================================
@@ -676,13 +682,13 @@ class TaxRule(models.Model):
         db_table = 'tax_rules'
         verbose_name = _('Tax Rule')
         verbose_name_plural = _('Tax Rules')
-        unique_together = [['country_code', 'region', 'tax_type', 'valid_from']]
-        indexes = [
+        unique_together = (('country_code', 'region', 'tax_type', 'valid_from'),)
+        indexes = (
             models.Index(fields=['country_code', 'tax_type']),
             models.Index(fields=['valid_from', 'valid_to']),
             models.Index(fields=['is_eu_member']),
-        ]
-        ordering = ['country_code', 'tax_type', '-valid_from']
+        )
+        ordering = ('country_code', 'tax_type', '-valid_from')
 
     def __str__(self) -> str:
         rate_display = f"{self.rate * 100:.2f}%"
@@ -780,13 +786,13 @@ class VATValidation(models.Model):
         db_table = 'vat_validations'
         verbose_name = _('VAT Validation')
         verbose_name_plural = _('VAT Validations')
-        unique_together = [['country_code', 'vat_number']]
-        indexes = [
+        unique_together = (('country_code', 'vat_number'),)
+        indexes = (
             models.Index(fields=['full_vat_number']),
             models.Index(fields=['validation_date']),
             models.Index(fields=['expires_at']),
-        ]
-        ordering = ['-validation_date']
+        )
+        ordering = ('-validation_date',)
 
     def __str__(self) -> str:
         status = "✓ Valid" if self.is_valid else "✗ Invalid"
@@ -882,7 +888,7 @@ class PaymentRetryPolicy(models.Model):
         db_table = 'payment_retry_policies'
         verbose_name = _('Payment Retry Policy')
         verbose_name_plural = _('Payment Retry Policies')
-        ordering = ['name']
+        ordering = ('name',)
 
     def __str__(self) -> str:
         return f"{self.name} ({len(self.retry_intervals_days)} attempts)"
@@ -975,13 +981,13 @@ class PaymentRetryAttempt(models.Model):
         db_table = 'payment_retry_attempts'
         verbose_name = _('Payment Retry Attempt')
         verbose_name_plural = _('Payment Retry Attempts')
-        unique_together = [['payment', 'attempt_number']]
-        indexes = [
+        unique_together = (('payment', 'attempt_number'),)
+        indexes = (
             models.Index(fields=['scheduled_at', 'status']),
             models.Index(fields=['payment', '-attempt_number']),
             models.Index(fields=['status', 'executed_at']),
-        ]
-        ordering = ['payment', 'attempt_number']
+        )
+        ordering = ('payment', 'attempt_number')
 
     def __str__(self) -> str:
         return f"Retry #{self.attempt_number} for Payment {self.payment.id} - {self.status}"
@@ -1076,12 +1082,12 @@ class PaymentCollectionRun(models.Model):
         db_table = 'payment_collection_runs'
         verbose_name = _('Payment Collection Run')
         verbose_name_plural = _('Payment Collection Runs')
-        indexes = [
+        indexes = (
             models.Index(fields=['-started_at']),
             models.Index(fields=['status']),
             models.Index(fields=['run_type', '-started_at']),
-        ]
-        ordering = ['-started_at']
+        )
+        ordering = ('-started_at',)
 
     def __str__(self) -> str:
         duration = ""

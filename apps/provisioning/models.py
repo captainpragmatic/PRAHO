@@ -4,7 +4,7 @@ Romanian hosting provider service management and provisioning.
 """
 
 from decimal import Decimal
-from typing import Any
+from typing import Any, ClassVar
 
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
@@ -15,7 +15,7 @@ from django.utils.translation import gettext_lazy as _
 class ServicePlan(models.Model):
     """Hosting service plans/packages"""
 
-    PLAN_TYPE_CHOICES = [
+    PLAN_TYPE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('shared_hosting', _('Shared Web Hosting')),
         ('vps', _('VPS')),
         ('dedicated', _('Dedicated Server')),
@@ -25,7 +25,7 @@ class ServicePlan(models.Model):
         ('email', _('Email Hosting')),
         ('backup', _('Backup')),
         ('maintenance', _('Maintenance')),
-    ]
+    )
 
     # Basic information
     name = models.CharField(max_length=100, verbose_name=_('Plan Name'))
@@ -105,11 +105,11 @@ class ServicePlan(models.Model):
         db_table = 'service_plans'
         verbose_name = _('Service Plan')
         verbose_name_plural = _('Service Plans')
-        ordering = ['plan_type', 'sort_order', 'price_monthly']
-        indexes = [
+        ordering: ClassVar[tuple[str, ...]] = ('plan_type', 'sort_order', 'price_monthly')
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=['plan_type', 'is_active']),
             models.Index(fields=['is_public', 'is_active']),
-        ]
+        )
 
     def __str__(self) -> str:
         return f"{self.name} ({self.get_plan_type_display()})"
@@ -135,19 +135,19 @@ class ServicePlan(models.Model):
 class Server(models.Model):
     """Physical/virtual servers for hosting services"""
 
-    SERVER_TYPE_CHOICES = [
+    SERVER_TYPE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('shared', _('Shared Server')),
         ('vps_host', _('VPS Host')),
         ('dedicated', _('Dedicated Server')),
         ('cloud', _('Cloud Node')),
-    ]
+    )
 
-    STATUS_CHOICES = [
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('active', _('Active')),
         ('maintenance', _('Under Maintenance')),
         ('offline', _('Offline')),
         ('decommissioned', _('Decommissioned')),
-    ]
+    )
 
     # Basic information
     name = models.CharField(max_length=100, verbose_name=_('Server Name'))
@@ -237,12 +237,12 @@ class Server(models.Model):
         db_table = 'servers'
         verbose_name = _('Server')
         verbose_name_plural = _('Servers')
-        ordering = ['location', 'name']
-        indexes = [
+        ordering: ClassVar[tuple[str, ...]] = ('location', 'name')
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=['status', 'server_type']),
             models.Index(fields=['location']),
             models.Index(fields=['primary_ip']),
-        ]
+        )
 
     def __str__(self) -> str:
         return f"{self.name} ({self.hostname})"
@@ -280,21 +280,21 @@ class Server(models.Model):
 class Service(models.Model):
     """Customer services (hosting accounts, domains, etc.)"""
 
-    STATUS_CHOICES = [
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('pending', _('Pending')),
         ('provisioning', _('Provisioning')),
         ('active', _('Active')),
         ('suspended', _('Suspended')),
         ('terminated', _('Terminated')),
         ('expired', _('Expired')),
-    ]
+    )
 
-    BILLING_CYCLE_CHOICES = [
+    BILLING_CYCLE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('monthly', _('Monthly')),
         ('quarterly', _('Quarterly')),
         ('semi_annual', _('Semi-Annual')),
         ('annual', _('Annual')),
-    ]
+    )
 
     # Basic information
     customer = models.ForeignKey(
@@ -380,8 +380,8 @@ class Service(models.Model):
         db_table = 'services'
         verbose_name = _('Service')
         verbose_name_plural = _('Services')
-        ordering = ['-created_at']
-        indexes = [
+        ordering: ClassVar[tuple[str, ...]] = ('-created_at',)
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=['customer', 'status']),
             models.Index(fields=['server', 'status']),
             models.Index(fields=['status', 'expires_at']),
@@ -393,7 +393,7 @@ class Service(models.Model):
             models.Index(fields=['service_plan', 'status']),
             # 🚀 Performance: Billing cycle reporting
             models.Index(fields=['billing_cycle', 'status', '-created_at']),
-        ]
+        )
 
     def __str__(self) -> str:
         return f"{self.service_name} - {self.customer.get_display_name()}"
@@ -460,22 +460,22 @@ class Service(models.Model):
 class ProvisioningTask(models.Model):
     """Automated provisioning tasks queue"""
 
-    TASK_STATUS_CHOICES = [
+    TASK_STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('pending', _('Pending')),
         ('running', _('Running')),
         ('completed', _('Completed')),
         ('failed', _('Failed')),
         ('retrying', _('Retrying')),
-    ]
+    )
 
-    TASK_TYPE_CHOICES = [
+    TASK_TYPE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('create_service', _('Create Service')),
         ('suspend_service', _('Suspend Service')),
         ('unsuspend_service', _('Unsuspend Service')),
         ('terminate_service', _('Terminate Service')),
         ('update_service', _('Update Service')),
         ('backup_service', _('Backup Service')),
-    ]
+    )
 
     service = models.ForeignKey(
         Service,
@@ -519,8 +519,8 @@ class ProvisioningTask(models.Model):
         db_table = 'provisioning_tasks'
         verbose_name = _('Provisioning Task')
         verbose_name_plural = _('Provisioning Tasks')
-        ordering = ['-created_at']
-        indexes = [
+        ordering: ClassVar[tuple[str, ...]] = ('-created_at',)
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=['status', 'created_at']),
             models.Index(fields=['service', 'task_type']),
             models.Index(fields=['next_retry_at']),
@@ -528,7 +528,7 @@ class ProvisioningTask(models.Model):
             models.Index(fields=['status', 'next_retry_at']),
             # 🚀 Performance: Task type analytics and monitoring
             models.Index(fields=['task_type', 'status', '-created_at']),
-        ]
+        )
 
     def __str__(self) -> str:
         return f"{self.get_task_type_display()} - {self.service.service_name}"
@@ -563,20 +563,20 @@ class ServiceRelationship(models.Model):
     - Service dependencies and billing relationships
     """
 
-    RELATIONSHIP_TYPE_CHOICES = [
+    RELATIONSHIP_TYPE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('addon', _('🔧 Add-on Service')),           # Backup, SSL, monitoring
         ('included', _('📦 Included Service')),       # Free subdomain, basic SSL
         ('dependency', _('⚡ Required Dependency')),  # Domain for hosting
         ('upgrade', _('⬆️ Service Upgrade')),         # VPS to dedicated server
         ('bundle', _('🎁 Bundle Component')),         # Part of package deal
-    ]
+    )
 
-    BILLING_IMPACT_CHOICES = [
+    BILLING_IMPACT_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('separate', _('💳 Billed Separately')),      # Additional charges
         ('included', _('🆓 Included in Parent')),     # No extra cost
         ('discounted', _('💰 Discounted Rate')),      # Reduced pricing
         ('prorated', _('📊 Prorated Billing')),       # Time-based billing
-    ]
+    )
 
     # Core relationship
     parent_service = models.ForeignKey(
@@ -648,10 +648,10 @@ class ServiceRelationship(models.Model):
     class Meta:
         verbose_name = _('🔗 Service Relationship')
         verbose_name_plural = _('🔗 Service Relationships')
-        unique_together = ('parent_service', 'child_service')
-        ordering = ['-created_at']
+        unique_together: ClassVar[list[list[str]]] = ('parent_service', 'child_service')
+        ordering: ClassVar[tuple[str, ...]] = ('-created_at',)
 
-        indexes = [
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(
                 fields=['parent_service', 'relationship_type'],
                 name='service_rel_parent_idx'
@@ -660,7 +660,7 @@ class ServiceRelationship(models.Model):
                 fields=['child_service', 'is_required'],
                 name='service_rel_child_idx'
             ),
-        ]
+        )
 
     def __str__(self) -> str:
         return f"{self.parent_service} → {self.child_service} ({self.get_relationship_type_display()})"
@@ -715,13 +715,13 @@ class ServiceDomain(models.Model):
     - SSL certificate domain mapping
     """
 
-    DOMAIN_TYPE_CHOICES = [
+    DOMAIN_TYPE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('primary', _('🎯 Primary Domain')),          # Main website domain
         ('addon', _('➕ Add-on Domain')),            # Additional domain on same hosting
         ('subdomain', _('🔗 Subdomain')),            # blog.example.com
         ('redirect', _('↩️ Domain Redirect')),        # Forward to primary domain
         ('parking', _('🅿️ Parked Domain')),          # Placeholder page
-    ]
+    )
 
     # Core relationships
     service = models.ForeignKey(
@@ -806,10 +806,10 @@ class ServiceDomain(models.Model):
     class Meta:
         verbose_name = _('🌐 Service Domain')
         verbose_name_plural = _('🌐 Service Domains')
-        unique_together = ('service', 'domain', 'subdomain')
-        ordering = ['-created_at']
+        unique_together: ClassVar[list[list[str]]] = ('service', 'domain', 'subdomain')
+        ordering: ClassVar[tuple[str, ...]] = ('-created_at',)
 
-        indexes = [
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(
                 fields=['service', 'domain_type'],
                 name='service_domain_type_idx'
@@ -818,7 +818,7 @@ class ServiceDomain(models.Model):
                 fields=['domain', 'is_active'],
                 name='service_domain_active_idx'
             ),
-        ]
+        )
 
     def __str__(self) -> str:
         domain_name = self.full_domain_name
@@ -858,20 +858,20 @@ class ServiceGroup(models.Model):
     - Development/staging environments
     """
 
-    GROUP_TYPE_CHOICES = [
+    GROUP_TYPE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('package', _('📦 Hosting Package')),         # VPS + Domain + SSL
         ('cluster', _('🔗 Service Cluster')),         # Load-balanced services
         ('bundle', _('🎁 Product Bundle')),           # Marketing bundle
         ('environment', _('🏗️ Environment')),         # Dev/staging/prod
         ('reseller', _('👥 Reseller Package')),       # Reseller hosting
-    ]
+    )
 
-    STATUS_CHOICES = [
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('active', _('🟢 Active')),
         ('suspended', _('🟡 Suspended')),
         ('cancelled', _('🔴 Cancelled')),
         ('pending', _('⏳ Pending Setup')),
-    ]
+    )
 
     # Basic information
     name = models.CharField(
@@ -933,9 +933,9 @@ class ServiceGroup(models.Model):
     class Meta:
         verbose_name = _('📦 Service Group')
         verbose_name_plural = _('📦 Service Groups')
-        ordering = ['-created_at']
+        ordering: ClassVar[tuple[str, ...]] = ('-created_at',)
 
-        indexes = [
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(
                 fields=['customer', 'status'],
                 name='service_group_customer_idx'
@@ -944,7 +944,7 @@ class ServiceGroup(models.Model):
                 fields=['group_type', 'status'],
                 name='service_group_type_idx'
             ),
-        ]
+        )
 
     def __str__(self) -> str:
         return f"{self.name} ({self.get_group_type_display()})"
@@ -970,12 +970,12 @@ class ServiceGroupMember(models.Model):
     - Custom billing rules per service
     """
 
-    MEMBER_ROLE_CHOICES = [
+    MEMBER_ROLE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('primary', _('🎯 Primary Service')),         # Main service in group
         ('dependency', _('⚡ Dependency')),           # Required for primary
         ('addon', _('🔧 Add-on')),                   # Optional enhancement
         ('backup', _('💾 Backup Service')),          # Backup/redundancy
-    ]
+    )
 
     # Core relationships
     group = models.ForeignKey(
@@ -1026,10 +1026,10 @@ class ServiceGroupMember(models.Model):
     class Meta:
         verbose_name = _('👥 Service Group Member')
         verbose_name_plural = _('👥 Service Group Members')
-        unique_together = ('group', 'service')
-        ordering = ['provision_order', 'joined_at']
+        unique_together: ClassVar[list[list[str]]] = ('group', 'service')
+        ordering: ClassVar[tuple[str, ...]] = ('provision_order', 'joined_at')
 
-        indexes = [
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(
                 fields=['group', 'provision_order'],
                 name='service_member_order_idx'
@@ -1038,7 +1038,7 @@ class ServiceGroupMember(models.Model):
                 fields=['service', 'is_active'],
                 name='service_member_active_idx'
             ),
-        ]
+        )
 
     def __str__(self) -> str:
         return f"{self.service} in {self.group} ({self.get_member_role_display()})"

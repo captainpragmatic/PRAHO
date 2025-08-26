@@ -4,6 +4,8 @@ Romanian hosting provider order management interface.
 """
 
 
+from typing import ClassVar
+
 from django.contrib import admin
 
 from .models import Order, OrderItem, OrderStatusHistory
@@ -13,20 +15,20 @@ from .models import Order, OrderItem, OrderStatusHistory
 class OrderAdmin(admin.ModelAdmin):
     """Admin interface for orders."""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'order_number', 'customer', 'status', 'total_cents',
         'currency', 'created_at'
-    ]
-    list_filter = [
+    )
+    list_filter: ClassVar[list[str]] = (
         'status', 'currency', 'created_at', 'updated_at'
-    ]
-    search_fields = [
+    )
+    search_fields: ClassVar[list[str]] = (
         'order_number', 'customer__company_name', 'customer_email',
         'billing_company_name'
-    ]
-    readonly_fields = ('created_at', 'updated_at', 'order_number')
+    )
+    readonly_fields: ClassVar[list[str]] = ('created_at', 'updated_at', 'order_number')
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         ('Order Information', {
             'fields': ('order_number', 'customer', 'status')
         }),
@@ -60,8 +62,8 @@ class OrderItemInline(admin.TabularInline):
     """Inline admin for order items."""
     model = OrderItem
     extra = 0
-    readonly_fields = ('created_at',)
-    fields = (
+    readonly_fields: ClassVar[list[str]] = ('created_at',)
+    fields: ClassVar[list[str]] = (
         'product', 'service', 'quantity', 'unit_price_cents',
         'line_total_cents', 'provisioning_status', 'created_at'
     )
@@ -75,17 +77,17 @@ OrderAdmin.inlines = [OrderItemInline]
 class OrderItemAdmin(admin.ModelAdmin):
     """Admin interface for order items."""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'order', 'product', 'quantity', 'unit_price_cents',
         'line_total_cents', 'provisioning_status', 'created_at'
-    ]
-    list_filter = ['provisioning_status', 'created_at']
-    search_fields = [
+    )
+    list_filter: ClassVar[list[str]] = ('provisioning_status', 'created_at')
+    search_fields: ClassVar[list[str]] = (
         'order__order_number', 'product__name', 'description'
-    ]
-    readonly_fields = ('created_at', 'updated_at')
+    )
+    readonly_fields: ClassVar[list[str]] = ('created_at', 'updated_at')
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         ('Order & Product', {
             'fields': ('order', 'product', 'service')
         }),
@@ -110,14 +112,14 @@ class OrderItemAdmin(admin.ModelAdmin):
 class OrderStatusHistoryAdmin(admin.ModelAdmin):
     """Admin interface for order status history."""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'order', 'old_status', 'new_status', 'changed_by', 'created_at'
-    ]
-    list_filter = ['old_status', 'new_status', 'created_at']
-    search_fields = ['order__order_number', 'notes']
-    readonly_fields = ('created_at',)
+    )
+    list_filter: ClassVar[list[str]] = ('old_status', 'new_status', 'created_at')
+    search_fields: ClassVar[list[str]] = ('order__order_number', 'notes')
+    readonly_fields: ClassVar[list[str]] = ('created_at',)
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         ('Status Change', {
             'fields': ('order', 'old_status', 'new_status', 'changed_by')
         }),

@@ -2,12 +2,16 @@
 Django admin configuration for Users app
 """
 
+from typing import ClassVar
+
 from django.contrib import admin, messages
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404, render
 from django.urls import path, reverse
 from django.utils.html import format_html
+
+from apps.common.constants import BACKUP_CODE_LOW_WARNING_THRESHOLD, USER_AGENT_DISPLAY_LIMIT
 
 from .mfa import MFAService
 from .models import CustomerMembership, User, UserLoginLog, UserProfile
@@ -17,27 +21,27 @@ from .models import CustomerMembership, User, UserLoginLog, UserProfile
 class UserAdmin(BaseUserAdmin):
     """Custom user admin with hybrid approach (system roles + customer memberships)"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'email', 'get_full_name', 'staff_role', 'is_staff_user',
         'primary_customer_name', 'two_factor_enabled', 'is_active',
         'last_login', 'date_joined'
-    ]
+    )
 
-    list_filter = [
+    list_filter: ClassVar[list[str]] = (
         'staff_role', 'two_factor_enabled', 'is_active',
         'is_staff', 'date_joined', 'last_login'
-    ]
+    )
 
-    search_fields = ['email', 'first_name', 'last_name']
+    search_fields: ClassVar[list[str]] = ('email', 'first_name', 'last_name')
 
-    actions = ['go_to_2fa_dashboard']
+    actions: ClassVar[list[str]] = ['go_to_2fa_dashboard']
 
     def go_to_2fa_dashboard(self, request, queryset):
         """Redirect to 2FA Dashboard"""
         return HttpResponseRedirect(reverse('admin:users_user_2fa_dashboard'))
     go_to_2fa_dashboard.short_description = "🔐 Go to 2FA Security Dashboard"
 
-    fieldsets = [
+    fieldsets: ClassVar[tuple] = [
         (None, {'fields': ('email', 'password')}),
         ('Personal info', {'fields': ('first_name', 'last_name', 'phone')}),
         ('Permissions', {
@@ -69,16 +73,16 @@ class UserAdmin(BaseUserAdmin):
         }),
     ]
 
-    add_fieldsets = [
+    add_fieldsets: ClassVar[list[tuple[str | None, dict[str, tuple[str, ...]]]]] = [
         (None, {
             'classes': ('wide',),
             'fields': ('email', 'password1', 'password2'),
         }),
     ]
 
-    ordering = ['email']
+    ordering: ClassVar[tuple[str, ...]] = ('email',)
 
-    readonly_fields = ['date_joined', 'last_login', 'created_at', 'updated_at', 'backup_codes_count', 'two_factor_actions']
+    readonly_fields: ClassVar[list[str]] = ('date_joined', 'last_login', 'created_at', 'updated_at', 'backup_codes_count', 'two_factor_actions')
 
     def is_staff_user(self, obj):
         """Check if user is system/staff user"""
@@ -106,7 +110,7 @@ class UserAdmin(BaseUserAdmin):
         count = len(obj.backup_tokens)
         if count == 0:
             return format_html('<span style="color: red; font-weight: bold;">0 (No backup codes!)</span>')
-        elif count <= 2:
+        elif count <= BACKUP_CODE_LOW_WARNING_THRESHOLD:
             return format_html('<span style="color: orange; font-weight: bold;">{} (Running low)</span>', count)
         else:
             return format_html('<span style="color: green;">{}</span>', count)
@@ -117,7 +121,7 @@ class UserAdmin(BaseUserAdmin):
         if not obj.two_factor_enabled:
             return format_html('<em>2FA not enabled</em>')
 
-        actions = []
+        actions: ClassVar[list[str]] = []
 
         # Disable 2FA action
         disable_url = reverse('admin:users_user_disable_2fa', args=[obj.id])
@@ -259,19 +263,19 @@ class UserAdmin(BaseUserAdmin):
 class UserProfileAdmin(admin.ModelAdmin):
     """User profile admin"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'user', 'preferred_language', 'timezone',
         'email_notifications', 'sms_notifications'
-    ]
+    )
 
-    list_filter = [
+    list_filter: ClassVar[list[str]] = (
         'preferred_language', 'timezone', 'email_notifications',
         'sms_notifications', 'marketing_emails'
-    ]
+    )
 
-    search_fields = ['user__email', 'user__first_name', 'user__last_name']
+    search_fields: ClassVar[list[str]] = ('user__email', 'user__first_name', 'user__last_name')
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         ('User', {
             'fields': ('user',)
         }),
@@ -286,25 +290,25 @@ class UserProfileAdmin(admin.ModelAdmin):
         }),
     )
 
-    readonly_fields = ['created_at', 'updated_at']
+    readonly_fields: ClassVar[list[str]] = ('created_at', 'updated_at')
 
 
 @admin.register(CustomerMembership)
 class CustomerMembershipAdmin(admin.ModelAdmin):
     """Customer membership admin for PostgreSQL-aligned user-customer relationships"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'user', 'customer', 'role', 'is_primary',
         'created_at', 'created_by'
-    ]
+    )
 
-    list_filter = ['role', 'is_primary', 'created_at']
+    list_filter: ClassVar[list[str]] = ('role', 'is_primary', 'created_at')
 
-    search_fields = [
+    search_fields: ClassVar[list[str]] = (
         'user__email', 'customer__name', 'customer__company_name'
-    ]
+    )
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         ('Membership', {
             'fields': ('user', 'customer', 'role', 'is_primary')
         }),
@@ -313,7 +317,7 @@ class CustomerMembershipAdmin(admin.ModelAdmin):
         }),
     )
 
-    readonly_fields = ['created_at', 'updated_at']
+    readonly_fields: ClassVar[list[str]] = ('created_at', 'updated_at')
 
     def get_queryset(self, request):
         return super().get_queryset(request).select_related(
@@ -325,23 +329,23 @@ class CustomerMembershipAdmin(admin.ModelAdmin):
 class UserLoginLogAdmin(admin.ModelAdmin):
     """User login log admin for security monitoring"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'get_user_display', 'timestamp', 'status', 'ip_address',
         'get_location', 'get_user_agent_short'
-    ]
+    )
 
-    list_filter = [
+    list_filter: ClassVar[list[str]] = (
         'status', 'timestamp', 'country', 'city'
-    ]
+    )
 
-    search_fields = [
+    search_fields: ClassVar[list[str]] = (
         'user__email', 'ip_address', 'user_agent', 'country', 'city'
-    ]
+    )
 
-    readonly_fields = [
+    readonly_fields: ClassVar[list[str]] = (
         'user', 'timestamp', 'ip_address', 'user_agent',
         'status', 'country', 'city'
-    ]
+    )
 
     date_hierarchy = 'timestamp'
 
@@ -365,8 +369,8 @@ class UserLoginLogAdmin(admin.ModelAdmin):
     def get_user_agent_short(self, obj):
         """Display shortened user agent"""
         ua = obj.user_agent
-        if len(ua) > 50:
-            return f"{ua[:47]}..."
+        if len(ua) > USER_AGENT_DISPLAY_LIMIT:
+            return f"{ua[:USER_AGENT_DISPLAY_LIMIT-3]}..."
         return ua
     get_user_agent_short.short_description = 'User Agent'
 

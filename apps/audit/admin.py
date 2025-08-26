@@ -4,12 +4,16 @@ Romanian PRAHO Platform audit trail management with security focus.
 """
 
 
+from typing import Any, ClassVar
+
 from django.contrib import admin
 from django.db.models.query import QuerySet
 from django.http import HttpRequest
 from django.utils.html import format_html
 from django.utils.safestring import SafeString
 from django.utils.translation import gettext_lazy as _
+
+from apps.common.constants import FILE_SIZE_CONVERSION_FACTOR_FLOAT
 
 from .models import AuditEvent, ComplianceLog, DataExport
 
@@ -18,7 +22,7 @@ from .models import AuditEvent, ComplianceLog, DataExport
 class AuditEventAdmin(admin.ModelAdmin):
     """Audit event admin interface"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'timestamp',
         'action',
         'user_display',
@@ -26,22 +30,22 @@ class AuditEventAdmin(admin.ModelAdmin):
         'object_id',
         'ip_address',
         'actor_type',
-    ]
-    list_filter = [
+    )
+    list_filter: ClassVar[list[str]] = (
         'action',
         'actor_type',
         'timestamp',
         'content_type',
-    ]
-    search_fields = [
+    )
+    search_fields: ClassVar[list[str]] = (
         'user__email',
         'user__first_name',
         'user__last_name',
         'description',
         'ip_address',
-    ]
+    )
     date_hierarchy = 'timestamp'
-    readonly_fields = [
+    readonly_fields: ClassVar[list[str]] = (
         'id',
         'timestamp',
         'ip_address',
@@ -58,9 +62,9 @@ class AuditEventAdmin(admin.ModelAdmin):
         'request_id',
         'session_key',
         'metadata',
-    ]
+    )
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple[tuple[str, dict[str, Any]], ...]] = (
         (_('Event Information'), {
             'fields': (
                 'id',
@@ -124,7 +128,7 @@ class AuditEventAdmin(admin.ModelAdmin):
 class DataExportAdmin(admin.ModelAdmin):
     """Data export admin interface for GDPR compliance"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'requested_at',
         'export_type',
         'requested_by',
@@ -133,21 +137,21 @@ class DataExportAdmin(admin.ModelAdmin):
         'record_count',
         'expires_at',
         'download_count',
-    ]
-    list_filter = [
+    )
+    list_filter: ClassVar[list[str]] = (
         'export_type',
         'status',
         'requested_at',
         'expires_at',
-    ]
-    search_fields = [
+    )
+    search_fields: ClassVar[list[str]] = (
         'requested_by__email',
         'requested_by__first_name',
         'requested_by__last_name',
         'export_type',
-    ]
+    )
     date_hierarchy = 'requested_at'
-    readonly_fields = [
+    readonly_fields: ClassVar[list[str]] = (
         'id',
         'requested_at',
         'started_at',
@@ -156,9 +160,9 @@ class DataExportAdmin(admin.ModelAdmin):
         'file_size',
         'record_count',
         'download_count',
-    ]
+    )
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple[tuple[str, dict[str, Any]], ...]] = (
         (_('Export Request'), {
             'fields': (
                 'id',
@@ -198,9 +202,9 @@ class DataExportAdmin(admin.ModelAdmin):
 
         size = obj.file_size
         for unit in ['B', 'KB', 'MB', 'GB']:
-            if size < 1024.0:
+            if size < FILE_SIZE_CONVERSION_FACTOR_FLOAT:
                 return f"{size:.1f} {unit}"
-            size /= 1024.0
+            size /= FILE_SIZE_CONVERSION_FACTOR_FLOAT
         return f"{size:.1f} TB"
     file_size_display.short_description = _('File Size')
 
@@ -217,27 +221,27 @@ class DataExportAdmin(admin.ModelAdmin):
 class ComplianceLogAdmin(admin.ModelAdmin):
     """Romanian compliance logging admin"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'timestamp',
         'compliance_type_display',
         'reference_id',
         'status_display',
         'user_display',
-    ]
-    list_filter = [
+    )
+    list_filter: ClassVar[list[str]] = (
         'compliance_type',
         'status',
         'timestamp',
-    ]
-    search_fields = [
+    )
+    search_fields: ClassVar[list[str]] = (
         'reference_id',
         'description',
         'user__email',
         'user__first_name',
         'user__last_name',
-    ]
+    )
     date_hierarchy = 'timestamp'
-    readonly_fields = [
+    readonly_fields: ClassVar[list[str]] = (
         'id',
         'timestamp',
         'compliance_type',
@@ -247,9 +251,9 @@ class ComplianceLogAdmin(admin.ModelAdmin):
         'status',
         'evidence',
         'metadata',
-    ]
+    )
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple[tuple[str, dict[str, Any]], ...]] = (
         (_('Compliance Event'), {
             'fields': (
                 'id',

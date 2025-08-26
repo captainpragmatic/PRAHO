@@ -4,6 +4,7 @@ Romanian hosting provider billing management with VAT compliance.
 """
 
 from decimal import Decimal
+from typing import ClassVar
 
 from django.contrib import admin
 from django.urls import reverse
@@ -11,6 +12,12 @@ from django.utils import timezone
 from django.utils.html import format_html
 from django.utils.safestring import SafeString
 from django.utils.translation import gettext_lazy as _
+
+from apps.common.constants import (
+    ADMIN_DISPLAY_ITEM_LIMIT,
+    SUCCESS_RATE_EXCELLENT_THRESHOLD,
+    SUCCESS_RATE_WARNING_THRESHOLD,
+)
 
 from .models import (
     CreditLedger,
@@ -38,18 +45,18 @@ from .models import (
 class CurrencyAdmin(admin.ModelAdmin):
     """Currency management"""
 
-    list_display = ['code', 'symbol', 'decimals']
-    search_fields = ['code', 'symbol']
-    ordering = ['code']
+    list_display: ClassVar[list[str]] = ('code', 'symbol', 'decimals')
+    search_fields: ClassVar[list[str]] = ('code', 'symbol')
+    ordering: ClassVar[tuple[str, ...]] = ('code',)
 
 
 @admin.register(FXRate)
 class FXRateAdmin(admin.ModelAdmin):
     """Foreign exchange rates"""
 
-    list_display = ['base_code', 'quote_code', 'rate', 'as_of']
-    list_filter = ['base_code', 'quote_code', 'as_of']
-    ordering = ['-as_of', 'base_code', 'quote_code']
+    list_display: ClassVar[list[str]] = ('base_code', 'quote_code', 'rate', 'as_of')
+    list_filter: ClassVar[list[str]] = ('base_code', 'quote_code', 'as_of')
+    ordering: ClassVar[tuple[str, ...]] = ('-as_of', 'base_code', 'quote_code')
     date_hierarchy = 'as_of'
 
 
@@ -61,8 +68,8 @@ class FXRateAdmin(admin.ModelAdmin):
 class InvoiceSequenceAdmin(admin.ModelAdmin):
     """Invoice numbering sequences"""
 
-    list_display = ['scope', 'last_value', 'next_number_preview']
-    search_fields = ['scope']
+    list_display: ClassVar[list[str]] = ('scope', 'last_value', 'next_number_preview')
+    search_fields: ClassVar[tuple[str, ...]] = ('scope',)
 
     def next_number_preview(self, obj: InvoiceSequence) -> str:
         """Preview next number without incrementing"""
@@ -74,8 +81,8 @@ class InvoiceSequenceAdmin(admin.ModelAdmin):
 class ProformaSequenceAdmin(admin.ModelAdmin):
     """Proforma invoice numbering sequences"""
 
-    list_display = ['scope', 'last_value', 'next_number_preview']
-    search_fields = ['scope']
+    list_display: ClassVar[list[str]] = ('scope', 'last_value', 'next_number_preview')
+    search_fields: ClassVar[tuple[str, ...]] = ('scope',)
 
     def next_number_preview(self, obj: ProformaSequence) -> str:
         """Preview next number without incrementing"""
@@ -91,7 +98,7 @@ class ProformaLineInline(admin.TabularInline):
     """Proforma invoice line items"""
     model = ProformaLine
     extra = 0
-    readonly_fields = ['line_total_display']
+    readonly_fields: ClassVar[tuple[str, ...]] = ('line_total_display',)
 
     def line_total_display(self, obj: ProformaLine) -> str:
         if obj.pk:
@@ -104,7 +111,7 @@ class ProformaLineInline(admin.TabularInline):
 class ProformaInvoiceAdmin(admin.ModelAdmin):
     """Proforma invoice management"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'number',
         'customer',
         'total_display',
@@ -112,30 +119,30 @@ class ProformaInvoiceAdmin(admin.ModelAdmin):
         'valid_until',
         'is_expired_display',
         'created_at',
-    ]
-    list_filter = [
+    )
+    list_filter: ClassVar[list[str]] = (
         'currency',
         'created_at',
         'valid_until',
-    ]
-    search_fields = [
+    )
+    search_fields: ClassVar[list[str]] = (
         'number',
         'customer__name',
         'customer__company_name',
         'customer__primary_email',
         'bill_to_name',
-    ]
+    )
     date_hierarchy = 'created_at'
-    readonly_fields = [
+    readonly_fields: ClassVar[list[str]] = (
         'number',
         'subtotal_display',
         'tax_display',
         'total_display',
         'created_at',
-    ]
-    inlines = [ProformaLineInline]
+    )
+    inlines: ClassVar[list[type[admin.TabularInline]]] = [ProformaLineInline]
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         (_('Proforma Information'), {
             'fields': (
                 'number',
@@ -202,7 +209,7 @@ class InvoiceLineInline(admin.TabularInline):
     """Invoice line items"""
     model = InvoiceLine
     extra = 0
-    readonly_fields = ['line_total_display']
+    readonly_fields: ClassVar[tuple[str, ...]] = ('line_total_display',)
 
     def line_total_display(self, obj) -> str:
         if obj.pk:
@@ -215,7 +222,7 @@ class InvoiceLineInline(admin.TabularInline):
 class InvoiceAdmin(admin.ModelAdmin):
     """Romanian compliant invoice management"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'number',
         'customer',
         'status_display',
@@ -224,25 +231,25 @@ class InvoiceAdmin(admin.ModelAdmin):
         'issued_at',
         'due_at',
         'efactura_status',
-    ]
-    list_filter = [
+    )
+    list_filter: ClassVar[list[str]] = (
         'status',
         'currency',
         'issued_at',
         'due_at',
         'efactura_sent',
         'created_at',
-    ]
-    search_fields = [
+    )
+    search_fields: ClassVar[list[str]] = (
         'number',
         'customer__name',
         'customer__company_name',
         'customer__primary_email',
         'bill_to_name',
         'efactura_id',
-    ]
+    )
     date_hierarchy = 'issued_at'
-    readonly_fields = [
+    readonly_fields: ClassVar[list[str]] = (
         'number',
         'subtotal_display',
         'tax_display',
@@ -251,10 +258,10 @@ class InvoiceAdmin(admin.ModelAdmin):
         'updated_at',
         'locked_at',
         'remaining_amount_display',
-    ]
-    inlines = [InvoiceLineInline]
+    )
+    inlines: ClassVar[list] = [InvoiceLineInline]
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         (_('Invoice Information'), {
             'fields': (
                 'number',
@@ -371,7 +378,7 @@ class InvoiceAdmin(admin.ModelAdmin):
         return format_html('<span style="color: orange;">⏳ Pending</span>')
     efactura_status.short_description = _('e-Factura')
 
-    actions = ['mark_as_paid', 'send_efactura']
+    actions: ClassVar[list[str]] = ['mark_as_paid', 'send_efactura']
 
     def mark_as_paid(self, request, queryset) -> None:
         """Mark selected invoices as paid"""
@@ -396,7 +403,7 @@ class InvoiceAdmin(admin.ModelAdmin):
 class PaymentAdmin(admin.ModelAdmin):
     """Payment tracking administration"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'received_at',
         'customer',
         'invoice',
@@ -405,29 +412,29 @@ class PaymentAdmin(admin.ModelAdmin):
         'method',
         'status_display',
         'reference_number',
-    ]
-    list_filter = [
+    )
+    list_filter: ClassVar[list[str]] = (
         'status',
         'method',
         'currency',
         'received_at',
         'created_at',
-    ]
-    search_fields = [
+    )
+    search_fields: ClassVar[list[str]] = (
         'customer__name',
         'customer__company_name',
         'customer__primary_email',
         'invoice__number',
         'gateway_txn_id',
         'reference_number',
-    ]
+    )
     date_hierarchy = 'received_at'
-    readonly_fields = [
+    readonly_fields: ClassVar[list[str]] = (
         'amount_display',
         'created_at',
-    ]
+    )
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         (_('Payment Information'), {
             'fields': (
                 'customer',
@@ -482,7 +489,7 @@ class PaymentAdmin(admin.ModelAdmin):
 class CreditLedgerAdmin(admin.ModelAdmin):
     """Customer credit/balance tracking"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'created_at',
         'customer',
         'delta_display',
@@ -490,20 +497,20 @@ class CreditLedgerAdmin(admin.ModelAdmin):
         'invoice',
         'payment',
         'created_by',
-    ]
-    list_filter = [
+    )
+    list_filter: ClassVar[list[str]] = (
         'created_at',
-    ]
-    search_fields = [
+    )
+    search_fields: ClassVar[list[str]] = (
         'customer__name',
         'customer__company_name',
         'customer__primary_email',
         'reason',
-    ]
+    )
     date_hierarchy = 'created_at'
-    readonly_fields = ['created_at', 'delta_display']
+    readonly_fields: ClassVar[list[str]] = ('created_at', 'delta_display')
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         (_('Credit Entry'), {
             'fields': (
                 'customer',
@@ -548,18 +555,18 @@ class CreditLedgerAdmin(admin.ModelAdmin):
 class TaxRuleAdmin(admin.ModelAdmin):
     """Tax rule management for EU VAT compliance"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'country_code', 'tax_type', 'rate_display', 'valid_from',
         'valid_to', 'is_eu_member', 'reverse_charge_eligible', 'is_active_now'
-    ]
-    list_filter = [
+    )
+    list_filter: ClassVar[list[str]] = (
         'tax_type', 'is_eu_member', 'reverse_charge_eligible',
         'applies_to_b2b', 'applies_to_b2c', 'vies_required'
-    ]
-    search_fields = ['country_code', 'region']
+    )
+    search_fields: ClassVar[list[str]] = ('country_code', 'region')
     date_hierarchy = 'valid_from'
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         ('Geographic Scope', {
             'fields': ('country_code', 'region')
         }),
@@ -582,7 +589,7 @@ class TaxRuleAdmin(admin.ModelAdmin):
         })
     )
 
-    readonly_fields = ('created_at', 'updated_at')
+    readonly_fields: ClassVar[list[str]] = ('created_at', 'updated_at')
 
     def rate_display(self, obj) -> str:
         """Display rate as percentage"""
@@ -606,18 +613,18 @@ class TaxRuleAdmin(admin.ModelAdmin):
 class VATValidationAdmin(admin.ModelAdmin):
     """VAT number validation results"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'full_vat_number', 'company_name', 'is_valid', 'is_active',
         'validation_date', 'validation_source', 'is_expired_now'
-    ]
-    list_filter = [
+    )
+    list_filter: ClassVar[list[str]] = (
         'is_valid', 'is_active', 'validation_source', 'country_code'
-    ]
-    search_fields = ['full_vat_number', 'vat_number', 'company_name']
-    readonly_fields = ('validation_date',)
+    )
+    search_fields: ClassVar[list[str]] = ('full_vat_number', 'vat_number', 'company_name')
+    readonly_fields: ClassVar[list[str]] = ('validation_date',)
     date_hierarchy = 'validation_date'
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         ('VAT Number', {
             'fields': ('country_code', 'vat_number', 'full_vat_number')
         }),
@@ -652,14 +659,14 @@ class VATValidationAdmin(admin.ModelAdmin):
 class PaymentRetryPolicyAdmin(admin.ModelAdmin):
     """Payment retry policy management"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'name', 'max_attempts', 'retry_schedule_display',
         'suspend_after_days', 'is_default', 'is_active'
-    ]
-    list_filter = ['is_default', 'is_active', 'send_dunning_emails']
-    search_fields = ['name', 'description']
+    )
+    list_filter: ClassVar[list[str]] = ('is_default', 'is_active', 'send_dunning_emails')
+    search_fields: ClassVar[list[str]] = ('name', 'description')
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         ('Policy Information', {
             'fields': ('name', 'description', 'is_default', 'is_active')
         }),
@@ -678,15 +685,15 @@ class PaymentRetryPolicyAdmin(admin.ModelAdmin):
         })
     )
 
-    readonly_fields = ('created_at', 'updated_at')
+    readonly_fields: ClassVar[list[str]] = ('created_at', 'updated_at')
 
     def retry_schedule_display(self, obj):
         """Display retry schedule in readable format"""
         if not obj.retry_intervals_days:
             return "No retries"
-        intervals = obj.retry_intervals_days[:5]  # Show first 5
+        intervals = obj.retry_intervals_days[:ADMIN_DISPLAY_ITEM_LIMIT]  # Show first items
         schedule = ", ".join(f"Day {day}" for day in intervals)
-        if len(obj.retry_intervals_days) > 5:
+        if len(obj.retry_intervals_days) > ADMIN_DISPLAY_ITEM_LIMIT:
             schedule += "..."
         return schedule
     retry_schedule_display.short_description = _('Retry Schedule')
@@ -701,18 +708,18 @@ class PaymentRetryPolicyAdmin(admin.ModelAdmin):
 class PaymentRetryAttemptAdmin(admin.ModelAdmin):
     """Payment retry attempt tracking"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'payment_link', 'attempt_number', 'status', 'scheduled_at',
         'executed_at', 'dunning_email_sent', 'policy'
-    ]
-    list_filter = [
+    )
+    list_filter: ClassVar[list[str]] = (
         'status', 'policy', 'dunning_email_sent', 'scheduled_at'
-    ]
-    search_fields = ['payment__id', 'failure_reason']
-    readonly_fields = ('created_at', 'updated_at')
+    )
+    search_fields: ClassVar[list[str]] = ('payment__id', 'failure_reason')
+    readonly_fields: ClassVar[list[str]] = ('created_at', 'updated_at')
     date_hierarchy = 'scheduled_at'
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         ('Retry Information', {
             'fields': ('payment', 'policy', 'attempt_number')
         }),
@@ -744,19 +751,19 @@ class PaymentRetryAttemptAdmin(admin.ModelAdmin):
 class PaymentCollectionRunAdmin(admin.ModelAdmin):
     """Payment collection run monitoring"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'started_at', 'run_type', 'status', 'duration_display',
         'success_rate_display', 'amount_recovered_display', 'triggered_by'
-    ]
-    list_filter = ['run_type', 'status', 'started_at']
-    readonly_fields = (
+    )
+    list_filter: ClassVar[list[str]] = ('run_type', 'status', 'started_at')
+    readonly_fields: ClassVar[list[str]] = (
         'started_at', 'completed_at', 'total_scheduled', 'total_processed',
         'total_successful', 'total_failed', 'amount_recovered_cents',
         'fees_charged_cents'
     )
     date_hierarchy = 'started_at'
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         ('Run Information', {
             'fields': ('run_type', 'triggered_by', 'status')
         }),
@@ -799,7 +806,7 @@ class PaymentCollectionRunAdmin(admin.ModelAdmin):
             return "N/A"
 
         rate = (obj.total_successful / obj.total_processed) * 100
-        color = "green" if rate >= 50 else "orange" if rate >= 25 else "red"
+        color = "green" if rate >= SUCCESS_RATE_EXCELLENT_THRESHOLD else "orange" if rate >= SUCCESS_RATE_WARNING_THRESHOLD else "red"
         return format_html(
             '<span style="color: {};">{:.1f}%</span>',
             color, rate

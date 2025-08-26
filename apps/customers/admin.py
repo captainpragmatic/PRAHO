@@ -3,6 +3,8 @@ Django admin configuration for Customers app
 """
 
 
+from typing import ClassVar
+
 from django.contrib import admin
 from django.utils.translation import gettext_lazy as _
 
@@ -13,20 +15,20 @@ from .models import Customer, CustomerAddress, CustomerBillingProfile
 class CustomerAdmin(admin.ModelAdmin):
     """Customer admin with Romanian business support"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'name', 'customer_type', 'primary_email', 'status',
         'company_name', 'created_at'
-    ]
+    )
 
-    list_filter = [
+    list_filter: ClassVar[list[str]] = (
         'customer_type', 'status', 'created_at', 'updated_at'
-    ]
+    )
 
-    search_fields = [
+    search_fields: ClassVar[list[str]] = (
         'name', 'company_name', 'primary_email', 'primary_phone'
-    ]
+    )
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         (_('Basic Information'), {
             'fields': ('name', 'customer_type', 'company_name', 'status')
         }),
@@ -48,24 +50,24 @@ class CustomerAdmin(admin.ModelAdmin):
         })
     )
 
-    readonly_fields = ['created_at', 'updated_at']
+    readonly_fields: ClassVar[list[str]] = ('created_at', 'updated_at')
 
 
 @admin.register(CustomerAddress)
 class CustomerAddressAdmin(admin.ModelAdmin):
     """Customer address admin"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'customer', 'address_type', 'county', 'city', 'is_current'
-    ]
+    )
 
-    list_filter = ['address_type', 'county', 'is_current']
+    list_filter: ClassVar[list[str]] = ('address_type', 'county', 'is_current')
 
-    search_fields = [
+    search_fields: ClassVar[list[str]] = (
         'customer__name', 'address_line1', 'city', 'county'
-    ]
+    )
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         (_('Customer'), {
             'fields': ('customer', 'address_type', 'is_current')
         }),
@@ -85,15 +87,15 @@ class CustomerAddressAdmin(admin.ModelAdmin):
 class CustomerBillingProfileAdmin(admin.ModelAdmin):
     """Customer billing profile admin"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'customer', 'payment_terms', 'preferred_currency', 'auto_payment_enabled'
-    ]
+    )
 
-    list_filter = ['payment_terms', 'preferred_currency', 'auto_payment_enabled']
+    list_filter: ClassVar[list[str]] = ('payment_terms', 'preferred_currency', 'auto_payment_enabled')
 
-    search_fields = ['customer__name']
+    search_fields: ClassVar[tuple[str, ...]] = ('customer__name',)
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         (_('Customer'), {
             'fields': ('customer',)
         }),

@@ -2,7 +2,7 @@ import hashlib
 import json
 import uuid
 from datetime import timedelta
-from typing import Any
+from typing import Any, ClassVar
 
 from django.core.validators import MinValueValidator
 from django.db import models
@@ -28,14 +28,14 @@ class WebhookEvent(models.Model):
     double provisioning, and data corruption from retried webhooks.
     """
 
-    STATUS_CHOICES = [
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('pending', _('⏳ Pending')),
         ('processed', _('✅ Processed')),
         ('failed', _('❌ Failed')),
         ('skipped', _('⏭️ Skipped')),  # Duplicate or irrelevant
-    ]
+    )
 
-    SOURCE_CHOICES = [
+    SOURCE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('stripe', _('💳 Stripe')),
         ('paypal', _('🟡 PayPal')),
         ('virtualmin', _('🖥️ Virtualmin')),
@@ -46,7 +46,7 @@ class WebhookEvent(models.Model):
         ('bank_bcr', _('🏦 BCR')),
         ('efactura', _('🇷🇴 e-Factura')),
         ('other', _('🔌 Other')),
-    ]
+    )
 
     # Core identification
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -132,9 +132,9 @@ class WebhookEvent(models.Model):
         verbose_name_plural = _('🔄 Webhook Events')
 
         # Prevent duplicate processing
-        unique_together = ('source', 'event_id')
+        unique_together: ClassVar[list[list[str]]] = ('source', 'event_id')
 
-        indexes = [
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             # Query pending webhooks for processing
             models.Index(
                 fields=['status', 'received_at'],
@@ -152,9 +152,9 @@ class WebhookEvent(models.Model):
                 fields=['source', 'event_type', 'received_at'],
                 name='webhook_source_type_idx'
             ),
-        ]
+        )
 
-        ordering = ['-received_at']
+        ordering: ClassVar[tuple[str, ...]] = ('-received_at',)
 
     def __str__(self) -> str:
         return f"🔄 {self.get_source_display()} | {self.event_type} | {self.status}"
@@ -247,12 +247,12 @@ class WebhookDelivery(models.Model):
     - domain.registered, domain.expired
     """
 
-    STATUS_CHOICES = [
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('pending', _('⏳ Pending')),
         ('delivered', _('✅ Delivered')),
         ('failed', _('❌ Failed')),
         ('disabled', _('🚫 Disabled')),
-    ]
+    )
 
     # Core identification
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -303,9 +303,9 @@ class WebhookDelivery(models.Model):
     class Meta:
         verbose_name = _('📤 Webhook Delivery')
         verbose_name_plural = _('📤 Webhook Deliveries')
-        ordering = ['-scheduled_at']
+        ordering: ClassVar[tuple[str, ...]] = ('-scheduled_at',)
 
-        indexes = [
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(
                 fields=['status', 'scheduled_at'],
                 name='delivery_pending_idx'
@@ -314,7 +314,7 @@ class WebhookDelivery(models.Model):
                 fields=['customer', 'event_type', 'scheduled_at'],
                 name='delivery_customer_idx'
             ),
-        ]
+        )
 
     def __str__(self) -> str:
         return f"📤 {self.customer} | {self.event_type} | {self.status}"

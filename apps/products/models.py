@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import uuid
 from decimal import Decimal
+from typing import ClassVar
 
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
@@ -50,7 +51,7 @@ class Product(models.Model):
     )
 
     # Product categorization
-    PRODUCT_TYPES = [
+    PRODUCT_TYPES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('shared_hosting', _('Shared Hosting')),
         ('vps', _('VPS')),
         ('dedicated', _('Dedicated Server')),
@@ -61,7 +62,7 @@ class Product(models.Model):
         ('addon', _('Add-on Service')),
         ('license', _('Software License')),
         ('support', _('Support Package')),
-    ]
+    )
     product_type = models.CharField(
         max_length=30,
         choices=PRODUCT_TYPES,
@@ -142,13 +143,13 @@ class Product(models.Model):
         db_table = 'products'
         verbose_name = _('Product')
         verbose_name_plural = _('Products')
-        ordering = ['sort_order', 'name']
-        indexes = [
+        ordering: ClassVar[tuple[str, ...]] = ('sort_order', 'name')
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=['slug']),
             models.Index(fields=['product_type', 'is_active']),
             models.Index(fields=['is_active', 'is_public']),
             models.Index(fields=['sort_order']),
-        ]
+        )
 
     def __str__(self) -> str:
         return self.name
@@ -192,7 +193,7 @@ class ProductPrice(models.Model):
     )
 
     # Billing configuration
-    BILLING_PERIODS = [
+    BILLING_PERIODS: ClassVar[tuple[tuple[str, str], ...]] = (
         ('once', _('One Time')),
         ('monthly', _('Monthly')),
         ('quarterly', _('Quarterly')),
@@ -200,7 +201,7 @@ class ProductPrice(models.Model):
         ('annual', _('Annual')),
         ('biennial', _('Biennial')),
         ('triennial', _('Triennial')),
-    ]
+    )
     billing_period = models.CharField(
         max_length=20,
         choices=BILLING_PERIODS,
@@ -265,12 +266,12 @@ class ProductPrice(models.Model):
         db_table = 'product_prices'
         verbose_name = _('Product Price')
         verbose_name_plural = _('Product Prices')
-        unique_together = [['product', 'currency', 'billing_period']]
-        ordering = ['billing_period', 'amount_cents']
-        indexes = [
+        unique_together: ClassVar[tuple[tuple[str, ...], ...]] = (('product', 'currency', 'billing_period'),)
+        ordering: ClassVar[tuple[str, ...]] = ('billing_period', 'amount_cents')
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=['currency', 'billing_period']),
             models.Index(fields=['is_active']),
-        ]
+        )
 
     @property
     def amount(self) -> Decimal:
@@ -321,7 +322,7 @@ class ProductRelationship(models.Model):
     )
 
     # Relationship types
-    RELATIONSHIP_TYPES = [
+    RELATIONSHIP_TYPES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('requires', _('Requires')),              # Source requires target
         ('includes', _('Includes')),              # Source includes target
         ('upgrades_to', _('Can Upgrade To')),     # Source can upgrade to target
@@ -330,7 +331,7 @@ class ProductRelationship(models.Model):
         ('downsell', _('Downsell')),              # Lower-tier alternative
         ('incompatible', _('Incompatible With')), # Cannot be ordered together
         ('replaces', _('Replaces')),              # Source replaces target
-    ]
+    )
     relationship_type = models.CharField(
         max_length=20,
         choices=RELATIONSHIP_TYPES,
@@ -364,13 +365,13 @@ class ProductRelationship(models.Model):
         db_table = 'product_relationships'
         verbose_name = _('Product Relationship')
         verbose_name_plural = _('Product Relationships')
-        unique_together = [['source_product', 'target_product', 'relationship_type']]
-        ordering = ['sort_order', 'created_at']
-        indexes = [
+        unique_together: ClassVar[tuple[tuple[str, ...], ...]] = (('source_product', 'target_product', 'relationship_type'),)
+        ordering: ClassVar[tuple[str, ...]] = ('sort_order', 'created_at')
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=['source_product', 'relationship_type']),
             models.Index(fields=['target_product', 'relationship_type']),
             models.Index(fields=['is_active']),
-        ]
+        )
 
     def __str__(self) -> str:
         return f"{self.source_product.name} {self.get_relationship_type_display()} {self.target_product.name}"
@@ -428,7 +429,7 @@ class ProductBundle(models.Model):
         db_table = 'product_bundles'
         verbose_name = _('Product Bundle')
         verbose_name_plural = _('Product Bundles')
-        ordering = ['name']
+        ordering: ClassVar[tuple[str, ...]] = ('name',)
 
     def __str__(self) -> str:
         return self.name
@@ -488,8 +489,8 @@ class ProductBundleItem(models.Model):
         db_table = 'product_bundle_items'
         verbose_name = _('Product Bundle Item')
         verbose_name_plural = _('Product Bundle Items')
-        unique_together = [['bundle', 'product']]
-        ordering = ['created_at']
+        unique_together: ClassVar[tuple[tuple[str, ...], ...]] = (('bundle', 'product'),)
+        ordering: ClassVar[tuple[str, ...]] = ('created_at',)
 
     @property
     def override_price(self) -> Decimal | None:

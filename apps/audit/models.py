@@ -4,6 +4,7 @@ Implements Romanian compliance requirements and security audit trails.
 """
 
 import uuid
+from typing import ClassVar
 
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.fields import GenericForeignKey
@@ -16,7 +17,7 @@ User = get_user_model()
 class AuditEvent(models.Model):
     """Immutable audit log for all system changes."""
 
-    ACTION_CHOICES = [
+    ACTION_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('create', 'Create'),
         ('update', 'Update'),
         ('delete', 'Delete'),
@@ -37,7 +38,7 @@ class AuditEvent(models.Model):
         ('2fa_verification_failed', '2FA Verification Failed'),
         ('2fa_setup_started', '2FA Setup Started'),
         ('2fa_setup_completed', '2FA Setup Completed'),
-    ]
+    )
 
     # Unique event ID
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -73,13 +74,13 @@ class AuditEvent(models.Model):
 
     class Meta:
         db_table = 'audit_event'
-        ordering = ['-timestamp']
-        indexes = [
+        ordering: ClassVar[tuple[str, ...]] = ('-timestamp',)
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=['user', '-timestamp']),
             models.Index(fields=['content_type', 'object_id', '-timestamp']),
             models.Index(fields=['action', '-timestamp']),
             models.Index(fields=['request_id']),
-        ]
+        )
 
     def __str__(self) -> str:
         return f"{self.action} on {self.content_type} by {self.user or 'System'}"
@@ -88,12 +89,12 @@ class AuditEvent(models.Model):
 class DataExport(models.Model):
     """Track GDPR data exports and similar compliance operations."""
 
-    STATUS_CHOICES = [
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('pending', 'Pending'),
         ('processing', 'Processing'),
         ('completed', 'Completed'),
         ('failed', 'Failed'),
-    ]
+    )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
@@ -111,7 +112,7 @@ class DataExport(models.Model):
     completed_at = models.DateTimeField(null=True, blank=True)
 
     # Results
-    file_path = models.CharField(max_length=255, null=True, blank=True)
+    file_path = models.CharField(max_length=255, blank=True, null=True)
     file_size = models.PositiveIntegerField(null=True, blank=True)
     record_count = models.PositiveIntegerField(null=True, blank=True)
 
@@ -124,7 +125,7 @@ class DataExport(models.Model):
 
     class Meta:
         db_table = 'audit_data_export'
-        ordering = ['-requested_at']
+        ordering: ClassVar[tuple[str, ...]] = ('-requested_at',)
 
     def __str__(self) -> str:
         return f"{self.export_type} export by {self.requested_by}"
@@ -133,14 +134,14 @@ class DataExport(models.Model):
 class ComplianceLog(models.Model):
     """Log compliance-related activities for Romanian regulations."""
 
-    COMPLIANCE_TYPE_CHOICES = [
+    COMPLIANCE_TYPE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('gdpr_consent', 'GDPR Consent'),
         ('gdpr_deletion', 'GDPR Data Deletion'),
         ('vat_validation', 'VAT Number Validation'),
         ('efactura_submission', 'e-Factura Submission'),
         ('data_retention', 'Data Retention Policy'),
         ('security_incident', 'Security Incident'),
-    ]
+    )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
@@ -162,12 +163,12 @@ class ComplianceLog(models.Model):
 
     class Meta:
         db_table = 'audit_compliance_log'
-        ordering = ['-timestamp']
-        indexes = [
+        ordering: ClassVar[tuple[str, ...]] = ('-timestamp',)
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=['compliance_type', '-timestamp']),
             models.Index(fields=['reference_id']),
             models.Index(fields=['status', '-timestamp']),
-        ]
+        )
 
     def __str__(self) -> str:
         return f"{self.compliance_type}: {self.reference_id}"

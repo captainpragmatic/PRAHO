@@ -1,5 +1,5 @@
 import uuid
-from typing import Any
+from typing import Any, ClassVar
 
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
@@ -106,7 +106,7 @@ class TLD(models.Model):
     class Meta:
         verbose_name = _('🌐 TLD')
         verbose_name_plural = _('🌐 TLDs')
-        ordering = ['extension']
+        ordering: ClassVar[tuple[str, ...]] = ('extension',)
 
     def __str__(self) -> str:
         return f".{self.extension}"
@@ -148,11 +148,11 @@ class Registrar(models.Model):
     - ROTLD: Romanian .ro domains
     """
 
-    STATUS_CHOICES = [
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('active', _('🟢 Active')),
         ('suspended', _('🟡 Suspended')),
         ('disabled', _('🔴 Disabled')),
-    ]
+    )
 
     # Basic information
     name = models.CharField(max_length=100, unique=True)
@@ -206,7 +206,7 @@ class Registrar(models.Model):
     class Meta:
         verbose_name = _('🏢 Registrar')
         verbose_name_plural = _('🏢 Registrars')
-        ordering = ['name']
+        ordering: ClassVar[tuple[str, ...]] = ('name',)
 
     def __str__(self) -> str:
         return self.display_name
@@ -268,8 +268,8 @@ class TLDRegistrarAssignment(models.Model):
     class Meta:
         verbose_name = _('🔗 TLD-Registrar Assignment')
         verbose_name_plural = _('🔗 TLD-Registrar Assignments')
-        unique_together = ('tld', 'registrar')
-        ordering = ['tld__extension', 'priority']
+        unique_together: ClassVar[list[list[str]]] = ('tld', 'registrar')
+        ordering: ClassVar[tuple[str, ...]] = ('tld__extension', 'priority')
 
     def __str__(self) -> str:
         primary = " (Primary)" if self.is_primary else ""
@@ -291,7 +291,7 @@ class Domain(models.Model):
     - Nameserver management
     """
 
-    STATUS_CHOICES = [
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('pending', _('⏳ Pending Registration')),
         ('active', _('🟢 Active')),
         ('expired', _('🔴 Expired')),
@@ -299,7 +299,7 @@ class Domain(models.Model):
         ('transfer_in', _('📥 Transfer In Progress')),
         ('transfer_out', _('📤 Transfer Out Progress')),
         ('cancelled', _('❌ Cancelled')),
-    ]
+    )
 
     # Core domain information
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -383,9 +383,9 @@ class Domain(models.Model):
     class Meta:
         verbose_name = _('🌍 Domain')
         verbose_name_plural = _('🌍 Domains')
-        ordering = ['-created_at']
+        ordering: ClassVar[tuple[str, ...]] = ('-created_at',)
 
-        indexes = [
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             # Query domains expiring soon
             models.Index(
                 fields=['status', 'expires_at'],
@@ -411,7 +411,7 @@ class Domain(models.Model):
                 fields=['registrar', 'status', '-expires_at'],
                 name='domain_registrar_expiry_idx'
             ),
-        ]
+        )
 
     def __str__(self) -> str:
         return self.name
@@ -472,11 +472,11 @@ class DomainOrderItem(models.Model):
     - Multi-year purchases
     """
 
-    ACTION_CHOICES = [
+    ACTION_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('register', _('🆕 Register')),
         ('renew', _('🔄 Renew')),
         ('transfer', _('📥 Transfer')),
-    ]
+    )
 
     # Order relationship
     order = models.ForeignKey(
@@ -548,7 +548,13 @@ class DomainOrderItem(models.Model):
     class Meta:
         verbose_name = _('🛒 Domain Order Item')
         verbose_name_plural = _('🛒 Domain Order Items')
-        ordering = ['-created_at']
+        ordering: ClassVar[tuple[str, ...]] = ('-created_at',)
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """💾 Calculate total price on save"""
+        if self.unit_price_cents and self.years:
+            self.total_price_cents = self.unit_price_cents * self.years
+        super().save(*args, **kwargs)
 
     def __str__(self) -> str:
         action_display = self.get_action_display()
@@ -563,9 +569,3 @@ class DomainOrderItem(models.Model):
     def total_price(self) -> float:
         """💰 Total price in RON"""
         return self.total_price_cents / 100
-
-    def save(self, *args: Any, **kwargs: Any) -> None:
-        """💾 Calculate total price on save"""
-        if self.unit_price_cents and self.years:
-            self.total_price_cents = self.unit_price_cents * self.years
-        super().save(*args, **kwargs)
