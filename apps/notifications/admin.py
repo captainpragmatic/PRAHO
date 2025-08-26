@@ -5,12 +5,16 @@ Email templates and communication logging for Romanian hosting provider.
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 from django import forms
 from django.contrib import admin
 from django.http import HttpRequest
 from django.utils.html import format_html
 from django.utils.safestring import SafeString
 from django.utils.translation import gettext_lazy as _
+
+from apps.common.constants import EXCELLENT_SUCCESS_RATE, GOOD_SUCCESS_RATE
 
 from .models import EmailCampaign, EmailLog, EmailTemplate
 
@@ -22,17 +26,17 @@ from .models import EmailCampaign, EmailLog, EmailTemplate
 class EmailTemplateAdmin(admin.ModelAdmin):
     """Admin interface for email templates"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'key', 'locale', 'get_subject_display', 'category',
         'is_active', 'version', 'created_at'
-    ]
-    list_filter = [
+    )
+    list_filter: ClassVar[list[str]] = (
         'category', 'locale', 'is_active', 'created_at'
-    ]
-    search_fields = ['key', 'subject', 'description']
-    readonly_fields = ['created_at', 'updated_at']
+    )
+    search_fields: ClassVar[list[str]] = ('key', 'subject', 'description')
+    readonly_fields: ClassVar[list[str]] = ('created_at', 'updated_at')
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         (_('Template Identification'), {
             'fields': ('key', 'locale', 'category', 'description')
         }),
@@ -69,21 +73,21 @@ class EmailTemplateAdmin(admin.ModelAdmin):
 class EmailLogAdmin(admin.ModelAdmin):
     """Admin interface for email delivery logs"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'subject', 'to_addr', 'get_status_display_colored',
         'provider', 'template_key', 'sent_at'
-    ]
-    list_filter = [
+    )
+    list_filter: ClassVar[list[str]] = (
         'status', 'provider', 'priority', 'sent_at'
-    ]
-    search_fields = ['to_addr', 'subject', 'template_key']
-    readonly_fields = [
+    )
+    search_fields: ClassVar[list[str]] = ('to_addr', 'subject', 'template_key')
+    readonly_fields: ClassVar[list[str]] = (
         'sent_at', 'delivered_at', 'opened_at', 'clicked_at',
         'provider_response', 'meta'
-    ]
+    )
     date_hierarchy = 'sent_at'
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         (_('Email Details'), {
             'fields': ('to_addr', 'from_addr', 'reply_to', 'subject')
         }),
@@ -149,23 +153,23 @@ class EmailLogAdmin(admin.ModelAdmin):
 class EmailCampaignAdmin(admin.ModelAdmin):
     """Admin interface for email campaigns"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'name', 'get_status_display_colored', 'audience',
         'get_progress_display', 'get_success_rate_display',
         'scheduled_at', 'created_at'
-    ]
-    list_filter = [
+    )
+    list_filter: ClassVar[list[str]] = (
         'status', 'audience', 'is_transactional', 'requires_consent',
         'created_at', 'scheduled_at'
-    ]
-    search_fields = ['name', 'description']
-    readonly_fields = [
+    )
+    search_fields: ClassVar[list[str]] = ('name', 'description')
+    readonly_fields: ClassVar[list[str]] = (
         'total_recipients', 'emails_sent', 'emails_failed',
         'started_at', 'completed_at', 'created_at', 'updated_at'
-    ]
+    )
     date_hierarchy = 'created_at'
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         (_('Campaign Details'), {
             'fields': ('name', 'description', 'template')
         }),
@@ -242,10 +246,10 @@ class EmailCampaignAdmin(admin.ModelAdmin):
         """Display success rate with color coding"""
         rate = obj.get_success_rate()
 
-        if rate >= 95:
+        if rate >= EXCELLENT_SUCCESS_RATE:
             color = '#10B981'  # Green
             emoji = '🎯'
-        elif rate >= 85:
+        elif rate >= GOOD_SUCCESS_RATE:
             color = '#F59E0B'  # Amber
             emoji = '⚠️'
         else:

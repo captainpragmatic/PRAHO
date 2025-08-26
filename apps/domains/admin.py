@@ -3,10 +3,19 @@ Django admin configuration for Domains app
 """
 
 
+from typing import ClassVar
+
 from django.contrib import admin
 from django.utils.html import format_html
 from django.utils.safestring import SafeString
 from django.utils.translation import gettext_lazy as _
+
+from apps.common.constants import (
+    SUCCESS_RATE_EXCELLENT_THRESHOLD, 
+    SUCCESS_RATE_WARNING_THRESHOLD,
+    DAYS_CRITICAL_EXPIRY,
+    DAYS_WARNING_EXPIRY,
+)
 
 from .models import TLD, Domain, DomainOrderItem, Registrar, TLDRegistrarAssignment
 
@@ -15,19 +24,19 @@ from .models import TLD, Domain, DomainOrderItem, Registrar, TLDRegistrarAssignm
 class TLDAdmin(admin.ModelAdmin):
     """TLD management with pricing and configuration"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'extension_display', 'description', 'registration_price_display',
         'renewal_price_display', 'profit_margin_display', 'is_active', 'is_featured'
-    ]
+    )
     
-    list_filter = [
+    list_filter: ClassVar[list[str]] = (
         'is_active', 'is_featured', 'requires_local_presence',
         'whois_privacy_available'
-    ]
+    )
     
-    search_fields = ['extension', 'description']
+    search_fields: ClassVar[list[str]] = ('extension', 'description')
     
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         (_('Basic Information'), {
             'fields': ('extension', 'description', 'is_active', 'is_featured')
         }),
@@ -53,7 +62,7 @@ class TLDAdmin(admin.ModelAdmin):
         })
     )
     
-    readonly_fields = ['created_at', 'updated_at']
+    readonly_fields: ClassVar[list[str]] = ('created_at', 'updated_at')
 
     def extension_display(self, obj: TLD) -> str:
         """Display TLD extension with dot prefix"""
@@ -74,10 +83,10 @@ class TLDAdmin(admin.ModelAdmin):
         """Display profit margin with color coding"""
         margin_pct = obj.profit_margin_percentage
         
-        if margin_pct >= 50:
+        if margin_pct >= SUCCESS_RATE_EXCELLENT_THRESHOLD:
             color = 'green'
             emoji = '💰'
-        elif margin_pct >= 25:
+        elif margin_pct >= SUCCESS_RATE_WARNING_THRESHOLD:
             color = 'orange'
             emoji = '💸'
         else:
@@ -95,16 +104,16 @@ class TLDAdmin(admin.ModelAdmin):
 class RegistrarAdmin(admin.ModelAdmin):
     """Registrar management with API configuration"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'display_name', 'status_display', 'total_domains',
         'supported_tlds_count', 'last_sync_at'
-    ]
+    )
     
-    list_filter = ['status', 'currency', 'last_sync_at']
+    list_filter: ClassVar[list[str]] = ('status', 'currency', 'last_sync_at')
     
-    search_fields = ['name', 'display_name', 'website_url']
+    search_fields: ClassVar[list[str]] = ('name', 'display_name', 'website_url')
     
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         (_('Basic Information'), {
             'fields': ('name', 'display_name', 'website_url', 'status')
         }),
@@ -134,7 +143,7 @@ class RegistrarAdmin(admin.ModelAdmin):
         })
     )
     
-    readonly_fields = ['created_at', 'updated_at', 'total_domains', 'last_sync_at']
+    readonly_fields: ClassVar[list[str]] = ('created_at', 'updated_at', 'total_domains', 'last_sync_at')
 
     def status_display(self, obj: Registrar) -> SafeString:
         """Display registrar status with colors"""
@@ -169,16 +178,16 @@ class RegistrarAdmin(admin.ModelAdmin):
 class TLDRegistrarAssignmentAdmin(admin.ModelAdmin):
     """TLD-Registrar assignment management"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'tld', 'registrar', 'is_primary_display', 'priority',
         'cost_override_display', 'is_active'
-    ]
+    )
     
-    list_filter = ['is_primary', 'is_active', 'tld', 'registrar']
+    list_filter: ClassVar[list[str]] = ('is_primary', 'is_active', 'tld', 'registrar')
     
-    search_fields = ['tld__extension', 'registrar__name']
+    search_fields: ClassVar[list[str]] = ('tld__extension', 'registrar__name')
     
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         (_('Assignment'), {
             'fields': ('tld', 'registrar', 'is_primary', 'priority', 'is_active')
         }),
@@ -191,7 +200,7 @@ class TLDRegistrarAssignmentAdmin(admin.ModelAdmin):
         })
     )
     
-    readonly_fields = ['created_at', 'updated_at']
+    readonly_fields: ClassVar[list[str]] = ('created_at', 'updated_at')
 
     def is_primary_display(self, obj: TLDRegistrarAssignment) -> SafeString:
         """Display primary status with styling"""
@@ -212,26 +221,26 @@ class TLDRegistrarAssignmentAdmin(admin.ModelAdmin):
 class DomainAdmin(admin.ModelAdmin):
     """Domain management with lifecycle tracking"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'name', 'customer', 'status_display', 'tld', 'registrar',
         'expires_at', 'days_until_expiry_display', 'auto_renew_display'
-    ]
+    )
     
-    list_filter = [
+    list_filter: ClassVar[list[str]] = (
         'status', 'tld', 'registrar', 'auto_renew', 'whois_privacy',
         'locked', 'expires_at'
-    ]
+    )
     
-    search_fields = [
+    search_fields: ClassVar[list[str]] = (
         'name', 'customer__name', 'customer__company_name',
         'registrar_domain_id', 'epp_code'
-    ]
+    )
     
     date_hierarchy = 'expires_at'
     
-    readonly_fields = ['id', 'created_at', 'updated_at']
+    readonly_fields: ClassVar[list[str]] = ('id', 'created_at', 'updated_at')
     
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         (_('Domain Information'), {
             'fields': ('id', 'name', 'tld', 'status')
         }),
@@ -311,12 +320,12 @@ class DomainAdmin(admin.ModelAdmin):
                 '<span style="color: red; font-weight: bold;">❌ Expired {}</span>',
                 abs(days)
             )
-        elif days <= 7:
+        elif days <= DAYS_CRITICAL_EXPIRY:
             return format_html(
                 '<span style="color: red; font-weight: bold;">🚨 {} days</span>',
                 days
             )
-        elif days <= 30:
+        elif days <= DAYS_WARNING_EXPIRY:
             return format_html(
                 '<span style="color: orange;">⚠️ {} days</span>',
                 days
@@ -340,16 +349,16 @@ class DomainAdmin(admin.ModelAdmin):
 class DomainOrderItemAdmin(admin.ModelAdmin):
     """Domain order items management"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'domain_name', 'action_display', 'order', 'years',
         'total_price_display', 'domain_link'
-    ]
+    )
     
-    list_filter = ['action', 'years', 'whois_privacy', 'auto_renew']
+    list_filter: ClassVar[list[str]] = ('action', 'years', 'whois_privacy', 'auto_renew')
     
-    search_fields = ['domain_name', 'order__order_number']
+    search_fields: ClassVar[list[str]] = ('domain_name', 'order__order_number')
     
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         (_('Order Information'), {
             'fields': ('order', 'domain_name', 'tld', 'action', 'years')
         }),
@@ -372,7 +381,7 @@ class DomainOrderItemAdmin(admin.ModelAdmin):
         })
     )
     
-    readonly_fields = ['created_at', 'updated_at']
+    readonly_fields: ClassVar[list[str]] = ('created_at', 'updated_at')
 
     def action_display(self, obj: DomainOrderItem) -> SafeString:
         """Display action with icons"""

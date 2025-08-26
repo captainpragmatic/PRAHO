@@ -11,6 +11,24 @@ from django import template
 from django.utils import timezone
 from django.utils.safestring import mark_safe
 
+from apps.common.constants import (
+    ROMANIAN_PLURAL_FEW_MAX,
+    ROMANIAN_PLURAL_FEW_MIN,
+    ROMANIAN_PLURAL_SINGLE,
+    SECONDS_PER_MINUTE,
+    SECONDS_PER_HOUR,
+    SECONDS_PER_DAY,
+    SECONDS_PER_TWO_DAYS,
+    SECONDS_PER_WEEK,
+    ROMANIAN_TIME_MINUTE_PLURAL_THRESHOLD,
+    ROMANIAN_TIME_HOUR_PLURAL_THRESHOLD,
+    ROMANIAN_IBAN_LENGTH,
+    PHONE_MOBILE_LENGTH,
+    PHONE_LANDLINE_LENGTH,
+    PHONE_MIN_VALID_LENGTH,
+    ROMANIAN_POSTAL_CODE_LENGTH,
+)
+
 register = template.Library()
 
 
@@ -153,28 +171,28 @@ def romanian_relative_date(value) -> str:
 
         seconds = diff.total_seconds()
 
-        if seconds < 60:
+        if seconds < SECONDS_PER_MINUTE:
             return "acum câteva secunde"
-        elif seconds < 3600:
-            minutes = int(seconds // 60)
+        elif seconds < SECONDS_PER_HOUR:
+            minutes = int(seconds // SECONDS_PER_MINUTE)
             if minutes == 1:
                 return "acum un minut"
-            elif minutes < 20:
+            elif minutes < ROMANIAN_TIME_MINUTE_PLURAL_THRESHOLD:
                 return f"acum {minutes} minute"
             else:
                 return f"acum {minutes} de minute"
-        elif seconds < 86400:
-            hours = int(seconds // 3600)
+        elif seconds < SECONDS_PER_DAY:
+            hours = int(seconds // SECONDS_PER_HOUR)
             if hours == 1:
                 return "acum o oră"
-            elif hours < 20:
+            elif hours < ROMANIAN_TIME_HOUR_PLURAL_THRESHOLD:
                 return f"acum {hours} ore"
             else:
                 return f"acum {hours} de ore"
-        elif seconds < 172800:  # 2 days
+        elif seconds < SECONDS_PER_TWO_DAYS:  # 2 days
             return "ieri"
-        elif seconds < 604800:  # 7 days
-            days = int(seconds // 86400)
+        elif seconds < SECONDS_PER_WEEK:  # 7 days
+            days = int(seconds // SECONDS_PER_DAY)
             return f"acum {days} zile"
         else:
             # Use short date format for older dates
@@ -230,7 +248,7 @@ def iban_format(value: str) -> str:
     iban = str(value).strip().upper().replace(' ', '')
 
     # Validate Romanian IBAN (should start with RO and be 24 characters)
-    if not iban.startswith('RO') or len(iban) != 24:
+    if not iban.startswith('RO') or len(iban) != ROMANIAN_IBAN_LENGTH:
         return value  # Return original if invalid
 
     # Format in groups of 4 characters
@@ -267,15 +285,15 @@ def phone_format(value: str, country_code: str = '+40') -> str:
             digits = digits[1:]  # Remove leading 0
 
         # Format based on length
-        if len(digits) == 9:
+        if len(digits) == PHONE_MOBILE_LENGTH:
             # Mobile: 721123456 -> +40 721 123 456
             return f"+40 {digits[:3]} {digits[3:6]} {digits[6:]}"
-        elif len(digits) == 10:
+        elif len(digits) == PHONE_LANDLINE_LENGTH:
             # Landline: 0213123456 -> +40 21 312 34 56
             return f"+40 {digits[:2]} {digits[2:5]} {digits[5:7]} {digits[7:]}"
 
     # For other countries or invalid Romanian numbers, return formatted
-    if len(digits) >= 7:
+    if len(digits) >= PHONE_MIN_VALID_LENGTH:
         return f"{country_code} {digits}"
 
     return value
@@ -299,7 +317,7 @@ def postal_code_format(value: str) -> str:
     postal_code = re.sub(r'\D', '', str(value))
 
     # Romanian postal codes are 6 digits
-    if len(postal_code) == 6:
+    if len(postal_code) == ROMANIAN_POSTAL_CODE_LENGTH:
         return postal_code
 
     return value  # Return original if invalid
@@ -373,15 +391,15 @@ def romanian_plural(count: int, singular: str, plural: str, genitive: str | None
         forms = plural.split(',')
         singular_form = forms[0] if len(forms) > 0 else singular
         plural_form = forms[1] if len(forms) > 1 else plural
-        genitive_form = forms[2] if len(forms) > 2 else plural_form
+        genitive_form = forms[2] if len(forms) > ROMANIAN_PLURAL_FEW_MIN else plural_form
     else:
         singular_form = singular
         plural_form = plural
         genitive_form = genitive or plural
 
-    if count == 1:
+    if count == ROMANIAN_PLURAL_SINGLE:
         return f"{count} {singular_form}"
-    elif 2 <= count <= 19:
+    elif ROMANIAN_PLURAL_FEW_MIN <= count <= ROMANIAN_PLURAL_FEW_MAX:
         return f"{count} {plural_form}"
     else:
         return f"{count} {genitive_form}"

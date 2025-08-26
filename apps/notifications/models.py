@@ -5,10 +5,13 @@ Aligned with PostgreSQL hosting panel schema v1.
 """
 
 import uuid
+from typing import ClassVar
 
 from django.core.validators import EmailValidator
 from django.db import models
 from django.utils.translation import gettext_lazy as _
+
+from apps.common.constants import SUBJECT_PREVIEW_LIMIT, SUBJECT_PREVIEW_DISPLAY
 
 # ===============================================================================
 # EMAIL TEMPLATE SYSTEM
@@ -70,7 +73,7 @@ class EmailTemplate(models.Model):
     )
 
     # Romanian hosting provider categories
-    CATEGORY_CHOICES = [
+    CATEGORY_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('billing', _('Billing & Invoices')),
         ('dunning', _('Payment Reminders')),
         ('provisioning', _('Service Provisioning')),
@@ -85,7 +88,7 @@ class EmailTemplate(models.Model):
         ('marketing', _('Marketing & Promotions')),
         ('compliance', _('Legal & Compliance')),
         ('system', _('System Notifications')),
-    ]
+    )
     category = models.CharField(
         max_length=20,
         choices=CATEGORY_CHOICES,
@@ -108,21 +111,21 @@ class EmailTemplate(models.Model):
         db_table = 'email_template'
         verbose_name = _('Email Template')
         verbose_name_plural = _('Email Templates')
-        unique_together = [['key', 'locale']]
-        indexes = [
+        unique_together: ClassVar[tuple[tuple[str, ...], ...]] = (('key', 'locale'),)
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=['key', 'locale']),
             models.Index(fields=['category', 'is_active']),
             models.Index(fields=['created_at']),
-        ]
-        ordering = ['category', 'key', 'locale']
+        )
+        ordering: ClassVar[tuple[str, ...]] = ('category', 'key', 'locale')
 
     def __str__(self) -> str:
         return f"{self.key} ({self.locale}): {self.subject}"
 
     def get_subject_display(self) -> str:
         """Truncated subject for admin display"""
-        if len(self.subject) > 50:
-            return f"{self.subject[:47]}..."
+        if len(self.subject) > SUBJECT_PREVIEW_LIMIT:
+            return f"{self.subject[:SUBJECT_PREVIEW_DISPLAY]}..."
         return self.subject
 
 
@@ -182,7 +185,7 @@ class EmailLog(models.Model):
     )
 
     # Delivery tracking
-    STATUS_CHOICES = [
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('queued', _('Queued')),           # Waiting to be sent
         ('sending', _('Sending')),         # Currently being processed
         ('sent', _('Sent')),              # Successfully sent to provider
@@ -192,7 +195,7 @@ class EmailLog(models.Model):
         ('complained', _('Complained')),   # Marked as spam by recipient
         ('failed', _('Failed')),          # Failed to send
         ('rejected', _('Rejected')),      # Rejected by email provider
-    ]
+    )
     status = models.CharField(
         max_length=20,
         choices=STATUS_CHOICES,
@@ -272,15 +275,15 @@ class EmailLog(models.Model):
         db_table = 'email_log'
         verbose_name = _('Email Log')
         verbose_name_plural = _('Email Logs')
-        indexes = [
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=['to_addr', '-sent_at']),
             models.Index(fields=['customer', '-sent_at']),
             models.Index(fields=['template_key', '-sent_at']),
             models.Index(fields=['status', '-sent_at']),
             models.Index(fields=['provider', '-sent_at']),
             models.Index(fields=['-sent_at']),  # Most recent emails
-        ]
-        ordering = ['-sent_at']
+        )
+        ordering: ClassVar[tuple[str, ...]] = ('-sent_at',)
 
     def __str__(self) -> str:
         return f"{self.subject} → {self.to_addr} ({self.status})"
@@ -340,14 +343,14 @@ class EmailCampaign(models.Model):
     )
 
     # Targeting
-    AUDIENCE_CHOICES = [
+    AUDIENCE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('all_customers', _('All Customers')),
         ('active_customers', _('Active Customers')),
         ('inactive_customers', _('Inactive Customers')),
         ('overdue_payments', _('Overdue Payments')),
         ('trial_expiring', _('Trial Expiring')),
         ('custom_filter', _('Custom Filter')),
-    ]
+    )
     audience = models.CharField(
         max_length=20,
         choices=AUDIENCE_CHOICES,
@@ -361,7 +364,7 @@ class EmailCampaign(models.Model):
     )
 
     # Campaign status
-    STATUS_CHOICES = [
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('draft', _('Draft')),           # Being prepared
         ('scheduled', _('Scheduled')),   # Scheduled for future sending
         ('sending', _('Sending')),       # Currently being sent
@@ -369,7 +372,7 @@ class EmailCampaign(models.Model):
         ('paused', _('Paused')),        # Temporarily paused
         ('cancelled', _('Cancelled')),   # Cancelled before completion
         ('failed', _('Failed')),        # Failed to send
-    ]
+    )
     status = models.CharField(
         max_length=20,
         choices=STATUS_CHOICES,
@@ -433,12 +436,12 @@ class EmailCampaign(models.Model):
         db_table = 'email_campaign'
         verbose_name = _('Email Campaign')
         verbose_name_plural = _('Email Campaigns')
-        indexes = [
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=['status', '-created_at']),
             models.Index(fields=['scheduled_at']),
             models.Index(fields=['-created_at']),
-        ]
-        ordering = ['-created_at']
+        )
+        ordering: ClassVar[tuple[str, ...]] = ('-created_at',)
 
     def __str__(self) -> str:
         return f"{self.name} ({self.get_status_display()})"

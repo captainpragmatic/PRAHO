@@ -6,6 +6,7 @@ from typing import Any
 from django.db import transaction
 from django.utils import timezone
 
+from apps.common.constants import DAYS_PER_WEEK
 from apps.integrations.models import WebhookEvent
 
 logger = logging.getLogger(__name__)
@@ -260,7 +261,7 @@ def should_retry_webhook(webhook_event: WebhookEvent, max_retries: int = 5) -> b
 
     # Don't retry if webhook is too old (7 days)
     age_days = (timezone.now() - webhook_event.received_at).days
-    return not age_days > 7
+    return not age_days > DAYS_PER_WEEK
 
 
 # ===============================================================================

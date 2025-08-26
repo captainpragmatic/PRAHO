@@ -1,7 +1,11 @@
+from typing import ClassVar
+
 from django.contrib import admin
 from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
+
+from apps.common.constants import TEXT_TRUNCATE_LIMIT, TEXT_TRUNCATE_DISPLAY
 
 from .models import WebhookDelivery, WebhookEvent
 
@@ -13,7 +17,7 @@ from .models import WebhookDelivery, WebhookEvent
 class WebhookEventAdmin(admin.ModelAdmin):
     """🔄 Webhook event administration with deduplication tracking"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'received_at',
         'source_display',
         'event_type_short',
@@ -21,30 +25,30 @@ class WebhookEventAdmin(admin.ModelAdmin):
         'retry_count',
         'processing_time',
         'payload_size',
-    ]
-    list_filter = [
+    )
+    list_filter: ClassVar[list[str]] = (
         'source',
         'status',
         'event_type',
         'received_at',
         'retry_count',
-    ]
-    search_fields = [
+    )
+    search_fields: ClassVar[list[str]] = (
         'event_id',
         'event_type',
         'error_message',
         'ip_address',
-    ]
-    readonly_fields = [
+    )
+    readonly_fields: ClassVar[list[str]] = (
         'id',
         'payload_hash',
         'processing_duration',
         'created_at',
         'updated_at',
-    ]
+    )
     date_hierarchy = 'received_at'
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         (_('🔍 Event Information'), {
             'fields': (
                 'id',
@@ -110,8 +114,8 @@ class WebhookEventAdmin(admin.ModelAdmin):
 
     def event_type_short(self, obj):
         """📝 Shortened event type for display"""
-        if len(obj.event_type) > 30:
-            return f"{obj.event_type[:27]}..."
+        if len(obj.event_type) > TEXT_TRUNCATE_LIMIT:
+            return f"{obj.event_type[:TEXT_TRUNCATE_DISPLAY]}..."
         return obj.event_type
     event_type_short.short_description = _('Event Type')
 
@@ -178,7 +182,7 @@ class WebhookEventAdmin(admin.ModelAdmin):
 class WebhookDeliveryAdmin(admin.ModelAdmin):
     """📤 Outgoing webhook delivery administration"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'scheduled_at',
         'customer_link',
         'event_type',
@@ -186,29 +190,29 @@ class WebhookDeliveryAdmin(admin.ModelAdmin):
         'http_status',
         'retry_count',
         'delivery_time',
-    ]
-    list_filter = [
+    )
+    list_filter: ClassVar[list[str]] = (
         'status',
         'event_type',
         'http_status',
         'scheduled_at',
         'retry_count',
-    ]
-    search_fields = [
+    )
+    search_fields: ClassVar[list[str]] = (
         'customer__name',
         'customer__company_name',
         'customer__primary_email',
         'endpoint_url',
         'event_type',
-    ]
-    readonly_fields = [
+    )
+    readonly_fields: ClassVar[list[str]] = (
         'id',
         'created_at',
         'updated_at',
-    ]
+    )
     date_hierarchy = 'scheduled_at'
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         (_('📤 Delivery Information'), {
             'fields': (
                 'id',

@@ -20,6 +20,11 @@ from django.core.exceptions import PermissionDenied
 from django.http import HttpResponse, JsonResponse
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.constants import (
+    PHONE_FULL_INTERNATIONAL_LENGTH,
+    PHONE_LANDLINE_LENGTH,
+)
+
 # ===============================================================================
 # ROMANIAN VALIDATION UTILITIES
 # ===============================================================================
@@ -30,10 +35,10 @@ def format_romanian_phone(phone: str) -> str:
     digits = re.sub(r'\D', '', phone)
 
     # Handle different input formats
-    if digits.startswith('40') and len(digits) == 11:
+    if digits.startswith('40') and len(digits) == PHONE_FULL_INTERNATIONAL_LENGTH:
         # +40XXXXXXXXX -> +40.XX.XXX.XXXX
         return f"+40.{digits[2:4]}.{digits[4:7]}.{digits[7:]}"
-    elif digits.startswith('07') and len(digits) == 10:
+    elif digits.startswith('07') and len(digits) == PHONE_LANDLINE_LENGTH:
         # 07XXXXXXXX -> +40.7X.XXX.XXXX
         return f"+40.{digits[1:3]}.{digits[3:6]}.{digits[6:]}"
 

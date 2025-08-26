@@ -15,6 +15,13 @@ from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.http import JsonResponse as DjangoJsonResponse
 
+from apps.common.constants import (
+    CUI_MIN_LENGTH,
+    CUI_MAX_LENGTH,
+    EMAIL_PARTS_COUNT,
+    DOMAIN_NAME_MAX_LENGTH,
+)
+
 if TYPE_CHECKING:
     pass
 
@@ -199,7 +206,7 @@ class RomanianVATNumber:
         if not digits.isdigit():
             return False
 
-        return len(digits) >= 2 and len(digits) <= 10
+        return len(digits) >= CUI_MIN_LENGTH and len(digits) <= CUI_MAX_LENGTH
 
 
 @dataclass(frozen=True)
@@ -250,7 +257,7 @@ class CUI:
         if not digits.isdigit():
             return False
 
-        return len(digits) >= 2 and len(digits) <= 10
+        return len(digits) >= CUI_MIN_LENGTH and len(digits) <= CUI_MAX_LENGTH
 
     def __str__(self) -> str:
         return self.value
@@ -269,7 +276,7 @@ def validate_romanian_cui(cui: str) -> Result[CUIString, str]:
     if not cui.isdigit():
         return Err("CUI must contain only digits")
 
-    if len(cui) < 2 or len(cui) > 10:
+    if len(cui) < CUI_MIN_LENGTH or len(cui) > CUI_MAX_LENGTH:
         return Err("CUI must have 2-10 digits")
 
     # Return the normalized format
@@ -282,7 +289,7 @@ def validate_email(email: str) -> Result[EmailAddress, str]:
         return Err("Invalid email format")
 
     parts = email.split('@')
-    if len(parts) != 2:
+    if len(parts) != EMAIL_PARTS_COUNT:
         return Err("Invalid email format")
 
     local, domain = parts
@@ -325,7 +332,7 @@ def validate_domain_name(domain: str) -> Result[DomainName, str]:
     if not re.match(pattern, domain, re.IGNORECASE):
         return Err("Invalid domain name format")
     
-    if len(domain) > 253:  # RFC 1035 max length
+    if len(domain) > DOMAIN_NAME_MAX_LENGTH:  # RFC 1035 max length
         return Err("Domain name too long")
     
     return Ok(DomainName(domain.lower()))

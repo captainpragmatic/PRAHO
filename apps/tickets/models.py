@@ -3,12 +3,14 @@ Support ticket models for PRAHO Platform
 Romanian hosting provider customer support system.
 """
 
-from typing import Any
+from typing import Any, ClassVar
 
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
 from django.utils.translation import gettext_lazy as _
+
+from apps.common.constants import FILE_SIZE_CONVERSION_FACTOR_FLOAT
 
 
 class SupportCategory(models.Model):
@@ -51,7 +53,7 @@ class SupportCategory(models.Model):
         db_table = 'support_categories'
         verbose_name = _('Support Category')
         verbose_name_plural = _('Support Categories')
-        ordering = ['sort_order', 'name']
+        ordering: ClassVar[tuple[str, ...]] = ('sort_order', 'name')
 
     def __str__(self) -> str:
         return self.name
@@ -60,31 +62,31 @@ class SupportCategory(models.Model):
 class Ticket(models.Model):
     """Customer support ticket"""
 
-    STATUS_CHOICES = [
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('new', _('New')),
         ('open', _('Open')),
         ('pending', _('Pending')),
         ('resolved', _('Resolved')),
         ('closed', _('Closed')),
         ('cancelled', _('Cancelled')),
-    ]
+    )
 
-    PRIORITY_CHOICES = [
+    PRIORITY_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('low', _('Low')),
         ('normal', _('Normal')),
         ('high', _('High')),
         ('urgent', _('Urgent')),
         ('critical', _('Critical')),
-    ]
+    )
 
-    SOURCE_CHOICES = [
+    SOURCE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('web', _('Website')),
         ('email', _('Email')),
         ('phone', _('Phone')),
         ('chat', _('Chat')),
         ('api', _('API')),
         ('internal', _('Internal')),
-    ]
+    )
 
     # Ticket identification
     ticket_number = models.CharField(
@@ -216,14 +218,14 @@ class Ticket(models.Model):
         db_table = 'tickets'
         verbose_name = _('Support Ticket')
         verbose_name_plural = _('Support Tickets')
-        ordering = ['-created_at']
-        indexes = [
+        ordering: ClassVar[tuple[str, ...]] = ('-created_at',)
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=['customer', 'status']),
             models.Index(fields=['assigned_to', 'status']),
             models.Index(fields=['status', 'priority']),
             models.Index(fields=['category']),
             models.Index(fields=['ticket_number']),
-        ]
+        )
 
     def __str__(self) -> str:
         return f"#{self.ticket_number}: {self.title}"
@@ -310,12 +312,12 @@ class Ticket(models.Model):
 class TicketComment(models.Model):
     """Comments/replies on support tickets"""
 
-    COMMENT_TYPE_CHOICES = [
+    COMMENT_TYPE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('customer', _('Customer')),
         ('support', _('Support')),
         ('internal', _('Internal')),
         ('system', _('System')),
-    ]
+    )
 
     ticket = models.ForeignKey(
         Ticket,
@@ -366,12 +368,12 @@ class TicketComment(models.Model):
         db_table = 'ticket_comments'
         verbose_name = _('Ticket Comment')
         verbose_name_plural = _('Ticket Comments')
-        ordering = ['created_at']
-        indexes = [
+        ordering: ClassVar[tuple[str, ...]] = ('created_at',)
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=['ticket', 'created_at']),
             models.Index(fields=['comment_type']),
             models.Index(fields=['is_public']),
-        ]
+        )
 
     def __str__(self) -> str:
         return f"Comment pe {self.ticket.ticket_number} de {self.get_author_name()}"
@@ -425,11 +427,11 @@ class TicketAttachment(models.Model):
         db_table = 'ticket_attachments'
         verbose_name = _('Ticket Attachment')
         verbose_name_plural = _('Ticket Attachments')
-        ordering = ['uploaded_at']
-        indexes = [
+        ordering: ClassVar[tuple[str, ...]] = ('uploaded_at',)
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=['ticket']),
             models.Index(fields=['comment']),
-        ]
+        )
 
     def __str__(self) -> str:
         return f"{self.filename} - {self.ticket.ticket_number}"
@@ -438,9 +440,9 @@ class TicketAttachment(models.Model):
         """Human readable file size"""
         size: float = float(self.file_size)
         for unit in ['B', 'KB', 'MB', 'GB']:
-            if size < 1024.0:
+            if size < FILE_SIZE_CONVERSION_FACTOR_FLOAT:
                 return f"{size:.1f} {unit}"
-            size /= 1024.0
+            size /= FILE_SIZE_CONVERSION_FACTOR_FLOAT
         return f"{size:.1f} TB"
 
 
@@ -484,12 +486,12 @@ class TicketWorklog(models.Model):
         db_table = 'ticket_worklogs'
         verbose_name = _('Ticket Worklog')
         verbose_name_plural = _('Ticket Worklogs')
-        ordering = ['-work_date']
-        indexes = [
+        ordering: ClassVar[tuple[str, ...]] = ('-work_date',)
+        indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=['ticket', 'work_date']),
             models.Index(fields=['user', 'work_date']),
             models.Index(fields=['is_billable']),
-        ]
+        )
 
     def __str__(self) -> str:
         return f"{self.user.get_full_name()} - {self.time_spent}h pe {self.ticket.ticket_number}"

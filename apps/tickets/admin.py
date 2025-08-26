@@ -4,7 +4,7 @@ Romanian hosting provider customer support system administration.
 """
 
 
-from typing import Any
+from typing import Any, ClassVar
 
 from django.contrib import admin
 from django.db import models
@@ -15,6 +15,17 @@ from django.utils import timezone
 from django.utils.html import format_html
 from django.utils.safestring import SafeString
 from django.utils.translation import gettext_lazy as _
+
+from apps.common.constants import (
+    TITLE_PREVIEW_LIMIT,
+    TITLE_PREVIEW_DISPLAY,
+    URGENT_RESPONSE_THRESHOLD,
+    URGENT_RESOLUTION_THRESHOLD,
+    CONTENT_PREVIEW_LIMIT,
+    CONTENT_PREVIEW_DISPLAY,
+    DESCRIPTION_PREVIEW_LIMIT,
+    DESCRIPTION_PREVIEW_DISPLAY,
+)
 
 from .models import (
     SupportCategory,
@@ -32,7 +43,7 @@ from .models import (
 class SupportCategoryAdmin(admin.ModelAdmin):
     """Support ticket categories management"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'name',
         'name_en',
         'icon_display',
@@ -41,15 +52,15 @@ class SupportCategoryAdmin(admin.ModelAdmin):
         'auto_assign_to',
         'is_active',
         'sort_order',
-    ]
-    list_filter = [
+    )
+    list_filter: ClassVar[list[str]] = (
         'is_active',
         'auto_assign_to',
-    ]
-    search_fields = ['name', 'name_en', 'description']
-    ordering = ['sort_order', 'name']
+    )
+    search_fields: ClassVar[list[str]] = ('name', 'name_en', 'description')
+    ordering: ClassVar[tuple[str, ...]] = ('sort_order', 'name')
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         (_('Category Information'), {
             'fields': (
                 'name',
@@ -75,7 +86,7 @@ class SupportCategoryAdmin(admin.ModelAdmin):
             'classes': ('collapse',),
         }),
     )
-    readonly_fields = ['created_at']
+    readonly_fields: ClassVar[tuple[str, ...]] = ('created_at',)
 
     def icon_display(self, obj: SupportCategory) -> SafeString:
         """Display category icon with color"""
@@ -95,17 +106,17 @@ class TicketCommentInline(admin.TabularInline):
     """Inline ticket comments"""
     model = TicketComment
     extra = 0
-    fields = ['comment_type', 'content', 'is_public', 'time_spent', 'created_at']
-    readonly_fields = ['created_at']
-    ordering = ['created_at']
+    fields: ClassVar[list[str]] = ('comment_type', 'content', 'is_public', 'time_spent', 'created_at')
+    readonly_fields: ClassVar[tuple[str, ...]] = ('created_at',)
+    ordering: ClassVar[tuple[str, ...]] = ('created_at',)
 
 
 class TicketAttachmentInline(admin.TabularInline):
     """Inline ticket attachments"""
     model = TicketAttachment
     extra = 0
-    fields = ['filename', 'file_size_display', 'content_type', 'is_safe', 'uploaded_at']
-    readonly_fields = ['file_size_display', 'uploaded_at']
+    fields: ClassVar[list[str]] = ('filename', 'file_size_display', 'content_type', 'is_safe', 'uploaded_at')
+    readonly_fields: ClassVar[list[str]] = ('file_size_display', 'uploaded_at')
 
     def file_size_display(self, obj: TicketAttachment) -> str:
         """Display file size in human readable format"""
@@ -119,8 +130,8 @@ class TicketWorklogInline(admin.TabularInline):
     """Inline ticket work logs"""
     model = TicketWorklog
     extra = 0
-    fields = ['user', 'work_date', 'time_spent', 'is_billable', 'hourly_rate', 'description']
-    ordering = ['-work_date']
+    fields: ClassVar[list[str]] = ('user', 'work_date', 'time_spent', 'is_billable', 'hourly_rate', 'description')
+    ordering: ClassVar[tuple[str, ...]] = ('-work_date',)
 
 
 # ===============================================================================
@@ -131,7 +142,7 @@ class TicketWorklogInline(admin.TabularInline):
 class TicketAdmin(admin.ModelAdmin):
     """Support ticket management"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'ticket_number',
         'title_truncated',
         'customer',
@@ -142,8 +153,8 @@ class TicketAdmin(admin.ModelAdmin):
         'sla_status',
         'created_at',
         'satisfaction_display',
-    ]
-    list_filter = [
+    )
+    list_filter: ClassVar[list[str]] = (
         'status',
         'priority',
         'category',
@@ -152,8 +163,8 @@ class TicketAdmin(admin.ModelAdmin):
         'is_escalated',
         'requires_customer_response',
         'created_at',
-    ]
-    search_fields = [
+    )
+    search_fields: ClassVar[list[str]] = (
         'ticket_number',
         'title',
         'description',
@@ -161,9 +172,9 @@ class TicketAdmin(admin.ModelAdmin):
         'customer__company_name',
         'customer__primary_email',
         'contact_email',
-    ]
+    )
     date_hierarchy = 'created_at'
-    readonly_fields = [
+    readonly_fields: ClassVar[list[str]] = (
         'ticket_number',
         'created_at',
         'updated_at',
@@ -172,11 +183,11 @@ class TicketAdmin(admin.ModelAdmin):
         'first_response_at',
         'resolved_at',
         'actual_hours',
-    ]
-    inlines = [TicketCommentInline, TicketAttachmentInline, TicketWorklogInline]
-    ordering = ['-created_at']
+    )
+    inlines: ClassVar[list] = [TicketCommentInline, TicketAttachmentInline, TicketWorklogInline]
+    ordering: ClassVar[tuple[str, ...]] = ('-created_at',)
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         (_('Ticket Information'), {
             'fields': (
                 'ticket_number',
@@ -244,8 +255,8 @@ class TicketAdmin(admin.ModelAdmin):
 
     def title_truncated(self, obj: Ticket) -> str:
         """Display truncated title"""
-        if len(obj.title) > 50:
-            return f"{obj.title[:47]}..."
+        if len(obj.title) > TITLE_PREVIEW_LIMIT:
+            return f"{obj.title[:TITLE_PREVIEW_DISPLAY]}..."
         return obj.title
     title_truncated.short_description = _('Title')
 
@@ -277,7 +288,7 @@ class TicketAdmin(admin.ModelAdmin):
         if not obj.first_response_at and obj.sla_response_due:
             if now > obj.sla_response_due:
                 response_status = format_html('<span style="color: red;">❌ Response Overdue</span>')
-            elif (obj.sla_response_due - now).total_seconds() < 3600:  # Less than 1 hour
+            elif (obj.sla_response_due - now).total_seconds() < URGENT_RESPONSE_THRESHOLD:  # Less than 1 hour
                 response_status = format_html('<span style="color: orange;">⚠️ Response Due Soon</span>')
             else:
                 response_status = format_html('<span style="color: green;">✅ Response On Time</span>')
@@ -288,7 +299,7 @@ class TicketAdmin(admin.ModelAdmin):
         if not obj.resolved_at and obj.sla_resolution_due:
             if now > obj.sla_resolution_due:
                 resolution_status = format_html('<span style="color: red;">❌ Resolution Overdue</span>')
-            elif (obj.sla_resolution_due - now).total_seconds() < 7200:  # Less than 2 hours
+            elif (obj.sla_resolution_due - now).total_seconds() < URGENT_RESOLUTION_THRESHOLD:  # Less than 2 hours
                 resolution_status = format_html('<span style="color: orange;">⚠️ Resolution Due Soon</span>')
             else:
                 resolution_status = format_html('<span style="color: green;">✅ Resolution On Time</span>')
@@ -316,7 +327,7 @@ class TicketAdmin(admin.ModelAdmin):
         return '-'
     satisfaction_display.short_description = _('Satisfaction')
 
-    actions = [
+    actions: ClassVar[list[str]] = [
         'assign_to_me',
         'mark_resolved',
         'escalate_tickets',
@@ -369,7 +380,7 @@ class TicketAdmin(admin.ModelAdmin):
 class TicketCommentAdmin(admin.ModelAdmin):
     """Ticket comment management"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'created_at',
         'ticket',
         'comment_type',
@@ -378,14 +389,14 @@ class TicketCommentAdmin(admin.ModelAdmin):
         'is_public',
         'is_solution',
         'time_spent',
-    ]
-    list_filter = [
+    )
+    list_filter: ClassVar[list[str]] = (
         'comment_type',
         'is_public',
         'is_solution',
         'created_at',
-    ]
-    search_fields = [
+    )
+    search_fields: ClassVar[list[str]] = (
         'ticket__ticket_number',
         'ticket__title',
         'content',
@@ -393,12 +404,12 @@ class TicketCommentAdmin(admin.ModelAdmin):
         'author__last_name',
         'author_name',
         'author_email',
-    ]
+    )
     date_hierarchy = 'created_at'
-    readonly_fields = ['created_at', 'updated_at']
-    ordering = ['-created_at']
+    readonly_fields: ClassVar[list[str]] = ('created_at', 'updated_at')
+    ordering: ClassVar[tuple[str, ...]] = ('-created_at',)
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         (_('Comment Information'), {
             'fields': (
                 'ticket',
@@ -448,8 +459,8 @@ class TicketCommentAdmin(admin.ModelAdmin):
 
     def content_preview(self, obj: TicketComment) -> str:
         """Display content preview"""
-        if len(obj.content) > 100:
-            return f"{obj.content[:97]}..."
+        if len(obj.content) > CONTENT_PREVIEW_LIMIT:
+            return f"{obj.content[:CONTENT_PREVIEW_DISPLAY]}..."
         return obj.content
     content_preview.short_description = _('Content Preview')
 
@@ -462,7 +473,7 @@ class TicketCommentAdmin(admin.ModelAdmin):
 class TicketWorklogAdmin(admin.ModelAdmin):
     """Ticket work time tracking"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'work_date',
         'ticket',
         'user',
@@ -471,25 +482,25 @@ class TicketWorklogAdmin(admin.ModelAdmin):
         'hourly_rate',
         'total_cost_display',
         'description_preview',
-    ]
-    list_filter = [
+    )
+    list_filter: ClassVar[list[str]] = (
         'is_billable',
         'work_date',
         'user',
         'created_at',
-    ]
-    search_fields = [
+    )
+    search_fields: ClassVar[list[str]] = (
         'ticket__ticket_number',
         'ticket__title',
         'user__first_name',
         'user__last_name',
         'description',
-    ]
+    )
     date_hierarchy = 'work_date'
-    readonly_fields = ['created_at', 'total_cost_display']
-    ordering = ['-work_date']
+    readonly_fields: ClassVar[list[str]] = ('created_at', 'total_cost_display')
+    ordering: ClassVar[tuple[str, ...]] = ('-work_date',)
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         (_('Work Information'), {
             'fields': (
                 'ticket',
@@ -524,8 +535,8 @@ class TicketWorklogAdmin(admin.ModelAdmin):
 
     def description_preview(self, obj: TicketWorklog) -> str:
         """Display description preview"""
-        if len(obj.description) > 80:
-            return f"{obj.description[:77]}..."
+        if len(obj.description) > DESCRIPTION_PREVIEW_LIMIT:
+            return f"{obj.description[:DESCRIPTION_PREVIEW_DISPLAY]}..."
         return obj.description
     description_preview.short_description = _('Description')
 
@@ -563,7 +574,7 @@ class TicketWorklogAdmin(admin.ModelAdmin):
 class TicketAttachmentAdmin(admin.ModelAdmin):
     """Ticket file attachment management"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'uploaded_at',
         'ticket',
         'filename',
@@ -571,24 +582,24 @@ class TicketAttachmentAdmin(admin.ModelAdmin):
         'content_type',
         'is_safe_display',
         'uploaded_by',
-    ]
-    list_filter = [
+    )
+    list_filter: ClassVar[list[str]] = (
         'content_type',
         'is_safe',
         'uploaded_at',
-    ]
-    search_fields = [
+    )
+    search_fields: ClassVar[list[str]] = (
         'ticket__ticket_number',
         'ticket__title',
         'filename',
         'uploaded_by__first_name',
         'uploaded_by__last_name',
-    ]
+    )
     date_hierarchy = 'uploaded_at'
-    readonly_fields = ['uploaded_at', 'file_size_display']
-    ordering = ['-uploaded_at']
+    readonly_fields: ClassVar[list[str]] = ('uploaded_at', 'file_size_display')
+    ordering: ClassVar[tuple[str, ...]] = ('-uploaded_at',)
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         (_('Attachment Information'), {
             'fields': (
                 'ticket',

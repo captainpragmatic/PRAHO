@@ -5,6 +5,8 @@ Romanian hosting provider service provisioning and server management.
 
 
 
+from typing import ClassVar
+
 from django.contrib import admin
 from django.db.models import QuerySet
 from django.http import HttpRequest
@@ -12,6 +14,18 @@ from django.utils import timezone
 from django.utils.html import format_html
 from django.utils.safestring import SafeString
 from django.utils.translation import gettext_lazy as _
+
+from apps.common.constants import (
+    HIGH_USAGE_THRESHOLD,
+    MEDIUM_USAGE_THRESHOLD,
+    FULL_USAGE_THRESHOLD,
+    RETRY_WARNING_THRESHOLD,
+    NO_EXPIRY_SENTINEL,
+    DAYS_CRITICAL_EXPIRY,
+    DAYS_WARNING_EXPIRY,
+    SECONDS_PER_MINUTE,
+    SECONDS_PER_HOUR,
+)
 
 from .models import ProvisioningTask, Server, Service, ServicePlan
 
@@ -23,7 +37,7 @@ from .models import ProvisioningTask, Server, Service, ServicePlan
 class ServicePlanAdmin(admin.ModelAdmin):
     """Hosting service plans management"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'name',
         'plan_type',
         'price_monthly_display',
@@ -32,21 +46,21 @@ class ServicePlanAdmin(admin.ModelAdmin):
         'is_public',
         'auto_provision',
         'sort_order',
-    ]
-    list_filter = [
+    )
+    list_filter: ClassVar[list[str]] = (
         'plan_type',
         'is_active',
         'is_public',
         'auto_provision',
         'includes_vat',
-    ]
-    search_fields = [
+    )
+    search_fields: ClassVar[list[str]] = (
         'name',
         'description',
-    ]
-    ordering = ['plan_type', 'sort_order', 'price_monthly']
+    )
+    ordering: ClassVar[tuple[str, ...]] = ('plan_type', 'sort_order', 'price_monthly')
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         (_('Basic Information'), {
             'fields': (
                 'name',
@@ -98,7 +112,7 @@ class ServicePlanAdmin(admin.ModelAdmin):
             'classes': ('collapse',),
         }),
     )
-    readonly_fields = ['created_at', 'updated_at']
+    readonly_fields: ClassVar[list[str]] = ('created_at', 'updated_at')
 
     def price_monthly_display(self, obj: ServicePlan) -> str:
         """Display monthly price with VAT indicator"""
@@ -113,7 +127,7 @@ class ServicePlanAdmin(admin.ModelAdmin):
         return format_html('<span style="color: green;">Free</span>')
     setup_fee_display.short_description = _('Setup Fee')
 
-    actions = ['activate_plans', 'deactivate_plans', 'make_public', 'make_private']
+    actions: ClassVar[list[str]] = ['activate_plans', 'deactivate_plans', 'make_public', 'make_private']
 
     def activate_plans(self, request: HttpRequest, queryset: QuerySet[ServicePlan]) -> None:
         """Activate selected service plans"""
@@ -148,7 +162,7 @@ class ServicePlanAdmin(admin.ModelAdmin):
 class ServerAdmin(admin.ModelAdmin):
     """Physical/virtual server management"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'name',
         'hostname',
         'server_type',
@@ -157,8 +171,8 @@ class ServerAdmin(admin.ModelAdmin):
         'active_services_display',
         'resource_usage_display',
         'monthly_cost_display',
-    ]
-    list_filter = [
+    )
+    list_filter: ClassVar[list[str]] = (
         'server_type',
         'status',
         'location',
@@ -166,18 +180,18 @@ class ServerAdmin(admin.ModelAdmin):
         'os_type',
         'provider',
         'is_active',
-    ]
-    search_fields = [
+    )
+    search_fields: ClassVar[list[str]] = (
         'name',
         'hostname',
         'primary_ip',
         'location',
         'datacenter',
         'provider_instance_id',
-    ]
-    ordering = ['location', 'name']
+    )
+    ordering: ClassVar[tuple[str, ...]] = ('location', 'name')
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         (_('Basic Information'), {
             'fields': (
                 'name',
@@ -238,7 +252,7 @@ class ServerAdmin(admin.ModelAdmin):
             'classes': ('collapse',),
         }),
     )
-    readonly_fields = ['created_at', 'updated_at']
+    readonly_fields: ClassVar[list[str]] = ('created_at', 'updated_at')
 
     def status_display(self, obj: Server) -> SafeString:
         """Display status with colors"""
@@ -262,9 +276,9 @@ class ServerAdmin(admin.ModelAdmin):
         max_services = obj.max_services
         if max_services:
             percentage = (count / max_services) * 100
-            if percentage > 90:
+            if percentage > HIGH_USAGE_THRESHOLD:
                 color = 'red'
-            elif percentage > 75:
+            elif percentage > MEDIUM_USAGE_THRESHOLD:
                 color = 'orange'
             else:
                 color = 'green'
@@ -278,9 +292,9 @@ class ServerAdmin(admin.ModelAdmin):
     def resource_usage_display(self, obj: Server) -> SafeString:
         """Display average resource usage"""
         avg_usage = obj.resource_usage_average
-        if avg_usage > 90:
+        if avg_usage > HIGH_USAGE_THRESHOLD:
             color = 'red'
-        elif avg_usage > 75:
+        elif avg_usage > MEDIUM_USAGE_THRESHOLD:
             color = 'orange'
         else:
             color = 'green'
@@ -302,7 +316,7 @@ class ServerAdmin(admin.ModelAdmin):
         return '-'
     monthly_cost_display.short_description = _('Monthly Cost')
 
-    actions = ['mark_maintenance', 'mark_active']
+    actions: ClassVar[list[str]] = ['mark_maintenance', 'mark_active']
 
     def mark_maintenance(self, request: HttpRequest, queryset: QuerySet[Server]) -> None:
         """Mark servers as under maintenance"""
@@ -325,7 +339,7 @@ class ServerAdmin(admin.ModelAdmin):
 class ServiceAdmin(admin.ModelAdmin):
     """Customer service management"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'service_name',
         'customer',
         'service_plan',
@@ -335,8 +349,8 @@ class ServiceAdmin(admin.ModelAdmin):
         'billing_cycle',
         'expires_at',
         'days_until_expiry_display',
-    ]
-    list_filter = [
+    )
+    list_filter: ClassVar[list[str]] = (
         'status',
         'billing_cycle',
         'service_plan__plan_type',
@@ -344,24 +358,24 @@ class ServiceAdmin(admin.ModelAdmin):
         'auto_renew',
         'setup_fee_paid',
         'created_at',
-    ]
-    search_fields = [
+    )
+    search_fields: ClassVar[list[str]] = (
         'service_name',
         'domain',
         'username',
         'customer__name',
         'customer__company_name',
         'customer__primary_email',
-    ]
+    )
     date_hierarchy = 'created_at'
-    readonly_fields = [
+    readonly_fields: ClassVar[list[str]] = (
         'created_at',
         'updated_at',
         'price_display',
         'days_until_expiry_display',
-    ]
+    )
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         (_('Service Information'), {
             'fields': (
                 'customer',
@@ -443,19 +457,19 @@ class ServiceAdmin(admin.ModelAdmin):
     def days_until_expiry_display(self, obj):
         """Display days until expiry with color coding"""
         days = obj.days_until_expiry
-        if days == 999999:
+        if days == NO_EXPIRY_SENTINEL:
             return format_html('<span style="color: green;">No expiry</span>')
         elif days <= 0:
             return format_html('<span style="color: red;">Expired</span>')
-        elif days <= 7:
+        elif days <= DAYS_CRITICAL_EXPIRY:
             return format_html('<span style="color: red;">{} days</span>', days)
-        elif days <= 30:
+        elif days <= DAYS_WARNING_EXPIRY:
             return format_html('<span style="color: orange;">{} days</span>', days)
         else:
             return format_html('<span style="color: green;">{} days</span>', days)
     days_until_expiry_display.short_description = _('Days to Expiry')
 
-    actions = ['activate_services', 'suspend_services', 'extend_expiry']
+    actions: ClassVar[list[str]] = ['activate_services', 'suspend_services', 'extend_expiry']
 
     def activate_services(self, request, queryset) -> None:
         """Activate selected services"""
@@ -486,7 +500,7 @@ class ServiceAdmin(admin.ModelAdmin):
 class ProvisioningTaskAdmin(admin.ModelAdmin):
     """Automated provisioning task management"""
 
-    list_display = [
+    list_display: ClassVar[list[str]] = (
         'created_at',
         'service',
         'task_type',
@@ -494,30 +508,30 @@ class ProvisioningTaskAdmin(admin.ModelAdmin):
         'retry_count_display',
         'duration_display',
         'next_retry_at',
-    ]
-    list_filter = [
+    )
+    list_filter: ClassVar[list[str]] = (
         'status',
         'task_type',
         'created_at',
         'service__service_plan__plan_type',
-    ]
-    search_fields = [
+    )
+    search_fields: ClassVar[list[str]] = (
         'service__service_name',
         'service__customer__name',
         'service__customer__company_name',
         'error_message',
-    ]
+    )
     date_hierarchy = 'created_at'
-    readonly_fields = [
+    readonly_fields: ClassVar[list[str]] = (
         'created_at',
         'updated_at',
         'duration_display',
         'started_at',
         'completed_at',
-    ]
-    ordering = ['-created_at']
+    )
+    ordering: ClassVar[tuple[str, ...]] = ('-created_at',)
 
-    fieldsets = (
+    fieldsets: ClassVar[tuple] = (
         (_('Task Information'), {
             'fields': (
                 'service',
@@ -572,9 +586,9 @@ class ProvisioningTaskAdmin(admin.ModelAdmin):
         """Display retry count with progress"""
         if obj.max_retries > 0:
             percentage = (obj.retry_count / obj.max_retries) * 100
-            if percentage >= 100:
+            if percentage >= FULL_USAGE_THRESHOLD:
                 color = 'red'
-            elif percentage >= 66:
+            elif percentage >= RETRY_WARNING_THRESHOLD:
                 color = 'orange'
             else:
                 color = 'green'
@@ -589,10 +603,10 @@ class ProvisioningTaskAdmin(admin.ModelAdmin):
         """Display task duration"""
         duration = obj.duration_seconds
         if duration > 0:
-            if duration < 60:
+            if duration < SECONDS_PER_MINUTE:
                 return f"{duration}s"
-            elif duration < 3600:
-                return f"{duration // 60}m {duration % 60}s"
+            elif duration < SECONDS_PER_HOUR:
+                return f"{duration // SECONDS_PER_MINUTE}m {duration % SECONDS_PER_MINUTE}s"
             else:
                 hours = duration // 3600
                 minutes = (duration % 3600) // 60
@@ -600,7 +614,7 @@ class ProvisioningTaskAdmin(admin.ModelAdmin):
         return '-'
     duration_display.short_description = _('Duration')
 
-    actions = ['retry_failed_tasks', 'cancel_pending_tasks']
+    actions: ClassVar[list[str]] = ['retry_failed_tasks', 'cancel_pending_tasks']
 
     def retry_failed_tasks(self, request, queryset) -> None:
         """Retry failed tasks that can be retried"""

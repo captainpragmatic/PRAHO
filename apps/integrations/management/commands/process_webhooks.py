@@ -3,6 +3,7 @@ import logging
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
+from apps.common.constants import SECONDS_PER_HOUR, SECONDS_PER_MINUTE
 from apps.integrations.models import WebhookEvent
 from apps.integrations.webhooks.base import (
     process_pending_webhooks,
@@ -190,10 +191,10 @@ class Command(BaseCommand):
                 age = timezone.now() - webhook.received_at
                 if age.days > 0:
                     age_str = f"{age.days}d ago"
-                elif age.seconds > 3600:
-                    age_str = f"{age.seconds // 3600}h ago"
-                elif age.seconds > 60:
-                    age_str = f"{age.seconds // 60}m ago"
+                elif age.seconds > SECONDS_PER_HOUR:
+                    age_str = f"{age.seconds // SECONDS_PER_HOUR}h ago"
+                elif age.seconds > SECONDS_PER_MINUTE:
+                    age_str = f"{age.seconds // SECONDS_PER_MINUTE}m ago"
                 else:
                     age_str = "just now"
 
