@@ -6,7 +6,7 @@ Fast iteration with debugging tools enabled.
 import os
 import sys
 
-from .base import *
+from .base import *  # noqa: F403
 
 # ===============================================================================
 # DEVELOPMENT FLAGS
@@ -23,13 +23,13 @@ ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_env.split(',') if host.s
 # DEVELOPMENT MIDDLEWARE
 # ===============================================================================
 
-MIDDLEWARE.insert(1, 'debug_toolbar.middleware.DebugToolbarMiddleware')
+MIDDLEWARE.insert(1, 'debug_toolbar.middleware.DebugToolbarMiddleware')  # noqa: F405
 
 # ===============================================================================
 # DEVELOPMENT APPS
 # ===============================================================================
 
-INSTALLED_APPS += [
+INSTALLED_APPS += [  # noqa: F405
     'debug_toolbar',
 ]
 
@@ -41,7 +41,7 @@ if os.environ.get('USE_POSTGRES') != 'true':
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': str(BASE_DIR / 'db.sqlite3'),
+            'NAME': str(BASE_DIR / 'db.sqlite3'),  # noqa: F405
         }
     }
 
@@ -63,7 +63,7 @@ DEBUG_TOOLBAR_CONFIG = {
 # Disable debug toolbar during tests
 if 'test' in sys.argv:
     INSTALLED_APPS = [app for app in INSTALLED_APPS if app != 'debug_toolbar']
-    MIDDLEWARE = [mw for mw in MIDDLEWARE if 'debug_toolbar' not in mw]
+    MIDDLEWARE = [mw for mw in MIDDLEWARE if 'debug_toolbar' not in mw]  # noqa: F405
 
 # ===============================================================================
 # EMAIL BACKEND (Console for development)
@@ -150,7 +150,7 @@ STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
 # ===============================================================================
 
 # Test company info for development
-ROMANIAN_BUSINESS_CONTEXT.update({
+ROMANIAN_BUSINESS_CONTEXT.update({  # noqa: F405
     'company_name': 'PragmaticHost Dev SRL',
     'company_cui': 'RO99999999',
     'email': 'dev@pragmatichost.com',

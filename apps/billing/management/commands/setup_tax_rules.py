@@ -3,6 +3,7 @@ Management command to set up Romanian and EU tax rules.
 Populates the TaxRule model with current VAT rates for Romanian hosting business.
 """
 
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
@@ -22,7 +23,7 @@ class Command(BaseCommand):
             help='Force recreation of existing tax rules',
         )
 
-    def _get_romanian_tax_rules_data(self, today: 'date') -> list[dict]:
+    def _get_romanian_tax_rules_data(self, today: date) -> list[dict]:
         """Get Romanian VAT rules configuration."""
         return [
             {
@@ -91,7 +92,7 @@ class Command(BaseCommand):
             self.stdout.write(f"  ✅ Created: {rule}")
             return 1, 0
 
-    def _create_romanian_rules(self, today: 'date', force: bool) -> tuple[int, int]:
+    def _create_romanian_rules(self, today: date, force: bool) -> tuple[int, int]:
         """Create Romanian tax rules."""
         created_count = 0
         updated_count = 0
@@ -104,7 +105,7 @@ class Command(BaseCommand):
             
         return created_count, updated_count
 
-    def _create_eu_rules(self, today: 'date', force: bool) -> tuple[int, int]:
+    def _create_eu_rules(self, today: date, force: bool) -> tuple[int, int]:
         """Create EU countries tax rules."""
         created_count = 0
         updated_count = 0
@@ -134,7 +135,7 @@ class Command(BaseCommand):
             
         return created_count, updated_count
 
-    def _create_non_eu_rules(self, today: 'date', force: bool) -> tuple[int, int]:
+    def _create_non_eu_rules(self, today: date, force: bool) -> tuple[int, int]:
         """Create non-EU countries tax rules."""
         created_count = 0
         updated_count = 0

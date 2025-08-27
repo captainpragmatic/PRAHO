@@ -15,14 +15,14 @@ try:
 except ImportError:
     HAS_SENTRY = False
 
-from .base import *
+from .base import *  # noqa: F403
 
 # ===============================================================================
 # PRODUCTION SECURITY VALIDATION
 # ===============================================================================
 
 # Validate SECRET_KEY meets production security requirements
-validate_production_secret_key()
+validate_production_secret_key()  # noqa: F405
 
 # ===============================================================================
 # PRODUCTION FLAGS
@@ -60,7 +60,7 @@ SECURE_REFERRER_POLICY = 'strict-origin-when-cross-origin'
 # MIDDLEWARE FOR PRODUCTION
 # ===============================================================================
 
-MIDDLEWARE.insert(-1, 'apps.common.middleware.SecurityHeadersMiddleware')
+MIDDLEWARE.insert(-1, 'apps.common.middleware.SecurityHeadersMiddleware')  # noqa: F405
 
 # ===============================================================================
 # TRUSTED ORIGINS FOR CSRF
@@ -76,7 +76,7 @@ CSRF_TRUSTED_ORIGINS = [
 # DATABASE PRODUCTION SETTINGS
 # ===============================================================================
 
-DATABASES['default'].update({
+DATABASES['default'].update({  # noqa: F405
     'CONN_MAX_AGE': 600,
     'OPTIONS': {
         'application_name': 'pragmatichost_crm_prod',
@@ -181,7 +181,7 @@ SERVER_EMAIL = DEFAULT_FROM_EMAIL
 # CACHE CONFIGURATION (Redis Production)
 # ===============================================================================
 
-CACHES['default'].update({
+CACHES['default'].update({  # noqa: F405
     'OPTIONS': {
         'CLIENT_CLASS': 'django_redis.client.DefaultClient',
         'CONNECTION_POOL_KWARGS': {
@@ -274,7 +274,7 @@ BACKUP_ENCRYPTION_KEY = os.environ.get('BACKUP_ENCRYPTION_KEY')
 # ===============================================================================
 
 # Database connection pooling
-DATABASES['default']['OPTIONS']['MAX_CONNS'] = 20
+DATABASES['default']['OPTIONS']['MAX_CONNS'] = 20  # noqa: F405
 
 # Template caching
 TEMPLATE_LOADERS = [
