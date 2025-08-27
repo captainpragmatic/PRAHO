@@ -18,12 +18,11 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.test import RequestFactory
 from django.utils import timezone
-from django.utils.translation import gettext as _t
 from django.utils.translation import gettext_lazy as _
 
+from apps.billing.pdf_generators import RomanianInvoicePDFGenerator, RomanianProformaPDFGenerator
 from apps.common.decorators import billing_staff_required, can_edit_proforma
 from apps.common.mixins import get_pagination_context, get_search_context
-from apps.billing.pdf_generators import RomanianInvoicePDFGenerator, RomanianProformaPDFGenerator
 from apps.common.utils import json_error, json_success
 from apps.customers.models import Customer
 from apps.users.models import User

@@ -193,9 +193,7 @@ class TypeSuggestionEngine:
 
     def _detect_repository_method(self, node: ast.FunctionDef) -> str | None:
         """Detect repository pattern methods."""
-        if node.name.startswith('create_'):
-            return 'Result[Any, str]'
-        elif node.name.startswith('update_'):
+        if node.name.startswith('create_') or node.name.startswith('update_'):
             return 'Result[Any, str]'
         elif node.name.startswith('delete_'):
             return 'Result[bool, str]'

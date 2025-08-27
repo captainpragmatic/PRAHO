@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 from io import BytesIO
-from typing import Any
 
 from django.conf import settings
 from django.http import HttpResponse
@@ -203,7 +202,7 @@ class RomanianDocumentPDFGenerator:
         
     def _render_status_information(self, totals_y: float) -> None:
         """Render document-specific status information."""
-        pass  # Override in subclasses if needed
+        # Override in subclasses if needed
         
     def _render_document_footer(self) -> None:
         """Render document footer with legal disclaimers."""

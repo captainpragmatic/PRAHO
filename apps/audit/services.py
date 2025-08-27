@@ -5,7 +5,7 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, Optional, TypedDict
+from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
 
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.models import ContentType
@@ -66,7 +66,7 @@ class ConsentHistoryEntry(TypedDict):
 @dataclass
 class AuditContext:
     """Parameter object for audit event context information"""
-    user: Optional[UserType] = None
+    user: UserType | None = None
     ip_address: str | None = None
     user_agent: str | None = None
     request_id: str | None = None
@@ -97,7 +97,7 @@ class ComplianceEventRequest:
     compliance_type: str
     reference_id: str
     description: str
-    user: Optional[UserType] = None
+    user: UserType | None = None
     status: str = 'success'
     evidence: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -311,7 +311,7 @@ class AuditService:
         compliance_type: str,
         reference_id: str,
         description: str,
-        user: Optional[UserType] = None,
+        user: UserType | None = None,
         status: str = 'success',
         evidence: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None
@@ -415,7 +415,7 @@ class GDPRExportService:
 
     @classmethod
     @transaction.atomic
-    def process_data_export(cls, export_request: 'DataExport') -> Result[str, str]:
+    def process_data_export(cls, export_request: DataExport) -> Result[str, str]:
         """Process and generate the actual data export file"""
         try:
             user = export_request.requested_by
@@ -603,7 +603,7 @@ class GDPRDeletionService:
         deletion_type: str = 'anonymize',  # 'anonymize' or 'delete'
         request_ip: str | None = None,
         reason: str | None = None
-    ) -> "Result[ComplianceLog, str]":
+    ) -> Result[ComplianceLog, str]:
         """Create a GDPR data deletion request"""
 
 
@@ -647,7 +647,7 @@ class GDPRDeletionService:
 
     @classmethod
     @transaction.atomic
-    def process_deletion_request(cls, deletion_request: 'ComplianceLog') -> Result[str, str]:
+    def process_deletion_request(cls, deletion_request: ComplianceLog) -> Result[str, str]:
         """Process the actual data deletion/anonymization"""
 
 
