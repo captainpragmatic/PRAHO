@@ -10,27 +10,32 @@ from django.core.management.base import BaseCommand
 from apps.billing.models import PaymentRetryPolicy
 
 
-class Command(BaseCommand):
-    help = 'Set up payment retry policies for failed payment recovery'
-
-    def add_arguments(self, parser: Any) -> None:
-        parser.add_argument(
-            '--force',
-            action='store_true',
-            help='Force recreation of existing policies',
-        )
-
-    def handle(self, *args: Any, **options: Any) -> None:
-        """Set up standard payment retry policies"""
-
-        force = options.get('force', False)
-        created_count = 0
-        updated_count = 0
-
+class PaymentRetryPolicySetup:
+    """
+    Handles setup and management of payment retry policies.
+    Encapsulates Romanian business logic for payment collection strategies.
+    """
+    
+    def __init__(self, stdout_writer: Any, force: bool = False) -> None:
+        self.stdout = stdout_writer
+        self.force = force
+        self.created_count = 0
+        self.updated_count = 0
+        
+    def setup_policies(self) -> None:
+        """Set up all standard payment retry policies."""
         self.stdout.write("💳 Setting up payment retry policies...")
-
-        # Standard retry policies for different scenarios
-        policies = [
+        
+        policies = self._get_policy_configurations()
+        self._create_or_update_policies(policies)
+        self._ensure_single_default_policy()
+        self._display_setup_summary()
+        self._display_active_policies()
+        self._display_next_steps()
+        
+    def _get_policy_configurations(self) -> list[dict[str, Any]]:
+        """Get standard retry policy configurations for Romanian hosting business."""
+        return [
             {
                 'name': 'Standard Hosting',
                 'description': 'Default policy for regular hosting customers',
@@ -152,31 +157,39 @@ class Command(BaseCommand):
                 }
             }
         ]
-
-        # Create or update policies
+        
+    def _create_or_update_policies(self, policies: list[dict[str, Any]]) -> None:
+        """Create or update payment retry policies."""
         for policy_data in policies:
             existing = PaymentRetryPolicy.objects.filter(
                 name=policy_data['name']
             ).first()
 
-            if existing and not force:
+            if existing and not self.force:
                 self.stdout.write(f"  ⏭️  Skipping existing: {existing.name}")
                 continue
 
-            if existing and force:
-                # Update existing policy
-                for key, value in policy_data.items():
-                    setattr(existing, key, value)
-                existing.save()
-                updated_count += 1
-                self.stdout.write(f"  🔄 Updated: {existing.name}")
+            if existing and self.force:
+                self._update_existing_policy(existing, policy_data)
             else:
-                # Create new policy
-                policy = PaymentRetryPolicy.objects.create(**policy_data)
-                created_count += 1
-                self.stdout.write(f"  ✅ Created: {policy.name}")
+                self._create_new_policy(policy_data)
+                
+    def _update_existing_policy(self, existing: PaymentRetryPolicy, policy_data: dict[str, Any]) -> None:
+        """Update an existing payment retry policy."""
+        for key, value in policy_data.items():
+            setattr(existing, key, value)
+        existing.save()
+        self.updated_count += 1
+        self.stdout.write(f"  🔄 Updated: {existing.name}")
+        
+    def _create_new_policy(self, policy_data: dict[str, Any]) -> None:
+        """Create a new payment retry policy."""
+        policy = PaymentRetryPolicy.objects.create(**policy_data)
+        self.created_count += 1
+        self.stdout.write(f"  ✅ Created: {policy.name}")
 
-        # Ensure only one default policy
+    def _ensure_single_default_policy(self) -> None:
+        """Ensure only one default policy exists."""
         default_policies = PaymentRetryPolicy.objects.filter(is_default=True)
         if default_policies.count() > 1:
             self.stdout.write("⚠️  Multiple default policies found, fixing...")
@@ -186,15 +199,17 @@ class Command(BaseCommand):
                 policy.save()
                 self.stdout.write(f"  🔧 Removed default from: {policy.name}")
 
-        # Summary
+    def _display_setup_summary(self) -> None:
+        """Display setup completion summary."""
         self.stdout.write("\n" + "="*60)
         self.stdout.write("📋 Payment Retry Policies Setup Complete!")
-        self.stdout.write(f"   ✅ Created: {created_count} new policies")
-        if updated_count > 0:
-            self.stdout.write(f"   🔄 Updated: {updated_count} existing policies")
+        self.stdout.write(f"   ✅ Created: {self.created_count} new policies")
+        if self.updated_count > 0:
+            self.stdout.write(f"   🔄 Updated: {self.updated_count} existing policies")
         self.stdout.write(f"   📊 Total policies: {PaymentRetryPolicy.objects.count()}")
 
-        # Show active policies
+    def _display_active_policies(self) -> None:
+        """Display active retry policies information."""
         self.stdout.write("\n💳 Active Retry Policies:")
         active_policies = PaymentRetryPolicy.objects.filter(is_active=True).order_by('name')
         for policy in active_policies:
@@ -207,6 +222,10 @@ class Command(BaseCommand):
                 self.stdout.write(f"     └─ Suspend after {policy.suspend_service_after_days} days")
 
         # Show default policy details
+        self._display_default_policy_details()
+
+    def _display_default_policy_details(self) -> None:
+        """Display default policy configuration details."""
         default_policy = PaymentRetryPolicy.objects.filter(is_default=True).first()
         if default_policy:
             self.stdout.write(f"\n🎯 Default Policy: {default_policy.name}")
@@ -214,8 +233,28 @@ class Command(BaseCommand):
             self.stdout.write(f"   Service suspension: {default_policy.suspend_service_after_days} days")
             self.stdout.write(f"   Service termination: {default_policy.terminate_service_after_days} days")
 
+    def _display_next_steps(self) -> None:
+        """Display next steps for dunning system configuration."""
         self.stdout.write("\n💡 Next steps:")
         self.stdout.write("   1. Configure email templates for dunning campaigns")
         self.stdout.write("   2. Set up cron job for: python manage.py run_payment_collection")
         self.stdout.write("   3. Test with failed payments: python manage.py test_dunning_system")
         self.stdout.write("   4. Monitor collection runs in Django admin")
+
+
+class Command(BaseCommand):
+    help = 'Set up payment retry policies for failed payment recovery'
+
+    def add_arguments(self, parser: Any) -> None:
+        parser.add_argument(
+            '--force',
+            action='store_true',
+            help='Force recreation of existing policies',
+        )
+
+    def handle(self, *args: Any, **options: Any) -> None:
+        """Set up standard payment retry policies using dedicated setup class."""
+        force = options.get('force', False)
+        
+        policy_setup = PaymentRetryPolicySetup(self.stdout, force)
+        policy_setup.setup_policies()
