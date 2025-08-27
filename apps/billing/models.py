@@ -4,11 +4,16 @@ Romanian invoice generation with VAT compliance and e-Factura support.
 Aligned with PostgreSQL hosting panel schema v1 with separate proforma handling.
 """
 
+from __future__ import annotations
+
 import logging
 import uuid
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
+
+if TYPE_CHECKING:
+    pass
 
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction

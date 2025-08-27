@@ -384,16 +384,18 @@ def _validate_invitation_input(args: tuple[Any, ...], kwargs: dict[str, Any]) ->
     customer = kwargs.get('customer') or (args[3] if len(args) > INVITATION_CUSTOMER_ARG_POSITION else None)
     role = kwargs.get('role', 'viewer') or (args[4] if len(args) > INVITATION_ROLE_ARG_POSITION else 'viewer')
 
-    if all([inviter, invitee_email, customer, role]):
+    if all([inviter, invitee_email, customer, role]) and isinstance(invitee_email, str):
         # Validate the invitation request
-        BusinessLogicValidator.validate_invitation_request(
-            inviter=inviter,
-            invitee_email=invitee_email,
-            customer=customer,
-            role=role,
-            user_id=inviter.id,
-            request_ip=kwargs.get('request_ip')
-        )
+        # Type guard: inviter is not None due to all() check above
+        if inviter is not None and hasattr(inviter, 'id'):
+            BusinessLogicValidator.validate_invitation_request(
+                inviter=inviter,
+                invitee_email=invitee_email,
+                customer=customer,
+                role=role,
+                user_id=inviter.id,
+                request_ip=kwargs.get('request_ip')
+            )
 
 
 def _validate_permissions(user: Any, customer: Any, required_role: str) -> None:

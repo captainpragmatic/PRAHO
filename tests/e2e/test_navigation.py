@@ -262,11 +262,11 @@ def _try_click_navigation_element(page: Page, selector: str, index: int) -> bool
 
 def _should_skip_element(href: str) -> bool:
     """Determine if an element should be skipped based on its href"""
-    return (href.startswith(('mailto:', 'tel:', 'javascript:')) or 
-            href == '#' or 
-            'logout' in href.lower() or 
-            'signout' in href.lower() or 
-            (href and not href.startswith('/')))
+    return bool(href.startswith(('mailto:', 'tel:', 'javascript:')) or 
+                href == '#' or 
+                'logout' in href.lower() or 
+                'signout' in href.lower() or 
+                (href and not href.startswith('/')))
 
 
 def _handle_navigation_result(page: Page, element_text: str) -> None:

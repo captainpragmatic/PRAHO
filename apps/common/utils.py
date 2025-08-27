@@ -11,7 +11,10 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from decimal import Decimal
 from functools import wraps
-from typing import Any, TypedDict
+from typing import Any, TypedDict, TypeVar
+
+# Type variable for function decorators
+F = TypeVar('F', bound=Callable[..., Any])
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
@@ -24,7 +27,7 @@ from django.utils.translation import gettext_lazy as _
 try:
     from apps.common.types import calculate_romanian_vat as new_calculator
 except ImportError:
-    new_calculator = None
+    new_calculator = None  # type: ignore[assignment]
 
 # ===============================================================================
 # ROMANIAN VALIDATION UTILITIES
@@ -45,22 +48,23 @@ def calculate_romanian_vat(amount: Decimal, vat_rate: int = 19) -> VATCalculatio
         # Fallback implementation in case of circular import
         vat_amount = amount * Decimal(vat_rate) / Decimal('119')  # 19% VAT included
         amount_without_vat = amount - vat_amount
-        return {
-            'amount_without_vat': amount_without_vat,
-            'vat_amount': vat_amount,
-            'amount_with_vat': amount,
-        }
+        return VATCalculation(
+            amount_without_vat=amount_without_vat,
+            vat_amount=vat_amount,
+            amount_with_vat=amount,
+            vat_rate=vat_rate,
+        )
     
     # Convert to cents-based calculation for precision
     amount_cents = int(amount * 100)
     result = new_calculator(amount_cents, include_vat=True)
     
-    return {
-        'amount_without_vat': Decimal(result['base_amount']) / 100,
-        'vat_amount': Decimal(result['vat_amount']) / 100,
-        'amount_with_vat': Decimal(result['total_amount']) / 100,
-        'vat_rate': vat_rate,
-    }
+    return VATCalculation(
+        amount_without_vat=Decimal(result['base_amount']) / 100,
+        vat_amount=Decimal(result['vat_amount']) / 100,
+        amount_with_vat=Decimal(result['total_amount']) / 100,
+        vat_rate=vat_rate,
+    )
 
 
 # ===============================================================================
@@ -90,9 +94,9 @@ def mask_sensitive_data(data: str, show_last: int = 4) -> str:
 # DECORATORS
 # ===============================================================================
 
-def require_permission(permission: str) -> Callable[[Callable], Callable]:
+def require_permission(permission: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Decorator to require specific permission"""
-    def decorator(view_func: Callable) -> Callable:
+    def decorator(view_func: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(view_func)
         @login_required
         def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> Any:
@@ -103,9 +107,9 @@ def require_permission(permission: str) -> Callable[[Callable], Callable]:
     return decorator
 
 
-def require_role(role: str) -> Callable[[Callable], Callable]:
+def require_role(role: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Decorator to require specific user role"""
-    def decorator(view_func: Callable) -> Callable:
+    def decorator(view_func: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(view_func)
         @login_required
         def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> Any:
@@ -117,9 +121,9 @@ def require_role(role: str) -> Callable[[Callable], Callable]:
     return decorator
 
 
-def api_require_permission(permission: str) -> Callable[[Callable], Callable]:
+def api_require_permission(permission: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """API decorator to require permission and return JSON error"""
-    def decorator(view_func: Callable) -> Callable:
+    def decorator(view_func: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(view_func)
         @login_required
         def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> Any:
@@ -167,11 +171,11 @@ def generate_invoice_number(year: int | None = None) -> str:
 
     # Get next invoice number for this year
     last_invoice = Invoice.objects.filter(
-        invoice_number__startswith=f"{year}-"
-    ).order_by('invoice_number').last()
+        number__startswith=f"{year}-"
+    ).order_by('number').last()
 
     if last_invoice:
-        last_num = int(last_invoice.invoice_number.split('-')[1])
+        last_num = int(last_invoice.number.split('-')[1])
         next_num = last_num + 1
     else:
         next_num = 1
@@ -215,7 +219,7 @@ def json_error(message: str, code: str = "ERROR", status: int = 400) -> JsonResp
 # MAINTENANCE MODE
 # ===============================================================================
 
-def maintenance_mode_check(view_func: Callable) -> Callable:
+def maintenance_mode_check(view_func: Callable[..., Any]) -> Callable[..., Any]:
     """Check if system is in maintenance mode"""
     @wraps(view_func)
     def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> Any:

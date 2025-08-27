@@ -106,7 +106,9 @@ def navigation_context(request: HttpRequest) -> dict[str, Any]:
         # ⚡ PERFORMANCE: Use list comprehension for better performance
         nav_items = [
             item for item in nav_items 
-            if 'permission' not in item or request.user.has_perm(item['permission'])
+            if 'permission' not in item or (
+                isinstance(item['permission'], str) and request.user.has_perm(item['permission'])
+            )
         ]
     else:
         # Anonymous users see limited navigation
@@ -157,6 +159,60 @@ def current_customer(request: HttpRequest) -> dict[str, Any]:
     # For customer users, get their primary customer
     primary_customer = getattr(request.user, 'primary_customer', None)
     return {'current_customer': primary_customer}
+
+
+def navigation_dropdowns(request: HttpRequest) -> dict[str, Any]:
+    """Navigation dropdown items for the header"""
+    if not request.user.is_authenticated:
+        return {}
+    
+    # Staff/Admin Navigation Items
+    if request.user.is_staff or getattr(request.user, 'staff_role', None):
+        business_items = [
+            {"text": "Customers", "url": "/app/customers/", "icon": "👥"},
+            {"text": "Orders", "url": "/app/orders/", "icon": "🛒"},
+            {"divider": True},
+            {"text": "Invoices", "url": "/app/billing/invoices/", "icon": "🧾"},
+            {"text": "Services", "url": "/app/provisioning/services/", "icon": "🚀"},
+            {"text": "Domains", "url": "/app/domains/", "icon": "🌐"},
+        ]
+        
+        support_items = [
+            {"text": "All Tickets", "url": "/app/tickets/", "icon": "🎫"},
+            {"text": "Create Ticket", "url": "/app/tickets/create/", "icon": "➕"},
+            {"divider": True},
+            {"text": "GDPR Dashboard", "url": "/app/audit/gdpr/", "icon": "🔒"},
+            {"text": "Audit Logs", "url": "/app/audit/logs/", "icon": "📊"},
+        ]
+        
+        return {
+            'business_items': business_items,
+            'support_items': support_items,
+        }
+    
+    # Customer User Navigation Items
+    elif getattr(request.user, 'is_customer_user', False):
+        customer_items = [
+            {"text": "My Orders", "url": "/app/orders/", "icon": "🛒"},
+            {"text": "My Invoices", "url": "/app/billing/invoices/", "icon": "🧾"},
+            {"divider": True},
+            {"text": "My Services", "url": "/app/provisioning/services/", "icon": "🚀"},
+            {"text": "My Domains", "url": "/app/domains/", "icon": "🌐"},
+        ]
+        
+        customer_support_items = [
+            {"text": "My Tickets", "url": "/app/tickets/", "icon": "🎫"},
+            {"text": "New Ticket", "url": "/app/tickets/create/", "icon": "➕"},
+            {"divider": True},
+            {"text": "Knowledge Base", "url": "/app/help/", "icon": "📚"},
+        ]
+        
+        return {
+            'customer_items': customer_items,
+            'customer_support_items': customer_support_items,
+        }
+    
+    return {}
 
 
 def gdpr_compliance(request: HttpRequest) -> dict[str, Any]:

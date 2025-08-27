@@ -62,6 +62,21 @@ class Order(models.Model):
         help_text=_("Current order status")
     )
 
+    # Editable fields by status for hybrid editing approach
+    EDITABLE_FIELDS_BY_STATUS: ClassVar[dict[str, list[str]]] = {
+        'draft': ['*'],  # Everything editable
+        'pending': ['*'],  # Everything editable (payment not processed yet)
+        'processing': [
+            'notes', 'delivery_date', 'shipping_address_line1', 'shipping_address_line2',
+            'shipping_city', 'shipping_county', 'shipping_postal_code', 'shipping_country'
+        ],  # Limited to delivery and notes
+        'completed': ['notes'],  # Only administrative notes
+        'failed': ['*'],  # Full edit to retry/fix issues
+        'cancelled': ['notes'],  # Only notes for record keeping
+        'refunded': ['notes'],  # Only notes
+        'partially_refunded': ['notes', 'refund_reason']  # Notes and refund details
+    }
+
     # Financial information
     currency = models.ForeignKey(
         'billing.Currency',
@@ -264,6 +279,15 @@ class Order(models.Model):
         """Check if order can be cancelled"""
         return self.status in ['draft', 'pending']
 
+    def can_edit_field(self, field_name: str) -> bool:
+        """Check if a specific field can be edited based on current status"""
+        editable_fields = self.EDITABLE_FIELDS_BY_STATUS.get(self.status, [])
+        return '*' in editable_fields or field_name in editable_fields
+
+    def get_editable_fields(self) -> list[str]:
+        """Get list of fields that can be edited in current status"""
+        return self.EDITABLE_FIELDS_BY_STATUS.get(self.status, [])
+
     def generate_order_number(self) -> None:
         """Generate a unique order number based on date and sequence"""
         if not self.order_number:
@@ -454,7 +478,7 @@ class OrderItem(models.Model):
     def __str__(self) -> str:
         return f"{self.product_name} x{self.quantity} ({self.order.order_number})"
 
-    def save(self, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
+    def save(self, *args: Any, **kwargs: Any) -> None:
         """Auto-calculate totals before saving"""
         # Store product details snapshot
         if self.product and not self.product_name:

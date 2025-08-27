@@ -28,7 +28,12 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
     # ===============================================================================
 
     # Get user's accessible customers (multi-tenant support)
-    accessible_customers_list = request.user.get_accessible_customers()
+    # Type guard: @login_required ensures request.user is authenticated User instance
+    user = request.user
+    if not user.is_authenticated:
+        return redirect('login')
+    
+    accessible_customers_list = user.get_accessible_customers()
 
     # Convert to QuerySet for database queries
     if isinstance(accessible_customers_list, QuerySet):

@@ -16,7 +16,15 @@
         {% trans "Invoice details and line items" %}
       </p>
     </div>
-    <div class="mt-4 sm:mt-0 sm:ml-16 sm:flex-none">
+    <div class="mt-4 sm:mt-0 sm:ml-16 sm:flex-none space-x-3">
+      <!-- Refund Button for Staff -->
+      {% if is_staff and invoice.status == "paid" %}
+        {% button "💰 Refund Invoice" onclick="showInvoiceRefundModal()" variant="success" %}
+      {% elif not is_staff and invoice.status == "paid" %}
+        <!-- Refund Request Button for Customers -->
+        {% button "🎫 Request Refund" onclick="showInvoiceRefundRequestModal()" variant="primary" %}
+      {% endif %}
+      
       <a href="{% url 'billing:invoice_list' %}"
          class="inline-flex items-center justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700">
         ← {% trans "Back to Billing" %}
@@ -216,4 +224,320 @@
   </div>
   {% endif %}
 </div>
+
+<!-- Invoice Refund Modal (for staff) -->
+{% if is_staff and invoice.status == "paid" %}
+<div id="invoiceRefundModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
+  <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+    <div class="fixed inset-0 transition-opacity" aria-hidden="true">
+      <div class="absolute inset-0 bg-slate-900 opacity-75" onclick="hideInvoiceRefundModal()"></div>
+    </div>
+
+    <div class="inline-block align-bottom bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+      <form id="invoiceRefundForm" method="post" action="{% url 'billing:invoice_refund' pk=invoice.id %}">
+        {% csrf_token %}
+        <div class="px-6 pt-6 pb-4">
+          <h3 class="text-lg font-medium text-white mb-4">💰 {% trans "Refund Invoice" %}</h3>
+          
+          <div class="mb-4">
+            <label for="invoice_refund_type" class="block text-sm font-medium text-slate-400 mb-2">
+              {% trans "Refund Type" %}
+            </label>
+            <select id="invoice_refund_type" name="refund_type" required
+                    class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500">
+              <option value="">{% trans "Select refund type..." %}</option>
+              <option value="full">💰 {% trans "Full Refund" %}</option>
+              <option value="partial">💸 {% trans "Partial Refund" %}</option>
+            </select>
+          </div>
+          
+          <div id="invoice_partial_amount_section" class="mb-4 hidden">
+            <label for="invoice_refund_amount" class="block text-sm font-medium text-slate-400 mb-2">
+              {% trans "Refund Amount" %}
+            </label>
+            <div class="relative">
+              <input type="number" id="invoice_refund_amount" name="refund_amount" step="0.01" min="0.01"
+                     max="{{ invoice.total_cents|cents_to_currency }}"
+                     class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 pr-16 focus:ring-2 focus:ring-blue-500"
+                     placeholder="0.00">
+              <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                <span class="text-slate-400 text-sm">{{ invoice.currency }}</span>
+              </div>
+            </div>
+            <p class="text-xs text-slate-500 mt-1">
+              {% trans "Maximum refundable:" %} {{ invoice.total_cents|cents_to_currency|romanian_currency:invoice.currency }}
+            </p>
+          </div>
+          
+          <div class="mb-4">
+            <label for="invoice_refund_reason" class="block text-sm font-medium text-slate-400 mb-2">
+              {% trans "Refund Reason" %}
+            </label>
+            <select id="invoice_refund_reason" name="refund_reason" required
+                    class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500">
+              <option value="">{% trans "Select reason..." %}</option>
+              <option value="customer_request">🙋 {% trans "Customer Request" %}</option>
+              <option value="error_correction">🔧 {% trans "Error Correction" %}</option>
+              <option value="dispute_resolution">⚖️ {% trans "Dispute Resolution" %}</option>
+              <option value="service_failure">❌ {% trans "Service Failure" %}</option>
+              <option value="duplicate_invoice">📋 {% trans "Duplicate Invoice" %}</option>
+              <option value="cancellation_request">🚫 {% trans "Cancellation Request" %}</option>
+              <option value="quality_issue">🔍 {% trans "Quality Issue" %}</option>
+              <option value="policy_violation">📜 {% trans "Policy Violation" %}</option>
+              <option value="technical_issue">⚙️ {% trans "Technical Issue" %}</option>
+              <option value="other">❓ {% trans "Other" %}</option>
+            </select>
+          </div>
+          
+          <div class="mb-4">
+            <label for="invoice_refund_notes" class="block text-sm font-medium text-slate-400 mb-2">
+              {% trans "Notes" %} <span class="text-slate-500">({% trans "required" %})</span>
+            </label>
+            <textarea id="invoice_refund_notes" name="refund_notes" rows="3" required
+                      class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+                      placeholder="{% trans 'Please explain the reason for this refund...' %}"></textarea>
+          </div>
+          
+          <div class="mb-4">
+            <label class="flex items-center">
+              <input type="checkbox" id="invoice_process_payment_refund" name="process_payment_refund" value="true" checked
+                     class="rounded border-slate-600 bg-slate-700 text-green-600 focus:ring-green-500 focus:ring-offset-slate-800">
+              <span class="ml-2 text-sm text-slate-300">
+                {% trans "Process payment gateway refund" %}
+              </span>
+            </label>
+            <p class="text-xs text-slate-500 mt-1">
+              {% trans "Uncheck if you've already processed the refund externally" %}
+            </p>
+          </div>
+        </div>
+        
+        <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
+          <button type="button" onclick="hideInvoiceRefundModal()" 
+                  class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white">
+            {% trans "Cancel" %}
+          </button>
+          <button type="submit"
+                  class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-transparent bg-green-600 text-white hover:bg-green-700 focus:ring-2 focus:ring-green-500">
+            💰 {% trans "Process Refund" %}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+function showInvoiceRefundModal() {
+    document.getElementById('invoiceRefundModal').classList.remove('hidden');
+}
+
+function hideInvoiceRefundModal() {
+    document.getElementById('invoiceRefundModal').classList.add('hidden');
+}
+
+// Show/hide partial amount section based on refund type
+document.getElementById('invoice_refund_type').addEventListener('change', function() {
+    const partialSection = document.getElementById('invoice_partial_amount_section');
+    if (this.value === 'partial') {
+        partialSection.classList.remove('hidden');
+        document.getElementById('invoice_refund_amount').required = true;
+    } else {
+        partialSection.classList.add('hidden');
+        document.getElementById('invoice_refund_amount').required = false;
+    }
+});
+
+// Handle invoice refund form submission
+document.getElementById('invoiceRefundForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(this);
+    
+    // Show confirmation dialog
+    const refundType = formData.get('refund_type');
+    const confirmMessage = refundType === 'full' 
+        ? '{% trans "Are you sure you want to process a FULL refund? This will also refund the associated order. This action cannot be undone." %}'
+        : '{% trans "Are you sure you want to process this PARTIAL refund? This action cannot be undone." %}';
+    
+    if (!confirm(confirmMessage)) {
+        return;
+    }
+    
+    // Disable submit button to prevent double-clicks
+    const submitBtn = this.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '⏳ {% trans "Processing..." %}';
+    
+    fetch(this.action, {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Reload page to show updated status
+            window.location.reload();
+        } else {
+            alert('Error: ' + data.error);
+            // Re-enable button
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '💰 {% trans "Process Refund" %}';
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('An error occurred while processing the refund.');
+        // Re-enable button
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '💰 {% trans "Process Refund" %}';
+    });
+});
+</script>
+{% endif %}
+
+<!-- Invoice Refund Request Modal (for customers) -->
+{% if not is_staff and invoice.status == "paid" %}
+<div id="invoiceRefundRequestModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
+  <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+    <div class="fixed inset-0 transition-opacity" aria-hidden="true">
+      <div class="absolute inset-0 bg-slate-900 opacity-75" onclick="hideInvoiceRefundRequestModal()"></div>
+    </div>
+
+    <div class="inline-block align-bottom bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+      <form id="invoiceRefundRequestForm" method="post" action="{% url 'billing:invoice_refund_request' pk=invoice.id %}">
+        {% csrf_token %}
+        <div class="px-6 pt-6 pb-4">
+          <h3 class="text-lg font-medium text-white mb-4">🎫 {% trans "Request Invoice Refund" %}</h3>
+          <p class="text-sm text-slate-400 mb-4">
+            {% trans "Submit a refund request for this invoice. Our billing team will review your request and contact you." %}
+          </p>
+          
+          <div class="mb-4">
+            <label for="invoice_refund_request_reason" class="block text-sm font-medium text-slate-400 mb-2">
+              {% trans "Refund Reason" %} <span class="text-red-400">*</span>
+            </label>
+            <select id="invoice_refund_request_reason" name="refund_reason" required
+                    class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500">
+              <option value="">{% trans "Please select a reason..." %}</option>
+              <option value="customer_request">🙋 {% trans "General Customer Request" %}</option>
+              <option value="service_failure">❌ {% trans "Service Not Working" %}</option>
+              <option value="quality_issue">🔍 {% trans "Quality Not As Expected" %}</option>
+              <option value="technical_issue">⚙️ {% trans "Technical Problems" %}</option>
+              <option value="cancellation_request">🚫 {% trans "Want to Cancel Service" %}</option>
+              <option value="duplicate_invoice">📋 {% trans "Duplicate Invoice" %}</option>
+              <option value="billing_error">💳 {% trans "Billing Error" %}</option>
+              <option value="policy_violation">📜 {% trans "Service Policy Issue" %}</option>
+              <option value="unsatisfied_service">😞 {% trans "Not Satisfied with Service" %}</option>
+              <option value="other">❓ {% trans "Other Reason" %}</option>
+            </select>
+          </div>
+          
+          <div class="mb-4">
+            <label for="invoice_refund_request_notes" class="block text-sm font-medium text-slate-400 mb-2">
+              {% trans "Details" %} <span class="text-red-400">*</span>
+            </label>
+            <textarea id="invoice_refund_request_notes" name="refund_notes" rows="4" required
+                      class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+                      placeholder="{% trans 'Please provide details about your refund request. The more information you provide, the faster we can process your request.' %}"></textarea>
+            <p class="text-xs text-slate-500 mt-1">
+              {% trans "Include details like what went wrong, when the issue occurred, or any relevant information." %}
+            </p>
+          </div>
+
+          <div class="mb-4 p-4 bg-blue-900 border border-blue-700 rounded-lg">
+            <div class="flex items-start">
+              <div class="flex-shrink-0">
+                <span class="text-blue-300 text-xl">ℹ️</span>
+              </div>
+              <div class="ml-3">
+                <h4 class="text-sm font-medium text-blue-200">{% trans 'What happens next?' %}</h4>
+                <div class="mt-1 text-sm text-blue-300">
+                  <p>{% trans 'We will create a support ticket for your refund request and our billing team will review it within 1-2 business days.' %}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
+          <button type="button" onclick="hideInvoiceRefundRequestModal()" 
+                  class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white">
+            {% trans "Cancel" %}
+          </button>
+          <button type="submit"
+                  class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700 focus:ring-2 focus:ring-blue-500">
+            🎫 {% trans "Submit Request" %}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+function showInvoiceRefundRequestModal() {
+    document.getElementById('invoiceRefundRequestModal').classList.remove('hidden');
+}
+
+function hideInvoiceRefundRequestModal() {
+    document.getElementById('invoiceRefundRequestModal').classList.add('hidden');
+}
+
+// Handle invoice refund request form submission
+document.getElementById('invoiceRefundRequestForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(this);
+    
+    // Basic validation
+    if (!formData.get('refund_reason') || !formData.get('refund_notes').trim()) {
+        alert('{% trans "Please fill in all required fields." %}');
+        return;
+    }
+    
+    // Show confirmation
+    if (!confirm('{% trans "Submit refund request? We will create a support ticket and contact you." %}')) {
+        return;
+    }
+    
+    // Disable submit button
+    const submitBtn = this.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '⏳ {% trans "Submitting..." %}';
+    
+    fetch(this.action, {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            hideInvoiceRefundRequestModal();
+            alert('{% trans "Refund request submitted successfully! You will receive a confirmation email with your ticket number." %}');
+            window.location.reload();
+        } else {
+            alert('Error: ' + data.error);
+            // Re-enable button
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '🎫 {% trans "Submit Request" %}';
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('{% trans "An error occurred. Please try again." %}');
+        // Re-enable button
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '🎫 {% trans "Submit Request" %}';
+    });
+});
+</script>
+{% endif %}
+
 {% endblock %}

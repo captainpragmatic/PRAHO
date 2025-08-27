@@ -5,12 +5,17 @@
 from __future__ import annotations
 
 import decimal
+import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    pass
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.views.decorators.http import require_POST
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Count, Q, QuerySet, Sum
@@ -21,8 +26,8 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from apps.billing.pdf_generators import RomanianInvoicePDFGenerator, RomanianProformaPDFGenerator
-from apps.common.decorators import billing_staff_required, can_edit_proforma
-from apps.common.mixins import get_pagination_context, get_search_context
+from apps.common.decorators import billing_staff_required, can_edit_proforma, staff_required
+from apps.common.mixins import get_search_context
 from apps.common.utils import json_error, json_success
 from apps.customers.models import Customer
 from apps.users.models import User
@@ -39,12 +44,12 @@ from .models import (
 )
 
 
-def _get_accessible_customer_ids(user: Any) -> list[int]:
+def _get_accessible_customer_ids(user: User) -> list[int]:
     """Helper to get customer IDs that user can access"""
     accessible_customers = user.get_accessible_customers()
 
     if isinstance(accessible_customers, QuerySet):
-        return accessible_customers.values_list('id', flat=True)
+        return list(accessible_customers.values_list('id', flat=True))
     else:
         return [c.id for c in accessible_customers] if accessible_customers else []
 
@@ -54,7 +59,8 @@ def _validate_pdf_access(request: HttpRequest, document: Invoice | ProformaInvoi
     Validate user access to PDF document.
     Returns redirect response if access denied, None if access granted.
     """
-    if not request.user.can_access_customer(document.customer):
+    # Type guard for authenticated user
+    if not isinstance(request.user, User) or not request.user.can_access_customer(document.customer):
         messages.error(request, _("❌ You do not have permission to access this document."))
         return redirect('billing:invoice_list')
     return None
@@ -65,107 +71,144 @@ def billing_list(request: HttpRequest) -> HttpResponse:
     """
     🧾 Display combined list of proformas and invoices (Romanian business practice)
     """
-    # Get accessible customers
-    customer_ids = _get_accessible_customer_ids(request.user)
-
-    # Filter by type
-    doc_type = request.GET.get('type', 'all')  # all, proforma, invoice
-
-    # ✅ Get search context for template
-    search_context = get_search_context(request, 'search')
-    search_query = search_context['search_query']
-
-    # Get both proformas and invoices with search applied
-    proformas_qs = ProformaInvoice.objects.filter(customer_id__in=customer_ids).select_related('customer')
-    invoices_qs = Invoice.objects.filter(customer_id__in=customer_ids).select_related('customer')
-
-    # Apply search filter
-    if search_query:
-        proformas_qs = proformas_qs.filter(
-            Q(number__icontains=search_query) |
-            Q(customer__company_name__icontains=search_query)
-        )
-        invoices_qs = invoices_qs.filter(
-            Q(number__icontains=search_query) |
-            Q(customer__company_name__icontains=search_query)
-        )
-
-    # 🎯 For pagination, we need to create a unified dataset
-    # Since Django doesn't support heterogeneous pagination well, we'll use a simpler approach
+    # Type guard for authenticated user
+    if not isinstance(request.user, User):
+        return redirect('users:login')
     
-    # Build combined list for pagination (performance optimized for Romanian business scale)
-    combined_documents = []
+    try:
+        # Get accessible customers
+        customer_ids = _get_accessible_customer_ids(request.user)
 
-    if doc_type in ['all', 'proforma']:
-        # ⚡ PERFORMANCE: Use list extend for better performance than multiple appends
-        proforma_data = [
-            {
-                'type': 'proforma',
-                'obj': proforma,
-                'id': proforma.pk,
-                'number': proforma.number,
-                'customer': proforma.customer,
-                'total': proforma.total,
-                'currency': proforma.currency,
-                'created_at': proforma.created_at,
-                'status': 'valid' if not proforma.is_expired else 'expired',
-                'can_edit': (request.user.is_staff or getattr(request.user, 'staff_role', None)) and not proforma.is_expired,
-                'can_convert': (request.user.is_staff or getattr(request.user, 'staff_role', None)) and not proforma.is_expired,
-            }
-            for proforma in proformas_qs
-        ]
-        combined_documents.extend(proforma_data)
+        # Filter by type
+        doc_type = request.GET.get('type', 'all')  # all, proforma, invoice
 
-    if doc_type in ['all', 'invoice']:
-        invoice_data = [
-            {
-                'type': 'invoice',
-                'obj': invoice,
-                'id': invoice.pk,
-                'number': invoice.number,
-                'customer': invoice.customer,
-                'total': invoice.total,
-                'currency': invoice.currency,
-                'created_at': invoice.created_at,
-                'status': invoice.status,
-                'can_edit': False,  # Invoices are immutable
-                'can_convert': False,
-            }
-            for invoice in invoices_qs
-        ]
-        combined_documents.extend(invoice_data)
+        # ✅ Get search context for template
+        search_context = get_search_context(request, 'search')
+        search_query = search_context['search_query']
 
-    # Sort by creation date (newest first)
-    combined_documents.sort(key=lambda x: x['created_at'], reverse=True)
+        # Get both proformas and invoices with search applied
+        proformas_qs = ProformaInvoice.objects.filter(customer_id__in=customer_ids).select_related('customer')
+        invoices_qs = Invoice.objects.filter(customer_id__in=customer_ids).select_related('customer')
 
-    # ✅ Apply pagination using reusable utility (20 items per page for Romanian business)
-    pagination_context = get_pagination_context(
-        request=request,
-        queryset=combined_documents,
-        page_size=20
-    )
+        # Apply search filter
+        if search_query:
+            proformas_qs = proformas_qs.filter(
+                Q(number__icontains=search_query) |
+                Q(customer__company_name__icontains=search_query)
+            )
+            invoices_qs = invoices_qs.filter(
+                Q(number__icontains=search_query) |
+                Q(customer__company_name__icontains=search_query)
+            )
 
-    # Statistics (calculate from original querysets for accuracy)
-    proforma_total = proformas_qs.aggregate(total=Sum('total_cents'))['total'] or 0
-    invoice_total = invoices_qs.aggregate(total=Sum('total_cents'))['total'] or 0
+        # 🎯 For pagination, we need to create a unified dataset
+        # Since Django doesn't support heterogeneous pagination well, we'll use a simpler approach
+        
+        # Build combined list for pagination (performance optimized for Romanian business scale)
+        combined_documents = []
 
-    # Check if user is staff for different context
-    is_staff_user = request.user.is_staff or getattr(request.user, 'staff_role', None)
+        if doc_type in ['all', 'proforma']:
+            # ⚡ PERFORMANCE: Use list extend for better performance than multiple appends
+            proforma_data = [
+                {
+                    'type': 'proforma',
+                    'obj': proforma,
+                    'id': proforma.pk,
+                    'number': proforma.number,
+                    'customer': proforma.customer,
+                    'total': proforma.total,
+                    'currency': proforma.currency,
+                    'created_at': proforma.created_at,
+                    'status': 'valid' if not proforma.is_expired else 'expired',
+                    'can_edit': (request.user.is_staff or getattr(request.user, 'staff_role', None)) and not proforma.is_expired,
+                    'can_convert': (request.user.is_staff or getattr(request.user, 'staff_role', None)) and not proforma.is_expired,
+                }
+                for proforma in proformas_qs
+            ]
+            combined_documents.extend(proforma_data)
 
-    context = {
-        'documents': pagination_context['page_obj'],  # ✅ Use paginated documents
-        'doc_type': doc_type,
-        'proforma_count': proformas_qs.count(),
-        'invoice_count': invoices_qs.count(),
-        'proforma_total': Decimal(proforma_total) / 100,
-        'invoice_total': Decimal(invoice_total) / 100,
-        'total_amount': Decimal(proforma_total + invoice_total) / 100,
-        'is_staff_user': is_staff_user,
-        **pagination_context,  # ✅ Add pagination context (page_obj, is_paginated, extra_params)
-        **search_context,      # ✅ Add search context (search_query, has_search)
-    }
+        if doc_type in ['all', 'invoice']:
+            invoice_data = [
+                {
+                    'type': 'invoice',
+                    'obj': invoice,
+                    'id': invoice.pk,
+                    'number': invoice.number,
+                    'customer': invoice.customer,
+                    'total': invoice.total,
+                    'currency': invoice.currency,
+                    'created_at': invoice.created_at,
+                    'status': invoice.status,
+                    'can_edit': False,  # Invoices are immutable
+                    'can_convert': False,
+                }
+                for invoice in invoices_qs
+            ]
+            combined_documents.extend(invoice_data)
 
-    return render(request, 'billing/billing_list.html', context)
+        # Sort by creation date (newest first)
+        from datetime import datetime as dt
+        combined_documents.sort(key=lambda x: x['created_at'] if isinstance(x['created_at'], dt) else dt.min, reverse=True)
+
+        # ✅ Apply pagination using reusable utility (20 items per page for Romanian business)
+        # Convert list to mock queryset-like object for pagination
+        from django.core.paginator import Paginator
+        paginator = Paginator(combined_documents, 20)
+        page_number = request.GET.get('page')
+        page_obj = paginator.get_page(page_number)
+        
+        pagination_context = {
+            'page_obj': page_obj,
+            'is_paginated': page_obj.has_other_pages(),
+            'extra_params': {k: v for k, v in request.GET.items() if k != 'page'}
+        }
+
+        # Statistics (calculate from original querysets for accuracy)
+        proforma_total = proformas_qs.aggregate(total=Sum('total_cents'))['total'] or 0
+        invoice_total = invoices_qs.aggregate(total=Sum('total_cents'))['total'] or 0
+
+        # Check if user is staff for different context
+        is_staff_user = request.user.is_staff or getattr(request.user, 'staff_role', None)
+
+        context = {
+            'documents': pagination_context['page_obj'],  # ✅ Use paginated documents
+            'doc_type': doc_type,
+            'proforma_count': proformas_qs.count(),
+            'invoice_count': invoices_qs.count(),
+            'proforma_total': Decimal(proforma_total) / 100,
+            'invoice_total': Decimal(invoice_total) / 100,
+            'total_amount': Decimal(proforma_total + invoice_total) / 100,
+            'is_staff_user': is_staff_user,
+            **pagination_context,  # ✅ Add pagination context (page_obj, is_paginated, extra_params)
+            **search_context,      # ✅ Add search context (search_query, has_search)
+        }
+
+        return render(request, 'billing/billing_list.html', context)
+        
+    except Exception as e:
+        # Handle database errors gracefully
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Database error in billing_list: {e}")
+        
+        # Return empty context with error handling
+        context = {
+            'documents': [],
+            'doc_type': 'all',
+            'proforma_count': 0,
+            'invoice_count': 0,
+            'proforma_total': Decimal('0.00'),
+            'invoice_total': Decimal('0.00'),
+            'total_amount': Decimal('0.00'),
+            'is_staff_user': False,
+            'page_obj': None,
+            'is_paginated': False,
+            'extra_params': {},
+            'search_query': '',
+            'has_search': False,
+            'error_message': 'Unable to load billing data. Please try again later.',
+        }
+        return render(request, 'billing/billing_list.html', context)
 
 
 @login_required
@@ -175,8 +218,8 @@ def invoice_detail(request: HttpRequest, pk: int) -> HttpResponse:
     """
     invoice = get_object_or_404(Invoice, pk=pk)
 
-    # Security check
-    if not request.user.can_access_customer(invoice.customer):
+    # Security check - type guard for authenticated user
+    if not isinstance(request.user, User) or not request.user.can_access_customer(invoice.customer):
         messages.error(request, _("❌ You do not have permission to access this invoice."))
         return redirect('billing:invoice_list')
 
@@ -217,17 +260,24 @@ def _create_proforma_with_sequence(customer: Customer, valid_until: datetime) ->
 
 def _handle_proforma_create_post(request: HttpRequest) -> HttpResponse:
     """Handle POST request for proforma creation."""
+    # Type guard for authenticated user
+    if not isinstance(request.user, User):
+        return redirect('users:login')
+        
     # Validate customer assignment
     customer_id = request.POST.get('customer')
     customer, error_response = _validate_customer_assignment(request.user, customer_id, None)
     if error_response:
-        return redirect('billing:invoice_list')
+        return error_response
 
     # Process valid_until date
     valid_until, validation_errors = _process_valid_until_date(request.POST)
 
     try:
-        # Create proforma
+        # Create proforma - customer is guaranteed to be not None here due to validation above
+        if customer is None:
+            messages.error(request, _("❌ Customer is required to create proforma."))
+            return redirect('billing:proforma_list')
         proforma = _create_proforma_with_sequence(customer, valid_until)
     except Exception as e:
         messages.error(request, _("❌ Error creating proforma: {error}").format(error=str(e)))
@@ -257,6 +307,10 @@ def proforma_create(request: HttpRequest) -> HttpResponse:
         return _handle_proforma_create_post(request)
 
     # GET request - render form
+    # Type guard for authenticated user
+    if not isinstance(request.user, User):
+        return redirect('users:login')
+        
     customers = _get_customers_for_edit_form(request.user)
     context = {
         'customers': customers,
@@ -273,8 +327,8 @@ def proforma_detail(request: HttpRequest, pk: int) -> HttpResponse:
     """
     proforma = get_object_or_404(ProformaInvoice, pk=pk)
 
-    # Security check
-    if not request.user.can_access_customer(proforma.customer):
+    # Security check - type guard for authenticated user
+    if not isinstance(request.user, User) or not request.user.can_access_customer(proforma.customer):
         messages.error(request, _("❌ You do not have permission to access this proforma."))
         return redirect('billing:invoice_list')
 
@@ -300,8 +354,8 @@ def proforma_to_invoice(request: HttpRequest, pk: int) -> HttpResponse:
     """
     proforma = get_object_or_404(ProformaInvoice, pk=pk)
 
-    # Security check
-    if not request.user.can_access_customer(proforma.customer):
+    # Security check - type guard for authenticated user
+    if not isinstance(request.user, User) or not request.user.can_access_customer(proforma.customer):
         messages.error(request, _("❌ You do not have permission to convert this proforma."))
         return redirect('billing:invoice_list')
 
@@ -381,8 +435,8 @@ def process_proforma_payment(request: HttpRequest, pk: int) -> HttpResponse:
     """
     proforma = get_object_or_404(ProformaInvoice, pk=pk)
 
-    # Security check
-    if not request.user.can_access_customer(proforma.customer):
+    # Security check - type guard for authenticated user
+    if not isinstance(request.user, User) or not request.user.can_access_customer(proforma.customer):
         return JsonResponse({'error': 'Unauthorized'}, status=403)
 
     if request.method == 'POST':
@@ -402,10 +456,13 @@ def process_proforma_payment(request: HttpRequest, pk: int) -> HttpResponse:
             payment_method = request.POST.get('payment_method', 'bank_transfer')
 
             Payment.objects.create(
+                customer=invoice.customer,
                 invoice=invoice,
-                amount=amount,
-                payment_method=payment_method,
-                status='completed',
+                amount_cents=int(amount * 100),
+                currency=invoice.currency,
+                method=payment_method if payment_method in ['stripe', 'bank', 'paypal', 'cash', 'other'] else 'other',
+                status='succeeded',
+                created_by=request.user,
             )
 
             # Mark invoice as paid
@@ -421,36 +478,43 @@ def process_proforma_payment(request: HttpRequest, pk: int) -> HttpResponse:
     return json_error('Invalid method', status=405)
 
 
-def _validate_proforma_edit_access(user: User, proforma: ProformaInvoice) -> HttpResponse | None:
+def _validate_proforma_edit_access(user: User, proforma: ProformaInvoice, request: HttpRequest) -> HttpResponse | None:
     """Validate user access to edit proforma. Returns error response or None if valid."""
     if not user.can_access_customer(proforma.customer):
-        messages.error(user.request, _("❌ You do not have permission to edit this proforma."))
+        messages.error(request, _("❌ You do not have permission to edit this proforma."))
         return redirect('billing:invoice_list')
     
     if proforma.is_expired:
-        messages.error(user.request, _("❌ Cannot edit expired proforma."))
+        messages.error(request, _("❌ Cannot edit expired proforma."))
         return redirect('billing:proforma_detail', pk=proforma.pk)
     
     return None
 
 
-def _validate_customer_assignment(user: User, customer_id: str, proforma_pk: int) -> tuple[Customer | None, HttpResponse | None]:
+def _validate_customer_assignment(user: User, customer_id: str | None, proforma_pk: int | None) -> tuple[Customer | None, HttpResponse | None]:
     """Validate customer assignment. Returns (customer, error_response) tuple."""
+    if not customer_id:
+        return None, redirect('billing:invoice_list')
+        
     try:
         customer = get_object_or_404(Customer, pk=customer_id)
     except (ValueError, Customer.DoesNotExist):
-        messages.error(user.request, _("❌ Invalid customer selected."))
-        return None, redirect('billing:proforma_detail', pk=proforma_pk)
+        if proforma_pk:
+            return None, redirect('billing:proforma_detail', pk=proforma_pk)
+        else:
+            return None, redirect('billing:invoice_list')
     
     accessible_customer_ids = _get_accessible_customer_ids(user)
     if int(customer_id) not in accessible_customer_ids:
-        messages.error(user.request, _("❌ You do not have permission to assign this customer."))
-        return None, redirect('billing:proforma_detail', pk=proforma_pk)
+        if proforma_pk:
+            return None, redirect('billing:proforma_detail', pk=proforma_pk)
+        else:
+            return None, redirect('billing:invoice_list')
     
     return customer, None
 
 
-def _update_proforma_basic_info(proforma: ProformaInvoice, request_data: dict) -> None:
+def _update_proforma_basic_info(proforma: ProformaInvoice, request_data: dict[str, Any]) -> None:
     """Update proforma basic information from form data."""
     bill_to_name = request_data.get('bill_to_name', '').strip()
     if bill_to_name:
@@ -465,10 +529,16 @@ def _update_proforma_basic_info(proforma: ProformaInvoice, request_data: dict) -
         proforma.bill_to_tax_id = bill_to_tax_id
 
 
-def _process_valid_until_date(request_data: dict) -> tuple[datetime, list[str]]:
+def _process_valid_until_date(request_data: dict[str, Any] | None) -> tuple[datetime, list[str]]:
     """Process and validate the valid_until date from form data."""
-    validation_errors = []
-    valid_until_str = request_data.get('valid_until', '').strip()
+    validation_errors: list[str] = []
+    
+    # Handle None case properly
+    if request_data is None:
+        valid_until = timezone.now() + timezone.timedelta(days=30)
+        return valid_until, validation_errors
+    
+    valid_until_str = (request_data.get('valid_until') or '').strip()
 
     if valid_until_str:
         try:
@@ -486,7 +556,7 @@ def _process_valid_until_date(request_data: dict) -> tuple[datetime, list[str]]:
     return valid_until, validation_errors
 
 
-def _process_proforma_line_items(proforma: ProformaInvoice, request_data: dict) -> list[str]:
+def _process_proforma_line_items(proforma: ProformaInvoice, request_data: dict[str, Any]) -> list[str]:
     """Process line items from form data and create ProformaLine objects."""
     # Clear existing line items first
     proforma.lines.all().delete()
@@ -532,7 +602,7 @@ def _process_proforma_line_items(proforma: ProformaInvoice, request_data: dict) 
     return validation_errors
 
 
-def _parse_line_quantity(request_data: dict, line_counter: int) -> tuple[Decimal, list[str]]:
+def _parse_line_quantity(request_data: dict[str, Any], line_counter: int) -> tuple[Decimal, list[str]]:
     """Parse and validate line item quantity."""
     errors = []
     try:
@@ -544,7 +614,7 @@ def _parse_line_quantity(request_data: dict, line_counter: int) -> tuple[Decimal
     return quantity, errors
 
 
-def _parse_line_unit_price(request_data: dict, line_counter: int) -> tuple[Decimal, list[str]]:
+def _parse_line_unit_price(request_data: dict[str, Any], line_counter: int) -> tuple[Decimal, list[str]]:
     """Parse and validate line item unit price."""
     errors = []
     try:
@@ -556,7 +626,7 @@ def _parse_line_unit_price(request_data: dict, line_counter: int) -> tuple[Decim
     return unit_price, errors
 
 
-def _parse_line_vat_rate(request_data: dict, line_counter: int) -> tuple[Decimal, list[str]]:
+def _parse_line_vat_rate(request_data: dict[str, Any], line_counter: int) -> tuple[Decimal, list[str]]:
     """Parse and validate line item VAT rate."""
     errors = []
     try:
@@ -570,14 +640,19 @@ def _parse_line_vat_rate(request_data: dict, line_counter: int) -> tuple[Decimal
 
 def _handle_proforma_edit_post(request: HttpRequest, proforma: ProformaInvoice) -> HttpResponse:
     """Handle POST request for proforma editing."""
+    # Type guard for authenticated user
+    if not isinstance(request.user, User):
+        return redirect('users:login')
+        
     # Validate customer assignment
     customer_id = request.POST.get('customer')
     customer, error_response = _validate_customer_assignment(request.user, customer_id, proforma.pk)
     if error_response:
         return error_response
 
-    # Update proforma data
-    proforma.customer = customer
+    # Update proforma data - customer is guaranteed to be not None here
+    if customer:
+        proforma.customer = customer
     _update_proforma_basic_info(proforma, request.POST)
     
     # Process valid_until date
@@ -599,16 +674,17 @@ def _handle_proforma_edit_post(request: HttpRequest, proforma: ProformaInvoice) 
     return redirect('billing:proforma_detail', pk=proforma.pk)
 
 
-def _get_customers_for_edit_form(user: User) -> QuerySet[Customer]:
+def _get_customers_for_edit_form(user: User) -> QuerySet[Customer, Customer]:
     """Get accessible customers for the edit form dropdown."""
     accessible_customers = user.get_accessible_customers()
-    if hasattr(accessible_customers, 'all'):
-        return accessible_customers.select_related('tax_profile', 'billing_profile').all()
-    elif isinstance(accessible_customers, list | tuple):
+    if isinstance(accessible_customers, QuerySet):
+        return accessible_customers.select_related('tax_profile', 'billing_profile')
+    elif isinstance(accessible_customers, (list, tuple)):
         return Customer.objects.filter(
             id__in=[c.id for c in accessible_customers]
         ).select_related('tax_profile', 'billing_profile')
     else:
+        # Fallback - assume it's already a QuerySet
         return accessible_customers.select_related('tax_profile', 'billing_profile')
 
 
@@ -620,9 +696,11 @@ def proforma_edit(request: HttpRequest, pk: int) -> HttpResponse:
     proforma = get_object_or_404(ProformaInvoice, pk=pk)
 
     # Guard clauses with early returns
-    # Store request in user object for helper functions
-    request.user.request = request
-    error_response = _validate_proforma_edit_access(request.user, proforma)
+    # Type guard for authenticated user
+    if not isinstance(request.user, User):
+        return redirect('users:login')
+        
+    error_response = _validate_proforma_edit_access(request.user, proforma, request)
     if error_response:
         return error_response
 
@@ -664,8 +742,8 @@ def proforma_send(request: HttpRequest, pk: int) -> HttpResponse:
     """
     proforma = get_object_or_404(ProformaInvoice, pk=pk)
 
-    # Security check
-    if not request.user.can_access_customer(proforma.customer):
+    # Security check - type guard for authenticated user
+    if not isinstance(request.user, User) or not request.user.can_access_customer(proforma.customer):
         return JsonResponse({'error': 'Unauthorized'}, status=403)
 
     if request.method == 'POST':
@@ -683,8 +761,8 @@ def invoice_edit(request: HttpRequest, pk: int) -> HttpResponse:
     """
     invoice = get_object_or_404(Invoice, pk=pk)
 
-    # Security and business rule checks
-    if not request.user.can_access_customer(invoice.customer):
+    # Security and business rule checks - type guard for authenticated user
+    if not isinstance(request.user, User) or not request.user.can_access_customer(invoice.customer):
         messages.error(request, _("❌ You do not have permission to edit this invoice."))
         return redirect('billing:invoice_list')
 
@@ -699,7 +777,7 @@ def invoice_edit(request: HttpRequest, pk: int) -> HttpResponse:
 
     context = {
         'invoice': invoice,
-        'items': invoice.items.all(),
+        'items': invoice.lines.all(),
     }
 
     return render(request, 'billing/invoice_form.html', context)
@@ -729,14 +807,13 @@ def invoice_send(request: HttpRequest, pk: int) -> HttpResponse:
     """
     invoice = get_object_or_404(Invoice, pk=pk)
 
-    # Security check
-    if not request.user.can_access_customer(invoice.customer):
+    # Security check - type guard for authenticated user
+    if not isinstance(request.user, User) or not request.user.can_access_customer(invoice.customer):
         return JsonResponse({'error': 'Unauthorized'}, status=403)
 
     if request.method == 'POST':
         # TODO: Implement email sending with Romanian template
-        # Update invoice status to sent
-        invoice.status = 'sent'
+        # Keep invoice as issued (don't need to change status just for sending)
         invoice.sent_at = timezone.now()
         invoice.save()
 
@@ -753,8 +830,8 @@ def generate_e_factura(request: HttpRequest, pk: int) -> HttpResponse:
     """
     invoice = get_object_or_404(Invoice, pk=pk)
 
-    # Security check
-    if not request.user.can_access_customer(invoice.customer):
+    # Security check - type guard for authenticated user
+    if not isinstance(request.user, User) or not request.user.can_access_customer(invoice.customer):
         messages.error(request, _("❌ You do not have permission to generate e-Invoice for this invoice."))
         return redirect('billing:invoice_detail', pk=pk)
 
@@ -782,6 +859,10 @@ def payment_list(request: HttpRequest) -> HttpResponse:
     """
     💰 Display list of payments
     """
+    # Type guard for authenticated user
+    if not isinstance(request.user, User):
+        return redirect('users:login')
+        
     customer_ids = _get_accessible_customer_ids(request.user)
     payments = Payment.objects.filter(
         invoice__customer_id__in=customer_ids
@@ -807,8 +888,8 @@ def process_payment(request: HttpRequest, pk: int) -> HttpResponse:
     """
     invoice = get_object_or_404(Invoice, pk=pk)
 
-    # Security check
-    if not request.user.can_access_customer(invoice.customer):
+    # Security check - type guard for authenticated user
+    if not isinstance(request.user, User) or not request.user.can_access_customer(invoice.customer):
         return JsonResponse({'error': 'Unauthorized'}, status=403)
 
     if request.method == 'POST':
@@ -817,10 +898,13 @@ def process_payment(request: HttpRequest, pk: int) -> HttpResponse:
 
         # Create payment record
         Payment.objects.create(
+            customer=invoice.customer,
             invoice=invoice,
-            amount=amount,
-            payment_method=payment_method,
-            status='completed',  # Simplified - would integrate with payment gateway
+            amount_cents=int(amount * 100),
+            currency=invoice.currency,
+            method=payment_method if payment_method in ['stripe', 'bank', 'paypal', 'cash', 'other'] else 'other',
+            status='succeeded',  # Changed from 'completed' to match model choices
+            created_by=request.user,
         )
 
         # Update invoice status if fully paid
@@ -840,6 +924,10 @@ def billing_reports(request: HttpRequest) -> HttpResponse:
     """
     📊 Billing reports and analytics
     """
+    # Type guard for authenticated user
+    if not isinstance(request.user, User):
+        return redirect('users:login')
+        
     customer_ids = _get_accessible_customer_ids(request.user)
 
     # Monthly revenue
@@ -869,6 +957,10 @@ def vat_report(request: HttpRequest) -> HttpResponse:
     """
     🇷🇴 VAT report for Romanian tax compliance
     """
+    # Type guard for authenticated user
+    if not isinstance(request.user, User):
+        return redirect('users:login')
+        
     customer_ids = _get_accessible_customer_ids(request.user)
 
     # VAT calculations for the selected period
@@ -878,10 +970,10 @@ def vat_report(request: HttpRequest) -> HttpResponse:
     invoices = Invoice.objects.filter(
         customer_id__in=customer_ids,
         created_at__date__range=[start_date, end_date],
-        status__in=['sent', 'paid']
+        status__in=['issued', 'paid']
     )
 
-    total_vat = invoices.aggregate(total_vat=Sum('vat_amount'))['total_vat'] or Decimal('0')
+    total_vat = invoices.aggregate(total_vat=Sum('tax_cents'))['total_vat'] or Decimal('0')
     total_net = invoices.aggregate(total_net=Sum('subtotal_cents'))['total_net'] or Decimal('0')
 
     context = {
@@ -893,3 +985,197 @@ def vat_report(request: HttpRequest) -> HttpResponse:
     }
 
     return render(request, 'billing/vat_report.html', context)
+
+
+@staff_required
+@require_POST
+def invoice_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
+    """
+    💰 Refund an invoice (bidirectional with order refunds)
+    """
+    from .services import RefundService, RefundData, RefundType, RefundReason
+    from decimal import Decimal
+    import uuid
+    from django.http import JsonResponse
+    from django.shortcuts import get_object_or_404
+    from apps.common.decorators import staff_required
+    from django.views.decorators.http import require_POST
+    from apps.common.utils import json_success, json_error
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    invoice = get_object_or_404(Invoice, id=pk)
+    
+    # Validate access
+    if not isinstance(request.user, User) or not request.user.can_access_customer(invoice.customer):
+        return json_error("You do not have permission to refund this invoice")
+    
+    # Parse form data
+    try:
+        refund_type_str = request.POST.get('refund_type', '').strip()
+        refund_reason_str = request.POST.get('refund_reason', '').strip()
+        refund_notes = request.POST.get('refund_notes', '').strip()
+        refund_amount_str = request.POST.get('refund_amount', '0').strip()
+        process_payment = request.POST.get('process_payment_refund') == 'true'
+        
+        if not refund_type_str or not refund_reason_str or not refund_notes:
+            return json_error("All fields are required")
+            
+        # Parse refund type
+        refund_type = RefundType.FULL if refund_type_str == 'full' else RefundType.PARTIAL
+        
+        # Parse refund reason
+        try:
+            refund_reason = RefundReason(refund_reason_str)
+        except ValueError:
+            return json_error("Invalid refund reason")
+        
+        # Parse refund amount for partial refunds
+        amount_cents = 0
+        if refund_type == RefundType.PARTIAL:
+            try:
+                refund_amount = Decimal(refund_amount_str)
+                if refund_amount <= 0:
+                    return json_error("Refund amount must be greater than 0")
+                amount_cents = int(refund_amount * 100)
+            except (ValueError, TypeError):
+                return json_error("Invalid refund amount")
+        
+        # Create refund data
+        refund_data: RefundData = {
+            'refund_type': refund_type,
+            'amount_cents': amount_cents,
+            'reason': refund_reason,
+            'notes': refund_notes,
+            'initiated_by': request.user,
+            'external_refund_id': None,
+            'process_payment_refund': process_payment
+        }
+        
+        # Process refund using RefundService
+        result = RefundService.refund_invoice(uuid.UUID(str(invoice.id)) if not isinstance(invoice.id, uuid.UUID) else invoice.id, refund_data)
+        
+        if result.is_ok():
+            refund_result = result.unwrap()
+            return json_success({
+                'message': f'Invoice refund processed successfully',
+                'refund_id': str(refund_result['refund_id']) if refund_result.get('refund_id') else None,
+                'new_status': invoice.status  # Will be updated by the service
+            })
+        else:
+            # Handle error case - use hasattr to check for error attribute
+            if hasattr(result, 'error'):
+                return json_error(result.error)
+            else:
+                return json_error("Unknown error occurred")
+            
+    except Exception as e:
+        logger.exception(f"Failed to process invoice refund: {e}")
+        return json_error("An unexpected error occurred while processing the refund")
+
+
+@login_required
+@require_POST
+def invoice_refund_request(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
+    """
+    🎫 Create a refund request ticket for an invoice (customer-facing)
+    """
+    from .models import Invoice
+    from apps.tickets.models import SupportTicket, SupportCategory
+    from django.contrib.contenttypes.models import ContentType
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    invoice = get_object_or_404(Invoice, id=pk)
+    
+    # Validate access - user must be able to access this invoice's customer
+    if not isinstance(request.user, User) or not request.user.can_access_customer(invoice.customer):
+        return json_error("You do not have permission to request refunds for this invoice")
+    
+    # Only allow refund requests for paid invoices
+    if invoice.status != 'paid':
+        return json_error("Refund requests are only allowed for paid invoices")
+    
+    try:
+        refund_reason = request.POST.get('refund_reason', '').strip()
+        refund_notes = request.POST.get('refund_notes', '').strip()
+        
+        if not refund_reason or not refund_notes:
+            return json_error("All fields are required")
+        
+        # Map refund reason to user-friendly title
+        reason_titles = {
+            'customer_request': 'General Customer Request',
+            'service_failure': 'Service Not Working',
+            'quality_issue': 'Quality Not As Expected', 
+            'technical_issue': 'Technical Problems',
+            'cancellation_request': 'Want to Cancel Service',
+            'duplicate_invoice': 'Duplicate Invoice',
+            'billing_error': 'Billing Error',
+            'policy_violation': 'Service Policy Issue',
+            'unsatisfied_service': 'Not Satisfied with Service',
+            'other': 'Other Reason'
+        }
+        
+        reason_title = reason_titles.get(refund_reason, 'Refund Request')
+        
+        # Get or create billing category
+        billing_category, _ = SupportCategory.objects.get_or_create(
+            name='Billing',
+            defaults={
+                'name_en': 'Billing',
+                'description': 'Billing and refund related issues',
+                'icon': 'credit-card',
+                'color': '#10B981',
+                'sla_response_hours': 24,
+                'sla_resolution_hours': 48
+            }
+        )
+        
+        # Create ticket
+        ticket = SupportTicket.objects.create(
+            title=f"Refund Request for Invoice {invoice.number}",
+            description=f"""
+REFUND REQUEST DETAILS
+======================
+
+Invoice Number: {invoice.number}
+Invoice Total: {invoice.total_cents / 100:.2f} {invoice.currency}
+Invoice Status: {invoice.get_status_display()}
+Issue Date: {invoice.issued_at.strftime('%Y-%m-%d') if invoice.issued_at else 'Draft'}
+
+Refund Reason: {reason_title}
+
+Customer Details:
+{refund_notes}
+
+---
+This ticket was automatically created from a customer refund request.
+            """.strip(),
+            customer=invoice.customer,
+            contact_person=request.user.get_full_name() or request.user.email,
+            contact_email=request.user.email,
+            contact_phone=getattr(request.user, 'phone', ''),
+            category=billing_category,
+            priority='normal',
+            status='new',
+            source='web',
+            created_by=request.user,
+            # Link to invoice
+            content_type=ContentType.objects.get_for_model(Invoice),
+            object_id=invoice.id
+        )
+        
+        logger.info(f"🎫 Refund request ticket #{ticket.ticket_number} created for invoice {invoice.number} by user {request.user.email}")
+        
+        return json_success({
+            'message': f'Refund request submitted successfully',
+            'ticket_number': ticket.ticket_number,
+            'invoice_number': invoice.number
+        })
+        
+    except Exception as e:
+        logger.exception(f"Failed to create invoice refund request ticket: {e}")
+        return json_error("An unexpected error occurred while submitting your refund request")

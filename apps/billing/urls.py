@@ -24,6 +24,8 @@ urlpatterns = [
     path('invoices/<int:pk>/', views.invoice_detail, name='invoice_detail'),
     path('invoices/<int:pk>/pdf/', views.invoice_pdf, name='invoice_pdf'),
     path('invoices/<int:pk>/send/', views.invoice_send, name='invoice_send'),
+    path('invoices/<int:pk>/refund/', views.invoice_refund, name='invoice_refund'),
+    path('invoices/<int:pk>/refund-request/', views.invoice_refund_request, name='invoice_refund_request'),
 
     # Romanian e-Factura integration
     path('invoices/<int:pk>/e-factura/', views.generate_e_factura, name='e_factura'),

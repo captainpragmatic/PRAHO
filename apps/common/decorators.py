@@ -110,7 +110,11 @@ def customer_or_staff_required(view_func: Callable[..., HttpResponse]) -> Callab
         user = request.user
         
         # Allow access if user is either staff or has customer memberships
-        if user.is_staff or bool(getattr(user, 'staff_role', '')) or user.is_customer_user:
+        # Check if user is authenticated and has the required attributes
+        # Type guard: AnonymousUser doesn't have is_customer_user attribute
+        if (hasattr(user, 'is_staff') and user.is_staff) or \
+           bool(getattr(user, 'staff_role', '')) or \
+           (user.is_authenticated and hasattr(user, 'is_customer_user') and user.is_customer_user):
             return view_func(request, *args, **kwargs)
         
         messages.error(request, _("❌ Access denied. Please contact support for account access."))

@@ -1,0 +1,220 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}
+  {% if order %}
+    {% trans "Edit Order" %} {{ order.order_number }}
+  {% else %}
+    {% trans "Create New Order" %}
+  {% endif %} - PRAHO Platform
+{% endblock %}
+
+{% block content %}
+<div class="px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto">
+  <!-- Header -->
+  <div class="sm:flex sm:items-center mb-6">
+    <div class="sm:flex-auto">
+      <h1 class="text-3xl font-bold text-white">
+        {% if order %}
+          ✏️ {% trans "Edit Order" %} {{ order.order_number }}
+        {% else %}
+          📦 {% trans "Create New Order" %}
+        {% endif %}
+      </h1>
+      <p class="mt-2 text-slate-400">
+        {% if order %}
+          {% trans "Update order details and items" %}
+        {% else %}
+          {% trans "Create a new order for customer services" %}
+        {% endif %}
+      </p>
+    </div>
+    <div class="mt-4 sm:mt-0 sm:ml-16 sm:flex-none">
+      {% if order %}
+        {% url 'orders:order_detail' pk=order.id as back_url %}
+      {% else %}
+        {% url 'orders:order_list' as back_url %}
+      {% endif %}
+      {% button "← Back" variant="outline" href=back_url %}
+    </div>
+  </div>
+
+  <!-- Form Content -->
+  <div class="bg-slate-800 rounded-lg border border-slate-700">
+    <div class="px-6 py-4 border-b border-slate-700">
+      <h3 class="text-lg font-semibold text-white">
+        {% if order %}
+          📝 {% trans "Order Details" %}
+        {% else %}
+          📋 {% trans "New Order Information" %}
+        {% endif %}
+      </h3>
+    </div>
+    
+    <div class="p-6">
+      <!-- Implementation Notice -->
+      <div class="bg-blue-900 border border-blue-700 rounded-lg p-6 mb-6">
+        <div class="flex items-start">
+          <div class="flex-shrink-0">
+            <span class="text-blue-300 text-xl">🚧</span>
+          </div>
+          <div class="ml-3">
+            <h3 class="text-sm font-medium text-blue-200">{% trans 'Implementation In Progress' %}</h3>
+            <div class="mt-1 text-sm text-blue-300">
+              <p>
+                {% if order %}
+                  {% trans 'Order editing functionality is currently being implemented. You can view and change order status from the detail page.' %}
+                {% else %}
+                  {% trans 'Order creation form is currently being implemented. Orders can be managed from the admin interface for now.' %}
+                {% endif %}
+              </p>
+              <div class="mt-3">
+                <strong>{% trans 'Available features:' %}</strong>
+                <ul class="list-disc list-inside mt-2 space-y-1">
+                  <li>{% trans 'View order details and items' %}</li>
+                  <li>{% trans 'Status change workflow with audit trail' %}</li>
+                  <li>{% trans 'Romanian VAT compliance calculations' %}</li>
+                  <li>{% trans 'Multi-tenant access control' %}</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Form Placeholder -->
+      <form method="post" class="space-y-6">
+        {% csrf_token %}
+        
+        <!-- Customer Selection (New Orders) -->
+        {% if not order %}
+        <div class="grid grid-cols-1 gap-6 sm:grid-cols-2">
+          <div class="sm:col-span-2">
+            <label for="customer" class="block text-sm font-medium text-slate-400 mb-2">
+              {% trans "Customer" %} <span class="text-red-400">*</span>
+            </label>
+            <select id="customer" name="customer" required disabled
+                    class="w-full bg-slate-700 border-slate-600 text-slate-400 rounded-lg px-3 py-2 cursor-not-allowed">
+              <option value="">{% trans "Order creation form coming soon..." %}</option>
+              {% for customer in customers %}
+                <option value="{{ customer.id }}">{{ customer.company_name }}</option>
+              {% endfor %}
+            </select>
+            <p class="mt-1 text-xs text-slate-500">
+              {% trans "Customer selection and order form will be implemented in the next phase" %}
+            </p>
+          </div>
+        </div>
+        {% endif %}
+
+        <!-- Order Details -->
+        <div class="grid grid-cols-1 gap-6 sm:grid-cols-2">
+          <div>
+            <label for="currency" class="block text-sm font-medium text-slate-400 mb-2">
+              {% trans "Currency" %}
+            </label>
+            <select id="currency" name="currency" disabled
+                    class="w-full bg-slate-700 border-slate-600 text-slate-400 rounded-lg px-3 py-2 cursor-not-allowed">
+              <option value="RON" {% if order.currency == "RON" %}selected{% endif %}>RON - Romanian Leu</option>
+              <option value="EUR" {% if order.currency == "EUR" %}selected{% endif %}>EUR - Euro</option>
+              <option value="USD" {% if order.currency == "USD" %}selected{% endif %}>USD - US Dollar</option>
+            </select>
+          </div>
+
+          <div>
+            <label for="status" class="block text-sm font-medium text-slate-400 mb-2">
+              {% trans "Status" %}
+            </label>
+            <input type="text" id="status" name="status" readonly
+                   value="{% if order %}{{ order.get_status_display }}{% else %}{% trans 'Draft' %}{% endif %}"
+                   class="w-full bg-slate-700 border-slate-600 text-slate-400 rounded-lg px-3 py-2 cursor-not-allowed">
+            <p class="mt-1 text-xs text-slate-500">
+              {% trans "Use 'Change Status' button on order detail page to update status" %}
+            </p>
+          </div>
+        </div>
+
+        <!-- Notes -->
+        <div>
+          <label for="notes" class="block text-sm font-medium text-slate-400 mb-2">
+            {% trans "Notes" %}
+          </label>
+          <textarea id="notes" name="notes" rows="4" disabled
+                    class="w-full bg-slate-700 border-slate-600 text-slate-400 rounded-lg px-3 py-2 cursor-not-allowed"
+                    placeholder="{% trans 'Order notes and special instructions will be editable when form is implemented...' %}">{% if order %}{{ order.notes }}{% endif %}</textarea>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="flex justify-end space-x-4 pt-6 border-t border-slate-700">
+          {% if order %}
+            {% url 'orders:order_detail' pk=order.id as cancel_url %}
+          {% else %}
+            {% url 'orders:order_list' as cancel_url %}
+          {% endif %}
+          {% button "Cancel" variant="outline" href=cancel_url %}
+          
+          <button type="submit" disabled
+                  class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-transparent bg-slate-600 text-slate-400 cursor-not-allowed">
+            {% if order %}
+              💾 {% trans "Update Order" %}
+            {% else %}
+              📦 {% trans "Create Order" %}
+            {% endif %}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Future Features Preview -->
+  <div class="mt-6 bg-slate-800 rounded-lg border border-slate-700">
+    <div class="px-6 py-4 border-b border-slate-700">
+      <h3 class="text-lg font-semibold text-white">🚀 {% trans "Coming Soon" %}</h3>
+    </div>
+    <div class="p-6">
+      <p class="text-slate-400 mb-4">
+        {% trans "The complete order management form will include:" %}
+      </p>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="space-y-2">
+          <div class="flex items-center text-sm">
+            <span class="mr-2">✅</span>
+            <span class="text-slate-300">{% trans "Customer selection and billing address" %}</span>
+          </div>
+          <div class="flex items-center text-sm">
+            <span class="mr-2">✅</span>
+            <span class="text-slate-300">{% trans "Dynamic item management (products/services)" %}</span>
+          </div>
+          <div class="flex items-center text-sm">
+            <span class="mr-2">✅</span>
+            <span class="text-slate-300">{% trans "Real-time VAT calculation (19%)" %}</span>
+          </div>
+          <div class="flex items-center text-sm">
+            <span class="mr-2">✅</span>
+            <span class="text-slate-300">{% trans "Romanian fiscal compliance validation" %}</span>
+          </div>
+        </div>
+        <div class="space-y-2">
+          <div class="flex items-center text-sm">
+            <span class="mr-2">✅</span>
+            <span class="text-slate-300">{% trans "Order templates and duplication" %}</span>
+          </div>
+          <div class="flex items-center text-sm">
+            <span class="mr-2">✅</span>
+            <span class="text-slate-300">{% trans "Integration with provisioning system" %}</span>
+          </div>
+          <div class="flex items-center text-sm">
+            <span class="mr-2">✅</span>
+            <span class="text-slate-300">{% trans "Conversion to proformas/invoices" %}</span>
+          </div>
+          <div class="flex items-center text-sm">
+            <span class="mr-2">✅</span>
+            <span class="text-slate-300">{% trans "PDF generation and email notifications" %}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

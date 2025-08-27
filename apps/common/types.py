@@ -77,6 +77,10 @@ class Ok(Generic[T]):
             return func(self.value)
         except Exception as e:
             return Err(str(e))
+    
+    def unwrap_err(self) -> Any:
+        """Raises an exception since this is success, not error - provides consistent API"""
+        raise ValueError(f"Called unwrap_err on Ok: {self.value}")
 
 
 @dataclass(frozen=True)

@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
-from playwright.sync_api import Page
+from playwright.sync_api import Page, ViewportSize
 
 # ===============================================================================
 # TEST CONFIGURATION
@@ -811,7 +811,7 @@ class ComprehensivePageMonitor:
     
     def __enter__(self):
         if self.check_console:
-            self.console_messages = setup_console_monitoring(self.page)
+            self.console_messages = setup_console_monitoring_standalone(self.page)
         return self
     
     def _check_console_issues(self) -> list[str]:
@@ -939,7 +939,7 @@ class ConsoleMonitor:
         self.console_messages = []
     
     def __enter__(self):
-        self.console_messages = setup_console_monitoring(self.page)
+        self.console_messages = setup_console_monitoring_standalone(self.page)
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -1325,7 +1325,7 @@ def get_test_user_credentials():
 # ===============================================================================
 
 # Common mobile viewport configurations based on 2024 Playwright best practices
-MOBILE_VIEWPORTS = {
+MOBILE_VIEWPORTS: dict[str, ViewportSize] = {
     'mobile_small': {'width': 320, 'height': 568},      # iPhone SE, older smartphones
     'mobile_medium': {'width': 375, 'height': 667},     # iPhone 8, standard mobile
     'mobile_large': {'width': 414, 'height': 896},      # iPhone 11 Pro Max, large phones
@@ -1334,7 +1334,7 @@ MOBILE_VIEWPORTS = {
 }
 
 # Desktop baseline for comparison
-DESKTOP_VIEWPORT = {'width': 1280, 'height': 720}
+DESKTOP_VIEWPORT: ViewportSize = {'width': 1280, 'height': 720}
 
 
 class MobileTestContext:
@@ -1352,7 +1352,7 @@ class MobileTestContext:
     """
     
     def __init__(self, page: Page, viewport_name: str = 'mobile_medium', 
-                 custom_viewport: dict[str, int] | None = None):
+                 custom_viewport: ViewportSize | None = None):
         self.page = page
         self.viewport_name = viewport_name
         self.custom_viewport = custom_viewport

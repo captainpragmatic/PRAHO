@@ -1,0 +1,788 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load ui_components %}
+{% load formatting %}
+
+{% block title %}{% trans "Order" %} {{ order.order_number }} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+  <!-- Header -->
+  <div class="sm:flex sm:items-center mb-6">
+    <div class="sm:flex-auto">
+      <h1 class="text-3xl font-bold text-white">
+        🛒 {% trans "Order" %} {{ order.order_number }}
+      </h1>
+      <p class="mt-2 text-slate-400">
+        {% trans "Order details, items, and status history" %}
+      </p>
+    </div>
+    <div class="mt-4 sm:mt-0 sm:ml-16 sm:flex-none space-x-3">
+      <!-- Back Button -->
+      {% url 'orders:order_list' as order_list_url %}
+      {% button "← Back to Orders" variant="outline" href=order_list_url %}
+      
+      <!-- Action Buttons for Staff -->
+      {% if is_staff %}
+        {% if can_edit %}
+          {% url 'orders:order_edit' pk=order.id as order_edit_url %}
+          {% button "✏️ Edit" variant="primary" href=order_edit_url %}
+        {% endif %}
+        
+        {% if order.status == "completed" or order.status == "partially_refunded" %}
+          {% button "💰 Refund Order" onclick="showRefundModal()" variant="success" %}
+        {% endif %}
+      {% elif not is_staff and order.status in "completed,partially_refunded" %}
+        <!-- Refund Request Button for Customers -->
+        {% button "🎫 Request Refund" onclick="showOrderRefundRequestModal()" variant="primary" %}
+        
+        {% if order.status not in "cancelled,refunded" %}
+          <button 
+            type="button"
+            onclick="showStatusModal()"
+            class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-slate-600 text-white bg-slate-700 hover:bg-slate-600 focus:ring-2 focus:ring-blue-500">
+            🔄 {% trans "Change Status" %}
+          </button>
+        {% endif %}
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- Main Content -->
+    <div class="lg:col-span-2">
+      <!-- Order Information Card -->
+      <div class="bg-slate-800 rounded-lg border border-slate-700 mb-6">
+        <div class="px-6 py-4 border-b border-slate-700">
+          <h3 class="text-lg font-semibold text-white">📋 {% trans "Order Information" %}</h3>
+        </div>
+        <div class="p-6">
+          <dl class="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2">
+            <!-- Order Number -->
+            <div>
+              <dt class="text-sm font-medium text-slate-400">{% trans "Order Number" %}</dt>
+              <dd class="mt-1 text-sm text-white font-mono">{{ order.order_number }}</dd>
+            </div>
+
+            <!-- Status -->
+            <div>
+              <dt class="text-sm font-medium text-slate-400">{% trans "Status" %}</dt>
+              <dd class="mt-1">
+                {% if order.status == "draft" %}
+                  {% badge "📝 Draft" variant="secondary" %}
+                {% elif order.status == "pending" %}
+                  {% badge "⏳ Pending" variant="warning" %}
+                {% elif order.status == "processing" %}
+                  {% badge "⚙️ Processing" variant="primary" %}
+                {% elif order.status == "completed" %}
+                  {% badge "✅ Completed" variant="success" %}
+                {% elif order.status == "cancelled" %}
+                  {% badge "❌ Cancelled" variant="danger" %}
+                {% elif order.status == "failed" %}
+                  {% badge "🔥 Failed" variant="danger" %}
+                {% elif order.status == "refunded" %}
+                  {% badge "💰 Refunded" variant="info" %}
+                {% elif order.status == "partially_refunded" %}
+                  {% badge "💸 Partially Refunded" variant="warning" %}
+                {% endif %}
+              </dd>
+            </div>
+
+            <!-- Customer -->
+            <div>
+              <dt class="text-sm font-medium text-slate-400">{% trans "Customer" %}</dt>
+              <dd class="mt-1 text-sm text-white">
+                <a href="{% url 'customers:detail' customer_id=order.customer.id %}" 
+                   class="hover:text-blue-400 transition-colors">
+                  {{ order.customer.company_name }}
+                </a>
+              </dd>
+            </div>
+
+            <!-- Created Date -->
+            <div>
+              <dt class="text-sm font-medium text-slate-400">{% trans "Created Date" %}</dt>
+              <dd class="mt-1 text-sm text-white">{{ order.created_at|date:"F d, Y H:i" }}</dd>
+            </div>
+
+            <!-- Currency -->
+            <div>
+              <dt class="text-sm font-medium text-slate-400">{% trans "Currency" %}</dt>
+              <dd class="mt-1 text-sm text-white">{{ order.currency }}</dd>
+            </div>
+
+            <!-- Last Updated -->
+            <div>
+              <dt class="text-sm font-medium text-slate-400">{% trans "Last Updated" %}</dt>
+              <dd class="mt-1 text-sm text-white">{{ order.updated_at|date:"F d, Y H:i" }}</dd>
+            </div>
+          </dl>
+
+          <!-- Notes -->
+          {% if order.notes %}
+          <div class="mt-6 pt-6 border-t border-slate-700">
+            <dt class="text-sm font-medium text-slate-400 mb-2">{% trans "Notes" %}</dt>
+            <dd class="text-sm text-white bg-slate-900 rounded-lg p-3">{{ order.notes }}</dd>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Billing Information Card -->
+      <div class="bg-slate-800 rounded-lg border border-slate-700 mb-6">
+        <div class="px-6 py-4 border-b border-slate-700">
+          <h3 class="text-lg font-semibold text-white">🧾 {% trans "Billing Information" %}</h3>
+        </div>
+        <div class="p-6">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- Company Details -->
+            <div>
+              <h4 class="text-sm font-semibold text-slate-300 mb-3">{% trans "Company Details" %}</h4>
+              <div class="space-y-2 text-sm text-slate-400">
+                <div><strong class="text-white">{{ order.billing_company_name }}</strong></div>
+                <div>{{ order.billing_contact_name }}</div>
+                <div>{{ order.billing_email }}</div>
+                {% if order.billing_phone %}
+                  <div>{{ order.billing_phone }}</div>
+                {% endif %}
+              </div>
+            </div>
+
+            <!-- Address -->
+            <div>
+              <h4 class="text-sm font-semibold text-slate-300 mb-3">{% trans "Billing Address" %}</h4>
+              <div class="space-y-1 text-sm text-slate-400">
+                <div>{{ order.billing_address_line1 }}</div>
+                {% if order.billing_address_line2 %}
+                  <div>{{ order.billing_address_line2 }}</div>
+                {% endif %}
+                <div>{{ order.billing_city }}, {{ order.billing_county }}</div>
+                <div>{{ order.billing_postal_code }}</div>
+                <div>{{ order.billing_country }}</div>
+              </div>
+            </div>
+
+            <!-- Romanian Compliance -->
+            <div class="md:col-span-2">
+              <h4 class="text-sm font-semibold text-slate-300 mb-3">🇷🇴 {% trans "Romanian Compliance" %}</h4>
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                {% if order.billing_fiscal_code %}
+                <div>
+                  <span class="text-slate-400">{% trans "CUI:" %}</span>
+                  <span class="text-white font-mono">{{ order.billing_fiscal_code }}</span>
+                </div>
+                {% endif %}
+                {% if order.billing_registration_number %}
+                <div>
+                  <span class="text-slate-400">{% trans "Reg. Number:" %}</span>
+                  <span class="text-white font-mono">{{ order.billing_registration_number }}</span>
+                </div>
+                {% endif %}
+                {% if order.billing_vat_number %}
+                <div>
+                  <span class="text-slate-400">{% trans "VAT Number:" %}</span>
+                  <span class="text-white font-mono">{{ order.billing_vat_number }}</span>
+                </div>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Order Items Card -->
+      <div class="bg-slate-800 rounded-lg border border-slate-700">
+        <div class="px-6 py-4 border-b border-slate-700">
+          <h3 class="text-lg font-semibold text-white">📦 {% trans "Order Items" %}</h3>
+        </div>
+        <div class="overflow-hidden">
+          {% if order.items.all %}
+            <table class="min-w-full divide-y divide-slate-700">
+              <thead class="bg-slate-900">
+                <tr>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+                    {% trans "Description" %}
+                  </th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+                    {% trans "Quantity" %}
+                  </th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+                    {% trans "Unit Price" %}
+                  </th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+                    {% trans "Total" %}
+                  </th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+                    {% trans "Status" %}
+                  </th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-700">
+                {% for item in order.items.all %}
+                <tr class="hover:bg-slate-750">
+                  <td class="px-6 py-4 whitespace-nowrap">
+                    <div class="text-sm">
+                      {% if item.product %}
+                        <div class="text-white font-medium">{{ item.product.name }}</div>
+                      {% elif item.service %}
+                        <div class="text-white font-medium">{{ item.service.name }}</div>
+                      {% else %}
+                        <div class="text-white font-medium">{% trans "Custom Item" %}</div>
+                      {% endif %}
+                      {% if item.description %}
+                        <div class="text-slate-400">{{ item.description }}</div>
+                      {% endif %}
+                    </div>
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-white">
+                    {{ item.quantity }}
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-white">
+                    {{ item.unit_price_cents|cents_to_currency|romanian_currency:order.currency }}
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-white font-semibold">
+                    {{ item.line_total_cents|cents_to_currency|romanian_currency:order.currency }}
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap">
+                    {% if item.provisioning_status == "pending" %}
+                      {% badge "⏳ Pending" variant="warning" size="sm" %}
+                    {% elif item.provisioning_status == "provisioning" %}
+                      {% badge "⚙️ Provisioning" variant="primary" size="sm" %}
+                    {% elif item.provisioning_status == "active" %}
+                      {% badge "✅ Active" variant="success" size="sm" %}
+                    {% elif item.provisioning_status == "failed" %}
+                      {% badge "🔥 Failed" variant="danger" size="sm" %}
+                    {% else %}
+                      {% badge "📋 Not Started" variant="secondary" size="sm" %}
+                    {% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          {% else %}
+            <div class="p-6 text-center text-slate-400">
+              {% trans "No items in this order yet." %}
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Sidebar -->
+    <div class="lg:col-span-1">
+      <!-- Financial Summary Card -->
+      <div class="bg-slate-800 rounded-lg border border-slate-700 mb-6">
+        <div class="px-6 py-4 border-b border-slate-700">
+          <h3 class="text-lg font-semibold text-white">💰 {% trans "Financial Summary" %}</h3>
+        </div>
+        <div class="p-6 space-y-4">
+          <div class="flex justify-between">
+            <span class="text-slate-400">{% trans "Subtotal:" %}</span>
+            <span class="text-white">
+              {{ order.subtotal_cents|cents_to_currency|romanian_currency:order.currency }}
+            </span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-slate-400">{% trans "VAT (19%):" %}</span>
+            <span class="text-white">
+              {{ order.tax_cents|cents_to_currency|romanian_currency:order.currency }}
+            </span>
+          </div>
+          <div class="border-t border-slate-700 pt-4">
+            <div class="flex justify-between">
+              <span class="text-lg font-semibold text-white">{% trans "Total:" %}</span>
+              <span class="text-lg font-semibold text-white">
+                {{ order.total_cents|cents_to_currency|romanian_currency:order.currency }}
+              </span>
+            </div>
+          </div>
+          
+          <div class="mt-4 pt-4 border-t border-slate-700 text-xs text-slate-500">
+            <span class="flex items-center">
+              <span class="mr-1">🇷🇴</span>
+              {% trans "Romanian VAT compliant" %}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Status History Card -->
+      <div class="bg-slate-800 rounded-lg border border-slate-700">
+        <div class="px-6 py-4 border-b border-slate-700">
+          <h3 class="text-lg font-semibold text-white">🕐 {% trans "Status History" %}</h3>
+        </div>
+        <div class="p-6">
+          {% if order.status_history.all %}
+            <div class="space-y-4">
+              {% for history in order.status_history.all %}
+                <div class="flex items-start space-x-3">
+                  <div class="flex-shrink-0">
+                    {% if history.new_status == "draft" %}📝
+                    {% elif history.new_status == "pending" %}⏳
+                    {% elif history.new_status == "processing" %}⚙️
+                    {% elif history.new_status == "completed" %}✅
+                    {% elif history.new_status == "cancelled" %}❌
+                    {% elif history.new_status == "failed" %}🔥
+                    {% elif history.new_status == "refunded" %}💰
+                    {% elif history.new_status == "partially_refunded" %}💸
+                    {% endif %}
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="text-sm text-white">
+                      {% if history.old_status %}
+                        {{ history.old_status|title }} → {{ history.new_status|title }}
+                      {% else %}
+                        {{ history.new_status|title }}
+                      {% endif %}
+                    </div>
+                    <div class="text-xs text-slate-400">
+                      {{ history.created_at|date:"M d, Y H:i" }}
+                      {% if history.changed_by %}
+                        • {{ history.changed_by.get_full_name|default:history.changed_by.email }}
+                      {% endif %}
+                    </div>
+                    {% if history.notes %}
+                      <div class="text-xs text-slate-500 mt-1">{{ history.notes }}</div>
+                    {% endif %}
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="text-center text-slate-400 text-sm">
+              {% trans "No status changes recorded yet." %}
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Status Change Modal (for staff) -->
+{% if is_staff and order.status not in "cancelled,refunded" %}
+<div id="statusModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
+  <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+    <div class="fixed inset-0 transition-opacity" aria-hidden="true">
+      <div class="absolute inset-0 bg-slate-900 opacity-75" onclick="hideStatusModal()"></div>
+    </div>
+
+    <div class="inline-block align-bottom bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+      <form id="statusForm" method="post" action="{% url 'orders:order_change_status' pk=order.id %}">
+        {% csrf_token %}
+        <div class="px-6 pt-6 pb-4">
+          <h3 class="text-lg font-medium text-white mb-4">🔄 {% trans "Change Order Status" %}</h3>
+          
+          <div class="mb-4">
+            <label for="new_status" class="block text-sm font-medium text-slate-400 mb-2">
+              {% trans "New Status" %}
+            </label>
+            <select id="new_status" name="status" required
+                    class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500">
+              <option value="">{% trans "Select new status..." %}</option>
+              {% if order.status == "draft" %}
+                <option value="pending">⏳ {% trans "Pending" %}</option>
+                <option value="cancelled">❌ {% trans "Cancelled" %}</option>
+              {% elif order.status == "pending" %}
+                <option value="processing">⚙️ {% trans "Processing" %}</option>
+                <option value="cancelled">❌ {% trans "Cancelled" %}</option>
+                <option value="failed">🔥 {% trans "Failed" %}</option>
+              {% elif order.status == "processing" %}
+                <option value="completed">✅ {% trans "Completed" %}</option>
+                <option value="failed">🔥 {% trans "Failed" %}</option>
+                <option value="cancelled">❌ {% trans "Cancelled" %}</option>
+              {% elif order.status == "completed" %}
+                <option value="refunded">💰 {% trans "Refunded" %}</option>
+                <option value="partially_refunded">💸 {% trans "Partially Refunded" %}</option>
+              {% elif order.status == "partially_refunded" %}
+                <option value="refunded">💰 {% trans "Refunded" %}</option>
+              {% elif order.status == "failed" %}
+                <option value="pending">⏳ {% trans "Pending" %}</option>
+                <option value="cancelled">❌ {% trans "Cancelled" %}</option>
+              {% endif %}
+            </select>
+          </div>
+          
+          <div class="mb-4">
+            <label for="notes" class="block text-sm font-medium text-slate-400 mb-2">
+              {% trans "Notes" %} <span class="text-slate-500">({% trans "optional" %})</span>
+            </label>
+            <textarea id="notes" name="notes" rows="3"
+                      class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+                      placeholder="{% trans 'Add a note about this status change...' %}"></textarea>
+          </div>
+        </div>
+        
+        <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
+          <button type="button" onclick="hideStatusModal()" 
+                  class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white">
+            {% trans "Cancel" %}
+          </button>
+          <button type="submit"
+                  class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700 focus:ring-2 focus:ring-blue-500">
+            🔄 {% trans "Change Status" %}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+function showStatusModal() {
+    document.getElementById('statusModal').classList.remove('hidden');
+}
+
+function hideStatusModal() {
+    document.getElementById('statusModal').classList.add('hidden');
+}
+
+// Handle form submission with AJAX
+document.getElementById('statusForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(this);
+    
+    fetch(this.action, {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Reload page to show updated status
+            window.location.reload();
+        } else {
+            alert('Error: ' + data.error);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('An error occurred while updating the status.');
+    });
+});
+</script>
+{% endif %}
+
+<!-- Refund Modal (for staff) -->
+{% if is_staff and order.status in "completed,partially_refunded" %}
+<div id="refundModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
+  <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+    <div class="fixed inset-0 transition-opacity" aria-hidden="true">
+      <div class="absolute inset-0 bg-slate-900 opacity-75" onclick="hideRefundModal()"></div>
+    </div>
+
+    <div class="inline-block align-bottom bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+      <form id="refundForm" method="post" action="{% url 'orders:order_refund' pk=order.id %}">
+        {% csrf_token %}
+        <div class="px-6 pt-6 pb-4">
+          <h3 class="text-lg font-medium text-white mb-4">💰 {% trans "Refund Order" %}</h3>
+          
+          <div class="mb-4">
+            <label for="refund_type" class="block text-sm font-medium text-slate-400 mb-2">
+              {% trans "Refund Type" %}
+            </label>
+            <select id="refund_type" name="refund_type" required
+                    class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500">
+              <option value="">{% trans "Select refund type..." %}</option>
+              <option value="full">💰 {% trans "Full Refund" %}</option>
+              {% if order.status == "completed" %}
+                <option value="partial">💸 {% trans "Partial Refund" %}</option>
+              {% endif %}
+            </select>
+          </div>
+          
+          <div id="partial_amount_section" class="mb-4 hidden">
+            <label for="refund_amount" class="block text-sm font-medium text-slate-400 mb-2">
+              {% trans "Refund Amount" %}
+            </label>
+            <div class="relative">
+              <input type="number" id="refund_amount" name="refund_amount" step="0.01" min="0.01"
+                     max="{{ order.total_cents|cents_to_currency }}"
+                     class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 pr-16 focus:ring-2 focus:ring-blue-500"
+                     placeholder="0.00">
+              <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                <span class="text-slate-400 text-sm">{{ order.currency }}</span>
+              </div>
+            </div>
+            <p class="text-xs text-slate-500 mt-1">
+              {% trans "Maximum refundable:" %} {{ order.total_cents|cents_to_currency|romanian_currency:order.currency }}
+            </p>
+          </div>
+          
+          <div class="mb-4">
+            <label for="refund_reason" class="block text-sm font-medium text-slate-400 mb-2">
+              {% trans "Refund Reason" %}
+            </label>
+            <select id="refund_reason" name="refund_reason" required
+                    class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500">
+              <option value="">{% trans "Select reason..." %}</option>
+              <option value="customer_request">🙋 {% trans "Customer Request" %}</option>
+              <option value="error_correction">🔧 {% trans "Error Correction" %}</option>
+              <option value="dispute_resolution">⚖️ {% trans "Dispute Resolution" %}</option>
+              <option value="service_failure">❌ {% trans "Service Failure" %}</option>
+              <option value="duplicate_order">📋 {% trans "Duplicate Order" %}</option>
+              <option value="cancellation_request">🚫 {% trans "Cancellation Request" %}</option>
+              <option value="quality_issue">🔍 {% trans "Quality Issue" %}</option>
+              <option value="policy_violation">📜 {% trans "Policy Violation" %}</option>
+              <option value="technical_issue">⚙️ {% trans "Technical Issue" %}</option>
+              <option value="other">❓ {% trans "Other" %}</option>
+            </select>
+          </div>
+          
+          <div class="mb-4">
+            <label for="refund_notes" class="block text-sm font-medium text-slate-400 mb-2">
+              {% trans "Notes" %} <span class="text-slate-500">({% trans "required" %})</span>
+            </label>
+            <textarea id="refund_notes" name="refund_notes" rows="3" required
+                      class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+                      placeholder="{% trans 'Please explain the reason for this refund...' %}"></textarea>
+          </div>
+          
+          <div class="mb-4">
+            <label class="flex items-center">
+              <input type="checkbox" id="process_payment_refund" name="process_payment_refund" value="true" checked
+                     class="rounded border-slate-600 bg-slate-700 text-green-600 focus:ring-green-500 focus:ring-offset-slate-800">
+              <span class="ml-2 text-sm text-slate-300">
+                {% trans "Process payment gateway refund" %}
+              </span>
+            </label>
+            <p class="text-xs text-slate-500 mt-1">
+              {% trans "Uncheck if you've already processed the refund externally" %}
+            </p>
+          </div>
+        </div>
+        
+        <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
+          <button type="button" onclick="hideRefundModal()" 
+                  class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white">
+            {% trans "Cancel" %}
+          </button>
+          <button type="submit"
+                  class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-transparent bg-green-600 text-white hover:bg-green-700 focus:ring-2 focus:ring-green-500">
+            💰 {% trans "Process Refund" %}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+function showRefundModal() {
+    document.getElementById('refundModal').classList.remove('hidden');
+}
+
+function hideRefundModal() {
+    document.getElementById('refundModal').classList.add('hidden');
+}
+
+// Show/hide partial amount section based on refund type
+document.getElementById('refund_type').addEventListener('change', function() {
+    const partialSection = document.getElementById('partial_amount_section');
+    if (this.value === 'partial') {
+        partialSection.classList.remove('hidden');
+        document.getElementById('refund_amount').required = true;
+    } else {
+        partialSection.classList.add('hidden');
+        document.getElementById('refund_amount').required = false;
+    }
+});
+
+// Handle refund form submission
+document.getElementById('refundForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(this);
+    
+    // Show confirmation dialog
+    const refundType = formData.get('refund_type');
+    const confirmMessage = refundType === 'full' 
+        ? '{% trans "Are you sure you want to process a FULL refund? This action cannot be undone." %}'
+        : '{% trans "Are you sure you want to process this PARTIAL refund? This action cannot be undone." %}';
+    
+    if (!confirm(confirmMessage)) {
+        return;
+    }
+    
+    // Disable submit button to prevent double-clicks
+    const submitBtn = this.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '⏳ {% trans "Processing..." %}';
+    
+    fetch(this.action, {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Reload page to show updated status
+            window.location.reload();
+        } else {
+            alert('Error: ' + data.error);
+            // Re-enable button
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '💰 {% trans "Process Refund" %}';
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('An error occurred while processing the refund.');
+        // Re-enable button
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '💰 {% trans "Process Refund" %}';
+    });
+});
+</script>
+{% endif %}
+
+<!-- Order Refund Request Modal (for customers) -->
+{% if not is_staff and order.status in "completed,partially_refunded" %}
+<div id="orderRefundRequestModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
+  <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+    <div class="fixed inset-0 transition-opacity" aria-hidden="true">
+      <div class="absolute inset-0 bg-slate-900 opacity-75" onclick="hideOrderRefundRequestModal()"></div>
+    </div>
+
+    <div class="inline-block align-bottom bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+      <form id="orderRefundRequestForm" method="post" action="{% url 'orders:order_refund_request' pk=order.id %}">
+        {% csrf_token %}
+        <div class="px-6 pt-6 pb-4">
+          <h3 class="text-lg font-medium text-white mb-4">🎫 {% trans "Request Order Refund" %}</h3>
+          <p class="text-sm text-slate-400 mb-4">
+            {% trans "Submit a refund request for this order. Our billing team will review your request and contact you." %}
+          </p>
+          
+          <div class="mb-4">
+            <label for="refund_request_reason" class="block text-sm font-medium text-slate-400 mb-2">
+              {% trans "Refund Reason" %} <span class="text-red-400">*</span>
+            </label>
+            <select id="refund_request_reason" name="refund_reason" required
+                    class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500">
+              <option value="">{% trans "Please select a reason..." %}</option>
+              <option value="customer_request">🙋 {% trans "General Customer Request" %}</option>
+              <option value="service_failure">❌ {% trans "Service Not Working" %}</option>
+              <option value="quality_issue">🔍 {% trans "Quality Not As Expected" %}</option>
+              <option value="technical_issue">⚙️ {% trans "Technical Problems" %}</option>
+              <option value="cancellation_request">🚫 {% trans "Want to Cancel Service" %}</option>
+              <option value="duplicate_order">📋 {% trans "Duplicate Order" %}</option>
+              <option value="billing_error">💳 {% trans "Billing Error" %}</option>
+              <option value="policy_violation">📜 {% trans "Service Policy Issue" %}</option>
+              <option value="unsatisfied_service">😞 {% trans "Not Satisfied with Service" %}</option>
+              <option value="other">❓ {% trans "Other Reason" %}</option>
+            </select>
+          </div>
+          
+          <div class="mb-4">
+            <label for="refund_request_notes" class="block text-sm font-medium text-slate-400 mb-2">
+              {% trans "Details" %} <span class="text-red-400">*</span>
+            </label>
+            <textarea id="refund_request_notes" name="refund_notes" rows="4" required
+                      class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+                      placeholder="{% trans 'Please provide details about your refund request. The more information you provide, the faster we can process your request.' %}"></textarea>
+            <p class="text-xs text-slate-500 mt-1">
+              {% trans "Include details like what went wrong, when the issue occurred, or any relevant information." %}
+            </p>
+          </div>
+
+          <div class="mb-4 p-4 bg-blue-900 border border-blue-700 rounded-lg">
+            <div class="flex items-start">
+              <div class="flex-shrink-0">
+                <span class="text-blue-300 text-xl">ℹ️</span>
+              </div>
+              <div class="ml-3">
+                <h4 class="text-sm font-medium text-blue-200">{% trans 'What happens next?' %}</h4>
+                <div class="mt-1 text-sm text-blue-300">
+                  <p>{% trans 'We will create a support ticket for your refund request and our billing team will review it within 1-2 business days.' %}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
+          <button type="button" onclick="hideOrderRefundRequestModal()" 
+                  class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white">
+            {% trans "Cancel" %}
+          </button>
+          <button type="submit"
+                  class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700 focus:ring-2 focus:ring-blue-500">
+            🎫 {% trans "Submit Request" %}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+function showOrderRefundRequestModal() {
+    document.getElementById('orderRefundRequestModal').classList.remove('hidden');
+}
+
+function hideOrderRefundRequestModal() {
+    document.getElementById('orderRefundRequestModal').classList.add('hidden');
+}
+
+// Handle order refund request form submission
+document.getElementById('orderRefundRequestForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(this);
+    
+    // Basic validation
+    if (!formData.get('refund_reason') || !formData.get('refund_notes').trim()) {
+        alert('{% trans "Please fill in all required fields." %}');
+        return;
+    }
+    
+    // Show confirmation
+    if (!confirm('{% trans "Submit refund request? We will create a support ticket and contact you." %}')) {
+        return;
+    }
+    
+    // Disable submit button
+    const submitBtn = this.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '⏳ {% trans "Submitting..." %}';
+    
+    fetch(this.action, {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            hideOrderRefundRequestModal();
+            alert('{% trans "Refund request submitted successfully! You will receive a confirmation email with your ticket number." %}');
+            window.location.reload();
+        } else {
+            alert('Error: ' + data.error);
+            // Re-enable button
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '🎫 {% trans "Submit Request" %}';
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('{% trans "An error occurred. Please try again." %}');
+        // Re-enable button
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '🎫 {% trans "Submit Request" %}';
+    });
+});
+</script>
+{% endif %}
+
+{% endblock %}

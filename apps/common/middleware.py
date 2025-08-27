@@ -160,7 +160,10 @@ class AuditMiddleware:
     def _get_client_ip(self, request: HttpRequest) -> str:
         """Get real client IP address"""
         x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-        ip = x_forwarded_for.split(',')[0] if x_forwarded_for else request.META.get('REMOTE_ADDR')
+        if x_forwarded_for:
+            ip = x_forwarded_for.split(',')[0].strip()
+        else:
+            ip = request.META.get('REMOTE_ADDR', '127.0.0.1')
         return ip
 
 
@@ -199,7 +202,7 @@ class JSONResponseMiddleware:
 
         return response
 
-    def process_exception(self, request: HttpRequest, exception: Exception) -> HttpResponse:
+    def process_exception(self, request: HttpRequest, exception: Exception) -> HttpResponse | None:
         """Handle API exceptions as JSON"""
         if request.path.startswith('/api/'):
             error_data = {

@@ -1,0 +1,282 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load ui_components %}
+{% load formatting %}
+
+{% block title %}{% trans "Orders" %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+  <!-- Header -->
+  <div class="sm:flex sm:items-center mb-6">
+    <div class="sm:flex-auto">
+      <h1 class="text-3xl font-bold text-white">
+        🛒 {% trans "Order Management" %}
+      </h1>
+      <p class="mt-2 text-slate-400">
+        {% if is_staff %}
+          {% trans "Manage customer orders and track order fulfillment" %}
+        {% else %}
+          {% trans "View your orders and track their status" %}
+        {% endif %}
+      </p>
+    </div>
+    <div class="mt-4 sm:ml-16 sm:mt-0 sm:flex-none">
+      {% if is_staff %}
+        {% url 'orders:order_create' as create_order_url %}
+        {% button "📦 New Order" variant="primary" href=create_order_url %}
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Romanian Business Notice - Staff Only -->
+  {% if is_staff %}
+  <div class="bg-blue-900 border border-blue-700 rounded-lg p-4 mb-6">
+    <div class="flex items-start">
+      <div class="flex-shrink-0">
+        <span class="text-blue-300 text-xl">🇷🇴</span>
+      </div>
+      <div class="ml-3">
+        <h3 class="text-sm font-medium text-blue-200">{% trans 'Romanian Hosting Business' %}</h3>
+        <div class="mt-1 text-sm text-blue-300">
+          <p>{% trans 'Orders follow Romanian VAT compliance (19%) and can be converted to proformas/invoices for billing.' %}</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Statistics Cards -->
+  <div class="grid grid-cols-1 md:grid-cols-5 gap-6 mb-8">
+    <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+      <div class="flex items-center">
+        <div class="flex-shrink-0">
+          <div class="w-8 h-8 text-2xl">📊</div>
+        </div>
+        <div class="ml-4">
+          <p class="text-sm font-medium text-slate-400">{% trans 'Total Orders' %}</p>
+          <p class="text-2xl font-semibold text-white">{{ status_counts.total }}</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+      <div class="flex items-center">
+        <div class="flex-shrink-0">
+          <div class="w-8 h-8 text-2xl">📝</div>
+        </div>
+        <div class="ml-4">
+          <p class="text-sm font-medium text-slate-400">{% trans 'Draft Orders' %}</p>
+          <p class="text-2xl font-semibold text-white">{{ status_counts.draft }}</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+      <div class="flex items-center">
+        <div class="flex-shrink-0">
+          <div class="w-8 h-8 text-2xl">⏳</div>
+        </div>
+        <div class="ml-4">
+          <p class="text-sm font-medium text-slate-400">{% trans 'Pending Orders' %}</p>
+          <p class="text-2xl font-semibold text-white">{{ status_counts.pending }}</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+      <div class="flex items-center">
+        <div class="flex-shrink-0">
+          <div class="w-8 h-8 text-2xl">⚙️</div>
+        </div>
+        <div class="ml-4">
+          <p class="text-sm font-medium text-slate-400">{% trans 'Processing' %}</p>
+          <p class="text-2xl font-semibold text-white">{{ status_counts.processing }}</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+      <div class="flex items-center">
+        <div class="flex-shrink-0">
+          <div class="w-8 h-8 text-2xl">✅</div>
+        </div>
+        <div class="ml-4">
+          <p class="text-sm font-medium text-slate-400">{% trans 'Completed' %}</p>
+          <p class="text-2xl font-semibold text-white">{{ status_counts.completed }}</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Filters and Search -->
+  <div class="bg-slate-800 rounded-lg p-6 border border-slate-700 mb-6">
+    <form method="get" class="space-y-4 md:space-y-0 md:flex md:items-center md:space-x-4">
+      <!-- Search Input -->
+      <div class="flex-1">
+        {% input_field "search" placeholder="Search orders by number, company name..." input_type="search" value=current_search %}
+      </div>
+      
+      <!-- Status Filter -->
+      <div class="min-w-0 flex-shrink-0">
+        <select name="status" class="bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+          <option value="">{% trans "All Statuses" %}</option>
+          <option value="draft" {% if current_status == "draft" %}selected{% endif %}>📝 {% trans "Draft" %}</option>
+          <option value="pending" {% if current_status == "pending" %}selected{% endif %}>⏳ {% trans "Pending" %}</option>
+          <option value="processing" {% if current_status == "processing" %}selected{% endif %}>⚙️ {% trans "Processing" %}</option>
+          <option value="completed" {% if current_status == "completed" %}selected{% endif %}>✅ {% trans "Completed" %}</option>
+          <option value="cancelled" {% if current_status == "cancelled" %}selected{% endif %}>❌ {% trans "Cancelled" %}</option>
+          <option value="failed" {% if current_status == "failed" %}selected{% endif %}>🔥 {% trans "Failed" %}</option>
+          <option value="refunded" {% if current_status == "refunded" %}selected{% endif %}>💰 {% trans "Refunded" %}</option>
+          <option value="partially_refunded" {% if current_status == "partially_refunded" %}selected{% endif %}>💸 {% trans "Partially Refunded" %}</option>
+        </select>
+      </div>
+      
+      <!-- Search Button -->
+      <div class="flex-shrink-0">
+        {% button "🔍 Search" type="submit" variant="primary" size="sm" %}
+      </div>
+      
+      {% if search_query or current_status %}
+      <div class="flex-shrink-0">
+        <a href="{% url 'orders:order_list' %}" class="inline-flex items-center px-3 py-2 text-sm font-medium text-slate-400 hover:text-white">
+          ❌ {% trans "Clear" %}
+        </a>
+      </div>
+      {% endif %}
+    </form>
+  </div>
+
+  <!-- Orders List -->
+  {% if orders %}
+    <div class="space-y-4">
+      {% for order in orders %}
+        <div class="bg-slate-800 rounded-lg border border-slate-700 hover:border-slate-600 transition-colors">
+          <div class="p-6">
+            <!-- Order Header -->
+            <div class="flex items-start justify-between">
+              <div class="flex-1">
+                <div class="flex items-center space-x-3 mb-2">
+                  <h3 class="text-lg font-semibold text-white">
+                    <a href="{% url 'orders:order_detail' pk=order.id %}" class="hover:text-blue-400 transition-colors">
+                      {{ order.order_number }}
+                    </a>
+                  </h3>
+                  
+                  <!-- Order Status Badge -->
+                  {% if order.status == "draft" %}
+                    {% badge "📝 Draft" variant="secondary" %}
+                  {% elif order.status == "pending" %}
+                    {% badge "⏳ Pending" variant="warning" %}
+                  {% elif order.status == "processing" %}
+                    {% badge "⚙️ Processing" variant="primary" %}
+                  {% elif order.status == "completed" %}
+                    {% badge "✅ Completed" variant="success" %}
+                  {% elif order.status == "cancelled" %}
+                    {% badge "❌ Cancelled" variant="danger" %}
+                  {% elif order.status == "failed" %}
+                    {% badge "🔥 Failed" variant="danger" %}
+                  {% elif order.status == "refunded" %}
+                    {% badge "💰 Refunded" variant="info" %}
+                  {% elif order.status == "partially_refunded" %}
+                    {% badge "💸 Partially Refunded" variant="warning" %}
+                  {% endif %}
+                </div>
+                
+                <!-- Customer Info -->
+                <div class="flex items-center space-x-4 text-sm text-slate-400 mb-3">
+                  <div class="flex items-center">
+                    <span class="mr-1">🏢</span>
+                    {{ order.customer.company_name }}
+                  </div>
+                  <div class="flex items-center">
+                    <span class="mr-1">📅</span>
+                    {{ order.created_at|date:"M d, Y" }}
+                  </div>
+                  <div class="flex items-center">
+                    <span class="mr-1">📦</span>
+                    {{ order.items.count }} {% trans "item" %}{{ order.items.count|pluralize }}
+                  </div>
+                </div>
+                
+                <!-- Billing Company if different -->
+                {% if order.billing_company_name != order.customer.company_name %}
+                <div class="text-sm text-slate-500 mb-2">
+                  <span class="mr-1">📋</span>
+                  {% trans "Bill to:" %} {{ order.billing_company_name }}
+                </div>
+                {% endif %}
+                
+                <!-- Order Total -->
+                <div class="text-lg font-semibold text-white">
+                  {% if order.total_cents %}
+                    {{ order.total_cents|cents_to_currency|romanian_currency:order.currency }}
+                    <span class="text-sm text-slate-400 font-normal">
+                      ({% trans "incl. VAT" %})
+                    </span>
+                  {% else %}
+                    <span class="text-slate-500">{% trans "No total calculated" %}</span>
+                  {% endif %}
+                </div>
+              </div>
+              
+              <!-- Action Buttons -->
+              <div class="flex space-x-2 ml-4">
+                {% url 'orders:order_detail' pk=order.id as order_detail_url %}
+                {% button "👁️ View" variant="outline" size="sm" href=order_detail_url %}
+                
+                {% if is_staff and order.status not in "cancelled,refunded" %}
+                  {% url 'orders:order_edit' pk=order.id as order_edit_url %}
+                  {% button "✏️ Edit" variant="outline" size="sm" href=order_edit_url %}
+                {% endif %}
+              </div>
+            </div>
+            
+            <!-- Notes (if any) -->
+            {% if order.notes %}
+            <div class="mt-3 pt-3 border-t border-slate-700">
+              <div class="text-sm text-slate-400">
+                <span class="font-medium">{% trans "Notes:" %}</span> {{ order.notes|truncatewords:20 }}
+              </div>
+            </div>
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+    
+    <!-- Pagination -->
+    {% if orders.has_other_pages %}
+      <div class="mt-8">
+        {% include 'components/pagination.html' with page_obj=orders %}
+      </div>
+    {% endif %}
+    
+  {% else %}
+    <!-- Empty State -->
+    <div class="bg-slate-800 rounded-lg border border-slate-700 p-12 text-center">
+      <div class="text-6xl mb-4">📦</div>
+      <h3 class="text-xl font-semibold text-white mb-2">
+        {% if search_query or current_status %}
+          {% trans "No orders found" %}
+        {% else %}
+          {% trans "No orders yet" %}
+        {% endif %}
+      </h3>
+      <p class="text-slate-400 mb-6">
+        {% if search_query or current_status %}
+          {% trans "Try adjusting your search or filter criteria." %}
+        {% elif is_staff %}
+          {% trans "Create your first order to get started with order management." %}
+        {% else %}
+          {% trans "Orders will appear here once they are created for your account." %}
+        {% endif %}
+      </p>
+      {% if is_staff and not search_query and not current_status %}
+        {% url 'orders:order_create' as create_order_url %}
+        {% button "📦 Create First Order" variant="primary" href=create_order_url %}
+      {% endif %}
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

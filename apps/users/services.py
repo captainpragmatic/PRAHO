@@ -340,7 +340,7 @@ class SecureUserRegistrationService:
                     },
                     request_ip,
                 )
-                return Err(_("Company information could not be verified"))
+                return Err(str(_("Company information could not be verified")))
 
             # Step 2: Create user in pending state
             user = User.objects.create_user(
@@ -406,7 +406,7 @@ class SecureCustomerUserService:
 
             # Validate customer email
             if not hasattr(request.customer, "primary_email") or not request.customer.primary_email:
-                return Err(_("Customer does not have a valid email address"))
+                return Err(str(_("Customer does not have a valid email address")))
 
             validated_email = SecureInputValidator.validate_email_secure(
                 request.customer.primary_email, "user_creation"
@@ -417,7 +417,7 @@ class SecureCustomerUserService:
                 existing_user = User.objects.select_for_update().filter(email=validated_email).first()
 
                 if existing_user:
-                    return Err(_("User account already exists for this email"))
+                    return Err(str(_("User account already exists for this email")))
 
                 # Extract names if not provided
                 if (
@@ -490,7 +490,7 @@ class SecureCustomerUserService:
                 )
 
                 if existing:
-                    return Err(_("User is already associated with this organization"))
+                    return Err(str(_("User is already associated with this organization")))
 
                 # Create membership
                 membership = CustomerMembership.objects.create(
@@ -552,7 +552,7 @@ class SecureCustomerUserService:
                     )
 
                     if existing_membership:
-                        return Err(_("User already has access to this organization"))
+                        return Err(str(_("User already has access to this organization")))
 
                     # Add to existing user
                     membership = CustomerMembership.objects.create(
@@ -894,7 +894,8 @@ class SessionSecurityService:
         new_session_key = request.session.session_key
 
         # Invalidate all other sessions for this user
-        cls._invalidate_other_user_sessions(target_user.id, new_session_key)
+        if hasattr(target_user, 'id') and target_user.id and new_session_key:
+            cls._invalidate_other_user_sessions(target_user.id, new_session_key)
 
         # Clear sensitive session data
         cls._clear_sensitive_session_data(request)
@@ -910,7 +911,11 @@ class SessionSecurityService:
             cls._get_client_ip(request),
         )
 
-        logger.warning(f"🔄 [SessionSecurity] Session rotated for {target_user.email} after password change")
+        # Type guard: target_user could be AnonymousUser from request.user
+        if hasattr(target_user, 'email') and target_user.is_authenticated:
+            logger.warning(f"🔄 [SessionSecurity] Session rotated for {target_user.email} after password change")
+        else:
+            logger.warning("🔄 [SessionSecurity] Session rotated after password change")
 
     @classmethod
     def rotate_session_on_2fa_change(cls, request: HttpRequest) -> None:
@@ -926,7 +931,8 @@ class SessionSecurityService:
         new_session_key = request.session.session_key
 
         # For 2FA changes, invalidate other sessions as security measure
-        cls._invalidate_other_user_sessions(user.id, new_session_key)
+        if user.id and new_session_key:
+            cls._invalidate_other_user_sessions(user.id, new_session_key)
 
         # Log security event
         log_security_event(
