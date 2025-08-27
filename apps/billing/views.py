@@ -194,7 +194,7 @@ def invoice_detail(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, 'billing/invoice_detail.html', context)
 
 
-def _create_proforma_with_sequence(customer: Customer, valid_until: timezone.datetime) -> ProformaInvoice:
+def _create_proforma_with_sequence(customer: Customer, valid_until: datetime) -> ProformaInvoice:
     """Create a new proforma with proper sequence number."""
     with transaction.atomic():
         sequence, created = ProformaSequence.objects.get_or_create(scope='default')
@@ -465,7 +465,7 @@ def _update_proforma_basic_info(proforma: ProformaInvoice, request_data: dict) -
         proforma.bill_to_tax_id = bill_to_tax_id
 
 
-def _process_valid_until_date(request_data: dict) -> tuple[timezone.datetime, list[str]]:
+def _process_valid_until_date(request_data: dict) -> tuple[datetime, list[str]]:
     """Process and validate the valid_until date from form data."""
     validation_errors = []
     valid_until_str = request_data.get('valid_until', '').strip()

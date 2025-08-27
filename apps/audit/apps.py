@@ -10,5 +10,5 @@ class AuditConfig(AppConfig):
 
     def ready(self) -> None:
         """Import signal handlers when app is ready."""
-        with contextlib.suppress(ImportError):
-            import apps.audit.signals  # noqa: PLC0415, F401 # Django app signals pattern requires import in ready()
+        # No signals defined yet for audit app
+        pass

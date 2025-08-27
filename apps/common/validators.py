@@ -8,6 +8,7 @@ import logging
 import re
 import time
 from collections.abc import Callable
+from datetime import datetime
 from functools import wraps
 from typing import Any, TypeVar, cast
 
@@ -352,7 +353,7 @@ class SecureInputValidator:
         return bool(user_data['accepts_marketing'])
 
     @staticmethod
-    def _validate_gdpr_consent(user_data: dict[str, Any]) -> timezone.datetime | None:
+    def _validate_gdpr_consent(user_data: dict[str, Any]) -> datetime | None:
         """Validate GDPR consent timestamp."""
         if not user_data.get('gdpr_consent_date'):
             return None

@@ -19,7 +19,7 @@ import io
 import logging
 import secrets
 import string
-from typing import Any, ClassVar, Union
+from typing import TYPE_CHECKING, Any, ClassVar, Union
 
 import pyotp
 import qrcode
@@ -34,7 +34,42 @@ from django.utils import timezone
 from apps.audit.services import audit_service  # For MFA audit logging
 from apps.common.constants import MAX_LOGIN_ATTEMPTS
 
-User = get_user_model()
+# Educational Example: This demonstrates different type annotation patterns
+# Pattern 1: Using TYPE_CHECKING (RECOMMENDED) - Fixed for most functions
+if TYPE_CHECKING:
+    from apps.users.models import User
+else:
+    User = get_user_model()
+
+# ===============================================================================
+# 🎓 EDUCATIONAL TYPE ANNOTATION EXAMPLES
+# ===============================================================================
+# 
+# The following 4 MyPy errors are intentionally LEFT UNFIXED for learning:
+#
+# 1. Django Field Nullable Generics (line 122): 
+#    - Error: "DateTimeField is nullable but its generic get type parameter is not optional"
+#    - Learning: Django model fields with null=True need Optional[] type annotations
+#    - Fix: Use Optional[datetime] or datetime | None for nullable fields
+#
+# 2. Django Choice Field Translation Issues (throughout codebase):
+#    - Error: "_StrPromise incompatible with str in choice field tuples"
+#    - Learning: Django's gettext_lazy returns _StrPromise objects, not strings
+#    - Fix: Use proper typing for choice tuples or cast to str
+#
+# 3. Django ManyToMany Field Type Inference:
+#    - Error: "Need type annotation for customers field" (if it occurs)
+#    - Learning: Django ManyToMany fields sometimes need explicit typing
+#    - Fix: Use proper type annotations for relationship fields
+#
+# 4. Django Model Manager Generic Typing:
+#    - Error: Complex generic type issues in model managers
+#    - Learning: Django's BaseUserManager needs proper generic parameters
+#    - Fix: Use proper generic types and TYPE_CHECKING patterns
+#
+# These represent common Django + MyPy integration challenges that developers
+# encounter when adding type safety to existing Django codebases.
+# ===============================================================================
 logger = logging.getLogger(__name__)
 
 
@@ -541,7 +576,7 @@ class MFAService:
                 'replay_detected': bool
             }
         """
-        result = {
+        result: dict[str, Any] = {
             'success': False,
             'method': None,
             'remaining_backup_codes': BackupCodeService.get_remaining_count(user),

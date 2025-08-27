@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from django import forms
 from django.contrib.auth import get_user_model
@@ -23,7 +23,10 @@ from .models import (
     CustomerTaxProfile,
 )
 
-User = get_user_model()
+if TYPE_CHECKING:
+    from apps.users.models import User
+else:
+    User = get_user_model()
 
 
 # ===============================================================================

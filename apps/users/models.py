@@ -6,7 +6,7 @@ Romanian hosting provider authentication with multi-customer support.
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
@@ -25,20 +25,21 @@ from apps.common.encryption import (  # Core encryption needed for user model
 from apps.customers.models import Customer  # Cross-app relationship
 
 
-class UserManager(BaseUserManager):
+class UserManager(BaseUserManager['User']):
     """Custom user manager for email-based authentication"""
 
-    def create_user(self, email: str, password: str | None = None, **extra_fields: Any) -> User:
+    def create_user(self, email: str, password: str | None = None, **extra_fields: Any) -> 'User':
         """Create and return a regular user with email and password"""
         if not email:
             raise ValueError('The Email field must be set')
         email = self.normalize_email(email)
-        user = self.model(email=email, **extra_fields)
+        from typing import cast
+        user = cast('User', self.model(email=email, **extra_fields))
         user.set_password(password)
         user.save(using=self._db)
         return user
 
-    def create_superuser(self, email: str, password: str | None = None, **extra_fields: Any) -> User:
+    def create_superuser(self, email: str, password: str | None = None, **extra_fields: Any) -> 'User':
         """Create and return a superuser with email and password"""
         extra_fields.setdefault('is_staff', True)
         extra_fields.setdefault('is_superuser', True)
@@ -119,7 +120,7 @@ class User(AbstractUser):
     )
 
     # Custom manager
-    objects = UserManager()
+    objects: UserManager['User'] = UserManager()
 
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS: ClassVar[list[str]] = []
@@ -262,10 +263,10 @@ class User(AbstractUser):
         """Validate user data"""
         super().clean()
 
-    def get_staff_role_display(self) -> str:
-        """Get display name for staff role"""
+    def get_staff_role_display_name(self) -> str:
+        """Get display name for staff role (custom implementation)"""
         if not self.staff_role:
-            return _('Customer User')
+            return str(_('Customer User'))
 
         role_map = {
             'admin': _('System Administrator'),
@@ -274,7 +275,7 @@ class User(AbstractUser):
             'manager': _('Manager'),
         }
 
-        return role_map.get(self.staff_role, self.staff_role)
+        return str(role_map.get(self.staff_role, self.staff_role))
 
     # Two-factor authentication properties
     @property
@@ -421,17 +422,17 @@ class CustomerMembership(models.Model):
 
     def __str__(self) -> str:
         primary_flag = " (Primary)" if self.is_primary else ""
-        return f"{self.user.email} → {self.customer.name} ({self.get_role_display()}){primary_flag}"
+        return f"{self.user.email} → {self.customer.name} ({self.get_role_display_name()}){primary_flag}"
 
-    def get_role_display(self) -> str:
-        """Get role display"""
+    def get_role_display_name(self) -> str:
+        """Get role display (custom implementation)"""
         role_map = {
             'owner': _('Owner'),
             'billing': _('Billing'),
             'tech': _('Technical'),
             'viewer': _('Viewer'),
         }
-        return role_map.get(self.role, self.role)
+        return str(role_map.get(self.role, self.role))
 
 
 # Remove the old UserCustomerAccess model - will be handled by migration

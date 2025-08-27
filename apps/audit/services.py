@@ -5,6 +5,7 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
 
 from django.contrib.auth import get_user_model
@@ -25,7 +26,7 @@ Centralized audit logging for Romanian compliance and security.
 """
 
 if TYPE_CHECKING:
-    from apps.users.models import User as UserType
+    from apps.users.models import User
 else:
     User = get_user_model()
 
@@ -66,7 +67,7 @@ class ConsentHistoryEntry(TypedDict):
 @dataclass
 class AuditContext:
     """Parameter object for audit event context information"""
-    user: UserType | None = None
+    user: User | None = None
     ip_address: str | None = None
     user_agent: str | None = None
     request_id: str | None = None
@@ -87,7 +88,7 @@ class AuditEventData:
 class TwoFactorAuditRequest:
     """Parameter object for 2FA audit events"""
     event_type: str
-    user: UserType
+    user: User
     context: AuditContext = field(default_factory=AuditContext)
     description: str = ''
 
@@ -97,7 +98,7 @@ class ComplianceEventRequest:
     compliance_type: str
     reference_id: str
     description: str
-    user: UserType | None = None
+    user: User | None = None
     status: str = 'success'
     evidence: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -311,7 +312,7 @@ class AuditService:
         compliance_type: str,
         reference_id: str,
         description: str,
-        user: UserType | None = None,
+        user: User | None = None,
         status: str = 'success',
         evidence: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None
@@ -391,7 +392,7 @@ class GDPRExportService:
                 export_type='gdpr',
                 scope=export_scope,
                 status='pending',
-                expires_at=timezone.now() + timezone.timedelta(days=7)  # 7 days to download
+                expires_at=timezone.now() + timedelta(days=7)  # 7 days to download
             )
 
             # Log GDPR export request
@@ -480,7 +481,7 @@ class GDPRExportService:
     @classmethod
     def _collect_user_data(cls, user: User, scope: dict[str, Any]) -> dict[str, Any]:
         """Collect comprehensive user data based on export scope"""
-        data = {
+        data: dict[str, Any] = {
             'metadata': {
                 'generated_at': timezone.now().isoformat(),
                 'user_id': user.id,
@@ -681,7 +682,7 @@ class GDPRDeletionService:
 
             if result.is_err():
                 deletion_request.status = 'failed'
-                deletion_request.evidence['error'] = result.error
+                deletion_request.evidence['error'] = result.error if hasattr(result, 'error') else str(result)
                 deletion_request.save(update_fields=['status', 'evidence'])
                 return result
 
@@ -824,13 +825,15 @@ class GDPRConsentService:
                     "Data processing consent withdrawn"
                 )
                 if deletion_result.is_err():
-                    return Err(f"Failed to process consent withdrawal: {deletion_result.error}")
+                    error_msg = deletion_result.error if hasattr(deletion_result, 'error') else str(deletion_result)
+                    return Err(f"Failed to process consent withdrawal: {error_msg}")
 
                 # Immediately process the deletion request
-                deletion_request = deletion_result.value
+                deletion_request = deletion_result.value if hasattr(deletion_result, 'value') else deletion_result
                 process_result = GDPRDeletionService.process_deletion_request(deletion_request)
                 if process_result.is_err():
-                    return Err(f"Failed to anonymize user data: {process_result.error}")
+                    error_msg = process_result.error if hasattr(process_result, 'error') else str(process_result)
+                    return Err(f"Failed to anonymize user data: {error_msg}")
 
                 changes_made.append('data_processing')
 
