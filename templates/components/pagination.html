@@ -1,253 +1,191 @@
 {% comment %}
 ===============================================================================
-📄 PAGINATION COMPONENT - PRAHO Platform
+📄 MODERN PAGINATION COMPONENT - PRAHO Platform
 ===============================================================================
-Reusable pagination component following Romanian business UI standards and 
-international pagination UX best practices.
+Adapted from modern Shadcn/UI pagination with PRAHO Platform integration.
+Clean, accessible, and responsive pagination following 2024 UI best practices.
 
 Usage:
-{% include 'components/pagination.html' with page_obj=page_obj url_name=current_url_name %}
-{% include 'components/pagination.html' with page_obj=invoices url_name='billing:list' extra_params='&filter=pending' %}
+{% include 'components/pagination.html' with page_obj=page_obj %}
+{% include 'components/pagination.html' with page_obj=invoices extra_params='&filter=pending' %}
 
 Required Parameters:
 - page_obj: Django paginator page object (has_previous, has_next, etc.)
 
 Optional Parameters:
-- url_name: Django URL name for pagination links (defaults to current URL)
 - extra_params: Additional URL parameters to preserve (e.g., "&search=query&filter=active")
 - css_class: Additional CSS classes for the container
-- show_info: Show "Showing X-Y of Z results" info (default: True)
-- mobile_simplified: Use simplified mobile-only pagination (default: False)
+- show_info: Show results info above pagination (default: True)
+- htmx_target: HTMX target selector for dynamic loading
 
 Features:
-- ✅ Responsive design (desktop + mobile)
-- ✅ Accessibility (ARIA labels, keyboard navigation)
+- ✅ Modern Shadcn UI design
+- ✅ Responsive (mobile + desktop)
+- ✅ Full accessibility (ARIA, keyboard nav)
 - ✅ Romanian translations
+- ✅ Smart page range with ellipsis
+- ✅ HTMX integration ready
 - ✅ Preserves query parameters
-- ✅ Smart page range (shows 5-7 pages around current)
-- ✅ Hides completely when only 1 page
-- ✅ Performance optimized
 ===============================================================================
 {% endcomment %}
 
 {% load i18n %}
-{% load ui_components %}
 
 {# Only show pagination if there are multiple pages #}
 {% if page_obj.has_other_pages %}
-<nav class="pagination-container {{ css_class|default:'' }}" aria-label="{% trans 'Pagination Navigation' %}">
-  
-  {# Desktop and Tablet Pagination #}
-  <div class="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
-    
-    {# Results Information #}
-    {% if show_info|default:True %}
-    <div class="pagination-info">
-      <p class="text-sm text-slate-400">
-        {% blocktrans with page_obj.start_index as start_index and page_obj.end_index as end_index and page_obj.paginator.count as count %}
-          Showing {{ start_index }} to {{ end_index }} of {{ count }} results
-        {% endblocktrans %}
-      </p>
-    </div>
-    {% endif %}
 
-    {# Page Navigation #}
-    <div class="pagination-nav">
-      <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="{% trans 'Pagination' %}">
-        
-        {# Previous Page Button #}
-        {% if page_obj.has_previous %}
-          <a href="?page={{ page_obj.previous_page_number }}{{ extra_params|default:'' }}" 
-             class="pagination-btn pagination-btn-prev"
-             aria-label="{% trans 'Go to previous page' %}">
-            <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
-              <path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd" />
-            </svg>
-            <span class="sr-only">{% trans 'Previous' %}</span>
-          </a>
-        {% else %}
-          <span class="pagination-btn pagination-btn-disabled"
-                aria-label="{% trans 'Previous page (unavailable)' %}">
-            <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
-              <path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd" />
-            </svg>
-            <span class="sr-only">{% trans 'Previous' %}</span>
-          </span>
-        {% endif %}
+{# Pagination Container with Consistent Spacing #}
+<div class="flex flex-col items-center space-y-2 py-6 px-4 sm:py-8 {{ css_class|default:'' }}">
 
-        {# Smart Page Range Logic #}
-        {% with page_obj.number as current_page and page_obj.paginator.num_pages as total_pages %}
-          
-          {# First page (if not in range) #}
-          {% if current_page > 3 %}
-            <a href="?page=1{{ extra_params|default:'' }}" 
-               class="pagination-btn"
-               aria-label="{% trans 'Go to page 1' %}">1</a>
-            
-            {% if current_page > 4 %}
-              <span class="pagination-btn pagination-ellipsis" aria-hidden="true">…</span>
-            {% endif %}
-          {% endif %}
-
-          {# Page range around current page #}
-          {% for page_num in page_obj.paginator.page_range %}
-            {% if page_num >= current_page|add:"-2" and page_num <= current_page|add:"2" %}
-              {% if page_num == current_page %}
-                <span class="pagination-btn pagination-btn-current" 
-                      aria-current="page"
-                      aria-label="{% blocktrans with page_num as page %}Current page, page {{ page }}{% endblocktrans %}">
-                  {{ page_num }}
-                </span>
-              {% else %}
-                <a href="?page={{ page_num }}{{ extra_params|default:'' }}" 
-                   class="pagination-btn"
-                   aria-label="{% blocktrans with page_num as page %}Go to page {{ page }}{% endblocktrans %}">
-                  {{ page_num }}
-                </a>
-              {% endif %}
-            {% endif %}
-          {% endfor %}
-
-          {# Last page (if not in range) #}
-          {% if current_page < total_pages|add:"-2" %}
-            {% if current_page < total_pages|add:"-3" %}
-              <span class="pagination-btn pagination-ellipsis" aria-hidden="true">…</span>
-            {% endif %}
-            
-            <a href="?page={{ total_pages }}{{ extra_params|default:'' }}" 
-               class="pagination-btn"
-               aria-label="{% blocktrans with total_pages as page %}Go to page {{ page }}{% endblocktrans %}">
-              {{ total_pages }}
-            </a>
-          {% endif %}
-
-        {% endwith %}
-
-        {# Next Page Button #}
-        {% if page_obj.has_next %}
-          <a href="?page={{ page_obj.next_page_number }}{{ extra_params|default:'' }}" 
-             class="pagination-btn pagination-btn-next"
-             aria-label="{% trans 'Go to next page' %}">
-            <span class="sr-only">{% trans 'Next' %}</span>
-            <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
-              <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
-            </svg>
-          </a>
-        {% else %}
-          <span class="pagination-btn pagination-btn-disabled"
-                aria-label="{% trans 'Next page (unavailable)' %}">
-            <span class="sr-only">{% trans 'Next' %}</span>
-            <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
-              <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
-            </svg>
-          </span>
-        {% endif %}
-
-      </nav>
-    </div>
-  </div>
-
-  {# Mobile Pagination #}
-  <div class="flex-1 flex justify-between sm:hidden">
-    
-    {# Mobile Previous #}
-    {% if page_obj.has_previous %}
-      <a href="?page={{ page_obj.previous_page_number }}{{ extra_params|default:'' }}" 
-         class="pagination-btn-mobile pagination-btn-mobile-prev">
-        {% trans 'Previous' %}
-      </a>
-    {% else %}
-      <span class="pagination-btn-mobile pagination-btn-mobile-disabled">
-        {% trans 'Previous' %}
-      </span>
-    {% endif %}
-
-    {# Mobile Page Info #}
-    <div class="flex items-center">
-      <span class="text-sm text-slate-400">
-        {% blocktrans with page_obj.number as current and page_obj.paginator.num_pages as total %}
-          {{ current }} / {{ total }}
-        {% endblocktrans %}
-      </span>
-    </div>
-
-    {# Mobile Next #}
-    {% if page_obj.has_next %}
-      <a href="?page={{ page_obj.next_page_number }}{{ extra_params|default:'' }}" 
-         class="pagination-btn-mobile pagination-btn-mobile-next">
-        {% trans 'Next' %}
-      </a>
-    {% else %}
-      <span class="pagination-btn-mobile pagination-btn-mobile-disabled">
-        {% trans 'Next' %}
-      </span>
-    {% endif %}
-
-  </div>
-
-  {# Mobile Results Info (below navigation) #}
+  {# Results Information - Centered Above Pagination #}
   {% if show_info|default:True %}
-  <div class="mt-3 text-center sm:hidden">
-    <p class="text-xs text-slate-400">
-      {% blocktrans with page_obj.start_index as start_index and page_obj.end_index as end_index and page_obj.paginator.count as count %}
-        {{ start_index }}-{{ end_index }} of {{ count }}
-      {% endblocktrans %}
-    </p>
+  <div class="flex justify-center">
+    <div class="inline-flex items-center px-3 sm:px-4 py-1.5 sm:py-2 bg-slate-800/40 backdrop-blur-sm border border-slate-700/50 rounded-full text-xs sm:text-sm text-slate-300 shadow-sm">
+      <span>
+        {% blocktrans with page_obj.start_index as start_index and page_obj.end_index as end_index and page_obj.paginator.count as count %}
+          Showing {{ start_index }}–{{ end_index }} of {{ count }} results
+        {% endblocktrans %}
+      </span>
+    </div>
   </div>
   {% endif %}
 
-</nav>
+  {# Modern Pagination Navigation with Consistent Spacing #}
+  <nav role="navigation" aria-label="{% trans 'Pagination' %}" data-slot="pagination" class="flex w-full justify-center">
+    <ul data-slot="pagination-content" class="inline-flex items-center gap-0.5 sm:gap-1 bg-slate-800/30 backdrop-blur-sm border border-slate-700/40 rounded-lg px-1.5 py-1.5 sm:px-2 sm:py-2 shadow-lg">
+    
+    {# Previous Page Button #}
+    <li data-slot="pagination-item">
+      {% if page_obj.has_previous %}
+        <a data-slot="pagination-link" 
+           class="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-slate-400/50 focus-visible:ring-offset-1 hover:bg-slate-700/60 hover:text-slate-100 active:bg-slate-600/80 h-8 sm:h-9 py-2 px-2 sm:px-3 gap-1 sm:gap-2 text-slate-300 border border-transparent hover:border-slate-600/50"
+           aria-label="{% trans 'Go to previous page' %}" 
+           href="?page={{ page_obj.previous_page_number }}{{ extra_params|default:'' }}"
+           {% if htmx_target %}hx-get="?page={{ page_obj.previous_page_number }}{{ extra_params|default:'' }}" hx-target="{{ htmx_target }}" hx-push-url="true"{% endif %}>
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-left">
+            <path d="m15 18-6-6 6-6"></path>
+          </svg>
+          <span class="hidden sm:block">{% trans 'Previous' %}</span>
+        </a>
+      {% else %}
+        <span data-slot="pagination-link" 
+              class="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none h-8 sm:h-9 py-2 px-2 sm:px-3 gap-1 sm:gap-2 text-slate-500 cursor-not-allowed border border-transparent"
+              aria-label="{% trans 'Previous page (unavailable)' %}">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-left">
+            <path d="m15 18-6-6 6-6"></path>
+          </svg>
+          <span class="hidden sm:block">{% trans 'Previous' %}</span>
+        </span>
+      {% endif %}
+    </li>
 
-{# CSS Styles #}
-<style>
-/* ===============================================================================
-   📄 PAGINATION COMPONENT STYLES
-   =============================================================================== */
+    {# Smart Page Range Logic #}
+    {% with page_obj.number as current_page and page_obj.paginator.num_pages as total_pages %}
+      
+      {# First page (if not in visible range) #}
+      {% if current_page > 3 %}
+        <li data-slot="pagination-item">
+          <a data-slot="pagination-link" 
+             class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 outline-none focus-visible:ring-2 focus-visible:ring-slate-400/50 focus-visible:ring-offset-1 hover:bg-slate-700/60 hover:text-slate-100 active:bg-slate-600/80 size-8 sm:size-9 text-slate-300 border border-transparent hover:border-slate-600/50" 
+             href="?page=1{{ extra_params|default:'' }}"
+             {% if htmx_target %}hx-get="?page=1{{ extra_params|default:'' }}" hx-target="{{ htmx_target }}" hx-push-url="true"{% endif %}>
+            1
+          </a>
+        </li>
+        
+        {% if current_page > 4 %}
+          <li data-slot="pagination-item">
+            <span aria-hidden="true" data-slot="pagination-ellipsis" class="flex size-8 sm:size-9 items-center justify-center text-slate-400">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-ellipsis size-4">
+                <circle cx="12" cy="12" r="1"></circle>
+                <circle cx="19" cy="12" r="1"></circle>
+                <circle cx="5" cy="12" r="1"></circle>
+              </svg>
+              <span class="sr-only">{% trans 'More pages' %}</span>
+            </span>
+          </li>
+        {% endif %}
+      {% endif %}
 
-.pagination-container {
-  @apply bg-slate-700 px-6 py-4 border-t border-slate-600;
-}
+      {# Page range around current page #}
+      {% for page_num in page_obj.paginator.page_range %}
+        {% if page_num >= current_page|add:"-2" and page_num <= current_page|add:"2" %}
+          <li data-slot="pagination-item">
+            {% if page_num == current_page %}
+              <a aria-current="page" 
+                 data-slot="pagination-link" 
+                 data-active="true" 
+                 class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 outline-none focus-visible:ring-2 focus-visible:ring-slate-400/50 focus-visible:ring-offset-1 border bg-slate-700/90 border-slate-600/80 shadow-sm hover:bg-slate-600/90 hover:text-slate-50 active:bg-slate-600/80 size-8 sm:size-9 text-slate-100 font-semibold" 
+                 href="?page={{ page_num }}{{ extra_params|default:'' }}">
+                {{ page_num }}
+              </a>
+            {% else %}
+              <a data-slot="pagination-link" 
+                 class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 outline-none focus-visible:ring-2 focus-visible:ring-slate-400/50 focus-visible:ring-offset-1 hover:bg-slate-700/60 hover:text-slate-100 active:bg-slate-600/80 size-8 sm:size-9 text-slate-300 border border-transparent hover:border-slate-600/50" 
+                 href="?page={{ page_num }}{{ extra_params|default:'' }}"
+                 {% if htmx_target %}hx-get="?page={{ page_num }}{{ extra_params|default:'' }}" hx-target="{{ htmx_target }}" hx-push-url="true"{% endif %}>
+                {{ page_num }}
+              </a>
+            {% endif %}
+          </li>
+        {% endif %}
+      {% endfor %}
 
-/* Desktop Pagination Buttons */
-.pagination-btn {
-  @apply relative inline-flex items-center px-4 py-2 border border-slate-600 bg-slate-800 text-sm font-medium text-slate-300 hover:bg-slate-700 focus:z-10 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-colors;
-}
+      {# Last page (if not in visible range) #}
+      {% if current_page < total_pages|add:"-2" %}
+        {% if current_page < total_pages|add:"-3" %}
+          <li data-slot="pagination-item">
+            <span aria-hidden="true" data-slot="pagination-ellipsis" class="flex size-8 sm:size-9 items-center justify-center text-slate-400">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-ellipsis size-4">
+                <circle cx="12" cy="12" r="1"></circle>
+                <circle cx="19" cy="12" r="1"></circle>
+                <circle cx="5" cy="12" r="1"></circle>
+              </svg>
+              <span class="sr-only">{% trans 'More pages' %}</span>
+            </span>
+          </li>
+        {% endif %}
+        
+        <li data-slot="pagination-item">
+          <a data-slot="pagination-link" 
+             class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 outline-none focus-visible:ring-2 focus-visible:ring-slate-400/50 focus-visible:ring-offset-1 hover:bg-slate-700/60 hover:text-slate-100 active:bg-slate-600/80 size-8 sm:size-9 text-slate-300 border border-transparent hover:border-slate-600/50" 
+             href="?page={{ total_pages }}{{ extra_params|default:'' }}"
+             {% if htmx_target %}hx-get="?page={{ total_pages }}{{ extra_params|default:'' }}" hx-target="{{ htmx_target }}" hx-push-url="true"{% endif %}>
+            {{ total_pages }}
+          </a>
+        </li>
+      {% endif %}
 
-.pagination-btn-prev {
-  @apply rounded-l-md pl-2 pr-3;
-}
+    {% endwith %}
 
-.pagination-btn-next {
-  @apply rounded-r-md pl-3 pr-2;
-}
+    {# Next Page Button #}
+    <li data-slot="pagination-item">
+      {% if page_obj.has_next %}
+        <a data-slot="pagination-link" 
+           class="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-slate-400/50 focus-visible:ring-offset-1 hover:bg-slate-700/60 hover:text-slate-100 active:bg-slate-600/80 h-8 sm:h-9 py-2 px-2 sm:px-3 gap-1 sm:gap-2 text-slate-300 border border-transparent hover:border-slate-600/50"
+           aria-label="{% trans 'Go to next page' %}" 
+           href="?page={{ page_obj.next_page_number }}{{ extra_params|default:'' }}"
+           {% if htmx_target %}hx-get="?page={{ page_obj.next_page_number }}{{ extra_params|default:'' }}" hx-target="{{ htmx_target }}" hx-push-url="true"{% endif %}>
+          <span class="hidden sm:block">{% trans 'Next' %}</span>
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-right">
+            <path d="m9 18 6-6-6-6"></path>
+          </svg>
+        </a>
+      {% else %}
+        <span data-slot="pagination-link" 
+              class="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none h-8 sm:h-9 py-2 px-2 sm:px-3 gap-1 sm:gap-2 text-slate-500 cursor-not-allowed border border-transparent"
+              aria-label="{% trans 'Next page (unavailable)' %}">
+          <span class="hidden sm:block">{% trans 'Next' %}</span>
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-right">
+            <path d="m9 18 6-6-6-6"></path>
+          </svg>
+        </span>
+      {% endif %}
+    </li>
 
-.pagination-btn-current {
-  @apply relative inline-flex items-center px-4 py-2 border border-blue-500 bg-blue-600 text-sm font-medium text-white;
-}
+    </ul>
+  </nav>
 
-.pagination-btn-disabled {
-  @apply relative inline-flex items-center px-4 py-2 border border-slate-600 bg-slate-800 text-sm font-medium text-slate-500 cursor-not-allowed;
-}
+</div>
 
-.pagination-ellipsis {
-  @apply relative inline-flex items-center px-4 py-2 border border-slate-600 bg-slate-800 text-sm font-medium text-slate-400 cursor-default;
-}
-
-/* Mobile Pagination Buttons */
-.pagination-btn-mobile {
-  @apply relative inline-flex items-center px-4 py-2 border border-slate-600 text-sm font-medium rounded-md text-slate-300 bg-slate-800 hover:bg-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-colors;
-}
-
-.pagination-btn-mobile-disabled {
-  @apply relative inline-flex items-center px-4 py-2 border border-slate-600 text-sm font-medium rounded-md text-slate-500 bg-slate-800 cursor-not-allowed;
-}
-
-.pagination-btn-mobile-prev {
-  @apply mr-3;
-}
-
-.pagination-btn-mobile-next {
-  @apply ml-3;
-}
-</style>
 {% endif %}
