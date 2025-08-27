@@ -15,7 +15,7 @@ Features:
 from typing import Any
 
 from django.core.paginator import Paginator
-from django.db.models import Q
+from django.db.models import Q, QuerySet
 from django.http import HttpRequest
 
 # 🎯 Romanian business pagination constants
@@ -25,7 +25,7 @@ DEFAULT_ORPHANS = 3
 
 def get_pagination_context(
     request: HttpRequest,
-    queryset,
+    queryset: QuerySet,
     page_size: int = DEFAULT_PAGE_SIZE,
     page_param: str = 'page',
     orphans: int = DEFAULT_ORPHANS
@@ -107,7 +107,7 @@ def get_search_context(request: HttpRequest, search_param: str = 'search') -> di
     }
 
 
-def filter_queryset_by_search(queryset, search_query: str, search_fields: list):
+def filter_queryset_by_search(queryset: QuerySet, search_query: str, search_fields: list[str]) -> QuerySet:
     """
     📄 Filter queryset by search terms
     

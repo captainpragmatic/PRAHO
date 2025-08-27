@@ -4,6 +4,7 @@ Populates the TaxRule model with current VAT rates for Romanian hosting business
 """
 
 from decimal import Decimal
+from typing import Any
 
 from django.core.management.base import BaseCommand
 from django.utils import timezone
@@ -14,14 +15,14 @@ from apps.billing.models import TaxRule
 class Command(BaseCommand):
     help = 'Set up Romanian and EU VAT tax rules for hosting business'
 
-    def add_arguments(self, parser) -> None:
+    def add_arguments(self, parser: Any) -> None:
         parser.add_argument(
             '--force',
             action='store_true',
             help='Force recreation of existing tax rules',
         )
 
-    def handle(self, *args, **options) -> None:
+    def handle(self, *args: Any, **options: Any) -> None:
         """Set up tax rules for Romanian hosting provider"""
 
         force = options.get('force', False)

@@ -3,6 +3,8 @@ Management command to set up payment retry policies for dunning campaigns.
 Creates standard retry schedules for different customer tiers and payment scenarios.
 """
 
+from typing import Any
+
 from django.core.management.base import BaseCommand
 
 from apps.billing.models import PaymentRetryPolicy
@@ -11,14 +13,14 @@ from apps.billing.models import PaymentRetryPolicy
 class Command(BaseCommand):
     help = 'Set up payment retry policies for failed payment recovery'
 
-    def add_arguments(self, parser) -> None:
+    def add_arguments(self, parser: Any) -> None:
         parser.add_argument(
             '--force',
             action='store_true',
             help='Force recreation of existing policies',
         )
 
-    def handle(self, *args, **options) -> None:
+    def handle(self, *args: Any, **options: Any) -> None:
         """Set up standard payment retry policies"""
 
         force = options.get('force', False)

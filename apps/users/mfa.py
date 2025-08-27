@@ -146,7 +146,7 @@ class TOTPService:
         return pyotp.random_base32()
 
     @staticmethod
-    def verify_token(user, token: str, request=None) -> bool:
+    def verify_token(user: Any, token: str, request: Any = None) -> bool:
         """
         🔍 Verify TOTP token with replay protection and time window tolerance
         """

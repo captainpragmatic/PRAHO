@@ -14,7 +14,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any, ClassVar, Optional
 
 if TYPE_CHECKING:
-    from apps.billing.models import Invoice  # Imported for balance calculations
+    pass  # Imported for balance calculations
 
 from django.core.validators import RegexValidator
 from django.db import models
@@ -61,7 +61,7 @@ class SoftDeleteModel(models.Model):
     class Meta:
         abstract = True
 
-    def soft_delete(self, user=None) -> None:
+    def soft_delete(self, user: Optional[Any] = None) -> None:
         """Soft delete this record"""
         self.deleted_at = timezone.now()
         self.deleted_by = user

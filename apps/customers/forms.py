@@ -13,7 +13,6 @@ from django.core.exceptions import ValidationError
 from django.forms.models import ModelChoiceField  # For form field type checking
 from django.utils.translation import gettext_lazy as _
 
-from apps.common.types import validate_romanian_phone  # Romanian phone validation
 from apps.users.models import CustomerMembership
 
 from .models import (
@@ -527,16 +526,6 @@ class CustomerCreationForm(forms.Form):
             'class': 'rounded border-slate-600 bg-slate-700 text-blue-600 focus:ring-blue-500'
         })
     )
-
-    def clean_phone(self) -> str:
-        """Validate Romanian phone number using centralized validation"""
-        phone: str | None = self.cleaned_data.get('phone')
-        if phone:
-            result = validate_romanian_phone(phone.strip())
-            if result.is_err():
-                raise ValidationError(result.error)
-            return result.unwrap()
-        return cast(str, phone or '')
 
     def clean(self) -> dict[str, Any]:
         """Cross-field validation"""

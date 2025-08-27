@@ -6,13 +6,13 @@ Shared helper functions and decorators.
 from __future__ import annotations
 
 import hashlib
-import re
 import secrets
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from decimal import Decimal
 from functools import wraps
 from typing import Any, TypedDict
+from django.http import HttpRequest
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
@@ -21,29 +21,9 @@ from django.core.exceptions import PermissionDenied
 from django.http import HttpResponse, JsonResponse
 from django.utils.translation import gettext_lazy as _
 
-from apps.common.constants import (
-    PHONE_FULL_INTERNATIONAL_LENGTH,
-    PHONE_LANDLINE_LENGTH,
-)
-
 # ===============================================================================
 # ROMANIAN VALIDATION UTILITIES
 # ===============================================================================
-
-def format_romanian_phone(phone: str) -> str:
-    """Format phone number to Romanian standard"""
-    # Remove all non-digits
-    digits = re.sub(r'\D', '', phone)
-
-    # Handle different input formats
-    if digits.startswith('40') and len(digits) == PHONE_FULL_INTERNATIONAL_LENGTH:
-        # +40XXXXXXXXX -> +40.XX.XXX.XXXX
-        return f"+40.{digits[2:4]}.{digits[4:7]}.{digits[7:]}"
-    elif digits.startswith('07') and len(digits) == PHONE_LANDLINE_LENGTH:
-        # 07XXXXXXXX -> +40.7X.XXX.XXXX
-        return f"+40.{digits[1:3]}.{digits[3:6]}.{digits[6:]}"
-
-    return phone  # Return original if can't format
 
 
 class VATCalculation(TypedDict):
@@ -56,7 +36,9 @@ class VATCalculation(TypedDict):
 
 def calculate_romanian_vat(amount: Decimal, vat_rate: int = 19) -> VATCalculation:
     """Calculate Romanian VAT breakdown (deprecated - use apps.common.types.calculate_romanian_vat)"""
-    from apps.common.types import calculate_romanian_vat as new_calculator  # noqa: PLC0415 # Delayed import to avoid circular dependency
+    from apps.common.types import (
+        calculate_romanian_vat as new_calculator,  # Delayed import to avoid circular dependency
+    )
     
     # Convert to cents-based calculation for precision
     amount_cents = int(amount * 100)
@@ -102,7 +84,7 @@ def require_permission(permission: str):
     def decorator(view_func: Callable) -> Callable:
         @wraps(view_func)
         @login_required
-        def wrapper(request, *args, **kwargs):
+        def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> Any:
             if not request.user.has_perm(permission):
                 raise PermissionDenied(f"Permission required: {permission}")
             return view_func(request, *args, **kwargs)
@@ -115,7 +97,7 @@ def require_role(role: str):
     def decorator(view_func: Callable) -> Callable:
         @wraps(view_func)
         @login_required
-        def wrapper(request, *args, **kwargs):
+        def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> Any:
             user_role = getattr(request.user, 'role', 'user')
             if user_role != role and not request.user.is_superuser:
                 raise PermissionDenied(f"Role required: {role}")
@@ -129,7 +111,7 @@ def api_require_permission(permission: str):
     def decorator(view_func: Callable) -> Callable:
         @wraps(view_func)
         @login_required
-        def wrapper(request, *args, **kwargs):
+        def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> Any:
             if not request.user.has_perm(permission):
                 return JsonResponse({
                     'error': True,
@@ -225,7 +207,7 @@ def json_error(message: str, code: str = "ERROR", status: int = 400) -> JsonResp
 def maintenance_mode_check(view_func: Callable) -> Callable:
     """Check if system is in maintenance mode"""
     @wraps(view_func)
-    def wrapper(request, *args, **kwargs):
+    def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> Any:
         if getattr(settings, 'MAINTENANCE_MODE', False) and not request.user.is_staff:
             return HttpResponse(
                 _("System is under maintenance. Please try again later."),

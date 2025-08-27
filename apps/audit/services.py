@@ -476,7 +476,7 @@ class GDPRDeletionService:
         deletion_type: str = 'anonymize',  # 'anonymize' or 'delete'
         request_ip: str | None = None,
         reason: str | None = None
-    ) -> "Result[DataDeletionRequest, str]":
+    ) -> "Result[ComplianceLog, str]":
         """Create a GDPR data deletion request"""
 
 

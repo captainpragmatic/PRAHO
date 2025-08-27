@@ -386,9 +386,9 @@ def count_elements(page: Page, selector: str, description: str | None = None) ->
 # CONSOLE ERROR MONITORING
 # ===============================================================================
 
-def setup_console_monitoring(page: Page) -> list:
+def setup_console_monitoring_standalone(page: Page) -> list:
     """
-    Set up console message monitoring for the page.
+    Set up console message monitoring for the page (standalone utility function).
     
     Args:
         page: Playwright page object
@@ -397,7 +397,7 @@ def setup_console_monitoring(page: Page) -> list:
         list: Console messages list to collect messages
         
     Example:
-        console_messages = setup_console_monitoring(page)
+        console_messages = setup_console_monitoring_standalone(page)
     """
     console_messages = []
     

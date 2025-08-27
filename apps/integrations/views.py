@@ -31,7 +31,7 @@ class WebhookView(View):
 
     source_name = None  # Override in subclasses
 
-    def post(self, request):
+    def post(self, request: Any) -> Any:
         """📨 Process incoming webhook"""
         if not self.source_name:
             return HttpResponseBadRequest("Webhook source not configured")
@@ -88,11 +88,11 @@ class WebhookView(View):
                 'message': f"Internal error: {e!s}"
             }, status=500)
 
-    def extract_signature(self, request):
+    def extract_signature(self, request: Any) -> str:
         """🔐 Extract webhook signature from headers - override in subclasses"""
         return request.META.get('HTTP_X_SIGNATURE', '')
 
-    def get_client_ip(self, request):
+    def get_client_ip(self, request: Any) -> str:
         """🌐 Get client IP address"""
         x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
         ip = x_forwarded_for.split(',')[0] if x_forwarded_for else request.META.get('REMOTE_ADDR')
@@ -103,7 +103,7 @@ class StripeWebhookView(WebhookView):
     """💳 Stripe webhook endpoint"""
     source_name = 'stripe'
 
-    def extract_signature(self, request):
+    def extract_signature(self, request: Any) -> str:
         """🔐 Extract Stripe signature"""
         return request.META.get('HTTP_STRIPE_SIGNATURE', '')
 
@@ -122,7 +122,7 @@ class PayPalWebhookView(WebhookView):
 # WEBHOOK MANAGEMENT API
 # ===============================================================================
 
-def webhook_status(request):
+def webhook_status(request: Any):
     """📊 Webhook processing status and statistics"""
     if not request.user.is_staff:
         return JsonResponse({'error': 'Unauthorized'}, status=403)
@@ -171,7 +171,7 @@ def webhook_status(request):
 
 
 @require_http_methods(["POST"])
-def retry_webhook(request, webhook_id):
+def retry_webhook(request: Any, webhook_id: Any):
     """🔄 Manually retry a failed webhook"""
     if not request.user.is_staff:
         return JsonResponse({'error': 'Unauthorized'}, status=403)

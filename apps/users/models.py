@@ -14,14 +14,14 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 # Cross-app imports for core functionality
-from apps.common.encryption import (  # noqa: PLC0415 # Core encryption needed for user model
+from apps.common.encryption import (  # Core encryption needed for user model
     decrypt_sensitive_data,
     encrypt_sensitive_data,
     generate_backup_codes,
     hash_backup_code,
     verify_backup_code,
 )
-from apps.customers.models import Customer  # noqa: PLC0415 # Cross-app relationship
+from apps.customers.models import Customer  # Cross-app relationship
 
 
 class UserManager(BaseUserManager):
@@ -533,4 +533,3 @@ class UserLoginLog(models.Model):
 
 
 # Import MFA models to ensure they're recognized by Django
-from .mfa import WebAuthnCredential

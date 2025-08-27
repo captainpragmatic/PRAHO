@@ -67,7 +67,7 @@ class GDPRExportServiceTestCase(TestCase):
         self.assertEqual(export_request.requested_by, self.user)
         self.assertEqual(export_request.status, 'pending')
         self.assertEqual(export_request.scope, export_scope)  # Field is 'scope' not 'export_scope'
-        self.assertIsNone(export_request.file_path)
+        self.assertEqual(export_request.file_path, '')
 
         # Check expiration date (should be 7 days from now)
         expected_expiry = timezone.now() + timedelta(days=7)

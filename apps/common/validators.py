@@ -8,7 +8,7 @@ import logging
 import re
 import time
 from functools import wraps
-from typing import Any
+from typing import Any, Optional
 
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -42,7 +42,6 @@ MAX_DESCRIPTION_LENGTH = 1000
 # Romanian specific patterns
 ROMANIAN_VAT_PATTERN = r'^RO[0-9]{2,10}$'
 ROMANIAN_CUI_PATTERN = r'^[0-9]{2,10}$'
-ROMANIAN_PHONE_PATTERN = r'^(\+40|0)(7[0-9]{8}|2[0-9]{8}|3[0-9]{8})$'  # More restrictive Romanian mobile/landline
 
 # Suspicious input patterns (injection attempts)
 SUSPICIOUS_PATTERNS = [
@@ -474,7 +473,7 @@ class BusinessLogicValidator:
                 raise ValidationError(_("Registration validation failed"))
 
     @staticmethod
-    def validate_user_permissions(user, customer, required_role: str = 'owner') -> None:
+    def validate_user_permissions(user: Any, customer: Any, required_role: str = 'owner') -> None:
         """
         TOCTOU-safe permission validation
         """
@@ -497,7 +496,7 @@ class BusinessLogicValidator:
 
     @staticmethod
     @rate_limited("invitation", RATE_LIMIT_INVITATION_PER_USER, 60)
-    def validate_invitation_request(inviter, invitee_email: str, customer, role: str, **kwargs) -> None:
+    def validate_invitation_request(inviter: Any, invitee_email: str, customer: Any, role: str, **kwargs: Any) -> None:
         """
         Comprehensive invitation validation with rate limiting
         """

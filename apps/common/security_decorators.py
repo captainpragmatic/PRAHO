@@ -7,7 +7,7 @@ import functools
 import logging
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Tuple, Dict
 
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -20,6 +20,7 @@ from apps.common.constants import (
     INVITATION_CUSTOMER_ARG_POSITION,
     INVITATION_ROLE_ARG_POSITION,
     INVITEE_EMAIL_ARG_POSITION,
+    INVITER_ARG_POSITION,
     USER_DATA_ARG_POSITION,
 )
 from apps.common.types import Err, Result
@@ -226,7 +227,7 @@ def prevent_race_conditions(lock_key_generator: Callable):
 # HELPER FUNCTIONS
 # ===============================================================================
 
-def _check_rate_limit(key_prefix: str, limit: int, request_ip: str, user=None) -> None:
+def _check_rate_limit(key_prefix: str, limit: int, request_ip: str, user: Any = None) -> None:
     """Check rate limiting with user and IP tracking"""
     identifiers = [request_ip]
     if user:
@@ -264,7 +265,7 @@ def _check_rate_limit(key_prefix: str, limit: int, request_ip: str, user=None) -
             logger.warning(f"🚨 [Security] Rate limiting failed due to cache issue: {e}")
 
 
-def _validate_user_registration_input(args, kwargs) -> None:
+def _validate_user_registration_input(args: Tuple[Any, ...], kwargs: Dict[str, Any]) -> None:
     """Validate user registration input data"""
     # Extract user_data from arguments
     user_data = None
@@ -283,7 +284,7 @@ def _validate_user_registration_input(args, kwargs) -> None:
             kwargs['user_data'] = validated_user_data
 
 
-def _validate_customer_data_input(args, kwargs) -> None:
+def _validate_customer_data_input(args: Tuple[Any, ...], kwargs: Dict[str, Any]) -> None:
     """Validate customer data input"""
     customer_data = None
     if len(args) >= CUSTOMER_DATA_ARG_POSITION and isinstance(args[2], dict):
@@ -307,7 +308,7 @@ def _validate_customer_data_input(args, kwargs) -> None:
         )
 
 
-def _validate_invitation_input(args, kwargs) -> None:
+def _validate_invitation_input(args: Tuple[Any, ...], kwargs: Dict[str, Any]) -> None:
     """Validate invitation input data"""
     inviter = kwargs.get('inviter') or (args[1] if len(args) > INVITER_ARG_POSITION else None)
     invitee_email = kwargs.get('invitee_email') or (args[2] if len(args) > INVITEE_EMAIL_ARG_POSITION else None)
@@ -326,7 +327,7 @@ def _validate_invitation_input(args, kwargs) -> None:
         )
 
 
-def _validate_permissions(user, customer, required_role: str) -> None:
+def _validate_permissions(user: Any, customer: Any, required_role: str) -> None:
     """Validate user permissions for customer operations"""
     if user and customer:
         BusinessLogicValidator.validate_user_permissions(user, customer, required_role)

@@ -12,7 +12,7 @@ register = template.Library()
 
 
 @register.filter
-def safe_message(value):
+def safe_message(value: Any) -> str:
     """
     Safely render messages with basic HTML support
     
@@ -38,7 +38,7 @@ def safe_message(value):
 
 
 @register.filter
-def escape_message(value):
+def escape_message(value: Any) -> str:
     """
     Escape all HTML in messages for maximum security
     
@@ -51,7 +51,7 @@ def escape_message(value):
 
 
 @register.simple_tag
-def secure_alert(message, alert_type='info', dismissible=True):
+def secure_alert(message: Any, alert_type: str = 'info', dismissible: bool = True) -> str:
     """
     Render a secure alert component with escaped content
     

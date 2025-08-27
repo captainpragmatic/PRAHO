@@ -30,7 +30,7 @@ class Command(BaseCommand):
 
     help = '🔄 Process webhook queue and retry failed webhooks'
 
-    def add_arguments(self, parser) -> None:
+    def add_arguments(self, parser: Any) -> None:
         parser.add_argument(
             '--pending',
             action='store_true',
@@ -93,7 +93,7 @@ class Command(BaseCommand):
             self.style.SUCCESS('✅ Webhook processing completed!')
         )
 
-    def process_pending(self, source=None, limit=100) -> None:
+    def process_pending(self, source: str = None, limit: int = 100) -> None:
         """📋 Process pending webhooks"""
         self.stdout.write(f"📋 Processing pending webhooks (source: {source or 'all'}, limit: {limit})")
 

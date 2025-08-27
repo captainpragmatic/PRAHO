@@ -11,7 +11,7 @@ from apps.notifications.models import EmailTemplate
 class Command(BaseCommand):
     help = 'Set up essential email templates for Romanian hosting provider'
 
-    def add_arguments(self, parser) -> None:
+    def add_arguments(self, parser: Any) -> None:
         parser.add_argument(
             '--overwrite',
             action='store_true',

@@ -496,7 +496,7 @@ def icon(
 
 
 @register.simple_tag(takes_context=True)
-def active_link(context, url_name: str, css_class: str = 'active') -> str:
+def active_link(context: Any, url_name: str, css_class: str = 'active') -> str:
     """
     Add CSS class if current URL matches the given URL name
     

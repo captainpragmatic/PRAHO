@@ -163,7 +163,7 @@ class TypeIgnoreChecker:
         
         for violation in all_violations:
             # Always fail for strict modules
-            if violation['is_strict'] or self.strict_mode and not violation['is_legacy']:
+            if violation['is_strict'] or (self.strict_mode and not violation['is_legacy']):
                 should_fail = True
                 blocking_violations.append(violation)
         

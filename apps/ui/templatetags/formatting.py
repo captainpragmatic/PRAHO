@@ -14,8 +14,8 @@ from django.utils.safestring import mark_safe
 
 from apps.common.constants import (
     PHONE_LANDLINE_LENGTH,
-    PHONE_MIN_VALID_LENGTH,
     PHONE_MOBILE_LENGTH,
+    PHONE_MIN_VALID_LENGTH,
     ROMANIAN_IBAN_LENGTH,
     ROMANIAN_PLURAL_FEW_MAX,
     ROMANIAN_PLURAL_FEW_MIN,
@@ -105,7 +105,7 @@ def romanian_vat(value: int | float | Decimal, vat_rate: float = 0.19) -> str:
 
 
 @register.filter
-def romanian_date(value, format_type: str = 'short') -> str:
+def romanian_date(value: Any, format_type: str = 'short') -> str:
     """
     Format dates in Romanian business style
     
@@ -155,7 +155,7 @@ def romanian_date(value, format_type: str = 'short') -> str:
 
 
 @register.filter
-def romanian_relative_date(value) -> str:
+def romanian_relative_date(value: Any) -> str:
     """
     Format relative dates in Romanian
     

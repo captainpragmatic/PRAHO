@@ -282,7 +282,9 @@ class SessionSecurityMiddleware:
     def _process_session_security(self, request: HttpRequest) -> None:
         """Process session security checks and updates"""
         try:
-            from apps.users.services import SessionSecurityService  # noqa: PLC0415 # Cross-app import to avoid circular dependencies
+            from apps.users.services import (
+                SessionSecurityService,  # Cross-app import to avoid circular dependencies
+            )
 
             # Update session timeout based on current context
             SessionSecurityService.update_session_timeout(request)
@@ -343,7 +345,9 @@ class SessionSecurityMiddleware:
                 request.session.pop('shared_device_mode', None)
                 request.session.pop('shared_device_enabled_at', None)
 
-                from apps.users.services import SessionSecurityService  # noqa: PLC0415 # Cross-app import to avoid circular dependencies
+                from apps.users.services import (
+                    SessionSecurityService,  # Cross-app import to avoid circular dependencies
+                )
                 SessionSecurityService.log_session_activity(
                     request,
                     'shared_device_auto_expired',
