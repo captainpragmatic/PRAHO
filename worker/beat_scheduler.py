@@ -21,7 +21,7 @@ from rq import Queue
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.dev')
 django.setup()
 
-from django.conf import settings
+from django.conf import settings  # noqa: E402
 
 # Configure logging
 logging.basicConfig(

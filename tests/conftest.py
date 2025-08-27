@@ -32,12 +32,12 @@ def pytest_configure():
 # PYTEST FIXTURES - UPDATED FOR NORMALIZED CUSTOMER MODEL
 # ===============================================================================
 
-from decimal import Decimal
+from decimal import Decimal  # noqa: E402
 
-import pytest
-from django.contrib.auth import get_user_model
+import pytest  # noqa: E402
+from django.contrib.auth import get_user_model  # noqa: E402
 
-from apps.customers.models import (
+from apps.customers.models import (  # noqa: E402
     Customer,
     CustomerAddress,
     CustomerBillingProfile,

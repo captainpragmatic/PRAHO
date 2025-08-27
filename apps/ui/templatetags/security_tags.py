@@ -3,6 +3,8 @@ Security-focused template tags for PRAHO Platform
 Safe HTML rendering and XSS prevention utilities.
 """
 
+from typing import Any
+
 import bleach
 from django import template
 from django.utils.html import escape, format_html

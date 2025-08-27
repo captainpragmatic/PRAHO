@@ -7,8 +7,9 @@ import hashlib
 import logging
 import re
 import time
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Optional
+from typing import Any, Optional, TypeVar, cast
 
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -18,6 +19,15 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.constants import COMPANY_NAME_MIN_LENGTH
+from apps.common.types import (
+    CUIString,
+    EmailAddress,
+    Err,
+    VATString,
+    validate_romanian_cui,
+)
+from apps.customers.models import Customer, CustomerTaxProfile
+from apps.users.models import CustomerMembership, User
 
 logger = logging.getLogger(__name__)
 
@@ -69,19 +79,6 @@ RESTRICTED_USER_FIELDS = [
 # ===============================================================================
 # CORE VALIDATION DECORATORS
 # ===============================================================================
-
-from collections.abc import Callable
-from typing import TypeVar, cast
-
-from apps.common.types import (
-    CUIString,
-    EmailAddress,
-    Err,
-    VATString,
-    validate_romanian_cui,
-)
-from apps.customers.models import Customer, CustomerTaxProfile
-from apps.users.models import CustomerMembership, User
 
 F = TypeVar('F', bound=Callable[..., Any])
 
@@ -211,7 +208,6 @@ class SecureInputValidator:
         return name
 
     @staticmethod
-    @staticmethod
     def validate_vat_number_romanian(vat_number: str) -> VATString:
         """Romanian VAT number validation"""
         if not vat_number:
@@ -315,14 +311,14 @@ class SecureInputValidator:
         # Validate required fields
         validated_data = {}
 
-        # Email (required)
+        # Email (required)  # noqa: ERA001
         if 'email' not in user_data:
             raise ValidationError(_("Required field missing"))
         validated_data['email'] = SecureInputValidator.validate_email_secure(
             user_data['email'], 'registration'
         )
 
-        # Names (required)
+        # Names (required)  # noqa: ERA001
         if 'first_name' not in user_data:
             raise ValidationError(_("Required field missing"))
         validated_data['first_name'] = SecureInputValidator.validate_name_secure(
@@ -563,16 +559,5 @@ def log_security_event(event_type: str, details: dict[str, Any], request_ip: str
         logger.warning(f"🚨 [Security] {event_type}: {details} from IP: {request_ip}")
 
         # TODO: Integrate with audit service once transaction handling is fixed
-        # audit_service.log_event(
-        #     event_type=f"security_{event_type}",
-        #     description=f"Security event: {event_type}",
-        #     ip_address=request_ip,
-        #     metadata={
-        #         'event_category': 'security_validation',
-        #         'timestamp': timezone.now().isoformat(),
-        #         'details': details
-        #     },
-        #     actor_type='system'
-        # )
     except Exception as e:
         logger.error(f"Failed to log security event: {e}")

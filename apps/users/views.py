@@ -4,12 +4,9 @@ Romanian-localized authentication and profile forms.
 """
 
 import logging
-from typing import Any, cast
+from typing import Any, cast, Union
 
 import pyotp
-
-logger = logging.getLogger(__name__)
-
 from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
@@ -24,6 +21,8 @@ from django.contrib.auth.views import (
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.db import models
+from django.db.models import QuerySet
+from django.forms import Form
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse, reverse_lazy
@@ -40,10 +39,6 @@ from apps.common.utils import (
     json_success,
 )
 
-from .models import CustomerMembership, User, UserLoginLog, UserProfile
-
-# Type alias for cleaner type hints
-CustomUser = User
 from .forms import (
     CustomerOnboardingRegistrationForm,
     LoginForm,
@@ -52,7 +47,13 @@ from .forms import (
     UserProfileForm,
 )
 from .mfa import MFAService, TOTPService
+from .models import CustomerMembership, User, UserLoginLog, UserProfile
 from .services import SessionSecurityService
+
+logger = logging.getLogger(__name__)
+
+# Type alias for cleaner type hints
+CustomUser = User
 
 # ===============================================================================
 # AUTHENTICATION VIEWS
@@ -287,7 +288,7 @@ class SecurePasswordResetConfirmView(PasswordResetConfirmView):
 
         return super().form_valid(form)
 
-    def form_invalid(self, form):
+    def form_invalid(self, form: Form) -> HttpResponse:
         # Log failed password reset confirmation
         UserLoginLog.objects.create(
             user=None,
@@ -322,7 +323,7 @@ class SecurePasswordChangeView(PasswordChangeView):
     template_name = 'users/password_change.html'
     success_url = reverse_lazy('users:user_profile')
 
-    def dispatch(self, request, *args, **kwargs):
+    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         try:
             return super().dispatch(request, *args, **kwargs)
         except Ratelimited:
@@ -338,7 +339,7 @@ class SecurePasswordChangeView(PasswordChangeView):
             ))
             return render(request, self.template_name, {'form': self.get_form()})
 
-    def form_valid(self, form):
+    def form_valid(self, form: Form) -> HttpResponse:
         # Log successful password change for audit
         UserLoginLog.objects.create(
             user=self.request.user,
@@ -356,7 +357,7 @@ class SecurePasswordChangeView(PasswordChangeView):
         )
         return super().form_valid(form)
 
-    def form_invalid(self, form):
+    def form_invalid(self, form: Form) -> HttpResponse:
         # Log failed password change attempt
         UserLoginLog.objects.create(
             user=self.request.user,
@@ -682,13 +683,13 @@ class UserListView(LoginRequiredMixin, ListView):
     context_object_name = 'users'
     paginate_by = 50
 
-    def dispatch(self, request, *args, **kwargs):
+    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         if not request.user.is_staff:
             messages.error(request, _('You do not have permission to access this page.'))
             return redirect('dashboard')
         return super().dispatch(request, *args, **kwargs)
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[User]:
         queryset = User.objects.select_related('profile').order_by('-date_joined')
 
         # Filter by staff role
@@ -714,7 +715,7 @@ class UserDetailView(LoginRequiredMixin, DetailView):
     template_name = 'users/user_detail.html'
     context_object_name = 'user_detail'
 
-    def get_object(self, queryset=None):
+    def get_object(self, queryset: Union[QuerySet[User], None] = None) -> User:
         """🚀 Performance: Prefetch customer memberships to prevent N+1 queries"""
         if queryset is None:
             queryset = self.get_queryset()
@@ -723,13 +724,13 @@ class UserDetailView(LoginRequiredMixin, DetailView):
             'customer_memberships__customer'
         ).get(pk=self.kwargs['pk'])
 
-    def dispatch(self, request, *args, **kwargs):
+    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         if not request.user.is_staff:
             messages.error(request, _('You do not have permission to access this page.'))
             return redirect('dashboard')
         return super().dispatch(request, *args, **kwargs)
 
-    def get_context_data(self, **kwargs):
+    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
         user = self.object
 
