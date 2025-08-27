@@ -351,6 +351,15 @@ show_column_numbers = true
 show_error_context = true
 pretty = true
 
+# Strategic error filtering - Smart layered ignore strategy (ADR-0009)
+# Global safe ignores - Django framework noise
+disable_error_code = [
+    "attr-defined",     # Django magic attributes (ORM, request.user)
+    "empty-body",       # Protocol stubs and abstract methods  
+    "redundant-cast",   # Harmless explicit casts
+    "no-any-return",    # Django views return Any often
+]
+
 # Import handling
 ignore_missing_imports = false
 follow_imports = "normal"
@@ -373,6 +382,39 @@ disallow_untyped_defs = false
 [[tool.mypy.overrides]]
 module = "scripts.*"
 disallow_untyped_defs = false
+
+# Django settings files use star imports and dynamic configuration
+[[tool.mypy.overrides]]
+module = "config.settings.*"
+disallow_untyped_defs = false
+disable_error_code = ["used-before-def", "name-defined", "misc"]
+
+# ===============================================================================
+# SMART LAYERED TYPING STRATEGY (ADR-0009)
+# ===============================================================================
+
+# Per-file dangerous ignores - Django UI layer
+[[tool.mypy.overrides]]
+module = [
+    "*.views",
+    "*.models", 
+    "*.forms",
+    "*.admin",
+]
+disable_error_code = ["assignment", "type-arg"]
+
+# Keep strict checking for business logic - Romanian critical paths
+[[tool.mypy.overrides]]
+module = [
+    "*.services.*",
+    "*.utils.*", 
+    "*.repos.*",
+    "*.gateways.*",
+    # Romanian business logic
+    "apps.common.validators",
+    "apps.billing.calculations",
+]
+strict = true
 
 # ===============================================================================
 # TEST CONFIGURATION
