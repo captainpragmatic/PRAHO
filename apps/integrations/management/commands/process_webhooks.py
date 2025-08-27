@@ -94,7 +94,7 @@ class Command(BaseCommand):
             self.style.SUCCESS('✅ Webhook processing completed!')
         )
 
-    def process_pending(self, source: str = None, limit: int = 100) -> None:
+    def process_pending(self, source: str | None = None, limit: int = 100) -> None:
         """📋 Process pending webhooks"""
         self.stdout.write(f"📋 Processing pending webhooks (source: {source or 'all'}, limit: {limit})")
 

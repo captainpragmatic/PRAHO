@@ -8,6 +8,8 @@ from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
+from apps.common.types import Err, Ok, Result
+
 from .models import WebhookEvent
 from .webhooks.base import get_webhook_processor
 
@@ -33,54 +35,20 @@ class WebhookView(View):
     source_name = None  # Override in subclasses
 
     def post(self, request: Any) -> Any:
-        """📨 Process incoming webhook"""
+        """📨 Process incoming webhook using result pipeline"""
         if not self.source_name:
             return HttpResponseBadRequest("Webhook source not configured")
 
         try:
-            # Parse JSON payload
-            if request.content_type == 'application/json':
-                payload = json.loads(request.body)
+            result = (self._parse_request(request)
+                     .and_then(lambda payload: self._extract_metadata(request, payload))
+                     .and_then(lambda context: self._get_processor(context))
+                     .and_then(lambda context: self._process_webhook(context)))
+            
+            if result.is_ok():
+                return result.value
             else:
-                return HttpResponseBadRequest("Content-Type must be application/json")
-
-            # Extract metadata
-            signature = self.extract_signature(request)
-            ip_address = self.get_client_ip(request)
-            user_agent = request.META.get('HTTP_USER_AGENT', '')
-            headers = dict(request.headers)
-
-            # Get processor for this source
-            processor = get_webhook_processor(self.source_name)
-            if not processor:
-                return HttpResponseBadRequest(f"No processor found for source: {self.source_name}")
-
-            # Process webhook
-            success, message, webhook_event = processor.process_webhook(
-                payload=payload,
-                signature=signature,
-                headers=headers,
-                ip_address=ip_address,
-                user_agent=user_agent
-            )
-
-            if success:
-                logger.info(f"✅ {self.source_name} webhook processed: {message}")
-                return JsonResponse({
-                    'status': 'success',
-                    'message': message,
-                    'webhook_id': str(webhook_event.id) if webhook_event else None
-                })
-            else:
-                logger.error(f"❌ {self.source_name} webhook failed: {message}")
-                return JsonResponse({
-                    'status': 'error',
-                    'message': message,
-                    'webhook_id': str(webhook_event.id) if webhook_event else None
-                }, status=400)
-
-        except json.JSONDecodeError:
-            return HttpResponseBadRequest("Invalid JSON payload")
+                return self._create_error_response(result.error)
 
         except Exception as e:
             logger.exception(f"💥 Critical error processing {self.source_name} webhook")
@@ -88,6 +56,74 @@ class WebhookView(View):
                 'status': 'error',
                 'message': f"Internal error: {e!s}"
             }, status=500)
+
+    def _parse_request(self, request: Any) -> Result[dict[str, Any], str]:
+        """Parse and validate the incoming request payload."""
+        if request.content_type != 'application/json':
+            return Err("Content-Type must be application/json")
+
+        try:
+            payload = json.loads(request.body)
+            return Ok(payload)
+        except json.JSONDecodeError:
+            return Err("Invalid JSON payload")
+
+    def _extract_metadata(self, request: Any, payload: dict[str, Any]) -> Result[dict[str, Any], str]:
+        """Extract webhook metadata from the request."""
+        return Ok({
+            'payload': payload,
+            'signature': self.extract_signature(request),
+            'ip_address': self.get_client_ip(request),
+            'user_agent': request.META.get('HTTP_USER_AGENT', ''),
+            'headers': dict(request.headers)
+        })
+
+    def _get_processor(self, context: dict[str, Any]) -> Result[dict[str, Any], str]:
+        """Get the appropriate webhook processor for this source."""
+        processor = get_webhook_processor(self.source_name)
+        if not processor:
+            return Err(f"No processor found for source: {self.source_name}")
+        
+        context['processor'] = processor
+        return Ok(context)
+
+    def _process_webhook(self, context: dict[str, Any]) -> Result[JsonResponse, str]:
+        """Process the webhook and create the appropriate response."""
+        processor = context['processor']
+        success, message, webhook_event = processor.process_webhook(
+            payload=context['payload'],
+            signature=context['signature'],
+            headers=context['headers'],
+            ip_address=context['ip_address'],
+            user_agent=context['user_agent']
+        )
+
+        webhook_id = str(webhook_event.id) if webhook_event else None
+
+        if success:
+            logger.info(f"✅ {self.source_name} webhook processed: {message}")
+            return Ok(JsonResponse({
+                'status': 'success',
+                'message': message,
+                'webhook_id': webhook_id
+            }))
+        else:
+            logger.error(f"❌ {self.source_name} webhook failed: {message}")
+            return Ok(JsonResponse({
+                'status': 'error',
+                'message': message,
+                'webhook_id': webhook_id
+            }, status=400))
+
+    def _create_error_response(self, error_message: str) -> JsonResponse:
+        """Create a standardized error response."""
+        if error_message in {"Content-Type must be application/json", "Invalid JSON payload"} or error_message.startswith("No processor found"):
+            return HttpResponseBadRequest(error_message)
+        else:
+            return JsonResponse({
+                'status': 'error',
+                'message': error_message
+            }, status=400)
 
     def extract_signature(self, request: Any) -> str:
         """🔐 Extract webhook signature from headers - override in subclasses"""
@@ -173,47 +209,78 @@ def webhook_status(request: HttpRequest) -> JsonResponse:
 
 @require_http_methods(["POST"])
 def retry_webhook(request: HttpRequest, webhook_id: int) -> JsonResponse:
-    """🔄 Manually retry a failed webhook"""
+    """🔄 Manually retry a failed webhook using result pipeline"""
     if not request.user.is_staff:
         return JsonResponse({'error': 'Unauthorized'}, status=403)
 
     try:
-        webhook_event = WebhookEvent.objects.get(id=webhook_id)
-
-        # Only retry failed webhooks
-        if webhook_event.status != 'failed':
-            return JsonResponse({
-                'error': f'Cannot retry webhook with status: {webhook_event.status}'
-            }, status=400)
-
-        # Get processor
-        processor = get_webhook_processor(webhook_event.source)
-        if not processor:
-            return JsonResponse({
-                'error': f'No processor found for source: {webhook_event.source}'
-            }, status=400)
-
-        # Process the webhook
-        success, message = processor.handle_event(webhook_event)
-
-        if success:
-            webhook_event.mark_processed()
-            return JsonResponse({
-                'status': 'success',
-                'message': f'Webhook retried successfully: {message}'
-            })
+        result = (_get_webhook_event(webhook_id)
+                 .and_then(_validate_webhook_status)
+                 .and_then(_get_webhook_processor)
+                 .and_then(_process_webhook_retry))
+        
+        if result.is_ok():
+            return result.value
         else:
-            webhook_event.mark_failed(message)
-            return JsonResponse({
-                'status': 'error',
-                'message': f'Webhook retry failed: {message}'
-            }, status=400)
-
-    except WebhookEvent.DoesNotExist:
-        return JsonResponse({'error': 'Webhook not found'}, status=404)
+            return _create_retry_error_response(result.error)
 
     except Exception as e:
         logger.exception(f"Error retrying webhook {webhook_id}")
         return JsonResponse({
             'error': f'Internal error: {e!s}'
         }, status=500)
+
+
+def _get_webhook_event(webhook_id: int) -> Result[WebhookEvent, str]:
+    """Get the webhook event by ID."""
+    try:
+        webhook_event = WebhookEvent.objects.get(id=webhook_id)
+        return Ok(webhook_event)
+    except WebhookEvent.DoesNotExist:
+        return Err("Webhook not found")
+
+
+def _validate_webhook_status(webhook_event: WebhookEvent) -> Result[WebhookEvent, str]:
+    """Validate that the webhook can be retried."""
+    if webhook_event.status != 'failed':
+        return Err(f'Cannot retry webhook with status: {webhook_event.status}')
+    return Ok(webhook_event)
+
+
+def _get_webhook_processor(webhook_event: WebhookEvent) -> Result[tuple[WebhookEvent, Any], str]:
+    """Get the processor for the webhook event."""
+    processor = get_webhook_processor(webhook_event.source)
+    if not processor:
+        return Err(f'No processor found for source: {webhook_event.source}')
+    
+    return Ok((webhook_event, processor))
+
+
+def _process_webhook_retry(context: tuple[WebhookEvent, Any]) -> Result[JsonResponse, str]:
+    """Process the webhook retry and update status."""
+    webhook_event, processor = context
+    
+    success, message = processor.handle_event(webhook_event)
+
+    if success:
+        webhook_event.mark_processed()
+        return Ok(JsonResponse({
+            'status': 'success',
+            'message': f'Webhook retried successfully: {message}'
+        }))
+    else:
+        webhook_event.mark_failed(message)
+        return Ok(JsonResponse({
+            'status': 'error',
+            'message': f'Webhook retry failed: {message}'
+        }, status=400))
+
+
+def _create_retry_error_response(error_message: str) -> JsonResponse:
+    """Create appropriate error response for webhook retry failures."""
+    if error_message == "Webhook not found":
+        return JsonResponse({'error': error_message}, status=404)
+    elif error_message.startswith(("Cannot retry webhook", "No processor found")):
+        return JsonResponse({'error': error_message}, status=400)
+    else:
+        return JsonResponse({'error': error_message}, status=400)

@@ -95,7 +95,7 @@ class PragmaticHostDeployment:
 
     def deploy(self, branch: str | None = None, skip_backup: bool = False) -> bool:
         """
-        Deploy the application
+        Deploy the application using deployment pipeline
         
         Args:
             branch: Git branch to deploy (defaults to config)
@@ -111,57 +111,63 @@ class PragmaticHostDeployment:
         try:
             logger.info(f"Starting deployment: {release_name} (branch: {deploy_branch})")
 
-            # 1. Create backup (if enabled)
-            if self.config['backup_before_deploy'] and not skip_backup and not self._create_backup():
-                logger.error("Backup failed, aborting deployment")
-                return False
+            # Execute deployment pipeline
+            deployment_steps = self._get_deployment_steps(skip_backup, release_dir, deploy_branch)
+            
+            for step_name, step_func in deployment_steps:
+                if not step_func():
+                    logger.error(f"Deployment step failed: {step_name}")
+                    return False
 
-            # 2. Clone repository
-            if not self._clone_repository(release_dir, deploy_branch):
-                return False
-
-            # 3. Setup shared files and directories
-            if not self._setup_shared_resources(release_dir):
-                return False
-
-            # 4. Install dependencies
-            if not self._install_dependencies(release_dir):
-                return False
-
-            # 5. Run database migrations
-            if self.config['run_migrations'] and not self._run_migrations(release_dir):
-                return False
-
-            # 6. Collect static files
-            if self.config['collect_static'] and not self._collect_static_files(release_dir):
-                return False
-
-            # 7. Update symlink (atomic deployment)
-            if not self._update_current_symlink(release_dir):
-                return False
-
-            # 8. Restart services
-            if not self._restart_services():
-                return False
-
-            # 9. Health check
-            if not self._health_check():
-                logger.error("Health check failed, rolling back...")
-                self._rollback()
-                return False
-
-            # 10. Cleanup old releases
-            self._cleanup_old_releases()
-
+            # Success
             logger.info(f"Deployment completed successfully: {release_name}")
             self._send_deployment_notification(True, release_name, deploy_branch)
-
             return True
 
         except Exception as e:
             logger.error(f"Deployment failed: {e}")
             self._send_deployment_notification(False, release_name, deploy_branch, str(e))
             return False
+
+    def _get_deployment_steps(self, skip_backup: bool, release_dir: Path, deploy_branch: str) -> list[tuple[str, callable]]:
+        """Get the ordered list of deployment steps to execute."""
+        steps = []
+        
+        # 1. Create backup (conditional)
+        if self.config['backup_before_deploy'] and not skip_backup:
+            steps.append(("backup", self._create_backup))
+
+        # 2. Core deployment steps
+        steps.extend([
+            ("clone_repository", lambda: self._clone_repository(release_dir, deploy_branch)),
+            ("setup_shared_resources", lambda: self._setup_shared_resources(release_dir)),
+            ("install_dependencies", lambda: self._install_dependencies(release_dir)),
+        ])
+
+        # 3. Optional steps (based on configuration)
+        if self.config['run_migrations']:
+            steps.append(("run_migrations", lambda: self._run_migrations(release_dir)))
+
+        if self.config['collect_static']:
+            steps.append(("collect_static", lambda: self._collect_static_files(release_dir)))
+
+        # 4. Finalization steps
+        steps.extend([
+            ("update_symlink", lambda: self._update_current_symlink(release_dir)),
+            ("restart_services", self._restart_services),
+            ("health_check", self._run_health_check_with_rollback),
+            ("cleanup", self._cleanup_old_releases),
+        ])
+
+        return steps
+
+    def _run_health_check_with_rollback(self) -> bool:
+        """Run health check and rollback if it fails."""
+        if not self._health_check():
+            logger.error("Health check failed, rolling back...")
+            self._rollback()
+            return False
+        return True
 
     def _create_backup(self) -> bool:
         """Create backup before deployment"""

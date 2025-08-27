@@ -1,15 +1,62 @@
 import hashlib
 import hmac
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from django.db import transaction
 from django.utils import timezone
 
 from apps.common.constants import DAYS_PER_WEEK
+from apps.common.types import Err, Ok, Result
 from apps.integrations.models import WebhookEvent
 
 logger = logging.getLogger(__name__)
+
+
+# ===============================================================================
+# WEBHOOK PROCESSING RESULT TYPES
+# ===============================================================================
+
+@dataclass(frozen=True)
+class WebhookProcessingResult:
+    """Result of webhook processing with success flag, message, and optional event."""
+    success: bool
+    message: str
+    webhook_event: WebhookEvent | None = None
+
+    def to_tuple(self) -> tuple[bool, str, WebhookEvent | None]:
+        """Convert to legacy tuple format for backward compatibility."""
+        return (self.success, self.message, self.webhook_event)
+
+    @classmethod
+    def success_result(cls, message: str, event: WebhookEvent) -> 'WebhookProcessingResult':
+        """Create a successful result."""
+        return cls(success=True, message=message, webhook_event=event)
+
+    @classmethod
+    def error_result(cls, message: str, event: WebhookEvent | None = None) -> 'WebhookProcessingResult':
+        """Create an error result."""
+        return cls(success=False, message=message, webhook_event=event)
+
+
+@dataclass(frozen=True)
+class WebhookContext:
+    """Context for webhook event processing."""
+    payload: dict[str, Any]
+    signature: str
+    headers: dict[str, str]
+    ip_address: str | None
+    user_agent: str | None
+    event_info: dict[str, str]
+
+@dataclass(frozen=True)
+class WebhookRequestMetadata:
+    """Metadata extracted from webhook request."""
+    signature: str
+    headers: dict[str, str]
+    ip_address: str | None
+    user_agent: str | None
 
 
 # ===============================================================================
@@ -50,63 +97,107 @@ class BaseWebhookProcessor:
         headers = headers or {}
 
         try:
-            # Extract event details
-            event_id = self.extract_event_id(payload)
-            event_type = self.extract_event_type(payload)
-
-            if not event_id:
-                return False, "❌ Missing event ID in payload", None
-
-            if not event_type:
-                return False, "❌ Missing event type in payload", None
-
-            # Check for duplicates
-            if WebhookEvent.is_duplicate(self.source_name, event_id):
-                logger.info(f"🔄 Duplicate webhook {self.source_name}:{event_id} - skipping")
-                # Find existing webhook
-                existing = WebhookEvent.objects.get(source=self.source_name, event_id=event_id)
-                return True, f"⏭️ Duplicate webhook skipped: {event_id}", existing
-
-            # Verify signature if required
-            if not self.verify_signature(payload, signature, headers):
-                return False, "❌ Invalid webhook signature", None
-
-            # Create webhook event record
-            with transaction.atomic():
-                webhook_event = WebhookEvent.objects.create(
-                    source=self.source_name,
-                    event_id=event_id,
-                    event_type=event_type,
-                    payload=payload,
-                    signature=signature,
-                    ip_address=ip_address,
-                    user_agent=user_agent,
-                    headers=headers,
-                    status='pending'
-                )
-
-                # Process the webhook
-                try:
-                    success, message = self.handle_event(webhook_event)
-
-                    if success:
-                        webhook_event.mark_processed()
-                        logger.info(f"✅ Processed {self.source_name} webhook {event_id}: {message}")
-                        return True, message, webhook_event
-                    else:
-                        webhook_event.mark_failed(message)
-                        logger.error(f"❌ Failed {self.source_name} webhook {event_id}: {message}")
-                        return False, message, webhook_event
-
-                except Exception as e:
-                    error_msg = f"Processing error: {e!s}"
-                    webhook_event.mark_failed(error_msg)
-                    logger.exception(f"💥 Exception processing {self.source_name} webhook {event_id}")
-                    return False, error_msg, webhook_event
+            metadata = WebhookRequestMetadata(signature, headers, ip_address, user_agent)
+            result = (self._validate_payload(payload)
+                     .and_then(lambda event_info: self._check_duplicates(event_info))
+                     .and_then(lambda event_info: self._create_context(payload, metadata, event_info))
+                     .and_then(lambda context: self._verify_signature_with_context(context))
+                     .and_then(lambda context: self._create_and_process_event(context)))
+            
+            if result.is_ok():
+                return result.value.to_tuple()
+            else:
+                # Handle special duplicate case
+                if result.error.startswith("DUPLICATE:"):
+                    event_id = result.error[10:]  # Remove "DUPLICATE:" prefix
+                    existing = WebhookEvent.objects.get(source=self.source_name, event_id=event_id)
+                    return WebhookProcessingResult.success_result(f"⏭️ Duplicate webhook skipped: {event_id}", existing).to_tuple()
+                
+                return WebhookProcessingResult.error_result(result.error).to_tuple()
 
         except Exception as e:
             logger.exception(f"💥 Critical error processing {self.source_name} webhook")
-            return False, f"Critical error: {e!s}", None
+            return WebhookProcessingResult.error_result(f"Critical error: {e!s}").to_tuple()
+
+    def _validate_payload(self, payload: dict[str, Any]) -> Result[dict[str, str], str]:
+        """Step 1: Validate payload and extract event information."""
+        event_id = self.extract_event_id(payload)
+        event_type = self.extract_event_type(payload)
+
+        if not event_id:
+            return Err("❌ Missing event ID in payload")
+
+        if not event_type:
+            return Err("❌ Missing event type in payload")
+
+        return Ok({"event_id": event_id, "event_type": event_type})
+
+    def _check_duplicates(self, event_info: dict[str, str]) -> Result[dict[str, str], str]:
+        """Step 2: Check for duplicate webhook processing."""
+        event_id = event_info["event_id"]
+        
+        if WebhookEvent.is_duplicate(self.source_name, event_id):
+            logger.info(f"🔄 Duplicate webhook {self.source_name}:{event_id} - skipping")
+            # Return special error that will be handled as success
+            return Err(f"DUPLICATE:{event_id}")
+
+        return Ok(event_info)
+
+    def _create_context(self, payload: dict[str, Any], metadata: WebhookRequestMetadata, 
+                       event_info: dict[str, str]) -> Result[WebhookContext, str]:
+        """Step 3: Create webhook processing context."""
+        context = WebhookContext(
+            payload=payload,
+            signature=metadata.signature,
+            headers=metadata.headers,
+            ip_address=metadata.ip_address,
+            user_agent=metadata.user_agent,
+            event_info=event_info
+        )
+        return Ok(context)
+
+    def _verify_signature_with_context(self, context: WebhookContext) -> Result[WebhookContext, str]:
+        """Step 4: Verify webhook signature using context."""
+        if not self.verify_signature(context.payload, context.signature, context.headers):
+            return Err("❌ Invalid webhook signature")
+        
+        return Ok(context)
+
+    def _create_and_process_event(self, context: WebhookContext) -> Result[WebhookProcessingResult, str]:
+        """Step 5: Create webhook event record and process it."""
+        event_id = context.event_info["event_id"]
+        event_type = context.event_info["event_type"]
+
+        with transaction.atomic():
+            webhook_event = WebhookEvent.objects.create(
+                source=self.source_name,
+                event_id=event_id,
+                event_type=event_type,
+                payload=context.payload,
+                signature=context.signature,
+                ip_address=context.ip_address,
+                user_agent=context.user_agent,
+                headers=context.headers,
+                status='pending'
+            )
+
+            try:
+                success, message = self.handle_event(webhook_event)
+
+                if success:
+                    webhook_event.mark_processed()
+                    logger.info(f"✅ Processed {self.source_name} webhook {event_id}: {message}")
+                    return Ok(WebhookProcessingResult.success_result(message, webhook_event))
+                else:
+                    webhook_event.mark_failed(message)
+                    logger.error(f"❌ Failed {self.source_name} webhook {event_id}: {message}")
+                    return Ok(WebhookProcessingResult.error_result(message, webhook_event))
+
+            except Exception as e:
+                error_msg = f"Processing error: {e!s}"
+                webhook_event.mark_failed(error_msg)
+                logger.exception(f"💥 Exception processing {self.source_name} webhook {event_id}")
+                return Ok(WebhookProcessingResult.error_result(error_msg, webhook_event))
 
     def extract_event_id(self, payload: dict[str, Any]) -> str | None:
         """🔍 Extract unique event ID from payload - override in subclasses"""

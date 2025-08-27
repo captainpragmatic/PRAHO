@@ -67,6 +67,13 @@ class Ok(Generic[T]):
             return Ok(func(self.value))
         except Exception as e:
             return Err(str(e))
+    
+    def and_then(self, func: Callable[[T], Result[Any, Any]]) -> Result[Any, Any]:
+        """Chain operations that can fail"""
+        try:
+            return func(self.value)
+        except Exception as e:
+            return Err(str(e))
 
 
 @dataclass(frozen=True)
@@ -90,6 +97,10 @@ class Err(Generic[E]):
 
     def map(self, func: Callable[[Any], Any]) -> Result[Any, E]:
         """No-op for error results"""
+        return self
+    
+    def and_then(self, func: Callable[[Any], Result[Any, Any]]) -> Result[Any, E]:
+        """No-op for error results - return self"""
         return self
 
 

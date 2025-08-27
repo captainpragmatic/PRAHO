@@ -1,5 +1,6 @@
 import json
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from django.conf import settings
@@ -11,6 +12,13 @@ from apps.integrations.models import WebhookEvent
 from .base import BaseWebhookProcessor, verify_stripe_signature
 
 logger = logging.getLogger(__name__)
+
+
+# ===============================================================================
+# STRIPE EVENT HANDLER REGISTRY
+# ===============================================================================
+
+StripeEventHandler = Callable[[str, dict[str, Any]], tuple[bool, str]]
 
 
 # ===============================================================================
@@ -62,28 +70,28 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             webhook_secret=webhook_secret
         )
 
+    def __init__(self) -> None:
+        super().__init__()
+        # Event handler registry - maps event prefixes to handler methods
+        self._event_handlers: dict[str, StripeEventHandler] = {
+            'payment_intent.': self.handle_payment_intent_event,
+            'invoice.': self.handle_invoice_event,
+            'customer.': self.handle_customer_event,
+            'charge.': self.handle_charge_event,
+            'setup_intent.': self.handle_setup_intent_event,
+        }
+
     def handle_event(self, webhook_event: WebhookEvent) -> tuple[bool, str]:
-        """🎯 Handle Stripe webhook event"""
+        """🎯 Handle Stripe webhook event using handler registry"""
         event_type = webhook_event.event_type
         payload = webhook_event.payload
 
         try:
-            # Route to specific handler
-            if event_type.startswith('payment_intent.'):
-                return self.handle_payment_intent_event(event_type, payload)
-
-            elif event_type.startswith('invoice.'):
-                return self.handle_invoice_event(event_type, payload)
-
-            elif event_type.startswith('customer.'):
-                return self.handle_customer_event(event_type, payload)
-
-            elif event_type.startswith('charge.'):
-                return self.handle_charge_event(event_type, payload)
-
-            elif event_type.startswith('setup_intent.'):
-                return self.handle_setup_intent_event(event_type, payload)
-
+            # Find appropriate handler using registry
+            handler = self._find_event_handler(event_type)
+            
+            if handler:
+                return handler(event_type, payload)
             else:
                 # Unknown event type - skip
                 logger.info(f"⏭️ Skipping unknown Stripe event type: {event_type}")
@@ -92,6 +100,13 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         except Exception as e:
             logger.exception(f"💥 Error handling Stripe event {event_type}")
             return False, f"Handler error: {e!s}"
+
+    def _find_event_handler(self, event_type: str) -> StripeEventHandler | None:
+        """Find the appropriate handler for the given event type."""
+        for prefix, handler in self._event_handlers.items():
+            if event_type.startswith(prefix):
+                return handler
+        return None
 
     def handle_payment_intent_event(self, event_type: str, payload: dict[str, Any]) -> tuple[bool, str]:
         """💳 Handle PaymentIntent events"""

@@ -105,10 +105,51 @@ def romanian_vat(value: int | float | Decimal, vat_rate: float = 0.19) -> str:
         return "0,00 RON TVA"
 
 
+# Romanian date formatting constants
+ROMANIAN_MONTH_SHORT = {
+    1: 'ian.', 2: 'feb.', 3: 'mar.', 4: 'apr.',
+    5: 'mai', 6: 'iun.', 7: 'iul.', 8: 'aug.',
+    9: 'sep.', 10: 'oct.', 11: 'nov.', 12: 'dec.'
+}
+
+ROMANIAN_MONTH_LONG = {
+    1: 'ianuarie', 2: 'februarie', 3: 'martie', 4: 'aprilie',
+    5: 'mai', 6: 'iunie', 7: 'iulie', 8: 'august',
+    9: 'septembrie', 10: 'octombrie', 11: 'noiembrie', 12: 'decembrie'
+}
+
+# Romanian date formatter registry
+def _format_short_date(value: Any) -> str:
+    """Format as: 15 ian. 2024"""
+    return f"{value.day} {ROMANIAN_MONTH_SHORT[value.month]} {value.year}"
+
+def _format_long_date(value: Any) -> str:
+    """Format as: 15 ianuarie 2024"""
+    return f"{value.day} {ROMANIAN_MONTH_LONG[value.month]} {value.year}"
+
+def _format_datetime(value: Any) -> str:
+    """Format as: 15 ian. 2024, 14:30"""
+    return f"{value.day} {ROMANIAN_MONTH_SHORT[value.month]} {value.year}, {value.hour:02d}:{value.minute:02d}"
+
+def _format_time_only(value: Any) -> str:
+    """Format as: 14:30"""
+    return f"{value.hour:02d}:{value.minute:02d}"
+
+def _format_default(value: Any) -> str:
+    """Default fallback formatting"""
+    return str(value)
+
+ROMANIAN_DATE_FORMATTERS = {
+    'short': _format_short_date,
+    'long': _format_long_date,
+    'datetime': _format_datetime,
+    'time': _format_time_only,
+}
+
 @register.filter
 def romanian_date(value: Any, format_type: str = 'short') -> str:
     """
-    Format dates in Romanian business style
+    Format dates in Romanian business style using formatter registry
     
     Usage:
         {{ invoice.date|romanian_date }}           -> "15 ian. 2024"
@@ -122,35 +163,9 @@ def romanian_date(value: Any, format_type: str = 'short') -> str:
     if not value:
         return ""
 
-    # Romanian month abbreviations
-    month_short = {
-        1: 'ian.', 2: 'feb.', 3: 'mar.', 4: 'apr.',
-        5: 'mai', 6: 'iun.', 7: 'iul.', 8: 'aug.',
-        9: 'sep.', 10: 'oct.', 11: 'nov.', 12: 'dec.'
-    }
-
-    # Romanian month full names
-    month_long = {
-        1: 'ianuarie', 2: 'februarie', 3: 'martie', 4: 'aprilie',
-        5: 'mai', 6: 'iunie', 7: 'iulie', 8: 'august',
-        9: 'septembrie', 10: 'octombrie', 11: 'noiembrie', 12: 'decembrie'
-    }
-
     try:
-        if format_type == 'short':
-            # 15 ian. 2024
-            return f"{value.day} {month_short[value.month]} {value.year}"
-        elif format_type == 'long':
-            # 15 ianuarie 2024
-            return f"{value.day} {month_long[value.month]} {value.year}"
-        elif format_type == 'datetime':
-            # 15 ian. 2024, 14:30
-            return f"{value.day} {month_short[value.month]} {value.year}, {value.hour:02d}:{value.minute:02d}"
-        elif format_type == 'time':
-            # 14:30
-            return f"{value.hour:02d}:{value.minute:02d}"
-        else:
-            return str(value)
+        formatter = ROMANIAN_DATE_FORMATTERS.get(format_type, _format_default)
+        return formatter(value)
     except (AttributeError, KeyError):
         return str(value)
 
@@ -191,10 +206,23 @@ def _format_days_relative(seconds: float) -> str:
         return f"acum {days} zile"
 
 
+# Romanian relative date formatter registry
+def _format_old_date(value: Any) -> str:
+    """Format dates older than a week using short date format."""
+    return romanian_date(value, 'short')
+
+ROMANIAN_RELATIVE_FORMATTERS = [
+    (SECONDS_PER_MINUTE, _format_seconds_relative),
+    (SECONDS_PER_HOUR, _format_minutes_relative),
+    (SECONDS_PER_DAY, _format_hours_relative),
+    (SECONDS_PER_WEEK, _format_days_relative),
+    (float('inf'), _format_old_date),  # Fallback for very old dates
+]
+
 @register.filter
 def romanian_relative_date(value: Any) -> str:
     """
-    Format relative dates in Romanian
+    Format relative dates in Romanian using formatter registry
     
     Usage:
         {{ created_at|romanian_relative_date }}  -> "acum 2 ore"
@@ -208,17 +236,13 @@ def romanian_relative_date(value: Any) -> str:
         diff = now - value
         seconds = diff.total_seconds()
 
-        if seconds < SECONDS_PER_MINUTE:
-            return _format_seconds_relative(seconds)
-        elif seconds < SECONDS_PER_HOUR:
-            return _format_minutes_relative(seconds)
-        elif seconds < SECONDS_PER_DAY:
-            return _format_hours_relative(seconds)
-        elif seconds < SECONDS_PER_WEEK:  # 7 days
-            return _format_days_relative(seconds)
-        else:
-            # Use short date format for older dates
-            return romanian_date(value, 'short')
+        # Find the appropriate formatter based on time threshold
+        for threshold, formatter in ROMANIAN_RELATIVE_FORMATTERS:
+            if seconds < threshold:
+                return formatter(seconds) if formatter != _format_old_date else formatter(value)
+
+        # Fallback (should never reach here due to inf threshold)
+        return str(value)
 
     except (AttributeError, TypeError):
         return str(value)

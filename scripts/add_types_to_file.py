@@ -42,6 +42,20 @@ class TypeSuggestionEngine:
         self.django_imports = set()
         self.existing_imports = set()
         
+        # Django pattern detector registry
+        self._pattern_detectors = [
+            self._detect_template_tag,
+            self._detect_admin_display_method,
+            self._detect_admin_short_description,
+            self._detect_view_method,
+            self._detect_class_based_view_method,
+            self._detect_form_method,
+            self._detect_model_method,
+            self._detect_service_layer_method,
+            self._detect_romanian_business_method,
+            self._detect_repository_method,
+        ]
+        
     def parse_file(self) -> bool:
         """Parse the Python file into AST"""
         try:
@@ -71,14 +85,23 @@ class TypeSuggestionEngine:
                         self.django_imports.add(full_name)
     
     def detect_django_patterns(self, node: ast.FunctionDef) -> str | None:
-        """Detect Django-specific patterns and suggest appropriate return types"""
-        method_name = node.name
+        """Detect Django-specific patterns using pattern detector registry"""
+        # Apply each detector in order until one returns a result
+        for detector in self._pattern_detectors:
+            result = detector(node)
+            if result:
+                return result
         
-        # Check if this is a Django template tag/filter
+        return None
+
+    def _detect_template_tag(self, node: ast.FunctionDef) -> str | None:
+        """Detect Django template tag/filter patterns."""
         if self._is_template_tag_function(node):
             return self._get_template_tag_return_type(node)
-        
-        # Django admin patterns
+        return None
+
+    def _detect_admin_display_method(self, node: ast.FunctionDef) -> str | None:
+        """Detect known Django admin display methods."""
         admin_display_methods = {
             'get_full_name': 'str',
             'staff_role': 'str', 
@@ -93,57 +116,65 @@ class TypeSuggestionEngine:
             'payment_status_display': 'str',
             'service_status_display': 'str',
         }
-        
-        if method_name in admin_display_methods:
-            return admin_display_methods[method_name]
-        
-        # Django admin display methods (short_description pattern)
-        if hasattr(node, 'name') and any(
-            'short_description' in getattr(stmt, 'attr', '') 
-            for stmt in ast.walk(node) 
-            if isinstance(stmt, ast.Attribute)
-        ):
-            return 'str'  # Admin display methods return strings
-        
-        # Django view patterns
-        if method_name in ['get', 'post', 'put', 'patch', 'delete']:
+        return admin_display_methods.get(node.name)
+
+    def _detect_admin_short_description(self, node: ast.FunctionDef) -> str | None:
+        """Detect Django admin methods with short_description attribute."""
+        if any('short_description' in getattr(stmt, 'attr', '') 
+               for stmt in ast.walk(node) 
+               if isinstance(stmt, ast.Attribute)):
+            return 'str'
+        return None
+
+    def _detect_view_method(self, node: ast.FunctionDef) -> str | None:
+        """Detect Django view HTTP methods."""
+        if node.name in ['get', 'post', 'put', 'patch', 'delete']:
             return 'HttpResponse'
+        return None
+
+    def _detect_class_based_view_method(self, node: ast.FunctionDef) -> str | None:
+        """Detect Django Class-Based View method patterns."""
+        cbv_methods = {
+            'get_context_data': 'dict[str, Any]',
+            'get_initial': 'dict[str, Any]',
+            'get_success_url': 'str',
+            'get_absolute_url': 'str',
+            'dispatch': 'HttpResponse',
+            'get_queryset': 'QuerySet[Any]',
+        }
         
-        # Django Class-Based View method patterns
-        if method_name in ['get_context_data', 'get_initial']:
+        if node.name in cbv_methods:
+            return cbv_methods[node.name]
+        
+        if node.name.startswith('get_') and 'context' in node.name:
             return 'dict[str, Any]'
         
-        if method_name in ['get_success_url', 'get_absolute_url']:
-            return 'str'
-            
-        if method_name == 'dispatch':
-            return 'HttpResponse'
-        
-        if method_name.startswith('get_') and 'context' in method_name:
-            return 'dict[str, Any]'
-        
-        if method_name == 'get_queryset':
-            return 'QuerySet[Any]'  # Will be refined based on model
-        
-        # Django form patterns
-        if method_name == 'clean' or method_name.startswith('clean_'):
-            return 'Any'  # Form clean methods can return various types
-        
-        if method_name == 'save':
-            return 'Any'  # Form save methods typically return model instances
-        
-        # Django model patterns  
-        if method_name == '__str__':
-            return 'str'
-        
-        if method_name == 'get_absolute_url':
-            return 'str'
-        
-        # Service layer patterns (from our common/types.py)
-        if method_name.endswith('_service') or 'service' in self.file_path.parts:
+        return None
+
+    def _detect_form_method(self, node: ast.FunctionDef) -> str | None:
+        """Detect Django form method patterns."""
+        if node.name == 'clean' or node.name.startswith('clean_'):
+            return 'Any'
+        if node.name == 'save':
+            return 'Any'
+        return None
+
+    def _detect_model_method(self, node: ast.FunctionDef) -> str | None:
+        """Detect Django model method patterns."""
+        model_methods = {
+            '__str__': 'str',
+            'get_absolute_url': 'str',
+        }
+        return model_methods.get(node.name)
+
+    def _detect_service_layer_method(self, node: ast.FunctionDef) -> str | None:
+        """Detect service layer patterns."""
+        if node.name.endswith('_service') or 'service' in self.file_path.parts:
             return 'Result[Any, str]'
-        
-        # PRAHO Romanian business patterns
+        return None
+
+    def _detect_romanian_business_method(self, node: ast.FunctionDef) -> str | None:
+        """Detect PRAHO Romanian business patterns."""
         romanian_methods = {
             'validate_cui': 'Result[CUIString, str]',
             'validate_vat': 'Result[VATString, str]',
@@ -158,22 +189,20 @@ class TypeSuggestionEngine:
             'send_notification': 'Result[bool, str]',
             'process_webhook': 'Result[dict[str, Any], str]',
         }
-        
-        if method_name in romanian_methods:
-            return romanian_methods[method_name]
-        
-        # Repository patterns
-        if method_name.startswith('create_'):
-            return 'Result[Any, str]'  # Could be more specific based on model
-        if method_name.startswith('update_'):
+        return romanian_methods.get(node.name)
+
+    def _detect_repository_method(self, node: ast.FunctionDef) -> str | None:
+        """Detect repository pattern methods."""
+        if node.name.startswith('create_'):
             return 'Result[Any, str]'
-        if method_name.startswith('delete_'):
+        elif node.name.startswith('update_'):
+            return 'Result[Any, str]'
+        elif node.name.startswith('delete_'):
             return 'Result[bool, str]'
-        if method_name.startswith('find_'):
+        elif node.name.startswith('find_'):
             return 'Result[Any | None, str]'
-        if method_name.startswith('list_'):
+        elif node.name.startswith('list_'):
             return 'Result[list[Any], str]'
-        
         return None
     
     def _is_template_tag_function(self, node: ast.FunctionDef) -> bool:
@@ -291,48 +320,82 @@ class TypeSuggestionEngine:
         return suggestions
     
     def suggest_return_type(self, node: ast.FunctionDef) -> str | None:
-        """Suggest return type based on function analysis"""
+        """Suggest return type based on function analysis using analyzers"""
         # Skip if already has return annotation
         if node.returns:
             return None
         
-        # First check Django patterns
-        django_suggestion = self.detect_django_patterns(node)
-        if django_suggestion:
-            return django_suggestion
+        # Try analyzers in order until one returns a result
+        analyzers = [
+            self._analyze_django_patterns,
+            self._analyze_return_statements,
+        ]
         
-        # Analyze return statements
+        for analyzer in analyzers:
+            result = analyzer(node)
+            if result:
+                return result
+        
+        return 'Any'  # Fallback for functions with no clear return pattern
+
+    def _analyze_django_patterns(self, node: ast.FunctionDef) -> str | None:
+        """Analyze Django-specific patterns first."""
+        return self.detect_django_patterns(node)
+
+    def _analyze_return_statements(self, node: ast.FunctionDef) -> str | None:
+        """Analyze return statements to infer type."""
         return_types = set()
         
         for stmt in ast.walk(node):
             if isinstance(stmt, ast.Return):
-                if stmt.value is None:
-                    return_types.add('None')
-                elif isinstance(stmt.value, ast.Constant):
-                    if isinstance(stmt.value.value, str):
-                        return_types.add('str')
-                    elif isinstance(stmt.value.value, bool):
-                        return_types.add('bool')
-                    elif isinstance(stmt.value.value, int):
-                        return_types.add('int')
-                    elif isinstance(stmt.value.value, float):
-                        return_types.add('float')
-                elif isinstance(stmt.value, ast.Dict):
-                    return_types.add('dict[str, Any]')
-                elif isinstance(stmt.value, ast.List):
-                    return_types.add('list[Any]')
-                elif isinstance(stmt.value, ast.Call):
-                    # Try to infer from function call
-                    if isinstance(stmt.value.func, ast.Name):
-                        func_name = stmt.value.func.id
-                        if func_name in ('render', 'redirect'):
-                            return_types.add('HttpResponse')
-                        elif func_name == 'JsonResponse':
-                            return_types.add('JsonResponse')
+                return_type = self._infer_return_type_from_statement(stmt)
+                if return_type:
+                    return_types.add(return_type)
         
-        # Combine return types
+        return self._combine_return_types(return_types)
+
+    def _infer_return_type_from_statement(self, stmt: ast.Return) -> str | None:
+        """Infer return type from a single return statement."""
+        if stmt.value is None:
+            return 'None'
+        
+        # Type inference based on AST node type
+        type_inferrers = {
+            ast.Constant: self._infer_constant_type,
+            ast.Dict: lambda _: 'dict[str, Any]',
+            ast.List: lambda _: 'list[Any]',
+            ast.Call: self._infer_call_type,
+        }
+        
+        inferrer = type_inferrers.get(type(stmt.value))
+        return inferrer(stmt.value) if inferrer else None
+
+    def _infer_constant_type(self, value: ast.Constant) -> str:
+        """Infer type from constant values."""
+        const_types = {
+            str: 'str',
+            bool: 'bool',
+            int: 'int',
+            float: 'float',
+        }
+        return const_types.get(type(value.value), 'Any')
+
+    def _infer_call_type(self, value: ast.Call) -> str | None:
+        """Infer type from function calls."""
+        if isinstance(value.func, ast.Name):
+            func_name = value.func.id
+            call_type_mapping = {
+                'render': 'HttpResponse',
+                'redirect': 'HttpResponse',
+                'JsonResponse': 'JsonResponse',
+            }
+            return call_type_mapping.get(func_name)
+        return None
+
+    def _combine_return_types(self, return_types: set[str]) -> str | None:
+        """Combine multiple return types into a union or single type."""
         if not return_types:
-            return 'Any'  # No return statements found
+            return None
         
         if len(return_types) == 1:
             return return_types.pop()
@@ -344,6 +407,7 @@ class TypeSuggestionEngine:
             elif len(other_types) > 1:
                 return f"({' | '.join(sorted(other_types))}) | None"
         
+        # Multiple return types - create union
         return ' | '.join(sorted(return_types))
     
     def analyze_functions(self) -> None:

@@ -990,87 +990,125 @@ def verify_admin_access(page: Page, should_have_access: bool) -> bool:
     print(f"🔐 Verifying admin access (should_have_access={should_have_access})")
     
     if should_have_access:
-        # For staff/admin users, check for staff navigation elements
-        staff_links = page.locator('a:has-text("Customers"), a:has-text("Invoices"), a:has-text("Tickets"), a:has-text("Services")')
-        staff_count = staff_links.count()
-        
-        if staff_count == 0:
-            print("❌ Admin user should see staff navigation")
-            return False
-            
-        print(f"✅ Found {staff_count} staff navigation items")
-        
-        # Test Django admin access by navigating directly
-        try:
-            current_url = page.url
-            page.goto(f"{BASE_URL}/admin/")
-            page.wait_for_load_state("networkidle", timeout=5000)
-            
-            # Should successfully access admin panel
-            if "/admin/" not in page.url:
-                print("❌ Admin user should access admin panel")
-                return False
-            
-            # Check for typical Django admin elements
-            admin_elements = page.locator('body:has-text("Django"), #header, .breadcrumbs, #changelist')
-            if admin_elements.count() == 0:
-                print("❌ Admin panel should load properly")
-                return False
-                
-            print("✅ Django admin access verified")
-            
-            # Navigate back to avoid affecting other tests
-            page.goto(current_url)
-            page.wait_for_load_state("networkidle", timeout=3000)
-            
-            return True
-            
-        except Exception as e:
-            print(f"❌ Admin access failed: {str(e)[:50]}")
-            return False
+        return _verify_admin_user_access(page)
     else:
-        # User should NOT have admin access
-        # First check they don't see staff-only navigation (not "My" variations)
-        staff_only_links = page.locator('a:has-text("Customers")')  # Only staff see "Customers", customers see "My Invoices"
-        staff_count = staff_only_links.count()
+        return _verify_non_admin_access_restrictions(page)
+
+
+def _verify_admin_user_access(page: Page) -> bool:
+    """Verify that admin users can access admin features."""
+    # Check for staff navigation elements
+    if not _check_staff_navigation(page):
+        return False
+    
+    # Test Django admin access
+    return _test_django_admin_access(page)
+
+
+def _verify_non_admin_access_restrictions(page: Page) -> bool:
+    """Verify that non-admin users cannot access admin features."""
+    # Check they don't see staff navigation
+    if not _check_no_staff_navigation(page):
+        return False
+    
+    # Test that admin access is blocked
+    return _test_admin_access_blocked(page)
+
+
+def _check_staff_navigation(page: Page) -> bool:
+    """Check that staff navigation elements are visible."""
+    staff_links = page.locator('a:has-text("Customers"), a:has-text("Invoices"), a:has-text("Tickets"), a:has-text("Services")')
+    staff_count = staff_links.count()
+    
+    if staff_count == 0:
+        print("❌ Admin user should see staff navigation")
+        return False
         
-        if staff_count > 0:
-            print(f"❌ Non-admin user should not see staff navigation ({staff_count} found)")
-            # Debug: show what they actually see
-            all_links = page.locator('nav a')
-            link_count = all_links.count()
-            print(f"   Debug: Found {link_count} navigation links total")
-            for i in range(min(link_count, 10)):  # Show first 10 links
-                link_text = all_links.nth(i).text_content() or ""
-                link_href = all_links.nth(i).get_attribute('href') or ""
-                print(f"   Link {i+1}: '{link_text}' -> {link_href}")
+    print(f"✅ Found {staff_count} staff navigation items")
+    return True
+
+
+def _test_django_admin_access(page: Page) -> bool:
+    """Test that Django admin can be accessed."""
+    try:
+        current_url = page.url
+        page.goto(f"{BASE_URL}/admin/")
+        page.wait_for_load_state("networkidle", timeout=5000)
+        
+        # Should successfully access admin panel
+        if "/admin/" not in page.url:
+            print("❌ Admin user should access admin panel")
             return False
         
-        # Try to navigate to admin directly
-        try:
-            current_url = page.url
-            page.goto(f"{BASE_URL}/admin/")
-            page.wait_for_load_state("networkidle", timeout=5000)
+        # Check for typical Django admin elements
+        admin_elements = page.locator('body:has-text("Django"), #header, .breadcrumbs, #changelist')
+        if admin_elements.count() == 0:
+            print("❌ Admin panel should load properly")
+            return False
             
-            # Should either be blocked or redirected to login
-            if "/admin/" in page.url and "login" not in page.url.lower():
-                # Check if it's actually showing admin content vs permission denied
-                admin_content = page.locator('body:has-text("Django"), #header, .breadcrumbs')
-                if admin_content.count() > 0:
-                    print("❌ Non-admin user should not access admin panel")
-                    return False
-                
-            print("✅ Admin access properly restricted")
+        print("✅ Django admin access verified")
+        
+        # Navigate back to avoid affecting other tests
+        page.goto(current_url)
+        page.wait_for_load_state("networkidle", timeout=3000)
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Admin access failed: {str(e)[:50]}")
+        return False
+
+
+def _check_no_staff_navigation(page: Page) -> bool:
+    """Check that staff-only navigation is not visible."""
+    staff_only_links = page.locator('a:has-text("Customers")')  # Only staff see "Customers", customers see "My Invoices"
+    staff_count = staff_only_links.count()
+    
+    if staff_count > 0:
+        print(f"❌ Non-admin user should not see staff navigation ({staff_count} found)")
+        _debug_navigation_links(page)
+        return False
+    
+    return True
+
+
+def _test_admin_access_blocked(page: Page) -> bool:
+    """Test that admin access is properly blocked."""
+    try:
+        current_url = page.url
+        page.goto(f"{BASE_URL}/admin/")
+        page.wait_for_load_state("networkidle", timeout=5000)
+        
+        # Should either be blocked or redirected to login
+        if "/admin/" in page.url and "login" not in page.url.lower():
+            # Check if it's actually showing admin content vs permission denied
+            admin_content = page.locator('body:has-text("Django"), #header, .breadcrumbs')
+            if admin_content.count() > 0:
+                print("❌ Non-admin user should not access admin panel")
+                return False
             
-            # Navigate back to avoid affecting other tests
-            page.goto(current_url)
-            page.wait_for_load_state("networkidle", timeout=3000)
-            
-            return True
-            
-        except Exception as e:
-            print(f"✅ Admin access blocked (expected): {str(e)[:50]}")
-            return True
+        print("✅ Admin access properly restricted")
+        
+        # Navigate back to avoid affecting other tests
+        page.goto(current_url)
+        page.wait_for_load_state("networkidle", timeout=3000)
+        
+        return True
+        
+    except Exception as e:
+        print(f"✅ Admin access blocked (expected): {str(e)[:50]}")
+        return True
+
+
+def _debug_navigation_links(page: Page) -> None:
+    """Debug helper to show what navigation links are visible."""
+    all_links = page.locator('nav a')
+    link_count = all_links.count()
+    print(f"   Debug: Found {link_count} navigation links total")
+    for i in range(min(link_count, 10)):  # Show first 10 links
+        link_text = all_links.nth(i).text_content() or ""
+        link_href = all_links.nth(i).get_attribute('href') or ""
+        print(f"   Link {i+1}: '{link_text}' -> {link_href}")
 
 
 def verify_navigation_completeness(page: Page, expected_sections: list[str]) -> bool:
