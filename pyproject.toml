@@ -312,32 +312,67 @@ suppress-dummy-args = true
 # - Comprehensive test coverage
 
 # ===============================================================================
-# PYLANCE/PYRIGHT CONFIGURATION - Strategic Django Compatibility
+# MYPY CONFIGURATION
 # ===============================================================================
-[tool.pyright]
-# Disable assignment type checking to reduce noise from Django lazy translations
-# Django's _StrPromise (gettext_lazy) triggers constant assignment type warnings
-# This aligns with ADR-0008 strategy: focus on Romanian business features over strict typing
-reportAssignmentType = false
+[tool.mypy]
+# Strict mode for high code quality
+strict = true
+python_version = "3.11"
 
-# Keep critical type checking enabled (aligned with VS Code settings)
-reportMissingImports = "error"
-reportUndefinedVariable = "error"
-reportImportCycles = "warning"
-reportMissingTypeStubs = "warning"
+# Django support
+plugins = ["mypy_django_plugin.main"]
 
-# Strategic ignores for Django patterns (matching VS Code diagnostic overrides)
-reportGeneralTypeIssues = false
-reportOptionalMemberAccess = false
-reportOptionalSubscript = false
-reportOptionalOperand = false
-reportOptionalCall = false
-reportOptionalIterable = false
-reportOptionalContextManager = false
-reportUnknownArgumentType = false
-reportUnknownMemberType = false
-reportUnknownParameterType = false
-reportUnknownVariableType = false
+# Module discovery
+# mypy_path = ["apps", "config"]  # Commented out to avoid module conflicts
+namespace_packages = true
+explicit_package_bases = true
+exclude = [
+    "migrations/",
+    "static/",
+    "media/",
+    "htmlcov/",
+    "node_modules/",
+    ".venv/",
+]
+
+# Strictness settings
+disallow_untyped_defs = true
+disallow_any_generics = true
+disallow_subclassing_any = true
+disallow_untyped_calls = true
+disallow_untyped_decorators = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_any_unimported = true
+
+# Error reporting
+show_error_codes = true
+show_column_numbers = true
+show_error_context = true
+pretty = true
+
+# Import handling
+ignore_missing_imports = false
+follow_imports = "normal"
+no_implicit_reexport = true
+
+# Django configuration
+[tool.django-stubs]
+django_settings_module = "config.settings.dev"
+strict_settings = false
+
+# Per-module configuration for gradual typing
+[[tool.mypy.overrides]]
+module = "*.migrations.*"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = "scripts.*"
+disallow_untyped_defs = false
 
 # ===============================================================================
 # TEST CONFIGURATION

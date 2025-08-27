@@ -162,16 +162,20 @@ clean:
 
 .PHONY: lint lint-fix lint-check lint-security lint-credentials lint-performance lint-watch
 
-## lint: Run comprehensive strategic linting (Ruff only) 🔍
+## lint: Run comprehensive code quality checks with MyPy 🔍
 lint:
-	@echo "🎯 PRAHO Platform - Strategic Code Quality Check"
+	@echo "🎯 PRAHO Platform - Comprehensive Code Quality Check"
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "🔍 1/2: Performance & Security Analysis..."
+	@echo "🔍 1/3: Performance & Security Analysis (Ruff)..."
 	@.venv/bin/ruff check . --statistics
 	@echo ""
-	@echo "📊 2/2: Django Check..."
+	@echo "🏷️  2/3: Type Safety Check (MyPy)..."
+	@.venv/bin/mypy apps/ --config-file=pyproject.toml
+	@.venv/bin/mypy config/ --config-file=pyproject.toml
+	@echo ""
+	@echo "📊 3/3: Django Check..."
 	@.venv/bin/python manage.py check --deploy
-	@echo "✅ Strategic linting complete! Focus on performance & security issues."
+	@echo "✅ Comprehensive linting complete! All quality checks passed."
 
 ## lint-fix: Auto-fix strategic issues (safe fixes only) 🔧
 lint-fix:
@@ -276,28 +280,22 @@ check-ide-settings:
 # ===============================================================================
 
 type-check:
-	@echo "🏷️ PRAHO Platform - Gradual Typing Check"
+	@echo "🏷️ PRAHO Platform - MyPy Type Check"
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "📋 Running gradual typing configuration test..."
-	@.venv/bin/python scripts/test_gradual_typing.py
+	@echo "📋 Running comprehensive MyPy type checking..."
+	@echo "🔍 Checking apps/ directory..."
+	@.venv/bin/mypy apps/ --config-file=pyproject.toml
+	@echo "🔍 Checking config/ directory..."
+	@.venv/bin/mypy config/ --config-file=pyproject.toml
 
 type-coverage:
-	@echo "📊 Type coverage analysis..."
-	@if [ -f scripts/type_coverage_report.py ]; then \
-		.venv/bin/python scripts/type_coverage_report.py; \
-	else \
-		echo "❌ Type coverage script not found"; \
-		echo "💡 Run mypy directly: mypy --config-file=pyproject.toml apps/"; \
-	fi
+	@echo "📊 MyPy type coverage analysis..."
+	@.venv/bin/mypy --config-file=pyproject.toml --html-report htmlcov/mypy apps/
+	@echo "📈 Type coverage report generated in htmlcov/mypy/"
 
 type-check-modified:
 	@echo "🔄 Type checking modified files only..."
-	@if [ -f scripts/check_types_modified.py ]; then \
-		.venv/bin/python scripts/check_types_modified.py; \
-	else \
-		echo "❌ Modified files type check script not found"; \
-		echo "💡 Run mypy on specific files: mypy --config-file=pyproject.toml <file>"; \
-	fi
+	@git diff --name-only --diff-filter=AM | grep '\.py$$' | head -10 | xargs -r .venv/bin/mypy --config-file=pyproject.toml
 
 # Enhanced Type Addition Target - Phase 2.4
 type-fix-file:
