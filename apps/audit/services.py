@@ -1,8 +1,4 @@
 from __future__ import annotations
-"""
-Audit services for PRAHO Platform
-Centralized audit logging for Romanian compliance and security.
-"""
 
 import hashlib
 import json
@@ -22,6 +18,11 @@ from apps.common.types import EmailAddress, Err, Ok, Result
 from apps.tickets.models import Ticket  # Import for GDPR data export
 
 from .models import AuditEvent, ComplianceLog, DataExport
+
+"""
+Audit services for PRAHO Platform
+Centralized audit logging for Romanian compliance and security.
+"""
 
 if TYPE_CHECKING:
     from apps.users.models import User as UserType

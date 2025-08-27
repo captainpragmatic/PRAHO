@@ -1,10 +1,4 @@
 from __future__ import annotations
-"""
-SECURE User Registration Services - PRAHO Platform
-Enhanced with comprehensive security measures addressing critical vulnerabilities.
-
-This replaces the existing services.py with security-hardened implementations.
-"""
 
 import hashlib
 import logging
@@ -65,6 +59,13 @@ from apps.customers.models import (
 )
 
 from .models import CustomerMembership
+
+"""
+SECURE User Registration Services - PRAHO Platform
+Enhanced with comprehensive security measures addressing critical vulnerabilities.
+
+This replaces the existing services.py with security-hardened implementations.
+"""
 
 if TYPE_CHECKING:
     from .models import User
