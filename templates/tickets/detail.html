@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load i18n %}
+{% load ui_components %}
 
 {% block title %}{% trans 'Ticket Details' %} - PRAHO Platform{% endblock %}
 
@@ -19,15 +20,37 @@
             </div>
             <div>
                 <p class="text-slate-400 text-sm">{% trans 'Status' %}:</p>
-                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium" style="background-color: {{ ticket.get_status_color }}; color: white;">
-                    {{ ticket.get_status_display }}
-                </span>
+                {% if ticket.status == 'new' %}
+                  {% badge "New" variant="success" icon="🆕" %}
+                {% elif ticket.status == 'open' %}
+                  {% badge "Open" variant="info" icon="📂" %}
+                {% elif ticket.status == 'pending' %}
+                  {% badge "Pending" variant="warning" icon="⏳" %}
+                {% elif ticket.status == 'resolved' %}
+                  {% badge "Resolved" variant="primary" icon="✅" %}
+                {% elif ticket.status == 'closed' %}
+                  {% badge "Closed" variant="secondary" icon="📁" %}
+                {% elif ticket.status == 'cancelled' %}
+                  {% badge "Cancelled" variant="danger" icon="❌" %}
+                {% else %}
+                  {% badge ticket.get_status_display variant="default" %}
+                {% endif %}
             </div>
             <div>
                 <p class="text-slate-400 text-sm">{% trans 'Priority' %}:</p>
-                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium" style="background-color: {{ ticket.get_priority_color }}; color: white;">
-                    {{ ticket.get_priority_display }}
-                </span>
+                {% if ticket.priority == 'critical' %}
+                  {% badge "Critical" variant="danger" icon="🚨" %}
+                {% elif ticket.priority == 'urgent' %}
+                  {% badge "Urgent" variant="danger" icon="🔴" %}
+                {% elif ticket.priority == 'high' %}
+                  {% badge "High" variant="warning" icon="🟡" %}
+                {% elif ticket.priority == 'normal' %}
+                  {% badge "Normal" variant="info" icon="🔵" %}
+                {% elif ticket.priority == 'low' %}
+                  {% badge "Low" variant="success" icon="🟢" %}
+                {% else %}
+                  {% badge ticket.get_priority_display variant="default" %}
+                {% endif %}
             </div>
             <div>
                 <p class="text-slate-400 text-sm">{% trans 'Created At' %}:</p>

@@ -36,13 +36,9 @@
               </div>
               <div class="flex items-center">
                 {% if consent_status.data_processing %}
-                  <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-green-600 text-white rounded-full">
-                    ✅ {% trans 'Active' %}
-                  </span>
+                  {% badge "Given" variant="success" icon="✅" %}
                 {% else %}
-                  <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-red-600 text-white rounded-full">
-                    ❌ {% trans 'Not Given' %}
-                  </span>
+                  {% badge "Not Given" variant="danger" icon="❌" %}
                 {% endif %}
               </div>
             </div>
@@ -55,13 +51,9 @@
               </div>
               <div class="flex items-center">
                 {% if consent_status.marketing %}
-                  <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-green-600 text-white rounded-full">
-                    ✅ {% trans 'Enabled' %}
-                  </span>
+                  {% badge "Enabled" variant="success" icon="✅" %}
                 {% else %}
-                  <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-slate-500 text-white rounded-full">
-                    📛 {% trans 'Disabled' %}
-                  </span>
+                  {% badge "Disabled" variant="secondary" icon="📛" %}
                 {% endif %}
               </div>
             </div>
@@ -171,22 +163,14 @@
             <div class="flex items-center space-x-2">
               <!-- Status Badge -->
               {% if export.status == 'completed' %}
-                <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-green-600 text-white rounded-full">
-                  ✅ {% trans 'Ready' %}
-                </span>
+                {% badge "Ready" variant="success" icon="✅" %}
                 {% button "📥 Download" variant="success" size="xs" href="/audit/gdpr/export/download/{{ export.id }}/" %}
               {% elif export.status == 'processing' %}
-                <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-yellow-600 text-white rounded-full">
-                  ⏳ {% trans 'Processing' %}
-                </span>
+                {% badge "Processing" variant="warning" icon="⏳" %}
               {% elif export.status == 'failed' %}
-                <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-red-600 text-white rounded-full">
-                  ❌ {% trans 'Failed' %}
-                </span>
+                {% badge "Failed" variant="danger" icon="❌" %}
               {% else %}
-                <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-slate-600 text-white rounded-full">
-                  ⏳ {% trans 'Pending' %}
-                </span>
+                {% badge "Pending" variant="warning" icon="⏳" %}
               {% endif %}
             </div>
           </div>

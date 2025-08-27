@@ -92,10 +92,7 @@
                     <div class="space-y-3">
                         <div class="flex">
                             <span class="text-sm font-medium text-slate-400 w-32">{% trans 'Customer Type' %}:</span>
-                            <span
-                                class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-700 text-slate-300">
-                                {{ customer.get_customer_type_display }}
-                            </span>
+                            {% badge customer.get_customer_type_display variant="secondary" %}
                         </div>
                         {% if customer.industry %}
                         <div class="flex">
@@ -105,13 +102,15 @@
                         {% endif %}
                         <div class="flex">
                             <span class="text-sm font-medium text-slate-400 w-32">{% trans 'Status' %}:</span>
-                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                                {% if customer.status == 'active' %}bg-green-900 text-green-200
-                                {% elif customer.status == 'inactive' %}bg-red-900 text-red-200  
-                                {% elif customer.status == 'suspended' %}bg-yellow-900 text-yellow-200
-                                {% else %}bg-blue-900 text-blue-200{% endif %}">
-                                {{ customer.get_status_display }}
-                            </span>
+                            {% if customer.status == 'active' %}
+                              {% badge customer.get_status_display variant="success" icon="✅" %}
+                            {% elif customer.status == 'inactive' %}
+                              {% badge customer.get_status_display variant="danger" icon="❌" %}
+                            {% elif customer.status == 'suspended' %}
+                              {% badge customer.get_status_display variant="warning" icon="⏸️" %}
+                            {% else %}
+                              {% badge customer.get_status_display variant="info" %}
+                            {% endif %}
                         </div>
                         <div class="flex">
                             <span class="text-sm font-medium text-slate-400 w-32">{% trans 'Created' %}:</span>
@@ -236,10 +235,7 @@
                         <h3 class="font-medium text-white">{{ address.get_address_type_display }}</h3>
                         <div class="flex space-x-1">
                             {% if address.is_current %}
-                            <span
-                                class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-900 text-green-200">
-                                {% trans 'Current' %}
-                            </span>
+                            {% badge "Current" variant="success" icon="📍" %}
                             {% endif %}
                         </div>
                     </div>

@@ -47,13 +47,14 @@
                     <div class="text-sm font-medium text-white">
                       {{ entry.action }}
                     </div>
-                    <span class="ml-3 inline-flex items-center px-2 py-1 text-xs font-medium rounded-full 
-                          {% if entry.status == 'success' %}bg-green-600 text-white
-                          {% elif entry.status == 'pending' %}bg-yellow-600 text-white
-                          {% else %}bg-red-600 text-white{% endif %}">
-                      {% if entry.status == 'success' %}✅ {% trans 'Completed' %}
-                      {% elif entry.status == 'pending' %}⏳ {% trans 'Pending' %}
-                      {% else %}❌ {% trans 'Failed' %}{% endif %}
+                    <span class="ml-3">
+                      {% if entry.status == 'success' %}
+                        {% badge "Completed" variant="success" icon="✅" %}
+                      {% elif entry.status == 'pending' %}
+                        {% badge "Pending" variant="warning" icon="⏳" %}
+                      {% else %}
+                        {% badge "Failed" variant="danger" icon="❌" %}
+                      {% endif %}
                     </span>
                   </div>
                   

@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
-{% load i18n %}
 {% load ui_components %}
+{% load i18n %}
 
 {% block title %}{% trans 'Dashboard' %} - PRAHO Platform{% endblock %}
 
@@ -167,14 +167,13 @@
               </div>
               <div class="text-right">
                 <p class="text-white font-medium">{{ invoice.total|floatformat:2 }} RON</p>
-                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                                  {% if invoice.status == 'paid' %}bg-green-900 text-green-200
-                                  {% elif invoice.status == 'overdue' %}bg-red-900 text-red-200
-                                  {% else %}bg-yellow-900 text-yellow-200{% endif %}">
-                  {% if invoice.status == 'paid' %}✅ {% trans 'Paid' %}
-                  {% elif invoice.status == 'overdue' %}❌ {% trans 'Overdue' %}
-                  {% else %}⏳ {% trans 'Pending' %}{% endif %}
-                </span>
+                {% if invoice.status == 'paid' %}
+                  {% badge "Paid" variant="success" icon="✅" %}
+                {% elif invoice.status == 'overdue' %}
+                  {% badge "Overdue" variant="danger" icon="❌" %}
+                {% else %}
+                  {% badge "Pending" variant="warning" icon="⏳" %}
+                {% endif %}
               </div>
             </div>
           </a>
@@ -217,7 +216,7 @@
           <a href="{% url 'tickets:detail' ticket.id %}" class="block group">
             <div class="flex items-center justify-between p-3 bg-slate-700 rounded-md hover:bg-slate-600 transition-colors border border-transparent hover:border-slate-500">
               <div>
-                <p class="text-white font-medium group-hover:text-blue-400 transition-colors">{{ ticket.ticket_number }} - {{ ticket.title|truncatechars:40 }}</p>
+                <p class="text-white font-medium group-hover:text-blue-400 transition-colors leading-5">{{ ticket.ticket_number }} - {{ ticket.title }}</p>
                 <p class="text-slate-400 text-sm">
                   {% if user.is_staff %}
                   {{ ticket.customer.company_name }} - {{ ticket.created_at|date:"d.m.Y" }}
@@ -227,14 +226,13 @@
                 </p>
               </div>
               <div class="text-right">
-                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                                  {% if ticket.priority == 'high' %}bg-red-900 text-red-200
-                                  {% elif ticket.priority == 'medium' %}bg-yellow-900 text-yellow-200
-                                  {% else %}bg-green-900 text-green-200{% endif %}">
-                  {% if ticket.priority == 'high' %}🔴 {% trans 'Urgent' %}
-                  {% elif ticket.priority == 'medium' %}🟡 {% trans 'Medium' %}
-                  {% else %}🟢 {% trans 'Low' %}{% endif %}
-                </span>
+                {% if ticket.priority == 'high' %}
+                  {% badge "Urgent" variant="danger" icon="🔴" %}
+                {% elif ticket.priority == 'medium' %}
+                  {% badge "Medium" variant="warning" icon="🟡" %}
+                {% else %}
+                  {% badge "Low" variant="success" icon="🟢" %}
+                {% endif %}
               </div>
             </div>
           </a>

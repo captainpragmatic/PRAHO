@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load i18n %}
+{% load ui_components %}
 
 {% block title %}{% trans 'Support Tickets' %} - PRAHO Platform{% endblock %}
 
@@ -148,29 +149,36 @@
               {% endif %}
             </td>
             <td class="px-6 py-4 whitespace-nowrap">
-              <span
-                class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                  {% if ticket.priority == 'critical' %}bg-red-500/20 text-red-300{% elif ticket.priority == 'urgent' %}bg-orange-500/20 text-orange-300{% elif ticket.priority == 'high' %}bg-yellow-500/20 text-yellow-300{% elif ticket.priority == 'normal' %}bg-blue-500/20 text-blue-300{% else %}bg-gray-500/20 text-gray-300{% endif %}">
-                {% if ticket.priority == 'critical' %}{% trans 'Critical' %}
-                {% elif ticket.priority == 'urgent' %}{% trans 'Urgent' %}
-                {% elif ticket.priority == 'high' %}{% trans 'High' %}
-                {% elif ticket.priority == 'normal' %}{% trans 'Normal' %}
-                {% elif ticket.priority == 'low' %}{% trans 'Low' %}
-                {% else %}{{ ticket.priority|capfirst }}{% endif %}
-              </span>
+              {% if ticket.priority == 'critical' %}
+                {% badge "Critical" variant="danger" icon="🚨" %}
+              {% elif ticket.priority == 'urgent' %}
+                {% badge "Urgent" variant="danger" icon="🔴" %}
+              {% elif ticket.priority == 'high' %}
+                {% badge "High" variant="warning" icon="🟡" %}
+              {% elif ticket.priority == 'normal' %}
+                {% badge "Normal" variant="info" icon="🔵" %}
+              {% elif ticket.priority == 'low' %}
+                {% badge "Low" variant="success" icon="🟢" %}
+              {% else %}
+                {% badge ticket.priority|capfirst variant="default" %}
+              {% endif %}
             </td>
             <td class="px-6 py-4 whitespace-nowrap">
-              <span
-                class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                  {% if ticket.status == 'new' %}bg-green-500/20 text-green-300{% elif ticket.status == 'open' %}bg-blue-500/20 text-blue-300{% elif ticket.status == 'pending' %}bg-yellow-500/20 text-yellow-300{% elif ticket.status == 'resolved' %}bg-purple-500/20 text-purple-300{% elif ticket.status == 'closed' %}bg-gray-500/20 text-gray-300{% else %}bg-slate-500/20 text-slate-300{% endif %}">
-                {% if ticket.status == 'new' %}{% trans 'New' %}
-                {% elif ticket.status == 'open' %}{% trans 'Open' %}
-                {% elif ticket.status == 'pending' %}{% trans 'Pending' %}
-                {% elif ticket.status == 'resolved' %}{% trans 'Resolved' %}
-                {% elif ticket.status == 'closed' %}{% trans 'Closed' %}
-                {% elif ticket.status == 'cancelled' %}{% trans 'Cancelled' %}
-                {% else %}{{ ticket.status|capfirst }}{% endif %}
-              </span>
+              {% if ticket.status == 'new' %}
+                {% badge "New" variant="success" icon="🆕" %}
+              {% elif ticket.status == 'open' %}
+                {% badge "Open" variant="info" icon="📂" %}
+              {% elif ticket.status == 'pending' %}
+                {% badge "Pending" variant="warning" icon="⏳" %}
+              {% elif ticket.status == 'resolved' %}
+                {% badge "Resolved" variant="primary" icon="✅" %}
+              {% elif ticket.status == 'closed' %}
+                {% badge "Closed" variant="secondary" icon="📁" %}
+              {% elif ticket.status == 'cancelled' %}
+                {% badge "Cancelled" variant="danger" icon="❌" %}
+              {% else %}
+                {% badge ticket.status|capfirst variant="default" %}
+              {% endif %}
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
               {{ ticket.created_at|date:"d M Y H:i" }}

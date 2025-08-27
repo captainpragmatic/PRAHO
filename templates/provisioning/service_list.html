@@ -136,17 +136,17 @@
             </td>
 
             <td class="px-6 py-4">
-              <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                                {% if service.status == 'active' %}bg-green-900 text-green-200
-                                {% elif service.status == 'suspended' %}bg-red-900 text-red-200
-                                {% elif service.status == 'cancelled' %}bg-gray-900 text-gray-200
-                                {% else %}bg-yellow-900 text-yellow-200{% endif %}">
-                {% if service.status == 'active' %}✅ {% trans 'Active' %}
-                {% elif service.status == 'suspended' %}⏸️ {% trans 'Suspended' %}
-                {% elif service.status == 'cancelled' %}❌ {% trans 'Cancelled' %}
-                {% elif service.status == 'pending' %}⏳ {% trans 'Pending' %}
-                {% else %}🔍 {{ service.status|title }}{% endif %}
-              </span>
+              {% if service.status == 'active' %}
+                {% badge "Active" variant="success" icon="✅" %}
+              {% elif service.status == 'suspended' %}
+                {% badge "Suspended" variant="danger" icon="⏸️" %}
+              {% elif service.status == 'cancelled' %}
+                {% badge "Cancelled" variant="secondary" icon="❌" %}
+              {% elif service.status == 'pending' %}
+                {% badge "Pending" variant="warning" icon="⏳" %}
+              {% else %}
+                {% badge service.status|title variant="default" icon="🔍" %}
+              {% endif %}
             </td>
 
             <td class="px-6 py-4">

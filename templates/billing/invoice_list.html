@@ -154,17 +154,17 @@
             </td>
 
             <td class="px-6 py-4">
-              <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                                {% if invoice.status == 'paid' %}bg-green-900 text-green-200
-                                {% elif invoice.status == 'overdue' %}bg-red-900 text-red-200
-                                {% elif invoice.status == 'sent' %}bg-blue-900 text-blue-200
-                                {% else %}bg-yellow-900 text-yellow-200{% endif %}">
-                {% if invoice.status == 'paid' %}✅ {% trans 'Paid' %}
-                {% elif invoice.status == 'overdue' %}❌ {% trans 'Overdue' %}
-                {% elif invoice.status == 'sent' %}📧 {% trans 'Sent' %}
-                {% elif invoice.status == 'draft' %}📝 {% trans 'Draft' %}
-                {% else %}⏳ {% trans 'Pending' %}{% endif %}
-              </span>
+              {% if invoice.status == 'paid' %}
+                {% badge "Paid" variant="success" icon="✅" %}
+              {% elif invoice.status == 'overdue' %}
+                {% badge "Overdue" variant="danger" icon="❌" %}
+              {% elif invoice.status == 'sent' %}
+                {% badge "Sent" variant="info" icon="📧" %}
+              {% elif invoice.status == 'draft' %}
+                {% badge "Draft" variant="secondary" icon="📝" %}
+              {% else %}
+                {% badge "Pending" variant="warning" icon="⏳" %}
+              {% endif %}
             </td>
 
             <td class="px-6 py-4">

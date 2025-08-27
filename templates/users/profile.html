@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load i18n %}
+{% load ui_components %}
 
 {% block title %}{% trans 'User Profile' %} - PRAHO Platform{% endblock %}
 
@@ -135,17 +136,11 @@
             <dt class="text-sm font-medium text-slate-400">{% trans 'User Role' %}</dt>
             <dd class="mt-1 text-sm text-white">
               {% if user.is_superuser %}
-                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-900 text-purple-200">
-                  👑 {% trans 'Superuser' %}
-                </span>
+                {% badge "Superuser" variant="primary" icon="👑" %}
               {% elif user.is_staff %}
-                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-900 text-blue-200">
-                  ⚙️ {% trans 'Staff' %}
-                </span>
+                {% badge "Staff" variant="info" icon="⚙️" %}
               {% else %}
-                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-900 text-green-200">
-                  👤 {% trans 'User' %}
-                </span>
+                {% badge "User" variant="success" icon="👤" %}
               {% endif %}
             </dd>
           </div>
@@ -154,9 +149,9 @@
             <dt class="text-sm font-medium text-slate-400">{% trans 'Account Status' %}</dt>
             <dd class="mt-1 text-sm text-white">
               {% if user.is_active %}
-                <span class="text-green-400">✅ {% trans 'Active' %}</span>
+                {% badge "Active" variant="success" icon="✅" %}
               {% else %}
-                <span class="text-red-400">❌ {% trans 'Inactive' %}</span>
+                {% badge "Inactive" variant="danger" icon="❌" %}
               {% endif %}
             </dd>
           </div>
@@ -193,7 +188,7 @@
                   </a>
                 </div>
               {% else %}
-                <span class="text-orange-400">⚠️ {% trans 'Disabled' %}</span>
+                {% badge "Disabled" variant="warning" icon="⚠️" %}
                 <a href="{% url 'users:two_factor_setup' %}" class="ml-2 text-blue-400 hover:text-blue-300 text-xs">
                   {% trans 'Enable 2FA' %}
                 </a>
@@ -238,13 +233,9 @@
                 </div>
               </div>
               {% if user.gdpr_consent_date %}
-                <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-green-600 text-white rounded-full">
-                  ✅ {% trans 'Active' %}
-                </span>
+                {% badge "Given" variant="success" icon="✅" %}
               {% else %}
-                <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-red-600 text-white rounded-full">
-                  ❌ {% trans 'Not Given' %}
-                </span>
+                {% badge "Not Given" variant="danger" icon="❌" %}
               {% endif %}
             </div>
 
@@ -258,13 +249,9 @@
                 </div>
               </div>
               {% if user.accepts_marketing %}
-                <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-green-600 text-white rounded-full">
-                  ✅ {% trans 'Enabled' %}
-                </span>
+                {% badge "Enabled" variant="success" icon="✅" %}
               {% else %}
-                <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-slate-500 text-white rounded-full">
-                  📛 {% trans 'Disabled' %}
-                </span>
+                {% badge "Disabled" variant="secondary" icon="📛" %}
               {% endif %}
             </div>
           </div>
@@ -349,9 +336,7 @@
           <h4 class="font-medium text-white">{{ customer.name }}</h4>
           <p class="text-sm text-slate-400 mt-1">{{ customer.primary_email }}</p>
           <div class="mt-2 flex items-center justify-between">
-            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-900 text-green-200">
-              {% trans 'Active' %}
-            </span>
+            {% badge "Active" variant="success" %}
             <a href="{% url 'customers:detail' customer.id %}" 
                class="text-blue-400 hover:text-blue-300 text-xs">
               {% trans 'View' %} →

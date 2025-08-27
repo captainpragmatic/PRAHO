@@ -107,6 +107,18 @@ class ModalConfig:
     html_id: str | None = None
 
 @dataclass
+class BadgeConfig:
+    """Parameter object for badge configuration"""
+    variant: str = 'default'
+    size: str = 'md'
+    rounded: str = 'md'
+    icon: str | None = None
+    icon_position: str = 'left'
+    dismissible: bool = False
+    css_class: str = ''
+    html_id: str | None = None
+
+@dataclass
 class DataTableConfig:
     """Parameter object for data table configuration"""
     sortable: bool = True
@@ -643,6 +655,61 @@ def format_bytes(bytes_value: int) -> str:
         return f"{int(size)} {units[unit_index]}"
     else:
         return f"{size:.1f} {units[unit_index]}"
+
+
+@register.inclusion_tag('components/badge.html')
+def badge(
+    text: str,
+    *,
+    config: BadgeConfig | None = None,
+    **kwargs: Any
+) -> dict[str, Any]:
+    """
+    Romanian hosting provider badge component for status indicators
+    
+    Usage:
+        {% badge "Pending" variant="warning" icon="clock" %}
+        {% badge "Paid" variant="success" icon="check" %}
+        {% badge "Overdue" variant="danger" %}
+        {% badge "99+" variant="secondary" size="sm" rounded="full" %}
+    
+    Args:
+        text: Badge text (supports Romanian diacritics and emojis)
+        variant: default|primary|secondary|success|warning|danger|info
+        size: xs|sm|md|lg
+        rounded: sm|md|lg|full
+        icon: Icon name (emoji or icon class)
+        icon_position: left|right
+        dismissible: Show dismiss button
+        css_class: Additional CSS classes
+        html_id: Custom HTML ID
+    """
+    # Use default configuration if not provided
+    if config is None:
+        config = BadgeConfig()
+    
+    # Override with any direct kwargs for backward compatibility
+    for key, value in kwargs.items():
+        if hasattr(config, key) and value is not None:
+            setattr(config, key, value)
+    
+    # Auto-generate ID if not provided
+    if not config.html_id:
+        # Create safe ID from text
+        safe_text = re.sub(r'[^a-zA-Z0-9]', '-', text.lower())
+        config.html_id = f"badge-{safe_text}"
+    
+    return {
+        'text': text,
+        'variant': config.variant,
+        'size': config.size,
+        'rounded': config.rounded,
+        'icon': config.icon,
+        'icon_position': config.icon_position,
+        'dismissible': config.dismissible,
+        'css_class': config.css_class,
+        'html_id': config.html_id,
+    }
 
 
 @register.simple_tag
