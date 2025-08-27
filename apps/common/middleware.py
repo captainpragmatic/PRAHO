@@ -18,6 +18,12 @@ from django.utils import timezone
 
 from apps.common.constants import HTTP_CLIENT_ERROR_THRESHOLD
 
+# Import for session security - handle potential circular import gracefully
+try:
+    from apps.users.services import SessionSecurityService
+except ImportError:
+    SessionSecurityService = None
+
 logger = logging.getLogger(__name__)
 User = get_user_model()
 
@@ -282,9 +288,9 @@ class SessionSecurityMiddleware:
     def _process_session_security(self, request: HttpRequest) -> None:
         """Process session security checks and updates"""
         try:
-            from apps.users.services import (
-                SessionSecurityService,  # Cross-app import to avoid circular dependencies
-            )
+            if SessionSecurityService is None:
+                # Service not available due to circular import - skip processing
+                return
 
             # Update session timeout based on current context
             SessionSecurityService.update_session_timeout(request)
@@ -345,14 +351,12 @@ class SessionSecurityMiddleware:
                 request.session.pop('shared_device_mode', None)
                 request.session.pop('shared_device_enabled_at', None)
 
-                from apps.users.services import (
-                    SessionSecurityService,  # Cross-app import to avoid circular dependencies
-                )
-                SessionSecurityService.log_session_activity(
-                    request,
-                    'shared_device_auto_expired',
-                    reason='max_duration_exceeded'
-                )
+                if SessionSecurityService is not None:
+                    SessionSecurityService.log_session_activity(
+                        request,
+                        'shared_device_auto_expired',
+                        reason='max_duration_exceeded'
+                    )
 
         except Exception as e:
             logger.error(f"🔥 [SessionSecurity] Error checking shared device expiry: {e}")

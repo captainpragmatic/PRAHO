@@ -788,10 +788,10 @@ class MFASecurityTestCase(TestCase):
 
     def test_mfa_with_encryption_key_missing(self):
         """Test MFA behavior when encryption key is missing"""
-        with patch('apps.common.encryption.get_encryption_key', return_value=None):
+        with patch('apps.common.encryption.get_encryption_key', return_value=None), \
+             self.assertRaises(Exception):
             # Should handle gracefully when encryption is not available
-            with self.assertRaises(Exception):
-                MFAService.enable_totp(self.user)
+            MFAService.enable_totp(self.user)
 
     def test_totp_time_window_tolerance(self):
         """Test TOTP time window tolerance"""

@@ -87,61 +87,25 @@ def secure_service_method(
             user = kwargs.get('user')
 
             try:
-                # 1. Rate Limiting Check
-                if config.rate_limit_key and config.rate_limit:
-                    _check_rate_limit(config.rate_limit_key, config.rate_limit, request_ip, user)
+                # Execute security checks
+                _execute_security_checks(config, args, kwargs, request_ip, user)
 
-                # 2. Input Validation
-                if config.validation_type == "user_registration":
-                    _validate_user_registration_input(args, kwargs)
-                elif config.validation_type == "customer_data":
-                    _validate_customer_data_input(args, kwargs)
-                elif config.validation_type == "invitation":
-                    _validate_invitation_input(args, kwargs)
+                # Execute original function with atomic transaction
+                result = _execute_protected_function(func, args, kwargs)
 
-                # 3. Permission Validation
-                if config.requires_permission:
-                    _validate_permissions(user, kwargs.get('customer'), config.requires_permission)
-
-                # 4. Execute Original Function
-                with transaction.atomic():
-                    result = func(*args, **kwargs)
-
-                # 5. Log Success
-                if config.log_attempts:
-                    log_security_event('method_success', {
-                        'method': func.__name__,
-                        'validation_type': config.validation_type,
-                        'user_id': user.id if user else None
-                    }, request_ip)
+                # Log successful execution
+                _log_success_event(config, func.__name__, user, request_ip)
 
                 return result
 
             except ValidationError as e:
-                # Security validation failed
-                if config.log_attempts:
-                    log_security_event('validation_failed', {
-                        'method': func.__name__,
-                        'error': str(e),
-                        'validation_type': config.validation_type,
-                        'user_id': user.id if user else None
-                    }, request_ip)
-
-                return Err(SecureErrorHandler.safe_error_response(e, config.validation_type))
+                return _handle_validation_error(e, config, func.__name__, user, request_ip)
 
             except Exception as e:
-                # Unexpected error
-                if config.log_attempts:
-                    log_security_event('method_error', {
-                        'method': func.__name__,
-                        'error': str(e),
-                        'user_id': user.id if user else None
-                    }, request_ip)
-
-                return Err(SecureErrorHandler.safe_error_response(e, "general"))
+                return _handle_unexpected_error(e, config, func.__name__, user, request_ip)
 
             finally:
-                # 6. Timing Attack Prevention
+                # Timing Attack Prevention
                 if config.prevent_timing_attacks:
                     _normalize_response_time(start_time)
 
@@ -262,6 +226,70 @@ def prevent_race_conditions(lock_key_generator: Callable) -> Callable[[Callable]
 
         return wrapper
     return decorator
+
+
+# ===============================================================================
+# SECURITY DECORATOR HELPER FUNCTIONS
+# ===============================================================================
+
+def _execute_security_checks(config: SecurityConfig, args: tuple[Any, ...], kwargs: dict[str, Any], request_ip: str, user: Any) -> None:
+    """Execute all security checks for the decorator"""
+    # 1. Rate Limiting Check
+    if config.rate_limit_key and config.rate_limit:
+        _check_rate_limit(config.rate_limit_key, config.rate_limit, request_ip, user)
+
+    # 2. Input Validation
+    if config.validation_type == "user_registration":
+        _validate_user_registration_input(args, kwargs)
+    elif config.validation_type == "customer_data":
+        _validate_customer_data_input(args, kwargs)
+    elif config.validation_type == "invitation":
+        _validate_invitation_input(args, kwargs)
+
+    # 3. Permission Validation
+    if config.requires_permission:
+        _validate_permissions(user, kwargs.get('customer'), config.requires_permission)
+
+
+def _execute_protected_function(func: Callable, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+    """Execute the original function within an atomic transaction"""
+    with transaction.atomic():
+        return func(*args, **kwargs)
+
+
+def _log_success_event(config: SecurityConfig, method_name: str, user: Any, request_ip: str) -> None:
+    """Log successful method execution"""
+    if config.log_attempts:
+        log_security_event('method_success', {
+            'method': method_name,
+            'validation_type': config.validation_type,
+            'user_id': user.id if user else None
+        }, request_ip)
+
+
+def _handle_validation_error(e: ValidationError, config: SecurityConfig, method_name: str, user: Any, request_ip: str) -> Result[Any, str]:
+    """Handle validation errors with proper logging"""
+    if config.log_attempts:
+        log_security_event('validation_failed', {
+            'method': method_name,
+            'error': str(e),
+            'validation_type': config.validation_type,
+            'user_id': user.id if user else None
+        }, request_ip)
+    
+    return Err(SecureErrorHandler.safe_error_response(e, config.validation_type))
+
+
+def _handle_unexpected_error(e: Exception, config: SecurityConfig, method_name: str, user: Any, request_ip: str) -> Result[Any, str]:
+    """Handle unexpected errors with proper logging"""
+    if config.log_attempts:
+        log_security_event('method_error', {
+            'method': method_name,
+            'error': str(e),
+            'user_id': user.id if user else None
+        }, request_ip)
+    
+    return Err(SecureErrorHandler.safe_error_response(e, "general"))
 
 
 # ===============================================================================

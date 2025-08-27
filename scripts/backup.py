@@ -185,9 +185,8 @@ class PragmaticHostBackup:
                     shutil.copy2(db_file, backup_file)
 
                     # Compress the database
-                    with open(backup_file, 'rb') as f_in:
-                        with gzip.open(f"{backup_file}.gz", 'wb') as f_out:
-                            shutil.copyfileobj(f_in, f_out)
+                    with open(backup_file, 'rb') as f_in, gzip.open(f"{backup_file}.gz", 'wb') as f_out:
+                        shutil.copyfileobj(f_in, f_out)
 
                     backup_file.unlink()  # Remove uncompressed file
                 else:

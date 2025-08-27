@@ -507,7 +507,7 @@ testpaths = [
     "tests/provisioning",
     "tests/tickets",
     "tests/ui",
-    "tests/integration-tests"
+    "tests/integration_tests"
 ]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",

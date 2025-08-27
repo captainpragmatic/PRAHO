@@ -75,10 +75,7 @@ class TypeIgnoreChecker:
             return True
         
         # Skip if file doesn't exist
-        if not Path(file_path).exists():
-            return True
-            
-        return False
+        return not Path(file_path).exists()
     
     def check_file_for_type_ignore(self, file_path: str) -> tuple[bool, list[dict[str, Any]]]:
         """

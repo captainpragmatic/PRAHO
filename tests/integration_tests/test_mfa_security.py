@@ -9,9 +9,10 @@
 # - Romanian compliance requirements
 # - Performance under attack scenarios
 #
-# Run with: make test-file FILE=tests.integration-tests.test_mfa_security
+# Run with: make test-file FILE=tests.integration_tests.test_mfa_security
 
 import base64
+import contextlib
 import time
 from datetime import datetime, timedelta
 from unittest.mock import patch
@@ -204,10 +205,8 @@ class MFAAttackPreventionTests(TestCase):
         for test_code in test_cases:
             start_time = time.perf_counter()
 
-            try:
+            with contextlib.suppress(Exception):
                 mfa_service.verify_mfa_code(self.user, test_code)
-            except Exception:
-                pass  # Expected for some cases
 
             end_time = time.perf_counter()
             timings.append(end_time - start_time)
@@ -418,5 +417,5 @@ class MFASecurityTestSuite:
         }
 
 
-# Run with: make test-file FILE=tests.integration-tests.test_mfa_security
-# Or: python manage.py test tests.integration-tests.test_mfa_security -v 2
+# Run with: make test-file FILE=tests.integration_tests.test_mfa_security
+# Or: python manage.py test tests.integration_tests.test_mfa_security -v 2

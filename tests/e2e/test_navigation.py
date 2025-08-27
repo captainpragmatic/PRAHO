@@ -133,6 +133,7 @@ def test_navigation_header_interactions(page: Page):
                                  check_css=True,
                                  check_accessibility=False,  # Keep fast for multi-user test
                                  check_performance=False):   # Keep fast for multi-user test
+        
         # Get test user credentials
         users = get_test_user_credentials()
         test_cases = [
@@ -141,93 +142,142 @@ def test_navigation_header_interactions(page: Page):
         ]
         
         for email, password, user_type in test_cases:
-            print(f"\n  👤 Testing navigation header for {user_type}")
-            
-            # Start fresh for each user type - clear session and go to login
-            ensure_fresh_session(page)
-        
-        # Login with current user
-        assert login_user(page, email, password)
-        
-        print(f"    🔘 Testing navigation elements for {user_type}...")
-        
-        # Define navigation-specific selectors (more conservative approach)
-        navigation_elements = [
-            # Navigation bar elements
-            ('nav a[href]:visible', 'visible navigation links'),
-            ('nav button:visible', 'visible navigation buttons'),
-            ('.navbar a[href]:visible', 'visible navbar links'),
-            ('.navbar button:visible', 'visible navbar buttons'),
-            
-            # Header elements (but avoid logout buttons)
-            ('header a[href]:not([href*="logout"]):visible', 'header links (non-logout)'),
-            ('header button:not([data-action="logout"]):visible', 'header buttons (non-logout)'),
-        ]
-        
-        user_total_clicked = 0
-        user_total_found = 0
-        
-        for selector, element_type in navigation_elements:
-            try:
-                count = count_elements(page, selector, element_type)
-                user_total_found += count
-                
-                if count > 0:
-                    # Test clicking navigation elements (max 2 for nav to avoid excessive testing)
-                    elements_to_test = min(count, 2)
-                    
-                    for i in range(elements_to_test):
-                        try:
-                            element = page.locator(selector).nth(i)
-                            
-                            # Check if element is visible and enabled
-                            if element.is_visible() and element.is_enabled():
-                                # Get element info for logging
-                                href = element.get_attribute("href") or ""
-                                text = element.inner_text()[:30] or element.get_attribute("title") or "nav element"
-                                
-                                # Skip problematic links
-                                if (href.startswith(('mailto:', 'tel:', 'javascript:')) or href == '#' or 'logout' in href.lower() or 'signout' in href.lower() or (href and not href.startswith('/'))):
-                                    print(f"        ⚠️  Skipping: {text} ({href})")
-                                    continue
-                                
-                                print(f"        🔘 Clicking nav element: {text}")
-                                
-                                # Perform the click with proper error handling
-                                if safe_click_element(page, f"({selector})[{i}]", f"nav element: {text}"):
-                                    user_total_clicked += 1
-                                    
-                                    # Log where we ended up
-                                    current_url = page.url
-                                    print(f"          ✅ Successfully clicked - URL: {current_url}")
-                                    
-                                    # If we're no longer on the dashboard, navigate back
-                                    if "/app/" not in current_url and "/auth/login/" not in current_url:
-                                        print("          🔄 Navigating back to dashboard")
-                                        navigate_to_dashboard(page)
-                                    elif "/auth/login/" in current_url:
-                                        # If we got logged out, break out of this user's testing
-                                        print(f"          ⚠️  Got logged out, ending {user_type} testing")
-                                        break
-                                    
-                        except Exception as element_error:
-                            print(f"        ❌ Element error: {str(element_error)[:100]}")
-                            continue
-                    
-                    # If we got logged out, break out of element testing
-                    if "/auth/login/" in page.url:
-                        break
-                            
-            except Exception as selector_error:
-                print(f"      ❌ Selector error for {element_type}: {str(selector_error)[:100]}")
-                continue
-        
-        print(f"    📊 {user_type.title()} summary: Found {user_total_found} nav elements, clicked {user_total_clicked}")
+            _test_user_navigation_interactions(page, email, password, user_type)
     
     # End on a clean state
     navigate_to_dashboard(page)
-    
     print("  ✅ Navigation header interaction testing completed!")
+
+
+def _test_user_navigation_interactions(page: Page, email: str, password: str, user_type: str) -> None:
+    """Test navigation interactions for a single user type"""
+    print(f"\n  👤 Testing navigation header for {user_type}")
+    
+    # Start fresh for each user type - clear session and go to login
+    ensure_fresh_session(page)
+    
+    # Login with current user
+    assert login_user(page, email, password)
+    
+    print(f"    🔘 Testing navigation elements for {user_type}...")
+    
+    # Define navigation-specific selectors (more conservative approach)
+    navigation_elements = [
+        # Navigation bar elements
+        ('nav a[href]:visible', 'visible navigation links'),
+        ('nav button:visible', 'visible navigation buttons'),
+        ('.navbar a[href]:visible', 'visible navbar links'),
+        ('.navbar button:visible', 'visible navbar buttons'),
+        
+        # Header elements (but avoid logout buttons)
+        ('header a[href]:not([href*="logout"]):visible', 'header links (non-logout)'),
+        ('header button:not([data-action="logout"]):visible', 'header buttons (non-logout)'),
+    ]
+    
+    user_total_clicked, user_total_found = _test_navigation_elements(page, navigation_elements, user_type)
+    print(f"    📊 {user_type.title()} summary: Found {user_total_found} nav elements, clicked {user_total_clicked}")
+
+
+def _test_navigation_elements(page: Page, navigation_elements: list, user_type: str) -> tuple[int, int]:
+    """Test individual navigation elements and return click/found counts"""
+    user_total_clicked = 0
+    user_total_found = 0
+    
+    for selector, element_type in navigation_elements:
+        try:
+            count = count_elements(page, selector, element_type)
+            user_total_found += count
+            
+            if count > 0:
+                clicked_count = _test_element_clicks(page, selector, count, user_type)
+                user_total_clicked += clicked_count
+                
+                # If we got logged out, break out of element testing
+                if "/auth/login/" in page.url:
+                    break
+                        
+        except Exception as selector_error:
+            print(f"      ❌ Selector error for {element_type}: {str(selector_error)[:100]}")
+            continue
+    
+    return user_total_clicked, user_total_found
+
+
+def _test_element_clicks(page: Page, selector: str, count: int, user_type: str) -> int:
+    """Test clicking on navigation elements and return count of successful clicks"""
+    clicked_count = 0
+    # Test clicking navigation elements (max 2 for nav to avoid excessive testing)
+    elements_to_test = min(count, 2)
+    
+    for i in range(elements_to_test):
+        if _should_stop_testing(page, user_type):
+            break
+            
+        try:
+            clicked = _try_click_navigation_element(page, selector, i)
+            if clicked:
+                clicked_count += 1
+                
+        except Exception as element_error:
+            print(f"        ❌ Element error: {str(element_error)[:100]}")
+            continue
+    
+    return clicked_count
+
+
+def _should_stop_testing(page: Page, user_type: str) -> bool:
+    """Check if we should stop testing (e.g., if logged out)"""
+    if "/auth/login/" in page.url:
+        print(f"          ⚠️  Got logged out, ending {user_type} testing")
+        return True
+    return False
+
+
+def _try_click_navigation_element(page: Page, selector: str, index: int) -> bool:
+    """Try to click a navigation element and handle the result"""
+    element = page.locator(selector).nth(index)
+    
+    # Check if element is visible and enabled
+    if not (element.is_visible() and element.is_enabled()):
+        return False
+    
+    # Get element info for logging
+    href = element.get_attribute("href") or ""
+    text = element.inner_text()[:30] or element.get_attribute("title") or "nav element"
+    
+    # Skip problematic links
+    if _should_skip_element(href):
+        print(f"        ⚠️  Skipping: {text} ({href})")
+        return False
+    
+    print(f"        🔘 Clicking nav element: {text}")
+    
+    # Perform the click with proper error handling
+    if safe_click_element(page, f"({selector})[{index}]", f"nav element: {text}"):
+        _handle_navigation_result(page, text)
+        return True
+    
+    return False
+
+
+def _should_skip_element(href: str) -> bool:
+    """Determine if an element should be skipped based on its href"""
+    return (href.startswith(('mailto:', 'tel:', 'javascript:')) or 
+            href == '#' or 
+            'logout' in href.lower() or 
+            'signout' in href.lower() or 
+            (href and not href.startswith('/')))
+
+
+def _handle_navigation_result(page: Page, element_text: str) -> None:
+    """Handle the result after clicking a navigation element"""
+    current_url = page.url
+    print(f"          ✅ Successfully clicked - URL: {current_url}")
+    
+    # If we're no longer on the dashboard, navigate back
+    if "/app/" not in current_url and "/auth/login/" not in current_url:
+        print("          🔄 Navigating back to dashboard")
+        navigate_to_dashboard(page)
 
 
 def test_navigation_menu_visibility_by_role(page: Page):

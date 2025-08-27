@@ -431,7 +431,6 @@ class Domain(models.Model):
             return timezone.now() > self.expires_at
         return False
 
-    @property
     def is_expiring_soon(self, days: int = 30) -> bool:
         """⚠️ Check if domain expires within specified days"""
         days_left = self.days_until_expiry

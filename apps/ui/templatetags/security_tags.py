@@ -36,7 +36,7 @@ def safe_message(value: Any) -> str:
         strip=True
     )
 
-    return mark_safe(cleaned)  # nosec B308 B703 - Input sanitized by bleach
+    return mark_safe(cleaned)  # nosec B308 B703 - Input sanitized by bleach  # noqa: S308
 
 
 @register.filter
@@ -90,5 +90,5 @@ def secure_alert(message: Any, alert_type: str = 'info', dismissible: bool = Tru
         ''',
         class_str,
         escaped_message,
-        mark_safe(dismiss_button)  # nosec B308 - Static HTML button, no user input
+        mark_safe(dismiss_button)  # nosec B308 - Static HTML button, no user input  # noqa: S308
     )

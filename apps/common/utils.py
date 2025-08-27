@@ -20,6 +20,12 @@ from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils.translation import gettext_lazy as _
 
+# Import for VAT calculation - handle potential circular import gracefully
+try:
+    from apps.common.types import calculate_romanian_vat as new_calculator
+except ImportError:
+    new_calculator = None
+
 # ===============================================================================
 # ROMANIAN VALIDATION UTILITIES
 # ===============================================================================
@@ -35,9 +41,15 @@ class VATCalculation(TypedDict):
 
 def calculate_romanian_vat(amount: Decimal, vat_rate: int = 19) -> VATCalculation:
     """Calculate Romanian VAT breakdown (deprecated - use apps.common.types.calculate_romanian_vat)"""
-    from apps.common.types import (
-        calculate_romanian_vat as new_calculator,  # Delayed import to avoid circular dependency
-    )
+    if new_calculator is None:
+        # Fallback implementation in case of circular import
+        vat_amount = amount * Decimal(vat_rate) / Decimal('119')  # 19% VAT included
+        amount_without_vat = amount - vat_amount
+        return {
+            'amount_without_vat': amount_without_vat,
+            'vat_amount': vat_amount,
+            'amount_with_vat': amount,
+        }
     
     # Convert to cents-based calculation for precision
     amount_cents = int(amount * 100)

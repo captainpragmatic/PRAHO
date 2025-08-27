@@ -180,7 +180,7 @@ def _handle_skip_user_for_customer(request: HttpRequest, customer: Customer) -> 
     )
     messages.info(
         request,
-        _('ℹ️ You can assign users later from the customer detail page.')
+        _('💡 You can assign users later from the customer detail page.')
     )
 
 
@@ -586,7 +586,7 @@ def _handle_user_skip_action(request: HttpRequest, customer: Customer) -> None:
     """Handle the 'skip' action for user assignment."""
     messages.info(
         request,
-        _('ℹ️ User assignment skipped for customer "{customer_name}"').format(customer_name=customer.name)
+        _('💡 User assignment skipped for customer "{customer_name}"').format(customer_name=customer.name)
     )
 
 

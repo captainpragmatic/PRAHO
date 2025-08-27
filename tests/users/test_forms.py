@@ -262,7 +262,7 @@ class MinimalFormIntegrationTestCase(TestCase):
             except AttributeError:
                 # save method might not exist or might require additional setup
                 pass
-            except Exception:
+            except Exception:  # noqa: S110
                 # Other exceptions are expected if form requires additional data
                 pass
 

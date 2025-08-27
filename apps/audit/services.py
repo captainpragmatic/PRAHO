@@ -333,13 +333,13 @@ class AuditService:
 class AuditServiceProxy:
     """Proxy class to maintain backward compatibility with existing code"""
     
-    def log_event(self, *args, **kwargs):
+    def log_event(self, *args: Any, **kwargs: Any) -> AuditEvent:
         return AuditService.log_event_legacy(*args, **kwargs)
     
-    def log_2fa_event(self, *args, **kwargs):
+    def log_2fa_event(self, *args: Any, **kwargs: Any) -> AuditEvent:
         return AuditService.log_2fa_event_legacy(*args, **kwargs)
     
-    def log_compliance_event(self, *args, **kwargs):
+    def log_compliance_event(self, *args: Any, **kwargs: Any) -> ComplianceLog:
         return AuditService.log_compliance_event_legacy(*args, **kwargs)
 
 

@@ -118,7 +118,7 @@ def login_user(page: Page, email: str, password: str) -> bool:
             if "/app/" in current_url:
                 print(f"✅ Successfully logged in as {email} (alternate check)")
                 return True
-        except Exception:
+        except Exception:  # noqa: S110
             pass
         
         # Login failed - gather debug info
@@ -133,7 +133,7 @@ def login_user(page: Page, email: str, password: str) -> bool:
                 if error.is_visible():
                     error_text = error.inner_text()
                     print(f"    Error message: {error_text}")
-        except Exception:
+        except Exception:  # noqa: S110
             pass
         
         return False
@@ -415,7 +415,7 @@ def setup_console_monitoring_standalone(page: Page) -> list:
     return console_messages
 
 
-def assert_no_console_errors(console_messages: list, ignore_patterns: list[str] = None, 
+def assert_no_console_errors(console_messages: list, ignore_patterns: list[str] | None = None, 
                            context: str = "") -> None:
     """
     Assert that there are no JavaScript console errors.
@@ -493,11 +493,13 @@ def check_network_errors(page: Page) -> list[str]:
         ]
         
         page_content = page.content()
-        for indicator in error_indicators:
-            if indicator in page_content:
-                network_errors.append(f"HTTP Error detected: {indicator}")
+        network_errors.extend(
+            f"HTTP Error detected: {indicator}"
+            for indicator in error_indicators
+            if indicator in page_content
+        )
                 
-    except Exception:
+    except Exception:  # noqa: S110
         pass
         
     return network_errors
@@ -533,8 +535,7 @@ def check_html_validation(page: Page) -> list[str]:
             }
         """)
         
-        for duplicate_id in duplicate_ids:
-            html_issues.append(f"Duplicate ID found: '{duplicate_id}'")
+        html_issues.extend(f"Duplicate ID found: '{duplicate_id}'" for duplicate_id in duplicate_ids)
             
         # Check for missing alt attributes on images
         missing_alt_images = page.locator('img:not([alt])').count()
@@ -931,7 +932,7 @@ class ConsoleMonitor:
             # Console errors are automatically checked when exiting context
     """
     
-    def __init__(self, page: Page, context: str = "", ignore_patterns: list[str] = None):
+    def __init__(self, page: Page, context: str = "", ignore_patterns: list[str] | None = None):
         self.page = page
         self.context = context
         self.ignore_patterns = ignore_patterns or []
@@ -1140,7 +1141,6 @@ def verify_navigation_completeness(page: Page, expected_sections: list[str]) -> 
             
         # Test the link actually works
         try:
-            original_url = page.url
             link.first.click()
             page.wait_for_load_state("networkidle", timeout=5000)
             
@@ -1363,10 +1363,7 @@ class MobileTestContext:
         self.original_viewport = self.page.viewport_size
         
         # Set mobile viewport
-        if self.custom_viewport:
-            viewport = self.custom_viewport
-        else:
-            viewport = MOBILE_VIEWPORTS.get(self.viewport_name, MOBILE_VIEWPORTS['mobile_medium'])
+        viewport = self.custom_viewport or MOBILE_VIEWPORTS.get(self.viewport_name, MOBILE_VIEWPORTS['mobile_medium'])
             
         self.page.set_viewport_size(viewport)
         print(f"  📱 Switched to {self.viewport_name} viewport: {viewport['width']}x{viewport['height']}")
@@ -1548,7 +1545,7 @@ def run_responsive_breakpoints_test(page: Page, test_function, *args, **kwargs) 
         print(f"    ❌ Desktop test failed: {str(e)[:50]}")
     
     # Test tablet landscape
-    with MobileTestContext(page, 'tablet_landscape') as tablet:
+    with MobileTestContext(page, 'tablet_landscape'):
         print("\n  📱 Testing tablet landscape")
         try:
             results['tablet_landscape'] = test_function(page, *args, **kwargs)

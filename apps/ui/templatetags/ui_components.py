@@ -587,7 +587,7 @@ def icon(
     safe_classes = escape(classes)
 
     # For now, return a placeholder - will be replaced with actual SVG icons
-    return mark_safe(f'<svg class="{safe_classes}" data-icon="{safe_name}"><use href="#icon-{safe_name}"></use></svg>')  # nosec B308 B703 - All inputs are validated and escaped
+    return mark_safe(f'<svg class="{safe_classes}" data-icon="{safe_name}"><use href="#icon-{safe_name}"></use></svg>')  # nosec B308 B703 - All inputs are validated and escaped  # noqa: S308
 
 
 @register.simple_tag(takes_context=True)

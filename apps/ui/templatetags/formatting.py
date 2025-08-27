@@ -604,4 +604,4 @@ def highlight_search(text: str, search_term: str) -> str:
         # Update the normalized text for next search
         normalized_text = normalize_text(highlighted)
 
-    return mark_safe(highlighted)  # nosec B308 B703 - Input is HTML-escaped before highlighting
+    return mark_safe(highlighted)  # nosec B308 B703 - Input is HTML-escaped before highlighting  # noqa: S308

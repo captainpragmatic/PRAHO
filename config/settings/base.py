@@ -308,7 +308,7 @@ if not SECRET_KEY:
         UserWarning,
         stacklevel=2
     )
-    SECRET_KEY = 'django-insecure-dev-key-only-change-in-production-or-tests'
+    SECRET_KEY = 'django-insecure-dev-key-only-change-in-production-or-tests'  # noqa: S105
 
 # Validate SECRET_KEY security in production (checked in prod.py)
 def validate_production_secret_key() -> None:

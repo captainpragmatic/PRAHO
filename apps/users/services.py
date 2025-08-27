@@ -1093,8 +1093,8 @@ class SessionSecurityService:
                     if session_user_id == str(user_id) and session.session_key != keep_session_key:
                         session.delete()
                         count += 1
-                except Exception:
-                    # Skip invalid sessions
+                except Exception:  # noqa: S112
+                    # Skip invalid/corrupted sessions during cleanup - intentionally silent
                     continue
 
             logger.info(f"🗑️ [SessionSecurity] Invalidated {count} other sessions for user {user_id}")
@@ -1115,8 +1115,8 @@ class SessionSecurityService:
                     if session_user_id == str(user_id):
                         session.delete()
                         count += 1
-                except Exception:
-                    # Skip invalid sessions
+                except Exception:  # noqa: S112
+                    # Skip invalid/corrupted sessions during cleanup - intentionally silent
                     continue
 
             logger.warning(f"🗑️ [SessionSecurity] Invalidated {count} sessions for user {user_id}")

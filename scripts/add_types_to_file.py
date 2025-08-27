@@ -291,7 +291,7 @@ class TypeSuggestionEngine:
                 suggested_type = 'str'
             
             # Boolean patterns
-            elif arg_name.startswith('is_') or arg_name.startswith('has_') or arg_name.startswith('can_'):
+            elif arg_name.startswith(('is_', 'has_', 'can_')):
                 suggested_type = 'bool'
             
             # Date/datetime patterns
@@ -435,11 +435,7 @@ class TypeSuggestionEngine:
         if node.returns is None:
             return False  # Missing return annotation
         
-        for arg in node.args.args:
-            if arg.arg not in ('self', 'cls') and arg.annotation is None:
-                return False  # Missing parameter annotation
-        
-        return True
+        return all(not (arg.arg not in ('self', 'cls') and arg.annotation is None) for arg in node.args.args)
     
     def generate_needed_imports(self) -> set[str]:
         """Generate the imports needed for suggested types"""
@@ -505,8 +501,8 @@ class TypeSuggestionEngine:
         params = []
         if params_part.strip():
             # Simple parameter parsing (doesn't handle complex cases)
-            for param in params_part.split(','):
-                param = param.strip()
+            for param_raw in params_part.split(','):
+                param = param_raw.strip()
                 if ':' in param:
                     # Already has type annotation
                     params.append(param)
@@ -531,10 +527,7 @@ class TypeSuggestionEngine:
         
         # Add return type annotation
         return_type = suggestion['return_type']
-        if return_type and not rest_part.strip().startswith('->'):
-            return_annotation = f" -> {return_type}:"
-        else:
-            return_annotation = ":"
+        return_annotation = f" -> {return_type}:" if return_type and not rest_part.strip().startswith('->') else ":"
         
         # Reconstruct the function definition
         params_str = ', '.join(params)
@@ -773,7 +766,7 @@ with Romanian business domain types and Result pattern for error handling.
         logger.error(f"File not found: {args.file}")
         sys.exit(1)
     
-    if not args.file.suffix == '.py':
+    if args.file.suffix != '.py':
         logger.error(f"Not a Python file: {args.file}")
         sys.exit(1)
     
