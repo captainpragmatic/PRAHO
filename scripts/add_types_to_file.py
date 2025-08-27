@@ -450,7 +450,7 @@ class TypeSuggestionEngine:
             if suggestion['return_type']:
                 self._check_type_imports(suggestion['return_type'], needed_imports)
             
-            for param_name, param_type in suggestion['parameters']:
+            for _param_name, param_type in suggestion['parameters']:
                 self._check_type_imports(param_type, needed_imports)
         
         # Remove imports that already exist

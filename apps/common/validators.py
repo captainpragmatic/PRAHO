@@ -173,7 +173,7 @@ class SecureInputValidator:
             validate_email(email)
         except ValidationError:
             # Generic error message (no enumeration)
-            raise ValidationError(_("Invalid input format"))
+            raise ValidationError(_("Invalid input format")) from None
 
         # Log suspicious attempts
         if '@' not in email or email.count('@') > 1:

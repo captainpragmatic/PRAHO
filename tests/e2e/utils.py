@@ -1410,23 +1410,23 @@ class MobileTestContext:
                 
                 # Wait for mobile menu animation
                 self.page.wait_for_timeout(500)
-                    
-                    # Look for expanded mobile menu
-                    expanded_menu_selectors = [
-                        '.navbar-collapse.show',
-                        '.mobile-menu.open', 
-                        '.nav-menu.active',
-                        '[aria-expanded="true"]'
-                    ]
-                    
-                    for menu_selector in expanded_menu_selectors:
-                        if count_elements(self.page, menu_selector, 'expanded mobile menu') > 0:
-                            print("      ✅ Mobile menu expanded successfully")
-                            break
-                            
-                    # Click somewhere else to close menu
-                    self.page.click('body')
-                    self.page.wait_for_timeout(200)
+                
+                # Look for expanded mobile menu
+                expanded_menu_selectors = [
+                    '.navbar-collapse.show',
+                    '.mobile-menu.open', 
+                    '.nav-menu.active',
+                    '[aria-expanded="true"]'
+                ]
+                
+                for menu_selector in expanded_menu_selectors:
+                    if count_elements(self.page, menu_selector, 'expanded mobile menu') > 0:
+                        print("      ✅ Mobile menu expanded successfully")
+                        break
+                        
+                # Click somewhere else to close menu
+                self.page.click('body')
+                self.page.wait_for_timeout(200)
         
         print(f"    📱 Found {mobile_elements_found} mobile navigation elements")
         return mobile_elements_found

@@ -455,7 +455,7 @@ class Domain(models.Model):
                 try:
                     self.tld = TLD.objects.get(extension=domain_tld)
                 except TLD.DoesNotExist:
-                    raise ValidationError(_(f"TLD '.{domain_tld}' is not supported"))
+                    raise ValidationError(_(f"TLD '.{domain_tld}' is not supported")) from None
 
 
 # ===============================================================================

@@ -334,23 +334,23 @@ def test_navigation_dropdown_interactions(page: Page):
             
             # Wait a moment for dropdown to appear
             page.wait_for_timeout(500)
-                
-                # Check if dropdown content is visible
-                dropdown_content_selectors = [
-                    '.dropdown-menu:visible',
-                    '.dropdown-content:visible',
-                    '[aria-expanded="true"]'
-                ]
-                
-                for content_selector in dropdown_content_selectors:
-                    content_count = count_elements(page, content_selector, 'dropdown content')
-                    if content_count > 0:
-                        print(f"      ✅ Dropdown content appeared: {content_count} items")
-                        break
-                
-                # Click somewhere else to close dropdown
-                page.click('body')
-                page.wait_for_timeout(200)
+            
+            # Check if dropdown content is visible
+            dropdown_content_selectors = [
+                '.dropdown-menu:visible',
+                '.dropdown-content:visible',
+                '[aria-expanded="true"]'
+            ]
+            
+            for content_selector in dropdown_content_selectors:
+                content_count = count_elements(page, content_selector, 'dropdown content')
+                if content_count > 0:
+                    print(f"      ✅ Dropdown content appeared: {content_count} items")
+                    break
+            
+            # Click somewhere else to close dropdown
+            page.click('body')
+            page.wait_for_timeout(200)
     
         print(f"  📊 Summary: Found {total_dropdowns} dropdown elements, successfully clicked {total_clicked}")
         

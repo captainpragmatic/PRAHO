@@ -339,7 +339,7 @@ def download_attachment(request: HttpRequest, attachment_id: int) -> HttpRespons
     try:
         attachment = TicketAttachment.objects.select_related('ticket__customer').get(id=attachment_id)
     except TicketAttachment.DoesNotExist:
-        raise Http404("Attachment not found")
+        raise Http404("Attachment not found") from None
 
     # Security check - verify user has access to this customer's ticket
     accessible_customers = request.user.get_accessible_customers()
@@ -359,4 +359,4 @@ def download_attachment(request: HttpRequest, attachment_id: int) -> HttpRespons
             response['Content-Length'] = attachment.file_size
             return response
     except OSError:
-        raise Http404("File could not be read")
+        raise Http404("File could not be read") from None

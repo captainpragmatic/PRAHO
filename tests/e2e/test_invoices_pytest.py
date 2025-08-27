@@ -131,7 +131,7 @@ def _count_navigation_elements(page: Page) -> int:
     ]
     
     nav_total = 0
-    for selector, description in nav_elements:
+    for selector, _description in nav_elements:
         count = page.locator(selector).count()
         nav_total += count
     
