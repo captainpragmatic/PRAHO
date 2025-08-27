@@ -83,7 +83,7 @@ def service_detail(request: HttpRequest, pk: int) -> HttpResponse:
 
 @staff_required
 def service_create(request: HttpRequest) -> HttpResponse:
-    """➕ Create new hosting service"""
+    """+ Create new hosting service"""
     # Get user's customers for dropdown
     accessible_customers = request.user.get_accessible_customers()
     if hasattr(accessible_customers, 'all'):

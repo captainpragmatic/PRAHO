@@ -712,7 +712,7 @@ class ServiceDomain(models.Model):
 
     DOMAIN_TYPE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('primary', _('🎯 Primary Domain')),          # Main website domain
-        ('addon', _('➕ Add-on Domain')),            # Additional domain on same hosting
+        ('addon', _('+ Add-on Domain')),            # Additional domain on same hosting
         ('subdomain', _('🔗 Subdomain')),            # blog.example.com
         ('redirect', _('↩️ Domain Redirect')),        # Forward to primary domain
         ('parking', _('🅿️ Parked Domain')),          # Placeholder page

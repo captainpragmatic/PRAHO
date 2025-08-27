@@ -75,7 +75,7 @@ def ticket_detail(request: HttpRequest, pk: int) -> HttpResponse:
 
 @login_required
 def ticket_create(request: HttpRequest) -> HttpResponse:
-    """➕ Create new support ticket"""
+    """+ Create new support ticket"""
     customers = request.user.get_accessible_customers()
 
     if request.method == 'POST':

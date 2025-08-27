@@ -227,7 +227,7 @@ def _render_customer_form(request: HttpRequest, form: CustomerCreationForm | Non
 @staff_required
 def customer_create(request: HttpRequest) -> HttpResponse:
     """
-    ➕ Create new customer with all profiles and optional user assignment
+    + Create new customer with all profiles and optional user assignment
     Uses composite form to handle normalized structure and user creation/linking
     """
     if request.method == 'POST':

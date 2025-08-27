@@ -251,7 +251,7 @@ def _handle_proforma_create_post(request: HttpRequest) -> HttpResponse:
 @billing_staff_required
 def proforma_create(request: HttpRequest) -> HttpResponse:
     """
-    ➕ Create new proforma invoice (Romanian business practice - only proformas can be created manually)
+    + Create new proforma invoice (Romanian business practice - only proformas can be created manually)
     """
     if request.method == 'POST':
         return _handle_proforma_create_post(request)

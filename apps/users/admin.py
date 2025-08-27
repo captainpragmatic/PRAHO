@@ -149,7 +149,7 @@ class UserAdmin(BaseUserAdmin):
                     'style="color: green; text-decoration: none; padding: 2px 6px; border: 1px solid green; border-radius: 3px; font-size: 11px; margin-left: 5px;">📊 2FA Dashboard</a>',
                     dashboard_url
                 ))
-            except:
+            except Exception:
                 # If reverse fails, use direct URL
                 actions.append(format_html(
                     '<a href="/admin/users/user/2fa-dashboard/" '

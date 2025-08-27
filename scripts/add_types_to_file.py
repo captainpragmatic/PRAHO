@@ -212,27 +212,27 @@ class TypeSuggestionEngine:
                     decorator.value.id == 'register' and 
                     decorator.attr in ('filter', 'simple_tag', 'inclusion_tag')):
                     return True
-            elif isinstance(decorator, ast.Call) and isinstance(decorator.func, ast.Attribute):
-                if (isinstance(decorator.func.value, ast.Name) and 
-                    decorator.func.value.id == 'register' and 
-                    decorator.func.attr in ('filter', 'simple_tag', 'inclusion_tag')):
-                    return True
+            elif (isinstance(decorator, ast.Call) and isinstance(decorator.func, ast.Attribute) and
+                  isinstance(decorator.func.value, ast.Name) and 
+                  decorator.func.value.id == 'register' and 
+                  decorator.func.attr in ('filter', 'simple_tag', 'inclusion_tag')):
+                return True
         return False
     
     def _get_template_tag_return_type(self, node: ast.FunctionDef) -> str:
         """Get appropriate return type for Django template tags/filters"""
         # Analyze the function to determine return type
         for stmt in ast.walk(node):
-            if isinstance(stmt, ast.Return) and stmt.value:
-                if isinstance(stmt.value, ast.Call):
-                    if isinstance(stmt.value.func, ast.Name):
-                        func_name = stmt.value.func.id
-                        if func_name == 'mark_safe':
-                            return 'SafeString'  # Need to add import
-                        elif func_name == 'format_html':
-                            return 'SafeString'
-                        elif func_name in ('escape', 'str'):
-                            return 'str'
+            if (isinstance(stmt, ast.Return) and stmt.value and 
+                isinstance(stmt.value, ast.Call) and 
+                isinstance(stmt.value.func, ast.Name)):
+                func_name = stmt.value.func.id
+                if func_name == 'mark_safe':
+                    return 'SafeString'  # Need to add import
+                elif func_name == 'format_html':
+                    return 'SafeString'
+                elif func_name in ('escape', 'str'):
+                    return 'str'
         
         # Default for template tags/filters
         return 'str'

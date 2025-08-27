@@ -82,10 +82,9 @@ def login_user(page: Page, email: str, password: str) -> bool:
     
     # Navigate to login page if not already there
     current_url = page.url
-    if "/auth/login/" not in current_url:
-        if not wait_for_server_ready(page):
-            print("❌ Server is not ready for login")
-            return False
+    if "/auth/login/" not in current_url and not wait_for_server_ready(page):
+        print("❌ Server is not ready for login")
+        return False
     
     # Wait for form to be ready
     try:
@@ -1406,13 +1405,11 @@ class MobileTestContext:
             count = count_elements(self.page, selector, f"mobile {description}")
             mobile_elements_found += count
             
-            if count > 0:
-                # Test clicking mobile menu toggle
-                if safe_click_element(self.page, selector, f"mobile {description}"):
-                    print(f"      ✅ Mobile menu toggle clicked: {description}")
-                    
-                    # Wait for mobile menu animation
-                    self.page.wait_for_timeout(500)
+            if count > 0 and safe_click_element(self.page, selector, f"mobile {description}"):
+                print(f"      ✅ Mobile menu toggle clicked: {description}")
+                
+                # Wait for mobile menu animation
+                self.page.wait_for_timeout(500)
                     
                     # Look for expanded mobile menu
                     expanded_menu_selectors = [
@@ -1506,7 +1503,7 @@ class MobileTestContext:
                 print("      ✅ Touch interaction successful")
                 return True
             else:
-                print("      ℹ️  No touch-interactive elements found")
+                print("      Info: No touch-interactive elements found")
                 return False
                 
         except Exception as e:

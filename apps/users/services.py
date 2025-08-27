@@ -1093,7 +1093,7 @@ class SessionSecurityService:
                     if session_user_id == str(user_id) and session.session_key != keep_session_key:
                         session.delete()
                         count += 1
-                except:
+                except Exception:
                     # Skip invalid sessions
                     continue
 
@@ -1115,7 +1115,7 @@ class SessionSecurityService:
                     if session_user_id == str(user_id):
                         session.delete()
                         count += 1
-                except:
+                except Exception:
                     # Skip invalid sessions
                     continue
 

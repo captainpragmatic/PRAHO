@@ -329,13 +329,11 @@ def test_navigation_dropdown_interactions(page: Page):
         count = count_elements(page, selector, description)
         total_dropdowns += count
         
-        if count > 0:
-            # Test clicking first dropdown (avoid excessive clicking)
-            if safe_click_element(page, f"{selector}:first-child", f"first {description}"):
-                total_clicked += 1
-                
-                # Wait a moment for dropdown to appear
-                page.wait_for_timeout(500)
+        if count > 0 and safe_click_element(page, f"{selector}:first-child", f"first {description}"):
+            total_clicked += 1
+            
+            # Wait a moment for dropdown to appear
+            page.wait_for_timeout(500)
                 
                 # Check if dropdown content is visible
                 dropdown_content_selectors = [

@@ -558,11 +558,10 @@ class CustomerCreationForm(forms.Form):
         if user_action == 'link' and not existing_user:
             raise ValidationError(_('Please select an existing user to link.'))
 
-        if user_action == 'create' and email:
-            if User.objects.filter(email=email).exists():
-                raise ValidationError(
-                    _('A user with email {email} already exists. Please choose "Link existing user" instead.').format(email=email)
-                )
+        if user_action == 'create' and email and User.objects.filter(email=email).exists():
+            raise ValidationError(
+                _('A user with email {email} already exists. Please choose "Link existing user" instead.').format(email=email)
+            )
 
         return cleaned_data
 

@@ -148,7 +148,7 @@ class Command(BaseCommand):
             old_webhooks.delete()
             self.stdout.write(f"  🗑️ Deleted {count} old webhook records")
         else:
-            self.stdout.write("  ℹ️ No old webhooks to clean up")
+            self.stdout.write("  Info: No old webhooks to clean up")
 
     def show_stats(self) -> None:
         """📊 Show webhook statistics"""

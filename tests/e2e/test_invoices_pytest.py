@@ -478,7 +478,7 @@ def test_invoices_mobile_specific_features(page: Page):
                 # Test touch interactions on invoice elements
                 touch_success = mobile.test_touch_interactions()
                 if not touch_success:
-                    print("    ℹ️  Limited touch interactivity (may be normal for this page)")
+                    print("    Info: Limited touch interactivity (may be normal for this page)")
             
             # Test mobile small viewport (older/smaller devices)  
             with MobileTestContext(page, 'mobile_small') as mobile_small:
