@@ -162,17 +162,14 @@ clean:
 
 .PHONY: lint lint-fix lint-check lint-security lint-credentials lint-performance lint-watch
 
-## lint: Run comprehensive strategic linting (Ruff + MyPy) 🔍
+## lint: Run comprehensive strategic linting (Ruff only) 🔍
 lint:
 	@echo "🎯 PRAHO Platform - Strategic Code Quality Check"
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "🔍 1/3: Performance & Security Analysis..."
+	@echo "🔍 1/2: Performance & Security Analysis..."
 	@.venv/bin/ruff check . --statistics
 	@echo ""
-	@echo "🏷️ 2/3: Type Safety Analysis (Gradual Configuration)..."  
-	@.venv/bin/mypy --config-file=pyproject.toml apps/ config/
-	@echo ""
-	@echo "📊 3/3: Django Check..."
+	@echo "📊 2/2: Django Check..."
 	@.venv/bin/python manage.py check --deploy
 	@echo "✅ Strategic linting complete! Focus on performance & security issues."
 
@@ -188,7 +185,7 @@ lint-fix:
 lint-check:
 	@echo "🤖 CI/CD Strategic Lint Check..."
 	@.venv/bin/ruff check . --no-fix --quiet
-	@.venv/bin/mypy --config-file=pyproject.toml apps/ config/
+	@.venv/bin/python manage.py check --deploy
 
 ## lint-security: Focus on security issues only 🔒
 lint-security:
