@@ -7,6 +7,7 @@ import functools
 import logging
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from django.core.cache import cache
@@ -37,16 +38,26 @@ logger = logging.getLogger(__name__)
 
 
 # ===============================================================================
+# SECURITY DECORATOR PARAMETER OBJECTS
+# ===============================================================================
+
+@dataclass
+class SecurityConfig:
+    """Parameter object for security decorator configuration"""
+    validation_type: str = "general"
+    rate_limit_key: str | None = None
+    rate_limit: int | None = None
+    requires_permission: str | None = None
+    log_attempts: bool = True
+    prevent_timing_attacks: bool = True
+
+# ===============================================================================
 # COMPREHENSIVE SERVICE SECURITY DECORATOR
 # ===============================================================================
 
 def secure_service_method(
-    validation_type: str = "general",
-    rate_limit_key: str | None = None,
-    rate_limit: int | None = None,
-    requires_permission: str | None = None,
-    log_attempts: bool = True,
-    prevent_timing_attacks: bool = True
+    config: SecurityConfig | None = None,
+    **kwargs: Any
 ) -> Callable[[Callable], Callable]:
     """
     Master security decorator for service methods
@@ -59,6 +70,15 @@ def secure_service_method(
         log_attempts: Whether to log security events
         prevent_timing_attacks: Whether to normalize response times
     """
+    # Use default config if none provided and merge with kwargs
+    if config is None:
+        config = SecurityConfig()
+    
+    # Override config with any direct kwargs for backward compatibility
+    for key, value in kwargs.items():
+        if hasattr(config, key):
+            setattr(config, key, value)
+    
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Result[Any, str]:
@@ -68,30 +88,30 @@ def secure_service_method(
 
             try:
                 # 1. Rate Limiting Check
-                if rate_limit_key and rate_limit:
-                    _check_rate_limit(rate_limit_key, rate_limit, request_ip, user)
+                if config.rate_limit_key and config.rate_limit:
+                    _check_rate_limit(config.rate_limit_key, config.rate_limit, request_ip, user)
 
                 # 2. Input Validation
-                if validation_type == "user_registration":
+                if config.validation_type == "user_registration":
                     _validate_user_registration_input(args, kwargs)
-                elif validation_type == "customer_data":
+                elif config.validation_type == "customer_data":
                     _validate_customer_data_input(args, kwargs)
-                elif validation_type == "invitation":
+                elif config.validation_type == "invitation":
                     _validate_invitation_input(args, kwargs)
 
                 # 3. Permission Validation
-                if requires_permission:
-                    _validate_permissions(user, kwargs.get('customer'), requires_permission)
+                if config.requires_permission:
+                    _validate_permissions(user, kwargs.get('customer'), config.requires_permission)
 
                 # 4. Execute Original Function
                 with transaction.atomic():
                     result = func(*args, **kwargs)
 
                 # 5. Log Success
-                if log_attempts:
+                if config.log_attempts:
                     log_security_event('method_success', {
                         'method': func.__name__,
-                        'validation_type': validation_type,
+                        'validation_type': config.validation_type,
                         'user_id': user.id if user else None
                     }, request_ip)
 
@@ -99,19 +119,19 @@ def secure_service_method(
 
             except ValidationError as e:
                 # Security validation failed
-                if log_attempts:
+                if config.log_attempts:
                     log_security_event('validation_failed', {
                         'method': func.__name__,
                         'error': str(e),
-                        'validation_type': validation_type,
+                        'validation_type': config.validation_type,
                         'user_id': user.id if user else None
                     }, request_ip)
 
-                return Err(SecureErrorHandler.safe_error_response(e, validation_type))
+                return Err(SecureErrorHandler.safe_error_response(e, config.validation_type))
 
             except Exception as e:
                 # Unexpected error
-                if log_attempts:
+                if config.log_attempts:
                     log_security_event('method_error', {
                         'method': func.__name__,
                         'error': str(e),
@@ -122,11 +142,32 @@ def secure_service_method(
 
             finally:
                 # 6. Timing Attack Prevention
-                if prevent_timing_attacks:
+                if config.prevent_timing_attacks:
                     _normalize_response_time(start_time)
 
         return wrapper
     return decorator
+
+
+# Legacy wrapper for backward compatibility
+def secure_service_method_legacy(  # noqa: PLR0913
+    validation_type: str = "general",
+    rate_limit_key: str | None = None,
+    rate_limit: int | None = None,
+    requires_permission: str | None = None,
+    log_attempts: bool = True,
+    prevent_timing_attacks: bool = True
+) -> Callable[[Callable], Callable]:
+    """Legacy wrapper for backward compatibility"""
+    config = SecurityConfig(
+        validation_type=validation_type,
+        rate_limit_key=rate_limit_key,
+        rate_limit=rate_limit,
+        requires_permission=requires_permission,
+        log_attempts=log_attempts,
+        prevent_timing_attacks=prevent_timing_attacks
+    )
+    return secure_service_method(config)
 
 
 # ===============================================================================

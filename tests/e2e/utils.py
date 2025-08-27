@@ -13,6 +13,7 @@ Centralizes common functionality like:
 
 
 import time
+from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
@@ -758,6 +759,22 @@ def check_performance_issues(page: Page) -> list[str]:
     return perf_issues
 
 
+# ===============================================================================
+# PAGE MONITOR CONFIGURATION
+# ===============================================================================
+
+@dataclass
+class PageQualityConfig:
+    """Configuration object for page quality monitoring"""
+    check_console: bool = True
+    check_network: bool = True
+    check_html: bool = True
+    check_css: bool = True
+    check_accessibility: bool = False  # Can be slow
+    check_performance: bool = False    # Can be slow
+    ignore_patterns: list[str] = field(default_factory=list)
+
+
 class ComprehensivePageMonitor:
     """
     Comprehensive monitoring for all aspects of page quality during test execution.
@@ -769,22 +786,27 @@ class ComprehensivePageMonitor:
     """
     
     def __init__(self, page: Page, context: str = "", 
-                 check_console: bool = True,
-                 check_network: bool = True, 
-                 check_html: bool = True,
-                 check_css: bool = True,
-                 check_accessibility: bool = False,  # Can be slow
-                 check_performance: bool = False,    # Can be slow
-                 ignore_patterns: list[str] = None):
+                 config: PageQualityConfig | None = None,
+                 **kwargs: Any):
+        # Use default config if none provided
+        if config is None:
+            config = PageQualityConfig()
+        
+        # Override with any direct kwargs for backward compatibility
+        for key, value in kwargs.items():
+            if hasattr(config, key) and value is not None:
+                setattr(config, key, value)
+        
         self.page = page
         self.context = context
-        self.check_console = check_console
-        self.check_network = check_network
-        self.check_html = check_html
-        self.check_css = check_css
-        self.check_accessibility = check_accessibility
-        self.check_performance = check_performance
-        self.ignore_patterns = ignore_patterns or []
+        self.config = config
+        self.check_console = config.check_console
+        self.check_network = config.check_network
+        self.check_html = config.check_html
+        self.check_css = config.check_css
+        self.check_accessibility = config.check_accessibility
+        self.check_performance = config.check_performance
+        self.ignore_patterns = config.ignore_patterns
         self.console_messages = []
     
     def __enter__(self):

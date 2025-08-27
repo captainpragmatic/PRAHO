@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Audit services for PRAHO Platform
 Centralized audit logging for Romanian compliance and security.
@@ -7,6 +8,7 @@ import hashlib
 import json
 import logging
 import uuid
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Optional, TypedDict
 
 from django.contrib.auth import get_user_model
@@ -59,6 +61,45 @@ class ConsentHistoryEntry(TypedDict):
     description: str
     status: str
     evidence: dict[str, Any]
+
+@dataclass
+class AuditContext:
+    """Parameter object for audit event context information"""
+    user: Optional[UserType] = None
+    ip_address: str | None = None
+    user_agent: str | None = None
+    request_id: str | None = None
+    session_key: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    actor_type: str = 'user'
+
+@dataclass
+class AuditEventData:
+    """Parameter object for audit event data"""
+    event_type: str
+    content_object: Any | None = None
+    old_values: dict[str, Any] | None = None
+    new_values: dict[str, Any] | None = None
+    description: str = ''
+
+@dataclass
+class TwoFactorAuditRequest:
+    """Parameter object for 2FA audit events"""
+    event_type: str
+    user: UserType
+    context: AuditContext = field(default_factory=AuditContext)
+    description: str = ''
+
+@dataclass
+class ComplianceEventRequest:
+    """Parameter object for compliance events"""
+    compliance_type: str
+    reference_id: str
+    description: str
+    user: Optional[UserType] = None
+    status: str = 'success'
+    evidence: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 logger = logging.getLogger(__name__)
 
 
@@ -67,82 +108,57 @@ class AuditService:
 
     @staticmethod
     def log_event(
-        event_type: str,
-        user: User | None = None,
-        content_object: Any | None = None,
-        old_values: dict[str, Any] | None = None,
-        new_values: dict[str, Any] | None = None,
-        description: str = '',
-        ip_address: str | None = None,
-        user_agent: str | None = None,
-        request_id: str | None = None,
-        session_key: str | None = None,
-        metadata: dict[str, Any] | None = None,
-        actor_type: str = 'user'
+        event_data: AuditEventData,
+        context: AuditContext | None = None
     ) -> AuditEvent:
         """
         🔐 Log an audit event with full context
 
         Args:
-            event_type: Type of event (from ACTION_CHOICES or custom 2FA events)
-            user: User performing the action
-            content_object: Object being acted upon
-            old_values: Previous values (for updates)
-            new_values: New values (for updates)
-            description: Human-readable description
-            ip_address: Client IP address
-            user_agent: Client user agent
-            request_id: Request tracking ID
-            session_key: Session key for correlation
-            metadata: Additional event metadata
-            actor_type: Type of actor (user, system, api)
+            event_data: AuditEventData containing event information
+            context: AuditContext containing user and request context (optional)
         """
+        # Use default context if none provided
+        if context is None:
+            context = AuditContext()
+        
         try:
             # Get content type if object provided
             content_type = None
             object_id = None
-            if content_object:
-                content_type = ContentType.objects.get_for_model(content_object)
-                object_id = content_object.pk
+            if event_data.content_object:
+                content_type = ContentType.objects.get_for_model(event_data.content_object)
+                object_id = event_data.content_object.pk
 
             # Create audit event
             audit_event = AuditEvent.objects.create(
-                user=user,
-                actor_type=actor_type,
-                action=event_type,
+                user=context.user,
+                actor_type=context.actor_type,
+                action=event_data.event_type,
                 content_type=content_type,
                 object_id=object_id,
-                old_values=old_values or {},
-                new_values=new_values or {},
-                description=description,
-                ip_address=ip_address,
-                user_agent=user_agent or '',
-                request_id=request_id or str(uuid.uuid4()),
-                session_key=session_key or '',
-                metadata=metadata or {}
+                old_values=event_data.old_values or {},
+                new_values=event_data.new_values or {},
+                description=event_data.description,
+                ip_address=context.ip_address,
+                user_agent=context.user_agent or '',
+                request_id=context.request_id or str(uuid.uuid4()),
+                session_key=context.session_key or '',
+                metadata=context.metadata
             )
 
             logger.info(
-                f"✅ [Audit] {event_type} event logged for user {user.email if user else 'System'}"
+                f"✅ [Audit] {event_data.event_type} event logged for user {context.user.email if context.user else 'System'}"
             )
 
             return audit_event
 
         except Exception as e:
-            logger.error(f"🔥 [Audit] Failed to log event {event_type}: {e}")
+            logger.error(f"🔥 [Audit] Failed to log event {event_data.event_type}: {e}")
             raise
 
     @staticmethod
-    def log_2fa_event(
-        event_type: str,
-        user: User,
-        ip_address: str | None = None,
-        user_agent: str | None = None,
-        metadata: dict[str, Any] | None = None,
-        description: str = '',
-        request_id: str | None = None,
-        session_key: str | None = None
-    ) -> AuditEvent:
+    def log_2fa_event(request: TwoFactorAuditRequest) -> AuditEvent:
         """
         🔐 Log 2FA-specific audit event
 
@@ -161,65 +177,173 @@ class AuditService:
         enhanced_metadata = {
             'event_category': '2fa_security',
             'timestamp': timezone.now().isoformat(),
-            **(metadata or {})
+            **request.context.metadata
         }
 
         # Add user 2FA status to metadata
-        if user:
+        if request.user:
             enhanced_metadata.update({
-                'user_2fa_enabled': user.two_factor_enabled,
-                'backup_codes_count': len(user.backup_tokens) if user.backup_tokens else 0
+                'user_2fa_enabled': request.user.two_factor_enabled,
+                'backup_codes_count': len(request.user.backup_tokens) if request.user.backup_tokens else 0
             })
 
-        return AuditService.log_event(
-            event_type=event_type,
-            user=user,
-            content_object=user,  # 2FA events act on the user object
-            description=description or f"2FA {event_type.replace('_', ' ').title()}",
-            ip_address=ip_address,
-            user_agent=user_agent,
-            request_id=request_id,
-            session_key=session_key,
-            metadata=enhanced_metadata
+        # Create enhanced context with metadata
+        enhanced_context = AuditContext(
+            user=request.user,
+            ip_address=request.context.ip_address,
+            user_agent=request.context.user_agent,
+            request_id=request.context.request_id,
+            session_key=request.context.session_key,
+            metadata=enhanced_metadata,
+            actor_type=request.context.actor_type
         )
 
+        # Create event data
+        event_data = AuditEventData(
+            event_type=request.event_type,
+            content_object=request.user,  # 2FA events act on the user object
+            description=request.description or f"2FA {request.event_type.replace('_', ' ').title()}"
+        )
+
+        return AuditService.log_event(event_data, enhanced_context)
+
     @staticmethod
-    def log_compliance_event(
-        compliance_type: str,
-        reference_id: str,
-        description: str,
-        user: Optional['UserType'] = None,
-        status: str = 'success',
-        evidence: dict[str, Any] | None = None,
-        metadata: dict[str, Any] | None = None
-    ) -> ComplianceLog:
+    def log_compliance_event(request: ComplianceEventRequest) -> ComplianceLog:
         """
         📋 Log Romanian compliance event
+        
+        Args:
+            request: ComplianceEventRequest containing all compliance event data
         """
         try:
             compliance_log = ComplianceLog.objects.create(
-                compliance_type=compliance_type,
-                reference_id=reference_id,
-                description=description,
-                user=user,
-                status=status,
-                evidence=evidence or {},
-                metadata=metadata or {}
+                compliance_type=request.compliance_type,
+                reference_id=request.reference_id,
+                description=request.description,
+                user=request.user,
+                status=request.status,
+                evidence=request.evidence,
+                metadata=request.metadata
             )
 
             logger.info(
-                f"📋 [Compliance] {compliance_type} logged: {reference_id}"
+                f"📋 [Compliance] {request.compliance_type} logged: {request.reference_id}"
             )
 
             return compliance_log
 
         except Exception as e:
-            logger.error(f"🔥 [Compliance] Failed to log {compliance_type}: {e}")
+            logger.error(f"🔥 [Compliance] Failed to log {request.compliance_type}: {e}")
             raise
+    
+    # ===============================================================================
+    # BACKWARD COMPATIBILITY WRAPPER METHODS
+    # ===============================================================================
+    
+    @staticmethod
+    def log_event_legacy(  # noqa: PLR0913
+        event_type: str,
+        user: User | None = None,
+        content_object: Any | None = None,
+        old_values: dict[str, Any] | None = None,
+        new_values: dict[str, Any] | None = None,
+        description: str = '',
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+        request_id: str | None = None,
+        session_key: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        actor_type: str = 'user'
+    ) -> AuditEvent:
+        """Legacy wrapper for backward compatibility"""
+        event_data = AuditEventData(
+            event_type=event_type,
+            content_object=content_object,
+            old_values=old_values,
+            new_values=new_values,
+            description=description
+        )
+        
+        context = AuditContext(
+            user=user,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            request_id=request_id,
+            session_key=session_key,
+            metadata=metadata or {},
+            actor_type=actor_type
+        )
+        
+        return AuditService.log_event(event_data, context)
+    
+    @staticmethod
+    def log_2fa_event_legacy(  # noqa: PLR0913
+        event_type: str,
+        user: User,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        description: str = '',
+        request_id: str | None = None,
+        session_key: str | None = None
+    ) -> AuditEvent:
+        """Legacy wrapper for backward compatibility"""
+        context = AuditContext(
+            ip_address=ip_address,
+            user_agent=user_agent,
+            request_id=request_id,
+            session_key=session_key,
+            metadata=metadata or {}
+        )
+        
+        request = TwoFactorAuditRequest(
+            event_type=event_type,
+            user=user,
+            context=context,
+            description=description
+        )
+        
+        return AuditService.log_2fa_event(request)
+    
+    @staticmethod
+    def log_compliance_event_legacy(  # noqa: PLR0913
+        compliance_type: str,
+        reference_id: str,
+        description: str,
+        user: Optional[UserType] = None,
+        status: str = 'success',
+        evidence: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None
+    ) -> ComplianceLog:
+        """Legacy wrapper for backward compatibility"""
+        request = ComplianceEventRequest(
+            compliance_type=compliance_type,
+            reference_id=reference_id,
+            description=description,
+            user=user,
+            status=status,
+            evidence=evidence or {},
+            metadata=metadata or {}
+        )
+        
+        return AuditService.log_compliance_event(request)
 
 
-# Global audit service instance
-audit_service = AuditService()
+class AuditServiceProxy:
+    """Proxy class to maintain backward compatibility with existing code"""
+    
+    def log_event(self, *args, **kwargs):
+        return AuditService.log_event_legacy(*args, **kwargs)
+    
+    def log_2fa_event(self, *args, **kwargs):
+        return AuditService.log_2fa_event_legacy(*args, **kwargs)
+    
+    def log_compliance_event(self, *args, **kwargs):
+        return AuditService.log_compliance_event_legacy(*args, **kwargs)
+
+
+# Global audit service instance (backward compatible)
+audit_service = AuditServiceProxy()
 
 
 # ===============================================================================
@@ -270,7 +394,7 @@ class GDPRExportService:
             )
 
             # Log GDPR export request
-            audit_service.log_compliance_event(
+            compliance_request = ComplianceEventRequest(
                 compliance_type='gdpr_consent',
                 reference_id=f"export_{export_request.id}",
                 description=f"GDPR data export requested by {user.email}",
@@ -279,6 +403,7 @@ class GDPRExportService:
                 evidence={'export_id': str(export_request.id), 'scope': export_scope},
                 metadata={'ip_address': request_ip}
             )
+            AuditService.log_compliance_event(compliance_request)
 
             logger.info(f"🔒 [GDPR Export] Request created for {user.email}: {export_request.id}")
             return Ok(export_request)
@@ -325,7 +450,7 @@ class GDPRExportService:
             ])
 
             # Log completion
-            audit_service.log_compliance_event(
+            compliance_request = ComplianceEventRequest(
                 compliance_type='gdpr_consent',
                 reference_id=f"export_{export_request.id}",
                 description=f"GDPR data export completed for {user.email}",
@@ -337,6 +462,7 @@ class GDPRExportService:
                     'completion_time': export_request.completed_at.isoformat()
                 }
             )
+            AuditService.log_compliance_event(compliance_request)
 
             logger.info(f"✅ [GDPR Export] Completed for {user.email}: {export_request.file_size} bytes, {export_request.record_count} records")
             return Ok(saved_path)
@@ -493,7 +619,7 @@ class GDPRDeletionService:
                 deletion_type = 'anonymize'  # Force anonymization instead
 
             # Create compliance log entry
-            deletion_request = audit_service.log_compliance_event(
+            compliance_request = ComplianceEventRequest(
                 compliance_type='gdpr_deletion',
                 reference_id=f"deletion_{user.id}_{uuid.uuid4().hex[:8]}",
                 description=f"GDPR {deletion_type} requested by {user.email}. Reason: {reason or 'User request'}" +
@@ -509,6 +635,7 @@ class GDPRDeletionService:
                 },
                 metadata={'ip_address': request_ip}
             )
+            deletion_request = AuditService.log_compliance_event(compliance_request)
 
             logger.info(f"🔒 [GDPR Deletion] {deletion_type.capitalize()} request created for {user.email}")
             return Ok(deletion_request)
@@ -710,7 +837,7 @@ class GDPRConsentService:
                 user.save()
 
                 # Log consent withdrawal
-                audit_service.log_compliance_event(
+                compliance_request = ComplianceEventRequest(
                     compliance_type='gdpr_consent',
                     reference_id=f"consent_withdrawal_{user.id}_{uuid.uuid4().hex[:8]}",
                     description=f"Consent withdrawn for: {', '.join(changes_made)}",
@@ -723,6 +850,7 @@ class GDPRConsentService:
                     },
                     metadata={'ip_address': request_ip}
                 )
+                AuditService.log_compliance_event(compliance_request)
 
             logger.info(f"✅ [GDPR Consent] Consent withdrawn for {user.email}: {changes_made}")
             return Ok(f"Consent withdrawn for: {', '.join(changes_made)}")

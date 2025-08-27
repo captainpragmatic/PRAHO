@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 SECURE User Registration Services - PRAHO Platform
 Enhanced with comprehensive security measures addressing critical vulnerabilities.
@@ -8,6 +9,7 @@ This replaces the existing services.py with security-hardened implementations.
 import hashlib
 import logging
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
 
 from django.conf import settings
@@ -70,6 +72,41 @@ else:
     User = get_user_model()
 
 logger = logging.getLogger(__name__)
+
+
+# ===============================================================================
+# USER SERVICE PARAMETER OBJECTS
+# ===============================================================================
+
+@dataclass
+class UserCreationRequest:
+    """Parameter object for user creation requests"""
+    customer: Customer
+    first_name: str = ""
+    last_name: str = ""
+    send_welcome: bool = True
+    created_by: User | None = None
+    request_ip: str | None = None
+
+@dataclass
+class UserLinkingRequest:
+    """Parameter object for linking existing users to customers"""
+    user: User
+    customer: Customer
+    role: str = 'viewer'  # Secure default
+    is_primary: bool = False
+    created_by: User | None = None
+    request_ip: str | None = None
+
+@dataclass
+class UserInvitationRequest:
+    """Parameter object for user invitation requests"""
+    inviter: User
+    invitee_email: str
+    customer: Customer
+    role: str = 'viewer'
+    request_ip: str | None = None
+    user_id: int | None = None  # For rate limiting
 
 
 # ===============================================================================
@@ -337,12 +374,7 @@ class SecureCustomerUserService:
     @monitor_performance(max_duration_seconds=8.0)
     def create_user_for_customer(
         cls,
-        customer: Customer,
-        first_name: str = "",
-        last_name: str = "",
-        send_welcome: bool = True,
-        created_by: User | None = None,
-        request_ip: str | None = None,
+        request: UserCreationRequest,
         **kwargs: Any
     ) -> Result[tuple[User, bool], str]:
         """
@@ -350,17 +382,17 @@ class SecureCustomerUserService:
         """
         try:
             # Input validation
-            if first_name:
-                first_name = SecureInputValidator.validate_name_secure(first_name, 'first_name')
-            if last_name:
-                last_name = SecureInputValidator.validate_name_secure(last_name, 'last_name')
+            if request.first_name:
+                request.first_name = SecureInputValidator.validate_name_secure(request.first_name, 'first_name')
+            if request.last_name:
+                request.last_name = SecureInputValidator.validate_name_secure(request.last_name, 'last_name')
 
             # Validate customer email
-            if not hasattr(customer, 'primary_email') or not customer.primary_email:
+            if not hasattr(request.customer, 'primary_email') or not request.customer.primary_email:
                 return Err(_("Customer does not have a valid email address"))
 
             validated_email = SecureInputValidator.validate_email_secure(
-                customer.primary_email, 'user_creation'
+                request.customer.primary_email, 'user_creation'
             )
 
             # Check for existing user (race condition safe)
@@ -373,19 +405,19 @@ class SecureCustomerUserService:
                     return Err(_("User account already exists for this email"))
 
                 # Extract names if not provided
-                if not first_name and not last_name and hasattr(customer, 'name') and customer.name:
-                    name_parts = customer.name.split()
-                    first_name = name_parts[0] if name_parts else ''
-                    last_name = ' '.join(name_parts[1:]) if len(name_parts) > 1 else ''
+                if not request.first_name and not request.last_name and hasattr(request.customer, 'name') and request.customer.name:
+                    name_parts = request.customer.name.split()
+                    request.first_name = name_parts[0] if name_parts else ''
+                    request.last_name = ' '.join(name_parts[1:]) if len(name_parts) > 1 else ''
 
                 # Create user with security measures
                 user = User.objects.create_user(
                     email=validated_email,
-                    first_name=first_name or '',
-                    last_name=last_name or '',
-                    phone=getattr(customer, 'primary_phone', '') or '',
+                    first_name=request.first_name or '',
+                    last_name=request.last_name or '',
+                    phone=getattr(request.customer, 'primary_phone', '') or '',
                     is_active=True,
-                    created_by=created_by
+                    created_by=request.created_by
                 )
                 user.set_unusable_password()  # Force password reset
                 user.save()
@@ -393,25 +425,25 @@ class SecureCustomerUserService:
                 # Create secure membership
                 CustomerMembership.objects.create(
                     user=user,
-                    customer=customer,
+                    customer=request.customer,
                     role='owner',
                     is_primary=True,
-                    created_by=created_by
+                    created_by=request.created_by
                 )
 
             # Send welcome email securely
             email_sent = False
-            if send_welcome:
-                email_sent = cls._send_welcome_email_secure(user, customer, request_ip)
+            if request.send_welcome:
+                email_sent = cls._send_welcome_email_secure(user, request.customer, request.request_ip)
 
             log_security_event('customer_user_created', {
                 'user_id': user.id,
-                'customer_id': customer.id,
+                'customer_id': request.customer.id,
                 'email_sent': email_sent,
-                'created_by_id': created_by.id if created_by else None
-            }, request_ip)
+                'created_by_id': request.created_by.id if request.created_by else None
+            }, request.request_ip)
 
-            logger.info(f"✅ [Secure User Creation] Created user {user.email} for customer {customer.name}")
+            logger.info(f"✅ [Secure User Creation] Created user {user.email} for customer {request.customer.name}")
             return Ok((user, email_sent))
 
         except Exception as e:
@@ -423,12 +455,7 @@ class SecureCustomerUserService:
     @audit_service_call("user_linking")
     def link_existing_user(
         cls,
-        user: User,
-        customer: Customer,
-        role: str = 'viewer',  # Secure default
-        is_primary: bool = False,
-        created_by: User | None = None,
-        request_ip: str | None = None,
+        request: UserLinkingRequest,
         **kwargs: Any
     ) -> Result[Any, str]:
         """
@@ -436,12 +463,12 @@ class SecureCustomerUserService:
         """
         try:
             # Validate role
-            validated_role = SecureInputValidator.validate_customer_role(role)
+            validated_role = SecureInputValidator.validate_customer_role(request.role)
 
             # Check for existing membership (race condition safe)
             with transaction.atomic():
                 existing = CustomerMembership.objects.select_for_update().filter(
-                    user=user, customer=customer
+                    user=request.user, customer=request.customer
                 ).first()
 
                 if existing:
@@ -449,21 +476,21 @@ class SecureCustomerUserService:
 
                 # Create membership
                 membership = CustomerMembership.objects.create(
-                    user=user,
-                    customer=customer,
+                    user=request.user,
+                    customer=request.customer,
                     role=validated_role,
-                    is_primary=is_primary,
-                    created_by=created_by
+                    is_primary=request.is_primary,
+                    created_by=request.created_by
                 )
 
             log_security_event('user_linked_to_customer', {
-                'user_id': user.id,
-                'customer_id': customer.id,
+                'user_id': request.user.id,
+                'customer_id': request.customer.id,
                 'role': validated_role,
-                'is_primary': is_primary
-            }, request_ip)
+                'is_primary': request.is_primary
+            }, request.request_ip)
 
-            logger.info(f"✅ [Secure User Linking] Linked user {user.email} to customer {customer.name} as {validated_role}")
+            logger.info(f"✅ [Secure User Linking] Linked user {request.user.email} to customer {request.customer.name} as {validated_role}")
             return Ok(membership)
 
         except Exception as e:
@@ -476,12 +503,7 @@ class SecureCustomerUserService:
     @monitor_performance(max_duration_seconds=10.0)
     def invite_user_to_customer(
         cls,
-        inviter: User,
-        invitee_email: str,
-        customer: Customer,
-        role: str = 'viewer',
-        request_ip: str | None = None,
-        user_id: int | None = None,  # For rate limiting
+        request: UserInvitationRequest,
         **kwargs: Any
     ) -> Result[CustomerMembership, str]:
         """
@@ -500,14 +522,14 @@ class SecureCustomerUserService:
             # Check if user already exists and has membership
             with transaction.atomic():
                 existing_user = User.objects.select_for_update().filter(
-                    email=invitee_email
+                    email=request.invitee_email
                 ).first()
 
                 if existing_user:
                     # Check for existing membership
                     existing_membership = CustomerMembership.objects.select_for_update().filter(
                         user=existing_user,
-                        customer=customer
+                        customer=request.customer
                     ).first()
 
                     if existing_membership:
@@ -516,41 +538,122 @@ class SecureCustomerUserService:
                     # Add to existing user
                     membership = CustomerMembership.objects.create(
                         user=existing_user,
-                        customer=customer,
-                        role=role,
+                        customer=request.customer,
+                        role=request.role,
                         is_primary=False,
                     )
                     user_created = False
                 else:
                     # Create new user account (inactive until they accept)
                     new_user = User.objects.create_user(
-                        email=invitee_email,
+                        email=request.invitee_email,
                         is_active=False,  # Will be activated when they accept invite
                     )
 
                     membership = CustomerMembership.objects.create(
                         user=new_user,
-                        customer=customer,
-                        role=role,
+                        customer=request.customer,
+                        role=request.role,
                         is_primary=False,
                     )
                     user_created = True
 
             # Send secure invitation email
-            cls._send_invitation_email_secure(membership, inviter, request_ip)
+            cls._send_invitation_email_secure(membership, request.inviter, request.request_ip)
 
             log_security_event('invitation_sent', {
-                'inviter_id': inviter.id,
-                'invitee_email': invitee_email,
-                'customer_id': customer.id,
-                'role': role,
+                'inviter_id': request.inviter.id,
+                'invitee_email': request.invitee_email,
+                'customer_id': request.customer.id,
+                'role': request.role,
                 'user_created': user_created
-            }, request_ip)
+            }, request.request_ip)
 
             return Ok(membership)
 
         except Exception as e:
             return Err(SecureErrorHandler.safe_error_response(e, "invitation"))
+    
+    # ===============================================================================
+    # BACKWARD COMPATIBILITY WRAPPER METHODS
+    # ===============================================================================
+    
+    @classmethod
+    @secure_customer_operation(requires_owner=True)
+    @atomic_with_retry(max_retries=3)
+    @audit_service_call("user_creation")
+    @monitor_performance(max_duration_seconds=8.0)
+    def create_user_for_customer_legacy(  # noqa: PLR0913
+        cls,
+        customer: Customer,
+        first_name: str = "",
+        last_name: str = "",
+        send_welcome: bool = True,
+        created_by: User | None = None,
+        request_ip: str | None = None,
+        **kwargs: Any
+    ) -> Result[tuple[User, bool], str]:
+        """Legacy wrapper for backward compatibility"""
+        request = UserCreationRequest(
+            customer=customer,
+            first_name=first_name,
+            last_name=last_name,
+            send_welcome=send_welcome,
+            created_by=created_by,
+            request_ip=request_ip
+        )
+        return cls.create_user_for_customer(request, **kwargs)
+    
+    @classmethod
+    @secure_customer_operation(requires_owner=False)
+    @atomic_with_retry(max_retries=3)
+    @audit_service_call("user_linking")
+    def link_existing_user_legacy(  # noqa: PLR0913
+        cls,
+        user: User,
+        customer: Customer,
+        role: str = 'viewer',
+        is_primary: bool = False,
+        created_by: User | None = None,
+        request_ip: str | None = None,
+        **kwargs: Any
+    ) -> Result[Any, str]:
+        """Legacy wrapper for backward compatibility"""
+        request = UserLinkingRequest(
+            user=user,
+            customer=customer,
+            role=role,
+            is_primary=is_primary,
+            created_by=created_by,
+            request_ip=request_ip
+        )
+        return cls.link_existing_user(request, **kwargs)
+    
+    @classmethod
+    @secure_invitation_system()
+    @atomic_with_retry(max_retries=3)
+    @audit_service_call("invitation_sent")
+    @monitor_performance(max_duration_seconds=10.0)
+    def invite_user_to_customer_legacy(  # noqa: PLR0913
+        cls,
+        inviter: User,
+        invitee_email: str,
+        customer: Customer,
+        role: str = 'viewer',
+        request_ip: str | None = None,
+        user_id: int | None = None,
+        **kwargs: Any
+    ) -> Result[CustomerMembership, str]:
+        """Legacy wrapper for backward compatibility"""
+        request = UserInvitationRequest(
+            inviter=inviter,
+            invitee_email=invitee_email,
+            customer=customer,
+            role=role,
+            request_ip=request_ip,
+            user_id=user_id
+        )
+        return cls.invite_user_to_customer(request, **kwargs)
 
     # ===============================================================================
     # SECURE HELPER METHODS

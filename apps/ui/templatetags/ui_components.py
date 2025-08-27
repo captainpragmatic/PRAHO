@@ -5,6 +5,7 @@ HTMX-powered reusable components for Romanian hosting provider interface
 """
 
 import re
+from dataclasses import dataclass
 from typing import Any
 
 from django import template
@@ -16,32 +17,112 @@ from apps.common.constants import FILE_SIZE_CONVERSION_FACTOR
 register = template.Library()
 
 
+# ===============================================================================
+# UI COMPONENT PARAMETER OBJECTS
+# ===============================================================================
+
+@dataclass
+class HTMXAttributes:
+    """Parameter object for HTMX attributes"""
+    hx_get: str | None = None
+    hx_post: str | None = None
+    hx_put: str | None = None
+    hx_patch: str | None = None
+    hx_delete: str | None = None
+    hx_target: str | None = None
+    hx_swap: str | None = None
+    hx_trigger: str | None = None
+    hx_confirm: str | None = None
+    hx_indicator: str | None = None
+    hx_push_url: str | None = None
+    hx_select: str | None = None
+    hx_boost: bool = False
+
+@dataclass
+class ButtonConfig:
+    """Parameter object for button styling and behavior"""
+    variant: str = 'primary'
+    size: str = 'md'
+    href: str | None = None
+    type: str = 'button'
+    icon: str | None = None
+    icon_right: bool = False
+    disabled: bool = False
+    class_: str = ''
+    attrs: str = ''
+
+@dataclass
+class InputConfig:
+    """Parameter object for input field configuration"""
+    input_type: str = 'text'
+    value: str | None = None
+    label: str | None = None
+    placeholder: str | None = None
+    required: bool = False
+    disabled: bool = False
+    readonly: bool = False
+    error: str | None = None
+    help_text: str | None = None
+    icon_left: str | None = None
+    icon_right: str | None = None
+    css_class: str = ''
+    html_id: str | None = None
+    options: list | None = None
+    romanian_validation: bool = True
+
+@dataclass
+class CheckboxConfig:
+    """Parameter object for checkbox configuration"""
+    label: str | None = None
+    value: str | None = None
+    checked: bool = False
+    required: bool = False
+    disabled: bool = False
+    error: str | None = None
+    help_text: str | None = None
+    variant: str = 'primary'
+    css_class: str = ''
+    container_class: str = ''
+    html_id: str | None = None
+    data_attrs: dict | None = None
+
+@dataclass
+class AlertConfig:
+    """Parameter object for alert configuration"""
+    variant: str = 'info'
+    title: str | None = None
+    dismissible: bool = False
+    show_icon: bool = True
+    css_class: str = ''
+    html_id: str | None = None
+
+@dataclass
+class ModalConfig:
+    """Parameter object for modal configuration"""
+    size: str = 'md'
+    closeable: bool = True
+    show_footer: bool = True
+    content: str | None = None
+    css_class: str = ''
+    html_id: str | None = None
+
+@dataclass
+class DataTableConfig:
+    """Parameter object for data table configuration"""
+    sortable: bool = True
+    searchable: bool = True
+    pagination: bool = True
+    actions: list | None = None
+    css_class: str = ''
+    empty_message: str = 'Nu există date disponibile.'
+
+
 @register.inclusion_tag('components/button.html')
 def button(
     text: str,
     *,
-    variant: str = 'primary',
-    size: str = 'md',
-    href: str | None = None,
-    type: str = 'button',
-    hx_get: str | None = None,
-    hx_post: str | None = None,
-    hx_put: str | None = None,
-    hx_patch: str | None = None,
-    hx_delete: str | None = None,
-    hx_target: str | None = None,
-    hx_swap: str | None = None,
-    hx_trigger: str | None = None,
-    hx_confirm: str | None = None,
-    hx_indicator: str | None = None,
-    hx_push_url: str | None = None,
-    hx_select: str | None = None,
-    hx_boost: bool = False,
-    icon: str | None = None,
-    icon_right: bool = False,
-    disabled: bool = False,
-    class_: str = '',
-    attrs: str = '',
+    config: ButtonConfig | None = None,
+    htmx: HTMXAttributes | None = None,
     **kwargs: Any
 ) -> dict[str, Any]:
     """
@@ -66,30 +147,43 @@ def button(
         attrs: Additional HTML attributes
     """
 
+    # Use default configurations if not provided
+    if config is None:
+        config = ButtonConfig()
+    if htmx is None:
+        htmx = HTMXAttributes()
+    
+    # Override with any direct kwargs for backward compatibility
+    for key, value in kwargs.items():
+        if hasattr(config, key) and value is not None:
+            setattr(config, key, value)
+        elif hasattr(htmx, key) and value is not None:
+            setattr(htmx, key, value)
+    
     return {
         'text': text,
-        'variant': variant,
-        'size': size,
-        'href': href,
-        'type': type,
-        'hx_get': hx_get,
-        'hx_post': hx_post,
-        'hx_put': hx_put,
-        'hx_patch': hx_patch,
-        'hx_delete': hx_delete,
-        'hx_target': hx_target,
-        'hx_swap': hx_swap,
-        'hx_trigger': hx_trigger,
-        'hx_confirm': hx_confirm,
-        'hx_indicator': hx_indicator,
-        'hx_push_url': hx_push_url,
-        'hx_select': hx_select,
-        'hx_boost': hx_boost,
-        'icon': icon,
-        'icon_right': icon_right,
-        'disabled': disabled,
-        'class': class_,
-        'attrs': attrs,
+        'variant': config.variant,
+        'size': config.size,
+        'href': config.href,
+        'type': config.type,
+        'hx_get': htmx.hx_get,
+        'hx_post': htmx.hx_post,
+        'hx_put': htmx.hx_put,
+        'hx_patch': htmx.hx_patch,
+        'hx_delete': htmx.hx_delete,
+        'hx_target': htmx.hx_target,
+        'hx_swap': htmx.hx_swap,
+        'hx_trigger': htmx.hx_trigger,
+        'hx_confirm': htmx.hx_confirm,
+        'hx_indicator': htmx.hx_indicator,
+        'hx_push_url': htmx.hx_push_url,
+        'hx_select': htmx.hx_select,
+        'hx_boost': htmx.hx_boost,
+        'icon': config.icon,
+        'icon_right': config.icon_right,
+        'disabled': config.disabled,
+        'class': config.class_,
+        'attrs': config.attrs,
     }
 
 
@@ -97,26 +191,8 @@ def button(
 def input_field(
     name: str,
     *,
-    input_type: str = 'text',
-    value: str | None = None,
-    label: str | None = None,
-    placeholder: str | None = None,
-    required: bool = False,
-    disabled: bool = False,
-    readonly: bool = False,
-    error: str | None = None,
-    help_text: str | None = None,
-    icon_left: str | None = None,
-    icon_right: str | None = None,
-    css_class: str = '',
-    html_id: str | None = None,
-    hx_get: str | None = None,
-    hx_post: str | None = None,
-    hx_trigger: str | None = None,
-    hx_target: str | None = None,
-    hx_swap: str | None = None,
-    options: list | None = None,
-    romanian_validation: bool = True,
+    config: InputConfig | None = None,
+    htmx: HTMXAttributes | None = None,
     **kwargs: Any
 ) -> dict[str, Any]:
     """
@@ -127,34 +203,46 @@ def input_field(
         {% input_field "search" label="Căutare client" icon_left="search" hx_get="/customers/search/" hx_trigger="keyup changed delay:300ms" %}
     """
 
+    # Use default configurations if not provided
+    if config is None:
+        config = InputConfig()
+    if htmx is None:
+        htmx = HTMXAttributes()
+    
+    # Override with any direct kwargs for backward compatibility
+    for key, value in kwargs.items():
+        if hasattr(config, key) and value is not None:
+            setattr(config, key, value)
+        elif hasattr(htmx, key) and value is not None:
+            setattr(htmx, key, value)
+    
     # Auto-generate ID if not provided
-    if not html_id:
-        html_id = f"input-{name}"
+    if not config.html_id:
+        config.html_id = f"input-{name}"
 
     return {
         'name': name,
-        'input_type': input_type,
-        'value': value,
-        'label': label,
-        'placeholder': placeholder,
-        'required': required,
-        'disabled': disabled,
-        'readonly': readonly,
-        'error': error,
-        'help_text': help_text,
-        'icon_left': icon_left,
-        'icon_right': icon_right,
-        'css_class': css_class,
-        'html_id': html_id,
-        'hx_get': hx_get,
-        'hx_post': hx_post,
-        'hx_trigger': hx_trigger,
-        'hx_target': hx_target,
-        'hx_swap': hx_swap,
-        'options': options,
-        'romanian_validation': romanian_validation,
-        'has_error': bool(error),
-        **kwargs
+        'input_type': config.input_type,
+        'value': config.value,
+        'label': config.label,
+        'placeholder': config.placeholder,
+        'required': config.required,
+        'disabled': config.disabled,
+        'readonly': config.readonly,
+        'error': config.error,
+        'help_text': config.help_text,
+        'icon_left': config.icon_left,
+        'icon_right': config.icon_right,
+        'css_class': config.css_class,
+        'html_id': config.html_id,
+        'hx_get': htmx.hx_get,
+        'hx_post': htmx.hx_post,
+        'hx_trigger': htmx.hx_trigger,
+        'hx_target': htmx.hx_target,
+        'hx_swap': htmx.hx_swap,
+        'options': config.options,
+        'romanian_validation': config.romanian_validation,
+        'has_error': bool(config.error),
     }
 
 
@@ -162,23 +250,8 @@ def input_field(
 def checkbox_field(
     name: str,
     *,
-    label: str | None = None,
-    value: str | None = None,
-    checked: bool = False,
-    required: bool = False,
-    disabled: bool = False,
-    error: str | None = None,
-    help_text: str | None = None,
-    variant: str = 'primary',
-    css_class: str = '',
-    container_class: str = '',
-    html_id: str | None = None,
-    hx_get: str | None = None,
-    hx_post: str | None = None,
-    hx_trigger: str | None = None,
-    hx_target: str | None = None,
-    hx_swap: str | None = None,
-    data_attrs: dict | None = None,
+    config: CheckboxConfig | None = None,
+    htmx: HTMXAttributes | None = None,
     **kwargs: Any
 ) -> dict[str, Any]:
     """
@@ -206,34 +279,46 @@ def checkbox_field(
         data_attrs: Dictionary of data attributes
     """
 
+    # Use default configurations if not provided
+    if config is None:
+        config = CheckboxConfig()
+    if htmx is None:
+        htmx = HTMXAttributes()
+    
+    # Override with any direct kwargs for backward compatibility
+    for key, value in kwargs.items():
+        if hasattr(config, key) and value is not None:
+            setattr(config, key, value)
+        elif hasattr(htmx, key) and value is not None:
+            setattr(htmx, key, value)
+    
     # Auto-generate ID if not provided
-    if not html_id:
-        html_id = f"checkbox-{name}"
+    if not config.html_id:
+        config.html_id = f"checkbox-{name}"
 
     # Default value for checkboxes
-    if not value:
-        value = "on"
+    if not config.value:
+        config.value = "on"
 
     return {
         'name': name,
-        'label': label,
-        'value': value,
-        'checked': checked,
-        'required': required,
-        'disabled': disabled,
-        'error': error,
-        'help_text': help_text,
-        'variant': variant,
-        'css_class': css_class,
-        'container_class': container_class,
-        'html_id': html_id,
-        'hx_get': hx_get,
-        'hx_post': hx_post,
-        'hx_trigger': hx_trigger,
-        'hx_target': hx_target,
-        'hx_swap': hx_swap,
-        'data_attrs': data_attrs or {},
-        **kwargs
+        'label': config.label,
+        'value': config.value,
+        'checked': config.checked,
+        'required': config.required,
+        'disabled': config.disabled,
+        'error': config.error,
+        'help_text': config.help_text,
+        'variant': config.variant,
+        'css_class': config.css_class,
+        'container_class': config.container_class,
+        'html_id': config.html_id,
+        'hx_get': htmx.hx_get,
+        'hx_post': htmx.hx_post,
+        'hx_trigger': htmx.hx_trigger,
+        'hx_target': htmx.hx_target,
+        'hx_swap': htmx.hx_swap,
+        'data_attrs': config.data_attrs or {},
     }
 
 
@@ -241,12 +326,7 @@ def checkbox_field(
 def alert(
     message: str,
     *,
-    variant: str = 'info',
-    title: str | None = None,
-    dismissible: bool = False,
-    show_icon: bool = True,
-    css_class: str = '',
-    html_id: str | None = None,
+    config: AlertConfig | None = None,
     **kwargs: Any
 ) -> dict[str, Any]:
     """
@@ -256,15 +336,23 @@ def alert(
         {% alert "Factura a fost emisă cu succes!" variant="success" dismissible=True %}
         {% alert "Clientul nu are un VAT ID valid" variant="warning" title="Atenție" %}
     """
+    # Use default configuration if not provided
+    if config is None:
+        config = AlertConfig()
+    
+    # Override with any direct kwargs for backward compatibility
+    for key, value in kwargs.items():
+        if hasattr(config, key) and value is not None:
+            setattr(config, key, value)
+    
     return {
         'message': message,
-        'variant': variant,
-        'title': title,
-        'dismissible': dismissible,
-        'show_icon': show_icon,
-        'css_class': css_class,
-        'html_id': html_id,
-        **kwargs
+        'variant': config.variant,
+        'title': config.title,
+        'dismissible': config.dismissible,
+        'show_icon': config.show_icon,
+        'css_class': config.css_class,
+        'html_id': config.html_id,
     }
 
 
@@ -273,12 +361,7 @@ def modal(
     modal_id: str,
     title: str,
     *,
-    size: str = 'md',
-    closeable: bool = True,
-    show_footer: bool = True,
-    content: str | None = None,
-    css_class: str = '',
-    html_id: str | None = None,
+    config: ModalConfig | None = None,
     **kwargs: Any
 ) -> dict[str, Any]:
     """
@@ -296,16 +379,24 @@ def modal(
         backdrop_dismiss: Close on backdrop click
         css_class: Additional CSS classes
     """
+    # Use default configuration if not provided
+    if config is None:
+        config = ModalConfig()
+    
+    # Override with any direct kwargs for backward compatibility
+    for key, value in kwargs.items():
+        if hasattr(config, key) and value is not None:
+            setattr(config, key, value)
+    
     return {
         'modal_id': modal_id,
         'title': title,
-        'size': size,
-        'closeable': closeable,
-        'show_footer': show_footer,
-        'content': content,
-        'css_class': css_class,
-        'html_id': html_id,
-        **kwargs
+        'size': config.size,
+        'closeable': config.closeable,
+        'show_footer': config.show_footer,
+        'content': config.content,
+        'css_class': config.css_class,
+        'html_id': config.html_id,
     }
 
 
@@ -316,12 +407,7 @@ def data_table(
     headers: list,
     rows: list,
     *,
-    sortable: bool = True,
-    searchable: bool = True,
-    pagination: bool = True,
-    actions: list | None = None,
-    css_class: str = '',
-    empty_message: str = 'Nu există date disponibile.',
+    config: DataTableConfig | None = None,
     **kwargs: Any
 ) -> dict[str, Any]:
     """
@@ -340,15 +426,24 @@ def data_table(
         css_class: Additional CSS classes
         empty_message: Message when no data
     """
+    # Use default configuration if not provided
+    if config is None:
+        config = DataTableConfig()
+    
+    # Override with any direct kwargs for backward compatibility
+    for key, value in kwargs.items():
+        if hasattr(config, key) and value is not None:
+            setattr(config, key, value)
+    
     return {
         'headers': headers,
         'rows': rows,
-        'sortable': sortable,
-        'searchable': searchable,
-        'pagination': pagination,
-        'actions': actions or [],
-        'css_class': css_class,
-        'empty_message': empty_message,
+        'sortable': config.sortable,
+        'searchable': config.searchable,
+        'pagination': config.pagination,
+        'actions': config.actions or [],
+        'css_class': config.css_class,
+        'empty_message': config.empty_message,
         'has_data': bool(rows),
     }
 

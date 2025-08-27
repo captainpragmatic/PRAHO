@@ -2,6 +2,7 @@
 # TEST FACTORIES FOR BILLING
 # ===============================================================================
 
+from dataclasses import dataclass
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
@@ -11,6 +12,21 @@ from apps.billing.models import Currency, Invoice, Payment
 from apps.customers.models import Customer
 
 User = get_user_model()
+
+
+# ===============================================================================
+# PAYMENT FACTORY PARAMETER OBJECTS
+# ===============================================================================
+
+@dataclass
+class PaymentCreationRequest:
+    """Parameter object for payment creation"""
+    customer: Customer
+    invoice: Invoice | None = None
+    currency: Currency | None = None
+    amount_cents: int = 1000
+    method: str = 'stripe'
+    status: str = 'succeeded'
 
 
 def create_currency(code: str = 'RON') -> Currency:
@@ -39,12 +55,32 @@ def create_invoice(customer: Customer, currency: Currency | None = None, number:
     )
 
 
-def create_payment(customer: Customer, invoice: Invoice | None = None, currency: Currency | None = None, amount_cents: int = 1000, method: str = 'stripe', status: str = 'succeeded') -> Payment:
+def create_payment(request: PaymentCreationRequest) -> Payment:
     """Create a Payment linked to an invoice optionally."""
-    if currency is None:
-        currency = create_currency()
+    if request.currency is None:
+        request.currency = create_currency()
 
     return Payment.objects.create(
+        customer=request.customer,
+        invoice=request.invoice,
+        currency=request.currency,
+        amount_cents=request.amount_cents,
+        method=request.method,
+        status=request.status
+    )
+
+
+# Legacy wrapper for backward compatibility
+def create_payment_legacy(  # noqa: PLR0913
+    customer: Customer,
+    invoice: Invoice | None = None,
+    currency: Currency | None = None,
+    amount_cents: int = 1000,
+    method: str = 'stripe',
+    status: str = 'succeeded'
+) -> Payment:
+    """Legacy wrapper for backward compatibility"""
+    request = PaymentCreationRequest(
         customer=customer,
         invoice=invoice,
         currency=currency,
@@ -52,3 +88,4 @@ def create_payment(customer: Customer, invoice: Invoice | None = None, currency:
         method=method,
         status=status
     )
+    return create_payment(request)
