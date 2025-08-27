@@ -4,7 +4,7 @@ Romanian-localized authentication and profile forms.
 """
 
 import logging
-from typing import Any, cast, Union
+from typing import Any, cast
 
 import pyotp
 from django.contrib import messages
@@ -715,7 +715,7 @@ class UserDetailView(LoginRequiredMixin, DetailView):
     template_name = 'users/user_detail.html'
     context_object_name = 'user_detail'
 
-    def get_object(self, queryset: Union[QuerySet[User], None] = None) -> User:
+    def get_object(self, queryset: QuerySet[User] | None = None) -> User:
         """🚀 Performance: Prefetch customer memberships to prevent N+1 queries"""
         if queryset is None:
             queryset = self.get_queryset()

@@ -61,7 +61,7 @@ class SoftDeleteModel(models.Model):
     class Meta:
         abstract = True
 
-    def soft_delete(self, user: Optional[Any] = None) -> None:
+    def soft_delete(self, user: Any | None = None) -> None:
         """Soft delete this record"""
         self.deleted_at = timezone.now()
         self.deleted_by = user

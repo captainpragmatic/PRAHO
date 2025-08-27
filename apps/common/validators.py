@@ -9,7 +9,7 @@ import re
 import time
 from collections.abc import Callable
 from functools import wraps
-from typing import Any, Optional, TypeVar, cast
+from typing import Any, TypeVar, cast
 
 from django.core.cache import cache
 from django.core.exceptions import ValidationError

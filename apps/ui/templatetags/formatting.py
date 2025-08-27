@@ -15,8 +15,8 @@ from django.utils.safestring import mark_safe
 
 from apps.common.constants import (
     PHONE_LANDLINE_LENGTH,
-    PHONE_MOBILE_LENGTH,
     PHONE_MIN_VALID_LENGTH,
+    PHONE_MOBILE_LENGTH,
     ROMANIAN_IBAN_LENGTH,
     ROMANIAN_PLURAL_FEW_MAX,
     ROMANIAN_PLURAL_FEW_MIN,

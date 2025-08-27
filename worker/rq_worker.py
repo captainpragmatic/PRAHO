@@ -9,7 +9,6 @@ import logging
 import os
 import sys
 from types import TracebackType
-from typing import Any, Type
 
 import django
 from redis import Redis
@@ -97,7 +96,7 @@ class PragmaticHostWorker:
             logger.error(f"Worker failed to start: {e}")
             raise
 
-    def _handle_job_exception(self, job: Job, exc_type: Type[BaseException], exc_value: BaseException, traceback: TracebackType) -> None:
+    def _handle_job_exception(self, job: Job, exc_type: type[BaseException], exc_value: BaseException, traceback: TracebackType) -> None:
         """
         Handle job exceptions with Romanian business context
         
