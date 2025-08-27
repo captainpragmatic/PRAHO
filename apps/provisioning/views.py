@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import cast
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -16,16 +16,17 @@ from django.utils.translation import gettext_lazy as _
 
 from apps.common.decorators import staff_required
 from apps.customers.models import Customer
+from apps.users.models import User
 
 from .models import Server, Service, ServicePlan
 
 
-def _get_accessible_customer_ids(user: Any) -> list[int]:
+def _get_accessible_customer_ids(user: User) -> list[int]:
     """Helper to get customer IDs that user can access"""
     accessible_customers = user.get_accessible_customers()
 
     if isinstance(accessible_customers, QuerySet):
-        return accessible_customers.values_list('id', flat=True)
+        return list(accessible_customers.values_list('id', flat=True))
     else:
         return [c.id for c in accessible_customers] if accessible_customers else []
 
@@ -33,7 +34,9 @@ def _get_accessible_customer_ids(user: Any) -> list[int]:
 @login_required
 def service_list(request: HttpRequest) -> HttpResponse:
     """🚀 Display hosting services for user's customers"""
-    customer_ids = _get_accessible_customer_ids(request.user)
+    # Type guard: @login_required ensures authenticated user
+    user = cast(User, request.user)
+    customer_ids = _get_accessible_customer_ids(user)
     services = Service.objects.filter(customer_id__in=customer_ids).select_related('customer', 'service_plan').order_by('-created_at')
 
     # Filter by status
@@ -47,7 +50,7 @@ def service_list(request: HttpRequest) -> HttpResponse:
     services_page = paginator.get_page(page_number)
 
     # Only staff can manage services (edit/suspend)
-    can_manage_services = request.user.is_staff or getattr(request.user, 'staff_role', None)
+    can_manage_services = user.is_staff or getattr(user, 'staff_role', None)
 
     context = {
         'services': services_page,
@@ -63,15 +66,17 @@ def service_list(request: HttpRequest) -> HttpResponse:
 @login_required
 def service_detail(request: HttpRequest, pk: int) -> HttpResponse:
     """🚀 Display service details and configuration"""
+    # Type guard: @login_required ensures authenticated user
+    user = cast(User, request.user)
     service = get_object_or_404(Service, pk=pk)
 
     # Security check
-    if not request.user.can_access_customer(service.customer):
+    if not user.can_access_customer(service.customer):
         messages.error(request, _("❌ You do not have permission to access this service."))
         return redirect('provisioning:services')
 
     # Only staff can manage services (edit/suspend)
-    can_manage = (request.user.is_staff or getattr(request.user, 'staff_role', None)) and service.status in ['active', 'suspended']
+    can_manage = (user.is_staff or getattr(user, 'staff_role', None)) and service.status in ['active', 'suspended']
 
     context = {
         'service': service,
@@ -84,8 +89,10 @@ def service_detail(request: HttpRequest, pk: int) -> HttpResponse:
 @staff_required
 def service_create(request: HttpRequest) -> HttpResponse:
     """+ Create new hosting service"""
+    # Type guard: @staff_required ensures authenticated user
+    user = cast(User, request.user)
     # Get user's customers for dropdown
-    accessible_customers = request.user.get_accessible_customers()
+    accessible_customers = user.get_accessible_customers()
     if hasattr(accessible_customers, 'all'):
         customers = accessible_customers.all()
     elif isinstance(accessible_customers, list | tuple):
@@ -103,7 +110,7 @@ def service_create(request: HttpRequest) -> HttpResponse:
             customer = get_object_or_404(Customer, pk=customer_id)
 
             # Security check
-            accessible_customer_ids = _get_accessible_customer_ids(request.user)
+            accessible_customer_ids = _get_accessible_customer_ids(user)
             if int(customer_id) not in accessible_customer_ids:
                 messages.error(request, _("❌ You do not have permission to create services for this customer."))
                 return redirect('provisioning:services')
@@ -111,7 +118,7 @@ def service_create(request: HttpRequest) -> HttpResponse:
 
             service = Service.objects.create(
                 customer=customer,
-                plan=plan,
+                service_plan=plan,
                 domain=domain,
                 status='pending',
             )
@@ -132,15 +139,17 @@ def service_create(request: HttpRequest) -> HttpResponse:
 @staff_required
 def service_edit(request: HttpRequest, pk: int) -> HttpResponse:
     """✏️ Edit existing hosting service"""
+    # Type guard: @staff_required ensures authenticated user
+    user = cast(User, request.user)
     service = get_object_or_404(Service, pk=pk)
 
     # Security check
-    if not request.user.can_access_customer(service.customer):
+    if not user.can_access_customer(service.customer):
         messages.error(request, _("❌ You do not have permission to edit this service."))
         return redirect('provisioning:services')
 
     # Get user's customers for dropdown
-    accessible_customers = request.user.get_accessible_customers()
+    accessible_customers = user.get_accessible_customers()
     if hasattr(accessible_customers, 'all'):
         customers = accessible_customers.all()
     elif isinstance(accessible_customers, list | tuple):
@@ -158,7 +167,7 @@ def service_edit(request: HttpRequest, pk: int) -> HttpResponse:
             customer = get_object_or_404(Customer, pk=customer_id)
 
             # Security check
-            accessible_customer_ids = _get_accessible_customer_ids(request.user)
+            accessible_customer_ids = _get_accessible_customer_ids(user)
             if int(customer_id) not in accessible_customer_ids:
                 messages.error(request, _("❌ You do not have permission to move services to this customer."))
                 return redirect('provisioning:service_detail', pk=pk)
@@ -189,10 +198,12 @@ def service_edit(request: HttpRequest, pk: int) -> HttpResponse:
 @staff_required
 def service_suspend(request: HttpRequest, pk: int) -> HttpResponse:
     """⏸️ Suspend hosting service"""
+    # Type guard: @staff_required ensures authenticated user
+    user = cast(User, request.user)
     service = get_object_or_404(Service, pk=pk)
 
     # Security check
-    if not request.user.can_access_customer(service.customer):
+    if not user.can_access_customer(service.customer):
         messages.error(request, _("❌ You do not have permission to suspend this service."))
         return redirect('provisioning:services')
 
@@ -209,10 +220,12 @@ def service_suspend(request: HttpRequest, pk: int) -> HttpResponse:
 @staff_required
 def service_activate(request: HttpRequest, pk: int) -> HttpResponse:
     """▶️ Activate suspended service"""
+    # Type guard: @staff_required ensures authenticated user
+    user = cast(User, request.user)
     service = get_object_or_404(Service, pk=pk)
 
     # Security check
-    if not request.user.can_access_customer(service.customer):
+    if not user.can_access_customer(service.customer):
         messages.error(request, _("❌ You do not have permission to activate this service."))
         return redirect('provisioning:services')
 

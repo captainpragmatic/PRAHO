@@ -3,7 +3,6 @@ Django admin configuration for support ticket models.
 Romanian hosting provider customer support system administration.
 """
 
-
 from typing import Any, ClassVar
 
 from django.contrib import admin
@@ -13,7 +12,7 @@ from django.db.models.query import QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.utils import timezone
 from django.utils.html import format_html
-from django.utils.safestring import SafeString
+from django.utils.safestring import SafeString, mark_safe
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.constants import (
@@ -39,218 +38,253 @@ from .models import (
 # SUPPORT CATEGORY ADMIN
 # ===============================================================================
 
+
 @admin.register(SupportCategory)
 class SupportCategoryAdmin(admin.ModelAdmin):
     """Support ticket categories management"""
 
     list_display: ClassVar[list[str]] = (
-        'name',
-        'name_en',
-        'icon_display',
-        'sla_response_hours',
-        'sla_resolution_hours',
-        'auto_assign_to',
-        'is_active',
-        'sort_order',
+        "name",
+        "name_en",
+        "icon_display",
+        "sla_response_hours",
+        "sla_resolution_hours",
+        "auto_assign_to",
+        "is_active",
+        "sort_order",
     )
     list_filter: ClassVar[list[str]] = (
-        'is_active',
-        'auto_assign_to',
+        "is_active",
+        "auto_assign_to",
     )
-    search_fields: ClassVar[list[str]] = ('name', 'name_en', 'description')
-    ordering: ClassVar[tuple[str, ...]] = ('sort_order', 'name')
+    search_fields: ClassVar[list[str]] = ("name", "name_en", "description")
+    ordering: ClassVar[tuple[str, ...]] = ("sort_order", "name")
 
     fieldsets: ClassVar[tuple] = (
-        (_('Category Information'), {
-            'fields': (
-                'name',
-                'name_en',
-                'description',
-                'icon',
-                'color',
-                'sort_order',
-                'is_active',
-            )
-        }),
-        (_('Service Level Agreement'), {
-            'fields': (
-                'sla_response_hours',
-                'sla_resolution_hours',
-                'auto_assign_to',
-            )
-        }),
-        (_('Timestamps'), {
-            'fields': (
-                'created_at',
-            ),
-            'classes': ('collapse',),
-        }),
+        (
+            _("Category Information"),
+            {
+                "fields": (
+                    "name",
+                    "name_en",
+                    "description",
+                    "icon",
+                    "color",
+                    "sort_order",
+                    "is_active",
+                )
+            },
+        ),
+        (
+            _("Service Level Agreement"),
+            {
+                "fields": (
+                    "sla_response_hours",
+                    "sla_resolution_hours",
+                    "auto_assign_to",
+                )
+            },
+        ),
+        (
+            _("Timestamps"),
+            {
+                "fields": ("created_at",),
+                "classes": ("collapse",),
+            },
+        ),
     )
-    readonly_fields: ClassVar[tuple[str, ...]] = ('created_at',)
+    readonly_fields: ClassVar[tuple[str, ...]] = ("created_at",)
 
     def icon_display(self, obj: SupportCategory) -> SafeString:
         """Display category icon with color"""
-        return format_html(
-            '<span style="color: {}; font-size: 16px;">{}</span>',
-            obj.color,
-            obj.icon
-        )
-    icon_display.short_description = _('Icon')
+        return format_html('<span style="color: {}; font-size: 16px;">{}</span>', obj.color, obj.icon)
+
+    icon_display.short_description = _("Icon")
 
 
 # ===============================================================================
 # TICKET COMMENT INLINE
 # ===============================================================================
 
+
 class TicketCommentInline(admin.TabularInline):
     """Inline ticket comments"""
+
     model = TicketComment
     extra = 0
-    fields: ClassVar[list[str]] = ('comment_type', 'content', 'is_public', 'time_spent', 'created_at')
-    readonly_fields: ClassVar[tuple[str, ...]] = ('created_at',)
-    ordering: ClassVar[tuple[str, ...]] = ('created_at',)
+    fields: ClassVar[list[str]] = ("comment_type", "content", "is_public", "time_spent", "created_at")
+    readonly_fields: ClassVar[tuple[str, ...]] = ("created_at",)
+    ordering: ClassVar[tuple[str, ...]] = ("created_at",)
 
 
 class TicketAttachmentInline(admin.TabularInline):
     """Inline ticket attachments"""
+
     model = TicketAttachment
     extra = 0
-    fields: ClassVar[list[str]] = ('filename', 'file_size_display', 'content_type', 'is_safe', 'uploaded_at')
-    readonly_fields: ClassVar[list[str]] = ('file_size_display', 'uploaded_at')
+    fields: ClassVar[list[str]] = ("filename", "file_size_display", "content_type", "is_safe", "uploaded_at")
+    readonly_fields: ClassVar[list[str]] = ("file_size_display", "uploaded_at")
 
     def file_size_display(self, obj: TicketAttachment) -> str:
         """Display file size in human readable format"""
         if obj.pk:
             return obj.get_file_size_display()
-        return '-'
-    file_size_display.short_description = _('Size')
+        return "-"
+
+    file_size_display.short_description = _("Size")
 
 
 class TicketWorklogInline(admin.TabularInline):
     """Inline ticket work logs"""
+
     model = TicketWorklog
     extra = 0
-    fields: ClassVar[list[str]] = ('user', 'work_date', 'time_spent', 'is_billable', 'hourly_rate', 'description')
-    ordering: ClassVar[tuple[str, ...]] = ('-work_date',)
+    fields: ClassVar[list[str]] = ("user", "work_date", "time_spent", "is_billable", "hourly_rate", "description")
+    ordering: ClassVar[tuple[str, ...]] = ("-work_date",)
 
 
 # ===============================================================================
 # TICKET ADMIN
 # ===============================================================================
 
+
 @admin.register(Ticket)
 class TicketAdmin(admin.ModelAdmin):
     """Support ticket management"""
 
     list_display: ClassVar[list[str]] = (
-        'ticket_number',
-        'title_truncated',
-        'customer',
-        'status_display',
-        'priority_display',
-        'assigned_to',
-        'category',
-        'sla_status',
-        'created_at',
-        'satisfaction_display',
+        "ticket_number",
+        "title_truncated",
+        "customer",
+        "status_display",
+        "priority_display",
+        "assigned_to",
+        "category",
+        "sla_status",
+        "created_at",
+        "satisfaction_display",
     )
     list_filter: ClassVar[list[str]] = (
-        'status',
-        'priority',
-        'category',
-        'source',
-        'assigned_to',
-        'is_escalated',
-        'requires_customer_response',
-        'created_at',
+        "status",
+        "priority",
+        "category",
+        "source",
+        "assigned_to",
+        "is_escalated",
+        "requires_customer_response",
+        "created_at",
     )
     search_fields: ClassVar[list[str]] = (
-        'ticket_number',
-        'title',
-        'description',
-        'customer__name',
-        'customer__company_name',
-        'customer__primary_email',
-        'contact_email',
+        "ticket_number",
+        "title",
+        "description",
+        "customer__name",
+        "customer__company_name",
+        "customer__primary_email",
+        "contact_email",
     )
-    date_hierarchy = 'created_at'
+    date_hierarchy = "created_at"
     readonly_fields: ClassVar[list[str]] = (
-        'ticket_number',
-        'created_at',
-        'updated_at',
-        'sla_response_due',
-        'sla_resolution_due',
-        'first_response_at',
-        'resolved_at',
-        'actual_hours',
+        "ticket_number",
+        "created_at",
+        "updated_at",
+        "sla_response_due",
+        "sla_resolution_due",
+        "first_response_at",
+        "resolved_at",
+        "actual_hours",
     )
     inlines: ClassVar[list] = [TicketCommentInline, TicketAttachmentInline, TicketWorklogInline]
-    ordering: ClassVar[tuple[str, ...]] = ('-created_at',)
+    ordering: ClassVar[tuple[str, ...]] = ("-created_at",)
 
     fieldsets: ClassVar[tuple] = (
-        (_('Ticket Information'), {
-            'fields': (
-                'ticket_number',
-                'title',
-                'description',
-                'category',
-                'priority',
-                'status',
-                'source',
-            )
-        }),
-        (_('Customer & Contact'), {
-            'fields': (
-                'customer',
-                'contact_person',
-                'contact_email',
-                'contact_phone',
-                'related_service',
-            )
-        }),
-        (_('Assignment'), {
-            'fields': (
-                'assigned_to',
-                'assigned_at',
-                'created_by',
-            )
-        }),
-        (_('SLA Tracking'), {
-            'fields': (
-                'sla_response_due',
-                'sla_resolution_due',
-                'first_response_at',
-                'resolved_at',
-            ),
-            'classes': ('collapse',),
-        }),
-        (_('Time Tracking'), {
-            'fields': (
-                'estimated_hours',
-                'actual_hours',
-            )
-        }),
-        (_('Customer Satisfaction'), {
-            'fields': (
-                'satisfaction_rating',
-                'satisfaction_comment',
-            ),
-            'classes': ('collapse',),
-        }),
-        (_('Flags & Options'), {
-            'fields': (
-                'is_escalated',
-                'is_public',
-                'requires_customer_response',
-            )
-        }),
-        (_('Timestamps'), {
-            'fields': (
-                'created_at',
-                'updated_at',
-            ),
-            'classes': ('collapse',),
-        }),
+        (
+            _("Ticket Information"),
+            {
+                "fields": (
+                    "ticket_number",
+                    "title",
+                    "description",
+                    "category",
+                    "priority",
+                    "status",
+                    "source",
+                )
+            },
+        ),
+        (
+            _("Customer & Contact"),
+            {
+                "fields": (
+                    "customer",
+                    "contact_person",
+                    "contact_email",
+                    "contact_phone",
+                    "related_service",
+                )
+            },
+        ),
+        (
+            _("Assignment"),
+            {
+                "fields": (
+                    "assigned_to",
+                    "assigned_at",
+                    "created_by",
+                )
+            },
+        ),
+        (
+            _("SLA Tracking"),
+            {
+                "fields": (
+                    "sla_response_due",
+                    "sla_resolution_due",
+                    "first_response_at",
+                    "resolved_at",
+                ),
+                "classes": ("collapse",),
+            },
+        ),
+        (
+            _("Time Tracking"),
+            {
+                "fields": (
+                    "estimated_hours",
+                    "actual_hours",
+                )
+            },
+        ),
+        (
+            _("Customer Satisfaction"),
+            {
+                "fields": (
+                    "satisfaction_rating",
+                    "satisfaction_comment",
+                ),
+                "classes": ("collapse",),
+            },
+        ),
+        (
+            _("Flags & Options"),
+            {
+                "fields": (
+                    "is_escalated",
+                    "is_public",
+                    "requires_customer_response",
+                )
+            },
+        ),
+        (
+            _("Timestamps"),
+            {
+                "fields": (
+                    "created_at",
+                    "updated_at",
+                ),
+                "classes": ("collapse",),
+            },
+        ),
     )
 
     def title_truncated(self, obj: Ticket) -> str:
@@ -258,27 +292,22 @@ class TicketAdmin(admin.ModelAdmin):
         if len(obj.title) > TITLE_PREVIEW_LIMIT:
             return f"{obj.title[:TITLE_PREVIEW_DISPLAY]}..."
         return obj.title
-    title_truncated.short_description = _('Title')
+
+    title_truncated.short_description = _("Title")
 
     def status_display(self, obj: Ticket) -> SafeString:
         """Display status with colors"""
         color = obj.get_status_color()
-        return format_html(
-            '<span style="color: {}; font-weight: bold;">{}</span>',
-            color,
-            obj.get_status_display()
-        )
-    status_display.short_description = _('Status')
+        return format_html('<span style="color: {}; font-weight: bold;">{}</span>', color, obj.get_status_display())
+
+    status_display.short_description = _("Status")
 
     def priority_display(self, obj: Ticket) -> SafeString:
         """Display priority with colors"""
         color = obj.get_priority_color()
-        return format_html(
-            '<span style="color: {}; font-weight: bold;">{}</span>',
-            color,
-            obj.get_priority_display()
-        )
-    priority_display.short_description = _('Priority')
+        return format_html('<span style="color: {}; font-weight: bold;">{}</span>', color, obj.get_priority_display())
+
+    priority_display.short_description = _("Priority")
 
     def sla_status(self, obj: Ticket) -> SafeString:
         """Display SLA status with warnings"""
@@ -306,223 +335,224 @@ class TicketAdmin(admin.ModelAdmin):
         else:
             resolution_status = format_html('<span style="color: green;">✅ Resolution Complete</span>')
 
-        return format_html(
-            '{}<br/>{}',
-            response_status,
-            resolution_status
-        )
-    sla_status.short_description = _('SLA Status')
+        return format_html("{}<br/>{}", response_status, resolution_status)
+
+    sla_status.short_description = _("SLA Status")
 
     def satisfaction_display(self, obj: Ticket) -> SafeString:
         """Display customer satisfaction rating"""
         if obj.satisfaction_rating:
-            stars = '⭐' * obj.satisfaction_rating
-            empty_stars = '☆' * (5 - obj.satisfaction_rating)
-            return format_html(
-                '<span title="{}/5 stars">{}{}</span>',
-                obj.satisfaction_rating,
-                stars,
-                empty_stars
-            )
-        return '-'
-    satisfaction_display.short_description = _('Satisfaction')
+            stars = "⭐" * obj.satisfaction_rating
+            empty_stars = "☆" * (5 - obj.satisfaction_rating)
+            return format_html('<span title="{}/5 stars">{}{}</span>', obj.satisfaction_rating, stars, empty_stars)
+        return mark_safe("-")
+
+    satisfaction_display.short_description = _("Satisfaction")
 
     actions: ClassVar[list[str]] = [
-        'assign_to_me',
-        'mark_resolved',
-        'escalate_tickets',
-        'require_customer_response',
+        "assign_to_me",
+        "mark_resolved",
+        "escalate_tickets",
+        "require_customer_response",
     ]
 
     def assign_to_me(self, request: HttpRequest, queryset: QuerySet[Ticket]) -> None:
         """Assign selected tickets to current user"""
-        updated = queryset.filter(status__in=['new', 'open']).update(
-            assigned_to=request.user,
-            assigned_at=timezone.now()
+        updated = queryset.filter(status__in=["new", "open"]).update(
+            assigned_to=request.user, assigned_at=timezone.now()
         )
-        self.message_user(request, f'Successfully assigned {updated} tickets to you.')
-    assign_to_me.short_description = _('Assign to me')
+        self.message_user(request, f"Successfully assigned {updated} tickets to you.")
+
+    assign_to_me.short_description = _("Assign to me")
 
     def mark_resolved(self, request: HttpRequest, queryset: QuerySet[Ticket]) -> None:
         """Mark selected tickets as resolved"""
         now = timezone.now()
         updated = 0
         for ticket in queryset:
-            if ticket.status not in ['resolved', 'closed']:
-                ticket.status = 'resolved'
+            if ticket.status not in ["resolved", "closed"]:
+                ticket.status = "resolved"
                 ticket.resolved_at = now
                 ticket.save()
                 updated += 1
-        self.message_user(request, f'Successfully resolved {updated} tickets.')
-    mark_resolved.short_description = _('Mark as resolved')
+        self.message_user(request, f"Successfully resolved {updated} tickets.")
+
+    mark_resolved.short_description = _("Mark as resolved")
 
     def escalate_tickets(self, request: HttpRequest, queryset: QuerySet[Ticket]) -> None:
         """Escalate selected tickets"""
-        updated = queryset.update(is_escalated=True, priority='urgent')
-        self.message_user(request, f'Successfully escalated {updated} tickets.')
-    escalate_tickets.short_description = _('Escalate tickets')
+        updated = queryset.update(is_escalated=True, priority="urgent")
+        self.message_user(request, f"Successfully escalated {updated} tickets.")
+
+    escalate_tickets.short_description = _("Escalate tickets")
 
     def require_customer_response(self, request: HttpRequest, queryset: QuerySet[Ticket]) -> None:
         """Mark tickets as requiring customer response"""
-        updated = queryset.update(
-            requires_customer_response=True,
-            status='pending'
-        )
-        self.message_user(request, f'Successfully marked {updated} tickets as requiring customer response.')
-    require_customer_response.short_description = _('Require customer response')
+        updated = queryset.update(requires_customer_response=True, status="pending")
+        self.message_user(request, f"Successfully marked {updated} tickets as requiring customer response.")
+
+    require_customer_response.short_description = _("Require customer response")
 
 
 # ===============================================================================
 # TICKET COMMENT ADMIN
 # ===============================================================================
 
+
 @admin.register(TicketComment)
 class TicketCommentAdmin(admin.ModelAdmin):
     """Ticket comment management"""
 
     list_display: ClassVar[list[str]] = (
-        'created_at',
-        'ticket',
-        'comment_type',
-        'author_display',
-        'content_preview',
-        'is_public',
-        'is_solution',
-        'time_spent',
+        "created_at",
+        "ticket",
+        "comment_type",
+        "author_display",
+        "content_preview",
+        "is_public",
+        "is_solution",
+        "time_spent",
     )
     list_filter: ClassVar[list[str]] = (
-        'comment_type',
-        'is_public',
-        'is_solution',
-        'created_at',
+        "comment_type",
+        "is_public",
+        "is_solution",
+        "created_at",
     )
     search_fields: ClassVar[list[str]] = (
-        'ticket__ticket_number',
-        'ticket__title',
-        'content',
-        'author__first_name',
-        'author__last_name',
-        'author_name',
-        'author_email',
+        "ticket__ticket_number",
+        "ticket__title",
+        "content",
+        "author__first_name",
+        "author__last_name",
+        "author_name",
+        "author_email",
     )
-    date_hierarchy = 'created_at'
-    readonly_fields: ClassVar[list[str]] = ('created_at', 'updated_at')
-    ordering: ClassVar[tuple[str, ...]] = ('-created_at',)
+    date_hierarchy = "created_at"
+    readonly_fields: ClassVar[list[str]] = ("created_at", "updated_at")
+    ordering: ClassVar[tuple[str, ...]] = ("-created_at",)
 
     fieldsets: ClassVar[tuple] = (
-        (_('Comment Information'), {
-            'fields': (
-                'ticket',
-                'comment_type',
-                'content',
-                'is_public',
-                'is_solution',
-            )
-        }),
-        (_('Author'), {
-            'fields': (
-                'author',
-                'author_name',
-                'author_email',
-            )
-        }),
-        (_('Time Tracking'), {
-            'fields': (
-                'time_spent',
-            )
-        }),
-        (_('Timestamps'), {
-            'fields': (
-                'created_at',
-                'updated_at',
-            ),
-            'classes': ('collapse',),
-        }),
+        (
+            _("Comment Information"),
+            {
+                "fields": (
+                    "ticket",
+                    "comment_type",
+                    "content",
+                    "is_public",
+                    "is_solution",
+                )
+            },
+        ),
+        (
+            _("Author"),
+            {
+                "fields": (
+                    "author",
+                    "author_name",
+                    "author_email",
+                )
+            },
+        ),
+        (_("Time Tracking"), {"fields": ("time_spent",)}),
+        (
+            _("Timestamps"),
+            {
+                "fields": (
+                    "created_at",
+                    "updated_at",
+                ),
+                "classes": ("collapse",),
+            },
+        ),
     )
 
     def author_display(self, obj: TicketComment) -> SafeString:
         """Display comment author"""
         if obj.author:
-            return format_html(
-                '👤 {} ({})',
-                obj.author.get_full_name(),
-                obj.author.email
-            )
+            return format_html("👤 {} ({})", obj.author.get_full_name(), obj.author.email)
         elif obj.author_name:
-            return format_html(
-                '👥 {} ({})',
-                obj.author_name,
-                obj.author_email or 'No email'
-            )
-        return 'Anonymous'
-    author_display.short_description = _('Author')
+            return format_html("👥 {} ({})", obj.author_name, obj.author_email or "No email")
+        return mark_safe("Anonymous")
+
+    author_display.short_description = _("Author")
 
     def content_preview(self, obj: TicketComment) -> str:
         """Display content preview"""
         if len(obj.content) > CONTENT_PREVIEW_LIMIT:
             return f"{obj.content[:CONTENT_PREVIEW_DISPLAY]}..."
         return obj.content
-    content_preview.short_description = _('Content Preview')
+
+    content_preview.short_description = _("Content Preview")
 
 
 # ===============================================================================
 # TICKET WORKLOG ADMIN
 # ===============================================================================
 
+
 @admin.register(TicketWorklog)
 class TicketWorklogAdmin(admin.ModelAdmin):
     """Ticket work time tracking"""
 
     list_display: ClassVar[list[str]] = (
-        'work_date',
-        'ticket',
-        'user',
-        'time_spent',
-        'is_billable',
-        'hourly_rate',
-        'total_cost_display',
-        'description_preview',
+        "work_date",
+        "ticket",
+        "user",
+        "time_spent",
+        "is_billable",
+        "hourly_rate",
+        "total_cost_display",
+        "description_preview",
     )
     list_filter: ClassVar[list[str]] = (
-        'is_billable',
-        'work_date',
-        'user',
-        'created_at',
+        "is_billable",
+        "work_date",
+        "user",
+        "created_at",
     )
     search_fields: ClassVar[list[str]] = (
-        'ticket__ticket_number',
-        'ticket__title',
-        'user__first_name',
-        'user__last_name',
-        'description',
+        "ticket__ticket_number",
+        "ticket__title",
+        "user__first_name",
+        "user__last_name",
+        "description",
     )
-    date_hierarchy = 'work_date'
-    readonly_fields: ClassVar[list[str]] = ('created_at', 'total_cost_display')
-    ordering: ClassVar[tuple[str, ...]] = ('-work_date',)
+    date_hierarchy = "work_date"
+    readonly_fields: ClassVar[list[str]] = ("created_at", "total_cost_display")
+    ordering: ClassVar[tuple[str, ...]] = ("-work_date",)
 
     fieldsets: ClassVar[tuple] = (
-        (_('Work Information'), {
-            'fields': (
-                'ticket',
-                'user',
-                'work_date',
-                'time_spent',
-                'description',
-            )
-        }),
-        (_('Billing'), {
-            'fields': (
-                'is_billable',
-                'hourly_rate',
-                'total_cost_display',
-            )
-        }),
-        (_('Timestamps'), {
-            'fields': (
-                'created_at',
-            ),
-            'classes': ('collapse',),
-        }),
+        (
+            _("Work Information"),
+            {
+                "fields": (
+                    "ticket",
+                    "user",
+                    "work_date",
+                    "time_spent",
+                    "description",
+                )
+            },
+        ),
+        (
+            _("Billing"),
+            {
+                "fields": (
+                    "is_billable",
+                    "hourly_rate",
+                    "total_cost_display",
+                )
+            },
+        ),
+        (
+            _("Timestamps"),
+            {
+                "fields": ("created_at",),
+                "classes": ("collapse",),
+            },
+        ),
     )
 
     def total_cost_display(self, obj: TicketWorklog) -> str:
@@ -530,37 +560,36 @@ class TicketWorklogAdmin(admin.ModelAdmin):
         if obj.is_billable and obj.hourly_rate:
             total = obj.total_cost
             return f"{total:.2f} RON"
-        return '-'
-    total_cost_display.short_description = _('Total Cost')
+        return "-"
+
+    total_cost_display.short_description = _("Total Cost")
 
     def description_preview(self, obj: TicketWorklog) -> str:
         """Display description preview"""
         if len(obj.description) > DESCRIPTION_PREVIEW_LIMIT:
             return f"{obj.description[:DESCRIPTION_PREVIEW_DISPLAY]}..."
         return obj.description
-    description_preview.short_description = _('Description')
+
+    description_preview.short_description = _("Description")
 
     def changelist_view(self, request: HttpRequest, extra_context: dict[str, Any] | None = None) -> HttpResponse:
         """Add summary statistics to changelist"""
         response = super().changelist_view(request, extra_context=extra_context)
 
-        if hasattr(response, 'context_data'):
-            queryset = response.context_data['cl'].queryset
+        if hasattr(response, "context_data"):
+            queryset = response.context_data["cl"].queryset
 
             # Calculate summary statistics
             summary = queryset.aggregate(
-                total_hours=Sum('time_spent'),
-                billable_hours=Sum('time_spent', filter=models.Q(is_billable=True)),
-                total_cost=Sum(
-                    models.F('time_spent') * models.F('hourly_rate'),
-                    filter=models.Q(is_billable=True)
-                )
+                total_hours=Sum("time_spent"),
+                billable_hours=Sum("time_spent", filter=models.Q(is_billable=True)),
+                total_cost=Sum(models.F("time_spent") * models.F("hourly_rate"), filter=models.Q(is_billable=True)),
             )
 
-            response.context_data['summary'] = {
-                'total_hours': summary['total_hours'] or 0,
-                'billable_hours': summary['billable_hours'] or 0,
-                'total_cost': summary['total_cost'] or 0,
+            response.context_data["summary"] = {
+                "total_hours": summary["total_hours"] or 0,
+                "billable_hours": summary["billable_hours"] or 0,
+                "total_cost": summary["total_cost"] or 0,
             }
 
         return response
@@ -570,67 +599,78 @@ class TicketWorklogAdmin(admin.ModelAdmin):
 # TICKET ATTACHMENT ADMIN
 # ===============================================================================
 
+
 @admin.register(TicketAttachment)
 class TicketAttachmentAdmin(admin.ModelAdmin):
     """Ticket file attachment management"""
 
     list_display: ClassVar[list[str]] = (
-        'uploaded_at',
-        'ticket',
-        'filename',
-        'file_size_display',
-        'content_type',
-        'is_safe_display',
-        'uploaded_by',
+        "uploaded_at",
+        "ticket",
+        "filename",
+        "file_size_display",
+        "content_type",
+        "is_safe_display",
+        "uploaded_by",
     )
     list_filter: ClassVar[list[str]] = (
-        'content_type',
-        'is_safe',
-        'uploaded_at',
+        "content_type",
+        "is_safe",
+        "uploaded_at",
     )
     search_fields: ClassVar[list[str]] = (
-        'ticket__ticket_number',
-        'ticket__title',
-        'filename',
-        'uploaded_by__first_name',
-        'uploaded_by__last_name',
+        "ticket__ticket_number",
+        "ticket__title",
+        "filename",
+        "uploaded_by__first_name",
+        "uploaded_by__last_name",
     )
-    date_hierarchy = 'uploaded_at'
-    readonly_fields: ClassVar[list[str]] = ('uploaded_at', 'file_size_display')
-    ordering: ClassVar[tuple[str, ...]] = ('-uploaded_at',)
+    date_hierarchy = "uploaded_at"
+    readonly_fields: ClassVar[list[str]] = ("uploaded_at", "file_size_display")
+    ordering: ClassVar[tuple[str, ...]] = ("-uploaded_at",)
 
     fieldsets: ClassVar[tuple] = (
-        (_('Attachment Information'), {
-            'fields': (
-                'ticket',
-                'comment',
-                'file',
-                'filename',
-                'file_size_display',
-                'content_type',
-            )
-        }),
-        (_('Security'), {
-            'fields': (
-                'is_safe',
-                'virus_scan_result',
-            )
-        }),
-        (_('Upload Info'), {
-            'fields': (
-                'uploaded_by',
-                'uploaded_at',
-            ),
-            'classes': ('collapse',),
-        }),
+        (
+            _("Attachment Information"),
+            {
+                "fields": (
+                    "ticket",
+                    "comment",
+                    "file",
+                    "filename",
+                    "file_size_display",
+                    "content_type",
+                )
+            },
+        ),
+        (
+            _("Security"),
+            {
+                "fields": (
+                    "is_safe",
+                    "virus_scan_result",
+                )
+            },
+        ),
+        (
+            _("Upload Info"),
+            {
+                "fields": (
+                    "uploaded_by",
+                    "uploaded_at",
+                ),
+                "classes": ("collapse",),
+            },
+        ),
     )
 
     def file_size_display(self, obj: TicketAttachment) -> str:
         """Display file size in human readable format"""
         if obj.pk:
             return obj.get_file_size_display()
-        return '-'
-    file_size_display.short_description = _('File Size')
+        return "-"
+
+    file_size_display.short_description = _("File Size")
 
     def is_safe_display(self, obj: TicketAttachment) -> SafeString:
         """Display safety status with colors"""
@@ -638,4 +678,5 @@ class TicketAttachmentAdmin(admin.ModelAdmin):
             return format_html('<span style="color: green;">✅ Safe</span>')
         else:
             return format_html('<span style="color: red;">❌ Unsafe</span>')
-    is_safe_display.short_description = _('Safety Status')
+
+    is_safe_display.short_description = _("Safety Status")

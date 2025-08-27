@@ -5,6 +5,10 @@ Fast iteration with debugging tools enabled.
 
 import os
 import sys
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    pass
 
 from .base import *  # noqa: F403
 
@@ -23,12 +27,14 @@ ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_env.split(',') if host.s
 # DEVELOPMENT MIDDLEWARE
 # ===============================================================================
 
+# Insert debug toolbar middleware into existing MIDDLEWARE list
 MIDDLEWARE.insert(1, 'debug_toolbar.middleware.DebugToolbarMiddleware')  # noqa: F405
 
 # ===============================================================================
 # DEVELOPMENT APPS
 # ===============================================================================
 
+# Add debug toolbar to existing INSTALLED_APPS list
 INSTALLED_APPS += [  # noqa: F405
     'debug_toolbar',
 ]
@@ -38,6 +44,7 @@ INSTALLED_APPS += [  # noqa: F405
 # ===============================================================================
 
 if os.environ.get('USE_POSTGRES') != 'true':
+    # Override DATABASES for development with SQLite
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
@@ -78,6 +85,7 @@ DEFAULT_FROM_EMAIL = 'dev@pragmatichost.com'
 # ===============================================================================
 
 if os.environ.get('USE_REDIS') != 'true':
+    # Override CACHES for development with in-memory cache
     CACHES = {
         'default': {
             'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
@@ -150,6 +158,7 @@ STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
 # ===============================================================================
 
 # Test company info for development
+# Update Romanian business context for development
 ROMANIAN_BUSINESS_CONTEXT.update({  # noqa: F405
     'company_name': 'PragmaticHost Dev SRL',
     'company_cui': 'RO99999999',

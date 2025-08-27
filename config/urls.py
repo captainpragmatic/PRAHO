@@ -44,6 +44,7 @@ urlpatterns = [
 
     # Core business apps
     path('app/customers/', include('apps.customers.urls')),
+    path('app/orders/', include('apps.orders.urls')),
     path('app/billing/', include('apps.billing.urls')),
     path('app/tickets/', include('apps.tickets.urls')),
     path('app/provisioning/', include('apps.provisioning.urls')),

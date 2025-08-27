@@ -23,7 +23,7 @@ from django.core.validators import validate_email
 from django.db import models
 from django.db.models import QuerySet
 from django.forms import Form
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.http import HttpRequest, HttpResponse, HttpResponseBase, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils.decorators import method_decorator
@@ -198,7 +198,7 @@ class SecurePasswordResetView(PasswordResetView):
         """Get translatable email subject"""
         return _("Password reset for your account")
 
-    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
         try:
             return super().dispatch(request, *args, **kwargs)
         except Ratelimited:
@@ -238,7 +238,7 @@ class SecurePasswordResetConfirmView(PasswordResetConfirmView):
     template_name = 'users/password_reset_confirm.html'
     success_url = reverse_lazy('users:password_reset_complete')
 
-    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
         try:
             return super().dispatch(request, *args, **kwargs)
         except Ratelimited:
@@ -323,26 +323,27 @@ class SecurePasswordChangeView(PasswordChangeView):
     template_name = 'users/password_change.html'
     success_url = reverse_lazy('users:user_profile')
 
-    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
         try:
             return super().dispatch(request, *args, **kwargs)
         except Ratelimited:
-            # Log rate limit exceeded
-            UserLoginLog.objects.create(
-                user=request.user,
-                ip_address=_get_client_ip(request),
-                user_agent=request.META.get('HTTP_USER_AGENT', ''),
-                status='password_change_rate_limited'
-            )
+            # Log rate limit exceeded - only log if user is authenticated
+            if request.user.is_authenticated:
+                UserLoginLog.objects.create(
+                    user=cast(User, request.user),
+                    ip_address=_get_client_ip(request),
+                    user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                    status='password_change_rate_limited'
+                )
             messages.error(request, _(
                 'Too many password change attempts. Please wait before trying again.'
             ))
             return render(request, self.template_name, {'form': self.get_form()})
 
     def form_valid(self, form: Form) -> HttpResponse:
-        # Log successful password change for audit
+        # Log successful password change for audit - user is guaranteed to be authenticated due to LoginRequiredMixin
         UserLoginLog.objects.create(
-            user=self.request.user,
+            user=cast(User, self.request.user),
             ip_address=_get_client_ip(self.request),
             user_agent=self.request.META.get('HTTP_USER_AGENT', ''),
             status='password_changed'
@@ -358,9 +359,9 @@ class SecurePasswordChangeView(PasswordChangeView):
         return super().form_valid(form)
 
     def form_invalid(self, form: Form) -> HttpResponse:
-        # Log failed password change attempt
+        # Log failed password change attempt - user is guaranteed to be authenticated due to LoginRequiredMixin
         UserLoginLog.objects.create(
-            user=self.request.user,
+            user=cast(User, self.request.user),
             ip_address=_get_client_ip(self.request),
             user_agent=self.request.META.get('HTTP_USER_AGENT', ''),
             status='password_change_failed'
@@ -401,8 +402,8 @@ TWO_FACTOR_STEPS = [
 def mfa_method_selection(request: HttpRequest) -> HttpResponse:
     """MFA method selection - first step in 2FA setup"""
 
-    # Check if user already has 2FA enabled
-    user = request.user  # type: User
+    # Check if user already has 2FA enabled - user is guaranteed to be authenticated due to @login_required
+    user = cast(User, request.user)
     if user.two_factor_enabled:
         messages.info(request, _('2FA is already enabled for your account.'))
         return redirect('users:user_profile')
@@ -416,8 +417,9 @@ def mfa_method_selection(request: HttpRequest) -> HttpResponse:
 @login_required
 def two_factor_setup_totp(request: HttpRequest) -> HttpResponse:
     """Set up 2FA for user account using new MFA service"""
-    # Check if user already has 2FA enabled
-    if request.user.two_factor_enabled:
+    # Check if user already has 2FA enabled - user is guaranteed to be authenticated due to @login_required
+    user = cast(User, request.user)
+    if user.two_factor_enabled:
         messages.info(request, _('2FA is already enabled for your account.'))
         return redirect('users:user_profile')
 
@@ -434,7 +436,7 @@ def two_factor_setup_totp(request: HttpRequest) -> HttpResponse:
                 if totp.verify(token):
                     try:
                         # Enable TOTP using MFA service
-                        secret, backup_codes = MFAService.enable_totp(request.user, request)
+                        secret, backup_codes = MFAService.enable_totp(user, request)
 
                         # 🔒 Rotate session for security after enabling 2FA
                         SessionSecurityService.rotate_session_on_2fa_change(request)
@@ -465,13 +467,13 @@ def two_factor_setup_totp(request: HttpRequest) -> HttpResponse:
     request.session['2fa_secret'] = secret
 
     # Generate QR code using the static method
-    qr_data = TOTPService.generate_qr_code(request.user, secret)
+    qr_data = TOTPService.generate_qr_code(user, secret)
 
     context = {
         'form': form,
         'qr_code': qr_data,
         'secret': secret,  # For manual entry
-        'user': request.user,
+        'user': user,
         'steps': TWO_FACTOR_STEPS,
         'current_step': 2,
         'back_url': reverse('users:two_factor_setup')  # Explicit back to method selection
@@ -483,8 +485,9 @@ def two_factor_setup_totp(request: HttpRequest) -> HttpResponse:
 def two_factor_setup_webauthn(request: HttpRequest) -> HttpResponse:
     """WebAuthn/Passkey setup - future implementation"""
 
-    # Check if user already has 2FA enabled
-    if request.user.two_factor_enabled:
+    # Check if user already has 2FA enabled - user is guaranteed to be authenticated due to @login_required
+    user = cast(User, request.user)
+    if user.two_factor_enabled:
         messages.info(request, _('2FA is already enabled for your account.'))
         return redirect('users:user_profile')
 
@@ -581,49 +584,53 @@ def two_factor_backup_codes(request: HttpRequest) -> HttpResponse:
 @login_required
 def two_factor_regenerate_backup_codes(request: HttpRequest) -> HttpResponse:
     """Regenerate backup codes for 2FA"""
-    if not request.user.two_factor_enabled:
+    # User is guaranteed to be authenticated due to @login_required
+    user = cast(User, request.user)
+    if not user.two_factor_enabled:
         messages.error(request, _('Two-factor authentication is not enabled.'))
         return redirect('users:user_profile')
 
     if request.method == 'POST':
         # Generate new backup codes
-        backup_codes = request.user.generate_backup_codes()
+        backup_codes = user.generate_backup_codes()
         request.session['new_backup_codes'] = backup_codes
 
         messages.success(request, _('New backup codes have been generated.'))
         return redirect('users:two_factor_backup_codes')
 
     return render(request, 'users/two_factor_regenerate_backup_codes.html', {
-        'backup_count': len(request.user.backup_tokens)
+        'backup_count': len(user.backup_tokens)
     })
 
 
 @login_required
 def two_factor_disable(request: HttpRequest) -> HttpResponse:
     """Disable 2FA for user account"""
-    if not request.user.two_factor_enabled:
+    # User is guaranteed to be authenticated due to @login_required
+    user = cast(User, request.user)
+    if not user.two_factor_enabled:
         messages.info(request, _('Two-factor authentication is already disabled.'))
         return redirect('users:user_profile')
 
     if request.method == 'POST':
         # Verify current password for security
         password = request.POST.get('password')
-        if not request.user.check_password(password):
+        if not password or not user.check_password(password):
             messages.error(request, _('Invalid password.'))
             return render(request, 'users/two_factor_disable.html')
 
         # Disable 2FA
-        request.user.two_factor_enabled = False
-        request.user.two_factor_secret = ''  # nosec B105
-        request.user.backup_tokens = []
-        request.user.save(update_fields=['two_factor_enabled', '_two_factor_secret', 'backup_tokens'])
+        user.two_factor_enabled = False
+        user.two_factor_secret = ''  # nosec B105
+        user.backup_tokens = []
+        user.save(update_fields=['two_factor_enabled', '_two_factor_secret', 'backup_tokens'])
 
         # 🔒 Rotate session for security after disabling 2FA
         SessionSecurityService.rotate_session_on_2fa_change(request)
 
         # Log the action
         UserLoginLog.objects.create(
-            user=request.user,
+            user=user,
             ip_address=_get_client_ip(request),
             user_agent=request.META.get('HTTP_USER_AGENT', ''),
             status='two_factor_disabled'
@@ -642,7 +649,9 @@ def two_factor_disable(request: HttpRequest) -> HttpResponse:
 @login_required
 def user_profile(request: HttpRequest) -> HttpResponse:
     """User profile view and editing"""
-    profile, created = UserProfile.objects.get_or_create(user=request.user)
+    # User is guaranteed to be authenticated due to @login_required
+    user = cast(User, request.user)
+    profile, created = UserProfile.objects.get_or_create(user=user)
 
     if request.method == 'POST':
         form = UserProfileForm(request.POST, instance=profile)
@@ -656,7 +665,7 @@ def user_profile(request: HttpRequest) -> HttpResponse:
     # 🚀 Performance: Prefetch customer memberships to prevent N+1 queries
     user_with_memberships = User.objects.prefetch_related(
         'customer_memberships__customer'
-    ).get(pk=request.user.pk)
+    ).get(pk=user.pk)
 
     context = {
         'form': form,
@@ -664,7 +673,7 @@ def user_profile(request: HttpRequest) -> HttpResponse:
         'user': user_with_memberships,
         'accessible_customers': user_with_memberships.get_accessible_customers(),
         'recent_logins': UserLoginLog.objects.filter(
-            user=request.user,
+            user=user,
             status='success'
         ).order_by('-timestamp')[:5],
     }
@@ -684,10 +693,10 @@ class UserListView(LoginRequiredMixin, ListView):
     paginate_by = 50
 
     def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
-        if not request.user.is_staff:
+        if not request.user.is_authenticated or not cast(User, request.user).is_staff:
             messages.error(request, _('You do not have permission to access this page.'))
             return redirect('dashboard')
-        return super().dispatch(request, *args, **kwargs)
+        return cast(HttpResponse, super().dispatch(request, *args, **kwargs))
 
     def get_queryset(self) -> QuerySet[User]:
         queryset = User.objects.select_related('profile').order_by('-date_joined')
@@ -725,10 +734,10 @@ class UserDetailView(LoginRequiredMixin, DetailView):
         ).get(pk=self.kwargs['pk'])
 
     def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
-        if not request.user.is_staff:
+        if not request.user.is_authenticated or not cast(User, request.user).is_staff:
             messages.error(request, _('You do not have permission to access this page.'))
             return redirect('dashboard')
-        return super().dispatch(request, *args, **kwargs)
+        return cast(HttpResponse, super().dispatch(request, *args, **kwargs))
 
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
@@ -741,8 +750,7 @@ class UserDetailView(LoginRequiredMixin, DetailView):
                 user=user
             ).order_by('-timestamp')[:10],
             'customer_memberships': CustomerMembership.objects.filter(
-                user=user,
-                is_active=True
+                user=user
             ).select_related('customer'),
         })
 

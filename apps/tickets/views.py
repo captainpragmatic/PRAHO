@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import mimetypes
 import os
+from typing import cast
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -24,7 +25,8 @@ from .models import Ticket, TicketAttachment, TicketComment
 @login_required
 def ticket_list(request: HttpRequest) -> HttpResponse:
     """🎫 Display support tickets for user's customers"""
-    accessible_customers = request.user.get_accessible_customers()
+    user = cast(User, request.user)  # Safe after @login_required
+    accessible_customers = user.get_accessible_customers()
     customer_ids = [customer.id for customer in accessible_customers]
     tickets = Ticket.objects.filter(customer_id__in=customer_ids).select_related('customer').order_by('-created_at')
 
@@ -45,17 +47,18 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
 @login_required
 def ticket_detail(request: HttpRequest, pk: int) -> HttpResponse:
     """🎫 Display ticket details and conversation"""
+    user = cast(User, request.user)  # Safe after @login_required
     ticket = get_object_or_404(Ticket, pk=pk)
 
     # Security check - verify user has access to this customer
-    accessible_customers = request.user.get_accessible_customers()
+    accessible_customers = user.get_accessible_customers()
     accessible_customer_ids = [customer.id for customer in accessible_customers]
     if ticket.customer.id not in accessible_customer_ids:
         messages.error(request, _("❌ You do not have permission to access this ticket."))
         return redirect('tickets:list')
 
     # Filter comments based on user permissions
-    if request.user.is_staff_user:
+    if user.is_staff_user:
         # Staff can see all comments including internal notes
         comments = ticket.comments.all().order_by('created_at')
     else:
@@ -76,7 +79,8 @@ def ticket_detail(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 def ticket_create(request: HttpRequest) -> HttpResponse:
     """+ Create new support ticket"""
-    customers = request.user.get_accessible_customers()
+    user = cast(User, request.user)  # Safe after @login_required
+    customers = user.get_accessible_customers()
 
     if request.method == 'POST':
         # Simplified ticket creation
@@ -87,7 +91,7 @@ def ticket_create(request: HttpRequest) -> HttpResponse:
 
         if customer_id and subject and description:
             # Find customer in accessible customers
-            accessible_customers = request.user.get_accessible_customers()
+            accessible_customers = user.get_accessible_customers()
             customer = None
             for cust in accessible_customers:
                 if str(cust.id) == str(customer_id):
@@ -104,7 +108,7 @@ def ticket_create(request: HttpRequest) -> HttpResponse:
                 description=description,
                 priority=priority,
                 status='open',
-                created_by=request.user,
+                created_by=user,
             )
 
             messages.success(request, _("✅ Ticket #{ticket_pk} has been created!").format(ticket_pk=ticket.pk))
@@ -119,20 +123,20 @@ def ticket_create(request: HttpRequest) -> HttpResponse:
     return render(request, 'tickets/form.html', context)
 
 
-def _validate_ticket_reply_access(user: User, ticket: Ticket) -> HttpResponse | None:
+def _validate_ticket_reply_access(request: HttpRequest, user: User, ticket: Ticket) -> HttpResponse | None:
     """Validate user access to reply to ticket."""
     accessible_customers = user.get_accessible_customers()
     accessible_customer_ids = [customer.id for customer in accessible_customers]
     if ticket.customer.id not in accessible_customer_ids:
-        messages.error(user.request, _("❌ You do not have permission to reply to this ticket."))
+        messages.error(request, _("❌ You do not have permission to reply to this ticket."))
         return redirect('tickets:list')
     return None
 
 
-def _validate_internal_note_permission(user: User, is_internal: bool, ticket_pk: int) -> HttpResponse | None:
+def _validate_internal_note_permission(request: HttpRequest, user: User, is_internal: bool, ticket_pk: int) -> HttpResponse | None:
     """Validate user permission to create internal notes."""
     if is_internal and not (user.is_staff or getattr(user, 'staff_role', None)):
-        messages.error(user.request, _("❌ You do not have permission to create internal notes."))
+        messages.error(request, _("❌ You do not have permission to create internal notes."))
         return redirect('tickets:detail', pk=ticket_pk)
     return None
 
@@ -149,6 +153,8 @@ def _determine_comment_type(user: User, is_internal: bool) -> str:
 
 def _is_file_size_valid(uploaded_file: UploadedFile) -> bool:
     """Check if uploaded file size is within limits."""
+    if uploaded_file.size is None:
+        return False
     return uploaded_file.size <= 10 * 1024 * 1024  # 10MB limit
 
 
@@ -172,8 +178,15 @@ def _process_ticket_attachments(request: HttpRequest, ticket: Ticket, comment: T
     """Process and validate uploaded attachments."""
     if not request.FILES:
         return
+    
+    user = cast(User, request.user)  # Safe as this is only called from authenticated views
         
     for uploaded_file in request.FILES.getlist('attachments'):
+        # Skip files without proper attributes
+        if not uploaded_file.name:
+            messages.warning(request, "❌ File has no name.")
+            continue
+            
         # File size check
         if not _is_file_size_valid(uploaded_file):
             messages.warning(request, f"❌ File {uploaded_file.name} is too large (max 10MB).")
@@ -189,25 +202,27 @@ def _process_ticket_attachments(request: HttpRequest, ticket: Ticket, comment: T
             messages.warning(request, f"❌ File type not allowed for {uploaded_file.name}.")
             continue
 
-        # Create attachment
+        # Create attachment with proper null handling
+        file_size = uploaded_file.size or 0  # Default to 0 if None
         TicketAttachment.objects.create(
             ticket=ticket,
             comment=comment,
             file=uploaded_file,
             filename=uploaded_file.name,
-            file_size=uploaded_file.size,
+            file_size=file_size,
             content_type=content_type,
-            uploaded_by=request.user
+            uploaded_by=user
         )
 
 
 def _handle_ticket_reply_post(request: HttpRequest, ticket: Ticket) -> HttpResponse:
     """Handle POST request for ticket reply."""
+    user = cast(User, request.user)  # Safe as this is only called from authenticated views
     reply_text = request.POST.get('reply')
     is_internal = request.POST.get('is_internal') == 'on'
 
     # Validate internal note permission
-    error_response = _validate_internal_note_permission(request.user, is_internal, ticket.pk)
+    error_response = _validate_internal_note_permission(request, user, is_internal, ticket.pk)
     if error_response:
         return error_response
 
@@ -218,16 +233,16 @@ def _handle_ticket_reply_post(request: HttpRequest, ticket: Ticket) -> HttpRespo
         return redirect('tickets:detail', pk=ticket.pk)
 
     # Create comment
-    comment_type = _determine_comment_type(request.user, is_internal)
-    is_public = not (is_internal and (request.user.is_staff or getattr(request.user, 'staff_role', None)))
+    comment_type = _determine_comment_type(user, is_internal)
+    is_public = not (is_internal and (user.is_staff or getattr(user, 'staff_role', None)))
     
     comment = TicketComment.objects.create(
         ticket=ticket,
         content=reply_text,
         comment_type=comment_type,
-        author=request.user,
-        author_name=request.user.get_full_name(),
-        author_email=request.user.email,
+        author=user,
+        author_name=user.get_full_name(),
+        author_email=user.email,
         is_public=is_public
     )
 
@@ -254,11 +269,11 @@ def _handle_ticket_reply_post(request: HttpRequest, ticket: Ticket) -> HttpRespo
 @login_required
 def ticket_reply(request: HttpRequest, pk: int) -> HttpResponse:
     """💬 Add reply to ticket"""
+    user = cast(User, request.user)  # Safe after @login_required
     ticket = get_object_or_404(Ticket, pk=pk)
 
     # Guard clause for access validation
-    request.user.request = request
-    error_response = _validate_ticket_reply_access(request.user, ticket)
+    error_response = _validate_ticket_reply_access(request, user, ticket)
     if error_response:
         return error_response
 
@@ -271,16 +286,17 @@ def ticket_reply(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 def ticket_comments_htmx(request: HttpRequest, pk: int) -> HttpResponse:
     """🔄 HTMX endpoint for loading comments"""
+    user = cast(User, request.user)  # Safe after @login_required
     ticket = get_object_or_404(Ticket, pk=pk)
 
     # Security check - verify user has access to this customer
-    accessible_customers = request.user.get_accessible_customers()
+    accessible_customers = user.get_accessible_customers()
     accessible_customer_ids = [customer.id for customer in accessible_customers]
     if ticket.customer.id not in accessible_customer_ids:
         return HttpResponse('<div class="text-red-500">Access denied</div>')
 
     # Filter comments based on user permissions
-    if request.user.is_staff_user:
+    if user.is_staff_user:
         # Staff can see all comments including internal notes
         comments = ticket.comments.all().order_by('created_at')
     else:
@@ -298,10 +314,11 @@ def ticket_comments_htmx(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 def ticket_close(request: HttpRequest, pk: int) -> HttpResponse:
     """✅ Close ticket"""
+    user = cast(User, request.user)  # Safe after @login_required
     ticket = get_object_or_404(Ticket, pk=pk)
 
     # Security check - verify user has access to this customer
-    accessible_customers = request.user.get_accessible_customers()
+    accessible_customers = user.get_accessible_customers()
     accessible_customer_ids = [customer.id for customer in accessible_customers]
     if ticket.customer.id not in accessible_customer_ids:
         messages.error(request, _("❌ You do not have permission to close this ticket."))
@@ -317,10 +334,11 @@ def ticket_close(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 def ticket_reopen(request: HttpRequest, pk: int) -> HttpResponse:
     """🔄 Reopen closed ticket"""
+    user = cast(User, request.user)  # Safe after @login_required
     ticket = get_object_or_404(Ticket, pk=pk)
 
     # Security check - verify user has access to this customer
-    accessible_customers = request.user.get_accessible_customers()
+    accessible_customers = user.get_accessible_customers()
     accessible_customer_ids = [customer.id for customer in accessible_customers]
     if ticket.customer.id not in accessible_customer_ids:
         messages.error(request, _("❌ You do not have permission to reopen this ticket."))
@@ -336,24 +354,31 @@ def ticket_reopen(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 def download_attachment(request: HttpRequest, attachment_id: int) -> HttpResponse:
     """📎 Download ticket attachment"""
+    user = cast(User, request.user)  # Safe after @login_required
+    
     try:
         attachment = TicketAttachment.objects.select_related('ticket__customer').get(id=attachment_id)
     except TicketAttachment.DoesNotExist:
         raise Http404("Attachment not found") from None
 
     # Security check - verify user has access to this customer's ticket
-    accessible_customers = request.user.get_accessible_customers()
+    accessible_customers = user.get_accessible_customers()
     accessible_customer_ids = [customer.id for customer in accessible_customers]
     if attachment.ticket.customer.id not in accessible_customer_ids:
         raise PermissionDenied("You do not have permission to access this attachment.")
 
     # Check if file exists
-    if not attachment.file or not os.path.exists(attachment.file.path):
+    if not attachment.file or not attachment.file.name:
+        raise Http404("File not found")
+    
+    # Get the file path as string to handle Path type properly
+    file_path = str(attachment.file.path)
+    if not os.path.exists(file_path):
         raise Http404("File not found")
 
     # Return file response
     try:
-        with open(attachment.file.path, 'rb') as f:
+        with open(file_path, 'rb') as f:
             response = HttpResponse(f.read(), content_type=attachment.content_type)
             response['Content-Disposition'] = f'attachment; filename="{attachment.filename}"'
             response['Content-Length'] = attachment.file_size

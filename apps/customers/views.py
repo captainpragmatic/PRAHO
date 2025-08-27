@@ -42,7 +42,8 @@ def customer_list(request: HttpRequest) -> HttpResponse:
     Uses simplified Customer model with related data loaded efficiently
     """
     # Get user's accessible customers (multi-tenant)
-    accessible_customers_list = request.user.get_accessible_customers()
+    user = cast(User, request.user)  # Safe due to @login_required
+    accessible_customers_list = user.get_accessible_customers()
 
     # Convert to QuerySet for database operations
     if isinstance(accessible_customers_list, QuerySet):
@@ -91,7 +92,8 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
     customer = get_object_or_404(Customer, id=customer_id)
 
     # Check access permissions
-    if not request.user.can_access_customer(customer):
+    user = cast(User, request.user)  # Safe due to @login_required
+    if not user.can_access_customer(customer):
         messages.error(request, _('Access denied to this customer'))
         return redirect('customers:list')
 
@@ -117,12 +119,13 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
 
 def _handle_user_creation_for_customer(request: HttpRequest, customer: Customer, form_data: dict, result: dict) -> None:
     """Handle user creation for a new customer."""
+    created_by_user = cast(User, request.user)  # Safe in authenticated contexts
     user_result = CustomerUserService.create_user_for_customer(
         customer=customer,
         first_name=form_data.get('first_name', ''),
         last_name=form_data.get('last_name', ''),
         send_welcome=result['send_welcome_email'],
-        created_by=request.user
+        created_by=created_by_user
     )
 
     if user_result.is_ok():
@@ -145,12 +148,13 @@ def _handle_user_linking_for_customer(request: HttpRequest, customer: Customer, 
     if not existing_user:
         return
         
+    created_by_user = cast(User, request.user)  # Safe in authenticated contexts
     link_result = CustomerUserService.link_existing_user(
         user=existing_user,
         customer=customer,
         role='owner',
         is_primary=True,
-        created_by=request.user
+        created_by=created_by_user
     )
 
     if link_result.is_ok():
@@ -193,7 +197,8 @@ def _handle_customer_create_post(request: HttpRequest) -> HttpResponse:
 
     try:
         # Save customer and get result data
-        result = form.save(user=request.user)
+        user = cast(User, request.user)  # Safe in authenticated contexts
+        result = form.save(user=user)
         customer = result['customer']
         user_action = result['user_action']
 
@@ -245,7 +250,8 @@ def customer_edit(request: HttpRequest, customer_id: int) -> HttpResponse:
     customer = get_object_or_404(Customer, id=customer_id)
 
     # Check access permissions
-    if not request.user.can_access_customer(customer):
+    user = cast(User, request.user)  # Safe due to @staff_required
+    if not user.can_access_customer(customer):
         messages.error(request, _('Access denied to this customer'))
         return redirect('customers:list')
 
@@ -277,7 +283,8 @@ def customer_tax_profile(request: HttpRequest, customer_id: int) -> HttpResponse
     customer = get_object_or_404(Customer, id=customer_id)
 
     # Check access permissions
-    if not request.user.can_access_customer(customer):
+    user = cast(User, request.user)  # Safe due to @staff_required
+    if not user.can_access_customer(customer):
         messages.error(request, _('Access denied to this customer'))
         return redirect('customers:list')
 
@@ -313,7 +320,8 @@ def customer_billing_profile(request: HttpRequest, customer_id: int) -> HttpResp
     customer = get_object_or_404(Customer, id=customer_id)
 
     # Check access permissions
-    if not request.user.can_access_customer(customer):
+    user = cast(User, request.user)  # Safe due to @staff_required
+    if not user.can_access_customer(customer):
         messages.error(request, _('Access denied to this customer'))
         return redirect('customers:list')
 
@@ -349,7 +357,8 @@ def customer_address_add(request: HttpRequest, customer_id: int) -> HttpResponse
     customer = get_object_or_404(Customer, id=customer_id)
 
     # Check access permissions
-    if not request.user.can_access_customer(customer):
+    user = cast(User, request.user)  # Safe due to @staff_required
+    if not user.can_access_customer(customer):
         messages.error(request, _('Access denied to this customer'))
         return redirect('customers:list')
 
@@ -397,7 +406,8 @@ def customer_note_add(request: HttpRequest, customer_id: int) -> HttpResponse:
     customer = get_object_or_404(Customer, id=customer_id)
 
     # Check access permissions
-    if not request.user.can_access_customer(customer):
+    user = cast(User, request.user)  # Safe due to @staff_required
+    if not user.can_access_customer(customer):
         messages.error(request, _('Access denied to this customer'))
         return redirect('customers:list')
 
@@ -406,7 +416,8 @@ def customer_note_add(request: HttpRequest, customer_id: int) -> HttpResponse:
         if form.is_valid():
             note = form.save(commit=False)
             note.customer = customer
-            note.created_by = request.user
+            user = cast(User, request.user)  # Safe due to @staff_required
+            note.created_by = user
             note.save()
             messages.success(request, _('✅ Note added successfully'))
             return redirect('customers:detail', customer_id=customer.id)
@@ -432,13 +443,15 @@ def customer_delete(request: HttpRequest, customer_id: int) -> HttpResponse:
     customer = get_object_or_404(Customer, id=customer_id)
 
     # Check access permissions
-    if not request.user.can_access_customer(customer):
+    user = cast(User, request.user)  # Safe due to @staff_required
+    if not user.can_access_customer(customer):
         messages.error(request, _('Access denied to this customer'))
         return redirect('customers:list')
 
     if request.method == 'POST':
         # Soft delete preserves all related data
-        customer.soft_delete(user=request.user)
+        user = cast(User, request.user)  # Safe due to @staff_required
+        customer.soft_delete(user=user)
         messages.success(
             request,
             _('🗑️ Customer "{customer_name}" deleted successfully').format(customer_name=customer.get_display_name())
@@ -461,7 +474,8 @@ def customer_search_api(request: HttpRequest) -> JsonResponse:
     if len(query) < SEARCH_QUERY_MIN_LENGTH:
         return JsonResponse({'results': []})
 
-    customers = request.user.get_accessible_customers()
+    user = cast(User, request.user)  # Safe due to @login_required
+    customers = user.get_accessible_customers()
 
     # Filter based on search query
     if hasattr(customers, 'filter'):  # QuerySet
@@ -490,10 +504,10 @@ def customer_search_api(request: HttpRequest) -> JsonResponse:
     return JsonResponse({'results': results})
 
 
-def _validate_customer_assign_access(user: 'User', customer: Customer) -> HttpResponse | None:
+def _validate_customer_assign_access(request: HttpRequest, user: 'User', customer: Customer) -> HttpResponse | None:
     """Validate user access to assign users to customer."""
     if not user.can_access_customer(customer):
-        messages.error(user.request, _('Access denied to this customer'))
+        messages.error(request, _('Access denied to this customer'))
         return redirect('customers:list')
     return None
 
@@ -501,12 +515,13 @@ def _validate_customer_assign_access(user: 'User', customer: Customer) -> HttpRe
 def _handle_user_creation_action(request: HttpRequest, customer: Customer, assignment_data: dict) -> None:
     """Handle the 'create' action for user assignment."""
     send_welcome = bool(assignment_data.get('send_welcome_email', True))
+    created_by_user = cast(User, request.user)  # Safe in authenticated contexts
     user_result = CustomerUserService.create_user_for_customer(
         customer=customer,
         first_name=assignment_data['first_name'],
         last_name=assignment_data['last_name'],
         send_welcome=send_welcome,
-        created_by=request.user
+        created_by=created_by_user
     )
 
     if user_result.is_ok():
@@ -557,12 +572,13 @@ def _handle_user_linking_action(request: HttpRequest, customer: Customer, assign
         messages.error(request, _('❌ Invalid user selected'))
         return
 
+    created_by_user = cast(User, request.user)  # Safe in authenticated contexts
     link_result = CustomerUserService.link_existing_user(
         user=existing_user,
         customer=customer,
         role=role,
         is_primary=False,  # Existing customers might already have primary users
-        created_by=request.user
+        created_by=created_by_user
     )
 
     if link_result.is_ok():
@@ -598,7 +614,8 @@ def _handle_user_assignment_post(request: HttpRequest, customer: Customer) -> Ht
         return _render_assignment_form(request, form, customer)
 
     try:
-        assignment_data = form.save(customer=customer, created_by=request.user)
+        created_by_user = cast(User, request.user)  # Safe in authenticated contexts
+        assignment_data = form.save(customer=customer, created_by=created_by_user)
         action = assignment_data['action']
 
         if action == 'create':
@@ -637,8 +654,8 @@ def customer_assign_user(request: HttpRequest, customer_id: int) -> HttpResponse
     customer = get_object_or_404(Customer, id=customer_id)
 
     # Guard clause for access validation
-    request.user.request = request
-    error_response = _validate_customer_assign_access(request.user, customer)
+    user = cast(User, request.user)  # Safe due to @staff_required
+    error_response = _validate_customer_assign_access(request, user, customer)
     if error_response:
         return error_response
 

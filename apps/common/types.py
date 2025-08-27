@@ -36,7 +36,10 @@ E = TypeVar('E')  # Error type
 # Additional type variables for Django patterns
 UserT = TypeVar('UserT', bound=AbstractUser)
 FormT = TypeVar('FormT', bound=Form)
-AdminT = TypeVar('AdminT', bound=ModelAdmin)
+if TYPE_CHECKING:
+    AdminT = TypeVar('AdminT', bound='ModelAdmin[Any]')
+else:
+    AdminT = TypeVar('AdminT', bound=ModelAdmin)
 
 # ===============================================================================
 # RESULT TYPES
@@ -152,13 +155,22 @@ PhoneNumber = str  # International phone format: "+40721123456"
 # ADMIN PATTERN TYPES
 # ===============================================================================
 
-AdminDisplayMethod = Callable[[ModelAdminGeneric, M], str]
-AdminPermissionMethod = Callable[[ModelAdminGeneric, HttpRequest], bool]
-AdminActionMethod = Callable[[ModelAdminGeneric, HttpRequest, QuerySetGeneric], HttpResponse | None]
-AdminGetFieldsMethod = Callable[[ModelAdminGeneric, HttpRequest, M | None], tuple[str, ...]]
-AdminGetReadonlyMethod = Callable[[ModelAdminGeneric, HttpRequest, M | None], tuple[str, ...]]
-AdminFormMethod = Callable[[ModelAdminGeneric, HttpRequest, M | None], type]
-AdminQuerysetMethod = Callable[[ModelAdminGeneric, HttpRequest], QuerySetGeneric]
+if TYPE_CHECKING:
+    AdminDisplayMethod = Callable[[ModelAdmin[M], M], str]
+    AdminPermissionMethod = Callable[[ModelAdmin[M], HttpRequest], bool]
+    AdminActionMethod = Callable[[ModelAdmin[M], HttpRequest, QuerySet[M]], HttpResponse | None]
+    AdminGetFieldsMethod = Callable[[ModelAdmin[M], HttpRequest, M | None], tuple[str, ...]]
+    AdminGetReadonlyMethod = Callable[[ModelAdmin[M], HttpRequest, M | None], tuple[str, ...]]
+    AdminFormMethod = Callable[[ModelAdmin[M], HttpRequest, M | None], type]
+    AdminQuerysetMethod = Callable[[ModelAdmin[M], HttpRequest], QuerySet[M]]
+else:
+    AdminDisplayMethod = Callable[[ModelAdmin, M], str]
+    AdminPermissionMethod = Callable[[ModelAdmin, HttpRequest], bool]
+    AdminActionMethod = Callable[[ModelAdmin, HttpRequest, QuerySet], HttpResponse | None]
+    AdminGetFieldsMethod = Callable[[ModelAdmin, HttpRequest, M | None], tuple[str, ...]]
+    AdminGetReadonlyMethod = Callable[[ModelAdmin, HttpRequest, M | None], tuple[str, ...]]
+    AdminFormMethod = Callable[[ModelAdmin, HttpRequest, M | None], type]
+    AdminQuerysetMethod = Callable[[ModelAdmin, HttpRequest], QuerySet]
 
 # ===============================================================================
 # FORM AND VALIDATION TYPES

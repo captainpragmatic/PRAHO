@@ -5,6 +5,7 @@ Romanian hosting provider with security-first approach.
 
 import os
 from pathlib import Path
+from typing import Any
 
 # ===============================================================================
 # CORE DJANGO SETTINGS
@@ -13,7 +14,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # Application definition
-DJANGO_APPS = [
+DJANGO_APPS: list[str] = [
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -23,12 +24,12 @@ DJANGO_APPS = [
     'django.contrib.humanize',
 ]
 
-THIRD_PARTY_APPS = [
+THIRD_PARTY_APPS: list[str] = [
     'rest_framework',
     'django_extensions',
 ]
 
-LOCAL_APPS = [
+LOCAL_APPS: list[str] = [
     'apps.common',
     'apps.users',
     'apps.customers',
@@ -44,9 +45,9 @@ LOCAL_APPS = [
     'apps.ui',
 ]
 
-INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
+INSTALLED_APPS: list[str] = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
-MIDDLEWARE = [
+MIDDLEWARE: list[str] = [
     'apps.common.middleware.RequestIDMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -87,7 +88,7 @@ ASGI_APPLICATION = 'config.asgi.application'
 # DATABASE CONFIGURATION
 # ===============================================================================
 
-DATABASES = {
+DATABASES: dict[str, dict[str, Any]] = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': os.environ.get('DB_NAME', 'pragmatichost'),
@@ -95,14 +96,12 @@ DATABASES = {
         'PASSWORD': os.environ.get('DB_PASSWORD', 'development_password'),
         'HOST': os.environ.get('DB_HOST', 'localhost'),
         'PORT': os.environ.get('DB_PORT', '5432'),
+        'CONN_MAX_AGE': 60,  # Database connection pooling
         'OPTIONS': {
             'application_name': 'pragmatichost_crm',
         },
     }
 }
-
-# Database connection pooling
-DATABASES['default']['CONN_MAX_AGE'] = 60
 
 # ===============================================================================
 # AUTHENTICATION & AUTHORIZATION

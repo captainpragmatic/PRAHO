@@ -74,11 +74,13 @@ class BaseWebhookProcessor:
     - Audit logging
     """
 
-    source_name: str = None  # Override in subclasses
+    source_name: str | None = None  # Override in subclasses
 
     def __init__(self) -> None:
         if not self.source_name:
             raise ValueError("source_name must be defined in subclass")
+        # After validation, we know source_name is not None
+        assert self.source_name is not None
 
     def process_webhook(
         self,
@@ -104,16 +106,25 @@ class BaseWebhookProcessor:
                      .and_then(lambda context: self._verify_signature_with_context(context))
                      .and_then(lambda context: self._create_and_process_event(context)))
             
-            if result.is_ok():
-                return result.value.to_tuple()
-            else:
-                # Handle special duplicate case
-                if result.error.startswith("DUPLICATE:"):
-                    event_id = result.error[10:]  # Remove "DUPLICATE:" prefix
-                    existing = WebhookEvent.objects.get(source=self.source_name, event_id=event_id)
-                    return WebhookProcessingResult.success_result(f"⏭️ Duplicate webhook skipped: {event_id}", existing).to_tuple()
-                
-                return WebhookProcessingResult.error_result(result.error).to_tuple()
+            # Type-safe handling of Result union types using match statement
+            match result:
+                case Ok(processing_result):
+                    # result is Ok[WebhookProcessingResult] - safe to access .value
+                    return processing_result.to_tuple()
+                case Err(error_message):
+                    # result is Err[str] - safe to access .error
+                    # Handle special duplicate case
+                    if error_message.startswith("DUPLICATE:"):
+                        event_id = error_message[10:]  # Remove "DUPLICATE:" prefix
+                        # source_name is guaranteed to be not None after __init__ validation
+                        assert self.source_name is not None
+                        existing = WebhookEvent.objects.get(source=self.source_name, event_id=event_id)
+                        return WebhookProcessingResult.success_result(f"⏭️ Duplicate webhook skipped: {event_id}", existing).to_tuple()
+                    
+                    return WebhookProcessingResult.error_result(error_message).to_tuple()
+                case _:
+                    # This should never happen with proper Result types, but provides safety
+                    return WebhookProcessingResult.error_result("Unknown result type").to_tuple()
 
         except Exception as e:
             logger.exception(f"💥 Critical error processing {self.source_name} webhook")
@@ -136,6 +147,8 @@ class BaseWebhookProcessor:
         """Step 2: Check for duplicate webhook processing."""
         event_id = event_info["event_id"]
         
+        # source_name is guaranteed to be not None after __init__ validation
+        assert self.source_name is not None
         if WebhookEvent.is_duplicate(self.source_name, event_id):
             logger.info(f"🔄 Duplicate webhook {self.source_name}:{event_id} - skipping")
             # Return special error that will be handled as success
@@ -169,6 +182,8 @@ class BaseWebhookProcessor:
         event_type = context.event_info["event_type"]
 
         with transaction.atomic():
+            # source_name is guaranteed to be not None after __init__ validation  
+            assert self.source_name is not None
             webhook_event = WebhookEvent.objects.create(
                 source=self.source_name,
                 event_id=event_id,
@@ -176,7 +191,7 @@ class BaseWebhookProcessor:
                 payload=context.payload,
                 signature=context.signature,
                 ip_address=context.ip_address,
-                user_agent=context.user_agent,
+                user_agent=context.user_agent or '',  # Convert None to empty string for TextField
                 headers=context.headers,
                 status='pending'
             )

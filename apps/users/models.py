@@ -6,13 +6,17 @@ Romanian hosting provider authentication with multi-customer support.
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar, cast, TYPE_CHECKING
 
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
 from django.db.models import QuerySet
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+
+if TYPE_CHECKING:
+    from django.db.models.manager import ManyToManyRelatedManager
+    from apps.customers.models import Customer as CustomerType
 
 # Cross-app imports for core functionality
 from apps.common.encryption import (  # Core encryption needed for user model
@@ -89,7 +93,7 @@ class User(AbstractUser):
     backup_tokens = models.JSONField(default=list, blank=True)  # Stores hashed backup codes
 
     # Customer relationships (replaces primary_customer + additional_customers)
-    customers = models.ManyToManyField(
+    customers: models.ManyToManyField = models.ManyToManyField(
         'customers.Customer',
         through='CustomerMembership',
         through_fields=('user', 'customer'),
@@ -118,8 +122,8 @@ class User(AbstractUser):
         related_name='created_users'
     )
 
-    # Custom manager
-    objects: UserManager[User] = UserManager()
+    # Custom manager with explicit typing to avoid MyPy override warnings
+    objects: UserManager = UserManager()  # type: ignore[misc]
 
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS: ClassVar[list[str]] = []

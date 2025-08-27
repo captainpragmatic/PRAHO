@@ -11,7 +11,7 @@ from django import forms
 from django.contrib import admin
 from django.http import HttpRequest
 from django.utils.html import format_html
-from django.utils.safestring import SafeString
+from django.utils.safestring import SafeString, mark_safe
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.constants import EXCELLENT_SUCCESS_RATE, GOOD_SUCCESS_RATE
@@ -22,41 +22,36 @@ from .models import EmailCampaign, EmailLog, EmailTemplate
 # EMAIL TEMPLATE ADMIN
 # ===============================================================================
 
+
 @admin.register(EmailTemplate)
 class EmailTemplateAdmin(admin.ModelAdmin):
     """Admin interface for email templates"""
 
     list_display: ClassVar[list[str]] = (
-        'key', 'locale', 'get_subject_display', 'category',
-        'is_active', 'version', 'created_at'
+        "key",
+        "locale",
+        "get_subject_display",
+        "category",
+        "is_active",
+        "version",
+        "created_at",
     )
-    list_filter: ClassVar[list[str]] = (
-        'category', 'locale', 'is_active', 'created_at'
-    )
-    search_fields: ClassVar[list[str]] = ('key', 'subject', 'description')
-    readonly_fields: ClassVar[list[str]] = ('created_at', 'updated_at')
+    list_filter: ClassVar[list[str]] = ("category", "locale", "is_active", "created_at")
+    search_fields: ClassVar[list[str]] = ("key", "subject", "description")
+    readonly_fields: ClassVar[list[str]] = ("created_at", "updated_at")
 
     fieldsets: ClassVar[tuple] = (
-        (_('Template Identification'), {
-            'fields': ('key', 'locale', 'category', 'description')
-        }),
-        (_('Content'), {
-            'fields': ('subject', 'body_html', 'body_text'),
-            'classes': ('wide',)
-        }),
-        (_('Configuration'), {
-            'fields': ('variables', 'is_active', 'version')
-        }),
-        (_('Audit'), {
-            'fields': ('created_by', 'created_at', 'updated_at'),
-            'classes': ('collapse',)
-        }),
+        (_("Template Identification"), {"fields": ("key", "locale", "category", "description")}),
+        (_("Content"), {"fields": ("subject", "body_html", "body_text"), "classes": ("wide",)}),
+        (_("Configuration"), {"fields": ("variables", "is_active", "version")}),
+        (_("Audit"), {"fields": ("created_by", "created_at", "updated_at"), "classes": ("collapse",)}),
     )
 
     def get_subject_display(self, obj: EmailTemplate) -> str:
         """Display truncated subject"""
         return obj.get_subject_display()
-    get_subject_display.short_description = _('Subject')
+
+    get_subject_display.short_description = _("Subject")
 
     def save_model(self, request: HttpRequest, obj: EmailTemplate, form: forms.ModelForm, change: bool) -> None:
         """Set created_by on new templates"""
@@ -69,45 +64,38 @@ class EmailTemplateAdmin(admin.ModelAdmin):
 # EMAIL LOG ADMIN
 # ===============================================================================
 
+
 @admin.register(EmailLog)
 class EmailLogAdmin(admin.ModelAdmin):
     """Admin interface for email delivery logs"""
 
     list_display: ClassVar[list[str]] = (
-        'subject', 'to_addr', 'get_status_display_colored',
-        'provider', 'template_key', 'sent_at'
+        "subject",
+        "to_addr",
+        "get_status_display_colored",
+        "provider",
+        "template_key",
+        "sent_at",
     )
-    list_filter: ClassVar[list[str]] = (
-        'status', 'provider', 'priority', 'sent_at'
-    )
-    search_fields: ClassVar[list[str]] = ('to_addr', 'subject', 'template_key')
+    list_filter: ClassVar[list[str]] = ("status", "provider", "priority", "sent_at")
+    search_fields: ClassVar[list[str]] = ("to_addr", "subject", "template_key")
     readonly_fields: ClassVar[list[str]] = (
-        'sent_at', 'delivered_at', 'opened_at', 'clicked_at',
-        'provider_response', 'meta'
+        "sent_at",
+        "delivered_at",
+        "opened_at",
+        "clicked_at",
+        "provider_response",
+        "meta",
     )
-    date_hierarchy = 'sent_at'
+    date_hierarchy = "sent_at"
 
     fieldsets: ClassVar[tuple] = (
-        (_('Email Details'), {
-            'fields': ('to_addr', 'from_addr', 'reply_to', 'subject')
-        }),
-        (_('Template & Content'), {
-            'fields': ('template_key', 'body_text', 'body_html'),
-            'classes': ('collapse',)
-        }),
-        (_('Delivery Status'), {
-            'fields': ('status', 'provider', 'provider_id', 'priority')
-        }),
-        (_('Timing'), {
-            'fields': ('sent_at', 'delivered_at', 'opened_at', 'clicked_at')
-        }),
-        (_('Context'), {
-            'fields': ('customer', 'sent_by')
-        }),
-        (_('Technical Details'), {
-            'fields': ('provider_response', 'meta'),
-            'classes': ('collapse',)
-        }),
+        (_("Email Details"), {"fields": ("to_addr", "from_addr", "reply_to", "subject")}),
+        (_("Template & Content"), {"fields": ("template_key", "body_text", "body_html"), "classes": ("collapse",)}),
+        (_("Delivery Status"), {"fields": ("status", "provider", "provider_id", "priority")}),
+        (_("Timing"), {"fields": ("sent_at", "delivered_at", "opened_at", "clicked_at")}),
+        (_("Context"), {"fields": ("customer", "sent_by")}),
+        (_("Technical Details"), {"fields": ("provider_response", "meta"), "classes": ("collapse",)}),
     )
 
     def get_status_display_colored(self, obj: EmailLog) -> SafeString:
@@ -117,24 +105,22 @@ class EmailLogAdmin(admin.ModelAdmin):
 
         # Add emoji indicators
         status_emoji = {
-            'queued': '⏳',
-            'sending': '📤',
-            'sent': '✅',
-            'delivered': '📬',
-            'bounced': '❌',
-            'soft_bounced': '⚠️',
-            'complained': '🚨',
-            'failed': '💥',
-            'rejected': '🚫',
+            "queued": "⏳",
+            "sending": "📤",
+            "sent": "✅",
+            "delivered": "📬",
+            "bounced": "❌",
+            "soft_bounced": "⚠️",
+            "complained": "🚨",
+            "failed": "💥",
+            "rejected": "🚫",
         }
-        emoji = status_emoji.get(obj.status, '❓')
+        emoji = status_emoji.get(obj.status, "❓")
 
-        return format_html(
-            '<span style="color: {};">{} {}</span>',
-            color, emoji, status_text
-        )
-    get_status_display_colored.short_description = _('Status')
-    get_status_display_colored.admin_order_field = 'status'
+        return format_html('<span style="color: {};">{} {}</span>', color, emoji, status_text)
+
+    get_status_display_colored.short_description = _("Status")
+    get_status_display_colored.admin_order_field = "status"
 
     def has_add_permission(self, request: HttpRequest) -> bool:
         """Email logs are created by system, not manually"""
@@ -149,118 +135,113 @@ class EmailLogAdmin(admin.ModelAdmin):
 # EMAIL CAMPAIGN ADMIN
 # ===============================================================================
 
+
 @admin.register(EmailCampaign)
 class EmailCampaignAdmin(admin.ModelAdmin):
     """Admin interface for email campaigns"""
 
     list_display: ClassVar[list[str]] = (
-        'name', 'get_status_display_colored', 'audience',
-        'get_progress_display', 'get_success_rate_display',
-        'scheduled_at', 'created_at'
+        "name",
+        "get_status_display_colored",
+        "audience",
+        "get_progress_display",
+        "get_success_rate_display",
+        "scheduled_at",
+        "created_at",
     )
     list_filter: ClassVar[list[str]] = (
-        'status', 'audience', 'is_transactional', 'requires_consent',
-        'created_at', 'scheduled_at'
+        "status",
+        "audience",
+        "is_transactional",
+        "requires_consent",
+        "created_at",
+        "scheduled_at",
     )
-    search_fields: ClassVar[list[str]] = ('name', 'description')
+    search_fields: ClassVar[list[str]] = ("name", "description")
     readonly_fields: ClassVar[list[str]] = (
-        'total_recipients', 'emails_sent', 'emails_failed',
-        'started_at', 'completed_at', 'created_at', 'updated_at'
+        "total_recipients",
+        "emails_sent",
+        "emails_failed",
+        "started_at",
+        "completed_at",
+        "created_at",
+        "updated_at",
     )
-    date_hierarchy = 'created_at'
+    date_hierarchy = "created_at"
 
     fieldsets: ClassVar[tuple] = (
-        (_('Campaign Details'), {
-            'fields': ('name', 'description', 'template')
-        }),
-        (_('Targeting'), {
-            'fields': ('audience', 'audience_filter')
-        }),
-        (_('Scheduling & Status'), {
-            'fields': ('status', 'scheduled_at')
-        }),
-        (_('Compliance'), {
-            'fields': ('is_transactional', 'requires_consent')
-        }),
-        (_('Results'), {
-            'fields': (
-                'total_recipients', 'emails_sent', 'emails_failed',
-                'started_at', 'completed_at'
-            ),
-            'classes': ('collapse',)
-        }),
-        (_('Audit'), {
-            'fields': ('created_by', 'created_at', 'updated_at'),
-            'classes': ('collapse',)
-        }),
+        (_("Campaign Details"), {"fields": ("name", "description", "template")}),
+        (_("Targeting"), {"fields": ("audience", "audience_filter")}),
+        (_("Scheduling & Status"), {"fields": ("status", "scheduled_at")}),
+        (_("Compliance"), {"fields": ("is_transactional", "requires_consent")}),
+        (
+            _("Results"),
+            {
+                "fields": ("total_recipients", "emails_sent", "emails_failed", "started_at", "completed_at"),
+                "classes": ("collapse",),
+            },
+        ),
+        (_("Audit"), {"fields": ("created_by", "created_at", "updated_at"), "classes": ("collapse",)}),
     )
 
     def get_status_display_colored(self, obj: EmailCampaign) -> SafeString:
         """Display campaign status with color coding"""
         status_colors = {
-            'draft': '#6B7280',       # Gray
-            'scheduled': '#3B82F6',   # Blue
-            'sending': '#F59E0B',     # Amber
-            'sent': '#10B981',        # Green
-            'paused': '#F59E0B',      # Amber
-            'cancelled': '#6B7280',   # Gray
-            'failed': '#EF4444',      # Red
+            "draft": "#6B7280",  # Gray
+            "scheduled": "#3B82F6",  # Blue
+            "sending": "#F59E0B",  # Amber
+            "sent": "#10B981",  # Green
+            "paused": "#F59E0B",  # Amber
+            "cancelled": "#6B7280",  # Gray
+            "failed": "#EF4444",  # Red
         }
 
         status_emoji = {
-            'draft': '📝',
-            'scheduled': '⏰',
-            'sending': '📤',
-            'sent': '✅',
-            'paused': '⏸️',
-            'cancelled': '❌',
-            'failed': '💥',
+            "draft": "📝",
+            "scheduled": "⏰",
+            "sending": "📤",
+            "sent": "✅",
+            "paused": "⏸️",
+            "cancelled": "❌",
+            "failed": "💥",
         }
 
-        color = status_colors.get(obj.status, '#6B7280')
-        emoji = status_emoji.get(obj.status, '❓')
+        color = status_colors.get(obj.status, "#6B7280")
+        emoji = status_emoji.get(obj.status, "❓")
         status_text = obj.get_status_display()
 
-        return format_html(
-            '<span style="color: {};">{} {}</span>',
-            color, emoji, status_text
-        )
-    get_status_display_colored.short_description = _('Status')
-    get_status_display_colored.admin_order_field = 'status'
+        return format_html('<span style="color: {};">{} {}</span>', color, emoji, status_text)
+
+    get_status_display_colored.short_description = _("Status")
+    get_status_display_colored.admin_order_field = "status"
 
     def get_progress_display(self, obj: EmailCampaign) -> SafeString:
         """Display campaign progress"""
         if obj.total_recipients == 0:
-            return _('No recipients')
+            return mark_safe(str(_("No recipients")))
 
         progress = (obj.emails_sent + obj.emails_failed) / obj.total_recipients * 100
-        return format_html(
-            '{}/{} ({}%)',
-            obj.emails_sent + obj.emails_failed,
-            obj.total_recipients,
-            round(progress, 1)
-        )
-    get_progress_display.short_description = _('Progress')
+        return format_html("{}/{} ({}%)", obj.emails_sent + obj.emails_failed, obj.total_recipients, round(progress, 1))
+
+    get_progress_display.short_description = _("Progress")
 
     def get_success_rate_display(self, obj: EmailCampaign) -> SafeString:
         """Display success rate with color coding"""
         rate = obj.get_success_rate()
 
         if rate >= EXCELLENT_SUCCESS_RATE:
-            color = '#10B981'  # Green
-            emoji = '🎯'
+            color = "#10B981"  # Green
+            emoji = "🎯"
         elif rate >= GOOD_SUCCESS_RATE:
-            color = '#F59E0B'  # Amber
-            emoji = '⚠️'
+            color = "#F59E0B"  # Amber
+            emoji = "⚠️"
         else:
-            color = '#EF4444'  # Red
-            emoji = '❌'
+            color = "#EF4444"  # Red
+            emoji = "❌"
 
-        return format_html(
-            '<span style="color: {};">{} {}%</span>',
-            color, emoji, rate
-        )
-    get_success_rate_display.short_description = _('Success Rate')
+        return format_html('<span style="color: {};">{} {}%</span>', color, emoji, rate)
+
+    get_success_rate_display.short_description = _("Success Rate")
 
     def save_model(self, request: HttpRequest, obj: EmailCampaign, form: forms.ModelForm, change: bool) -> None:
         """Set created_by on new campaigns"""

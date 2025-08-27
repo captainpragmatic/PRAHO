@@ -533,6 +533,11 @@ class CustomerCreationForm(forms.Form):
     def clean(self) -> dict[str, Any]:
         """Cross-field validation"""
         cleaned_data = super().clean()
+        
+        # Guard clause: if cleaned_data is None (validation failed), return early
+        if cleaned_data is None:
+            return {}
+            
         customer_type: str | None = cleaned_data.get('customer_type')
         company_name: str | None = cleaned_data.get('company_name')
         vat_number: str | None = cleaned_data.get('vat_number')
@@ -724,7 +729,16 @@ class CustomerUserAssignmentForm(forms.Form):
                 ).exclude(id__in=existing_member_ids)
 
     def clean(self) -> dict[str, Any]:
-        cleaned_data = super().clean()
+        try:
+            cleaned_data = super().clean()
+        except AttributeError:
+            # Handle case where cleaned_data doesn't exist yet
+            return {}
+        
+        # Guard clause: if cleaned_data is None (validation failed), return early
+        if cleaned_data is None:
+            return {}
+            
         user_action: str | None = cleaned_data.get('user_action')
 
         if user_action == 'create':

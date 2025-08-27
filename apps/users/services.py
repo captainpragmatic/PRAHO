@@ -18,6 +18,7 @@ from django.http import HttpRequest
 from django.template.loader import render_to_string
 from django.utils import timezone
 from django.utils.encoding import force_bytes
+from django.utils.functional import Promise
 from django.utils.http import urlsafe_base64_encode
 from django.utils.translation import gettext_lazy as _
 
@@ -79,9 +80,11 @@ logger = logging.getLogger(__name__)
 # USER SERVICE PARAMETER OBJECTS
 # ===============================================================================
 
+
 @dataclass
 class UserCreationRequest:
     """Parameter object for user creation requests"""
+
     customer: Customer
     first_name: str = ""
     last_name: str = ""
@@ -89,23 +92,27 @@ class UserCreationRequest:
     created_by: User | None = None
     request_ip: str | None = None
 
+
 @dataclass
 class UserLinkingRequest:
     """Parameter object for linking existing users to customers"""
+
     user: User
     customer: Customer
-    role: str = 'viewer'  # Secure default
+    role: str = "viewer"  # Secure default
     is_primary: bool = False
     created_by: User | None = None
     request_ip: str | None = None
 
+
 @dataclass
 class UserInvitationRequest:
     """Parameter object for user invitation requests"""
+
     inviter: User
     invitee_email: str
     customer: Customer
-    role: str = 'viewer'
+    role: str = "viewer"
     request_ip: str | None = None
     user_id: int | None = None  # For rate limiting
 
@@ -114,27 +121,29 @@ class UserInvitationRequest:
 # SECURE USER REGISTRATION SERVICE
 # ===============================================================================
 
+
 class SecureUserRegistrationService:
     """
     🔒 Security-hardened user registration with comprehensive protection
-    
+
     Addresses:
     - Race condition vulnerabilities
-    - Email enumeration attacks  
+    - Email enumeration attacks
     - Privilege escalation attempts
     - Input validation bypasses
     - Romanian compliance requirements
     """
 
-    CUSTOMER_TYPES: ClassVar[list[tuple[str, str]]] = [
-        ('individual', _('Individual')),
-        ('company', _('Company')),
-        ('pfa', _('PFA/SRL')),
-        ('ngo', _('NGO/Association')),
+    CUSTOMER_TYPES: ClassVar[list[tuple[str, str | Promise]]] = [
+        ("individual", _("Individual")),
+        ("company", _("Company")),
+        ("pfa", _("PFA/SRL")),
+        ("ngo", _("NGO/Association")),
     ]
 
     class UserData(TypedDict):
         """Type definition for user registration data"""
+
         email: EmailAddress
         first_name: str
         last_name: str
@@ -144,6 +153,7 @@ class SecureUserRegistrationService:
 
     class CustomerData(TypedDict):
         """Type definition for customer registration data"""
+
         company_name: str
         customer_type: str
         vat_number: VATString | None
@@ -155,13 +165,20 @@ class SecureUserRegistrationService:
     @classmethod
     @secure_user_registration(rate_limit=5)  # 5 registrations per hour per IP
     @atomic_with_retry(max_retries=3)
-    @prevent_race_conditions(lambda cls, user_data, customer_data, **kwargs:
-                            f"{user_data.get('email', '')}:{customer_data.get('company_name', '')}")
-    @audit_service_call("user_registration", lambda cls, user_data, customer_data, **kwargs: {
-        'email': user_data.get('email', ''),
-        'company_name': customer_data.get('company_name', ''),
-        'customer_type': customer_data.get('customer_type', '')
-    })
+    @prevent_race_conditions(
+        lambda cls,
+        user_data,
+        customer_data,
+        **kwargs: f"{user_data.get('email', '')}:{customer_data.get('company_name', '')}"
+    )
+    @audit_service_call(
+        "user_registration",
+        lambda cls, user_data, customer_data, **kwargs: {
+            "email": user_data.get("email", ""),
+            "company_name": customer_data.get("company_name", ""),
+            "customer_type": customer_data.get("customer_type", ""),
+        },
+    )
     @monitor_performance(max_duration_seconds=10.0, alert_threshold=3.0)
     def register_new_customer_owner(
         cls,
@@ -169,11 +186,11 @@ class SecureUserRegistrationService:
         customer_data: dict[str, Any],
         request_ip: str | None = None,
         user_agent: str | None = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> Result[tuple[User, Customer], str]:
         """
         🔒 Secure registration of new user as owner of NEW customer organization
-        
+
         Security Enhancements:
         - Comprehensive input validation
         - Race condition prevention with distributed locking
@@ -192,26 +209,26 @@ class SecureUserRegistrationService:
 
             # Step 2: Create the user account with security measures
             user = User.objects.create_user(
-                email=user_data['email'],  # Validated email
-                first_name=user_data['first_name'],  # XSS-safe
-                last_name=user_data['last_name'],    # XSS-safe
-                phone=user_data.get('phone', ''),   # Romanian format validated
-                accepts_marketing=user_data.get('accepts_marketing', False),
-                gdpr_consent_date=user_data.get('gdpr_consent_date'),
+                email=user_data["email"],  # Validated email
+                first_name=user_data["first_name"],  # XSS-safe
+                last_name=user_data["last_name"],  # XSS-safe
+                phone=user_data.get("phone", ""),  # Romanian format validated
+                accepts_marketing=user_data.get("accepts_marketing", False),
+                gdpr_consent_date=user_data.get("gdpr_consent_date"),
                 # Security: No admin fields can be injected due to validation
             )
 
             # Step 3: Create customer organization with validated data
             customer = Customer.objects.create(
-                company_name=customer_data['company_name'],  # Sanitized
-                customer_type=customer_data.get('customer_type', 'other'),
-                status='active',
-                created_by=user
+                company_name=customer_data["company_name"],  # Sanitized
+                customer_type=customer_data.get("customer_type", "other"),
+                status="active",
+                created_by=user,
             )
 
             # Step 4: Create tax profile with Romanian compliance
-            vat_number = customer_data.get('vat_number', '').strip()
-            registration_number = customer_data.get('registration_number', '').strip()
+            vat_number = customer_data.get("vat_number", "").strip()
+            registration_number = customer_data.get("registration_number", "").strip()
 
             if vat_number or registration_number:
                 CustomerTaxProfile.objects.create(
@@ -222,29 +239,29 @@ class SecureUserRegistrationService:
                 )
 
                 # Log tax profile creation for Romanian compliance
-                log_security_event('tax_profile_created', {
-                    'customer_id': customer.id,
-                    'has_vat': bool(vat_number),
-                    'has_cui': bool(registration_number)
-                }, request_ip)
+                log_security_event(
+                    "tax_profile_created",
+                    {"customer_id": customer.id, "has_vat": bool(vat_number), "has_cui": bool(registration_number)},
+                    request_ip,
+                )
 
             # Step 5: Create billing profile (secure defaults)
             CustomerBillingProfile.objects.create(
                 customer=customer,
                 payment_terms=30,  # Default 30 days
-                preferred_currency='RON',  # Romanian Lei
-                invoice_delivery_method='email',
+                preferred_currency="RON",  # Romanian Lei
+                invoice_delivery_method="email",
             )
 
             # Step 6: Create billing address with validated data
             CustomerAddress.objects.create(
                 customer=customer,
-                address_type='billing',
-                address_line1=customer_data.get('billing_address', ''),  # Sanitized
-                city=customer_data.get('billing_city', ''),              # Sanitized
-                postal_code=customer_data.get('billing_postal_code', ''), # Sanitized
-                county='',  # TODO: Auto-detect from city
-                country='România',
+                address_type="billing",
+                address_line1=customer_data.get("billing_address", ""),  # Sanitized
+                city=customer_data.get("billing_city", ""),  # Sanitized
+                postal_code=customer_data.get("billing_postal_code", ""),  # Sanitized
+                county="",  # TODO: Auto-detect from city
+                country="România",
                 is_current=True,
             )
 
@@ -252,19 +269,23 @@ class SecureUserRegistrationService:
             CustomerMembership.objects.create(
                 user=user,
                 customer=customer,
-                role='owner',  # Validated role
+                role="owner",  # Validated role
                 is_primary=True,
             )
 
             # Step 8: Security audit logging
-            log_security_event('customer_registration_success', {
-                'user_id': user.id,
-                'customer_id': customer.id,
-                'email': user.email,
-                'company_name': customer.company_name,
-                'has_vat_number': bool(vat_number),
-                'user_agent': user_agent
-            }, request_ip)
+            log_security_event(
+                "customer_registration_success",
+                {
+                    "user_id": user.id,
+                    "customer_id": customer.id,
+                    "email": user.email,
+                    "company_name": customer.company_name,
+                    "has_vat_number": bool(vat_number),
+                    "user_agent": user_agent,
+                },
+                request_ip,
+            )
 
             logger.info(f"✅ [Secure Registration] User {user.email} registered customer {customer.company_name}")
             return Ok((user, customer))
@@ -278,10 +299,9 @@ class SecureUserRegistrationService:
             error_id = hashlib.sha256(f"{e!s}{time.time()}".encode()).hexdigest()[:8]
             logger.error(f"🔥 [Secure Registration] Unexpected error {error_id}: {e!s}")
 
-            log_security_event('registration_system_error', {
-                'error_id': error_id,
-                'error_type': type(e).__name__
-            }, request_ip)
+            log_security_event(
+                "registration_system_error", {"error_id": error_id, "error_type": type(e).__name__}, request_ip
+            )
 
             return Err(_("Registration could not be completed. Please contact support.") + f" (ID: {error_id})")
 
@@ -296,7 +316,7 @@ class SecureUserRegistrationService:
         company_identifier: str,
         identification_type: str,  # 'name', 'vat_number', 'registration_number'
         request_ip: str | None = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> Result[dict[str, Any], str]:
         """
         🔒 Secure request to join existing customer with enumeration prevention
@@ -307,27 +327,29 @@ class SecureUserRegistrationService:
 
             # Step 1: Secure company lookup (timing-safe)
             existing_customer = cls._find_customer_by_identifier_secure(
-                company_identifier,
-                identification_type,
-                request_ip
+                company_identifier, identification_type, request_ip
             )
 
             if not existing_customer:
                 # Generic error message (no enumeration)
-                log_security_event('join_request_invalid_company', {
-                    'identifier_type': identification_type,
-                    'identifier_hash': hashlib.sha256(company_identifier.encode()).hexdigest()[:16]
-                }, request_ip)
+                log_security_event(
+                    "join_request_invalid_company",
+                    {
+                        "identifier_type": identification_type,
+                        "identifier_hash": hashlib.sha256(company_identifier.encode()).hexdigest()[:16],
+                    },
+                    request_ip,
+                )
                 return Err(_("Company information could not be verified"))
 
             # Step 2: Create user in pending state
             user = User.objects.create_user(
-                email=user_data['email'],
-                first_name=user_data['first_name'],
-                last_name=user_data['last_name'],
-                phone=user_data.get('phone', ''),
-                accepts_marketing=user_data.get('accepts_marketing', False),
-                gdpr_consent_date=user_data.get('gdpr_consent_date'),
+                email=user_data["email"],
+                first_name=user_data["first_name"],
+                last_name=user_data["last_name"],
+                phone=user_data.get("phone", ""),
+                accepts_marketing=user_data.get("accepts_marketing", False),
+                gdpr_consent_date=user_data.get("gdpr_consent_date"),
                 is_active=False,  # 🚨 Pending approval
             )
 
@@ -335,25 +357,22 @@ class SecureUserRegistrationService:
             membership = CustomerMembership.objects.create(
                 user=user,
                 customer=existing_customer,
-                role='viewer',  # Default safe role
+                role="viewer",  # Default safe role
                 is_primary=False,
             )
 
             # Step 4: Secure notification to owners
             cls._notify_owners_of_join_request_secure(existing_customer, user, request_ip)
 
-            log_security_event('join_request_created', {
-                'user_id': user.id,
-                'customer_id': existing_customer.id,
-                'pending_approval': True
-            }, request_ip)
+            log_security_event(
+                "join_request_created",
+                {"user_id": user.id, "customer_id": existing_customer.id, "pending_approval": True},
+                request_ip,
+            )
 
-            return Ok({
-                'user': user,
-                'customer': existing_customer,
-                'membership': membership,
-                'status': 'pending_approval'
-            })
+            return Ok(
+                {"user": user, "customer": existing_customer, "membership": membership, "status": "pending_approval"}
+            )
 
         except Exception as e:
             return Err(SecureErrorHandler.safe_error_response(e, "join_request"))
@@ -362,6 +381,7 @@ class SecureUserRegistrationService:
 # ===============================================================================
 # SECURE CUSTOMER USER SERVICE
 # ===============================================================================
+
 
 class SecureCustomerUserService:
     """
@@ -373,63 +393,58 @@ class SecureCustomerUserService:
     @atomic_with_retry(max_retries=3)
     @audit_service_call("user_creation")
     @monitor_performance(max_duration_seconds=8.0)
-    def create_user_for_customer(
-        cls,
-        request: UserCreationRequest,
-        **kwargs: Any
-    ) -> Result[tuple[User, bool], str]:
+    def create_user_for_customer(cls, request: UserCreationRequest, **kwargs: Any) -> Result[tuple[User, bool], str]:
         """
         🔒 Secure user creation for customer with comprehensive validation
         """
         try:
             # Input validation
             if request.first_name:
-                request.first_name = SecureInputValidator.validate_name_secure(request.first_name, 'first_name')
+                request.first_name = SecureInputValidator.validate_name_secure(request.first_name, "first_name")
             if request.last_name:
-                request.last_name = SecureInputValidator.validate_name_secure(request.last_name, 'last_name')
+                request.last_name = SecureInputValidator.validate_name_secure(request.last_name, "last_name")
 
             # Validate customer email
-            if not hasattr(request.customer, 'primary_email') or not request.customer.primary_email:
+            if not hasattr(request.customer, "primary_email") or not request.customer.primary_email:
                 return Err(_("Customer does not have a valid email address"))
 
             validated_email = SecureInputValidator.validate_email_secure(
-                request.customer.primary_email, 'user_creation'
+                request.customer.primary_email, "user_creation"
             )
 
             # Check for existing user (race condition safe)
             with transaction.atomic():
-                existing_user = User.objects.select_for_update().filter(
-                    email=validated_email
-                ).first()
+                existing_user = User.objects.select_for_update().filter(email=validated_email).first()
 
                 if existing_user:
                     return Err(_("User account already exists for this email"))
 
                 # Extract names if not provided
-                if not request.first_name and not request.last_name and hasattr(request.customer, 'name') and request.customer.name:
+                if (
+                    not request.first_name
+                    and not request.last_name
+                    and hasattr(request.customer, "name")
+                    and request.customer.name
+                ):
                     name_parts = request.customer.name.split()
-                    request.first_name = name_parts[0] if name_parts else ''
-                    request.last_name = ' '.join(name_parts[1:]) if len(name_parts) > 1 else ''
+                    request.first_name = name_parts[0] if name_parts else ""
+                    request.last_name = " ".join(name_parts[1:]) if len(name_parts) > 1 else ""
 
                 # Create user with security measures
                 user = User.objects.create_user(
                     email=validated_email,
-                    first_name=request.first_name or '',
-                    last_name=request.last_name or '',
-                    phone=getattr(request.customer, 'primary_phone', '') or '',
+                    first_name=request.first_name or "",
+                    last_name=request.last_name or "",
+                    phone=getattr(request.customer, "primary_phone", "") or "",
                     is_active=True,
-                    created_by=request.created_by
+                    created_by=request.created_by,
                 )
                 user.set_unusable_password()  # Force password reset
                 user.save()
 
                 # Create secure membership
                 CustomerMembership.objects.create(
-                    user=user,
-                    customer=request.customer,
-                    role='owner',
-                    is_primary=True,
-                    created_by=request.created_by
+                    user=user, customer=request.customer, role="owner", is_primary=True, created_by=request.created_by
                 )
 
             # Send welcome email securely
@@ -437,12 +452,16 @@ class SecureCustomerUserService:
             if request.send_welcome:
                 email_sent = cls._send_welcome_email_secure(user, request.customer, request.request_ip)
 
-            log_security_event('customer_user_created', {
-                'user_id': user.id,
-                'customer_id': request.customer.id,
-                'email_sent': email_sent,
-                'created_by_id': request.created_by.id if request.created_by else None
-            }, request.request_ip)
+            log_security_event(
+                "customer_user_created",
+                {
+                    "user_id": user.id,
+                    "customer_id": request.customer.id,
+                    "email_sent": email_sent,
+                    "created_by_id": request.created_by.id if request.created_by else None,
+                },
+                request.request_ip,
+            )
 
             logger.info(f"✅ [Secure User Creation] Created user {user.email} for customer {request.customer.name}")
             return Ok((user, email_sent))
@@ -454,11 +473,7 @@ class SecureCustomerUserService:
     @secure_customer_operation(requires_owner=False)
     @atomic_with_retry(max_retries=3)
     @audit_service_call("user_linking")
-    def link_existing_user(
-        cls,
-        request: UserLinkingRequest,
-        **kwargs: Any
-    ) -> Result[Any, str]:
+    def link_existing_user(cls, request: UserLinkingRequest, **kwargs: Any) -> Result[Any, str]:
         """
         🔒 Secure linking of existing user to customer
         """
@@ -468,9 +483,11 @@ class SecureCustomerUserService:
 
             # Check for existing membership (race condition safe)
             with transaction.atomic():
-                existing = CustomerMembership.objects.select_for_update().filter(
-                    user=request.user, customer=request.customer
-                ).first()
+                existing = (
+                    CustomerMembership.objects.select_for_update()
+                    .filter(user=request.user, customer=request.customer)
+                    .first()
+                )
 
                 if existing:
                     return Err(_("User is already associated with this organization"))
@@ -481,17 +498,23 @@ class SecureCustomerUserService:
                     customer=request.customer,
                     role=validated_role,
                     is_primary=request.is_primary,
-                    created_by=request.created_by
+                    created_by=request.created_by,
                 )
 
-            log_security_event('user_linked_to_customer', {
-                'user_id': request.user.id,
-                'customer_id': request.customer.id,
-                'role': validated_role,
-                'is_primary': request.is_primary
-            }, request.request_ip)
+            log_security_event(
+                "user_linked_to_customer",
+                {
+                    "user_id": request.user.id,
+                    "customer_id": request.customer.id,
+                    "role": validated_role,
+                    "is_primary": request.is_primary,
+                },
+                request.request_ip,
+            )
 
-            logger.info(f"✅ [Secure User Linking] Linked user {request.user.email} to customer {request.customer.name} as {validated_role}")
+            logger.info(
+                f"✅ [Secure User Linking] Linked user {request.user.email} to customer {request.customer.name} as {validated_role}"
+            )
             return Ok(membership)
 
         except Exception as e:
@@ -502,16 +525,12 @@ class SecureCustomerUserService:
     @atomic_with_retry(max_retries=3)
     @audit_service_call("invitation_sent")
     @monitor_performance(max_duration_seconds=10.0)
-    def invite_user_to_customer(
-        cls,
-        request: UserInvitationRequest,
-        **kwargs: Any
-    ) -> Result[CustomerMembership, str]:
+    def invite_user_to_customer(cls, request: UserInvitationRequest, **kwargs: Any) -> Result[CustomerMembership, str]:
         """
         🔒 Secure user invitation with comprehensive protection
-        
+
         Security Features:
-        - TOCTOU-safe permission checking  
+        - TOCTOU-safe permission checking
         - Rate limiting per user
         - Input validation and sanitization
         - Audit logging with request tracking
@@ -522,16 +541,15 @@ class SecureCustomerUserService:
 
             # Check if user already exists and has membership
             with transaction.atomic():
-                existing_user = User.objects.select_for_update().filter(
-                    email=request.invitee_email
-                ).first()
+                existing_user = User.objects.select_for_update().filter(email=request.invitee_email).first()
 
                 if existing_user:
                     # Check for existing membership
-                    existing_membership = CustomerMembership.objects.select_for_update().filter(
-                        user=existing_user,
-                        customer=request.customer
-                    ).first()
+                    existing_membership = (
+                        CustomerMembership.objects.select_for_update()
+                        .filter(user=existing_user, customer=request.customer)
+                        .first()
+                    )
 
                     if existing_membership:
                         return Err(_("User already has access to this organization"))
@@ -562,23 +580,27 @@ class SecureCustomerUserService:
             # Send secure invitation email
             cls._send_invitation_email_secure(membership, request.inviter, request.request_ip)
 
-            log_security_event('invitation_sent', {
-                'inviter_id': request.inviter.id,
-                'invitee_email': request.invitee_email,
-                'customer_id': request.customer.id,
-                'role': request.role,
-                'user_created': user_created
-            }, request.request_ip)
+            log_security_event(
+                "invitation_sent",
+                {
+                    "inviter_id": request.inviter.id,
+                    "invitee_email": request.invitee_email,
+                    "customer_id": request.customer.id,
+                    "role": request.role,
+                    "user_created": user_created,
+                },
+                request.request_ip,
+            )
 
             return Ok(membership)
 
         except Exception as e:
             return Err(SecureErrorHandler.safe_error_response(e, "invitation"))
-    
+
     # ===============================================================================
     # BACKWARD COMPATIBILITY WRAPPER METHODS
     # ===============================================================================
-    
+
     @classmethod
     @secure_customer_operation(requires_owner=True)
     @atomic_with_retry(max_retries=3)
@@ -592,7 +614,7 @@ class SecureCustomerUserService:
         send_welcome: bool = True,
         created_by: User | None = None,
         request_ip: str | None = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> Result[tuple[User, bool], str]:
         """Legacy wrapper for backward compatibility"""
         request = UserCreationRequest(
@@ -601,10 +623,10 @@ class SecureCustomerUserService:
             last_name=last_name,
             send_welcome=send_welcome,
             created_by=created_by,
-            request_ip=request_ip
+            request_ip=request_ip,
         )
         return cls.create_user_for_customer(request, **kwargs)
-    
+
     @classmethod
     @secure_customer_operation(requires_owner=False)
     @atomic_with_retry(max_retries=3)
@@ -613,23 +635,18 @@ class SecureCustomerUserService:
         cls,
         user: User,
         customer: Customer,
-        role: str = 'viewer',
+        role: str = "viewer",
         is_primary: bool = False,
         created_by: User | None = None,
         request_ip: str | None = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> Result[Any, str]:
         """Legacy wrapper for backward compatibility"""
         request = UserLinkingRequest(
-            user=user,
-            customer=customer,
-            role=role,
-            is_primary=is_primary,
-            created_by=created_by,
-            request_ip=request_ip
+            user=user, customer=customer, role=role, is_primary=is_primary, created_by=created_by, request_ip=request_ip
         )
         return cls.link_existing_user(request, **kwargs)
-    
+
     @classmethod
     @secure_invitation_system()
     @atomic_with_retry(max_retries=3)
@@ -640,10 +657,10 @@ class SecureCustomerUserService:
         inviter: User,
         invitee_email: str,
         customer: Customer,
-        role: str = 'viewer',
+        role: str = "viewer",
         request_ip: str | None = None,
         user_id: int | None = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> Result[CustomerMembership, str]:
         """Legacy wrapper for backward compatibility"""
         request = UserInvitationRequest(
@@ -652,7 +669,7 @@ class SecureCustomerUserService:
             customer=customer,
             role=role,
             request_ip=request_ip,
-            user_id=user_id
+            user_id=user_id,
         )
         return cls.invite_user_to_customer(request, **kwargs)
 
@@ -662,10 +679,7 @@ class SecureCustomerUserService:
 
     @classmethod
     def _find_customer_by_identifier_secure(
-        cls,
-        identifier: str,
-        identification_type: str,
-        request_ip: str | None = None
+        cls, identifier: str, identification_type: str, request_ip: str | None = None
     ) -> Customer | None:
         """
         🔒 Timing-safe customer lookup preventing enumeration attacks
@@ -688,9 +702,9 @@ class SecureCustomerUserService:
 
             # Perform lookup based on type
             customer = None
-            if identification_type == 'name':
+            if identification_type == "name":
                 customer = Customer.objects.filter(company_name__iexact=identifier).first()
-            elif identification_type == 'vat_number':
+            elif identification_type == "vat_number":
                 # Validate VAT format first
                 try:
                     validated_vat = SecureInputValidator.validate_vat_number_romanian(identifier)
@@ -698,7 +712,7 @@ class SecureCustomerUserService:
                     customer = tax_profile.customer if tax_profile else None
                 except ValidationError:
                     pass
-            elif identification_type == 'registration_number':
+            elif identification_type == "registration_number":
                 # Validate CUI format first
                 try:
                     validated_cui = SecureInputValidator.validate_cui_romanian(identifier)
@@ -729,21 +743,19 @@ class SecureCustomerUserService:
 
             # Prepare secure email context
             context = {
-                'user': user,
-                'customer': customer,
-                'domain': getattr(settings, 'DOMAIN_NAME', 'localhost:8000'),
-                'uid': uid,
-                'token': token,
-                'protocol': 'https' if getattr(settings, 'USE_HTTPS', False) else 'http',
-                'support_email': getattr(settings, 'SUPPORT_EMAIL', 'support@praho.com')
+                "user": user,
+                "customer": customer,
+                "domain": getattr(settings, "DOMAIN_NAME", "localhost:8000"),
+                "uid": uid,
+                "token": token,
+                "protocol": "https" if getattr(settings, "USE_HTTPS", False) else "http",
+                "support_email": getattr(settings, "SUPPORT_EMAIL", "support@praho.com"),
             }
 
             # Render email templates (XSS-safe)
-            subject = _('Welcome to PRAHO - Account Created for {customer_name}').format(
-                customer_name=customer.name
-            )
-            text_message = render_to_string('customers/emails/welcome_email.txt', context)
-            html_message = render_to_string('customers/emails/welcome_email.html', context)
+            subject = _("Welcome to PRAHO - Account Created for {customer_name}").format(customer_name=customer.name)
+            text_message = render_to_string("customers/emails/welcome_email.txt", context)
+            html_message = render_to_string("customers/emails/welcome_email.html", context)
 
             # Send email with error handling
             send_mail(
@@ -752,27 +764,23 @@ class SecureCustomerUserService:
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[user.email],
                 html_message=html_message,
-                fail_silently=False
+                fail_silently=False,
             )
 
-            log_security_event('welcome_email_sent', {
-                'user_id': user.id,
-                'customer_id': customer.id
-            }, request_ip)
+            log_security_event("welcome_email_sent", {"user_id": user.id, "customer_id": customer.id}, request_ip)
 
             logger.info(f"📧 [Secure Email] Welcome email sent to {user.email}")
             return True
 
         except Exception as e:
             logger.error(f"📧 [Secure Email] Failed to send welcome email: {e!s}")
-            log_security_event('welcome_email_failed', {
-                'user_id': user.id,
-                'error': str(e)[:200]
-            }, request_ip)
+            log_security_event("welcome_email_failed", {"user_id": user.id, "error": str(e)[:200]}, request_ip)
             return False
 
     @classmethod
-    def _notify_owners_of_join_request_secure(cls, customer: Customer, requesting_user: User, request_ip: str | None = None) -> None:
+    def _notify_owners_of_join_request_secure(
+        cls, customer: Customer, requesting_user: User, request_ip: str | None = None
+    ) -> None:
         """
         🔒 Secure notification to owners with rate limiting
         """
@@ -786,33 +794,31 @@ class SecureCustomerUserService:
 
             # Get owners securely
             owners = User.objects.filter(
-                customer_memberships__customer=customer,
-                customer_memberships__role='owner',
-                is_active=True
+                customer_memberships__customer=customer, customer_memberships__role="owner", is_active=True
             ).distinct()
 
             for owner in owners:
                 send_mail(
-                    subject=_('[PRAHO] New Access Request for {company}').format(
-                        company=customer.company_name
-                    ),
-                    message=_('A user has requested access to your organization. Please review in your dashboard.'),
+                    subject=_("[PRAHO] New Access Request for {company}").format(company=customer.company_name),
+                    message=_("A user has requested access to your organization. Please review in your dashboard."),
                     from_email=settings.DEFAULT_FROM_EMAIL,
                     recipient_list=[owner.email],
                     fail_silently=True,  # Don't fail the whole process if email fails
                 )
 
-            log_security_event('join_request_notifications_sent', {
-                'customer_id': customer.id,
-                'requesting_user_id': requesting_user.id,
-                'owners_notified': len(owners)
-            }, request_ip)
+            log_security_event(
+                "join_request_notifications_sent",
+                {"customer_id": customer.id, "requesting_user_id": requesting_user.id, "owners_notified": len(owners)},
+                request_ip,
+            )
 
         except Exception as e:
             logger.error(f"📧 [Secure Notification] Failed to notify owners: {e!s}")
 
     @classmethod
-    def _send_invitation_email_secure(cls, membership: CustomerMembership, inviter: User, request_ip: str | None = None) -> None:
+    def _send_invitation_email_secure(
+        cls, membership: CustomerMembership, inviter: User, request_ip: str | None = None
+    ) -> None:
         """
         🔒 Secure invitation email with proper tokens and expiration
         """
@@ -821,32 +827,30 @@ class SecureCustomerUserService:
             customer = membership.customer
 
             # Generate secure invitation token (could be enhanced with JWT)
-            invitation_token = hashlib.sha256(
-                f"{user.id}:{customer.id}:{time.time()}".encode()
-            ).hexdigest()
+            invitation_token = hashlib.sha256(f"{user.id}:{customer.id}:{time.time()}".encode()).hexdigest()
 
             # Store token temporarily
-            cache.set(f"invitation_token:{invitation_token}", {
-                'user_id': user.id,
-                'customer_id': customer.id,
-                'role': membership.role
-            }, timeout=7*24*3600)  # 7 days expiration
+            cache.set(
+                f"invitation_token:{invitation_token}",
+                {"user_id": user.id, "customer_id": customer.id, "role": membership.role},
+                timeout=7 * 24 * 3600,
+            )  # 7 days expiration
 
             send_mail(
-                subject=_('[PRAHO] Invitation to join {company}').format(
-                    company=customer.company_name
+                subject=_("[PRAHO] Invitation to join {company}").format(company=customer.company_name),
+                message=_(
+                    "You have been invited to join an organization on PRAHO. Please check your dashboard to accept."
                 ),
-                message=_('You have been invited to join an organization on PRAHO. Please check your dashboard to accept.'),
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[user.email],
                 fail_silently=True,
             )
 
-            log_security_event('invitation_email_sent', {
-                'inviter_id': inviter.id,
-                'invitee_id': user.id,
-                'customer_id': customer.id
-            }, request_ip)
+            log_security_event(
+                "invitation_email_sent",
+                {"inviter_id": inviter.id, "invitee_id": user.id, "customer_id": customer.id},
+                request_ip,
+            )
 
         except Exception as e:
             logger.error(f"📧 [Secure Invitation] Failed to send invitation: {e!s}")
@@ -856,10 +860,11 @@ class SecureCustomerUserService:
 # SESSION SECURITY SERVICE
 # ===============================================================================
 
+
 class SessionSecurityService:
     """
     🔒 Secure session management for Romanian hosting security compliance
-    
+
     Provides:
     - Session rotation on security events
     - 2FA secret cleanup during recovery
@@ -869,10 +874,10 @@ class SessionSecurityService:
 
     # Session timeout policies (seconds)
     TIMEOUT_POLICIES: ClassVar[dict[str, int]] = {
-        'standard': 3600,        # 1 hour for regular users
-        'sensitive': 1800,       # 30 min for admin/billing staff
-        'shared_device': 900,    # 15 min for shared device mode
-        'remember_me': 86400 * 7 # 7 days for remember me
+        "standard": 3600,  # 1 hour for regular users
+        "sensitive": 1800,  # 30 min for admin/billing staff
+        "shared_device": 900,  # 15 min for shared device mode
+        "remember_me": 86400 * 7,  # 7 days for remember me
     }
 
     @classmethod
@@ -895,11 +900,15 @@ class SessionSecurityService:
         cls._clear_sensitive_session_data(request)
 
         # Log security event using existing pattern
-        log_security_event('session_rotated_password_change', {
-            'user_id': target_user.id,
-            'old_session_key': old_session_key[:8] + '...',  # Truncated for security
-            'new_session_key': new_session_key[:8] + '...'
-        }, cls._get_client_ip(request))
+        log_security_event(
+            "session_rotated_password_change",
+            {
+                "user_id": target_user.id,
+                "old_session_key": old_session_key[:8] + "...",  # Truncated for security
+                "new_session_key": new_session_key[:8] + "...",
+            },
+            cls._get_client_ip(request),
+        )
 
         logger.warning(f"🔄 [SessionSecurity] Session rotated for {target_user.email} after password change")
 
@@ -920,11 +929,15 @@ class SessionSecurityService:
         cls._invalidate_other_user_sessions(user.id, new_session_key)
 
         # Log security event
-        log_security_event('session_rotated_2fa_change', {
-            'user_id': user.id,
-            'old_session_key': old_session_key[:8] + '...',
-            'new_session_key': new_session_key[:8] + '...'
-        }, cls._get_client_ip(request))
+        log_security_event(
+            "session_rotated_2fa_change",
+            {
+                "user_id": user.id,
+                "old_session_key": old_session_key[:8] + "...",
+                "new_session_key": new_session_key[:8] + "...",
+            },
+            cls._get_client_ip(request),
+        )
 
         logger.warning(f"🔄 [SessionSecurity] Session rotated for {user.email} after 2FA change")
 
@@ -936,58 +949,59 @@ class SessionSecurityService:
 
         # Clear 2FA configuration
         user.two_factor_enabled = False
-        user.two_factor_secret = ''  # This will encrypt empty string
+        user.two_factor_secret = ""  # This will encrypt empty string
         user.backup_tokens = []
-        user.save(update_fields=['two_factor_enabled', '_two_factor_secret', 'backup_tokens'])
+        user.save(update_fields=["two_factor_enabled", "_two_factor_secret", "backup_tokens"])
 
         # Invalidate all sessions for security
         cls._invalidate_all_user_sessions(user.id)
 
         # Log security event
-        log_security_event('2fa_secrets_cleared_recovery', {
-            'user_id': user.id,
-            'email': user.email
-        }, request_ip)
+        log_security_event("2fa_secrets_cleared_recovery", {"user_id": user.id, "email": user.email}, request_ip)
 
         logger.warning(f"🔐 [SessionSecurity] 2FA secrets cleared for {user.email} during recovery")
 
     @classmethod
     def update_session_timeout(cls, request: HttpRequest) -> None:
         """🔒 Update session timeout based on user context"""
-        if not hasattr(request, 'session') or not request.user.is_authenticated:
+        if not hasattr(request, "session") or not request.user.is_authenticated:
             return
 
         timeout_seconds = cls.get_appropriate_timeout(request)
         request.session.set_expiry(timeout_seconds)
 
         # Log timeout update
-        log_security_event('session_timeout_updated', {
-            'user_id': request.user.id,
-            'timeout_seconds': timeout_seconds,
-            'policy': cls._get_timeout_policy_name(timeout_seconds)
-        }, cls._get_client_ip(request))
+        log_security_event(
+            "session_timeout_updated",
+            {
+                "user_id": request.user.id,
+                "timeout_seconds": timeout_seconds,
+                "policy": cls._get_timeout_policy_name(timeout_seconds),
+            },
+            cls._get_client_ip(request),
+        )
 
     @classmethod
     def get_appropriate_timeout(cls, request: HttpRequest) -> int:
         """Get appropriate timeout based on user role and device context"""
         if not request.user.is_authenticated:
-            return cls.TIMEOUT_POLICIES['standard']
+            return cls.TIMEOUT_POLICIES["standard"]
 
         user = request.user
 
         # Shared device mode (shorter timeout)
-        if request.session.get('shared_device_mode', False):
-            return cls.TIMEOUT_POLICIES['shared_device']
+        if request.session.get("shared_device_mode", False):
+            return cls.TIMEOUT_POLICIES["shared_device"]
 
         # Sensitive staff roles get shorter timeouts
-        if hasattr(user, 'staff_role') and user.staff_role in ['admin', 'billing']:
-            return cls.TIMEOUT_POLICIES['sensitive']
+        if hasattr(user, "staff_role") and user.staff_role in ["admin", "billing"]:
+            return cls.TIMEOUT_POLICIES["sensitive"]
 
         # Remember me functionality
-        if request.session.get('remember_me', False):
-            return cls.TIMEOUT_POLICIES['remember_me']
+        if request.session.get("remember_me", False):
+            return cls.TIMEOUT_POLICIES["remember_me"]
 
-        return cls.TIMEOUT_POLICIES['standard']
+        return cls.TIMEOUT_POLICIES["standard"]
 
     @classmethod
     def enable_shared_device_mode(cls, request: HttpRequest) -> None:
@@ -995,20 +1009,21 @@ class SessionSecurityService:
         if not request.user.is_authenticated:
             return
 
-        request.session['shared_device_mode'] = True
-        request.session['shared_device_enabled_at'] = timezone.now().isoformat()
+        request.session["shared_device_mode"] = True
+        request.session["shared_device_enabled_at"] = timezone.now().isoformat()
 
         # Set shorter timeout immediately
-        timeout = cls.TIMEOUT_POLICIES['shared_device']
+        timeout = cls.TIMEOUT_POLICIES["shared_device"]
         request.session.set_expiry(timeout)
 
         # Clear any remember me settings
-        request.session.pop('remember_me', None)
+        request.session.pop("remember_me", None)
 
-        log_security_event('shared_device_mode_enabled', {
-            'user_id': request.user.id,
-            'timeout_seconds': timeout
-        }, cls._get_client_ip(request))
+        log_security_event(
+            "shared_device_mode_enabled",
+            {"user_id": request.user.id, "timeout_seconds": timeout},
+            cls._get_client_ip(request),
+        )
 
         logger.info(f"📱 [SessionSecurity] Shared device mode enabled for {request.user.email}")
 
@@ -1026,26 +1041,22 @@ class SessionSecurityService:
         recent_ips = cache.get(cache_key, [])
 
         # Add current IP
-        recent_ips.append({
-            'ip': current_ip,
-            'timestamp': time.time()
-        })
+        recent_ips.append({"ip": current_ip, "timestamp": time.time()})
 
         # Keep only last hour of IPs
         one_hour_ago = time.time() - 3600
-        recent_ips = [ip_data for ip_data in recent_ips if ip_data['timestamp'] > one_hour_ago]
+        recent_ips = [ip_data for ip_data in recent_ips if ip_data["timestamp"] > one_hour_ago]
 
         # Check for suspicious pattern (3+ different IPs in 1 hour)
-        unique_ips = {ip_data['ip'] for ip_data in recent_ips}
+        unique_ips = {ip_data["ip"] for ip_data in recent_ips}
         is_suspicious = len(unique_ips) >= SUSPICIOUS_IP_THRESHOLD
 
         if is_suspicious:
-            log_security_event('suspicious_activity_detected', {
-                'user_id': user_id,
-                'ip_count': len(unique_ips),
-                'current_ip': current_ip,
-                'pattern': 'multiple_ips'
-            }, current_ip)
+            log_security_event(
+                "suspicious_activity_detected",
+                {"user_id": user_id, "ip_count": len(unique_ips), "current_ip": current_ip, "pattern": "multiple_ips"},
+                current_ip,
+            )
 
             logger.warning(f"🚨 [SessionSecurity] Suspicious IP pattern for {request.user.email}: {unique_ips}")
 
@@ -1061,18 +1072,18 @@ class SessionSecurityService:
             return
 
         activity_data = {
-            'user_id': request.user.id,
-            'session_key': request.session.session_key[:8] + '...' if request.session.session_key else None,
-            'activity_type': activity_type,
-            'request_path': request.path,
-            **extra_data
+            "user_id": request.user.id,
+            "session_key": request.session.session_key[:8] + "..." if request.session.session_key else None,
+            "activity_type": activity_type,
+            "request_path": request.path,
+            **extra_data,
         }
 
         # Use existing security logging
-        log_security_event(f'session_activity_{activity_type}', activity_data, cls._get_client_ip(request))
+        log_security_event(f"session_activity_{activity_type}", activity_data, cls._get_client_ip(request))
 
         # Log critical activities with warning level
-        if activity_type in ['login', 'logout', 'password_changed', '2fa_disabled']:
+        if activity_type in ["login", "logout", "password_changed", "2fa_disabled"]:
             logger.warning(f"🔐 [SessionActivity] {activity_type.upper()}: {request.user.email}")
 
     # ===============================================================================
@@ -1088,7 +1099,7 @@ class SessionSecurityService:
             for session in Session.objects.all():
                 try:
                     session_data = session.get_decoded()
-                    session_user_id = session_data.get('_auth_user_id')
+                    session_user_id = session_data.get("_auth_user_id")
 
                     if session_user_id == str(user_id) and session.session_key != keep_session_key:
                         session.delete()
@@ -1110,7 +1121,7 @@ class SessionSecurityService:
             for session in Session.objects.all():
                 try:
                     session_data = session.get_decoded()
-                    session_user_id = session_data.get('_auth_user_id')
+                    session_user_id = session_data.get("_auth_user_id")
 
                     if session_user_id == str(user_id):
                         session.delete()
@@ -1127,8 +1138,11 @@ class SessionSecurityService:
     def _clear_sensitive_session_data(cls, request: HttpRequest) -> None:
         """Clear sensitive data from session"""
         sensitive_keys = [
-            '2fa_secret', 'new_backup_codes', 'password_reset_token',
-            'email_verification_token', 'temp_user_data'
+            "2fa_secret",
+            "new_backup_codes",
+            "password_reset_token",
+            "email_verification_token",
+            "temp_user_data",
         ]
 
         for key in sensitive_keys:
@@ -1138,10 +1152,10 @@ class SessionSecurityService:
     @classmethod
     def _get_client_ip(cls, request: HttpRequest) -> str:
         """Get real client IP address"""
-        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+        x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
         if x_forwarded_for:
-            return x_forwarded_for.split(',')[0].strip()
-        return request.META.get('REMOTE_ADDR', '')
+            return x_forwarded_for.split(",")[0].strip()
+        return request.META.get("REMOTE_ADDR", "")
 
     @classmethod
     def _get_timeout_policy_name(cls, timeout_seconds: int) -> str:
@@ -1149,7 +1163,7 @@ class SessionSecurityService:
         for policy, seconds in cls.TIMEOUT_POLICIES.items():
             if seconds == timeout_seconds:
                 return policy
-        return 'custom'
+        return "custom"
 
 
 # ===============================================================================

@@ -4,9 +4,10 @@ Comprehensive data subject rights implementation with industry-standard UI/UX.
 """
 
 import logging
+from typing import TYPE_CHECKING, cast
 
 from django.contrib import messages
-from django.contrib.auth import logout  # For GDPR deletion logout
+from django.contrib.auth import get_user_model, logout  # For GDPR deletion logout
 from django.contrib.auth.decorators import login_required
 from django.core.files.storage import default_storage
 from django.http import Http404, HttpRequest, HttpResponse
@@ -23,6 +24,12 @@ from .services import (
     gdpr_deletion_service,
     gdpr_export_service,
 )
+from apps.common.types import Err, Ok
+
+if TYPE_CHECKING:
+    from apps.users.models import User
+else:
+    User = get_user_model()
 
 logger = logging.getLogger(__name__)
 
@@ -42,25 +49,27 @@ def _get_client_ip(request: HttpRequest) -> str | None:
 @login_required
 def gdpr_dashboard(request: HttpRequest) -> HttpResponse:
     """GDPR privacy dashboard - main entry point for data subject rights"""
+    user = cast(User, request.user)  # Safe due to @login_required
+    
     # Get user's consent history
-    consent_history = gdpr_consent_service.get_consent_history(request.user)
+    consent_history = gdpr_consent_service.get_consent_history(user)
 
     # Get recent export requests
     recent_exports = DataExport.objects.filter(
-        requested_by=request.user
+        requested_by=user
     ).order_by('-requested_at')[:5]
 
     # Get recent deletion requests
     recent_deletions = ComplianceLog.objects.filter(
         compliance_type='gdpr_deletion',
-        user=request.user
+        user=user
     ).order_by('-timestamp')[:5]
 
     # Calculate current consent status
     consent_status = {
-        'data_processing': bool(request.user.gdpr_consent_date),
-        'marketing': request.user.accepts_marketing,
-        'last_updated': request.user.gdpr_consent_date.isoformat() if request.user.gdpr_consent_date else None
+        'data_processing': bool(user.gdpr_consent_date),
+        'marketing': user.accepts_marketing,
+        'last_updated': user.gdpr_consent_date.isoformat() if user.gdpr_consent_date else None
     }
 
     context = {
@@ -68,7 +77,7 @@ def gdpr_dashboard(request: HttpRequest) -> HttpResponse:
         'recent_exports': recent_exports,
         'recent_deletions': recent_deletions,
         'consent_status': consent_status,
-        'user': request.user
+        'user': user
     }
 
     return render(request, 'audit/gdpr_dashboard.html', context)
@@ -79,6 +88,8 @@ def gdpr_dashboard(request: HttpRequest) -> HttpResponse:
 @csrf_protect
 def request_data_export(request: HttpRequest) -> HttpResponse:
     """Create a new GDPR data export request"""
+    user = cast(User, request.user)  # Safe due to @login_required
+    
     try:
         # Get export scope from form
         export_scope = {
@@ -92,36 +103,38 @@ def request_data_export(request: HttpRequest) -> HttpResponse:
 
         # Create export request
         result = gdpr_export_service.create_data_export_request(
-            user=request.user,
+            user=user,
             request_ip=_get_client_ip(request),
             export_scope=export_scope
         )
 
-        if result.is_ok():
-            export_request = result.value
-            messages.success(
-                request,
-                _('Your data export request has been created. You will receive an email when it is ready for download. Request ID: {}').format(
-                    str(export_request.id)[:8]
+        match result:
+            case Ok(export_request):
+                messages.success(
+                    request,
+                    _('Your data export request has been created. You will receive an email '
+                      'when it is ready for download. Request ID: {}').format(
+                        str(export_request.id)[:8]
+                    )
                 )
-            )
 
-            # Process export asynchronously (in a real app, use Celery)
-            # For now, process immediately for demo
-            processing_result = gdpr_export_service.process_data_export(export_request)
-            if processing_result.is_ok():
-                messages.success(request, _('Your data export is ready for download!'))
-            else:
-                messages.warning(request, _('Export is being processed. Please check back in a few minutes.'))
+                # Process export asynchronously (in a real app, use Celery)
+                # For now, process immediately for demo
+                processing_result = gdpr_export_service.process_data_export(export_request)
+                match processing_result:
+                    case Ok(_):
+                        messages.success(request, _('Your data export is ready for download!'))
+                    case Err(_):
+                        messages.warning(request, _('Export is being processed. Please check back in a few minutes.'))
 
-        else:
-            messages.error(
-                request,
-                _('Failed to create data export request: {}').format(result.error)
-            )
+            case Err(error_msg):
+                messages.error(
+                    request,
+                    _('Failed to create data export request: {}').format(error_msg)
+                )
 
     except Exception as e:
-        logger.error(f"🔥 [GDPR Export] Request creation failed for {request.user.email}: {e}")
+        logger.error(f"🔥 [GDPR Export] Request creation failed for {user.email}: {e}")
         messages.error(request, _('An error occurred while creating your export request. Please try again.'))
 
     return redirect('audit:gdpr_dashboard')
@@ -130,13 +143,14 @@ def request_data_export(request: HttpRequest) -> HttpResponse:
 @login_required
 def download_data_export(request: HttpRequest, export_id: int) -> HttpResponse:
     """Download completed GDPR data export"""
-
+    user = cast(User, request.user)  # Safe due to @login_required
+    
     try:
         # Get export request (ensure it belongs to the user)
         export_request = get_object_or_404(
             DataExport,
             id=export_id,
-            requested_by=request.user,
+            requested_by=user,
             status='completed'
         )
 
@@ -158,8 +172,8 @@ def download_data_export(request: HttpRequest, export_id: int) -> HttpResponse:
         audit_service.log_compliance_event(
             compliance_type='gdpr_consent',
             reference_id=f"export_download_{export_request.id}",
-            description=f"GDPR export downloaded by {request.user.email}",
-            user=request.user,
+            description=f"GDPR export downloaded by {user.email}",
+            user=user,
             status='success',
             evidence={
                 'export_id': str(export_request.id),
@@ -172,7 +186,7 @@ def download_data_export(request: HttpRequest, export_id: int) -> HttpResponse:
         # Serve file
         file_content = default_storage.open(export_request.file_path).read()
         response = HttpResponse(file_content, content_type='application/json')
-        response['Content-Disposition'] = f'attachment; filename="gdpr_export_{request.user.id}.json"'
+        response['Content-Disposition'] = f'attachment; filename="gdpr_export_{user.id}.json"'
         response['Content-Length'] = len(file_content)
 
         return response
@@ -181,7 +195,7 @@ def download_data_export(request: HttpRequest, export_id: int) -> HttpResponse:
         # Re-raise 404 errors to get proper 404 response
         raise
     except Exception as e:
-        logger.error(f"🔥 [GDPR Export] Download failed for {request.user.email}: {e}")
+        logger.error(f"🔥 [GDPR Export] Download failed for {user.email}: {e}")
         messages.error(request, _('Failed to download export file. Please try again.'))
         return redirect('audit:gdpr_dashboard')
 
@@ -195,6 +209,8 @@ def download_data_export(request: HttpRequest, export_id: int) -> HttpResponse:
 @csrf_protect
 def request_data_deletion(request: HttpRequest) -> HttpResponse:
     """Create a GDPR data deletion/anonymization request"""
+    user = cast(User, request.user)  # Safe due to @login_required
+    
     try:
         deletion_type = request.POST.get('deletion_type', 'anonymize')
         reason = request.POST.get('reason', '').strip()
@@ -205,42 +221,47 @@ def request_data_deletion(request: HttpRequest) -> HttpResponse:
 
         # Create deletion request
         result = gdpr_deletion_service.create_deletion_request(
-            user=request.user,
+            user=user,
             deletion_type=deletion_type,
             request_ip=_get_client_ip(request),
             reason=reason
         )
 
-        if result.is_ok():
-            deletion_request = result.value
-            messages.warning(
-                request,
-                _('Your data deletion request has been submitted. This action cannot be undone. Request ID: {}').format(
-                    deletion_request.reference_id[:16]
+        match result:
+            case Ok(deletion_request):
+                messages.warning(
+                    request,
+                    _('Your data deletion request has been submitted. '
+                      'This action cannot be undone. Request ID: {}').format(
+                        deletion_request.reference_id[:16]
+                    )
                 )
-            )
 
-            # For demo purposes, process immediately
-            # In production, this would be handled by staff or automated process
-            if request.POST.get('confirm_immediate') == 'yes':
-                processing_result = gdpr_deletion_service.process_deletion_request(deletion_request)
-                if processing_result.is_ok():
-                    messages.success(request, _('Your account data has been processed according to your request.'))
-                    # If full deletion, user would be logged out
-                    if deletion_type == 'delete':
-                        logout(request)
-                        return redirect('users:login')
-                else:
-                    messages.error(request, _('Processing failed: {}').format(processing_result.error))
+                # For demo purposes, process immediately
+                # In production, this would be handled by staff or automated process
+                if request.POST.get('confirm_immediate') == 'yes':
+                    processing_result = gdpr_deletion_service.process_deletion_request(deletion_request)
+                    match processing_result:
+                        case Ok(_):
+                            messages.success(
+                                request,
+                                _('Your account data has been processed according to your request.')
+                            )
+                            # If full deletion, user would be logged out
+                            if deletion_type == 'delete':
+                                logout(request)
+                                return redirect('users:login')
+                        case Err(error_msg):
+                            messages.error(request, _('Processing failed: {}').format(error_msg))
 
-        else:
-            messages.error(
-                request,
-                _('Failed to create deletion request: {}').format(result.error)
-            )
+            case Err(error_msg):
+                messages.error(
+                    request,
+                    _('Failed to create deletion request: {}').format(error_msg)
+                )
 
     except Exception as e:
-        logger.error(f"🔥 [GDPR Deletion] Request creation failed for {request.user.email}: {e}")
+        logger.error(f"🔥 [GDPR Deletion] Request creation failed for {user.email}: {e}")
         messages.error(request, _('An error occurred while creating your deletion request. Please try again.'))
 
     return redirect('audit:gdpr_dashboard')
@@ -255,6 +276,8 @@ def request_data_deletion(request: HttpRequest) -> HttpResponse:
 @csrf_protect
 def withdraw_consent(request: HttpRequest) -> HttpResponse:
     """Withdraw specific GDPR consents"""
+    user = cast(User, request.user)  # Safe due to @login_required
+    
     try:
         consent_types = request.POST.getlist('consent_types')
 
@@ -264,31 +287,33 @@ def withdraw_consent(request: HttpRequest) -> HttpResponse:
 
         # Process consent withdrawal
         result = gdpr_consent_service.withdraw_consent(
-            user=request.user,
+            user=user,
             consent_types=consent_types,
             request_ip=_get_client_ip(request)
         )
 
-        if result.is_ok():
-            messages.success(
-                request,
-                _('Your consent has been withdrawn for: {}').format(result.value)
-            )
-
-            # If data processing consent withdrawn, warn about anonymization
-            if 'data_processing' in consent_types:
-                messages.warning(
+        match result:
+            case Ok(success_msg):
+                messages.success(
                     request,
-                    _('Data processing consent withdrawal will trigger account anonymization. This cannot be undone.')
+                    _('Your consent has been withdrawn for: {}').format(success_msg)
                 )
-        else:
-            messages.error(
-                request,
-                _('Failed to withdraw consent: {}').format(result.error)
-            )
+
+                # If data processing consent withdrawn, warn about anonymization
+                if 'data_processing' in consent_types:
+                    messages.warning(
+                        request,
+                        _('Data processing consent withdrawal will trigger account anonymization. '
+                          'This cannot be undone.')
+                    )
+            case Err(error_msg):
+                messages.error(
+                    request,
+                    _('Failed to withdraw consent: {}').format(error_msg)
+                )
 
     except Exception as e:
-        logger.error(f"🔥 [GDPR Consent] Withdrawal failed for {request.user.email}: {e}")
+        logger.error(f"🔥 [GDPR Consent] Withdrawal failed for {user.email}: {e}")
         messages.error(request, _('An error occurred while processing your consent withdrawal. Please try again.'))
 
     return redirect('audit:gdpr_dashboard')
@@ -297,11 +322,13 @@ def withdraw_consent(request: HttpRequest) -> HttpResponse:
 @login_required
 def consent_history(request: HttpRequest) -> HttpResponse:
     """Display detailed consent history"""
-    history = gdpr_consent_service.get_consent_history(request.user)
+    user = cast(User, request.user)  # Safe due to @login_required
+    
+    history = gdpr_consent_service.get_consent_history(user)
 
     context = {
         'consent_history': history,
-        'user': request.user
+        'user': user
     }
 
     return render(request, 'audit/consent_history.html', context)

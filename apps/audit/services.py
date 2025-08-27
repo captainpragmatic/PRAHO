@@ -125,12 +125,15 @@ class AuditService:
             context = AuditContext()
         
         try:
-            # Get content type if object provided
-            content_type = None
-            object_id = None
+            # Get content type and object ID - both are required by the model
             if event_data.content_object:
                 content_type = ContentType.objects.get_for_model(event_data.content_object)
                 object_id = event_data.content_object.pk
+            else:
+                # For events without a specific object, use the User model as a fallback
+                # This ensures we always have valid content_type and object_id
+                content_type = ContentType.objects.get_for_model(User)
+                object_id = context.user.pk if context.user else 1  # Use system user ID=1 as fallback
 
             # Create audit event
             audit_event = AuditEvent.objects.create(
@@ -829,7 +832,8 @@ class GDPRConsentService:
                     return Err(f"Failed to process consent withdrawal: {error_msg}")
 
                 # Immediately process the deletion request
-                deletion_request = deletion_result.value if hasattr(deletion_result, 'value') else deletion_result
+                # Type-safe extraction after confirming it's Ok
+                deletion_request = deletion_result.unwrap()
                 process_result = GDPRDeletionService.process_deletion_request(deletion_request)
                 if process_result.is_err():
                     error_msg = process_result.error if hasattr(process_result, 'error') else str(process_result)

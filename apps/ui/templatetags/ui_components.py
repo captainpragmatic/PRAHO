@@ -693,11 +693,8 @@ def badge(
         if hasattr(config, key) and value is not None:
             setattr(config, key, value)
     
-    # Auto-generate ID if not provided
-    if not config.html_id:
-        # Create safe ID from text
-        safe_text = re.sub(r'[^a-zA-Z0-9]', '-', text.lower())
-        config.html_id = f"badge-{safe_text}"
+    # Only use ID if explicitly provided to avoid duplicate IDs
+    # Multiple badges with same text would create duplicate IDs otherwise
     
     return {
         'text': text,

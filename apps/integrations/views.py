@@ -1,8 +1,9 @@
 import json
 import logging
-from typing import Any
+import uuid
+from typing import Any, Union
 
-from django.http import HttpRequest, HttpResponseBadRequest, JsonResponse
+from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
@@ -37,7 +38,7 @@ class WebhookView(View):
     def post(self, request: Any) -> Any:
         """📨 Process incoming webhook using result pipeline"""
         if not self.source_name:
-            return HttpResponseBadRequest("Webhook source not configured")
+            return JsonResponse({'error': 'Webhook source not configured'}, status=400)
 
         try:
             result = (self._parse_request(request)
@@ -80,6 +81,10 @@ class WebhookView(View):
 
     def _get_processor(self, context: dict[str, Any]) -> Result[dict[str, Any], str]:
         """Get the appropriate webhook processor for this source."""
+        # Type guard: ensure source_name is not None before calling get_webhook_processor
+        if self.source_name is None:
+            return Err("Webhook source not configured")
+        
         processor = get_webhook_processor(self.source_name)
         if not processor:
             return Err(f"No processor found for source: {self.source_name}")
@@ -115,10 +120,10 @@ class WebhookView(View):
                 'webhook_id': webhook_id
             }, status=400))
 
-    def _create_error_response(self, error_message: str) -> JsonResponse:
+    def _create_error_response(self, error_message: str) -> HttpResponse:
         """Create a standardized error response."""
         if error_message in {"Content-Type must be application/json", "Invalid JSON payload"} or error_message.startswith("No processor found"):
-            return HttpResponseBadRequest(error_message)
+            return JsonResponse({'error': error_message}, status=400)
         else:
             return JsonResponse({
                 'status': 'error',
@@ -208,7 +213,7 @@ def webhook_status(request: HttpRequest) -> JsonResponse:
 
 
 @require_http_methods(["POST"])
-def retry_webhook(request: HttpRequest, webhook_id: int) -> JsonResponse:
+def retry_webhook(request: HttpRequest, webhook_id: Union[str, int]) -> JsonResponse:
     """🔄 Manually retry a failed webhook using result pipeline"""
     if not request.user.is_staff:
         return JsonResponse({'error': 'Unauthorized'}, status=403)
@@ -219,10 +224,17 @@ def retry_webhook(request: HttpRequest, webhook_id: int) -> JsonResponse:
                  .and_then(_get_webhook_processor)
                  .and_then(_process_webhook_retry))
         
-        if result.is_ok():
-            return result.value
-        else:
-            return _create_retry_error_response(result.error)
+        # Proper type narrowing for Result handling
+        match result:
+            case Ok(value):
+                # result is Ok type - safe to access .value
+                return value
+            case Err(error):
+                # result is Err type - safe to access .error  
+                return _create_retry_error_response(error)
+            case _:
+                # Fallback for any unexpected cases
+                return JsonResponse({'error': 'Unknown result type'}, status=500)
 
     except Exception as e:
         logger.exception(f"Error retrying webhook {webhook_id}")
@@ -231,10 +243,24 @@ def retry_webhook(request: HttpRequest, webhook_id: int) -> JsonResponse:
         }, status=500)
 
 
-def _get_webhook_event(webhook_id: int) -> Result[WebhookEvent, str]:
+def _get_webhook_event(webhook_id: Union[str, int]) -> Result[WebhookEvent, str]:
     """Get the webhook event by ID."""
     try:
-        webhook_event = WebhookEvent.objects.get(id=webhook_id)
+        # Handle both string UUID and integer input
+        # Convert to UUID if string, validate if already UUID-like
+        if isinstance(webhook_id, str):
+            try:
+                parsed_uuid = uuid.UUID(webhook_id)
+            except ValueError:
+                return Err("Invalid webhook ID format")
+        else:
+            # If it's an integer, it's likely from a URL param - convert to string first
+            try:
+                parsed_uuid = uuid.UUID(str(webhook_id))
+            except ValueError:
+                return Err("Invalid webhook ID format")
+        
+        webhook_event = WebhookEvent.objects.get(id=parsed_uuid)
         return Ok(webhook_event)
     except WebhookEvent.DoesNotExist:
         return Err("Webhook not found")

@@ -2,7 +2,7 @@
 Django admin configuration for Users app
 """
 
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 from django.contrib import admin, messages
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
@@ -210,6 +210,14 @@ class UserAdmin(BaseUserAdmin):
         """Admin view to disable 2FA for a user using MFA service"""
         user = get_object_or_404(User, id=user_id)
 
+        # Ensure user is authenticated and is a User instance (not AnonymousUser)
+        if not request.user.is_authenticated:
+            messages.error(request, '❌ Authentication required to perform this action')
+            return HttpResponseRedirect(reverse('admin:users_user_change', args=[user_id]))
+        
+        # Type-safe cast after authentication check
+        admin_user = cast(User, request.user)
+
         if not user.two_factor_enabled:
             messages.warning(request, f'2FA is already disabled for {user.email}')
         else:
@@ -217,8 +225,8 @@ class UserAdmin(BaseUserAdmin):
                 # Use MFA service to disable 2FA with audit logging
                 result = MFAService.disable_totp(
                     user=user,
-                    admin_user=request.user,
-                    reason=f'Admin reset by {request.user.email}',
+                    admin_user=admin_user,
+                    reason=f'Admin reset by {admin_user.email}',
                     request=request
                 )
 
