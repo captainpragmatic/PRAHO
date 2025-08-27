@@ -814,70 +814,112 @@ class ComprehensivePageMonitor:
             self.console_messages = setup_console_monitoring(self.page)
         return self
     
+    def _check_console_issues(self) -> list[str]:
+        """Check for console errors and return issues."""
+        if not self.check_console:
+            return []
+            
+        try:
+            assert_no_console_errors(
+                self.console_messages, 
+                ignore_patterns=self.ignore_patterns,
+                context=self.context
+            )
+            return []
+        except AssertionError as e:
+            return [f"Console: {e!s}"]
+    
+    def _check_network_issues(self) -> list[str]:
+        """Check for network errors and return issues."""
+        if not self.check_network:
+            return []
+            
+        network_issues = check_network_errors(self.page)
+        return [f"Network: {issue}" for issue in network_issues] if network_issues else []
+    
+    def _check_html_issues(self) -> list[str]:
+        """Check for HTML validation issues and return them."""
+        if not self.check_html:
+            return []
+            
+        html_issues = check_html_validation(self.page)
+        return [f"HTML: {issue}" for issue in html_issues] if html_issues else []
+    
+    def _check_css_issues(self) -> list[str]:
+        """Check for CSS issues and return them."""
+        if not self.check_css:
+            return []
+            
+        css_issues = check_css_issues(self.page)
+        return [f"CSS: {issue}" for issue in css_issues] if css_issues else []
+    
+    def _check_accessibility_issues(self) -> list[str]:
+        """Check for accessibility issues and return them."""
+        if not self.check_accessibility:
+            return []
+            
+        a11y_issues = check_accessibility_basics(self.page)
+        return [f"A11Y: {issue}" for issue in a11y_issues] if a11y_issues else []
+    
+    def _check_performance_issues(self) -> list[str]:
+        """Check for performance issues and return them."""
+        if not self.check_performance:
+            return []
+            
+        perf_issues = check_performance_issues(self.page)
+        return [f"PERF: {issue}" for issue in perf_issues] if perf_issues else []
+    
+    def _get_all_quality_issues(self) -> list[str]:
+        """Collect all quality issues from different checks."""
+        all_issues = []
+        all_issues.extend(self._check_console_issues())
+        all_issues.extend(self._check_network_issues())
+        all_issues.extend(self._check_html_issues())
+        all_issues.extend(self._check_css_issues())
+        all_issues.extend(self._check_accessibility_issues())
+        all_issues.extend(self._check_performance_issues())
+        return all_issues
+    
+    def _get_checks_performed(self) -> list[str]:
+        """Get list of checks that were performed."""
+        checks_performed = []
+        if self.check_console: 
+            checks_performed.append("console")
+        if self.check_network: 
+            checks_performed.append("network")
+        if self.check_html: 
+            checks_performed.append("HTML")
+        if self.check_css: 
+            checks_performed.append("CSS")
+        if self.check_accessibility: 
+            checks_performed.append("accessibility")
+        if self.check_performance: 
+            checks_performed.append("performance")
+        return checks_performed
+    
+    def _print_success_message(self) -> None:
+        """Print success message with context and checks performed."""
+        checks_performed = self._get_checks_performed()
+        checks_str = ', '.join(checks_performed)
+        
+        if self.context:
+            print(f"  ✅ Page quality verified {self.context} ({checks_str})")
+        else:
+            print(f"  ✅ Page quality verified ({checks_str})")
+    
     def __exit__(self, exc_type, exc_val, exc_tb):
         # Only check quality issues if the test didn't already fail
-        if exc_type is None:
-            all_issues = []
+        if exc_type is not None:
+            return
             
-            # Console errors
-            if self.check_console:
-                try:
-                    assert_no_console_errors(
-                        self.console_messages, 
-                        ignore_patterns=self.ignore_patterns,
-                        context=self.context
-                    )
-                except AssertionError as e:
-                    all_issues.append(f"Console: {e!s}")
-            
-            # Network errors
-            if self.check_network:
-                network_issues = check_network_errors(self.page)
-                if network_issues:
-                    all_issues.extend([f"Network: {issue}" for issue in network_issues])
-            
-            # HTML validation
-            if self.check_html:
-                html_issues = check_html_validation(self.page)
-                if html_issues:
-                    all_issues.extend([f"HTML: {issue}" for issue in html_issues])
-            
-            # CSS issues
-            if self.check_css:
-                css_issues = check_css_issues(self.page)
-                if css_issues:
-                    all_issues.extend([f"CSS: {issue}" for issue in css_issues])
-            
-            # Accessibility
-            if self.check_accessibility:
-                a11y_issues = check_accessibility_basics(self.page)
-                if a11y_issues:
-                    all_issues.extend([f"A11Y: {issue}" for issue in a11y_issues])
-            
-            # Performance
-            if self.check_performance:
-                perf_issues = check_performance_issues(self.page)
-                if perf_issues:
-                    all_issues.extend([f"PERF: {issue}" for issue in perf_issues])
-            
-            if all_issues:
-                context_msg = f" {self.context}" if self.context else ""
-                issue_list = "\n".join(f"  - {issue}" for issue in all_issues)
-                raise AssertionError(f"Page quality issues found{context_msg}:\n{issue_list}")
-            
-            # Success message
-            checks_performed = []
-            if self.check_console: checks_performed.append("console")
-            if self.check_network: checks_performed.append("network") 
-            if self.check_html: checks_performed.append("HTML")
-            if self.check_css: checks_performed.append("CSS")
-            if self.check_accessibility: checks_performed.append("accessibility")
-            if self.check_performance: checks_performed.append("performance")
-            
-            if self.context:
-                print(f"  ✅ Page quality verified {self.context} ({', '.join(checks_performed)})")
-            else:
-                print(f"  ✅ Page quality verified ({', '.join(checks_performed)})")
+        all_issues = self._get_all_quality_issues()
+        
+        if all_issues:
+            context_msg = f" {self.context}" if self.context else ""
+            issue_list = "\n".join(f"  - {issue}" for issue in all_issues)
+            raise AssertionError(f"Page quality issues found{context_msg}:\n{issue_list}")
+        
+        self._print_success_message()
 
 
 class ConsoleMonitor:

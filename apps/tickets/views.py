@@ -2,16 +2,21 @@
 # TICKETS VIEWS - SUPPORT SYSTEM
 # ===============================================================================
 
+from __future__ import annotations
+
 import mimetypes
 import os
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.core.files.uploadedfile import UploadedFile
 from django.core.paginator import Paginator
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
+
+from apps.users.models import User
 
 from .models import Ticket, TicketAttachment, TicketComment
 
@@ -114,99 +119,151 @@ def ticket_create(request: HttpRequest) -> HttpResponse:
     return render(request, 'tickets/form.html', context)
 
 
+def _validate_ticket_reply_access(user: User, ticket: Ticket) -> HttpResponse | None:
+    """Validate user access to reply to ticket."""
+    accessible_customers = user.get_accessible_customers()
+    accessible_customer_ids = [customer.id for customer in accessible_customers]
+    if ticket.customer.id not in accessible_customer_ids:
+        messages.error(user.request, _("❌ You do not have permission to reply to this ticket."))
+        return redirect('tickets:list')
+    return None
+
+
+def _validate_internal_note_permission(user: User, is_internal: bool, ticket_pk: int) -> HttpResponse | None:
+    """Validate user permission to create internal notes."""
+    if is_internal and not (user.is_staff or getattr(user, 'staff_role', None)):
+        messages.error(user.request, _("❌ You do not have permission to create internal notes."))
+        return redirect('tickets:detail', pk=ticket_pk)
+    return None
+
+
+def _determine_comment_type(user: User, is_internal: bool) -> str:
+    """Determine the appropriate comment type based on user permissions."""
+    if is_internal and (user.is_staff or getattr(user, 'staff_role', None)):
+        return 'internal'
+    elif user.staff_role in ['support', 'admin', 'manager']:
+        return 'support'
+    else:
+        return 'customer'
+
+
+def _is_file_size_valid(uploaded_file: UploadedFile) -> bool:
+    """Check if uploaded file size is within limits."""
+    return uploaded_file.size <= 10 * 1024 * 1024  # 10MB limit
+
+
+def _is_file_type_allowed(content_type: str) -> bool:
+    """Check if file type is in allowed list."""
+    allowed_types = [
+        'application/pdf',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'text/plain',
+        'image/png',
+        'image/jpeg',
+        'image/jpg',
+        'application/zip',
+        'application/x-rar-compressed'
+    ]
+    return content_type in allowed_types
+
+
+def _process_ticket_attachments(request: HttpRequest, ticket: Ticket, comment: TicketComment) -> None:
+    """Process and validate uploaded attachments."""
+    if not request.FILES:
+        return
+        
+    for uploaded_file in request.FILES.getlist('attachments'):
+        # File size check
+        if not _is_file_size_valid(uploaded_file):
+            messages.warning(request, f"❌ File {uploaded_file.name} is too large (max 10MB).")
+            continue
+
+        # Content type detection
+        content_type, _unused = mimetypes.guess_type(uploaded_file.name)
+        if not content_type:
+            content_type = 'application/octet-stream'
+
+        # File type validation
+        if not _is_file_type_allowed(content_type):
+            messages.warning(request, f"❌ File type not allowed for {uploaded_file.name}.")
+            continue
+
+        # Create attachment
+        TicketAttachment.objects.create(
+            ticket=ticket,
+            comment=comment,
+            file=uploaded_file,
+            filename=uploaded_file.name,
+            file_size=uploaded_file.size,
+            content_type=content_type,
+            uploaded_by=request.user
+        )
+
+
+def _handle_ticket_reply_post(request: HttpRequest, ticket: Ticket) -> HttpResponse:
+    """Handle POST request for ticket reply."""
+    reply_text = request.POST.get('reply')
+    is_internal = request.POST.get('is_internal') == 'on'
+
+    # Validate internal note permission
+    error_response = _validate_internal_note_permission(request.user, is_internal, ticket.pk)
+    if error_response:
+        return error_response
+
+    if not reply_text:
+        if request.headers.get('HX-Request'):
+            return HttpResponse('<div class="text-red-500 text-sm">Reply cannot be empty.</div>')
+        messages.error(request, _("❌ The reply cannot be empty."))
+        return redirect('tickets:detail', pk=ticket.pk)
+
+    # Create comment
+    comment_type = _determine_comment_type(request.user, is_internal)
+    is_public = not (is_internal and (request.user.is_staff or getattr(request.user, 'staff_role', None)))
+    
+    comment = TicketComment.objects.create(
+        ticket=ticket,
+        content=reply_text,
+        comment_type=comment_type,
+        author=request.user,
+        author_name=request.user.get_full_name(),
+        author_email=request.user.email,
+        is_public=is_public
+    )
+
+    # Process attachments
+    _process_ticket_attachments(request, ticket, comment)
+
+    # Update ticket status if it was new
+    if ticket.status == 'new':
+        ticket.status = 'open'
+        ticket.save()
+
+    # Handle HTMX response
+    if request.headers.get('HX-Request'):
+        comments = ticket.comments.all().order_by('created_at')
+        return render(request, 'tickets/partials/comments_list.html', {
+            'ticket': ticket,
+            'comments': comments,
+        })
+
+    messages.success(request, _("✅ Your reply has been added!"))
+    return redirect('tickets:detail', pk=ticket.pk)
+
+
 @login_required
 def ticket_reply(request: HttpRequest, pk: int) -> HttpResponse:
     """💬 Add reply to ticket"""
     ticket = get_object_or_404(Ticket, pk=pk)
 
-    # Security check - verify user has access to this customer
-    accessible_customers = request.user.get_accessible_customers()
-    accessible_customer_ids = [customer.id for customer in accessible_customers]
-    if ticket.customer.id not in accessible_customer_ids:
-        messages.error(request, _("❌ You do not have permission to reply to this ticket."))
-        return redirect('tickets:list')
+    # Guard clause for access validation
+    request.user.request = request
+    error_response = _validate_ticket_reply_access(request.user, ticket)
+    if error_response:
+        return error_response
 
     if request.method == 'POST':
-        reply_text = request.POST.get('reply')
-        is_internal = request.POST.get('is_internal') == 'on'
-
-        # Security check: Only staff can create internal notes
-        if is_internal and not (request.user.is_staff or getattr(request.user, 'staff_role', None)):
-            messages.error(request, _("❌ You do not have permission to create internal notes."))
-            return redirect('tickets:detail', pk=pk)
-
-        if reply_text:
-            # Create TicketComment with proper permission checks
-            comment = TicketComment.objects.create(
-                ticket=ticket,
-                content=reply_text,
-                comment_type='internal' if (is_internal and (request.user.is_staff or getattr(request.user, 'staff_role', None))) else ('support' if request.user.staff_role in ['support', 'admin', 'manager'] else 'customer'),
-                author=request.user,
-                author_name=request.user.get_full_name(),
-                author_email=request.user.email,
-                is_public=not (is_internal and (request.user.is_staff or getattr(request.user, 'staff_role', None)))
-            )
-
-            # Handle file attachments
-            if request.FILES:
-                for uploaded_file in request.FILES.getlist('attachments'):
-                    # Basic security checks
-                    if uploaded_file.size > 10 * 1024 * 1024:  # 10MB limit
-                        messages.warning(request, f"❌ File {uploaded_file.name} is too large (max 10MB).")
-                        continue
-
-                    # Get content type
-                    content_type, _unused = mimetypes.guess_type(uploaded_file.name)
-                    if not content_type:
-                        content_type = 'application/octet-stream'
-
-                    # Check allowed file types
-                    allowed_types = [
-                        'application/pdf',
-                        'application/msword',
-                        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                        'text/plain',
-                        'image/png',
-                        'image/jpeg',
-                        'image/jpg',
-                        'application/zip',
-                        'application/x-rar-compressed'
-                    ]
-
-                    if content_type not in allowed_types:
-                        messages.warning(request, f"❌ File type not allowed for {uploaded_file.name}.")
-                        continue
-
-                    # Create attachment
-                    TicketAttachment.objects.create(
-                        ticket=ticket,
-                        comment=comment,
-                        file=uploaded_file,
-                        filename=uploaded_file.name,
-                        file_size=uploaded_file.size,
-                        content_type=content_type,
-                        uploaded_by=request.user
-                    )
-
-            # Update ticket status if it was new
-            if ticket.status == 'new':
-                ticket.status = 'open'
-                ticket.save()
-
-            # Check if this is an HTMX request
-            if request.headers.get('HX-Request'):
-                # Return the updated comments section
-                comments = ticket.comments.all().order_by('created_at')
-                return render(request, 'tickets/partials/comments_list.html', {
-                    'ticket': ticket,
-                    'comments': comments,
-                })
-
-            messages.success(request, _("✅ Your reply has been added!"))
-        else:
-            if request.headers.get('HX-Request'):
-                return HttpResponse('<div class="text-red-500 text-sm">Reply cannot be empty.</div>')
-            messages.error(request, _("❌ The reply cannot be empty."))
+        return _handle_ticket_reply_post(request, ticket)
 
     return redirect('tickets:detail', pk=pk)
 

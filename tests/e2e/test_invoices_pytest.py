@@ -60,6 +60,84 @@ def navigate_to_invoices(page: Page) -> bool:
         return False
 
 
+def _validate_basic_page_structure(page: Page) -> int:
+    """Validate basic page structure elements and return count."""
+    basic_elements = [
+        ('main', 'main content area'),
+        ('h1, h2, h3', 'page headings'),
+        ('table, .table, .invoice-list', 'invoice listing'),
+    ]
+    
+    total_elements = 0
+    for selector, description in basic_elements:
+        count = page.locator(selector).count()
+        total_elements += count
+        print(f"📊 Found {count} {description}")
+    
+    return total_elements
+
+
+def _check_superuser_features(page: Page) -> None:
+    """Check superuser-specific invoice features."""
+    staff_features = [
+        ('a[href*="/proformas/create/"], button:has-text("Create"), .btn-create', 'create invoice/proforma'),
+        ('a[href*="/reports/"], .reports', 'billing reports access'),
+        ('.invoice-actions, .actions', 'invoice action buttons'),
+    ]
+    
+    staff_feature_count = 0
+    for selector, feature_name in staff_features:
+        count = page.locator(selector).count()
+        staff_feature_count += count
+        if count > 0:
+            print(f"    ✅ Found {feature_name}: {count} elements")
+        else:
+            print(f"    ❌ Missing {feature_name}")
+    
+    print(f"👤 Staff features found: {staff_feature_count}")
+
+
+def _check_customer_features(page: Page) -> None:
+    """Check customer-specific invoice features and restrictions."""
+    customer_features = [
+        ('.invoice-list, .my-invoices', 'my invoices list'),
+        ('a[href*="/invoices/"], .invoice-link', 'invoice detail links'),
+        ('.invoice-status, .status', 'invoice status indicators'),
+    ]
+    
+    customer_feature_count = 0
+    for selector, feature_name in customer_features:
+        count = page.locator(selector).count()
+        customer_feature_count += count
+        if count > 0:
+            print(f"    ✅ Found {feature_name}: {count} elements")
+    
+    # Customer should NOT see staff-only features
+    restricted_features = page.locator('a[href*="/proformas/create/"], a[href*="/reports/"]').count()
+    if restricted_features == 0:
+        print("    ✅ Properly restricted from staff features")
+    else:
+        print(f"    ❌ Has access to {restricted_features} staff-only features")
+    
+    print(f"👤 Customer features found: {customer_feature_count}")
+
+
+def _count_navigation_elements(page: Page) -> int:
+    """Count navigation elements on the page."""
+    nav_elements = [
+        ('nav', 'navigation elements'),
+        ('a[href*="/app/"]', 'app navigation links'),
+        ('button', 'interactive buttons'),
+    ]
+    
+    nav_total = 0
+    for selector, description in nav_elements:
+        count = page.locator(selector).count()
+        nav_total += count
+    
+    return nav_total
+
+
 def verify_invoices_functionality(page: Page, user_type: str) -> bool:
     """
     Verify invoice page functionality for different user types.
@@ -77,75 +155,17 @@ def verify_invoices_functionality(page: Page, user_type: str) -> bool:
     if not navigate_to_invoices(page):
         return False
     
-    # Basic page structure validation
-    basic_elements = [
-        ('main', 'main content area'),
-        ('h1, h2, h3', 'page headings'),
-        ('table, .table, .invoice-list', 'invoice listing'),
-    ]
-    
-    total_elements = 0
-    for selector, description in basic_elements:
-        count = page.locator(selector).count()
-        total_elements += count
-        print(f"📊 Found {count} {description}")
+    # Validate page structure
+    total_elements = _validate_basic_page_structure(page)
     
     # User-specific functionality checks
     if user_type == "superuser":
-        # Staff should see invoice management features
-        staff_features = [
-            ('a[href*="/proformas/create/"], button:has-text("Create"), .btn-create', 'create invoice/proforma'),
-            ('a[href*="/reports/"], .reports', 'billing reports access'),
-            ('.invoice-actions, .actions', 'invoice action buttons'),
-        ]
-        
-        staff_feature_count = 0
-        for selector, feature_name in staff_features:
-            count = page.locator(selector).count()
-            staff_feature_count += count
-            if count > 0:
-                print(f"    ✅ Found {feature_name}: {count} elements")
-            else:
-                print(f"    ❌ Missing {feature_name}")
-        
-        print(f"👤 Staff features found: {staff_feature_count}")
-        
+        _check_superuser_features(page)
     elif user_type == "customer":
-        # Customer should see limited invoice access
-        customer_features = [
-            ('.invoice-list, .my-invoices', 'my invoices list'),
-            ('a[href*="/invoices/"], .invoice-link', 'invoice detail links'),
-            ('.invoice-status, .status', 'invoice status indicators'),
-        ]
-        
-        customer_feature_count = 0
-        for selector, feature_name in customer_features:
-            count = page.locator(selector).count()
-            customer_feature_count += count
-            if count > 0:
-                print(f"    ✅ Found {feature_name}: {count} elements")
-        
-        # Customer should NOT see staff-only features
-        restricted_features = page.locator('a[href*="/proformas/create/"], a[href*="/reports/"]').count()
-        if restricted_features == 0:
-            print("    ✅ Properly restricted from staff features")
-        else:
-            print(f"    ❌ Has access to {restricted_features} staff-only features")
-        
-        print(f"👤 Customer features found: {customer_feature_count}")
+        _check_customer_features(page)
     
-    # Check for essential navigation elements
-    nav_elements = [
-        ('nav', 'navigation elements'),
-        ('a[href*="/app/"]', 'app navigation links'),
-        ('button', 'interactive buttons'),
-    ]
-    
-    nav_total = 0
-    for selector, description in nav_elements:
-        count = page.locator(selector).count()
-        nav_total += count
-    
+    # Count navigation elements
+    nav_total = _count_navigation_elements(page)
     print(f"📊 Total invoice content elements: {total_elements + nav_total}")
     
     # Page should have meaningful content

@@ -295,6 +295,70 @@ class SecureInputValidator:
         return role
 
     @staticmethod
+    def _validate_restricted_fields(user_data: dict[str, Any]) -> None:
+        """Check for restricted fields to prevent privilege escalation."""
+        for field in RESTRICTED_USER_FIELDS:
+            if field in user_data:
+                logger.warning(f"🚨 [Security] Privilege escalation attempt: {field}")
+                raise ValidationError(_("Invalid input data"))
+
+    @staticmethod
+    def _validate_required_email(user_data: dict[str, Any]) -> str:
+        """Validate required email field."""
+        if 'email' not in user_data:
+            raise ValidationError(_("Required field missing"))
+        return SecureInputValidator.validate_email_secure(
+            user_data['email'], 'registration'
+        )
+
+    @staticmethod
+    def _validate_required_names(user_data: dict[str, Any]) -> tuple[str, str]:
+        """Validate required first_name and last_name fields."""
+        if 'first_name' not in user_data:
+            raise ValidationError(_("Required field missing"))
+        if 'last_name' not in user_data:
+            raise ValidationError(_("Required field missing"))
+            
+        first_name = SecureInputValidator.validate_name_secure(
+            user_data['first_name'], 'first_name'
+        )
+        last_name = SecureInputValidator.validate_name_secure(
+            user_data['last_name'], 'last_name'
+        )
+        return first_name, last_name
+
+    @staticmethod
+    def _validate_optional_phone(user_data: dict[str, Any]) -> str | None:
+        """Validate optional phone field."""
+        if 'phone' not in user_data:
+            return None
+            
+        phone = user_data['phone']
+        if not isinstance(phone, str):
+            raise ValidationError(_("Invalid input format"))
+            
+        SecureInputValidator._check_malicious_patterns(phone)
+        return phone.strip()
+
+    @staticmethod
+    def _validate_marketing_consent(user_data: dict[str, Any]) -> bool | None:
+        """Validate marketing consent boolean field."""
+        if 'accepts_marketing' not in user_data:
+            return None
+            
+        if not isinstance(user_data['accepts_marketing'], bool | str):
+            raise ValidationError(_("Invalid input format"))
+            
+        return bool(user_data['accepts_marketing'])
+
+    @staticmethod
+    def _validate_gdpr_consent(user_data: dict[str, Any]) -> timezone.datetime | None:
+        """Validate GDPR consent timestamp."""
+        if not user_data.get('gdpr_consent_date'):
+            return None
+        return timezone.now()
+
+    @staticmethod
     def validate_user_data_dict(user_data: dict[str, Any]) -> dict[str, Any]:
         """
         Comprehensive user data validation preventing privilege escalation
@@ -302,55 +366,30 @@ class SecureInputValidator:
         if not isinstance(user_data, dict):
             raise ValidationError(_("Invalid input format"))
 
-        # Check for restricted fields (privilege escalation prevention)
-        for field in RESTRICTED_USER_FIELDS:
-            if field in user_data:
-                logger.warning(f"🚨 [Security] Privilege escalation attempt: {field}")
-                raise ValidationError(_("Invalid input data"))
+        # Security validation first
+        SecureInputValidator._validate_restricted_fields(user_data)
 
-        # Validate required fields
+        # Build validated data from required and optional fields
         validated_data = {}
-
-        # Email (required)  # noqa: ERA001
-        if 'email' not in user_data:
-            raise ValidationError(_("Required field missing"))
-        validated_data['email'] = SecureInputValidator.validate_email_secure(
-            user_data['email'], 'registration'
-        )
-
-        # Names (required)  # noqa: ERA001
-        if 'first_name' not in user_data:
-            raise ValidationError(_("Required field missing"))
-        validated_data['first_name'] = SecureInputValidator.validate_name_secure(
-            user_data['first_name'], 'first_name'
-        )
-
-        if 'last_name' not in user_data:
-            raise ValidationError(_("Required field missing"))
-        validated_data['last_name'] = SecureInputValidator.validate_name_secure(
-            user_data['last_name'], 'last_name'
-        )
+        
+        # Required fields
+        validated_data['email'] = SecureInputValidator._validate_required_email(user_data)
+        first_name, last_name = SecureInputValidator._validate_required_names(user_data)
+        validated_data['first_name'] = first_name
+        validated_data['last_name'] = last_name
 
         # Optional fields
-        if 'phone' in user_data:
-            # No phone validation - just basic input sanitization
-            phone = user_data['phone']
-            if isinstance(phone, str):
-                SecureInputValidator._check_malicious_patterns(phone)
-                validated_data['phone'] = phone.strip()
-            else:
-                raise ValidationError(_("Invalid input format"))
-
-        # Boolean fields with type safety
-        if 'accepts_marketing' in user_data:
-            if isinstance(user_data['accepts_marketing'], bool | str):
-                validated_data['accepts_marketing'] = bool(user_data['accepts_marketing'])
-            else:
-                raise ValidationError(_("Invalid input format"))
-
-        # GDPR consent validation
-        if user_data.get('gdpr_consent_date'):
-            validated_data['gdpr_consent_date'] = timezone.now()
+        phone = SecureInputValidator._validate_optional_phone(user_data)
+        if phone is not None:
+            validated_data['phone'] = phone
+            
+        marketing_consent = SecureInputValidator._validate_marketing_consent(user_data)
+        if marketing_consent is not None:
+            validated_data['accepts_marketing'] = marketing_consent
+            
+        gdpr_consent = SecureInputValidator._validate_gdpr_consent(user_data)
+        if gdpr_consent is not None:
+            validated_data['gdpr_consent_date'] = gdpr_consent
 
         return validated_data
 

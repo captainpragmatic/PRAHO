@@ -155,6 +155,42 @@ def romanian_date(value: Any, format_type: str = 'short') -> str:
         return str(value)
 
 
+def _format_seconds_relative(seconds: float) -> str:
+    """Format time in seconds range (under 1 minute)."""
+    return "acum câteva secunde"
+
+
+def _format_minutes_relative(seconds: float) -> str:
+    """Format time in minutes range (1 minute to 1 hour)."""
+    minutes = int(seconds // SECONDS_PER_MINUTE)
+    if minutes == 1:
+        return "acum un minut"
+    elif minutes < ROMANIAN_TIME_MINUTE_PLURAL_THRESHOLD:
+        return f"acum {minutes} minute"
+    else:
+        return f"acum {minutes} de minute"
+
+
+def _format_hours_relative(seconds: float) -> str:
+    """Format time in hours range (1 hour to 1 day)."""
+    hours = int(seconds // SECONDS_PER_HOUR)
+    if hours == 1:
+        return "acum o oră"
+    elif hours < ROMANIAN_TIME_HOUR_PLURAL_THRESHOLD:
+        return f"acum {hours} ore"
+    else:
+        return f"acum {hours} de ore"
+
+
+def _format_days_relative(seconds: float) -> str:
+    """Format time in days range (1 day to 1 week)."""
+    if seconds < SECONDS_PER_TWO_DAYS:  # 2 days
+        return "ieri"
+    else:
+        days = int(seconds // SECONDS_PER_DAY)
+        return f"acum {days} zile"
+
+
 @register.filter
 def romanian_relative_date(value: Any) -> str:
     """
@@ -170,32 +206,16 @@ def romanian_relative_date(value: Any) -> str:
     try:
         now = timezone.now()
         diff = now - value
-
         seconds = diff.total_seconds()
 
         if seconds < SECONDS_PER_MINUTE:
-            return "acum câteva secunde"
+            return _format_seconds_relative(seconds)
         elif seconds < SECONDS_PER_HOUR:
-            minutes = int(seconds // SECONDS_PER_MINUTE)
-            if minutes == 1:
-                return "acum un minut"
-            elif minutes < ROMANIAN_TIME_MINUTE_PLURAL_THRESHOLD:
-                return f"acum {minutes} minute"
-            else:
-                return f"acum {minutes} de minute"
+            return _format_minutes_relative(seconds)
         elif seconds < SECONDS_PER_DAY:
-            hours = int(seconds // SECONDS_PER_HOUR)
-            if hours == 1:
-                return "acum o oră"
-            elif hours < ROMANIAN_TIME_HOUR_PLURAL_THRESHOLD:
-                return f"acum {hours} ore"
-            else:
-                return f"acum {hours} de ore"
-        elif seconds < SECONDS_PER_TWO_DAYS:  # 2 days
-            return "ieri"
+            return _format_hours_relative(seconds)
         elif seconds < SECONDS_PER_WEEK:  # 7 days
-            days = int(seconds // SECONDS_PER_DAY)
-            return f"acum {days} zile"
+            return _format_days_relative(seconds)
         else:
             # Use short date format for older dates
             return romanian_date(value, 'short')

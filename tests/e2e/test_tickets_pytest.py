@@ -59,6 +59,84 @@ def navigate_to_tickets(page: Page) -> bool:
         return False
 
 
+def _validate_tickets_page_structure(page: Page) -> int:
+    """Validate basic tickets page structure elements and return count."""
+    basic_elements = [
+        ('main', 'main content area'),
+        ('h1, h2, h3', 'page headings'),
+        ('table, .table, .ticket-list', 'ticket listing'),
+    ]
+    
+    total_elements = 0
+    for selector, description in basic_elements:
+        count = page.locator(selector).count()
+        total_elements += count
+        print(f"🎫 Found {count} {description}")
+    
+    return total_elements
+
+
+def _check_staff_ticket_features(page: Page) -> None:
+    """Check staff-specific ticket features."""
+    staff_features = [
+        ('a[href*="/tickets/create/"], button:has-text("Create"), .btn-create', 'create ticket'),
+        ('a[href*="/tickets/"], .ticket-link', 'ticket detail links'),
+        ('.ticket-actions, .actions', 'ticket action buttons'),
+    ]
+    
+    staff_feature_count = 0
+    for selector, feature_name in staff_features:
+        count = page.locator(selector).count()
+        staff_feature_count += count
+        if count > 0:
+            print(f"    ✅ Found {feature_name}: {count} elements")
+        else:
+            print(f"    ❌ Missing {feature_name}")
+    
+    print(f"👤 Staff features found: {staff_feature_count}")
+
+
+def _check_customer_ticket_features(page: Page) -> None:
+    """Check customer-specific ticket features and restrictions."""
+    customer_features = [
+        ('.ticket-list, .my-tickets', 'my tickets list'),
+        ('a[href*="/tickets/"], .ticket-link', 'ticket detail links'),
+        ('.ticket-status, .status', 'ticket status indicators'),
+    ]
+    
+    customer_feature_count = 0
+    for selector, feature_name in customer_features:
+        count = page.locator(selector).count()
+        customer_feature_count += count
+        if count > 0:
+            print(f"    ✅ Found {feature_name}: {count} elements")
+    
+    # Customer should NOT see admin-only features (internal notes, etc)
+    restricted_features = page.locator('input[name="is_internal"], .internal-note').count()
+    if restricted_features == 0:
+        print("    ✅ Properly restricted from staff features")
+    else:
+        print(f"    ❌ Has access to {restricted_features} staff-only features")
+    
+    print(f"👤 Customer features found: {customer_feature_count}")
+
+
+def _count_ticket_navigation_elements(page: Page) -> int:
+    """Count navigation elements on the tickets page."""
+    nav_elements = [
+        ('nav', 'navigation elements'),
+        ('a[href*="/app/"]', 'app navigation links'),
+        ('button', 'interactive buttons'),
+    ]
+    
+    nav_total = 0
+    for selector, description in nav_elements:
+        count = page.locator(selector).count()
+        nav_total += count
+    
+    return nav_total
+
+
 def verify_tickets_functionality(page: Page, user_type: str) -> bool:
     """
     Verify ticket page functionality for different user types.
@@ -76,75 +154,17 @@ def verify_tickets_functionality(page: Page, user_type: str) -> bool:
     if not navigate_to_tickets(page):
         return False
     
-    # Basic page structure validation
-    basic_elements = [
-        ('main', 'main content area'),
-        ('h1, h2, h3', 'page headings'),
-        ('table, .table, .ticket-list', 'ticket listing'),
-    ]
-    
-    total_elements = 0
-    for selector, description in basic_elements:
-        count = page.locator(selector).count()
-        total_elements += count
-        print(f"🎫 Found {count} {description}")
+    # Validate page structure
+    total_elements = _validate_tickets_page_structure(page)
     
     # User-specific functionality checks
     if user_type == "superuser":
-        # Staff should see ticket management features
-        staff_features = [
-            ('a[href*="/tickets/create/"], button:has-text("Create"), .btn-create', 'create ticket'),
-            ('a[href*="/tickets/"], .ticket-link', 'ticket detail links'),
-            ('.ticket-actions, .actions', 'ticket action buttons'),
-        ]
-        
-        staff_feature_count = 0
-        for selector, feature_name in staff_features:
-            count = page.locator(selector).count()
-            staff_feature_count += count
-            if count > 0:
-                print(f"    ✅ Found {feature_name}: {count} elements")
-            else:
-                print(f"    ❌ Missing {feature_name}")
-        
-        print(f"👤 Staff features found: {staff_feature_count}")
-        
+        _check_staff_ticket_features(page)
     elif user_type == "customer":
-        # Customer should see limited ticket access
-        customer_features = [
-            ('.ticket-list, .my-tickets', 'my tickets list'),
-            ('a[href*="/tickets/"], .ticket-link', 'ticket detail links'),
-            ('.ticket-status, .status', 'ticket status indicators'),
-        ]
-        
-        customer_feature_count = 0
-        for selector, feature_name in customer_features:
-            count = page.locator(selector).count()
-            customer_feature_count += count
-            if count > 0:
-                print(f"    ✅ Found {feature_name}: {count} elements")
-        
-        # Customer should NOT see admin-only features (internal notes, etc)
-        restricted_features = page.locator('input[name="is_internal"], .internal-note').count()
-        if restricted_features == 0:
-            print("    ✅ Properly restricted from staff features")
-        else:
-            print(f"    ❌ Has access to {restricted_features} staff-only features")
-        
-        print(f"👤 Customer features found: {customer_feature_count}")
+        _check_customer_ticket_features(page)
     
-    # Check for essential navigation elements
-    nav_elements = [
-        ('nav', 'navigation elements'),
-        ('a[href*="/app/"]', 'app navigation links'),
-        ('button', 'interactive buttons'),
-    ]
-    
-    nav_total = 0
-    for selector, description in nav_elements:
-        count = page.locator(selector).count()
-        nav_total += count
-    
+    # Count navigation elements
+    nav_total = _count_ticket_navigation_elements(page)
     print(f"🎫 Total ticket content elements: {total_elements + nav_total}")
     
     # Page should have meaningful content

@@ -30,6 +30,7 @@ from apps.common.decorators import billing_staff_required, can_edit_proforma
 from apps.common.mixins import get_pagination_context, get_search_context
 from apps.common.utils import json_error, json_success
 from apps.customers.models import Customer
+from apps.users.models import User
 
 from .models import (
     Currency,
@@ -187,144 +188,75 @@ def invoice_detail(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, 'billing/invoice_detail.html', context)
 
 
+def _create_proforma_with_sequence(customer: Customer, valid_until: timezone.datetime) -> ProformaInvoice:
+    """Create a new proforma with proper sequence number."""
+    with transaction.atomic():
+        sequence, created = ProformaSequence.objects.get_or_create(scope='default')
+        proforma_number = sequence.get_next_number('PRO')
+        
+        # Create proforma
+        ron_currency = Currency.objects.get(code='RON')
+        
+        return ProformaInvoice.objects.create(
+            customer=customer,
+            number=proforma_number,
+            currency=ron_currency,
+            valid_until=valid_until,
+            # Copy customer billing info
+            bill_to_name=customer.company_name or customer.name,
+            bill_to_email=customer.primary_email,
+            bill_to_tax_id=(getattr(customer, 'tax_profile', None) and customer.tax_profile.vat_number) or '',
+        )
+
+
+def _handle_proforma_create_post(request: HttpRequest) -> HttpResponse:
+    """Handle POST request for proforma creation."""
+    # Validate customer assignment
+    customer_id = request.POST.get('customer')
+    customer, error_response = _validate_customer_assignment(request.user, customer_id, None)
+    if error_response:
+        return redirect('billing:invoice_list')
+
+    # Process valid_until date
+    valid_until, validation_errors = _process_valid_until_date(request.POST)
+
+    try:
+        # Create proforma
+        proforma = _create_proforma_with_sequence(customer, valid_until)
+    except Exception as e:
+        messages.error(request, _("❌ Error creating proforma: {error}").format(error=str(e)))
+        return redirect('billing:proforma_list')
+
+    # Process line items
+    line_errors = _process_proforma_line_items(proforma, request.POST)
+    validation_errors.extend(line_errors)
+    
+    # Save proforma with totals
+    proforma.save()
+
+    # Show validation errors if any
+    for error in validation_errors:
+        messages.warning(request, _("⚠️ {error}").format(error=error))
+
+    messages.success(request, _("✅ Proforma #{number} has been created!").format(number=proforma.number))
+    return redirect('billing:proforma_detail', pk=proforma.pk)
+
+
 @billing_staff_required
 def proforma_create(request: HttpRequest) -> HttpResponse:
     """
     ➕ Create new proforma invoice (Romanian business practice - only proformas can be created manually)
     """
     if request.method == 'POST':
-        # Create proforma from form data
-        customer_id = request.POST.get('customer')
-        customer = get_object_or_404(Customer, pk=customer_id)
+        return _handle_proforma_create_post(request)
 
-        # Security check
-        accessible_customer_ids = _get_accessible_customer_ids(request.user)
-        if int(customer_id) not in accessible_customer_ids:
-            messages.error(request, _("❌ You do not have permission to create proformas for this customer."))
-            return redirect('billing:invoice_list')
-
-        # Get next proforma number with proper error handling
-
-        # Get valid until date from form
-        valid_until_str = request.POST.get('valid_until', '').strip()
-        validation_errors = []
-
-        if valid_until_str:
-            try:
-                valid_until_date = datetime.strptime(valid_until_str, '%Y-%m-%d').date()
-                valid_until = timezone.make_aware(datetime.combine(valid_until_date, datetime.min.time()))
-            except ValueError:
-                # If date parsing fails, default to 30 days
-                valid_until = timezone.now() + timezone.timedelta(days=30)
-                validation_errors.append("Invalid 'Valid Until' date format, using 30 days from now")
-        else:
-            # If no date provided, default to 30 days
-            valid_until = timezone.now() + timezone.timedelta(days=30)
-
-        try:
-            with transaction.atomic():
-                sequence, created = ProformaSequence.objects.get_or_create(scope='default')
-                proforma_number = sequence.get_next_number('PRO')
-
-                # Create proforma
-                ron_currency = Currency.objects.get(code='RON')
-
-                proforma = ProformaInvoice.objects.create(
-                    customer=customer,
-                    number=proforma_number,
-                    currency=ron_currency,
-                    valid_until=valid_until,
-                    # Copy customer billing info
-                    bill_to_name=customer.company_name or customer.name,
-                    bill_to_email=customer.primary_email,
-                    bill_to_tax_id=(getattr(customer, 'tax_profile', None) and customer.tax_profile.vat_number) or '',
-                )
-        except Exception as e:
-            messages.error(request, _("❌ Error creating proforma: {error}").format(error=str(e)))
-            return redirect('billing:proforma_list')
-
-        # Process line items from form
-        line_counter = 0
-        total_subtotal = 0
-        total_tax = 0
-
-        while f'line_{line_counter}_description' in request.POST:
-            description = request.POST.get(f'line_{line_counter}_description', '').strip()
-
-            # Safe decimal conversion with validation
-            try:
-                quantity_str = request.POST.get(f'line_{line_counter}_quantity', '0').strip()
-                quantity = Decimal(quantity_str) if quantity_str else Decimal('0')
-            except (ValueError, TypeError, decimal.InvalidOperation):
-                quantity = Decimal('0')
-                validation_errors.append(f"Line {line_counter + 1}: Invalid quantity '{quantity_str}', using 0")
-
-            try:
-                unit_price_str = request.POST.get(f'line_{line_counter}_unit_price', '0').strip()
-                unit_price = Decimal(unit_price_str) if unit_price_str else Decimal('0')
-            except (ValueError, TypeError, decimal.InvalidOperation):
-                unit_price = Decimal('0')
-                validation_errors.append(f"Line {line_counter + 1}: Invalid unit price '{unit_price_str}', using 0")
-
-            try:
-                vat_rate_str = request.POST.get(f'line_{line_counter}_vat_rate', '19').strip()
-                vat_rate = Decimal(vat_rate_str) if vat_rate_str else Decimal('19')
-            except (ValueError, TypeError, decimal.InvalidOperation):
-                vat_rate = Decimal('19')
-                validation_errors.append(f"Line {line_counter + 1}: Invalid VAT rate '{vat_rate_str}', using 19%")
-
-            if description and quantity > 0 and unit_price > 0:
-                line_subtotal = quantity * unit_price
-                line_tax = line_subtotal * (vat_rate / 100)
-                line_total = line_subtotal + line_tax
-
-                ProformaLine.objects.create(
-                    proforma=proforma,
-                    kind='service',
-                    description=description,
-                    quantity=quantity,
-                    unit_price_cents=int(unit_price * 100),
-                    tax_rate=vat_rate / 100,
-                    line_total_cents=int(line_total * 100),
-                )
-
-                total_subtotal += line_subtotal
-                total_tax += line_tax
-
-            line_counter += 1
-
-        # Update proforma totals
-        proforma.subtotal_cents = int(total_subtotal * 100)
-        proforma.tax_cents = int(total_tax * 100)
-        proforma.total_cents = int((total_subtotal + total_tax) * 100)
-        proforma.save()
-
-        # Show validation errors if any
-        if validation_errors:
-            for error in validation_errors:
-                messages.warning(request, _("⚠️ {error}").format(error=error))
-
-        messages.success(request, _("✅ Proforma #{number} has been created!").format(number=proforma.number))
-        return redirect('billing:proforma_detail', pk=proforma.pk)
-
-    # Get user's customers for dropdown with related data
-    accessible_customers = request.user.get_accessible_customers()
-    if hasattr(accessible_customers, 'all'):
-        customers = accessible_customers.select_related('tax_profile', 'billing_profile').all()
-    # Customer is already imported at module level
-    elif isinstance(accessible_customers, list | tuple):
-        customers = Customer.objects.filter(
-            id__in=[c.id for c in accessible_customers]
-        ).select_related('tax_profile', 'billing_profile')
-    else:
-        customers = accessible_customers.select_related('tax_profile', 'billing_profile')
-
+    # GET request - render form
+    customers = _get_customers_for_edit_form(request.user)
     context = {
         'customers': customers,
         'vat_rate': Decimal('19.00'),  # Romanian standard VAT
         'document_type': 'proforma',
     }
-
     return render(request, 'billing/proforma_form.html', context)
 
 
@@ -483,6 +415,197 @@ def process_proforma_payment(request: HttpRequest, pk: int) -> HttpResponse:
     return json_error('Invalid method', status=405)
 
 
+def _validate_proforma_edit_access(user: User, proforma: ProformaInvoice) -> HttpResponse | None:
+    """Validate user access to edit proforma. Returns error response or None if valid."""
+    if not user.can_access_customer(proforma.customer):
+        messages.error(user.request, _("❌ You do not have permission to edit this proforma."))
+        return redirect('billing:invoice_list')
+    
+    if proforma.is_expired:
+        messages.error(user.request, _("❌ Cannot edit expired proforma."))
+        return redirect('billing:proforma_detail', pk=proforma.pk)
+    
+    return None
+
+
+def _validate_customer_assignment(user: User, customer_id: str, proforma_pk: int) -> tuple[Customer | None, HttpResponse | None]:
+    """Validate customer assignment. Returns (customer, error_response) tuple."""
+    try:
+        customer = get_object_or_404(Customer, pk=customer_id)
+    except (ValueError, Customer.DoesNotExist):
+        messages.error(user.request, _("❌ Invalid customer selected."))
+        return None, redirect('billing:proforma_detail', pk=proforma_pk)
+    
+    accessible_customer_ids = _get_accessible_customer_ids(user)
+    if int(customer_id) not in accessible_customer_ids:
+        messages.error(user.request, _("❌ You do not have permission to assign this customer."))
+        return None, redirect('billing:proforma_detail', pk=proforma_pk)
+    
+    return customer, None
+
+
+def _update_proforma_basic_info(proforma: ProformaInvoice, request_data: dict) -> None:
+    """Update proforma basic information from form data."""
+    bill_to_name = request_data.get('bill_to_name', '').strip()
+    if bill_to_name:
+        proforma.bill_to_name = bill_to_name
+
+    bill_to_email = request_data.get('bill_to_email', '').strip()
+    if bill_to_email:
+        proforma.bill_to_email = bill_to_email
+
+    bill_to_tax_id = request_data.get('bill_to_tax_id', '').strip()
+    if bill_to_tax_id:
+        proforma.bill_to_tax_id = bill_to_tax_id
+
+
+def _process_valid_until_date(request_data: dict) -> tuple[timezone.datetime, list[str]]:
+    """Process and validate the valid_until date from form data."""
+    validation_errors = []
+    valid_until_str = request_data.get('valid_until', '').strip()
+
+    if valid_until_str:
+        try:
+            # Parse date from form (YYYY-MM-DD format)
+            valid_until_date = datetime.strptime(valid_until_str, '%Y-%m-%d').date()
+            valid_until = timezone.make_aware(datetime.combine(valid_until_date, datetime.min.time()))
+        except ValueError:
+            # Invalid date format, use default
+            valid_until = timezone.now() + timezone.timedelta(days=30)
+            validation_errors.append(f"Invalid date format '{valid_until_str}', using 30 days from now")
+    else:
+        # No date provided, use default
+        valid_until = timezone.now() + timezone.timedelta(days=30)
+
+    return valid_until, validation_errors
+
+
+def _process_proforma_line_items(proforma: ProformaInvoice, request_data: dict) -> list[str]:
+    """Process line items from form data and create ProformaLine objects."""
+    # Clear existing line items first
+    proforma.lines.all().delete()
+    
+    line_counter = 0
+    total_subtotal = Decimal('0')
+    total_tax = Decimal('0')
+    validation_errors = []
+
+    while f'line_{line_counter}_description' in request_data:
+        description = request_data.get(f'line_{line_counter}_description', '').strip()
+        quantity, price_errors = _parse_line_quantity(request_data, line_counter)
+        unit_price, price_errors_2 = _parse_line_unit_price(request_data, line_counter)
+        vat_rate, vat_errors = _parse_line_vat_rate(request_data, line_counter)
+        
+        validation_errors.extend(price_errors + price_errors_2 + vat_errors)
+
+        if description and quantity > 0 and unit_price > 0:
+            line_subtotal = quantity * unit_price
+            line_tax = line_subtotal * (vat_rate / 100)
+            line_total = line_subtotal + line_tax
+
+            ProformaLine.objects.create(
+                proforma=proforma,
+                kind='service',
+                description=description,
+                quantity=quantity,
+                unit_price_cents=int(unit_price * 100),
+                tax_rate=vat_rate / 100,
+                line_total_cents=int(line_total * 100),
+            )
+
+            total_subtotal += line_subtotal
+            total_tax += line_tax
+
+        line_counter += 1
+
+    # Update proforma totals
+    proforma.subtotal_cents = int(total_subtotal * 100)
+    proforma.tax_cents = int(total_tax * 100)
+    proforma.total_cents = int((total_subtotal + total_tax) * 100)
+    
+    return validation_errors
+
+
+def _parse_line_quantity(request_data: dict, line_counter: int) -> tuple[Decimal, list[str]]:
+    """Parse and validate line item quantity."""
+    errors = []
+    try:
+        quantity_str = request_data.get(f'line_{line_counter}_quantity', '0').strip()
+        quantity = Decimal(quantity_str) if quantity_str else Decimal('0')
+    except (ValueError, TypeError, decimal.InvalidOperation):
+        quantity = Decimal('0')
+        errors.append(f"Line {line_counter + 1}: Invalid quantity '{quantity_str}', using 0")
+    return quantity, errors
+
+
+def _parse_line_unit_price(request_data: dict, line_counter: int) -> tuple[Decimal, list[str]]:
+    """Parse and validate line item unit price."""
+    errors = []
+    try:
+        unit_price_str = request_data.get(f'line_{line_counter}_unit_price', '0').strip()
+        unit_price = Decimal(unit_price_str) if unit_price_str else Decimal('0')
+    except (ValueError, TypeError, decimal.InvalidOperation):
+        unit_price = Decimal('0')
+        errors.append(f"Line {line_counter + 1}: Invalid unit price '{unit_price_str}', using 0")
+    return unit_price, errors
+
+
+def _parse_line_vat_rate(request_data: dict, line_counter: int) -> tuple[Decimal, list[str]]:
+    """Parse and validate line item VAT rate."""
+    errors = []
+    try:
+        vat_rate_str = request_data.get(f'line_{line_counter}_vat_rate', '19').strip()
+        vat_rate = Decimal(vat_rate_str) if vat_rate_str else Decimal('19')
+    except (ValueError, TypeError, decimal.InvalidOperation):
+        vat_rate = Decimal('19')
+        errors.append(f"Line {line_counter + 1}: Invalid VAT rate '{vat_rate_str}', using 19%")
+    return vat_rate, errors
+
+
+def _handle_proforma_edit_post(request: HttpRequest, proforma: ProformaInvoice) -> HttpResponse:
+    """Handle POST request for proforma editing."""
+    # Validate customer assignment
+    customer_id = request.POST.get('customer')
+    customer, error_response = _validate_customer_assignment(request.user, customer_id, proforma.pk)
+    if error_response:
+        return error_response
+
+    # Update proforma data
+    proforma.customer = customer
+    _update_proforma_basic_info(proforma, request.POST)
+    
+    # Process valid_until date
+    valid_until, validation_errors = _process_valid_until_date(request.POST)
+    proforma.valid_until = valid_until
+    
+    # Process line items
+    line_errors = _process_proforma_line_items(proforma, request.POST)
+    validation_errors.extend(line_errors)
+    
+    # Save proforma
+    proforma.save()
+
+    # Show validation errors if any
+    for error in validation_errors:
+        messages.warning(request, _("⚠️ {error}").format(error=error))
+
+    messages.success(request, _("✅ Proforma #{proforma_number} has been updated!").format(proforma_number=proforma.number))
+    return redirect('billing:proforma_detail', pk=proforma.pk)
+
+
+def _get_customers_for_edit_form(user: User) -> QuerySet[Customer]:
+    """Get accessible customers for the edit form dropdown."""
+    accessible_customers = user.get_accessible_customers()
+    if hasattr(accessible_customers, 'all'):
+        return accessible_customers.select_related('tax_profile', 'billing_profile').all()
+    elif isinstance(accessible_customers, list | tuple):
+        return Customer.objects.filter(
+            id__in=[c.id for c in accessible_customers]
+        ).select_related('tax_profile', 'billing_profile')
+    else:
+        return accessible_customers.select_related('tax_profile', 'billing_profile')
+
+
 @billing_staff_required
 def proforma_edit(request: HttpRequest, pk: int) -> HttpResponse:
     """
@@ -490,154 +613,24 @@ def proforma_edit(request: HttpRequest, pk: int) -> HttpResponse:
     """
     proforma = get_object_or_404(ProformaInvoice, pk=pk)
 
-    # Security check
-    if not request.user.can_access_customer(proforma.customer):
-        messages.error(request, _("❌ You do not have permission to edit this proforma."))
-        return redirect('billing:invoice_list')
-
-    # Business rule check
-    if proforma.is_expired:
-        messages.error(request, _("❌ Cannot edit expired proforma."))
-        return redirect('billing:proforma_detail', pk=pk)
+    # Guard clauses with early returns
+    # Store request in user object for helper functions
+    request.user.request = request
+    error_response = _validate_proforma_edit_access(request.user, proforma)
+    if error_response:
+        return error_response
 
     if request.method == 'POST':
-        # Update proforma from form data
-        customer_id = request.POST.get('customer')
-        customer = get_object_or_404(Customer, pk=customer_id)
+        return _handle_proforma_edit_post(request, proforma)
 
-        # Security check
-        accessible_customer_ids = _get_accessible_customer_ids(request.user)
-        if int(customer_id) not in accessible_customer_ids:
-            messages.error(request, _("❌ You do not have permission to assign this customer."))
-            return redirect('billing:proforma_detail', pk=pk)
-
-        # Update proforma basic info
-        proforma.customer = customer
-
-        # Update billing address if provided
-        bill_to_name = request.POST.get('bill_to_name', '').strip()
-        if bill_to_name:
-            proforma.bill_to_name = bill_to_name
-
-        bill_to_email = request.POST.get('bill_to_email', '').strip()
-        if bill_to_email:
-            proforma.bill_to_email = bill_to_email
-
-        bill_to_tax_id = request.POST.get('bill_to_tax_id', '').strip()
-        if bill_to_tax_id:
-            proforma.bill_to_tax_id = bill_to_tax_id
-
-        # ===============================================================================
-        # 📅 PROCESS VALID_UNTIL DATE FROM FORM
-        # ===============================================================================
-        validation_errors = []
-
-        # Process valid_until date from form with proper validation
-        valid_until_str = request.POST.get('valid_until', '').strip()
-
-        if valid_until_str:
-            try:
-                # Parse date from form (YYYY-MM-DD format)
-                valid_until_date = datetime.strptime(valid_until_str, '%Y-%m-%d').date()
-                valid_until = timezone.make_aware(datetime.combine(valid_until_date, datetime.min.time()))
-            except ValueError:
-                # Invalid date format, use default
-                valid_until = timezone.now() + timezone.timedelta(days=30)
-                validation_errors.append(f"Invalid date format '{valid_until_str}', using 30 days from now")
-        else:
-            # No date provided, use default
-            valid_until = timezone.now() + timezone.timedelta(days=30)
-
-        # Update proforma valid_until
-        proforma.valid_until = valid_until
-
-        # Clear existing line items
-        proforma.lines.all().delete()
-
-        # Process line items from form
-        line_counter = 0
-        total_subtotal = 0
-        total_tax = 0
-        validation_errors = []
-
-        while f'line_{line_counter}_description' in request.POST:
-            description = request.POST.get(f'line_{line_counter}_description', '').strip()
-
-            # Safe decimal conversion with validation
-            try:
-                quantity_str = request.POST.get(f'line_{line_counter}_quantity', '0').strip()
-                quantity = Decimal(quantity_str) if quantity_str else Decimal('0')
-            except (ValueError, TypeError, decimal.InvalidOperation):
-                quantity = Decimal('0')
-                validation_errors.append(f"Line {line_counter + 1}: Invalid quantity '{quantity_str}', using 0")
-
-            try:
-                unit_price_str = request.POST.get(f'line_{line_counter}_unit_price', '0').strip()
-                unit_price = Decimal(unit_price_str) if unit_price_str else Decimal('0')
-            except (ValueError, TypeError, decimal.InvalidOperation):
-                unit_price = Decimal('0')
-                validation_errors.append(f"Line {line_counter + 1}: Invalid unit price '{unit_price_str}', using 0")
-
-            try:
-                vat_rate_str = request.POST.get(f'line_{line_counter}_vat_rate', '19').strip()
-                vat_rate = Decimal(vat_rate_str) if vat_rate_str else Decimal('19')
-            except (ValueError, TypeError, decimal.InvalidOperation):
-                vat_rate = Decimal('19')
-                validation_errors.append(f"Line {line_counter + 1}: Invalid VAT rate '{vat_rate_str}', using 19%")
-
-            if description and quantity > 0 and unit_price > 0:
-                line_subtotal = quantity * unit_price
-                line_tax = line_subtotal * (vat_rate / 100)
-                line_total = line_subtotal + line_tax
-
-                ProformaLine.objects.create(
-                    proforma=proforma,
-                    kind='service',
-                    description=description,
-                    quantity=quantity,
-                    unit_price_cents=int(unit_price * 100),
-                    tax_rate=vat_rate / 100,
-                    line_total_cents=int(line_total * 100),
-                )
-
-                total_subtotal += line_subtotal
-                total_tax += line_tax
-
-            line_counter += 1
-
-        # Update proforma totals
-        proforma.subtotal_cents = int(total_subtotal * 100)
-        proforma.tax_cents = int(total_tax * 100)
-        proforma.total_cents = int((total_subtotal + total_tax) * 100)
-        proforma.save()
-
-        # Show validation errors if any
-        if validation_errors:
-            for error in validation_errors:
-                messages.warning(request, _("⚠️ {error}").format(error=error))
-
-        messages.success(request, _("✅ Proforma #{proforma_number} has been updated!").format(proforma_number=proforma.number))
-        return redirect('billing:proforma_detail', pk=pk)
-
-    # Get user's customers for dropdown
-    accessible_customers = request.user.get_accessible_customers()
-    if hasattr(accessible_customers, 'all'):
-        customers = accessible_customers.select_related('tax_profile', 'billing_profile').all()
-    # Customer is already imported at module level
-    elif isinstance(accessible_customers, list | tuple):
-        customers = Customer.objects.filter(
-            id__in=[c.id for c in accessible_customers]
-        ).select_related('tax_profile', 'billing_profile')
-    else:
-        customers = accessible_customers.select_related('tax_profile', 'billing_profile')
-
+    # GET request - render form
+    customers = _get_customers_for_edit_form(request.user)
     context = {
         'proforma': proforma,
         'lines': proforma.lines.all(),
         'customers': customers,
         'document_type': 'proforma',
     }
-
     return render(request, 'billing/proforma_form.html', context)
 
 

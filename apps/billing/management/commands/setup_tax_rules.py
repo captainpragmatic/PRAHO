@@ -22,20 +22,9 @@ class Command(BaseCommand):
             help='Force recreation of existing tax rules',
         )
 
-    def handle(self, *args: Any, **options: Any) -> None:
-        """Set up tax rules for Romanian hosting provider"""
-
-        force = options.get('force', False)
-        created_count = 0
-        updated_count = 0
-
-        self.stdout.write("🏛️  Setting up Romanian and EU VAT tax rules...")
-
-        # Current date for validity
-        today = timezone.now().date()
-
-        # Romanian VAT Rules
-        romanian_rules = [
+    def _get_romanian_tax_rules_data(self, today: 'date') -> list[dict]:
+        """Get Romanian VAT rules configuration."""
+        return [
             {
                 'country_code': 'RO',
                 'tax_type': 'vat',
@@ -54,8 +43,9 @@ class Command(BaseCommand):
             }
         ]
 
-        # Major EU Country VAT Rules
-        eu_vat_rules = [
+    def _get_eu_tax_rules_data(self) -> list[dict]:
+        """Get EU countries VAT rates."""
+        return [
             # Germany
             {'country_code': 'DE', 'rate': Decimal('0.19'), 'reduced_rate': Decimal('0.07')},
             # France
@@ -76,32 +66,50 @@ class Command(BaseCommand):
             {'country_code': 'BG', 'rate': Decimal('0.20'), 'reduced_rate': Decimal('0.09')},
         ]
 
-        # Create Romanian rules
+    def _process_tax_rule(self, rule_data: dict, force: bool) -> tuple[int, int]:
+        """Process a single tax rule. Returns (created_count, updated_count)."""
+        existing = TaxRule.objects.filter(
+            country_code=rule_data['country_code'],
+            tax_type=rule_data['tax_type'],
+            valid_from=rule_data['valid_from']
+        ).first()
+
+        if existing and not force:
+            self.stdout.write(f"  ⏭️  Skipping existing: {existing}")
+            return 0, 0
+
+        if existing and force:
+            # Update existing
+            for key, value in rule_data.items():
+                setattr(existing, key, value)
+            existing.save()
+            self.stdout.write(f"  ✅ Updated: {existing}")
+            return 0, 1
+        else:
+            # Create new
+            rule = TaxRule.objects.create(**rule_data)
+            self.stdout.write(f"  ✅ Created: {rule}")
+            return 1, 0
+
+    def _create_romanian_rules(self, today: 'date', force: bool) -> tuple[int, int]:
+        """Create Romanian tax rules."""
+        created_count = 0
+        updated_count = 0
+        
+        romanian_rules = self._get_romanian_tax_rules_data(today)
         for rule_data in romanian_rules:
-            existing = TaxRule.objects.filter(
-                country_code=rule_data['country_code'],
-                tax_type=rule_data['tax_type'],
-                valid_from=rule_data['valid_from']
-            ).first()
+            created, updated = self._process_tax_rule(rule_data, force)
+            created_count += created
+            updated_count += updated
+            
+        return created_count, updated_count
 
-            if existing and not force:
-                self.stdout.write(f"  ⏭️  Skipping existing: {existing}")
-                continue
-
-            if existing and force:
-                # Update existing
-                for key, value in rule_data.items():
-                    setattr(existing, key, value)
-                existing.save()
-                updated_count += 1
-                self.stdout.write(f"  ✅ Updated: {existing}")
-            else:
-                # Create new
-                rule = TaxRule.objects.create(**rule_data)
-                created_count += 1
-                self.stdout.write(f"  ✅ Created: {rule}")
-
-        # Create EU country rules
+    def _create_eu_rules(self, today: 'date', force: bool) -> tuple[int, int]:
+        """Create EU countries tax rules."""
+        created_count = 0
+        updated_count = 0
+        
+        eu_vat_rules = self._get_eu_tax_rules_data()
         for eu_rule in eu_vat_rules:
             rule_data = {
                 'country_code': eu_rule['country_code'],
@@ -119,28 +127,18 @@ class Command(BaseCommand):
                     'notes': 'EU member state VAT for cross-border transactions'
                 }
             }
+            
+            created, updated = self._process_tax_rule(rule_data, force)
+            created_count += created
+            updated_count += updated
+            
+        return created_count, updated_count
 
-            existing = TaxRule.objects.filter(
-                country_code=rule_data['country_code'],
-                tax_type=rule_data['tax_type'],
-                valid_from=rule_data['valid_from']
-            ).first()
-
-            if existing and not force:
-                continue
-
-            if existing and force:
-                for key, value in rule_data.items():
-                    setattr(existing, key, value)
-                existing.save()
-                updated_count += 1
-                self.stdout.write(f"  ✅ Updated: {existing}")
-            else:
-                rule = TaxRule.objects.create(**rule_data)
-                created_count += 1
-                self.stdout.write(f"  ✅ Created: {rule}")
-
-        # Non-EU countries (simplified, no VAT)
+    def _create_non_eu_rules(self, today: 'date', force: bool) -> tuple[int, int]:
+        """Create non-EU countries tax rules."""
+        created_count = 0
+        updated_count = 0
+        
         non_eu_countries = ['US', 'GB', 'CH', 'NO', 'CA', 'AU']
         for country_code in non_eu_countries:
             rule_data = {
@@ -158,26 +156,15 @@ class Command(BaseCommand):
                     'notes': 'Non-EU country, VAT not applicable for Romanian provider'
                 }
             }
+            
+            created, updated = self._process_tax_rule(rule_data, force)
+            created_count += created
+            updated_count += updated
+            
+        return created_count, updated_count
 
-            existing = TaxRule.objects.filter(
-                country_code=rule_data['country_code'],
-                tax_type=rule_data['tax_type'],
-                valid_from=rule_data['valid_from']
-            ).first()
-
-            if existing and not force:
-                continue
-
-            if existing and force:
-                for key, value in rule_data.items():
-                    setattr(existing, key, value)
-                existing.save()
-                updated_count += 1
-            else:
-                rule = TaxRule.objects.create(**rule_data)
-                created_count += 1
-
-        # Summary
+    def _print_summary(self, created_count: int, updated_count: int) -> None:
+        """Print setup summary and verification info."""
         self.stdout.write("\n" + "="*60)
         self.stdout.write("📊 Tax Rules Setup Complete!")
         self.stdout.write(f"   ✅ Created: {created_count} new rules")
@@ -200,3 +187,28 @@ class Command(BaseCommand):
         self.stdout.write("   1. Set up payment retry policies: python manage.py setup_dunning_policies")
         self.stdout.write("   2. Configure VAT validation in settings")
         self.stdout.write("   3. Test VAT calculation in orders/invoices")
+
+    def handle(self, *args: Any, **options: Any) -> None:
+        """Set up tax rules for Romanian hosting provider"""
+        force = options.get('force', False)
+        today = timezone.now().date()
+        
+        self.stdout.write("🏛️  Setting up Romanian and EU VAT tax rules...")
+
+        # Create all tax rules
+        total_created = 0
+        total_updated = 0
+        
+        created, updated = self._create_romanian_rules(today, force)
+        total_created += created
+        total_updated += updated
+        
+        created, updated = self._create_eu_rules(today, force)
+        total_created += created
+        total_updated += updated
+        
+        created, updated = self._create_non_eu_rules(today, force)
+        total_created += created
+        total_updated += updated
+
+        self._print_summary(total_created, total_updated)

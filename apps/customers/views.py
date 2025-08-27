@@ -115,6 +115,115 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
     return render(request, 'customers/detail.html', context)
 
 
+def _handle_user_creation_for_customer(request: HttpRequest, customer: Customer, form_data: dict, result: dict) -> None:
+    """Handle user creation for a new customer."""
+    user_result = CustomerUserService.create_user_for_customer(
+        customer=customer,
+        first_name=form_data.get('first_name', ''),
+        last_name=form_data.get('last_name', ''),
+        send_welcome=result['send_welcome_email'],
+        created_by=request.user
+    )
+
+    if user_result.is_ok():
+        user, email_sent = user_result.value
+        _show_user_creation_success_message(request, customer, user, email_sent)
+    else:
+        messages.success(
+            request,
+            _('✅ Customer "{customer_name}" created successfully').format(customer_name=customer.name)
+        )
+        messages.error(
+            request,
+            _('❌ Failed to create user account: {error}').format(error=user_result.error)
+        )
+
+
+def _handle_user_linking_for_customer(request: HttpRequest, customer: Customer, result: dict) -> None:
+    """Handle linking existing user to a new customer."""
+    existing_user = result['existing_user']
+    if not existing_user:
+        return
+        
+    link_result = CustomerUserService.link_existing_user(
+        user=existing_user,
+        customer=customer,
+        role='owner',
+        is_primary=True,
+        created_by=request.user
+    )
+
+    if link_result.is_ok():
+        messages.success(
+            request,
+            _('✅ Customer "{customer_name}" created and linked to user {email}').format(
+                customer_name=customer.name,
+                email=existing_user.email
+            )
+        )
+    else:
+        messages.success(
+            request,
+            _('✅ Customer "{customer_name}" created successfully').format(customer_name=customer.name)
+        )
+        messages.error(
+            request,
+            _('❌ Failed to link user: {error}').format(error=link_result.error)
+        )
+
+
+def _handle_skip_user_for_customer(request: HttpRequest, customer: Customer) -> None:
+    """Handle skipping user assignment for a new customer."""
+    messages.success(
+        request,
+        _('✅ Customer "{customer_name}" created successfully. No user assigned.').format(customer_name=customer.name)
+    )
+    messages.info(
+        request,
+        _('ℹ️ You can assign users later from the customer detail page.')
+    )
+
+
+def _handle_customer_create_post(request: HttpRequest) -> HttpResponse:
+    """Handle POST request for customer creation."""
+    form = CustomerCreationForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, _('❌ Please correct the errors below'))
+        return _render_customer_form(request, form)
+
+    try:
+        # Save customer and get result data
+        result = form.save(user=request.user)
+        customer = result['customer']
+        user_action = result['user_action']
+
+        # Handle user assignment based on action
+        if user_action == 'create':
+            _handle_user_creation_for_customer(request, customer, form.cleaned_data, result)
+        elif user_action == 'link':
+            _handle_user_linking_for_customer(request, customer, result)
+        else:  # user_action == 'skip'
+            _handle_skip_user_for_customer(request, customer)
+
+        return redirect('customers:detail', customer_id=customer.pk)
+
+    except Exception as e:
+        messages.error(request, _('❌ Error creating customer: {error}').format(error=str(e)))
+        return _render_customer_form(request, form)
+
+
+def _render_customer_form(request: HttpRequest, form: CustomerCreationForm | None = None) -> HttpResponse:
+    """Render the customer creation form."""
+    if form is None:
+        form = CustomerCreationForm()
+    
+    context = {
+        'form': form,
+        'action': _('Create'),
+    }
+    return render(request, 'customers/form.html', context)
+
+
 @staff_required
 def customer_create(request: HttpRequest) -> HttpResponse:
     """
@@ -122,112 +231,9 @@ def customer_create(request: HttpRequest) -> HttpResponse:
     Uses composite form to handle normalized structure and user creation/linking
     """
     if request.method == 'POST':
-        form = CustomerCreationForm(request.POST)
-        if form.is_valid():
-            try:
-                # Save customer and get result data
-                result = form.save(user=request.user)
-                customer = result['customer']
-                user_action = result['user_action']
-
-                # Handle user assignment based on action
-                if user_action == 'create':
-                    # Auto-create user account
-                    user_result = CustomerUserService.create_user_for_customer(
-                        customer=customer,
-                        first_name=form.cleaned_data.get('first_name', ''),
-                        last_name=form.cleaned_data.get('last_name', ''),
-                        send_welcome=result['send_welcome_email'],
-                        created_by=request.user
-                    )
-
-                    if user_result.is_ok():
-                        user, email_sent = user_result.value
-                        if email_sent:
-                            messages.success(
-                                request,
-                                _('✅ Customer "{customer_name}" created successfully. Welcome email sent to {email}').format(
-                                    customer_name=customer.name,
-                                    email=user.email
-                                )
-                            )
-                        else:
-                            messages.success(
-                                request,
-                                _('✅ Customer "{customer_name}" created successfully. User account created for {email}').format(
-                                    customer_name=customer.name,
-                                    email=user.email
-                                )
-                            )
-                            messages.warning(
-                                request,
-                                _('⚠️ Welcome email could not be sent. Please inform the user manually.')
-                            )
-                    else:  # user_result.is_err()
-                        messages.success(
-                            request,
-                            _('✅ Customer "{customer_name}" created successfully').format(customer_name=customer.name)
-                        )
-                        messages.error(
-                            request,
-                            _('❌ Failed to create user account: {error}').format(error=user_result.error)
-                        )
-
-                elif user_action == 'link':
-                    # Link existing user
-                    existing_user = result['existing_user']
-                    if existing_user:
-                        link_result = CustomerUserService.link_existing_user(
-                            user=existing_user,
-                            customer=customer,
-                            role='owner',
-                            is_primary=True,
-                            created_by=request.user
-                        )
-
-                        if link_result.is_ok():
-                            messages.success(
-                                request,
-                                _('✅ Customer "{customer_name}" created and linked to user {email}').format(
-                                    customer_name=customer.name,
-                                    email=existing_user.email
-                                )
-                            )
-                        else:  # link_result.is_err()
-                            messages.success(
-                                request,
-                                _('✅ Customer "{customer_name}" created successfully').format(customer_name=customer.name)
-                            )
-                            messages.error(
-                                request,
-                                _('❌ Failed to link user: {error}').format(error=link_result.error)
-                            )
-
-                else:  # user_action == 'skip'
-                    messages.success(
-                        request,
-                        _('✅ Customer "{customer_name}" created successfully. No user assigned.').format(customer_name=customer.name)
-                    )
-                    messages.info(
-                        request,
-                        _('ℹ️ You can assign users later from the customer detail page.')
-                    )
-
-                return redirect('customers:detail', customer_id=customer.pk)
-
-            except Exception as e:
-                messages.error(request, _('❌ Error creating customer: {error}').format(error=str(e)))
-        else:
-            messages.error(request, _('❌ Please correct the errors below'))
-    else:
-        form = CustomerCreationForm()
-
-    context = {
-        'form': form,
-        'action': _('Create'),
-    }
-
-    return render(request, 'customers/form.html', context)
+        return _handle_customer_create_post(request)
+    
+    return _render_customer_form(request)
 
 
 @staff_required
@@ -484,6 +490,144 @@ def customer_search_api(request: HttpRequest) -> JsonResponse:
     return JsonResponse({'results': results})
 
 
+def _validate_customer_assign_access(user: 'User', customer: Customer) -> HttpResponse | None:
+    """Validate user access to assign users to customer."""
+    if not user.can_access_customer(customer):
+        messages.error(user.request, _('Access denied to this customer'))
+        return redirect('customers:list')
+    return None
+
+
+def _handle_user_creation_action(request: HttpRequest, customer: Customer, assignment_data: dict) -> None:
+    """Handle the 'create' action for user assignment."""
+    send_welcome = bool(assignment_data.get('send_welcome_email', True))
+    user_result = CustomerUserService.create_user_for_customer(
+        customer=customer,
+        first_name=assignment_data['first_name'],
+        last_name=assignment_data['last_name'],
+        send_welcome=send_welcome,
+        created_by=request.user
+    )
+
+    if user_result.is_ok():
+        user, email_sent = user_result.unwrap()
+        _show_user_creation_success_message(request, customer, user, email_sent)
+    else:
+        error_result = cast(Err, user_result)
+        messages.error(
+            request,
+            _('❌ Failed to create user account: {error}').format(error=error_result.error)
+        )
+
+
+def _show_user_creation_success_message(request: HttpRequest, customer: Customer, user: 'User', email_sent: bool) -> None:
+    """Show appropriate success message for user creation."""
+    if email_sent:
+        messages.success(
+            request,
+            _('✅ User account created for {customer_name}. Welcome email sent to {email}').format(
+                customer_name=customer.name,
+                email=user.email
+            )
+        )
+    else:
+        messages.success(
+            request,
+            _('✅ User account created for {customer_name}: {email}').format(
+                customer_name=customer.name,
+                email=user.email
+            )
+        )
+        messages.warning(
+            request,
+            _('⚠️ Welcome email could not be sent. Please inform the user manually.')
+        )
+
+
+def _handle_user_linking_action(request: HttpRequest, customer: Customer, assignment_data: dict) -> None:
+    """Handle the 'link' action for user assignment."""
+    existing_user = assignment_data['existing_user']
+    role = assignment_data['role']
+
+    if not existing_user:
+        messages.error(request, _('❌ No user selected for linking'))
+        return
+    
+    if not isinstance(existing_user, User):
+        messages.error(request, _('❌ Invalid user selected'))
+        return
+
+    link_result = CustomerUserService.link_existing_user(
+        user=existing_user,
+        customer=customer,
+        role=role,
+        is_primary=False,  # Existing customers might already have primary users
+        created_by=request.user
+    )
+
+    if link_result.is_ok():
+        messages.success(
+            request,
+            _('✅ User {email} linked to customer "{customer_name}" with {role} role').format(
+                email=existing_user.email,
+                customer_name=customer.name,
+                role=role
+            )
+        )
+    else:
+        error_result = cast(Err, link_result)
+        messages.error(
+            request,
+            _('❌ Failed to link user: {error}').format(error=error_result.error)
+        )
+
+
+def _handle_user_skip_action(request: HttpRequest, customer: Customer) -> None:
+    """Handle the 'skip' action for user assignment."""
+    messages.info(
+        request,
+        _('ℹ️ User assignment skipped for customer "{customer_name}"').format(customer_name=customer.name)
+    )
+
+
+def _handle_user_assignment_post(request: HttpRequest, customer: Customer) -> HttpResponse:
+    """Handle POST request for user assignment."""
+    form = CustomerUserAssignmentForm(data=request.POST, customer=customer)
+    if not form.is_valid():
+        messages.error(request, _('❌ Please correct the errors below'))
+        return _render_assignment_form(request, form, customer)
+
+    try:
+        assignment_data = form.save(customer=customer, created_by=request.user)
+        action = assignment_data['action']
+
+        if action == 'create':
+            _handle_user_creation_action(request, customer, assignment_data)
+        elif action == 'link':
+            _handle_user_linking_action(request, customer, assignment_data)
+        else:  # action == 'skip'
+            _handle_user_skip_action(request, customer)
+
+        return redirect('customers:detail', customer_id=customer.pk)
+
+    except Exception as e:
+        messages.error(request, _('❌ Error assigning user: {error}').format(error=str(e)))
+        return _render_assignment_form(request, form, customer)
+
+
+def _render_assignment_form(request: HttpRequest, form: CustomerUserAssignmentForm | None, customer: Customer) -> HttpResponse:
+    """Render the user assignment form."""
+    if form is None:
+        form = CustomerUserAssignmentForm(customer=customer)
+    
+    context = {
+        'form': form,
+        'customer': customer,
+        'action': _('Assign User'),
+    }
+    return render(request, 'customers/assign_user.html', context)
+
+
 @staff_required
 def customer_assign_user(request: HttpRequest, customer_id: int) -> HttpResponse:
     """
@@ -492,113 +636,13 @@ def customer_assign_user(request: HttpRequest, customer_id: int) -> HttpResponse
     """
     customer = get_object_or_404(Customer, id=customer_id)
 
-    # Check access permissions
-    if not request.user.can_access_customer(customer):
-        messages.error(request, _('Access denied to this customer'))
-        return redirect('customers:list')
+    # Guard clause for access validation
+    request.user.request = request
+    error_response = _validate_customer_assign_access(request.user, customer)
+    if error_response:
+        return error_response
 
     if request.method == 'POST':
-        form = CustomerUserAssignmentForm(data=request.POST, customer=customer)
-        if form.is_valid():
-            try:
-                # Get form data
-                assignment_data = form.save(customer=customer, created_by=request.user)
-                action = assignment_data['action']
-
-                if action == 'create':
-                    # Auto-create user account using customer's email
-                    send_welcome = bool(assignment_data.get('send_welcome_email', True))
-                    user_result = CustomerUserService.create_user_for_customer(
-                        customer=customer,
-                        first_name=assignment_data['first_name'],
-                        last_name=assignment_data['last_name'],
-                        send_welcome=send_welcome,
-                        created_by=request.user
-                    )
-
-                    if user_result.is_ok():
-                        user, email_sent = user_result.unwrap()
-                        if email_sent:
-                            messages.success(
-                                request,
-                                _('✅ User account created for {customer_name}. Welcome email sent to {email}').format(
-                                    customer_name=customer.name,
-                                    email=user.email
-                                )
-                            )
-                        else:
-                            messages.success(
-                                request,
-                                _('✅ User account created for {customer_name}: {email}').format(
-                                    customer_name=customer.name,
-                                    email=user.email
-                                )
-                            )
-                            messages.warning(
-                                request,
-                                _('⚠️ Welcome email could not be sent. Please inform the user manually.')
-                            )
-                    else:  # user_result.is_err()
-                        error_result = cast(Err, user_result)
-                        messages.error(
-                            request,
-                            _('❌ Failed to create user account: {error}').format(error=error_result.error)
-                        )
-
-                elif action == 'link':
-                    # Link existing user
-                    existing_user = assignment_data['existing_user']
-                    role = assignment_data['role']
-
-                    if existing_user:  # Ensure user is not None
-                        if isinstance(existing_user, User):
-                            link_result = CustomerUserService.link_existing_user(
-                                user=existing_user,
-                                customer=customer,
-                                role=role,
-                                is_primary=False,  # Existing customers might already have primary users
-                                created_by=request.user
-                            )
-
-                            if link_result.is_ok():
-                                messages.success(
-                                    request,
-                                    _('✅ User {email} linked to customer "{customer_name}" with {role} role').format(
-                                        email=existing_user.email,
-                                        customer_name=customer.name,
-                                        role=role
-                                    )
-                                )
-                            else:  # link_result.is_err()
-                                error_result = cast(Err, link_result)
-                                messages.error(
-                                    request,
-                                    _('❌ Failed to link user: {error}').format(error=error_result.error)
-                                )
-                        else:
-                            messages.error(request, _('❌ Invalid user selected'))
-                    else:
-                        messages.error(request, _('❌ No user selected for linking'))
-
-                else:  # action == 'skip'
-                    messages.info(
-                        request,
-                        _('ℹ️ User assignment skipped for customer "{customer_name}"').format(customer_name=customer.name)
-                    )
-
-                return redirect('customers:detail', customer_id=customer.pk)
-
-            except Exception as e:
-                messages.error(request, _('❌ Error assigning user: {error}').format(error=str(e)))
-        else:
-            messages.error(request, _('❌ Please correct the errors below'))
-    else:
-        form = CustomerUserAssignmentForm(customer=customer)
-
-    context = {
-        'form': form,
-        'customer': customer,
-        'action': _('Assign User'),
-    }
-
-    return render(request, 'customers/assign_user.html', context)
+        return _handle_user_assignment_post(request, customer)
+    
+    return _render_assignment_form(request, None, customer)
