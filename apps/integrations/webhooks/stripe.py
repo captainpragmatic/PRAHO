@@ -6,6 +6,7 @@ from django.conf import settings
 
 from apps.billing.models import Payment
 from apps.customers.models import Customer
+from apps.integrations.models import WebhookEvent
 
 from .base import BaseWebhookProcessor, verify_stripe_signature
 
@@ -61,7 +62,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             webhook_secret=webhook_secret
         )
 
-    def handle_event(self, webhook_event) -> tuple[bool, str]:
+    def handle_event(self, webhook_event: WebhookEvent) -> tuple[bool, str]:
         """🎯 Handle Stripe webhook event"""
         event_type = webhook_event.event_type
         payload = webhook_event.payload

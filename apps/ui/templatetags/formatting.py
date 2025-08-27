@@ -6,6 +6,7 @@ Romanian business formatting for dates, currency, legal compliance
 
 import re
 from decimal import Decimal
+from typing import Any
 
 from django import template
 from django.utils import timezone
@@ -527,7 +528,7 @@ def highlight_search(text: str, search_term: str) -> str:
         'Ă': 'A', 'Â': 'A', 'Î': 'I', 'Ș': 'S', 'Ț': 'T'
     }
 
-    def normalize_text(s):
+    def normalize_text(s: str) -> str:
         """Remove diacritics for search comparison"""
         for diacritic, replacement in diacritic_map.items():
             s = s.replace(diacritic, replacement)

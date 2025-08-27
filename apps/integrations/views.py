@@ -1,7 +1,8 @@
 import json
 import logging
+from typing import Any
 
-from django.http import HttpResponseBadRequest, JsonResponse
+from django.http import HttpRequest, HttpResponseBadRequest, JsonResponse
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
@@ -122,7 +123,7 @@ class PayPalWebhookView(WebhookView):
 # WEBHOOK MANAGEMENT API
 # ===============================================================================
 
-def webhook_status(request: Any):
+def webhook_status(request: HttpRequest) -> JsonResponse:
     """📊 Webhook processing status and statistics"""
     if not request.user.is_staff:
         return JsonResponse({'error': 'Unauthorized'}, status=403)
@@ -171,7 +172,7 @@ def webhook_status(request: Any):
 
 
 @require_http_methods(["POST"])
-def retry_webhook(request: Any, webhook_id: Any):
+def retry_webhook(request: HttpRequest, webhook_id: int) -> JsonResponse:
     """🔄 Manually retry a failed webhook"""
     if not request.user.is_staff:
         return JsonResponse({'error': 'Unauthorized'}, status=403)

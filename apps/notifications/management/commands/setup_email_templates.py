@@ -3,6 +3,8 @@ Management command to set up email templates for Romanian hosting provider.
 Creates essential templates for billing, provisioning, and customer communication.
 """
 
+from typing import Any
+
 from django.core.management.base import BaseCommand
 
 from apps.notifications.models import EmailTemplate
@@ -18,7 +20,7 @@ class Command(BaseCommand):
             help='Overwrite existing templates',
         )
 
-    def handle(self, *args, **options) -> None:
+    def handle(self, *args: Any, **options: Any) -> None:
         """Create email templates for Romanian hosting provider"""
 
         self.stdout.write(

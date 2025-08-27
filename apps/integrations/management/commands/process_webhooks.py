@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 from django.core.management.base import BaseCommand
 from django.utils import timezone
@@ -63,7 +64,7 @@ class Command(BaseCommand):
             help='Show webhook processing statistics'
         )
 
-    def handle(self, *args, **options) -> None:
+    def handle(self, *args: Any, **options: Any) -> None:
         """🎯 Main command handler"""
         self.stdout.write(
             self.style.SUCCESS('🔄 Starting webhook processing...')
@@ -114,7 +115,7 @@ class Command(BaseCommand):
                 self.style.WARNING(f"⚠️ {stats['failed']} webhooks failed - they will be retried later")
             )
 
-    def retry_failed(self, source=None) -> None:
+    def retry_failed(self, source: str | None = None) -> None:
         """🔄 Retry failed webhooks"""
         self.stdout.write(f"🔄 Retrying failed webhooks (source: {source or 'all'})")
 

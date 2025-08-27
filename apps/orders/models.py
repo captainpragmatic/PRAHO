@@ -267,7 +267,7 @@ class Order(models.Model):
     def generate_order_number(self) -> None:
         """Generate a unique order number based on date and sequence"""
         if not self.order_number:
-            # Format: ORD-YYYYMMDD-XXXXXX
+            # Format: ORD-YYYYMMDD-XXXXXX  # noqa: ERA001
             date_part = timezone.now().strftime('%Y%m%d')
             # Get last order number for today
             today_orders = Order.objects.filter(
@@ -479,7 +479,7 @@ class OrderItem(models.Model):
         """Return line total in currency units"""
         return Decimal(self.line_total_cents) / 100
 
-    def save(self, *args, **kwargs) -> None:  # type: ignore[override]
+    def save(self, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
         """Auto-calculate totals before saving"""
         # Store product details snapshot
         if self.product and not self.product_name:

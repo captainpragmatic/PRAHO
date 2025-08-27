@@ -1,6 +1,8 @@
 """
 Test user setup command - only for testing environments
 """
+from typing import Any
+
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
@@ -10,7 +12,7 @@ User = get_user_model()
 class Command(BaseCommand):
     help = 'Create test users for E2E testing (test environments only)'
 
-    def handle(self, *args, **options):
+    def handle(self, *args: Any, **options: Any) -> None:
         # Strict test-only enforcement
         if not settings.DEBUG:
             raise CommandError("❌ This command only runs in DEBUG mode")
@@ -26,7 +28,7 @@ class Command(BaseCommand):
             self.style.SUCCESS('✅ Test users created successfully')
         )
 
-    def _create_test_admin(self):
+    def _create_test_admin(self) -> None:
         """Create admin user for E2E tests"""
         email = 'admin@example.com'
         if not User.objects.filter(email=email).exists():
@@ -40,7 +42,7 @@ class Command(BaseCommand):
             )
             self.stdout.write(f'✓ Test admin: {email}')
 
-    def _create_test_support(self):
+    def _create_test_support(self) -> None:
         """Create support user for E2E tests"""
         email = 'support@example.com'
         if not User.objects.filter(email=email).exists():

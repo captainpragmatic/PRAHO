@@ -47,7 +47,7 @@ def secure_service_method(
     requires_permission: str | None = None,
     log_attempts: bool = True,
     prevent_timing_attacks: bool = True
-):
+) -> Callable[[Callable], Callable]:
     """
     Master security decorator for service methods
     
@@ -61,7 +61,7 @@ def secure_service_method(
     """
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
-        def wrapper(*args, **kwargs) -> Result[Any, str]:
+        def wrapper(*args: Any, **kwargs: Any) -> Result[Any, str]:
             start_time = time.time()
             request_ip = kwargs.get('request_ip', 'unknown')
             user = kwargs.get('user')
@@ -133,7 +133,7 @@ def secure_service_method(
 # SPECIALIZED SECURITY DECORATORS
 # ===============================================================================
 
-def secure_user_registration(rate_limit: int = RATE_LIMIT_REGISTRATION_PER_IP):
+def secure_user_registration(rate_limit: int = RATE_LIMIT_REGISTRATION_PER_IP) -> Callable[[Callable], Callable]:
     """Security decorator specifically for user registration methods"""
     return secure_service_method(
         validation_type="user_registration",
@@ -144,7 +144,7 @@ def secure_user_registration(rate_limit: int = RATE_LIMIT_REGISTRATION_PER_IP):
     )
 
 
-def secure_customer_operation(requires_owner: bool = False):
+def secure_customer_operation(requires_owner: bool = False) -> Callable[[Callable], Callable]:
     """Security decorator for customer-related operations"""
     permission = "owner" if requires_owner else "viewer"
     return secure_service_method(
@@ -155,7 +155,7 @@ def secure_customer_operation(requires_owner: bool = False):
     )
 
 
-def secure_invitation_system():
+def secure_invitation_system() -> Callable[[Callable], Callable]:
     """Security decorator for invitation system"""
     return secure_service_method(
         validation_type="invitation",
@@ -171,13 +171,13 @@ def secure_invitation_system():
 # ATOMIC BUSINESS LOGIC DECORATORS
 # ===============================================================================
 
-def atomic_with_retry(max_retries: int = 3, delay: float = 0.1):
+def atomic_with_retry(max_retries: int = 3, delay: float = 0.1) -> Callable[[Callable], Callable]:
     """
     Atomic transaction with retry logic for race condition handling
     """
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
-        def wrapper(*args, **kwargs) -> Any:
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
             last_exception = None
 
             for attempt in range(max_retries):
@@ -198,13 +198,13 @@ def atomic_with_retry(max_retries: int = 3, delay: float = 0.1):
     return decorator
 
 
-def prevent_race_conditions(lock_key_generator: Callable):
+def prevent_race_conditions(lock_key_generator: Callable) -> Callable[[Callable], Callable]:
     """
     Prevent race conditions using distributed locking
     """
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
-        def wrapper(*args, **kwargs) -> Any:
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
             # Generate unique lock key
             lock_key = f"race_lock:{lock_key_generator(*args, **kwargs)}"
 
@@ -344,13 +344,13 @@ def _normalize_response_time(start_time: float, min_time: float = 0.1) -> None:
 # AUDIT & MONITORING DECORATORS
 # ===============================================================================
 
-def audit_service_call(event_type: str, extract_details: Callable | None = None):
+def audit_service_call(event_type: str, extract_details: Callable | None = None) -> Callable[[Callable], Callable]:
     """
     Comprehensive audit logging for service method calls
     """
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
-        def wrapper(*args, **kwargs) -> Any:
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
             start_time = timezone.now()
             user = kwargs.get('user') or (args[0] if len(args) > 0 and hasattr(args[0], 'id') else None)
             request_ip = kwargs.get('request_ip')
@@ -396,13 +396,13 @@ def audit_service_call(event_type: str, extract_details: Callable | None = None)
 # PERFORMANCE MONITORING DECORATORS
 # ===============================================================================
 
-def monitor_performance(max_duration_seconds: float = 5.0, alert_threshold: float = 2.0):
+def monitor_performance(max_duration_seconds: float = 5.0, alert_threshold: float = 2.0) -> Callable[[Callable], Callable]:
     """
     Monitor method performance and alert on slow operations
     """
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
-        def wrapper(*args, **kwargs) -> Any:
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
             start_time = time.time()
 
             try:

@@ -19,7 +19,9 @@ import io
 import logging
 import secrets
 import string
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Union
+from django.contrib.auth.models import AbstractUser
+from django.http import HttpRequest
 
 import pyotp
 import qrcode
@@ -174,7 +176,7 @@ class TOTPService:
             return False
 
     @staticmethod
-    def generate_qr_code(user, secret: str) -> str:
+    def generate_qr_code(user: 'User', secret: str) -> str:
         """
         📱 Generate QR code for authenticator app setup
 
@@ -229,7 +231,7 @@ class BackupCodeService:
     BACKUP_CODE_LENGTH = 8
 
     @staticmethod
-    def generate_codes(user) -> list[str]:
+    def generate_codes(user: 'User') -> list[str]:
         """
         Generate new backup codes and store hashed versions in user model
 
@@ -248,7 +250,7 @@ class BackupCodeService:
         return codes
 
     @staticmethod
-    def verify_and_consume_code(user, code: str) -> bool:
+    def verify_and_consume_code(user: 'User', code: str) -> bool:
         """
         Verify and consume a backup code (one-time use)
 
@@ -268,7 +270,7 @@ class BackupCodeService:
         return False
 
     @staticmethod
-    def get_remaining_count(user) -> int:
+    def get_remaining_count(user: 'User') -> int:
         """Get number of remaining backup codes"""
         return len(user.backup_tokens) if user.backup_tokens else 0
 
@@ -296,7 +298,7 @@ class WebAuthnService:
         return False  # TODO: Implement WebAuthn support
 
     @staticmethod
-    def generate_registration_options(user) -> dict[str, Any] | None:
+    def generate_registration_options(user: 'User') -> Union[dict[str, Any], None]:
         """
         Generate WebAuthn registration options for a user
 
@@ -310,14 +312,14 @@ class WebAuthnService:
             logger.info(f"📱 [WebAuthn] Not yet implemented for user {user.email}")
             return None
 
-        # TODO: Implement with webauthn library
-        # from webauthn import generate_registration_options
-        # return generate_registration_options(...)
+        # TODO: Implement with webauthn library  # noqa: ERA001
+        # from webauthn import generate_registration_options  # noqa: ERA001
+        # return generate_registration_options(...)  # noqa: ERA001
 
         return None
 
     @staticmethod
-    def verify_registration(user, credential_data: dict[str, Any]) -> bool:
+    def verify_registration(user: 'User', credential_data: dict[str, Any]) -> bool:
         """
         Verify and store a new WebAuthn credential
 
@@ -336,7 +338,7 @@ class WebAuthnService:
         return False
 
     @staticmethod
-    def generate_authentication_options(user) -> dict[str, Any] | None:
+    def generate_authentication_options(user: 'User') -> Union[dict[str, Any], None]:
         """
         Generate WebAuthn authentication options
 
@@ -353,7 +355,7 @@ class WebAuthnService:
         return None
 
     @staticmethod
-    def verify_authentication(user, authentication_data: dict[str, Any]) -> bool:
+    def verify_authentication(user: 'User', authentication_data: dict[str, Any]) -> bool:
         """
         Verify WebAuthn authentication
 
@@ -389,7 +391,7 @@ class MFAService:
     """
 
     @staticmethod
-    def enable_totp(user, request=None) -> tuple[str, list[str]]:
+    def enable_totp(user: 'User', request: Union[HttpRequest, None] = None) -> tuple[str, list[str]]:
         """
         🔐 Enable TOTP/2FA for user with audit logging
 
@@ -441,7 +443,7 @@ class MFAService:
             raise
 
     @staticmethod
-    def disable_totp(user, admin_user=None, reason: str | None = None, request=None) -> bool:
+    def disable_totp(user: 'User', admin_user: Union['User', None] = None, reason: Union[str, None] = None, request: Union[HttpRequest, None] = None) -> bool:
         """
         🔓 Disable TOTP/2FA with audit trail
 
@@ -495,7 +497,7 @@ class MFAService:
             raise
 
     @staticmethod
-    def generate_backup_codes(user, request=None) -> list[str]:
+    def generate_backup_codes(user: 'User', request: Union[HttpRequest, None] = None) -> list[str]:
         """
         🎫 Generate new backup codes with audit
         """
@@ -527,7 +529,7 @@ class MFAService:
             raise
 
     @staticmethod
-    def verify_mfa_code(user, code: str, request=None) -> dict[str, Any]:
+    def verify_mfa_code(user: 'User', code: str, request: Union[HttpRequest, None] = None) -> dict[str, Any]:
         """
         🔍 Verify MFA code (TOTP or backup code) with enhanced security and audit logging
 
@@ -617,7 +619,7 @@ class MFAService:
             return result
 
     @staticmethod
-    def generate_qr_code(user, secret: str) -> str:
+    def generate_qr_code(user: 'User', secret: str) -> str:
         """
         📱 Generate QR code for TOTP setup
 
@@ -627,7 +629,7 @@ class MFAService:
         return TOTPService.generate_qr_code(user, secret)
 
     @staticmethod
-    def get_user_mfa_status(user) -> dict[str, Any]:
+    def get_user_mfa_status(user: 'User') -> dict[str, Any]:
         """
         📊 Get comprehensive MFA status for a user
 
@@ -652,7 +654,7 @@ class MFAService:
     # ===============================================================================
 
     @staticmethod
-    def _check_rate_limit(user) -> bool:
+    def _check_rate_limit(user: 'User') -> bool:
         """
         🚦 Rate limit MFA verification attempts
         """
@@ -667,7 +669,7 @@ class MFAService:
         return True
 
     @staticmethod
-    def _get_available_methods(user) -> list[str]:
+    def _get_available_methods(user: 'User') -> list[str]:
         """Get list of available MFA methods for user"""
         methods = []
 

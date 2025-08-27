@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from typing import Any, ClassVar
+from django.db.models import QuerySet
 
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
@@ -165,7 +166,7 @@ class User(AbstractUser):
         return CustomerMembership.objects.filter(user=self).exists()
 
     @property
-    def primary_customer(self):
+    def primary_customer(self) -> Customer | None:
         """Get user's primary customer organization
 
         🚀 Performance: Uses prefetched customer_memberships if available,
@@ -187,7 +188,7 @@ class User(AbstractUser):
         return membership.customer if membership else None
 
 
-    def get_accessible_customers(self):
+    def get_accessible_customers(self) -> QuerySet[Customer] | list[Customer]:
         """Get all customers this user can access
 
         🚀 Performance: Uses prefetched customer_memberships if available,
@@ -207,14 +208,14 @@ class User(AbstractUser):
             memberships__user=self
         ).distinct()
 
-    def can_access_customer(self, customer) -> bool:
+    def can_access_customer(self, customer: Customer) -> bool:
         """Check if user can access specific customer"""
         if self.is_staff or self.staff_role:
             return True
 
         return CustomerMembership.objects.filter(user=self, customer=customer).exists()
 
-    def get_role_for_customer(self, customer):
+    def get_role_for_customer(self, customer: Customer) -> str | None:
         """Get user's role within specific customer organization"""
         membership = CustomerMembership.objects.filter(user=self, customer=customer).first()
         return membership.role if membership else None

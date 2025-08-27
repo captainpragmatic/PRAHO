@@ -8,16 +8,19 @@ import argparse
 import logging
 import os
 import sys
+from types import TracebackType
+from typing import Any, Type
 
 import django
 from redis import Redis
 from rq import Connection, Queue, Worker
+from rq.job import Job
 
 # Setup Django environment
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.dev')
 django.setup()
 
-from django.conf import settings
+from django.conf import settings  # noqa: E402
 
 # Configure logging
 logging.basicConfig(
@@ -94,7 +97,7 @@ class PragmaticHostWorker:
             logger.error(f"Worker failed to start: {e}")
             raise
 
-    def _handle_job_exception(self, job, exc_type, exc_value, traceback) -> None:
+    def _handle_job_exception(self, job: Job, exc_type: Type[BaseException], exc_value: BaseException, traceback: TracebackType) -> None:
         """
         Handle job exceptions with Romanian business context
         

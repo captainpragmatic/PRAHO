@@ -79,7 +79,7 @@ def mask_sensitive_data(data: str, show_last: int = 4) -> str:
 # DECORATORS
 # ===============================================================================
 
-def require_permission(permission: str):
+def require_permission(permission: str) -> Callable[[Callable], Callable]:
     """Decorator to require specific permission"""
     def decorator(view_func: Callable) -> Callable:
         @wraps(view_func)
@@ -92,7 +92,7 @@ def require_permission(permission: str):
     return decorator
 
 
-def require_role(role: str):
+def require_role(role: str) -> Callable[[Callable], Callable]:
     """Decorator to require specific user role"""
     def decorator(view_func: Callable) -> Callable:
         @wraps(view_func)
@@ -106,7 +106,7 @@ def require_role(role: str):
     return decorator
 
 
-def api_require_permission(permission: str):
+def api_require_permission(permission: str) -> Callable[[Callable], Callable]:
     """API decorator to require permission and return JSON error"""
     def decorator(view_func: Callable) -> Callable:
         @wraps(view_func)

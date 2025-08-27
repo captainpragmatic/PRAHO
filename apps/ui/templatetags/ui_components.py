@@ -42,7 +42,7 @@ def button(
     disabled: bool = False,
     class_: str = '',
     attrs: str = '',
-    **kwargs
+    **kwargs: Any
 ) -> dict[str, Any]:
     """
     Romanian hosting provider button component with full HTMX support
@@ -117,7 +117,7 @@ def input_field(
     hx_swap: str | None = None,
     options: list | None = None,
     romanian_validation: bool = True,
-    **kwargs
+    **kwargs: Any
 ) -> dict[str, Any]:
     """
     Romanian hosting provider input component with HTMX support
@@ -179,7 +179,7 @@ def checkbox_field(
     hx_target: str | None = None,
     hx_swap: str | None = None,
     data_attrs: dict | None = None,
-    **kwargs
+    **kwargs: Any
 ) -> dict[str, Any]:
     """
     Romanian hosting provider checkbox component with proper text centering
@@ -247,7 +247,7 @@ def alert(
     show_icon: bool = True,
     css_class: str = '',
     html_id: str | None = None,
-    **kwargs
+    **kwargs: Any
 ) -> dict[str, Any]:
     """
     Romanian hosting provider alert component
@@ -279,7 +279,7 @@ def modal(
     content: str | None = None,
     css_class: str = '',
     html_id: str | None = None,
-    **kwargs
+    **kwargs: Any
 ) -> dict[str, Any]:
     """
     HTMX modal component for Romanian business workflows
@@ -322,7 +322,7 @@ def data_table(
     actions: list | None = None,
     css_class: str = '',
     empty_message: str = 'Nu există date disponibile.',
-    **kwargs
+    **kwargs: Any
 ) -> dict[str, Any]:
     """
     Romanian data table component with sorting and pagination
@@ -361,7 +361,7 @@ def toast(
     dismissible: bool = True,
     auto_dismiss: int = 5000,
     toast_id: str | None = None,
-    **kwargs
+    **kwargs: Any
 ) -> dict[str, Any]:
     """
     Romanian notification toast component
@@ -394,7 +394,7 @@ def card(
     footer: str | None = None,
     css_class: str = '',
     actions: list | None = None,
-    **kwargs
+    **kwargs: Any
 ) -> dict[str, Any]:
     """
     Romanian business card component
@@ -427,7 +427,7 @@ def breadcrumb(
     *,
     css_class: str = '',
     separator: str = '/',
-    **kwargs
+    **kwargs: Any
 ) -> dict[str, Any]:
     """
     Romanian navigation breadcrumb component
@@ -453,7 +453,7 @@ def icon(
     *,
     size: str = 'md',
     css_class: str = '',
-    **kwargs
+    **kwargs: Any
 ) -> str:
     """
     Romanian icon component (SVG-based)
