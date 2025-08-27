@@ -4,7 +4,8 @@
 
 from django.test import TestCase
 
-from tests.factories.billing import create_currency, create_customer, create_invoice, create_payment
+from tests.factories.billing_factories import create_currency, create_customer, create_invoice
+from tests.factories.billing_factories import create_payment_legacy as create_payment
 
 
 class PaymentAllocationTests(TestCase):

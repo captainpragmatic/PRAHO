@@ -1,4 +1,3 @@
-import contextlib
 
 from django.apps import AppConfig
 
@@ -11,4 +10,3 @@ class AuditConfig(AppConfig):
     def ready(self) -> None:
         """Import signal handlers when app is ready."""
         # No signals defined yet for audit app
-        pass

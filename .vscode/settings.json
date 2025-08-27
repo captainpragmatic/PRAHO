@@ -19,10 +19,14 @@
     "editor.formatOnType": false,
     "prettier.enable": false
   },
-  // Python-specific settings (safe to format)
+  // Python-specific settings (safe to format, strategic type checking)
   "[python]": {
     "editor.formatOnSave": true,
-    "editor.defaultFormatter": "ms-python.python"
+    "editor.defaultFormatter": "ms-python.python",
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": "explicit",
+      "source.fixAll.ruff": "explicit"
+    }
   },
   // JavaScript/CSS (safe to format)  
   "[javascript]": {
@@ -97,25 +101,49 @@
     "/^ls\\s+/": true,
     "/^grep\\s+/": true
   },
-  "python.analysis.typeCheckingMode": "standard",
+  // ===============================================================================
+  // STRATEGIC TYPE CHECKING CONFIGURATION - Post ADR-0008
+  // ===============================================================================
+  // Aligned with ADR-0008: MyPy removal strategy
+  // Focus on Romanian business features over strict type checking
   
-  // ===============================================================================
-  // ENHANCED TYPE CHECKING CONFIGURATION - Phase 2.4
-  // ===============================================================================
+  "python.analysis.typeCheckingMode": "basic",
+  
+  // Strategic diagnostic filtering (focus on critical issues only)
+  "python.analysis.diagnosticSeverityOverrides": {
+    // CRITICAL: Keep these errors (runtime safety)
+    "reportMissingImports": "error",
+    "reportUndefinedVariable": "error",
+    "reportImportCycles": "warning",
+    "reportMissingTypeStubs": "warning",
+    
+    // STRATEGIC IGNORE: Complex Django typing (per ADR-0008)
+    "reportGeneralTypeIssues": "none",
+    "reportOptionalMemberAccess": "none",
+    "reportOptionalSubscript": "none",
+    "reportOptionalOperand": "none",
+    "reportOptionalCall": "none",
+    "reportOptionalIterable": "none",
+    "reportOptionalContextManager": "none",
+    "reportTypedDictNotRequiredAccess": "none",
+    "reportPrivateImportUsage": "none",
+    "reportUnknownArgumentType": "none",
+    "reportUnknownLambdaType": "none",
+    "reportUnknownMemberType": "none",
+    "reportUnknownParameterType": "none",
+    "reportUnknownVariableType": "none",
+    "reportUntypedBaseClass": "none",
+    "reportUntypedClassDecorator": "none",
+    "reportUntypedFunctionDecorator": "none",
+    "reportUntypedNamedTuple": "none"
+  },
   
   // Python interpreter and environment
   "python.defaultInterpreterPath": ".venv/bin/python",
   "python.terminal.activateEnvironment": true,
   
-  // Enhanced type checking with MyPy integration
+  // REMOVED: MyPy integration (per ADR-0008)
   "python.linting.enabled": true,
-  "python.linting.mypyEnabled": true,
-  "python.linting.mypyPath": ".venv/bin/mypy",
-  "python.linting.mypyArgs": [
-    "--config-file=pyproject.toml",
-    "--show-column-numbers",
-    "--show-error-context"
-  ],
   
   // Type checking enhancements
   "python.analysis.diagnosticMode": "workspace",
@@ -126,14 +154,7 @@
     "./config"
   ],
   
-  // Django-specific configuration
-  "python.analysis.django.enabled": true,
-  "python.linting.pylintArgs": [
-    "--load-plugins=pylint_django",
-    "--django-settings-module=config.settings.dev"
-  ],
-  
-  // Ruff integration (enhanced)
+  // Ruff integration (strategic linting only)
   "python.linting.ruffEnabled": true,
   "python.linting.ruffPath": ".venv/bin/ruff",
   
@@ -142,16 +163,6 @@
   "python.analysis.inlayHints.functionReturnTypes": true,
   "python.analysis.inlayHints.variableTypes": false,
   "python.analysis.inlayHints.parameterNames": true,
-  
-  // Enhanced Python formatting with Ruff
-  "[python]": {
-    "editor.defaultFormatter": "charliermarsh.ruff",
-    "editor.formatOnSave": true,
-    "editor.codeActionsOnSave": {
-      "source.organizeImports": "explicit",
-      "source.fixAll.ruff": "explicit"
-    }
-  },
   
   // Error and warning display
   "problems.showCurrentInStatus": true,

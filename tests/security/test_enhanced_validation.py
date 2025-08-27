@@ -555,7 +555,7 @@ class TestSecureCustomerUserService(TestCase):
     def test_secure_user_invitation_with_rate_limiting(self):
         """Test secure user invitation with rate limiting"""
         # First invitation should succeed
-        result = SecureCustomerUserService.invite_user_to_customer(
+        result = SecureCustomerUserService.invite_user_to_customer_legacy(
             inviter=self.owner,
             invitee_email='newuser@example.com',
             customer=self.customer,
@@ -575,7 +575,7 @@ class TestSecureCustomerUserService(TestCase):
 
     def test_invitation_prevents_role_injection(self):
         """Test role injection prevention in invitations"""
-        result = SecureCustomerUserService.invite_user_to_customer(
+        result = SecureCustomerUserService.invite_user_to_customer_legacy(
             inviter=self.owner,
             invitee_email='hacker@example.com',
             customer=self.customer,
@@ -603,7 +603,7 @@ class TestSecureCustomerUserService(TestCase):
         )
 
         # Viewer should not be able to invite
-        result = SecureCustomerUserService.invite_user_to_customer(
+        result = SecureCustomerUserService.invite_user_to_customer_legacy(
             inviter=viewer,
             invitee_email='newuser@example.com',
             customer=self.customer,

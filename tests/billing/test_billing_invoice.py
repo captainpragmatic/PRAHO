@@ -13,7 +13,7 @@ from django.utils import timezone
 from apps.billing.models import Currency, Invoice, InvoiceLine, ProformaInvoice
 from apps.customers.models import Customer
 from apps.provisioning.models import Service, ServicePlan
-from tests.factories.billing import create_invoice
+from tests.factories.billing_factories import create_invoice
 
 User = get_user_model()
 

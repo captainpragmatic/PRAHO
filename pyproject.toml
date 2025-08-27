@@ -312,6 +312,34 @@ suppress-dummy-args = true
 # - Comprehensive test coverage
 
 # ===============================================================================
+# PYLANCE/PYRIGHT CONFIGURATION - Strategic Django Compatibility
+# ===============================================================================
+[tool.pyright]
+# Disable assignment type checking to reduce noise from Django lazy translations
+# Django's _StrPromise (gettext_lazy) triggers constant assignment type warnings
+# This aligns with ADR-0008 strategy: focus on Romanian business features over strict typing
+reportAssignmentType = false
+
+# Keep critical type checking enabled (aligned with VS Code settings)
+reportMissingImports = "error"
+reportUndefinedVariable = "error"
+reportImportCycles = "warning"
+reportMissingTypeStubs = "warning"
+
+# Strategic ignores for Django patterns (matching VS Code diagnostic overrides)
+reportGeneralTypeIssues = false
+reportOptionalMemberAccess = false
+reportOptionalSubscript = false
+reportOptionalOperand = false
+reportOptionalCall = false
+reportOptionalIterable = false
+reportOptionalContextManager = false
+reportUnknownArgumentType = false
+reportUnknownMemberType = false
+reportUnknownParameterType = false
+reportUnknownVariableType = false
+
+# ===============================================================================
 # TEST CONFIGURATION
 # ===============================================================================
 
