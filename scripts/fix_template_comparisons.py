@@ -66,7 +66,7 @@ def detect_potential_auto_formatting(changes: list[str], file_path: Path) -> lis
 
 def find_template_files(base_dir: Path) -> list[Path]:
     """Find all Django template files"""
-    template_files = []
+    template_files: list[Path] = []
 
     for pattern in TEMPLATE_DIRS:
         if "*" in pattern:
@@ -137,7 +137,7 @@ def process_template_file(file_path: Path) -> tuple[bool, list[str]]:
 # MAIN EXECUTION
 # ===============================================================================
 
-def main():
+def main() -> None:
     """Main execution function"""
 
     print("🔧 Django Template Comparison Operator Fixer")
@@ -192,7 +192,7 @@ def main():
         print()
         print("🧪 Run tests to verify the fixes work correctly")
 
-def check_only():
+def check_only() -> int:
     """Check for issues without fixing them"""
 
     print("🔍 Django Template Syntax Checker")

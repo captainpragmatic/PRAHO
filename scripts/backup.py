@@ -365,7 +365,7 @@ class PragmaticHostBackup:
         except Exception as e:
             logger.error(f"Cleanup failed: {e}")
 
-    def _send_backup_notification(self, success: bool, backup_name: str, details: str):
+    def _send_backup_notification(self, success: bool, backup_name: str, details: str) -> None:
         """Send backup notification email"""
         try:
             from django.core.mail import mail_admins

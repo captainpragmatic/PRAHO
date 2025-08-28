@@ -34,7 +34,7 @@ def run_mypy_check(target_path: str, description: str) -> tuple[int, str]:
     except Exception as e:
         return -1, str(e)
 
-def test_phase_configuration():
+def test_phase_configuration() -> None:
     """Test mypy configuration for different phases."""
     
     print("🚀 PRAHO Platform - Gradual Typing Configuration Test")

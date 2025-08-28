@@ -32,10 +32,10 @@ from apps.customers.models import (
 from apps.orders.models import Order, OrderItem
 from apps.products.models import (
     Product,
-    ProductBundle,
-    ProductBundleItem,
     ProductPrice,
     ProductRelationship,
+    ProductBundle,
+    ProductBundleItem,
 )
 from apps.provisioning.models import Service, ServicePlan
 from apps.tickets.models import SupportCategory, Ticket, TicketComment
@@ -224,103 +224,46 @@ def create_test_data():
     return superuser, customer_user, customer
 
 def create_service_if_missing(customer):
-    """Create services based on completed orders from the product catalog."""
+    """Create service plan and service if they don't exist."""
     try:
-        # Get completed orders to create services from
-        completed_orders = Order.objects.filter(
-            customer=customer,
-            status='completed'
+        # First create a service plan (required dependency)
+        service_plan, plan_created = ServicePlan.objects.get_or_create(
+            name='Starter Web Hosting',
+            defaults={
+                'plan_type': 'shared_hosting',
+                'description': 'Basic shared hosting plan for small websites',
+                'price_monthly': Decimal('29.99'),
+                'price_annual': Decimal('299.90'),
+                'disk_space_gb': 5,
+                'bandwidth_gb': 100,
+                'email_accounts': 10,
+                'databases': 5,
+                'is_active': True,
+            }
         )
-        
-        services_created = 0
-        
-        for order in completed_orders:
-            for order_item in order.items.all():
-                product = order_item.product
-                
-                # Only create services for hosting products
-                if product.product_type in ['shared_hosting', 'vps_hosting', 'dedicated_hosting']:
-                    service_name = f"{customer.name} - {product.name}"
-                    domain = f"{customer.name.lower().replace(' ', '').replace('srl', '').replace('ltd', '').replace('inc', '')}.com"
-                    
-                    # Create service plan based on product
-                    service_plan, plan_created = ServicePlan.objects.get_or_create(
-                        name=product.name,
-                        defaults={
-                            'plan_type': product.product_type,
-                            'description': product.short_description,
-                            'price_monthly': Decimal(str(order_item.unit_price_cents / 100)) if order_item.billing_period == 'monthly' else Decimal(str(order_item.unit_price_cents / 100 / 12)),
-                            'price_annual': Decimal(str(order_item.unit_price_cents / 100)) if order_item.billing_period == 'annual' else Decimal(str(order_item.unit_price_cents / 100 * 12)),
-                            'disk_space_gb': product.module_config.get('disk_quota', 5000) // 1000,  # Convert MB to GB
-                            'bandwidth_gb': product.module_config.get('bandwidth_quota', 100000) // 1000,  # Convert MB to GB
-                            'email_accounts': product.module_config.get('email_accounts', 10) if isinstance(product.module_config.get('email_accounts'), int) else 10,
-                            'databases': product.module_config.get('databases', 5),
-                            'is_active': True,
-                        }
-                    )
-                    
-                    if plan_created:
-                        print(f"✅ Created service plan: {product.name}")
+        if plan_created:
+            print("✅ Created service plan")
 
-                    # Create the service
-                    service, created = Service.objects.get_or_create(
-                        customer=customer,
-                        service_name=service_name,
-                        defaults={
-                            'service_plan': service_plan,
-                            'domain': domain,
-                            'username': f'usr_{customer.id}_{product.slug.replace("-", "_")}',
-                            'billing_cycle': order_item.billing_period,
-                            'price': Decimal(str(order_item.unit_price_cents / 100)),
-                            'status': 'active',  # Since order is completed
-                        }
-                    )
-                    
-                    if created:
-                        services_created += 1
-                        print(f"✅ Created service: {service_name}")
+        # Now create the service for this customer
+        service, created = Service.objects.get_or_create(
+            customer=customer,
+            service_name=f'{customer.name} Hosting',
+            defaults={
+                'service_plan': service_plan,
+                'domain': f'{customer.name.lower().replace(" ", "")}.com',
+                'username': f'test_{customer.name.lower().replace(" ", "")}',
+                'billing_cycle': 'monthly',
+                'price': service_plan.price_monthly,
+                'status': 'active',
+            }
+        )
+        if created:
+            print(f"✅ Created test service for {customer.name}")
 
-        # If no completed orders, create a basic service for testing
-        if services_created == 0:
-            try:
-                service_plan, plan_created = ServicePlan.objects.get_or_create(
-                    name='Basic Hosting (Fallback)',
-                    defaults={
-                        'plan_type': 'shared_hosting',
-                        'description': 'Basic shared hosting plan',
-                        'price_monthly': Decimal('29.99'),
-                        'price_annual': Decimal('299.90'),
-                        'disk_space_gb': 5,
-                        'bandwidth_gb': 100,
-                        'email_accounts': 10,
-                        'databases': 5,
-                        'is_active': True,
-                    }
-                )
-                
-                service, created = Service.objects.get_or_create(
-                    customer=customer,
-                    service_name=f'{customer.name} Basic Hosting',
-                    defaults={
-                        'service_plan': service_plan,
-                        'domain': f'{customer.name.lower().replace(" ", "").replace("srl", "")}.com',
-                        'username': f'test_{customer.name.lower().replace(" ", "")}',
-                        'billing_cycle': 'monthly',
-                        'price': service_plan.price_monthly,
-                        'status': 'active',
-                    }
-                )
-                
-                if created:
-                    print(f"✅ Created fallback service for {customer.name}")
-                    
-            except Exception:
-                print("⚠️  Failed to create fallback service")
-
+        # Create invoices and proformas
+        create_billing_data_if_missing(customer)
     except Exception as e:
         print(f"⚠️  Service creation failed: {e}")
-        import traceback
-        traceback.print_exc()
 
 def create_products_if_missing():
     """Create comprehensive product catalog with all related models."""
@@ -604,7 +547,7 @@ def create_products_if_missing():
         if bundles_created > 0:
             print(f"✅ Created {bundles_created} product bundles with items")
 
-        print("✅ Complete product catalog created with all relationships")
+        print(f"✅ Complete product catalog created with all relationships")
 
     except Exception as e:
         print(f"⚠️  Products creation failed: {e}")
@@ -612,162 +555,114 @@ def create_products_if_missing():
         traceback.print_exc()
 
 def create_orders_if_missing(customer, customer_user):
-    """Create sample orders with various statuses using the complete product catalog."""
+    """Create sample orders with various statuses."""
     try:
         # Get currencies
         ron_currency = Currency.objects.get(code='RON')
         eur_currency = Currency.objects.get(code='EUR')
         
-        # Get all products from our catalog
-        try:
-            basic_hosting = Product.objects.get(slug='web-hosting-basic')
-            premium_hosting = Product.objects.get(slug='web-hosting-premium')
-            domain_registration = Product.objects.get(slug='domain-registration')
-            ssl_certificate = Product.objects.get(slug='ssl-certificate')
-            email_hosting = Product.objects.get(slug='email-hosting')
-        except Product.DoesNotExist as e:
-            print(f"⚠️  Required product not found: {e}")
-            return
+        # Get products
+        basic_product = Product.objects.get(slug='web-hosting-basic')
+        premium_product = Product.objects.get(slug='web-hosting-premium')
 
         orders_data = [
             {
                 'order_number': 'ORD-2025-001',
                 'status': 'draft',
                 'currency': ron_currency,
-                'items': [
-                    {
-                        'product': basic_hosting,
-                        'quantity': 1,
-                        'billing_period': 'monthly',
-                        'unit_price_cents': 2999,  # 29.99 RON
-                    },
-                    {
-                        'product': domain_registration,
-                        'quantity': 1,
-                        'billing_period': 'annual',
-                        'unit_price_cents': 4900,  # 49.00 RON
-                    }
-                ],
-                'notes': 'Draft order - basic hosting package with domain'
+                'subtotal_cents': 2999,  # 29.99 RON
+                'tax_cents': 570,        # 5.70 RON (19% VAT)
+                'total_cents': 3569,     # 35.69 RON
+                'product': basic_product,
+                'quantity': 1,
+                'billing_period': 'monthly',
+                'notes': 'Draft order for basic hosting'
             },
             {
                 'order_number': 'ORD-2025-002',
                 'status': 'pending',
                 'currency': ron_currency,
-                'items': [
-                    {
-                        'product': premium_hosting,
-                        'quantity': 1,
-                        'billing_period': 'annual',
-                        'unit_price_cents': 49990,  # 499.90 RON
-                    },
-                    {
-                        'product': ssl_certificate,
-                        'quantity': 1,
-                        'billing_period': 'annual',
-                        'unit_price_cents': 9900,  # 99.00 RON
-                    }
-                ],
-                'notes': 'Pending payment for premium hosting with SSL'
+                'subtotal_cents': 4999,  # 49.99 RON
+                'tax_cents': 950,        # 9.50 RON (19% VAT)
+                'total_cents': 5949,     # 59.49 RON
+                'product': premium_product,
+                'quantity': 1,
+                'billing_period': 'monthly',
+                'notes': 'Pending payment for premium hosting'
             },
             {
                 'order_number': 'ORD-2025-003',
                 'status': 'processing',
                 'currency': eur_currency,
-                'items': [
-                    {
-                        'product': email_hosting,
-                        'quantity': 1,
-                        'billing_period': 'monthly',
-                        'unit_price_cents': 499,  # 4.99 EUR
-                    }
-                ],
-                'notes': 'Payment received, setting up email hosting'
+                'subtotal_cents': 799,   # 7.99 EUR
+                'tax_cents': 152,        # 1.52 EUR (19% VAT)
+                'total_cents': 951,      # 9.51 EUR
+                'product': basic_product,
+                'quantity': 1,
+                'billing_period': 'monthly',
+                'notes': 'Payment received, setting up hosting account'
             },
             {
                 'order_number': 'ORD-2025-004',
                 'status': 'completed',
                 'currency': eur_currency,
-                'items': [
-                    {
-                        'product': premium_hosting,
-                        'quantity': 1,
-                        'billing_period': 'annual',
-                        'unit_price_cents': 11990,  # 119.90 EUR
-                    },
-                    {
-                        'product': domain_registration,
-                        'quantity': 2,  # Multiple domains
-                        'billing_period': 'annual',
-                        'unit_price_cents': 1200,  # 12.00 EUR each
-                    },
-                    {
-                        'product': email_hosting,
-                        'quantity': 1,
-                        'billing_period': 'annual',
-                        'unit_price_cents': 4990,  # 49.90 EUR
-                    }
-                ],
-                'notes': 'Complete business package - successfully provisioned'
+                'subtotal_cents': 1299,  # 12.99 EUR
+                'tax_cents': 247,        # 2.47 EUR (19% VAT)
+                'total_cents': 1546,     # 15.46 EUR
+                'product': premium_product,
+                'quantity': 1,
+                'billing_period': 'monthly',
+                'notes': 'Successfully provisioned premium hosting'
             },
             {
                 'order_number': 'ORD-2025-005',
                 'status': 'cancelled',
                 'currency': ron_currency,
-                'items': [
-                    {
-                        'product': basic_hosting,
-                        'quantity': 1,
-                        'billing_period': 'monthly',
-                        'unit_price_cents': 2999,  # 29.99 RON
-                    }
-                ],
+                'subtotal_cents': 2999,  # 29.99 RON
+                'tax_cents': 570,        # 5.70 RON (19% VAT) 
+                'total_cents': 3569,     # 35.69 RON
+                'product': basic_product,
+                'quantity': 1,
+                'billing_period': 'monthly',
                 'notes': 'Cancelled by customer before payment'
             }
         ]
 
         orders_created = 0
         for order_data in orders_data:
-            # Calculate order totals from items
-            subtotal_cents = sum(item['unit_price_cents'] * item['quantity'] for item in order_data['items'])
-            tax_cents = int(subtotal_cents * Decimal('0.1900'))  # 19% VAT
-            total_cents = subtotal_cents + tax_cents
-            
             order, created = Order.objects.get_or_create(
                 order_number=order_data['order_number'],
                 defaults={
                     'customer': customer,
                     'status': order_data['status'],
                     'currency': order_data['currency'],
-                    'subtotal_cents': subtotal_cents,
-                    'tax_cents': tax_cents,
-                    'total_cents': total_cents,
+                    'subtotal_cents': order_data['subtotal_cents'],
+                    'tax_cents': order_data['tax_cents'],
+                    'total_cents': order_data['total_cents'],
                     'customer_email': customer_user.email,
                     'notes': order_data['notes'],
+                    'created_by': customer_user,
                 }
             )
 
             if created:
                 orders_created += 1
                 
-                # Create order items
-                for item_data in order_data['items']:
-                    item_tax_cents = int(item_data['unit_price_cents'] * item_data['quantity'] * Decimal('0.1900'))
-                    
-                    OrderItem.objects.create(
-                        order=order,
-                        product=item_data['product'],
-                        product_name=item_data['product'].name,
-                        product_type=item_data['product'].product_type,
-                        billing_period=item_data['billing_period'],
-                        quantity=item_data['quantity'],
-                        unit_price_cents=item_data['unit_price_cents'],
-                        tax_rate=Decimal('0.1900'),  # 19% VAT
-                        tax_cents=item_tax_cents,
-                    )
+                # Create order item
+                OrderItem.objects.create(
+                    order=order,
+                    product=order_data['product'],
+                    product_name=order_data['product'].name,
+                    product_type=order_data['product'].product_type,
+                    billing_period=order_data['billing_period'],
+                    quantity=order_data['quantity'],
+                    unit_price_cents=order_data['subtotal_cents'],
+                    tax_rate=Decimal('0.1900'),  # 19% VAT
+                    tax_cents=order_data['tax_cents'],
+                )
 
         if orders_created > 0:
-            print(f"✅ Created {orders_created} test orders with comprehensive product catalog")
+            print(f"✅ Created {orders_created} test orders with various statuses")
 
     except Exception as e:
         print(f"⚠️  Orders creation failed: {e}")
@@ -1064,7 +959,7 @@ def print_credentials(superuser, customer_user, customer):
 
     print("\n🌐 Access URLs:")
     print("   📊 Dashboard: http://localhost:8001/app/")
-    print("   🔐 Staff Interface: http://localhost:8001/app/ (login with staff account)")
+    print("   🔐 Admin: http://localhost:8001/admin/")
     print("   🎯 Login: http://localhost:8001/auth/login/")
 
     print("\n📊 Database stats:")
@@ -1083,7 +978,7 @@ def print_credentials(superuser, customer_user, customer):
         products_count = Product.objects.count()
         print(f"   📦 Products: {products_count}")
         if products_count == 0:
-            print("   ➡️  Create products via Staff Interface: http://localhost:8001/app/products/")
+            print("   ➡️  Create products via Admin: http://localhost:8001/admin/products/product/")
     except:
         pass
 
@@ -1112,7 +1007,7 @@ def print_credentials(superuser, customer_user, customer):
         print(f"   🧾 Invoices: {invoices_count}")
         print(f"   📄 Proformas: {proformas_count}")
         if invoices_count == 0:
-            print("   ➡️  Create invoices via Staff Interface: http://localhost:8001/app/billing/")
+            print("   ➡️  Create invoices via Admin: http://localhost:8001/admin/billing/invoice/")
     except:
         pass
 

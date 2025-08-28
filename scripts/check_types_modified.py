@@ -106,7 +106,7 @@ def run_mypy_on_files(files: list[str], verbose: bool = False) -> bool:
         return False
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(description="Type check modified Python files")
     parser.add_argument("--staged", action="store_true", help="Check only staged files")
     parser.add_argument("--since", help="Check files modified since this commit")

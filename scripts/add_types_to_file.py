@@ -22,6 +22,7 @@ import ast
 import logging
 import re
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -39,8 +40,8 @@ class TypeSuggestionEngine:
         self.lines = self.content.splitlines()
         self.tree: ast.AST | None = None
         self.suggestions: list[dict[str, Any]] = []
-        self.django_imports = set()
-        self.existing_imports = set()
+        self.django_imports: set[str] = set()
+        self.existing_imports: set[str] = set()
         
         # Django pattern detector registry
         self._pattern_detectors = [
@@ -358,11 +359,11 @@ class TypeSuggestionEngine:
             return 'None'
         
         # Type inference based on AST node type
-        type_inferrers = {
-            ast.Constant: self._infer_constant_type,
+        type_inferrers: dict[type[ast.expr], Callable[[ast.expr], str | None]] = {
+            ast.Constant: lambda x: self._infer_constant_type(x) if isinstance(x, ast.Constant) else None,
             ast.Dict: lambda _: 'dict[str, Any]',
             ast.List: lambda _: 'list[Any]',
-            ast.Call: self._infer_call_type,
+            ast.Call: lambda x: self._infer_call_type(x) if isinstance(x, ast.Call) else None,
         }
         
         inferrer = type_inferrers.get(type(stmt.value))
@@ -439,7 +440,7 @@ class TypeSuggestionEngine:
     
     def generate_needed_imports(self) -> set[str]:
         """Generate the imports needed for suggested types"""
-        needed_imports = set()
+        needed_imports: set[str] = set()
         
         # Check what types are used in suggestions
         for suggestion in self.suggestions:
@@ -675,7 +676,7 @@ class InteractiveTypeAdder:
             logger.warning(f"⚠️ Failed to format file: {e}")
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Semi-automated type addition tool for PRAHO Platform",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -783,7 +784,7 @@ with Romanian business domain types and Result pattern for error handling.
             return 'a'
         
         import builtins
-        builtins.input = mock_input
+        builtins.input = mock_input  # type: ignore[assignment]
         
         try:
             adder.run()

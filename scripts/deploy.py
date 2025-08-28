@@ -510,7 +510,7 @@ class PragmaticHostDeployment:
         release_name: str,
         branch: str,
         error: str | None = None
-    ):
+    ) -> None:
         """Send deployment notification email"""
         try:
             # Import Django for email functionality

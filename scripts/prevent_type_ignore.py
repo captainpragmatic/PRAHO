@@ -119,7 +119,7 @@ class TypeIgnoreChecker:
         message_parts = []
         
         # Group by file
-        files_with_violations = {}
+        files_with_violations: dict[str, list[dict[str, Any]]] = {}
         for violation in violations:
             file_path = violation['file']
             if file_path not in files_with_violations:
@@ -186,7 +186,7 @@ class TypeIgnoreChecker:
         return should_fail, message
 
 
-def main():
+def main() -> int:
     """Main CLI interface."""
     parser = argparse.ArgumentParser(
         description="Check for new # type: ignore comments",

@@ -95,7 +95,7 @@ class TypeCoverageReporter:
         }
         
         # Analyze each app
-        app_reports = []
+        app_reports: list[dict[str, Any]] = []
         total_errors = 0
         total_files = 0
         
@@ -115,7 +115,7 @@ class TypeCoverageReporter:
             "phase_3_status": "in_progress"
         }
         
-        report["app_breakdown"] = sorted(app_reports, key=lambda x: x["error_count"])
+        report["app_breakdown"] = sorted(app_reports, key=lambda x: x.get("error_count", 0), reverse=True)
         
         # Generate recommendations
         report["recommendations"] = self._generate_recommendations(app_reports)
@@ -186,7 +186,7 @@ class TypeCoverageReporter:
         return md
 
 
-def main():
+def main() -> None:
     """Main CLI interface"""
     reporter = TypeCoverageReporter()
     
