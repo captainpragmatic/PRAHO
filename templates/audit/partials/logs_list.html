@@ -59,7 +59,7 @@
                                 <span class="font-mono">from {{ event.ip_address }}</span>
                             {% endif %}
                             
-                            {% if event.object_id %}
+                            {% if event.object_id and event.content_type.model != 'user' %}
                                 <span class="text-slate-500">ID: {{ event.object_id|slice:":8" }}</span>
                             {% endif %}
                         </div>

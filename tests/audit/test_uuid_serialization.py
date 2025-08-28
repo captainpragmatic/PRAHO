@@ -8,6 +8,7 @@ from decimal import Decimal
 from uuid import uuid4
 
 from django.test import TestCase
+from django.utils import timezone
 
 from apps.audit.services import AuditContext, AuditEventData, AuditJSONEncoder, AuditService, serialize_metadata
 
@@ -36,7 +37,7 @@ class UUIDSerializationTestCase(TestCase):
         
         test_data = {
             'uuid_field': uuid4(),
-            'datetime_field': datetime.now(),
+            'datetime_field': timezone.now(),
             'decimal_field': Decimal('123.45'),
             'string_field': 'test',
             'number_field': 42,
@@ -71,7 +72,7 @@ class UUIDSerializationTestCase(TestCase):
             'invoice_id': uuid4(),
             'user_id': uuid4(),
             'amount': Decimal('150.00'),
-            'timestamp': datetime.now()
+            'timestamp': timezone.now()
         }
         
         # This should not raise any errors
@@ -103,7 +104,7 @@ class UUIDSerializationTestCase(TestCase):
             'invoice_id': uuid4(),
             'transaction_id': uuid4(),
             'amount': Decimal('200.00'),
-            'processed_at': datetime.now()
+            'processed_at': timezone.now()
         }
         
         context = AuditContext(

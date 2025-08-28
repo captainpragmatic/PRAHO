@@ -26,6 +26,23 @@ class AuditEvent(models.Model):
         ('access', 'Access'),
         ('export', 'Export'),
         ('import', 'Import'),
+        # Authentication Events
+        ('login_success', 'Login Success'),
+        ('login_failed', 'Login Failed'),
+        ('login_failed_password', 'Login Failed - Invalid Password'),
+        ('login_failed_user_not_found', 'Login Failed - User Not Found'),
+        ('login_failed_account_locked', 'Login Failed - Account Locked'),
+        ('login_failed_2fa', 'Login Failed - 2FA Verification'),
+        ('logout_manual', 'Manual Logout'),
+        ('logout_session_expired', 'Session Expired Logout'),
+        ('logout_concurrent_session', 'Concurrent Session Logout'),
+        ('logout_security_event', 'Security Event Logout'),
+        ('account_locked', 'Account Locked'),
+        ('account_unlocked', 'Account Unlocked'),
+        ('password_changed', 'Password Changed'),
+        ('password_reset_requested', 'Password Reset Requested'),
+        ('password_reset_completed', 'Password Reset Completed'),
+        ('session_rotation', 'Session Rotation'),
         # 2FA Security Events
         ('2fa_enabled', '2FA Enabled'),
         ('2fa_disabled', '2FA Disabled'),
@@ -81,6 +98,11 @@ class AuditEvent(models.Model):
             models.Index(fields=['content_type', 'object_id', '-timestamp']),
             models.Index(fields=['action', '-timestamp']),
             models.Index(fields=['request_id']),
+            # Authentication-specific indexes for performance
+            models.Index(fields=['user', 'action', '-timestamp'], name='idx_audit_user_action_time'),
+            models.Index(fields=['ip_address', 'action', '-timestamp'], name='idx_audit_ip_action_time'),
+            models.Index(fields=['session_key', '-timestamp'], name='idx_audit_session_time'),
+            models.Index(fields=['actor_type', 'action', '-timestamp'], name='idx_audit_actor_action_time'),
         )
 
     def __str__(self) -> str:

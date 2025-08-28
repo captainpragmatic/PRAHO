@@ -38,6 +38,7 @@ from apps.common.utils import (
     json_error,
     json_success,
 )
+from apps.audit.services import AuthenticationAuditService
 
 from .forms import (
     CustomerOnboardingRegistrationForm,
@@ -172,11 +173,38 @@ def register_view(request: HttpRequest) -> HttpResponse:
 
 
 def logout_view(request: HttpRequest) -> HttpResponse:
-    """Logout view with Romanian messages"""
+    """
+    Logout view with comprehensive audit logging
+    
+    Logs the logout event BEFORE clearing the session to capture
+    complete context including session duration and security metadata.
+    """
+    user = None
     if request.user.is_authenticated:
+        user = request.user
+        
+        # Log logout event BEFORE clearing session
+        try:
+            AuthenticationAuditService.log_logout(
+                user=user,
+                logout_reason='manual',
+                request=request,
+                metadata={
+                    'logout_triggered_by': 'logout_view',
+                    'session_key_before_logout': request.session.session_key,
+                    'user_agent': request.META.get('HTTP_USER_AGENT', ''),
+                }
+            )
+            logger.info(f"✅ [Logout View] Audit logged for {user.email}")
+        except Exception as e:
+            # Don't let audit logging break logout
+            logger.error(f"🔥 [Logout View] Failed to log logout for {user.email}: {e}")
+        
         messages.success(request, _('You have been successfully logged out.'))
 
+    # Perform actual logout (this triggers the logout signal)
     logout(request)
+    
     return redirect('users:login')
 
 

@@ -174,6 +174,353 @@ class ComplianceEventRequest:
 logger = logging.getLogger(__name__)
 
 
+class AuthenticationAuditService:
+    """
+    🔐 Specialized authentication audit service
+    
+    Features:
+    - Rich metadata capture for security analysis
+    - Session-level security event monitoring
+    - Support for different authentication methods
+    - Geographic and temporal analysis data
+    - Failed login attempt tracking
+    - Account lockout event logging
+    """
+
+    @staticmethod
+    def log_login_success(
+        user: User,
+        request: Any = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+        session_key: str | None = None,
+        authentication_method: str = 'password',
+        metadata: dict[str, Any] | None = None
+    ) -> AuditEvent:
+        """
+        Log successful login event with comprehensive metadata
+        
+        Args:
+            user: The authenticated user
+            request: Django request object (optional, for extracting context)
+            ip_address: Client IP address
+            user_agent: Client user agent string
+            session_key: Session identifier
+            authentication_method: Method used (password, 2fa_totp, 2fa_backup, etc.)
+            metadata: Additional metadata
+        """
+        # Extract context from request if provided
+        if request:
+            ip_address = ip_address or _get_client_ip_from_request(request)
+            user_agent = user_agent or request.META.get('HTTP_USER_AGENT', '')
+            session_key = session_key or request.session.session_key
+        
+        # Build comprehensive metadata
+        auth_metadata = {
+            'authentication_method': authentication_method,
+            'login_timestamp': timezone.now().isoformat(),
+            'user_id': str(user.id),
+            'user_email': user.email,
+            'user_staff_status': user.is_staff,
+            'user_2fa_enabled': getattr(user, 'two_factor_enabled', False),
+            'previous_login': user.last_login.isoformat() if user.last_login else None,
+            'failed_attempts_before': getattr(user, 'failed_login_attempts', 0),
+            'account_was_locked': getattr(user, 'is_account_locked', lambda: False)(),
+            'session_info': {
+                'session_key': session_key,
+                'session_created': timezone.now().isoformat()
+            },
+            **(metadata or {})
+        }
+        
+        # Add user agent analysis if available
+        if user_agent:
+            auth_metadata['user_agent_info'] = {
+                'raw': user_agent,
+                'truncated': user_agent[:200],  # Prevent excessively long strings
+            }
+        
+        context = AuditContext(
+            user=user,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            session_key=session_key,
+            metadata=auth_metadata,
+            actor_type='user'
+        )
+        
+        event_data = AuditEventData(
+            event_type='login_success',
+            content_object=user,
+            description=f"Successful login via {authentication_method} for {user.email}"
+        )
+        
+        return AuditService.log_event(event_data, context)
+
+    @staticmethod
+    def log_login_failed(
+        email: str | None = None,
+        user: User | None = None,
+        failure_reason: str = 'invalid_credentials',
+        request: Any = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+        metadata: dict[str, Any] | None = None
+    ) -> AuditEvent:
+        """
+        Log failed login attempt with security-focused metadata
+        
+        Args:
+            email: Attempted email (may not exist)
+            user: User object if exists (optional)
+            failure_reason: Reason for failure (invalid_password, user_not_found, account_locked, etc.)
+            request: Django request object (optional)
+            ip_address: Client IP address
+            user_agent: Client user agent string
+            metadata: Additional metadata
+        """
+        # Extract context from request if provided
+        if request:
+            ip_address = ip_address or _get_client_ip_from_request(request)
+            user_agent = user_agent or request.META.get('HTTP_USER_AGENT', '')
+        
+        # Determine the appropriate action based on failure reason
+        action_map = {
+            'invalid_password': 'login_failed_password',
+            'user_not_found': 'login_failed_user_not_found', 
+            'account_locked': 'login_failed_account_locked',
+            '2fa_verification': 'login_failed_2fa',
+            'unknown': 'login_failed'
+        }
+        action = action_map.get(failure_reason, 'login_failed')
+        
+        # Build security-focused metadata
+        auth_metadata = {
+            'failure_reason': failure_reason,
+            'attempted_email': email,
+            'attempt_timestamp': timezone.now().isoformat(),
+            'security_analysis': {
+                'ip_based_attempt': True,
+                'user_agent_provided': bool(user_agent),
+            },
+            **(metadata or {})
+        }
+        
+        # Add user context if user exists
+        if user:
+            auth_metadata.update({
+                'user_id': str(user.id),
+                'user_exists': True,
+                'user_active': user.is_active,
+                'user_staff': user.is_staff,
+                'previous_failed_attempts': getattr(user, 'failed_login_attempts', 0),
+                'account_locked': getattr(user, 'is_account_locked', lambda: False)(),
+                'user_2fa_enabled': getattr(user, 'two_factor_enabled', False),
+            })
+        else:
+            auth_metadata.update({
+                'user_exists': False,
+                'attempted_email_format_valid': bool(email and '@' in email),
+            })
+        
+        context = AuditContext(
+            user=user,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            metadata=auth_metadata,
+            actor_type='anonymous' if not user else 'user'
+        )
+        
+        event_data = AuditEventData(
+            event_type=action,
+            content_object=user,  # May be None for non-existent users
+            description=f"Failed login attempt: {failure_reason} for {email or 'unknown'}"
+        )
+        
+        return AuditService.log_event(event_data, context)
+
+    @staticmethod
+    def log_logout(
+        user: User,
+        logout_reason: str = 'manual',
+        request: Any = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+        session_key: str | None = None,
+        metadata: dict[str, Any] | None = None
+    ) -> AuditEvent:
+        """
+        Log logout event with session and security context
+        
+        Args:
+            user: The user being logged out
+            logout_reason: Reason for logout (manual, session_expired, security_event, concurrent_session)
+            request: Django request object (optional)
+            ip_address: Client IP address
+            user_agent: Client user agent string  
+            session_key: Session identifier being ended
+            metadata: Additional metadata
+        """
+        # Extract context from request if provided
+        if request:
+            ip_address = ip_address or _get_client_ip_from_request(request)
+            user_agent = user_agent or request.META.get('HTTP_USER_AGENT', '')
+            session_key = session_key or getattr(request.session, 'session_key', None)
+        
+        # Map logout reasons to actions
+        action_map = {
+            'manual': 'logout_manual',
+            'session_expired': 'logout_session_expired',
+            'security_event': 'logout_security_event',
+            'concurrent_session': 'logout_concurrent_session'
+        }
+        action = action_map.get(logout_reason, 'logout_manual')
+        
+        # Build session and security metadata
+        auth_metadata = {
+            'logout_reason': logout_reason,
+            'logout_timestamp': timezone.now().isoformat(),
+            'user_id': str(user.id),
+            'user_email': user.email,
+            'session_info': {
+                'session_key': session_key,
+                'session_ended': timezone.now().isoformat(),
+            },
+            'security_context': {
+                'user_2fa_enabled': getattr(user, 'two_factor_enabled', False),
+                'logout_triggered_by': logout_reason,
+            },
+            **(metadata or {})
+        }
+        
+        # Add login session duration if available
+        if user.last_login:
+            session_duration = timezone.now() - user.last_login
+            auth_metadata['session_info']['duration_seconds'] = int(session_duration.total_seconds())
+            auth_metadata['session_info']['duration_human'] = str(session_duration)
+        
+        context = AuditContext(
+            user=user,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            session_key=session_key,
+            metadata=auth_metadata,
+            actor_type='user'
+        )
+        
+        event_data = AuditEventData(
+            event_type=action,
+            content_object=user,
+            description=f"User logout: {logout_reason} for {user.email}"
+        )
+        
+        return AuditService.log_event(event_data, context)
+
+    @staticmethod
+    def log_account_locked(
+        user: User,
+        trigger_reason: str,
+        request: Any = None,
+        ip_address: str | None = None,
+        failed_attempts: int | None = None,
+        metadata: dict[str, Any] | None = None
+    ) -> AuditEvent:
+        """
+        Log account lockout event with security details
+        
+        Args:
+            user: The user whose account was locked
+            trigger_reason: Why the account was locked
+            request: Django request object (optional)
+            ip_address: Client IP address
+            failed_attempts: Number of failed attempts that triggered lockout
+            metadata: Additional metadata
+        """
+        if request:
+            ip_address = ip_address or _get_client_ip_from_request(request)
+        
+        auth_metadata = {
+            'lockout_reason': trigger_reason,
+            'lockout_timestamp': timezone.now().isoformat(),
+            'failed_attempts_count': failed_attempts or getattr(user, 'failed_login_attempts', 0),
+            'user_id': str(user.id),
+            'user_email': user.email,
+            'security_event': True,
+            **(metadata or {})
+        }
+        
+        context = AuditContext(
+            user=user,
+            ip_address=ip_address,
+            metadata=auth_metadata,
+            actor_type='system'
+        )
+        
+        event_data = AuditEventData(
+            event_type='account_locked',
+            content_object=user,
+            description=f"Account locked for {user.email}: {trigger_reason}"
+        )
+        
+        return AuditService.log_event(event_data, context)
+
+    @staticmethod
+    def log_session_rotation(
+        user: User,
+        reason: str,
+        request: Any = None,
+        old_session_key: str | None = None,
+        new_session_key: str | None = None,
+        metadata: dict[str, Any] | None = None
+    ) -> AuditEvent:
+        """
+        Log session rotation events for security tracking
+        
+        Args:
+            user: The user whose session was rotated
+            reason: Reason for rotation (2fa_change, password_change, security_event)
+            request: Django request object (optional) 
+            old_session_key: Previous session key
+            new_session_key: New session key
+            metadata: Additional metadata
+        """
+        auth_metadata = {
+            'rotation_reason': reason,
+            'rotation_timestamp': timezone.now().isoformat(),
+            'user_id': str(user.id),
+            'session_info': {
+                'old_session_key': old_session_key,
+                'new_session_key': new_session_key,
+            },
+            'security_enhancement': True,
+            **(metadata or {})
+        }
+        
+        context = AuditContext(
+            user=user,
+            ip_address=_get_client_ip_from_request(request) if request else None,
+            session_key=new_session_key,
+            metadata=auth_metadata,
+            actor_type='system'
+        )
+        
+        event_data = AuditEventData(
+            event_type='session_rotation',
+            content_object=user,
+            description=f"Session rotated for {user.email}: {reason}"
+        )
+        
+        return AuditService.log_event(event_data, context)
+
+
+def _get_client_ip_from_request(request: Any) -> str:
+    """Extract client IP address from Django request"""
+    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+    ip = x_forwarded_for.split(',')[0].strip() if x_forwarded_for else request.META.get('REMOTE_ADDR', '127.0.0.1')
+    
+    return ip if ip else '127.0.0.1'
+
+
 class AuditService:
     """Centralized audit logging service"""
 
