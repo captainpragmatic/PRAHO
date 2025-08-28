@@ -188,6 +188,7 @@ class ProformaInvoice(models.Model):
     def convert_to_invoice(self) -> None:
         """Convert this proforma to an actual invoice"""
         # Will implement this method in business logic
+        # Explicit pass for clarity
 
 
 class ProformaLine(models.Model):
@@ -488,7 +489,7 @@ class Payment(models.Model):
 
     # Payment details
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
-    method = models.CharField(max_length=20, choices=METHOD_CHOICES, default='stripe')
+    payment_method = models.CharField(max_length=20, choices=METHOD_CHOICES, default='stripe')
     amount_cents = models.BigIntegerField(validators=[MinValueValidator(1)], default=0)
     currency = models.ForeignKey(Currency, on_delete=models.PROTECT)
 
@@ -519,7 +520,7 @@ class Payment(models.Model):
         indexes = (
             models.Index(fields=['customer', '-received_at']),
             models.Index(fields=['status']),
-            models.Index(fields=['method']),
+            models.Index(fields=['payment_method']),
             models.Index(fields=['gateway_txn_id']),
         )
 

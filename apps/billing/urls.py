@@ -22,6 +22,7 @@ urlpatterns = [
 
     # Invoice management (read-only, auto-generated from proformas)
     path('invoices/<int:pk>/', views.invoice_detail, name='invoice_detail'),
+    path('invoices/<int:pk>/edit/', views.invoice_edit, name='invoice_edit'),
     path('invoices/<int:pk>/pdf/', views.invoice_pdf, name='invoice_pdf'),
     path('invoices/<int:pk>/send/', views.invoice_send, name='invoice_send'),
     path('invoices/<int:pk>/refund/', views.invoice_refund, name='invoice_refund'),

@@ -40,7 +40,7 @@ class PaymentTestCase(TestCase):
             invoice=self.invoice,
             currency=self.currency,
             amount_cents=10000,
-            method='card',
+            payment_method='card',
             status='succeeded'
         )
 
@@ -48,7 +48,7 @@ class PaymentTestCase(TestCase):
         self.assertEqual(payment.invoice, self.invoice)
         self.assertEqual(payment.currency, self.currency)
         self.assertEqual(payment.amount_cents, 10000)
-        self.assertEqual(payment.method, 'card')
+        self.assertEqual(payment.payment_method, 'card')
         self.assertEqual(payment.status, 'succeeded')
 
     def test_payment_str_representation(self):
@@ -57,7 +57,7 @@ class PaymentTestCase(TestCase):
             customer=self.customer,
             currency=self.currency,
             amount_cents=5000,
-            method='bank_transfer'
+            payment_method='bank_transfer'
         )
 
         str_repr = str(payment)
@@ -73,7 +73,7 @@ class PaymentTestCase(TestCase):
                 customer=self.customer,
                 currency=self.currency,
                 amount_cents=1000,
-                method='card',
+                payment_method='card',
                 status=status
             )
             self.assertEqual(payment.status, status)
@@ -87,9 +87,9 @@ class PaymentTestCase(TestCase):
                 customer=self.customer,
                 currency=self.currency,
                 amount_cents=1000,
-                method=method
+                payment_method=method
             )
-            self.assertEqual(payment.method, method)
+            self.assertEqual(payment.payment_method, method)
 
     def test_payment_without_invoice(self):
         """Test payment without invoice (credit payment)"""
@@ -97,7 +97,7 @@ class PaymentTestCase(TestCase):
             customer=self.customer,
             currency=self.currency,
             amount_cents=5000,
-            method='bank_transfer',
+            payment_method='bank_transfer',
             status='succeeded'
         )
 
@@ -110,7 +110,7 @@ class PaymentTestCase(TestCase):
             customer=self.customer,
             currency=self.currency,
             amount_cents=1000,
-            method='card'
+            payment_method='card'
         )
 
         self.assertEqual(payment.customer, self.customer)
@@ -122,7 +122,7 @@ class PaymentTestCase(TestCase):
             invoice=self.invoice,
             currency=self.currency,
             amount_cents=10000,
-            method='card'
+            payment_method='card'
         )
 
         self.assertEqual(payment.invoice, self.invoice)
@@ -133,7 +133,7 @@ class PaymentTestCase(TestCase):
             customer=self.customer,
             currency=self.currency,
             amount_cents=1000,
-            method='card'
+            payment_method='card'
         )
 
         # Should not be able to delete currency while it's referenced
@@ -146,7 +146,7 @@ class PaymentTestCase(TestCase):
             customer=self.customer,
             currency=self.currency,
             amount_cents=1000,
-            method='card'
+            payment_method='card'
         )
 
         # Should not be able to delete customer while they have payments
@@ -159,7 +159,7 @@ class PaymentTestCase(TestCase):
             invoice=self.invoice,
             currency=self.currency,
             amount_cents=10000,
-            method='card'
+            payment_method='card'
         )
 
         self.invoice.delete()
@@ -173,7 +173,7 @@ class PaymentTestCase(TestCase):
             customer=self.customer,
             currency=self.currency,
             amount_cents=1000,
-            method='card',
+            payment_method='card',
             meta={'gateway': 'stripe', 'transaction_id': 'tx_123'}
         )
 
@@ -186,7 +186,7 @@ class PaymentTestCase(TestCase):
             customer=self.customer,
             currency=self.currency,
             amount_cents=1000,
-            method='bank_transfer',
+            payment_method='bank_transfer',
             notes='Payment received via bank transfer'
         )
 
@@ -221,7 +221,7 @@ class PaymentIntegrationTestCase(TestCase):
             invoice=invoice,
             currency=self.currency,
             amount_cents=3000,  # 30.00 EUR
-            method='card',
+            payment_method='card',
             status='succeeded'
         )
 
@@ -231,7 +231,7 @@ class PaymentIntegrationTestCase(TestCase):
             invoice=invoice,
             currency=self.currency,
             amount_cents=7000,  # 70.00 EUR
-            method='bank_transfer',
+            payment_method='bank_transfer',
             status='succeeded'
         )
 
@@ -254,7 +254,7 @@ class PaymentIntegrationTestCase(TestCase):
             invoice=invoice,
             currency=self.currency,
             amount_cents=7000,  # 70.00 EUR (overpaid by 20.00)
-            method='card',
+            payment_method='card',
             status='succeeded'
         )
 
@@ -277,7 +277,7 @@ class PaymentIntegrationTestCase(TestCase):
             invoice=invoice,
             currency=self.currency,
             amount_cents=10000,
-            method='card',
+            payment_method='card',
             status='failed'
         )
 
@@ -291,7 +291,7 @@ class PaymentIntegrationTestCase(TestCase):
             customer=self.customer,
             currency=self.currency,
             amount_cents=15000,  # 150.00 EUR credit
-            method='bank_transfer',
+            payment_method='bank_transfer',
             status='succeeded',
             notes='Account credit top-up'
         )
@@ -305,7 +305,7 @@ class PaymentIntegrationTestCase(TestCase):
             customer=self.customer,
             currency=self.currency,
             amount_cents=5000,
-            method='card',
+            payment_method='card',
             status='succeeded',
             meta={
                 'gateway': 'stripe',
@@ -324,7 +324,7 @@ class PaymentIntegrationTestCase(TestCase):
             customer=self.customer,
             currency=self.currency,
             amount_cents=1000,
-            method='card'
+            payment_method='card'
         )
 
         # These queries should be efficient due to indexes

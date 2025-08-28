@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import decimal
+import logging
 import uuid
 from datetime import datetime
 from decimal import Decimal
@@ -15,7 +16,7 @@ if TYPE_CHECKING:
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.views.decorators.http import require_POST
+from django.contrib.contenttypes.models import ContentType
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Count, Q, QuerySet, Sum
@@ -24,12 +25,14 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.test import RequestFactory
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django.views.decorators.http import require_POST
 
 from apps.billing.pdf_generators import RomanianInvoicePDFGenerator, RomanianProformaPDFGenerator
 from apps.common.decorators import billing_staff_required, can_edit_proforma, staff_required
 from apps.common.mixins import get_search_context
 from apps.common.utils import json_error, json_success
 from apps.customers.models import Customer
+from apps.tickets.models import SupportCategory, Ticket
 from apps.users.models import User
 
 from .models import (
@@ -42,6 +45,7 @@ from .models import (
     ProformaLine,
     ProformaSequence,
 )
+from .services import RefundData, RefundReason, RefundService, RefundType
 
 
 def _get_accessible_customer_ids(user: User) -> list[int]:
@@ -147,12 +151,10 @@ def billing_list(request: HttpRequest) -> HttpResponse:
             combined_documents.extend(invoice_data)
 
         # Sort by creation date (newest first)
-        from datetime import datetime as dt
-        combined_documents.sort(key=lambda x: x['created_at'] if isinstance(x['created_at'], dt) else dt.min, reverse=True)
+        combined_documents.sort(key=lambda x: x['created_at'] if isinstance(x['created_at'], datetime) else datetime.min, reverse=True)
 
         # ✅ Apply pagination using reusable utility (20 items per page for Romanian business)
         # Convert list to mock queryset-like object for pagination
-        from django.core.paginator import Paginator
         paginator = Paginator(combined_documents, 20)
         page_number = request.GET.get('page')
         page_obj = paginator.get_page(page_number)
@@ -187,7 +189,6 @@ def billing_list(request: HttpRequest) -> HttpResponse:
         
     except Exception as e:
         # Handle database errors gracefully
-        import logging
         logger = logging.getLogger(__name__)
         logger.error(f"Database error in billing_list: {e}")
         
@@ -460,7 +461,7 @@ def process_proforma_payment(request: HttpRequest, pk: int) -> HttpResponse:
                 invoice=invoice,
                 amount_cents=int(amount * 100),
                 currency=invoice.currency,
-                method=payment_method if payment_method in ['stripe', 'bank', 'paypal', 'cash', 'other'] else 'other',
+                payment_method=payment_method if payment_method in ['stripe', 'bank', 'paypal', 'cash', 'other'] else 'other',
                 status='succeeded',
                 created_by=request.user,
             )
@@ -516,15 +517,15 @@ def _validate_customer_assignment(user: User, customer_id: str | None, proforma_
 
 def _update_proforma_basic_info(proforma: ProformaInvoice, request_data: dict[str, Any]) -> None:
     """Update proforma basic information from form data."""
-    bill_to_name = request_data.get('bill_to_name', '').strip()
+    bill_to_name = (request_data.get('bill_to_name') or '').strip()
     if bill_to_name:
         proforma.bill_to_name = bill_to_name
 
-    bill_to_email = request_data.get('bill_to_email', '').strip()
+    bill_to_email = (request_data.get('bill_to_email') or '').strip()
     if bill_to_email:
         proforma.bill_to_email = bill_to_email
 
-    bill_to_tax_id = request_data.get('bill_to_tax_id', '').strip()
+    bill_to_tax_id = (request_data.get('bill_to_tax_id') or '').strip()
     if bill_to_tax_id:
         proforma.bill_to_tax_id = bill_to_tax_id
 
@@ -567,7 +568,7 @@ def _process_proforma_line_items(proforma: ProformaInvoice, request_data: dict[s
     validation_errors = []
 
     while f'line_{line_counter}_description' in request_data:
-        description = request_data.get(f'line_{line_counter}_description', '').strip()
+        description = (request_data.get(f'line_{line_counter}_description') or '').strip()
         quantity, price_errors = _parse_line_quantity(request_data, line_counter)
         unit_price, price_errors_2 = _parse_line_unit_price(request_data, line_counter)
         vat_rate, vat_errors = _parse_line_vat_rate(request_data, line_counter)
@@ -606,7 +607,8 @@ def _parse_line_quantity(request_data: dict[str, Any], line_counter: int) -> tup
     """Parse and validate line item quantity."""
     errors = []
     try:
-        quantity_str = request_data.get(f'line_{line_counter}_quantity', '0').strip()
+        quantity_raw = request_data.get(f'line_{line_counter}_quantity', '0')
+        quantity_str = (quantity_raw or '0').strip()
         quantity = Decimal(quantity_str) if quantity_str else Decimal('0')
     except (ValueError, TypeError, decimal.InvalidOperation):
         quantity = Decimal('0')
@@ -618,7 +620,7 @@ def _parse_line_unit_price(request_data: dict[str, Any], line_counter: int) -> t
     """Parse and validate line item unit price."""
     errors = []
     try:
-        unit_price_str = request_data.get(f'line_{line_counter}_unit_price', '0').strip()
+        unit_price_str = (request_data.get(f'line_{line_counter}_unit_price') or '0').strip()
         unit_price = Decimal(unit_price_str) if unit_price_str else Decimal('0')
     except (ValueError, TypeError, decimal.InvalidOperation):
         unit_price = Decimal('0')
@@ -630,7 +632,7 @@ def _parse_line_vat_rate(request_data: dict[str, Any], line_counter: int) -> tup
     """Parse and validate line item VAT rate."""
     errors = []
     try:
-        vat_rate_str = request_data.get(f'line_{line_counter}_vat_rate', '19').strip()
+        vat_rate_str = (request_data.get(f'line_{line_counter}_vat_rate') or '19').strip()
         vat_rate = Decimal(vat_rate_str) if vat_rate_str else Decimal('19')
     except (ValueError, TypeError, decimal.InvalidOperation):
         vat_rate = Decimal('19')
@@ -679,7 +681,7 @@ def _get_customers_for_edit_form(user: User) -> QuerySet[Customer, Customer]:
     accessible_customers = user.get_accessible_customers()
     if isinstance(accessible_customers, QuerySet):
         return accessible_customers.select_related('tax_profile', 'billing_profile')
-    elif isinstance(accessible_customers, (list, tuple)):
+    elif isinstance(accessible_customers, list | tuple):
         return Customer.objects.filter(
             id__in=[c.id for c in accessible_customers]
         ).select_related('tax_profile', 'billing_profile')
@@ -875,7 +877,7 @@ def payment_list(request: HttpRequest) -> HttpResponse:
 
     context = {
         'payments': payments_page,
-        'total_amount': payments.aggregate(total=Sum('amount'))['total'] or Decimal('0'),
+        'total_amount': payments.aggregate(total=Sum('amount_cents'))['total'] or Decimal('0'),
     }
 
     return render(request, 'billing/payment_list.html', context)
@@ -902,7 +904,7 @@ def process_payment(request: HttpRequest, pk: int) -> HttpResponse:
             invoice=invoice,
             amount_cents=int(amount * 100),
             currency=invoice.currency,
-            method=payment_method if payment_method in ['stripe', 'bank', 'paypal', 'cash', 'other'] else 'other',
+            payment_method=payment_method if payment_method in ['stripe', 'bank', 'paypal', 'cash', 'other'] else 'other',
             status='succeeded',  # Changed from 'completed' to match model choices
             created_by=request.user,
         )
@@ -989,20 +991,10 @@ def vat_report(request: HttpRequest) -> HttpResponse:
 
 @staff_required
 @require_POST
-def invoice_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
+def invoice_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:  # noqa: PLR0911
     """
     💰 Refund an invoice (bidirectional with order refunds)
     """
-    from .services import RefundService, RefundData, RefundType, RefundReason
-    from decimal import Decimal
-    import uuid
-    from django.http import JsonResponse
-    from django.shortcuts import get_object_or_404
-    from apps.common.decorators import staff_required
-    from django.views.decorators.http import require_POST
-    from apps.common.utils import json_success, json_error
-    import logging
-    
     logger = logging.getLogger(__name__)
     
     invoice = get_object_or_404(Invoice, id=pk)
@@ -1013,10 +1005,10 @@ def invoice_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
     
     # Parse form data
     try:
-        refund_type_str = request.POST.get('refund_type', '').strip()
-        refund_reason_str = request.POST.get('refund_reason', '').strip()
-        refund_notes = request.POST.get('refund_notes', '').strip()
-        refund_amount_str = request.POST.get('refund_amount', '0').strip()
+        refund_type_str = (request.POST.get('refund_type') or '').strip()
+        refund_reason_str = (request.POST.get('refund_reason') or '').strip()
+        refund_notes = (request.POST.get('refund_notes') or '').strip()
+        refund_amount_str = (request.POST.get('refund_amount') or '0').strip()
         process_payment = request.POST.get('process_payment_refund') == 'true'
         
         if not refund_type_str or not refund_reason_str or not refund_notes:
@@ -1054,21 +1046,20 @@ def invoice_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
         }
         
         # Process refund using RefundService
-        result = RefundService.refund_invoice(uuid.UUID(str(invoice.id)) if not isinstance(invoice.id, uuid.UUID) else invoice.id, refund_data)
+        result = RefundService.refund_invoice(invoice.id, refund_data)
         
         if result.is_ok():
             refund_result = result.unwrap()
             return json_success({
-                'message': f'Invoice refund processed successfully',
+                'message': 'Invoice refund processed successfully',
                 'refund_id': str(refund_result['refund_id']) if refund_result.get('refund_id') else None,
                 'new_status': invoice.status  # Will be updated by the service
             })
+        # Handle error case - use hasattr to check for error attribute
+        elif hasattr(result, 'error'):
+            return json_error(result.error)
         else:
-            # Handle error case - use hasattr to check for error attribute
-            if hasattr(result, 'error'):
-                return json_error(result.error)
-            else:
-                return json_error("Unknown error occurred")
+            return json_error("Unknown error occurred")
             
     except Exception as e:
         logger.exception(f"Failed to process invoice refund: {e}")
@@ -1081,11 +1072,6 @@ def invoice_refund_request(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
     """
     🎫 Create a refund request ticket for an invoice (customer-facing)
     """
-    from .models import Invoice
-    from apps.tickets.models import SupportTicket, SupportCategory
-    from django.contrib.contenttypes.models import ContentType
-    import logging
-    
     logger = logging.getLogger(__name__)
     
     invoice = get_object_or_404(Invoice, id=pk)
@@ -1099,8 +1085,8 @@ def invoice_refund_request(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
         return json_error("Refund requests are only allowed for paid invoices")
     
     try:
-        refund_reason = request.POST.get('refund_reason', '').strip()
-        refund_notes = request.POST.get('refund_notes', '').strip()
+        refund_reason = (request.POST.get('refund_reason') or '').strip()
+        refund_notes = (request.POST.get('refund_notes') or '').strip()
         
         if not refund_reason or not refund_notes:
             return json_error("All fields are required")
@@ -1135,7 +1121,7 @@ def invoice_refund_request(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
         )
         
         # Create ticket
-        ticket = SupportTicket.objects.create(
+        ticket = Ticket.objects.create(
             title=f"Refund Request for Invoice {invoice.number}",
             description=f"""
 REFUND REQUEST DETAILS
@@ -1171,7 +1157,7 @@ This ticket was automatically created from a customer refund request.
         logger.info(f"🎫 Refund request ticket #{ticket.ticket_number} created for invoice {invoice.number} by user {request.user.email}")
         
         return json_success({
-            'message': f'Refund request submitted successfully',
+            'message': 'Refund request submitted successfully',
             'ticket_number': ticket.ticket_number,
             'invoice_number': invoice.number
         })
