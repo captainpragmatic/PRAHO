@@ -215,6 +215,114 @@ def billing_list(request: HttpRequest) -> HttpResponse:
         return render(request, 'billing/billing_list.html', context)
 
 
+@login_required
+def proforma_list(request: HttpRequest) -> HttpResponse:
+    """
+    🧾 Display list of proformas only (Romanian business practice)
+    """
+    # Type guard for authenticated user
+    if not isinstance(request.user, User):
+        return redirect('users:login')
+    
+    try:
+        # Get accessible customers
+        customer_ids = _get_accessible_customer_ids(request.user)
+
+        # ✅ Get search context for template
+        search_context = get_search_context(request, 'search')
+        search_query = search_context['search_query']
+
+        # Get proformas with search applied
+        proformas_qs = ProformaInvoice.objects.filter(customer_id__in=customer_ids).select_related('customer')
+
+        # Apply search filter
+        if search_query:
+            proformas_qs = proformas_qs.filter(
+                Q(number__icontains=search_query) |
+                Q(customer__company_name__icontains=search_query) |
+                Q(customer__name__icontains=search_query)
+            )
+
+        # Build proforma data for rendering
+        proforma_documents = [
+            {
+                'type': 'proforma',
+                'obj': proforma,
+                'id': proforma.pk,
+                'number': proforma.number,
+                'customer': proforma.customer,
+                'total': proforma.total,
+                'currency': proforma.currency,
+                'created_at': proforma.created_at,
+                'status': 'valid' if not proforma.is_expired else 'expired',
+                'can_edit': (request.user.is_staff or getattr(request.user, 'staff_role', None)) and not proforma.is_expired,
+                'can_convert': (request.user.is_staff or getattr(request.user, 'staff_role', None)) and not proforma.is_expired,
+            }
+            for proforma in proformas_qs
+        ]
+
+        # Sort by creation date (newest first)
+        proforma_documents.sort(key=lambda x: x['created_at'], reverse=True)
+
+        # ⚡ PERFORMANCE: Implement pagination for 25 items per page (Romanian business scale)
+        paginator = Paginator(proforma_documents, 25)
+        page_number = request.GET.get('page')
+        page_obj = paginator.get_page(page_number)
+
+        # Build pagination context
+        pagination_context = {
+            'page_obj': page_obj,
+            'is_paginated': page_obj.has_other_pages(),
+            'extra_params': {k: v for k, v in request.GET.items() if k != 'page'}
+        }
+
+        # Statistics 
+        proforma_total = proformas_qs.aggregate(total=Sum('total_cents'))['total'] or 0
+
+        # Check if user is staff for different context
+        is_staff_user = request.user.is_staff or getattr(request.user, 'staff_role', None)
+
+        context = {
+            'documents': pagination_context['page_obj'],
+            'doc_type': 'proforma',  # Always proforma for this view
+            'proforma_count': proformas_qs.count(),
+            'invoice_count': 0,  # No invoices in this view
+            'proforma_total': Decimal(proforma_total) / 100,
+            'invoice_total': Decimal('0.00'),
+            'total_amount': Decimal(proforma_total) / 100,
+            'is_staff_user': is_staff_user,
+            **pagination_context,
+            **search_context,
+        }
+
+        return render(request, 'billing/billing_list.html', context)
+        
+    except Exception as e:
+        # Handle database errors gracefully
+        logger = logging.getLogger(__name__)
+        logger.error(f"Database error in proforma_list: {e}")
+        
+        # Return empty context with error handling
+        context = {
+            'documents': [],
+            'doc_type': 'proforma',
+            'proforma_count': 0,
+            'invoice_count': 0,
+            'proforma_total': Decimal('0.00'),
+            'invoice_total': Decimal('0.00'),
+            'total_amount': Decimal('0.00'),
+            'is_staff_user': False,
+            'page_obj': None,
+            'is_paginated': False,
+            'extra_params': {},
+            'search_query': '',
+            'has_search': False,
+            'error_message': 'Unable to load proforma data. Please try again later.',
+        }
+
+        return render(request, 'billing/billing_list.html', context)
+
+
 @login_required  
 def billing_list_htmx(request: HttpRequest) -> HttpResponse:
     """

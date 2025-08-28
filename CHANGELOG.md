@@ -457,7 +457,7 @@ This release represents a significant advancement in PRAHO Platform's code quali
   - `audit_service`: Immutable audit event logging for compliance
 - **GDPR Views**: Professional privacy dashboard in `apps/audit/views.py`
   - `gdpr_dashboard`: Complete privacy management interface
-  - `request_data_export`: Automated data export requests
+  - `request_data_export`: Automated data export requests with immediate JSON download
   - `request_data_deletion`: Secure deletion workflow
   - `consent_history`: Complete consent audit trail
 - **GDPR Templates**: Modern UI components in `templates/audit/`
@@ -482,6 +482,15 @@ This release represents a significant advancement in PRAHO Platform's code quali
 - **macOS Development**: Updated Makefile python commands for macOS compatibility
 - **Template Accessibility**: Improved checkbox component accessibility and error handling
 - **Navigation Branding**: Removed redundant "Hello" greeting from navigation header
+
+### Added
+- **GDPR Export Immediate Download**: Enhanced data export functionality with immediate file downloads
+  - **HTMX Integration**: Seamless download experience without page reloads
+  - **Immediate Processing**: Export requests processed immediately for smaller datasets
+  - **JSON File Generation**: Professional JSON export with complete user data structure
+  - **User Experience**: Eliminates need to check history section after requesting exports
+  - **Audit Logging**: Comprehensive logging of export downloads for GDPR compliance
+  - **File Naming**: Consistent naming with export ID and user identification
 
 ## [v0.3.0] - Previous Release
 

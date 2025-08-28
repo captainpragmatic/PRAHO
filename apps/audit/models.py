@@ -455,6 +455,195 @@ class DataExport(models.Model):
         return f"{self.export_type} export by {self.requested_by}"
 
 
+class AuditIntegrityCheck(models.Model):
+    """Track audit data integrity verification for tamper detection."""
+
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+        ('healthy', 'Healthy'),
+        ('warning', 'Warning'),
+        ('compromised', 'Compromised'),
+    )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    
+    # Check details
+    check_type = models.CharField(max_length=50, db_index=True)  # hash_verification, sequence_check, gap_detection
+    checked_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    period_start = models.DateTimeField(db_index=True)
+    period_end = models.DateTimeField(db_index=True)
+    
+    # Results
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='healthy')
+    records_checked = models.PositiveIntegerField(default=0)
+    issues_found = models.PositiveIntegerField(default=0)
+    
+    # Findings
+    findings = models.JSONField(default=list, blank=True)  # List of detected issues
+    hash_chain = models.TextField(blank=True)  # Cryptographic hash chain
+    
+    # Metadata
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = 'audit_integrity_check'
+        ordering: ClassVar[tuple[str, ...]] = ('-checked_at',)
+        indexes: ClassVar[tuple[models.Index, ...]] = (
+            models.Index(fields=['check_type', '-checked_at']),
+            models.Index(fields=['status', '-checked_at']),
+            models.Index(fields=['period_start', 'period_end']),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.check_type} check: {self.status} ({self.issues_found} issues)"
+
+
+class AuditRetentionPolicy(models.Model):
+    """Define retention policies for different types of audit events."""
+
+    RETENTION_ACTION_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+        ('archive', 'Archive to Cold Storage'),
+        ('delete', 'Permanent Deletion'),
+        ('anonymize', 'Anonymize Sensitive Data'),
+    )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    
+    # Policy definition
+    name = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True)
+    category = models.CharField(max_length=30, choices=AuditEvent.CATEGORY_CHOICES)
+    severity = models.CharField(max_length=10, choices=AuditEvent.SEVERITY_CHOICES, blank=True)
+    
+    # Retention rules
+    retention_days = models.PositiveIntegerField()  # Days to keep in active storage
+    action = models.CharField(max_length=20, choices=RETENTION_ACTION_CHOICES, default='archive')
+    
+    # Compliance requirements
+    legal_basis = models.CharField(max_length=200, blank=True)  # Romanian law reference
+    is_mandatory = models.BooleanField(default=False)  # Cannot be overridden
+    
+    # Policy status
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+
+    class Meta:
+        db_table = 'audit_retention_policy'
+        ordering: ClassVar[tuple[str, ...]] = ('name',)
+        indexes: ClassVar[tuple[models.Index, ...]] = (
+            models.Index(fields=['category', 'severity']),
+            models.Index(fields=['is_active', 'retention_days']),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.retention_days} days)"
+
+
+class AuditSearchQuery(models.Model):
+    """Save commonly used audit search queries for staff efficiency."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    
+    # Query details
+    name = models.CharField(max_length=100)
+    description = models.TextField(blank=True)
+    query_params = models.JSONField(default=dict)  # Serialized search parameters
+    
+    # Usage tracking
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    usage_count = models.PositiveIntegerField(default=0)
+    
+    # Sharing
+    is_shared = models.BooleanField(default=False)  # Available to all staff
+    shared_with = models.ManyToManyField(User, related_name='shared_audit_queries', blank=True)
+
+    class Meta:
+        db_table = 'audit_search_query'
+        ordering: ClassVar[tuple[str, ...]] = ('-last_used_at', 'name')
+        indexes: ClassVar[tuple[models.Index, ...]] = (
+            models.Index(fields=['created_by', '-created_at']),
+            models.Index(fields=['is_shared', '-usage_count']),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.name} by {self.created_by.email}"
+
+
+class AuditAlert(models.Model):
+    """Track security and compliance alerts generated from audit analysis."""
+
+    ALERT_TYPE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+        ('security_incident', 'Security Incident'),
+        ('compliance_violation', 'Compliance Violation'),
+        ('data_integrity', 'Data Integrity Issue'),
+        ('suspicious_activity', 'Suspicious Activity'),
+        ('performance_anomaly', 'Performance Anomaly'),
+        ('retention_violation', 'Retention Policy Violation'),
+    )
+
+    SEVERITY_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+        ('info', 'Informational'),
+        ('warning', 'Warning'),
+        ('high', 'High Priority'),
+        ('critical', 'Critical'),
+    )
+
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+        ('active', 'Active'),
+        ('acknowledged', 'Acknowledged'),
+        ('investigating', 'Under Investigation'),
+        ('resolved', 'Resolved'),
+        ('false_positive', 'False Positive'),
+    )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    
+    # Alert details
+    alert_type = models.CharField(max_length=30, choices=ALERT_TYPE_CHOICES, db_index=True)
+    severity = models.CharField(max_length=10, choices=SEVERITY_CHOICES, db_index=True)
+    title = models.CharField(max_length=200)
+    description = models.TextField()
+    
+    # Status tracking
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active', db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    
+    # Assignment
+    assigned_to = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_audit_alerts')
+    acknowledged_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='acknowledged_audit_alerts')
+    acknowledged_at = models.DateTimeField(null=True, blank=True)
+    
+    # Related data
+    related_events = models.ManyToManyField(AuditEvent, blank=True)  # Events that triggered this alert
+    affected_users = models.ManyToManyField(User, blank=True, related_name='audit_alerts')  # Users affected by this alert
+    
+    # Evidence and context
+    evidence = models.JSONField(default=dict, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    
+    # Resolution
+    resolution_notes = models.TextField(blank=True)
+    remediation_actions = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        db_table = 'audit_alert'
+        ordering: ClassVar[tuple[str, ...]] = ('-created_at',)
+        indexes: ClassVar[tuple[models.Index, ...]] = (
+            models.Index(fields=['alert_type', '-created_at']),
+            models.Index(fields=['severity', 'status', '-created_at']),
+            models.Index(fields=['assigned_to', 'status']),
+            models.Index(fields=['status', '-created_at']),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.get_severity_display()} {self.get_alert_type_display()}: {self.title}"
+
+
 class ComplianceLog(models.Model):
     """Log compliance-related activities for Romanian regulations."""
 
@@ -465,6 +654,7 @@ class ComplianceLog(models.Model):
         ('efactura_submission', 'e-Factura Submission'),
         ('data_retention', 'Data Retention Policy'),
         ('security_incident', 'Security Incident'),
+        ('audit_integrity', 'Audit Data Integrity'),
     )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

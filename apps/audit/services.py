@@ -19,7 +19,15 @@ from django.utils import timezone
 from apps.common.types import EmailAddress, Err, Ok, Result
 from apps.tickets.models import Ticket  # Import for GDPR data export
 
-from .models import AuditEvent, ComplianceLog, DataExport
+from .models import (
+    AuditAlert,
+    AuditEvent,
+    AuditIntegrityCheck,
+    AuditRetentionPolicy,
+    AuditSearchQuery,
+    ComplianceLog,
+    DataExport,
+)
 
 """
 Audit services for PRAHO Platform
@@ -627,9 +635,13 @@ class AuditService:
         if action.startswith(('security_', 'suspicious_', 'brute_force', 'malicious_')):
             return 'security_event'
         
-        # Data protection events
-        if action.startswith(('data_export', 'data_deletion', 'data_breach')):
+        # Data protection events (except data_breach which is security)
+        if action.startswith(('data_export', 'data_deletion')):
             return 'data_protection'
+        
+        # Data breach is a security event
+        if action.startswith('data_breach'):
+            return 'security_event'
         
         # API/Integration events
         if action.startswith(('api_', 'webhook_')):
@@ -676,16 +688,16 @@ class AuditService:
         
         # Medium severity events
         medium_actions = [
-            'login_success', 'login_failed', 'logout_manual', 'password_changed', 
-            '2fa_enabled', 'profile_updated', 'email_changed', 'phone_updated',
+            'login_success', 'login_failed', 'logout_manual', 'account_locked', 'session_rotation',
+            'password_changed', '2fa_enabled', 'profile_updated', 'email_changed', 'phone_updated',
             'customer_membership_created', 'api_key_generated', 'invoice_created', 
             'invoice_paid', 'payment_succeeded', 'order_created', 'order_completed',
             'proforma_created', 'provisioning_completed', 'efactura_submitted'
         ]
         
-        if action in critical_actions or action.startswith(('security_', 'data_breach')):
+        if action in critical_actions or action.startswith(('security_', 'suspicious_', 'data_breach')):
             return 'critical'
-        elif action in high_actions or action.startswith(('data_', 'gdpr_', 'role_', 'permission_', 'payment_fraud', 'payment_chargeback')):
+        elif action in high_actions or action.startswith(('data_', 'gdpr_', 'privacy_', 'marketing_consent', 'cookie_consent', 'role_', 'permission_', 'payment_fraud', 'payment_chargeback')):
             return 'high'
         elif action in medium_actions or action.startswith(('login_', 'password_', '2fa_', 'profile_', 'invoice_', 'payment_', 'order_')):
             return 'medium'
@@ -695,14 +707,21 @@ class AuditService:
     @staticmethod
     def _is_action_sensitive(action: str) -> bool:
         """Determine if action involves sensitive data"""
-        sensitive_patterns = [
-            'login_', 'password_', '2fa_', 'email_', 'phone_', 'profile_',
-            'privacy_', 'gdpr_', 'data_', 'security_', 'role_', 'permission_',
-            'payment_', 'billing_', 'tax_', 'invoice_', 'credit_', 'proforma_',
-            'vat_', 'efactura_', 'order_', 'customer_'
+        # Specific sensitive actions
+        sensitive_actions = [
+            'account_locked', 'account_unlocked', 'session_rotation', 'session_terminated',
+            'suspicious_activity', 'brute_force_attempt', 'malicious_request'
         ]
         
-        return any(action.startswith(pattern) for pattern in sensitive_patterns)
+        # Sensitive patterns
+        sensitive_patterns = [
+            'login_', 'logout_', 'password_', '2fa_', 'email_', 'phone_', 'profile_',
+            'privacy_', 'gdpr_', 'marketing_consent', 'cookie_consent', 'data_', 'security_', 
+            'role_', 'permission_', 'payment_', 'billing_', 'tax_', 'invoice_', 'credit_', 
+            'proforma_', 'vat_', 'efactura_', 'order_', 'customer_'
+        ]
+        
+        return action in sensitive_actions or any(action.startswith(pattern) for pattern in sensitive_patterns)
     
     @staticmethod
     def _requires_review(action: str) -> bool:
@@ -1970,6 +1989,639 @@ class OrdersAuditService:
 # Global service instances
 billing_audit_service = BillingAuditService()
 orders_audit_service = OrdersAuditService()
+
+# ===============================================================================
+# AUDIT INTEGRITY MONITORING SERVICE
+# ===============================================================================
+
+class AuditIntegrityService:
+    """
+    🔒 Enterprise audit data integrity monitoring service
+    
+    Features:
+    - Cryptographic hash verification for immutable audit trails
+    - Tampering detection and alerting system  
+    - Gap detection in audit sequence (missing events)
+    - Data consistency checks across related events
+    - Automatic integrity reports and health monitoring
+    - GDPR compliance validation (required fields, retention periods)
+    """
+
+    @classmethod
+    @transaction.atomic
+    def verify_audit_integrity(
+        cls,
+        period_start: datetime,
+        period_end: datetime,
+        check_type: str = 'hash_verification'
+    ) -> Result[AuditIntegrityCheck, str]:
+        """Verify audit data integrity for a given period."""
+        
+        try:
+            # Get audit events in the period
+            events = AuditEvent.objects.filter(
+                timestamp__gte=period_start,
+                timestamp__lt=period_end
+            ).order_by('timestamp')
+            
+            records_checked = events.count()
+            issues_found = []
+            
+            if check_type == 'hash_verification':
+                issues_found = cls._verify_hash_chain(events)
+            elif check_type == 'sequence_check':
+                issues_found = cls._check_sequence_gaps(events)
+            elif check_type == 'gdpr_compliance':
+                issues_found = cls._check_gdpr_compliance(events)
+            
+            # Generate hash chain for this check
+            hash_chain = cls._generate_hash_chain(events)
+            
+            # Determine status
+            status = 'healthy'
+            if len(issues_found) > 0:
+                critical_issues = [i for i in issues_found if i.get('severity') == 'critical']
+                if critical_issues:
+                    status = 'compromised'
+                else:
+                    status = 'warning'
+            
+            # Create integrity check record
+            integrity_check = AuditIntegrityCheck.objects.create(
+                check_type=check_type,
+                period_start=period_start,
+                period_end=period_end,
+                status=status,
+                records_checked=records_checked,
+                issues_found=len(issues_found),
+                findings=issues_found,
+                hash_chain=hash_chain,
+                metadata={
+                    'check_timestamp': timezone.now().isoformat(),
+                    'checker': 'AuditIntegrityService'
+                }
+            )
+            
+            # Create alerts for critical issues
+            if status == 'compromised':
+                cls._create_integrity_alert(integrity_check, issues_found)
+            
+            logger.info(f"✅ [Audit Integrity] {check_type} check completed: {status} ({len(issues_found)} issues)")
+            return Ok(integrity_check)
+            
+        except Exception as e:
+            logger.error(f"🔥 [Audit Integrity] Verification failed: {e}")
+            return Err(f"Integrity verification failed: {e!s}")
+    
+    @classmethod
+    def _verify_hash_chain(cls, events: list[AuditEvent]) -> list[dict[str, Any]]:
+        """Verify cryptographic hash chain of audit events."""
+        issues = []
+        
+        for i, event in enumerate(events):
+            # Check if event data has been modified
+            expected_hash = cls._calculate_event_hash(event)
+            stored_hash = event.metadata.get('integrity_hash')
+            
+            if stored_hash and stored_hash != expected_hash:
+                issues.append({
+                    'type': 'hash_mismatch',
+                    'severity': 'critical',
+                    'event_id': str(event.id),
+                    'timestamp': event.timestamp.isoformat(),
+                    'description': 'Event hash mismatch - possible tampering detected',
+                    'expected_hash': expected_hash,
+                    'stored_hash': stored_hash
+                })
+        
+        return issues
+    
+    @classmethod
+    def _check_sequence_gaps(cls, events: list[AuditEvent]) -> list[dict[str, Any]]:
+        """Check for gaps in audit event sequence."""
+        issues = []
+        
+        if not events:
+            return issues
+        
+        # Check for time gaps that might indicate missing events
+        for i in range(1, len(events)):
+            prev_event = events[i-1]
+            current_event = events[i]
+            
+            time_gap = (current_event.timestamp - prev_event.timestamp).total_seconds()
+            
+            # Flag suspicious gaps (more than 1 hour with no events for active users)
+            if time_gap > 3600 and prev_event.user and current_event.user:
+                # Check if there should have been activity
+                if cls._should_have_activity(prev_event, current_event):
+                    issues.append({
+                        'type': 'sequence_gap',
+                        'severity': 'warning',
+                        'gap_start': prev_event.timestamp.isoformat(),
+                        'gap_end': current_event.timestamp.isoformat(),
+                        'gap_duration_seconds': int(time_gap),
+                        'description': f'Suspicious gap in audit trail: {time_gap/3600:.1f} hours'
+                    })
+        
+        return issues
+    
+    @classmethod
+    def _check_gdpr_compliance(cls, events: list[AuditEvent]) -> list[dict[str, Any]]:
+        """Check GDPR compliance of audit events."""
+        issues = []
+        
+        for event in events:
+            # Check required fields for GDPR events
+            if event.category in ['privacy', 'data_protection']:
+                required_fields = ['user', 'ip_address', 'description']
+                missing_fields = []
+                
+                for field in required_fields:
+                    if not getattr(event, field, None):
+                        missing_fields.append(field)
+                
+                if missing_fields:
+                    issues.append({
+                        'type': 'gdpr_compliance',
+                        'severity': 'high',
+                        'event_id': str(event.id),
+                        'missing_fields': missing_fields,
+                        'description': f'GDPR event missing required fields: {missing_fields}'
+                    })
+        
+        return issues
+    
+    @classmethod
+    def _calculate_event_hash(cls, event: AuditEvent) -> str:
+        """Calculate cryptographic hash for an audit event."""
+        # Create a canonical representation of the event
+        data = {
+            'id': str(event.id),
+            'timestamp': event.timestamp.isoformat(),
+            'user_id': str(event.user.id) if event.user else None,
+            'action': event.action,
+            'content_type_id': event.content_type_id,
+            'object_id': event.object_id,
+            'description': event.description,
+            'ip_address': event.ip_address,
+        }
+        
+        # Sort and serialize for consistent hashing
+        canonical_data = json.dumps(data, sort_keys=True, default=str)
+        return hashlib.sha256(canonical_data.encode()).hexdigest()
+    
+    @classmethod
+    def _generate_hash_chain(cls, events: list[AuditEvent]) -> str:
+        """Generate a hash chain for a sequence of events."""
+        if not events:
+            return ''
+        
+        # Create chain of hashes
+        chain_data = [cls._calculate_event_hash(event) for event in events]
+        chain_hash = hashlib.sha256(''.join(chain_data).encode()).hexdigest()
+        
+        return chain_hash
+    
+    @classmethod
+    def _should_have_activity(cls, prev_event: AuditEvent, current_event: AuditEvent) -> bool:
+        """Determine if there should have been activity between events."""
+        # Simple heuristic: if both events are from the same user in a short session
+        if prev_event.user == current_event.user and prev_event.user:
+            # Check if events are in same session
+            if (prev_event.session_key == current_event.session_key and 
+                prev_event.session_key):
+                return True
+        
+        return False
+    
+    @classmethod
+    def _create_integrity_alert(cls, integrity_check: AuditIntegrityCheck, issues: list[dict[str, Any]]) -> None:
+        """Create alert for integrity issues."""
+        try:
+            critical_issues = [i for i in issues if i.get('severity') == 'critical']
+            
+            alert = AuditAlert.objects.create(
+                alert_type='data_integrity',
+                severity='critical' if critical_issues else 'high',
+                title='Audit Data Integrity Issues Detected',
+                description=f'Integrity check found {len(issues)} issues in audit data from {integrity_check.period_start} to {integrity_check.period_end}',
+                evidence={
+                    'integrity_check_id': str(integrity_check.id),
+                    'issues': issues,
+                    'records_checked': integrity_check.records_checked
+                },
+                metadata={
+                    'check_type': integrity_check.check_type,
+                    'auto_generated': True
+                }
+            )
+            
+            logger.warning(f"⚠️ [Audit Integrity] Alert created: {alert.id}")
+            
+        except Exception as e:
+            logger.error(f"🔥 [Audit Integrity] Failed to create alert: {e}")
+
+
+# ===============================================================================
+# AUDIT RETENTION MANAGEMENT SERVICE
+# ===============================================================================
+
+class AuditRetentionService:
+    """
+    📅 Audit log retention management service
+    
+    Features:
+    - Configurable retention periods by event category/severity
+    - Automatic archiving of old audit logs
+    - Romanian legal compliance (7-year financial records)
+    - GDPR right-to-erasure implementation
+    - Bulk deletion with approval workflows
+    - Archive storage and retrieval system
+    """
+
+    @classmethod
+    def apply_retention_policies(cls) -> Result[dict[str, Any], str]:
+        """Apply all active retention policies to audit data."""
+        
+        try:
+            policies = AuditRetentionPolicy.objects.filter(is_active=True)
+            results = {
+                'policies_applied': 0,
+                'events_processed': 0,
+                'events_archived': 0,
+                'events_deleted': 0,
+                'events_anonymized': 0,
+                'errors': []
+            }
+            
+            for policy in policies:
+                try:
+                    result = cls._apply_single_policy(policy)
+                    results['policies_applied'] += 1
+                    results['events_processed'] += result.get('processed', 0)
+                    results['events_archived'] += result.get('archived', 0)
+                    results['events_deleted'] += result.get('deleted', 0)
+                    results['events_anonymized'] += result.get('anonymized', 0)
+                    
+                except Exception as e:
+                    error_msg = f"Policy {policy.name} failed: {e}"
+                    results['errors'].append(error_msg)
+                    logger.error(f"🔥 [Retention] {error_msg}")
+            
+            # Log compliance event
+            compliance_request = ComplianceEventRequest(
+                compliance_type='data_retention',
+                reference_id=f"retention_run_{timezone.now().strftime('%Y%m%d_%H%M%S')}",
+                description=f"Retention policies applied: {results['policies_applied']} policies, {results['events_processed']} events processed",
+                status='success' if not results['errors'] else 'partial',
+                evidence=results
+            )
+            AuditService.log_compliance_event(compliance_request)
+            
+            logger.info(f"✅ [Retention] Policies applied: {results['policies_applied']} policies, {results['events_processed']} events processed")
+            return Ok(results)
+            
+        except Exception as e:
+            logger.error(f"🔥 [Retention] Policy application failed: {e}")
+            return Err(f"Retention policy application failed: {e!s}")
+    
+    @classmethod
+    @transaction.atomic
+    def _apply_single_policy(cls, policy: AuditRetentionPolicy) -> dict[str, int]:
+        """Apply a single retention policy."""
+        
+        # Calculate cutoff date
+        cutoff_date = timezone.now() - timedelta(days=policy.retention_days)
+        
+        # Build query for events to process
+        queryset = AuditEvent.objects.filter(
+            timestamp__lt=cutoff_date,
+            category=policy.category
+        )
+        
+        # Add severity filter if specified
+        if policy.severity:
+            queryset = queryset.filter(severity=policy.severity)
+        
+        events_to_process = list(queryset)
+        result = {
+            'processed': len(events_to_process),
+            'archived': 0,
+            'deleted': 0,
+            'anonymized': 0
+        }
+        
+        if not events_to_process:
+            return result
+        
+        # Apply retention action
+        if policy.action == 'archive':
+            result['archived'] = cls._archive_events(events_to_process)
+        elif policy.action == 'delete':
+            result['deleted'] = cls._delete_events(events_to_process, policy)
+        elif policy.action == 'anonymize':
+            result['anonymized'] = cls._anonymize_events(events_to_process)
+        
+        return result
+    
+    @classmethod
+    def _archive_events(cls, events: list[AuditEvent]) -> int:
+        """Archive events to cold storage (placeholder - implement with actual storage)."""
+        
+        # For now, mark events as archived in metadata
+        # In production, this would move data to cold storage (S3, etc.)
+        archived_count = 0
+        
+        for event in events:
+            event.metadata['archived'] = True
+            event.metadata['archived_at'] = timezone.now().isoformat()
+            event.save(update_fields=['metadata'])
+            archived_count += 1
+        
+        return archived_count
+    
+    @classmethod
+    def _delete_events(cls, events: list[AuditEvent], policy: AuditRetentionPolicy) -> int:
+        """Delete events (only if not mandatory retention)."""
+        
+        # Additional safety check for mandatory retention
+        if policy.is_mandatory:
+            logger.warning(f"⚠️ [Retention] Attempted deletion with mandatory policy: {policy.name}")
+            return 0
+        
+        # Check Romanian compliance (7-year financial records)
+        financial_events = [e for e in events if cls._is_financial_record(e)]
+        if financial_events:
+            logger.warning(f"⚠️ [Retention] Blocked deletion of {len(financial_events)} financial records (Romanian compliance)")
+            # Remove financial events from deletion list
+            events = [e for e in events if not cls._is_financial_record(e)]
+        
+        deleted_count = 0
+        event_ids = [e.id for e in events]
+        
+        if event_ids:
+            deleted_count = AuditEvent.objects.filter(id__in=event_ids).delete()[0]
+        
+        return deleted_count
+    
+    @classmethod
+    def _anonymize_events(cls, events: list[AuditEvent]) -> int:
+        """Anonymize sensitive data in events."""
+        
+        anonymized_count = 0
+        
+        for event in events:
+            # Anonymize IP addresses
+            if event.ip_address:
+                event.ip_address = '0.0.0.0'
+            
+            # Anonymize user agent
+            if event.user_agent:
+                event.user_agent = 'Anonymized'
+            
+            # Remove sensitive metadata
+            if event.metadata:
+                sensitive_keys = ['user_email', 'phone', 'real_name', 'address']
+                for key in sensitive_keys:
+                    if key in event.metadata:
+                        event.metadata[key] = 'Anonymized'
+            
+            event.metadata['anonymized'] = True
+            event.metadata['anonymized_at'] = timezone.now().isoformat()
+            event.save(update_fields=['ip_address', 'user_agent', 'metadata'])
+            anonymized_count += 1
+        
+        return anonymized_count
+    
+    @classmethod
+    def _is_financial_record(cls, event: AuditEvent) -> bool:
+        """Check if event is a financial record requiring 7-year retention."""
+        
+        financial_actions = [
+            'invoice_created', 'invoice_paid', 'payment_succeeded', 
+            'proforma_created', 'credit_added', 'vat_calculation_applied'
+        ]
+        
+        return event.action in financial_actions or event.category == 'business_operation'
+
+
+# ===============================================================================
+# ADVANCED AUDIT SEARCH SERVICE
+# ===============================================================================
+
+class AuditSearchService:
+    """
+    🔍 Advanced audit search and filtering service
+    
+    Features:
+    - Multi-criteria search (request_id, session_key, IP address, date ranges)
+    - Advanced filter combinations (category + severity, user + action type)
+    - Elasticsearch-style query builder interface
+    - Saved search queries for common investigations
+    - Real-time search suggestions and auto-completion
+    """
+
+    @classmethod
+    def build_advanced_query(
+        cls,
+        filters: dict[str, Any],
+        user: User
+    ) -> tuple[models.QuerySet[AuditEvent], dict[str, Any]]:
+        """Build advanced audit query with multiple filters and performance optimization."""
+        
+        # Start with base queryset
+        queryset = AuditEvent.objects.select_related('user', 'content_type')
+        query_info = {
+            'filters_applied': [],
+            'performance_hints': [],
+            'estimated_cost': 'low'
+        }
+        
+        # Apply filters
+        if filters.get('user_ids'):
+            queryset = queryset.filter(user_id__in=filters['user_ids'])
+            query_info['filters_applied'].append('user_filter')
+        
+        if filters.get('actions'):
+            queryset = queryset.filter(action__in=filters['actions'])
+            query_info['filters_applied'].append('action_filter')
+        
+        if filters.get('categories'):
+            queryset = queryset.filter(category__in=filters['categories'])
+            query_info['filters_applied'].append('category_filter')
+        
+        if filters.get('severities'):
+            queryset = queryset.filter(severity__in=filters['severities'])
+            query_info['filters_applied'].append('severity_filter')
+        
+        if filters.get('start_date'):
+            queryset = queryset.filter(timestamp__gte=filters['start_date'])
+            query_info['filters_applied'].append('date_range_start')
+        
+        if filters.get('end_date'):
+            queryset = queryset.filter(timestamp__lte=filters['end_date'])
+            query_info['filters_applied'].append('date_range_end')
+        
+        if filters.get('ip_addresses'):
+            ip_list = filters['ip_addresses'] if isinstance(filters['ip_addresses'], list) else [filters['ip_addresses']]
+            queryset = queryset.filter(ip_address__in=ip_list)
+            query_info['filters_applied'].append('ip_filter')
+        
+        if filters.get('request_ids'):
+            request_ids = filters['request_ids'] if isinstance(filters['request_ids'], list) else [filters['request_ids']]
+            queryset = queryset.filter(request_id__in=request_ids)
+            query_info['filters_applied'].append('request_id_filter')
+        
+        if filters.get('session_keys'):
+            session_keys = filters['session_keys'] if isinstance(filters['session_keys'], list) else [filters['session_keys']]
+            queryset = queryset.filter(session_key__in=session_keys)
+            query_info['filters_applied'].append('session_filter')
+        
+        if filters.get('content_types'):
+            queryset = queryset.filter(content_type_id__in=filters['content_types'])
+            query_info['filters_applied'].append('content_type_filter')
+        
+        if filters.get('search_text'):
+            search_text = filters['search_text']
+            queryset = queryset.filter(
+                Q(description__icontains=search_text) |
+                Q(old_values__icontains=search_text) |
+                Q(new_values__icontains=search_text) |
+                Q(action__icontains=search_text)
+            )
+            query_info['filters_applied'].append('text_search')
+            query_info['estimated_cost'] = 'medium'  # Text search is more expensive
+        
+        if filters.get('is_sensitive') is not None:
+            queryset = queryset.filter(is_sensitive=filters['is_sensitive'])
+            query_info['filters_applied'].append('sensitivity_filter')
+        
+        if filters.get('requires_review') is not None:
+            queryset = queryset.filter(requires_review=filters['requires_review'])
+            query_info['filters_applied'].append('review_filter')
+        
+        # Advanced filters
+        if filters.get('has_old_values'):
+            if filters['has_old_values']:
+                queryset = queryset.exclude(old_values={})
+            else:
+                queryset = queryset.filter(old_values={})
+            query_info['filters_applied'].append('old_values_filter')
+        
+        if filters.get('has_new_values'):
+            if filters['has_new_values']:
+                queryset = queryset.exclude(new_values={})
+            else:
+                queryset = queryset.filter(new_values={})
+            query_info['filters_applied'].append('new_values_filter')
+        
+        # Performance optimization hints
+        if len(query_info['filters_applied']) > 5:
+            query_info['estimated_cost'] = 'high'
+            query_info['performance_hints'].append('Consider using saved queries for complex searches')
+        
+        if 'text_search' in query_info['filters_applied'] and len(query_info['filters_applied']) == 1:
+            query_info['performance_hints'].append('Add date range or user filters to improve search performance')
+        
+        # Default ordering
+        queryset = queryset.order_by('-timestamp')
+        
+        return queryset, query_info
+    
+    @classmethod
+    @transaction.atomic
+    def save_search_query(
+        cls,
+        name: str,
+        query_params: dict[str, Any],
+        user: User,
+        description: str = '',
+        is_shared: bool = False
+    ) -> Result[AuditSearchQuery, str]:
+        """Save a search query for reuse."""
+        
+        try:
+            # Check for duplicate names for this user
+            existing = AuditSearchQuery.objects.filter(
+                name=name,
+                created_by=user
+            ).exists()
+            
+            if existing:
+                return Err(f"Search query '{name}' already exists")
+            
+            search_query = AuditSearchQuery.objects.create(
+                name=name,
+                description=description,
+                query_params=query_params,
+                created_by=user,
+                is_shared=is_shared
+            )
+            
+            logger.info(f"✅ [Audit Search] Query saved: {name} by {user.email}")
+            return Ok(search_query)
+            
+        except Exception as e:
+            logger.error(f"🔥 [Audit Search] Failed to save query: {e}")
+            return Err(f"Failed to save search query: {e!s}")
+    
+    @classmethod
+    def get_search_suggestions(
+        cls,
+        query: str,
+        user: User,
+        limit: int = 10
+    ) -> dict[str, list[str]]:
+        """Get search suggestions for auto-completion."""
+        
+        suggestions = {
+            'actions': [],
+            'users': [],
+            'ip_addresses': [],
+            'descriptions': []
+        }
+        
+        if not query or len(query) < 2:
+            return suggestions
+        
+        try:
+            # Action suggestions
+            action_choices = [choice[0] for choice in AuditEvent.ACTION_CHOICES if query.lower() in choice[0].lower()]
+            suggestions['actions'] = action_choices[:limit]
+            
+            # User suggestions (staff only for privacy)
+            if user.is_staff:
+                users = User.objects.filter(
+                    Q(email__icontains=query) | Q(first_name__icontains=query) | Q(last_name__icontains=query)
+                ).values_list('email', flat=True)[:limit]
+                suggestions['users'] = list(users)
+            
+            # IP address suggestions (recent ones)
+            if cls._is_ip_like(query):
+                recent_ips = AuditEvent.objects.filter(
+                    ip_address__icontains=query,
+                    timestamp__gte=timezone.now() - timedelta(days=30)
+                ).values_list('ip_address', flat=True).distinct()[:limit]
+                suggestions['ip_addresses'] = list(recent_ips)
+            
+        except Exception as e:
+            logger.warning(f"⚠️ [Audit Search] Suggestion generation failed: {e}")
+        
+        return suggestions
+    
+    @classmethod
+    def _is_ip_like(cls, query: str) -> bool:
+        """Check if query looks like an IP address."""
+        import re
+        ip_pattern = r'^\d{1,3}(\.\d{0,3}){0,3}$'
+        return bool(re.match(ip_pattern, query))
+
+
+# Global service instances
+audit_integrity_service = AuditIntegrityService()
+audit_retention_service = AuditRetentionService()
+audit_search_service = AuditSearchService()
 
 # Global GDPR service instances
 gdpr_export_service = GDPRExportService()

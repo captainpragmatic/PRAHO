@@ -69,7 +69,7 @@ def prepare_billing_table_data(documents: list[Any], user: Any) -> dict[str, lis
         # Customer cell
         customer_cell = {
             "content": f"<div class='text-white'>{customer.get_display_name()}</div>"
-                      f"<div class='text-slate-400 text-sm'>{getattr(customer, 'tax_profile', None) and customer.tax_profile.cui or 'N/A'}</div>"
+                      f"<div class='text-slate-400 text-sm'>{(getattr(customer, 'tax_profile', None) and customer.tax_profile.cui) or 'N/A'}</div>"
         }
         
         # Amount cell

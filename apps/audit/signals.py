@@ -6,23 +6,13 @@ Implements industry-standard user action auditing (GDPR, ISO 27001, NIST, SOX, P
 import logging
 from typing import Any
 
-from django.contrib.auth import get_user_model
-from django.contrib.auth.signals import (
-    user_logged_in,
-    user_logged_out, 
-    user_login_failed
-)
-from django.db.models.signals import (
-    post_save,
-    pre_delete,
-    m2m_changed
-)
-from django.dispatch import receiver, Signal
+from django.db.models.signals import post_save, pre_delete
+from django.dispatch import Signal, receiver
 from django.http import HttpRequest
 
-from apps.users.models import User, UserProfile, CustomerMembership
+from apps.users.models import CustomerMembership, User, UserProfile
 
-from .services import AuditService, AuditEventData, AuditContext
+from .services import AuditContext, AuditEventData, AuditService
 
 logger = logging.getLogger(__name__)
 
@@ -220,7 +210,7 @@ def audit_user_profile_changes(sender: type[User], instance: User, created: bool
     
     try:
         # Check if we have update_fields specified - this helps detect specific changes
-        update_fields = kwargs.get('update_fields', None)
+        update_fields = kwargs.get('update_fields')
         
         # If no specific fields were updated, we need to compare with previous version
         # However, for post_save signal, we don't have the previous version easily
@@ -324,7 +314,7 @@ def audit_user_profile_preferences(sender: type[UserProfile], instance: UserProf
     
     try:
         # Similar to User model, we'll use update_fields when available
-        update_fields = kwargs.get('update_fields', None)
+        update_fields = kwargs.get('update_fields')
         
         if update_fields:
             preference_fields = {
@@ -416,7 +406,7 @@ def audit_customer_membership_changes(sender: type[CustomerMembership], instance
             )
         else:
             # For updates, use update_fields when available
-            update_fields = kwargs.get('update_fields', None)
+            update_fields = kwargs.get('update_fields')
             
             if update_fields:
                 if 'role' in update_fields:

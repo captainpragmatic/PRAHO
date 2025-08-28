@@ -33,12 +33,12 @@ from django.views.generic import DetailView, ListView
 from django_ratelimit.decorators import ratelimit  # type: ignore[import-untyped]
 from django_ratelimit.exceptions import Ratelimited  # type: ignore[import-untyped]
 
+from apps.audit.services import AuthenticationAuditService
 from apps.common.constants import BACKUP_CODE_LENGTH, BACKUP_CODE_LOW_WARNING_THRESHOLD
 from apps.common.utils import (
     json_error,
     json_success,
 )
-from apps.audit.services import AuthenticationAuditService
 
 from .forms import (
     CustomerOnboardingRegistrationForm,
