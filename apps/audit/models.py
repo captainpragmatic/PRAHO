@@ -558,7 +558,7 @@ class AuditSearchQuery(models.Model):
     
     # Sharing
     is_shared = models.BooleanField(default=False)  # Available to all staff
-    shared_with = models.ManyToManyField(User, related_name='shared_audit_queries', blank=True)
+    shared_with: models.ManyToManyField = models.ManyToManyField(User, related_name='shared_audit_queries', blank=True)
 
     class Meta:
         db_table = 'audit_search_query'
@@ -620,7 +620,7 @@ class AuditAlert(models.Model):
     
     # Related data
     related_events = models.ManyToManyField(AuditEvent, blank=True)  # Events that triggered this alert
-    affected_users = models.ManyToManyField(User, blank=True, related_name='audit_alerts')  # Users affected by this alert
+    affected_users: models.ManyToManyField = models.ManyToManyField(User, blank=True, related_name='audit_alerts')  # Users affected by this alert
     
     # Evidence and context
     evidence = models.JSONField(default=dict, blank=True)

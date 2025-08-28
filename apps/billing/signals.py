@@ -226,8 +226,6 @@ def handle_payment_created_or_updated(sender: type[Payment], instance: Payment, 
     - Service activation
     """
     try:
-        event_type = 'payment_created' if created else 'payment_updated'
-        
         old_values = getattr(instance, '_original_payment_values', {}) if not created else {}
         new_values = {
             'status': instance.status,

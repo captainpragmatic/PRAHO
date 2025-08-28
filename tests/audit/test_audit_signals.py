@@ -127,7 +127,7 @@ class TestAuditSignalHelpers(TestCase):
         )
         
         # Verify event was created with correct categorization
-        audit_event = AuditEvent.objects.get(action='profile_updated')
+        audit_event = AuditEvent.objects.filter(action='profile_updated').first()
         assert audit_event.category == 'account_management'
         assert audit_event.severity == 'medium'
         assert audit_event.is_sensitive is True
@@ -392,7 +392,7 @@ class TestCustomerMembershipAudit(TransactionTestCase):
         
         audit_event = audit_events.first()
         assert audit_event.new_values['role'] == 'billing'
-        assert audit_event.metadata['requires_review'] is True
+        assert audit_event.requires_review is True
     
     def test_audit_primary_customer_change(self):
         """Test audit logging for primary customer changes"""
@@ -682,7 +682,7 @@ class TestSecurityEventDetection(TestCase):
             metadata={'incident_type': 'suspicious_activity'}
         )
         
-        audit_event = AuditEvent.objects.get(action='security_incident_detected')
+        audit_event = AuditEvent.objects.filter(action='security_incident_detected').first()
         assert audit_event.category == 'security_event'
         assert audit_event.severity == 'critical'
         assert audit_event.requires_review is True

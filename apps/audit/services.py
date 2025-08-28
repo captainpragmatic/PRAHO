@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -13,7 +14,8 @@ from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.models import ContentType
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
-from django.db import transaction
+from django.db import models, transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.common.types import EmailAddress, Err, Ok, Result
@@ -28,6 +30,11 @@ from .models import (
     ComplianceLog,
     DataExport,
 )
+
+# Constants for audit operations
+ONE_HOUR_SECONDS = 3600  # 1 hour in seconds for gap detection
+HIGH_COMPLEXITY_FILTER_THRESHOLD = 5  # Number of filters that indicate high complexity
+MIN_SEARCH_QUERY_LENGTH = 2  # Minimum length for search queries
 
 """
 Audit services for PRAHO Platform
@@ -179,6 +186,70 @@ class ComplianceEventRequest:
     status: str = 'success'
     evidence: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
+
+@dataclass
+class AuthenticationEventData:
+    """Parameter object for authentication event data"""
+    user: User
+    request: Any = None
+    ip_address: str | None = None
+    user_agent: str | None = None
+    session_key: str | None = None
+    authentication_method: str = 'password'
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+@dataclass
+class LoginFailureEventData:
+    """Parameter object for login failure event data"""
+    email: str | None = None
+    user: User | None = None
+    request: Any = None
+    ip_address: str | None = None
+    user_agent: str | None = None
+    failure_reason: str = 'invalid_credentials'
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+@dataclass
+class LogoutEventData:
+    """Parameter object for logout event data"""
+    user: User
+    logout_reason: str = 'manual'
+    request: Any = None
+    ip_address: str | None = None
+    user_agent: str | None = None
+    session_key: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+@dataclass
+class AccountEventData:
+    """Parameter object for account-related event data (lockout, session rotation)"""
+    user: User
+    trigger_reason: str
+    request: Any = None
+    ip_address: str | None = None
+    failed_attempts: int | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+@dataclass
+class SessionRotationEventData:
+    """Parameter object for session rotation event data"""
+    user: User
+    reason: str
+    request: Any = None
+    old_session_key: str | None = None
+    new_session_key: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+@dataclass
+class BusinessEventData:
+    """Parameter object for business transaction event data"""
+    event_type: str
+    business_object: Any  # Invoice, Payment, Order, etc.
+    user: User | None = None
+    context: AuditContext | None = None
+    old_values: dict[str, Any] | None = None
+    new_values: dict[str, Any] | None = None
+    description: str | None = None
 logger = logging.getLogger(__name__)
 
 
@@ -196,101 +267,73 @@ class AuthenticationAuditService:
     """
 
     @staticmethod
-    def log_login_success(
-        user: User,
-        request: Any = None,
-        ip_address: str | None = None,
-        user_agent: str | None = None,
-        session_key: str | None = None,
-        authentication_method: str = 'password',
-        metadata: dict[str, Any] | None = None
-    ) -> AuditEvent:
+    def log_login_success(event_data: AuthenticationEventData) -> AuditEvent:
         """
         Log successful login event with comprehensive metadata
         
         Args:
-            user: The authenticated user
-            request: Django request object (optional, for extracting context)
-            ip_address: Client IP address
-            user_agent: Client user agent string
-            session_key: Session identifier
-            authentication_method: Method used (password, 2fa_totp, 2fa_backup, etc.)
-            metadata: Additional metadata
+            event_data: Authentication event data containing user and context info
         """
         # Extract context from request if provided
-        if request:
-            ip_address = ip_address or _get_client_ip_from_request(request)
-            user_agent = user_agent or request.META.get('HTTP_USER_AGENT', '')
-            session_key = session_key or request.session.session_key
+        if event_data.request:
+            event_data.ip_address = event_data.ip_address or _get_client_ip_from_request(event_data.request)
+            event_data.user_agent = event_data.user_agent or event_data.request.META.get('HTTP_USER_AGENT', '')
+            event_data.session_key = event_data.session_key or event_data.request.session.session_key
         
         # Build comprehensive metadata
         auth_metadata = {
-            'authentication_method': authentication_method,
+            'authentication_method': event_data.authentication_method,
             'login_timestamp': timezone.now().isoformat(),
-            'user_id': str(user.id),
-            'user_email': user.email,
-            'user_staff_status': user.is_staff,
-            'user_2fa_enabled': getattr(user, 'two_factor_enabled', False),
-            'previous_login': user.last_login.isoformat() if user.last_login else None,
-            'failed_attempts_before': getattr(user, 'failed_login_attempts', 0),
-            'account_was_locked': getattr(user, 'is_account_locked', lambda: False)(),
+            'user_id': str(event_data.user.id),
+            'user_email': event_data.user.email,
+            'user_staff_status': event_data.user.is_staff,
+            'user_2fa_enabled': getattr(event_data.user, 'two_factor_enabled', False),
+            'previous_login': event_data.user.last_login.isoformat() if event_data.user.last_login else None,
+            'failed_attempts_before': getattr(event_data.user, 'failed_login_attempts', 0),
+            'account_was_locked': getattr(event_data.user, 'is_account_locked', lambda: False)(),
             'session_info': {
-                'session_key': session_key,
+                'session_key': event_data.session_key,
                 'session_created': timezone.now().isoformat()
             },
-            **(metadata or {})
+            **event_data.metadata
         }
         
         # Add user agent analysis if available
-        if user_agent:
+        if event_data.user_agent:
             auth_metadata['user_agent_info'] = {
-                'raw': user_agent,
-                'truncated': user_agent[:200],  # Prevent excessively long strings
+                'raw': event_data.user_agent,
+                'truncated': event_data.user_agent[:200],  # Prevent excessively long strings
             }
         
         context = AuditContext(
-            user=user,
-            ip_address=ip_address,
-            user_agent=user_agent,
-            session_key=session_key,
+            user=event_data.user,
+            ip_address=event_data.ip_address,
+            user_agent=event_data.user_agent,
+            session_key=event_data.session_key,
             metadata=auth_metadata,
             actor_type='user'
         )
         
-        event_data = AuditEventData(
+        audit_event_data = AuditEventData(
             event_type='login_success',
-            content_object=user,
-            description=f"Successful login via {authentication_method} for {user.email}"
+            content_object=event_data.user,
+            description=f"Successful login via {event_data.authentication_method} for {event_data.user.email}"
         )
         
-        return AuditService.log_event(event_data, context)
+        return AuditService.log_event(audit_event_data, context)
 
     @staticmethod
-    def log_login_failed(
-        email: str | None = None,
-        user: User | None = None,
-        failure_reason: str = 'invalid_credentials',
-        request: Any = None,
-        ip_address: str | None = None,
-        user_agent: str | None = None,
-        metadata: dict[str, Any] | None = None
-    ) -> AuditEvent:
+    def log_login_failed(failure_data: LoginFailureEventData) -> AuditEvent:
         """
         Log failed login attempt with security-focused metadata
         
         Args:
-            email: Attempted email (may not exist)
-            user: User object if exists (optional)
-            failure_reason: Reason for failure (invalid_password, user_not_found, account_locked, etc.)
-            request: Django request object (optional)
-            ip_address: Client IP address
-            user_agent: Client user agent string
-            metadata: Additional metadata
+            failure_data: Login failure event data containing email, user, and context info
         """
         # Extract context from request if provided
-        if request:
-            ip_address = ip_address or _get_client_ip_from_request(request)
-            user_agent = user_agent or request.META.get('HTTP_USER_AGENT', '')
+        if failure_data.request:
+            failure_data.ip_address = failure_data.ip_address or _get_client_ip_from_request(failure_data.request)
+            failure_data.user_agent = failure_data.user_agent or failure_data.request.META.get('HTTP_USER_AGENT', '')
         
         # Determine the appropriate action based on failure reason
         action_map = {
@@ -300,80 +343,66 @@ class AuthenticationAuditService:
             '2fa_verification': 'login_failed_2fa',
             'unknown': 'login_failed'
         }
-        action = action_map.get(failure_reason, 'login_failed')
+        action = action_map.get(failure_data.failure_reason, 'login_failed')
         
         # Build security-focused metadata
         auth_metadata = {
-            'failure_reason': failure_reason,
-            'attempted_email': email,
+            'failure_reason': failure_data.failure_reason,
+            'attempted_email': failure_data.email,
             'attempt_timestamp': timezone.now().isoformat(),
             'security_analysis': {
                 'ip_based_attempt': True,
-                'user_agent_provided': bool(user_agent),
+                'user_agent_provided': bool(failure_data.user_agent),
             },
-            **(metadata or {})
+            **failure_data.metadata
         }
         
         # Add user context if user exists
-        if user:
+        if failure_data.user:
             auth_metadata.update({
-                'user_id': str(user.id),
+                'user_id': str(failure_data.user.id),
                 'user_exists': True,
-                'user_active': user.is_active,
-                'user_staff': user.is_staff,
-                'previous_failed_attempts': getattr(user, 'failed_login_attempts', 0),
-                'account_locked': getattr(user, 'is_account_locked', lambda: False)(),
-                'user_2fa_enabled': getattr(user, 'two_factor_enabled', False),
+                'user_active': failure_data.user.is_active,
+                'user_staff': failure_data.user.is_staff,
+                'previous_failed_attempts': getattr(failure_data.user, 'failed_login_attempts', 0),
+                'account_locked': getattr(failure_data.user, 'is_account_locked', lambda: False)(),
+                'user_2fa_enabled': getattr(failure_data.user, 'two_factor_enabled', False),
             })
         else:
             auth_metadata.update({
                 'user_exists': False,
-                'attempted_email_format_valid': bool(email and '@' in email),
+                'attempted_email_format_valid': bool(failure_data.email and '@' in failure_data.email),
             })
         
         context = AuditContext(
-            user=user,
-            ip_address=ip_address,
-            user_agent=user_agent,
+            user=failure_data.user,
+            ip_address=failure_data.ip_address,
+            user_agent=failure_data.user_agent,
             metadata=auth_metadata,
-            actor_type='anonymous' if not user else 'user'
+            actor_type='anonymous' if not failure_data.user else 'user'
         )
         
-        event_data = AuditEventData(
+        audit_event_data = AuditEventData(
             event_type=action,
-            content_object=user,  # May be None for non-existent users
-            description=f"Failed login attempt: {failure_reason} for {email or 'unknown'}"
+            content_object=failure_data.user,  # May be None for non-existent users
+            description=f"Failed login attempt: {failure_data.failure_reason} for {failure_data.email or 'unknown'}"
         )
         
-        return AuditService.log_event(event_data, context)
+        return AuditService.log_event(audit_event_data, context)
 
     @staticmethod
-    def log_logout(
-        user: User,
-        logout_reason: str = 'manual',
-        request: Any = None,
-        ip_address: str | None = None,
-        user_agent: str | None = None,
-        session_key: str | None = None,
-        metadata: dict[str, Any] | None = None
-    ) -> AuditEvent:
+    def log_logout(logout_data: LogoutEventData) -> AuditEvent:
         """
         Log logout event with session and security context
         
         Args:
-            user: The user being logged out
-            logout_reason: Reason for logout (manual, session_expired, security_event, concurrent_session)
-            request: Django request object (optional)
-            ip_address: Client IP address
-            user_agent: Client user agent string  
-            session_key: Session identifier being ended
-            metadata: Additional metadata
+            logout_data: Logout event data containing user and context info
         """
         # Extract context from request if provided
-        if request:
-            ip_address = ip_address or _get_client_ip_from_request(request)
-            user_agent = user_agent or request.META.get('HTTP_USER_AGENT', '')
-            session_key = session_key or getattr(request.session, 'session_key', None)
+        if logout_data.request:
+            logout_data.ip_address = logout_data.ip_address or _get_client_ip_from_request(logout_data.request)
+            logout_data.user_agent = logout_data.user_agent or logout_data.request.META.get('HTTP_USER_AGENT', '')
+            logout_data.session_key = logout_data.session_key or getattr(logout_data.request.session, 'session_key', None)
         
         # Map logout reasons to actions
         action_map = {
@@ -382,143 +411,119 @@ class AuthenticationAuditService:
             'security_event': 'logout_security_event',
             'concurrent_session': 'logout_concurrent_session'
         }
-        action = action_map.get(logout_reason, 'logout_manual')
+        action = action_map.get(logout_data.logout_reason, 'logout_manual')
         
         # Build session and security metadata
         auth_metadata = {
-            'logout_reason': logout_reason,
+            'logout_reason': logout_data.logout_reason,
             'logout_timestamp': timezone.now().isoformat(),
-            'user_id': str(user.id),
-            'user_email': user.email,
+            'user_id': str(logout_data.user.id),
+            'user_email': logout_data.user.email,
             'session_info': {
-                'session_key': session_key,
+                'session_key': logout_data.session_key,
                 'session_ended': timezone.now().isoformat(),
             },
             'security_context': {
-                'user_2fa_enabled': getattr(user, 'two_factor_enabled', False),
-                'logout_triggered_by': logout_reason,
+                'user_2fa_enabled': getattr(logout_data.user, 'two_factor_enabled', False),
+                'logout_triggered_by': logout_data.logout_reason,
             },
-            **(metadata or {})
+            **logout_data.metadata
         }
         
         # Add login session duration if available
-        if user.last_login:
-            session_duration = timezone.now() - user.last_login
+        if logout_data.user.last_login:
+            session_duration = timezone.now() - logout_data.user.last_login
             auth_metadata['session_info']['duration_seconds'] = int(session_duration.total_seconds())
             auth_metadata['session_info']['duration_human'] = str(session_duration)
         
         context = AuditContext(
-            user=user,
-            ip_address=ip_address,
-            user_agent=user_agent,
-            session_key=session_key,
+            user=logout_data.user,
+            ip_address=logout_data.ip_address,
+            user_agent=logout_data.user_agent,
+            session_key=logout_data.session_key,
             metadata=auth_metadata,
             actor_type='user'
         )
         
-        event_data = AuditEventData(
+        audit_event_data = AuditEventData(
             event_type=action,
-            content_object=user,
-            description=f"User logout: {logout_reason} for {user.email}"
+            content_object=logout_data.user,
+            description=f"User logout: {logout_data.logout_reason} for {logout_data.user.email}"
         )
         
-        return AuditService.log_event(event_data, context)
+        return AuditService.log_event(audit_event_data, context)
 
     @staticmethod
-    def log_account_locked(
-        user: User,
-        trigger_reason: str,
-        request: Any = None,
-        ip_address: str | None = None,
-        failed_attempts: int | None = None,
-        metadata: dict[str, Any] | None = None
-    ) -> AuditEvent:
+    def log_account_locked(account_data: AccountEventData) -> AuditEvent:
         """
         Log account lockout event with security details
         
         Args:
-            user: The user whose account was locked
-            trigger_reason: Why the account was locked
-            request: Django request object (optional)
-            ip_address: Client IP address
-            failed_attempts: Number of failed attempts that triggered lockout
-            metadata: Additional metadata
+            account_data: Account event data containing user and context info
         """
-        if request:
-            ip_address = ip_address or _get_client_ip_from_request(request)
+        if account_data.request:
+            account_data.ip_address = account_data.ip_address or _get_client_ip_from_request(account_data.request)
         
         auth_metadata = {
-            'lockout_reason': trigger_reason,
+            'lockout_reason': account_data.trigger_reason,
             'lockout_timestamp': timezone.now().isoformat(),
-            'failed_attempts_count': failed_attempts or getattr(user, 'failed_login_attempts', 0),
-            'user_id': str(user.id),
-            'user_email': user.email,
+            'failed_attempts_count': account_data.failed_attempts or getattr(account_data.user, 'failed_login_attempts', 0),
+            'user_id': str(account_data.user.id),
+            'user_email': account_data.user.email,
             'security_event': True,
-            **(metadata or {})
+            **account_data.metadata
         }
         
         context = AuditContext(
-            user=user,
-            ip_address=ip_address,
+            user=account_data.user,
+            ip_address=account_data.ip_address,
             metadata=auth_metadata,
             actor_type='system'
         )
         
-        event_data = AuditEventData(
+        audit_event_data = AuditEventData(
             event_type='account_locked',
-            content_object=user,
-            description=f"Account locked for {user.email}: {trigger_reason}"
+            content_object=account_data.user,
+            description=f"Account locked for {account_data.user.email}: {account_data.trigger_reason}"
         )
         
-        return AuditService.log_event(event_data, context)
+        return AuditService.log_event(audit_event_data, context)
 
     @staticmethod
-    def log_session_rotation(
-        user: User,
-        reason: str,
-        request: Any = None,
-        old_session_key: str | None = None,
-        new_session_key: str | None = None,
-        metadata: dict[str, Any] | None = None
-    ) -> AuditEvent:
+    def log_session_rotation(session_data: SessionRotationEventData) -> AuditEvent:
         """
         Log session rotation events for security tracking
         
         Args:
-            user: The user whose session was rotated
-            reason: Reason for rotation (2fa_change, password_change, security_event)
-            request: Django request object (optional) 
-            old_session_key: Previous session key
-            new_session_key: New session key
-            metadata: Additional metadata
+            session_data: Session rotation event data containing user and context info
         """
         auth_metadata = {
-            'rotation_reason': reason,
+            'rotation_reason': session_data.reason,
             'rotation_timestamp': timezone.now().isoformat(),
-            'user_id': str(user.id),
+            'user_id': str(session_data.user.id),
             'session_info': {
-                'old_session_key': old_session_key,
-                'new_session_key': new_session_key,
+                'old_session_key': session_data.old_session_key,
+                'new_session_key': session_data.new_session_key,
             },
             'security_enhancement': True,
-            **(metadata or {})
+            **session_data.metadata
         }
         
         context = AuditContext(
-            user=user,
-            ip_address=_get_client_ip_from_request(request) if request else None,
-            session_key=new_session_key,
+            user=session_data.user,
+            ip_address=_get_client_ip_from_request(session_data.request) if session_data.request else None,
+            session_key=session_data.new_session_key,
             metadata=auth_metadata,
             actor_type='system'
         )
         
-        event_data = AuditEventData(
+        audit_event_data = AuditEventData(
             event_type='session_rotation',
-            content_object=user,
-            description=f"Session rotated for {user.email}: {reason}"
+            content_object=session_data.user,
+            description=f"Session rotated for {session_data.user.email}: {session_data.reason}"
         )
         
-        return AuditService.log_event(event_data, context)
+        return AuditService.log_event(audit_event_data, context)
 
 
 def _get_client_ip_from_request(request: Any) -> str:
@@ -604,64 +609,50 @@ class AuditService:
     @staticmethod
     def _get_action_category(action: str) -> str:
         """Determine audit event category from action type"""
-        # Authentication events
-        if action.startswith(('login_', 'logout_', 'session_', 'account_')):
-            return 'authentication'
+        # Use a mapping approach to reduce branching complexity
+        category_mappings = {
+            'authentication': [
+                'login_', 'logout_', 'session_', 'account_', 'password_', '2fa_'
+            ],
+            'account_management': [
+                'profile_updated', 'email_changed', 'phone_updated', 'name_changed'
+            ],
+            'privacy': [
+                'privacy_', 'gdpr_', 'marketing_consent', 'cookie_consent'
+            ],
+            'authorization': [
+                'role_assigned', 'role_removed', 'permission_granted', 
+                'permission_revoked', 'staff_role_changed', 'customer_'
+            ],
+            'security_event': [
+                'security_', 'suspicious_', 'brute_force', 'malicious_', 'data_breach'
+            ],
+            'data_protection': [
+                'data_export', 'data_deletion'
+            ],
+            'integration': [
+                'api_', 'webhook_'
+            ],
+            'system_admin': [
+                'system_', 'backup_', 'configuration_', 'user_impersonation'
+            ],
+            'compliance': [
+                'vat_', 'efactura_', 'data_retention', 'tax_rule'
+            ],
+            'business_operation': [
+                'proforma_', 'invoice_', 'payment_', 'credit_', 'billing_', 
+                'currency_conversion', 'order_', 'provisioning_', 'service_', 'domain_'
+            ]
+        }
         
-        # Password events
-        if action.startswith('password_'):
-            return 'authentication'
-        
-        # 2FA events
-        if action.startswith('2fa_'):
-            return 'authentication'
-        
-        # Profile and privacy events
-        if action in ['profile_updated', 'email_changed', 'phone_updated', 'name_changed']:
-            return 'account_management'
-        
-        if action.startswith(('privacy_', 'gdpr_', 'marketing_consent', 'cookie_consent')):
-            return 'privacy'
-        
-        # Authorization events
-        if action in ['role_assigned', 'role_removed', 'permission_granted', 'permission_revoked', 'staff_role_changed']:
-            return 'authorization'
-        
-        # Customer relationship events
-        if action.startswith('customer_'):
-            return 'authorization'
-        
-        # Security events
-        if action.startswith(('security_', 'suspicious_', 'brute_force', 'malicious_')):
-            return 'security_event'
-        
-        # Data protection events (except data_breach which is security)
-        if action.startswith(('data_export', 'data_deletion')):
-            return 'data_protection'
-        
-        # Data breach is a security event
-        if action.startswith('data_breach'):
-            return 'security_event'
-        
-        # API/Integration events
-        if action.startswith(('api_', 'webhook_')):
-            return 'integration'
-        
-        # System admin events
-        if action.startswith(('system_', 'backup_', 'configuration_', 'user_impersonation')):
-            return 'system_admin'
-        
-        # Compliance events
-        if action.startswith(('vat_', 'efactura_', 'data_retention', 'tax_rule')):
-            return 'compliance'
-        
-        # Billing and financial events
-        if action.startswith(('proforma_', 'invoice_', 'payment_', 'credit_', 'billing_', 'currency_conversion')):
-            return 'business_operation'
-        
-        # Order management events
-        if action.startswith(('order_', 'provisioning_', 'service_', 'domain_')):
-            return 'business_operation'
+        # Check each category's patterns
+        for category, patterns in category_mappings.items():
+            for pattern in patterns:
+                if pattern.endswith('_'):  # Prefix pattern
+                    if action.startswith(pattern):
+                        return category
+                elif action == pattern:
+                    return category
         
         # Default to business operation
         return 'business_operation'
@@ -1491,85 +1482,63 @@ class BillingAuditService:
     """
 
     @staticmethod
-    def log_invoice_event(
-        event_type: str,
-        invoice: Any,
-        user: User | None = None,
-        context: AuditContext | None = None,
-        old_values: dict[str, Any] | None = None,
-        new_values: dict[str, Any] | None = None,
-        description: str | None = None
-    ) -> AuditEvent:
+    def log_invoice_event(event_data: BusinessEventData) -> AuditEvent:
         """
         Log invoice-related audit event with financial context
         
         Args:
-            event_type: Type of invoice event (invoice_created, invoice_paid, etc.)
-            invoice: Invoice object being audited
-            user: User performing the action
-            context: Additional audit context
-            old_values: Previous values for comparison
-            new_values: New values for comparison
-            description: Optional description override
+            event_data: Business event data containing event type, invoice, and context info
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        if event_data.context is None:
+            event_data.context = AuditContext(user=event_data.user)
         
         # Build invoice-specific metadata
         invoice_metadata = {
-            'invoice_number': invoice.number,
-            'invoice_status': invoice.status,
-            'customer_id': str(invoice.customer.id),
-            'customer_name': invoice.bill_to_name or invoice.customer.company_name,
-            'currency': invoice.currency.code,
-            'total_amount': str(invoice.total),
-            'total_cents': invoice.total_cents,
-            'vat_amount': str(invoice.tax_amount),
-            'vat_cents': invoice.tax_cents,
-            'due_date': invoice.due_at.isoformat() if invoice.due_at else None,
-            'issued_date': invoice.issued_at.isoformat() if invoice.issued_at else None,
-            'is_overdue': invoice.is_overdue(),
+            'invoice_number': event_data.business_object.number,
+            'invoice_status': event_data.business_object.status,
+            'customer_id': str(event_data.business_object.customer.id),
+            'customer_name': event_data.business_object.bill_to_name or event_data.business_object.customer.company_name,
+            'currency': event_data.business_object.currency.code,
+            'total_amount': str(event_data.business_object.total),
+            'total_cents': event_data.business_object.total_cents,
+            'vat_amount': str(event_data.business_object.tax_amount),
+            'vat_cents': event_data.business_object.tax_cents,
+            'due_date': event_data.business_object.due_at.isoformat() if event_data.business_object.due_at else None,
+            'issued_date': event_data.business_object.issued_at.isoformat() if event_data.business_object.issued_at else None,
+            'is_overdue': event_data.business_object.is_overdue(),
             'romanian_compliance': {
-                'efactura_id': invoice.efactura_id,
-                'efactura_sent': invoice.efactura_sent,
-                'efactura_sent_date': invoice.efactura_sent_date.isoformat() if invoice.efactura_sent_date else None,
+                'efactura_id': event_data.business_object.efactura_id,
+                'efactura_sent': event_data.business_object.efactura_sent,
+                'efactura_sent_date': event_data.business_object.efactura_sent_date.isoformat() if event_data.business_object.efactura_sent_date else None,
             },
-            **context.metadata
+            **event_data.context.metadata
         }
         
         # Enhanced context with invoice metadata
         enhanced_context = AuditContext(
-            user=context.user,
-            ip_address=context.ip_address,
-            user_agent=context.user_agent,
-            request_id=context.request_id,
-            session_key=context.session_key,
+            user=event_data.context.user,
+            ip_address=event_data.context.ip_address,
+            user_agent=event_data.context.user_agent,
+            request_id=event_data.context.request_id,
+            session_key=event_data.context.session_key,
             metadata=serialize_metadata(invoice_metadata),
-            actor_type=context.actor_type
+            actor_type=event_data.context.actor_type
         )
         
         # Create audit event data
-        event_data = AuditEventData(
-            event_type=event_type,
-            content_object=invoice,
-            old_values=old_values,
-            new_values=new_values,
-            description=description or f"Invoice {event_type.replace('_', ' ').title()}: {invoice.number}"
+        audit_event_data = AuditEventData(
+            event_type=event_data.event_type,
+            content_object=event_data.business_object,
+            old_values=event_data.old_values,
+            new_values=event_data.new_values,
+            description=event_data.description or f"Invoice {event_data.event_type.replace('_', ' ').title()}: {event_data.business_object.number}"
         )
         
-        return AuditService.log_event(event_data, enhanced_context)
+        return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_payment_event(
-        event_type: str,
-        payment: Any,
-        user: User | None = None,
-        context: AuditContext | None = None,
-        old_values: dict[str, Any] | None = None,
-        new_values: dict[str, Any] | None = None,
-        description: str | None = None
-    ) -> AuditEvent:
+    def log_payment_event(event_data: BusinessEventData) -> AuditEvent:
         """
         Log payment-related audit event with transaction context
         
@@ -1628,15 +1597,7 @@ class BillingAuditService:
         return AuditService.log_event(event_data, enhanced_context)
 
     @staticmethod
-    def log_proforma_event(
-        event_type: str,
-        proforma: Any,
-        user: User | None = None,
-        context: AuditContext | None = None,
-        old_values: dict[str, Any] | None = None,
-        new_values: dict[str, Any] | None = None,
-        description: str | None = None
-    ) -> AuditEvent:
+    def log_proforma_event(event_data: BusinessEventData) -> AuditEvent:
         """
         Log proforma-related audit event
         
@@ -1765,15 +1726,7 @@ class OrdersAuditService:
     """
 
     @staticmethod
-    def log_order_event(
-        event_type: str,
-        order: Any,
-        user: User | None = None,
-        context: AuditContext | None = None,
-        old_values: dict[str, Any] | None = None,
-        new_values: dict[str, Any] | None = None,
-        description: str | None = None
-    ) -> AuditEvent:
+    def log_order_event(event_data: BusinessEventData) -> AuditEvent:
         """
         Log order-related audit event with business context
         
@@ -1850,15 +1803,7 @@ class OrdersAuditService:
         return AuditService.log_event(event_data, enhanced_context)
 
     @staticmethod
-    def log_order_item_event(
-        event_type: str,
-        order_item: Any,
-        user: User | None = None,
-        context: AuditContext | None = None,
-        old_values: dict[str, Any] | None = None,
-        new_values: dict[str, Any] | None = None,
-        description: str | None = None
-    ) -> AuditEvent:
+    def log_order_item_event(event_data: BusinessEventData) -> AuditEvent:
         """
         Log order item-related audit event with product context
         
@@ -1925,14 +1870,7 @@ class OrdersAuditService:
         return AuditService.log_event(event_data, enhanced_context)
 
     @staticmethod
-    def log_provisioning_event(
-        event_type: str,
-        order_item: Any,
-        service: Any | None = None,
-        user: User | None = None,
-        context: AuditContext | None = None,
-        description: str | None = None
-    ) -> AuditEvent:
+    def log_provisioning_event(event_data: BusinessEventData) -> AuditEvent:
         """
         Log provisioning-related audit event
         
@@ -2027,24 +1965,24 @@ class AuditIntegrityService:
             records_checked = events.count()
             issues_found = []
             
+            # Convert QuerySet to list for methods that expect list[AuditEvent]
+            events_list = list(events)
+            
             if check_type == 'hash_verification':
-                issues_found = cls._verify_hash_chain(events)
+                issues_found = cls._verify_hash_chain(events_list)
             elif check_type == 'sequence_check':
-                issues_found = cls._check_sequence_gaps(events)
+                issues_found = cls._check_sequence_gaps(events_list)
             elif check_type == 'gdpr_compliance':
-                issues_found = cls._check_gdpr_compliance(events)
+                issues_found = cls._check_gdpr_compliance(events_list)
             
             # Generate hash chain for this check
-            hash_chain = cls._generate_hash_chain(events)
+            hash_chain = cls._generate_hash_chain(events_list)
             
             # Determine status
             status = 'healthy'
             if len(issues_found) > 0:
                 critical_issues = [i for i in issues_found if i.get('severity') == 'critical']
-                if critical_issues:
-                    status = 'compromised'
-                else:
-                    status = 'warning'
+                status = 'compromised' if critical_issues else 'warning'
             
             # Create integrity check record
             integrity_check = AuditIntegrityCheck.objects.create(
@@ -2078,7 +2016,7 @@ class AuditIntegrityService:
         """Verify cryptographic hash chain of audit events."""
         issues = []
         
-        for i, event in enumerate(events):
+        for event in events:
             # Check if event data has been modified
             expected_hash = cls._calculate_event_hash(event)
             stored_hash = event.metadata.get('integrity_hash')
@@ -2099,7 +2037,7 @@ class AuditIntegrityService:
     @classmethod
     def _check_sequence_gaps(cls, events: list[AuditEvent]) -> list[dict[str, Any]]:
         """Check for gaps in audit event sequence."""
-        issues = []
+        issues: list[dict[str, Any]] = []
         
         if not events:
             return issues
@@ -2112,9 +2050,8 @@ class AuditIntegrityService:
             time_gap = (current_event.timestamp - prev_event.timestamp).total_seconds()
             
             # Flag suspicious gaps (more than 1 hour with no events for active users)
-            if time_gap > 3600 and prev_event.user and current_event.user:
-                # Check if there should have been activity
-                if cls._should_have_activity(prev_event, current_event):
+            if (time_gap > ONE_HOUR_SECONDS and prev_event.user and current_event.user and 
+                cls._should_have_activity(prev_event, current_event)):
                     issues.append({
                         'type': 'sequence_gap',
                         'severity': 'warning',
@@ -2135,11 +2072,7 @@ class AuditIntegrityService:
             # Check required fields for GDPR events
             if event.category in ['privacy', 'data_protection']:
                 required_fields = ['user', 'ip_address', 'description']
-                missing_fields = []
-                
-                for field in required_fields:
-                    if not getattr(event, field, None):
-                        missing_fields.append(field)
+                missing_fields = [field for field in required_fields if not getattr(event, field, None)]
                 
                 if missing_fields:
                     issues.append({
@@ -2187,13 +2120,9 @@ class AuditIntegrityService:
     def _should_have_activity(cls, prev_event: AuditEvent, current_event: AuditEvent) -> bool:
         """Determine if there should have been activity between events."""
         # Simple heuristic: if both events are from the same user in a short session
-        if prev_event.user == current_event.user and prev_event.user:
-            # Check if events are in same session
-            if (prev_event.session_key == current_event.session_key and 
-                prev_event.session_key):
-                return True
-        
-        return False
+        return bool(prev_event.user == current_event.user and prev_event.user and
+                    prev_event.session_key == current_event.session_key and 
+                    prev_event.session_key)
     
     @classmethod
     def _create_integrity_alert(cls, integrity_check: AuditIntegrityCheck, issues: list[dict[str, Any]]) -> None:
@@ -2246,7 +2175,7 @@ class AuditRetentionService:
         
         try:
             policies = AuditRetentionPolicy.objects.filter(is_active=True)
-            results = {
+            results: dict[str, Any] = {
                 'policies_applied': 0,
                 'events_processed': 0,
                 'events_archived': 0,
@@ -2429,8 +2358,6 @@ class AuditSearchService:
         user: User
     ) -> tuple[models.QuerySet[AuditEvent], dict[str, Any]]:
         """Build advanced audit query with multiple filters and performance optimization."""
-        
-        # Start with base queryset
         queryset = AuditEvent.objects.select_related('user', 'content_type')
         query_info = {
             'filters_applied': [],
@@ -2438,23 +2365,48 @@ class AuditSearchService:
             'estimated_cost': 'low'
         }
         
-        # Apply filters
-        if filters.get('user_ids'):
-            queryset = queryset.filter(user_id__in=filters['user_ids'])
-            query_info['filters_applied'].append('user_filter')
+        # Apply all filter groups
+        queryset = cls._apply_basic_filters(queryset, filters, query_info)
+        queryset = cls._apply_date_filters(queryset, filters, query_info)
+        queryset = cls._apply_technical_filters(queryset, filters, query_info)
+        queryset = cls._apply_content_filters(queryset, filters, query_info)
+        queryset = cls._apply_advanced_filters(queryset, filters, query_info)
         
-        if filters.get('actions'):
-            queryset = queryset.filter(action__in=filters['actions'])
-            query_info['filters_applied'].append('action_filter')
+        # Add performance hints
+        cls._add_performance_hints(query_info)
         
-        if filters.get('categories'):
-            queryset = queryset.filter(category__in=filters['categories'])
-            query_info['filters_applied'].append('category_filter')
+        return queryset.order_by('-timestamp'), query_info
+    
+    @classmethod
+    def _apply_basic_filters(
+        cls, 
+        queryset: models.QuerySet[AuditEvent], 
+        filters: dict[str, Any], 
+        query_info: dict[str, Any]
+    ) -> models.QuerySet[AuditEvent]:
+        """Apply basic entity filters (user, action, category, severity)."""
+        filter_mappings = [
+            ('user_ids', 'user_id__in', 'user_filter'),
+            ('actions', 'action__in', 'action_filter'),
+            ('categories', 'category__in', 'category_filter'),
+            ('severities', 'severity__in', 'severity_filter'),
+        ]
         
-        if filters.get('severities'):
-            queryset = queryset.filter(severity__in=filters['severities'])
-            query_info['filters_applied'].append('severity_filter')
+        for filter_key, django_filter, info_key in filter_mappings:
+            if filters.get(filter_key):
+                queryset = queryset.filter(**{django_filter: filters[filter_key]})
+                query_info['filters_applied'].append(info_key)
         
+        return queryset
+    
+    @classmethod 
+    def _apply_date_filters(
+        cls,
+        queryset: models.QuerySet[AuditEvent],
+        filters: dict[str, Any],
+        query_info: dict[str, Any]
+    ) -> models.QuerySet[AuditEvent]:
+        """Apply date range filters."""
         if filters.get('start_date'):
             queryset = queryset.filter(timestamp__gte=filters['start_date'])
             query_info['filters_applied'].append('date_range_start')
@@ -2463,25 +2415,43 @@ class AuditSearchService:
             queryset = queryset.filter(timestamp__lte=filters['end_date'])
             query_info['filters_applied'].append('date_range_end')
         
-        if filters.get('ip_addresses'):
-            ip_list = filters['ip_addresses'] if isinstance(filters['ip_addresses'], list) else [filters['ip_addresses']]
-            queryset = queryset.filter(ip_address__in=ip_list)
-            query_info['filters_applied'].append('ip_filter')
+        return queryset
+    
+    @classmethod
+    def _apply_technical_filters(
+        cls,
+        queryset: models.QuerySet[AuditEvent],
+        filters: dict[str, Any],
+        query_info: dict[str, Any]
+    ) -> models.QuerySet[AuditEvent]:
+        """Apply technical filters (IP, request ID, session)."""
+        list_filters = [
+            ('ip_addresses', 'ip_address__in', 'ip_filter'),
+            ('request_ids', 'request_id__in', 'request_id_filter'),
+            ('session_keys', 'session_key__in', 'session_filter'),
+        ]
         
-        if filters.get('request_ids'):
-            request_ids = filters['request_ids'] if isinstance(filters['request_ids'], list) else [filters['request_ids']]
-            queryset = queryset.filter(request_id__in=request_ids)
-            query_info['filters_applied'].append('request_id_filter')
-        
-        if filters.get('session_keys'):
-            session_keys = filters['session_keys'] if isinstance(filters['session_keys'], list) else [filters['session_keys']]
-            queryset = queryset.filter(session_key__in=session_keys)
-            query_info['filters_applied'].append('session_filter')
+        for filter_key, django_filter, info_key in list_filters:
+            if filters.get(filter_key):
+                filter_value = filters[filter_key]
+                filter_list = filter_value if isinstance(filter_value, list) else [filter_value]
+                queryset = queryset.filter(**{django_filter: filter_list})
+                query_info['filters_applied'].append(info_key)
         
         if filters.get('content_types'):
             queryset = queryset.filter(content_type_id__in=filters['content_types'])
             query_info['filters_applied'].append('content_type_filter')
         
+        return queryset
+    
+    @classmethod
+    def _apply_content_filters(
+        cls,
+        queryset: models.QuerySet[AuditEvent],
+        filters: dict[str, Any],
+        query_info: dict[str, Any]
+    ) -> models.QuerySet[AuditEvent]:
+        """Apply content-based filters (text search, sensitivity)."""
         if filters.get('search_text'):
             search_text = filters['search_text']
             queryset = queryset.filter(
@@ -2491,43 +2461,52 @@ class AuditSearchService:
                 Q(action__icontains=search_text)
             )
             query_info['filters_applied'].append('text_search')
-            query_info['estimated_cost'] = 'medium'  # Text search is more expensive
+            query_info['estimated_cost'] = 'medium'
         
-        if filters.get('is_sensitive') is not None:
-            queryset = queryset.filter(is_sensitive=filters['is_sensitive'])
-            query_info['filters_applied'].append('sensitivity_filter')
+        boolean_filters = [
+            ('is_sensitive', 'sensitivity_filter'),
+            ('requires_review', 'review_filter'),
+        ]
         
-        if filters.get('requires_review') is not None:
-            queryset = queryset.filter(requires_review=filters['requires_review'])
-            query_info['filters_applied'].append('review_filter')
+        for filter_key, info_key in boolean_filters:
+            if filters.get(filter_key) is not None:
+                queryset = queryset.filter(**{filter_key: filters[filter_key]})
+                query_info['filters_applied'].append(info_key)
         
-        # Advanced filters
-        if filters.get('has_old_values'):
-            if filters['has_old_values']:
-                queryset = queryset.exclude(old_values={})
-            else:
-                queryset = queryset.filter(old_values={})
-            query_info['filters_applied'].append('old_values_filter')
+        return queryset
+    
+    @classmethod
+    def _apply_advanced_filters(
+        cls,
+        queryset: models.QuerySet[AuditEvent],
+        filters: dict[str, Any],
+        query_info: dict[str, Any]
+    ) -> models.QuerySet[AuditEvent]:
+        """Apply advanced value existence filters."""
+        value_filters = [
+            ('has_old_values', 'old_values', 'old_values_filter'),
+            ('has_new_values', 'new_values', 'new_values_filter'),
+        ]
         
-        if filters.get('has_new_values'):
-            if filters['has_new_values']:
-                queryset = queryset.exclude(new_values={})
-            else:
-                queryset = queryset.filter(new_values={})
-            query_info['filters_applied'].append('new_values_filter')
+        for filter_key, field_name, info_key in value_filters:
+            if filters.get(filter_key) is not None:
+                if filters[filter_key]:
+                    queryset = queryset.exclude(**{field_name: {}})
+                else:
+                    queryset = queryset.filter(**{field_name: {}})
+                query_info['filters_applied'].append(info_key)
         
-        # Performance optimization hints
-        if len(query_info['filters_applied']) > 5:
+        return queryset
+    
+    @classmethod
+    def _add_performance_hints(cls, query_info: dict[str, Any]) -> None:
+        """Add performance optimization hints to query info."""
+        if len(query_info['filters_applied']) > HIGH_COMPLEXITY_FILTER_THRESHOLD:
             query_info['estimated_cost'] = 'high'
             query_info['performance_hints'].append('Consider using saved queries for complex searches')
         
         if 'text_search' in query_info['filters_applied'] and len(query_info['filters_applied']) == 1:
             query_info['performance_hints'].append('Add date range or user filters to improve search performance')
-        
-        # Default ordering
-        queryset = queryset.order_by('-timestamp')
-        
-        return queryset, query_info
     
     @classmethod
     @transaction.atomic
@@ -2575,14 +2554,14 @@ class AuditSearchService:
     ) -> dict[str, list[str]]:
         """Get search suggestions for auto-completion."""
         
-        suggestions = {
+        suggestions: dict[str, list[str]] = {
             'actions': [],
             'users': [],
             'ip_addresses': [],
             'descriptions': []
         }
         
-        if not query or len(query) < 2:
+        if not query or len(query) < MIN_SEARCH_QUERY_LENGTH:
             return suggestions
         
         try:
@@ -2603,7 +2582,7 @@ class AuditSearchService:
                     ip_address__icontains=query,
                     timestamp__gte=timezone.now() - timedelta(days=30)
                 ).values_list('ip_address', flat=True).distinct()[:limit]
-                suggestions['ip_addresses'] = list(recent_ips)
+                suggestions['ip_addresses'] = [ip for ip in recent_ips if ip]
             
         except Exception as e:
             logger.warning(f"⚠️ [Audit Search] Suggestion generation failed: {e}")
@@ -2613,7 +2592,6 @@ class AuditSearchService:
     @classmethod
     def _is_ip_like(cls, query: str) -> bool:
         """Check if query looks like an IP address."""
-        import re
         ip_pattern = r'^\d{1,3}(\.\d{0,3}){0,3}$'
         return bool(re.match(ip_pattern, query))
 

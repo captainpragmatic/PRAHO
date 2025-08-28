@@ -208,6 +208,19 @@ ignore = [
     "F841"              # Unused variables (sample data creation)
 ]
 
+# Audit event generation - Allow pseudo-random for test data
+"**/management/commands/generate_audit_events.py" = [
+    "T201", "T203",     # Print statements for progress  
+    "S311",             # Pseudo-random generators (test data generation)
+    "PLR2004",          # Magic numbers (test data)
+    "ANN"               # Type hints (utility script)
+]
+
+# GDPR compliance views - Allow complex functions for comprehensive compliance
+"apps/audit/views.py" = [
+    "PLR0915",          # Too many statements (GDPR compliance needs to be comprehensive)
+]
+
 # Migration files - Generated code, minimal linting
 "**/migrations/*.py" = [
     "E501",     # Long lines acceptable

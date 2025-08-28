@@ -4,15 +4,20 @@
 ===============================================================================
 Management command to generate random audit events for pagination testing.
 Creates realistic Romanian hosting provider audit trail with diverse events.
+
+SECURITY NOTE: This file uses standard `random` module for test data generation.
+S311 warnings are acceptable here as this is NOT for cryptographic purposes.
+This command is only used for development/testing, never in production.
 """
 
 import random
 import uuid
 from datetime import timedelta
+from typing import Any
 
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.models import ContentType
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandParser
 from django.utils import timezone
 
 from apps.audit.models import AuditEvent
@@ -25,7 +30,7 @@ class Command(BaseCommand):
     
     help = 'Generate random audit events for pagination testing'
     
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument(
             '--count',
             type=int,
@@ -33,7 +38,7 @@ class Command(BaseCommand):
             help='Number of random events to generate (default: 30)'
         )
         
-    def handle(self, *args, **options):
+    def handle(self, *args: Any, **options: Any) -> None:
         count = options['count']
         
         self.stdout.write(f"🎯 Generating {count} random audit events...")
@@ -114,7 +119,7 @@ class Command(BaseCommand):
                 )
                 
                 # Create random audit event
-                event = AuditEvent.objects.create(
+                AuditEvent.objects.create(
                     timestamp=timestamp,
                     user=random.choice(users) if random.random() > 0.1 else None,  # 10% system events
                     actor_type=random.choice(['user', 'system', 'api']),

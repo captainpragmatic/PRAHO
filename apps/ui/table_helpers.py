@@ -201,8 +201,4 @@ def _get_order_status_variant(status: str) -> str:
     return variant_map.get(status, 'secondary')
 
 
-# Add more helper functions for other data types as needed:
-# - prepare_tickets_table_data()
-# - prepare_customers_table_data() 
-# - prepare_services_table_data()
-# - prepare_audit_table_data()
+# TODO: Implement additional table data preparation helpers for other data types

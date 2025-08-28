@@ -10,7 +10,7 @@ import uuid
 from datetime import timedelta
 from functools import wraps
 from io import StringIO
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from django.contrib import messages
 from django.contrib.auth import get_user_model, logout  # For GDPR deletion logout
@@ -20,7 +20,7 @@ from django.core.files.storage import default_storage
 from django.core.paginator import Paginator
 from django.db import models
 from django.db.models import Q
-from django.http import Http404, HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.utils.translation import gettext as _
@@ -62,14 +62,14 @@ logger = logging.getLogger(__name__)
 # CUSTOM DECORATORS
 # ===============================================================================
 
-def staff_required(view_func):
+def staff_required(view_func: Any) -> Any:
     """
     Custom decorator to check if user is staff (instead of Django admin staff_member_required).
     This prevents NoReverseMatch errors since we don't use Django admin.
     """
     @wraps(view_func)
     @login_required
-    def _wrapped_view(request, *args, **kwargs):
+    def _wrapped_view(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         if not request.user.is_staff:
             messages.error(request, _("You don't have permission to access this page."))
             return redirect('dashboard')
@@ -510,7 +510,7 @@ def update_consent(request: HttpRequest) -> HttpResponse:
                 _('Your privacy preferences have been updated successfully.')
             )
         else:
-            logger.info("ℹ️ [GDPR Consent] No changes detected")
+            logger.info("[GDPR Consent] No changes detected")
             messages.info(request, _('No changes were made to your privacy preferences.'))
             
     except Exception as e:
@@ -536,7 +536,7 @@ def audit_management_dashboard(request: HttpRequest) -> HttpResponse:
     """Enterprise audit management dashboard with real-time metrics and alerts."""
     
     # Log staff access
-    logger.info(f"🔒 [Audit Management] Dashboard accessed by {request.user.email} from {_get_client_ip(request)}")
+    logger.info(f"🔒 [Audit Management] Dashboard accessed by {getattr(request.user, 'email', 'anonymous')} from {_get_client_ip(request)}")
     
     # Get dashboard metrics
     now = timezone.now()
@@ -635,6 +635,9 @@ def logs_list(request: HttpRequest) -> HttpResponse:
     filters = {k: v for k, v in filters.items() if v is not None and v != ''}
     
     # Use advanced search service
+    # Ensure user is authenticated before passing to service
+    if not request.user.is_authenticated:
+        return HttpResponseForbidden()
     queryset, query_info = audit_search_service.build_advanced_query(filters, request.user)
     
     # Pagination
@@ -687,6 +690,9 @@ def export_logs(request: HttpRequest) -> HttpResponse:
     filters = {k: v for k, v in filters.items() if v is not None and v != ''}
     
     # Use advanced search service
+    # Ensure user is authenticated before passing to service
+    if not request.user.is_authenticated:
+        return HttpResponseForbidden()
     queryset, _ = audit_search_service.build_advanced_query(filters, request.user)
     
     # Limit export size for performance
@@ -831,7 +837,7 @@ def gdpr_management_dashboard(request: HttpRequest) -> HttpResponse:
     """Staff-only GDPR management dashboard for processing all user requests"""
     
     # Log staff access for security audit
-    logger.info(f"🔒 [Staff GDPR] Dashboard accessed by {request.user.email} from {_get_client_ip(request)}")
+    logger.info(f"🔒 [Staff GDPR] Dashboard accessed by {getattr(request.user, 'email', 'anonymous')} from {_get_client_ip(request)}")
     
     # Get summary statistics
     export_stats = {
@@ -1052,6 +1058,9 @@ def audit_search_suggestions(request: HttpRequest) -> HttpResponse:
     """HTMX endpoint for search auto-completion suggestions."""
     
     query = request.GET.get('q', '').strip()
+    # Ensure user is authenticated
+    if not request.user.is_authenticated:
+        return JsonResponse({'suggestions': {}})
     suggestions = audit_search_service.get_search_suggestions(query, request.user)
     
     context = {
@@ -1084,6 +1093,11 @@ def save_search_query(request: HttpRequest) -> HttpResponse:
             messages.error(request, _('Search query name is required.'))
             return redirect('audit:logs')
         
+        # Ensure user is authenticated for saving searches
+        if not request.user.is_authenticated:
+            messages.error(request, _('You must be logged in to save search queries.'))
+            return redirect('audit:logs')
+            
         result = audit_search_service.save_search_query(
             name=name,
             query_params=query_params,
@@ -1197,10 +1211,12 @@ def run_integrity_check(request: HttpRequest) -> HttpResponse:
         start_time = end_time - timedelta(days=1)
         
         # Allow custom time range
-        if request.POST.get('start_date'):
-            start_time = timezone.datetime.fromisoformat(request.POST.get('start_date'))
-        if request.POST.get('end_date'):
-            end_time = timezone.datetime.fromisoformat(request.POST.get('end_date'))
+        start_date = request.POST.get('start_date')
+        if start_date:
+            start_time = timezone.datetime.fromisoformat(start_date)
+        end_date = request.POST.get('end_date')
+        if end_date:
+            end_time = timezone.datetime.fromisoformat(end_date)
         
         # Run integrity check
         result = audit_integrity_service.verify_audit_integrity(
@@ -1354,9 +1370,9 @@ def alerts_dashboard(request: HttpRequest) -> HttpResponse:
             status__in=['active', 'acknowledged', 'investigating']
         ).count(),
         'my_assigned': AuditAlert.objects.filter(
-            assigned_to=request.user,
+            assigned_to=request.user if request.user.is_authenticated else None,
             status__in=['active', 'acknowledged', 'investigating']
-        ).count(),
+        ).count() if request.user.is_authenticated else 0,
     }
     
     context = {
@@ -1432,7 +1448,7 @@ def event_detail(request: HttpRequest, event_id: uuid.UUID) -> HttpResponse:
     event = get_object_or_404(AuditEvent, id=event_id)
     
     # Find related events for forensic analysis
-    related_events = []
+    related_events: list[AuditEvent] = []
     
     # Same user, within 1 hour
     if event.user:

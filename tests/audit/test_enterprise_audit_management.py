@@ -465,6 +465,8 @@ class AuditAlertsManagementTests(EnterpriseAuditManagementTestCase):
     
     def test_alerts_dashboard_access(self):
         """Test alerts dashboard access and filtering."""
+        # Login as staff user
+        self.client.login(email='admin@example.com', password='testpass123')
         response = self.client.get(reverse('audit:alerts_dashboard'))
         self.assertEqual(response.status_code, 200)
         

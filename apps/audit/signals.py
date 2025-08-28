@@ -4,6 +4,7 @@ Implements industry-standard user action auditing (GDPR, ISO 27001, NIST, SOX, P
 """
 
 import logging
+from dataclasses import dataclass, field
 from typing import Any
 
 from django.db.models.signals import post_save, pre_delete
@@ -13,6 +14,18 @@ from django.http import HttpRequest
 from apps.users.models import CustomerMembership, User, UserProfile
 
 from .services import AuditContext, AuditEventData, AuditService
+
+@dataclass
+class AuditEventCreationData:
+    """Parameter object for audit event creation"""
+    action: str
+    user: User | None = None
+    content_object: Any = None
+    old_values: dict[str, Any] | None = None
+    new_values: dict[str, Any] | None = None
+    description: str = ''
+    request: HttpRequest | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 logger = logging.getLogger(__name__)
 
@@ -79,78 +92,90 @@ def _get_action_category_severity(action: str) -> tuple[str, str, bool, bool]:
     
     Returns: (category, severity, is_sensitive, requires_review)
     """
-    # Authentication events
-    if action.startswith(('login_', 'logout_', 'session_', 'account_')):
-        return ('authentication', 'medium', True, action in ['account_locked', 'login_failed_2fa'])
+    # Define action patterns and their properties
+    # Each pattern maps to: (category, base_severity, is_sensitive, requires_review_func)
+    action_config = {
+        ('login_', 'logout_', 'session_', 'account_'): (
+            'authentication', 'medium', True, 
+            lambda a: a in ['account_locked', 'login_failed_2fa']
+        ),
+        ('password_',): (
+            'authentication', lambda a: 'high' if a in ['password_compromised', 'password_strength_weak'] else 'medium',
+            True, lambda a: a == 'password_compromised'
+        ),
+        ('2fa_',): (
+            'authentication', lambda a: 'high' if a in ['2fa_disabled', '2fa_admin_reset'] else 'medium',
+            True, lambda a: a in ['2fa_disabled', '2fa_admin_reset']
+        ),
+        ('privacy_', 'gdpr_', 'marketing_consent'): (
+            'privacy', 'high', True, lambda a: a.endswith('_withdrawn')
+        ),
+        ('customer_',): (
+            'authorization', 'medium', False, lambda a: a.endswith('_revoked')
+        ),
+        ('security_', 'suspicious_', 'brute_force', 'malicious_'): (
+            'security_event', 'critical', True, lambda a: True
+        ),
+        ('data_export', 'data_deletion', 'data_breach'): (
+            'data_protection', 'high', True, lambda a: True
+        ),
+        ('system_', 'backup_', 'configuration_', 'user_impersonation'): (
+            'system_admin', 'high', True, lambda a: True
+        ),
+    }
     
-    # Password events
-    if action.startswith('password_'):
-        severity = 'high' if action in ['password_compromised', 'password_strength_weak'] else 'medium'
-        return ('authentication', severity, True, action == 'password_compromised')
+    # Exact match patterns
+    exact_matches = {
+        'profile_updated': ('account_management', 'medium', True, False),
+        'email_changed': ('account_management', 'medium', True, False),
+        'phone_updated': ('account_management', 'medium', True, False),
+        'name_changed': ('account_management', 'medium', True, False),
+        'role_assigned': ('authorization', 'high', True, True),
+        'role_removed': ('authorization', 'high', True, True),
+        'permission_granted': ('authorization', 'high', True, True),
+        'permission_revoked': ('authorization', 'high', True, True),
+        'staff_role_changed': ('authorization', 'high', True, True),
+        'invoice_accessed': ('business_operation', 'low', False, False),
+        'payment_method_added': ('business_operation', 'low', False, False),
+        'order_placed': ('business_operation', 'low', False, False),
+    }
     
-    # 2FA events
-    if action.startswith('2fa_'):
-        severity = 'high' if action in ['2fa_disabled', '2fa_admin_reset'] else 'medium'
-        return ('authentication', severity, True, action in ['2fa_disabled', '2fa_admin_reset'])
+    # Check exact matches first
+    if action in exact_matches:
+        return exact_matches[action]
     
-    # Profile and privacy events
-    if action in ['profile_updated', 'email_changed', 'phone_updated', 'name_changed']:
-        return ('account_management', 'medium', True, False)
-    
-    if action.startswith(('privacy_', 'gdpr_', 'marketing_consent')):
-        return ('privacy', 'high', True, action.endswith('_withdrawn'))
-    
-    # Authorization events - including staff role changes
-    if action in ['role_assigned', 'role_removed', 'permission_granted', 'permission_revoked', 'staff_role_changed']:
-        return ('authorization', 'high', True, True)
-    
-    # Customer relationship events
-    if action.startswith('customer_'):
-        return ('authorization', 'medium', False, action.endswith('_revoked'))
-    
-    # Security events
-    if action.startswith(('security_', 'suspicious_', 'brute_force', 'malicious_')):
-        return ('security_event', 'critical', True, True)
-    
-    # Data protection events
-    if action.startswith(('data_export', 'data_deletion', 'data_breach')):
-        return ('data_protection', 'high', True, True)
-    
-    # Business operations
-    if action in ['invoice_accessed', 'payment_method_added', 'order_placed']:
-        return ('business_operation', 'low', False, False)
-    
-    # System admin events
-    if action.startswith(('system_', 'backup_', 'configuration_', 'user_impersonation')):
-        return ('system_admin', 'high', True, True)
+    # Check prefix patterns
+    for patterns, config in action_config.items():
+        for pattern in patterns:
+            if action.startswith(pattern):
+                category, severity, is_sensitive, requires_review = config
+                
+                # Handle dynamic severity
+                final_severity: str = str(severity(action)) if callable(severity) else str(severity)
+                
+                # Handle dynamic requires_review  
+                final_requires_review: bool = bool(requires_review(action)) if callable(requires_review) else bool(requires_review)  # type: ignore
+                
+                return category, final_severity, is_sensitive, final_requires_review
     
     # Default
     return ('business_operation', 'low', False, False)
 
 
-def _create_audit_event(
-    action: str,
-    user: User | None = None,
-    content_object: Any = None,
-    old_values: dict[str, Any] | None = None,
-    new_values: dict[str, Any] | None = None,
-    description: str = '',
-    request: HttpRequest | None = None,
-    metadata: dict[str, Any] | None = None
-) -> None:
+def _create_audit_event(event_data: AuditEventCreationData) -> None:
     """
     Unified audit event creation with automatic categorization
     """
     try:
         # Get context from request
-        context = _get_audit_context_from_request(request, user)
+        context = _get_audit_context_from_request(event_data.request, event_data.user)
         
         # Add additional metadata
-        if metadata:
-            context.metadata.update(metadata)
+        if event_data.metadata:
+            context.metadata.update(event_data.metadata)
         
         # Get action classification
-        category, severity, is_sensitive, requires_review = _get_action_category_severity(action)
+        category, severity, is_sensitive, requires_review = _get_action_category_severity(event_data.action)
         
         # Add classification to metadata
         context.metadata.update({
@@ -162,16 +187,16 @@ def _create_audit_event(
         })
         
         # Create event data
-        event_data = AuditEventData(
-            event_type=action,
-            content_object=content_object,
-            old_values=old_values,
-            new_values=new_values,
-            description=description
+        audit_event_data = AuditEventData(
+            event_type=event_data.action,
+            content_object=event_data.content_object,
+            old_values=event_data.old_values,
+            new_values=event_data.new_values,
+            description=event_data.description
         )
         
         # Log the event
-        audit_event = AuditService.log_event(event_data, context)
+        audit_event = AuditService.log_event(audit_event_data, context)
         
         # Update the audit event with classification fields
         audit_event.category = category
