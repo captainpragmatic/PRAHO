@@ -10,6 +10,7 @@ from django.contrib.auth import get_user_model
 from django.db import models, transaction
 from django.utils import timezone
 
+from apps.billing.models import Currency
 from apps.common.types import EmailAddress, Err, Ok, Result
 from apps.common.validators import log_security_event
 
@@ -17,14 +18,14 @@ if TYPE_CHECKING:
     from apps.customers.models import Customer
     from apps.users.models import User
 
-    from .models import Order, OrderItem, OrderStatusHistory
+    from .models import Order
 
 """
 Order Management Services for PRAHO Platform
 Handles order lifecycle, Romanian VAT compliance, and integration with billing/provisioning.
 """
 
-User = get_user_model()
+UserModel = get_user_model()
 logger = logging.getLogger(__name__)
 
 # ===============================================================================
@@ -135,10 +136,10 @@ class OrderNumberingService:
     @transaction.atomic
     def generate_order_number(customer: Customer) -> str:
         """Generate sequential order number for customer compliance"""
-        from .models import Order
+        from .models import Order  # noqa: PLC0415 - Circular import prevention
         
         current_year = timezone.now().year
-        prefix = f"ORD-{current_year}-{customer.pk.hex[:8].upper()}"
+        prefix = f"ORD-{current_year}-{str(customer.pk).zfill(8)}"
         
         # Get the highest existing order number for this customer and year
         latest_order = (
@@ -176,7 +177,7 @@ class OrderService:
     def create_order(data: OrderCreateData, created_by: User | None = None) -> Result[Order, str]:
         """Create new order with validation and audit trail"""
         try:
-            from .models import Order, OrderItem
+            from .models import Order, OrderItem  # noqa: PLC0415 - Circular import prevention
             
             # Generate order number
             order_number = OrderNumberingService.generate_order_number(data.customer)
@@ -184,44 +185,51 @@ class OrderService:
             # Calculate financial totals
             totals = OrderCalculationService.calculate_order_totals(data.items)
             
+            # Get currency instance (Currency already imported at top)
+            currency_instance = Currency.objects.get(code=data.currency)
+            
             # Create order
             order = Order.objects.create(
                 order_number=order_number,
                 customer=data.customer,
-                currency=data.currency,
+                currency=currency_instance,
                 notes=data.notes,
                 meta=data.meta,
-                # Billing address fields
-                billing_company_name=data.billing_address['company_name'],
-                billing_contact_name=data.billing_address['contact_name'],
-                billing_email=data.billing_address['email'],
-                billing_phone=data.billing_address['phone'],
-                billing_address_line1=data.billing_address['address_line1'],
-                billing_address_line2=data.billing_address['address_line2'],
-                billing_city=data.billing_address['city'],
-                billing_county=data.billing_address['county'],
-                billing_postal_code=data.billing_address['postal_code'],
-                billing_country=data.billing_address['country'],
-                billing_fiscal_code=data.billing_address['fiscal_code'],
-                billing_registration_number=data.billing_address['registration_number'],
-                billing_vat_number=data.billing_address['vat_number'],
+                # Customer snapshot fields
+                customer_email=data.customer.primary_email,
+                customer_name=data.customer.name,
+                customer_company=data.customer.company_name or '',
+                customer_vat_id=getattr(data.customer.tax_profile, 'vat_number', '') if hasattr(data.customer, 'tax_profile') else '',
+                # Billing address as JSON
+                billing_address=dict(data.billing_address),
                 # Financial totals
                 **totals
             )
             
             # Create order items
             for item_data in data.items:
-                line_total = item_data['quantity'] * item_data['unit_price_cents']
+                # Calculate line totals
+                subtotal_cents = item_data['quantity'] * item_data['unit_price_cents']
+                tax_cents = OrderCalculationService.calculate_vat(subtotal_cents)
+                line_total_cents = subtotal_cents + tax_cents
+                
+                # Handle optional product_id - if None, skip this item or handle appropriately
+                product_id = item_data.get('product_id')
+                if product_id is None:
+                    continue  # Skip items without a product_id
                 
                 OrderItem.objects.create(
                     order=order,
-                    product_id=item_data.get('product_id'),
-                    service_id=item_data.get('service_id'),
+                    product_id=product_id,
                     quantity=item_data['quantity'],
                     unit_price_cents=item_data['unit_price_cents'],
-                    line_total_cents=line_total,
-                    description=item_data['description'],
-                    meta=item_data['meta']
+                    tax_rate=OrderCalculationService.VAT_RATE,
+                    tax_cents=tax_cents,
+                    line_total_cents=line_total_cents,
+                    product_name=item_data['description'],
+                    product_type='hosting',  # Default type
+                    billing_period='monthly',  # Default period
+                    config=item_data.get('meta', {})
                 )
             
             # Create status history entry
@@ -234,7 +242,7 @@ class OrderService:
                 'order_created',
                 {
                     'order_number': order.order_number,
-                    'customer_name': data.customer.company_name,
+                    'customer_name': data.customer.name,
                     'order_id': str(order.id),
                     'customer_id': str(data.customer.id),
                     'total_cents': totals['total_cents'],
@@ -300,11 +308,11 @@ class OrderService:
         changed_by: User | None
     ) -> None:
         """Create order status history entry"""
-        from .models import OrderStatusHistory
+        from .models import OrderStatusHistory  # noqa: PLC0415 - Circular import prevention
         
         OrderStatusHistory.objects.create(
             order=order,
-            old_status=old_status,
+            old_status=old_status or '',  # Convert None to empty string
             new_status=new_status,
             notes=notes,
             changed_by=changed_by
@@ -342,7 +350,7 @@ class OrderQueryService:
     ) -> Result[list[Order], str]:
         """Get orders for a specific customer with optional filtering"""
         try:
-            from .models import Order
+            from .models import Order  # noqa: PLC0415 - Circular import prevention
             
             queryset = Order.objects.filter(customer=customer).select_related('customer')
             
@@ -354,7 +362,8 @@ class OrderQueryService:
                 if search := filters.get('search'):
                     queryset = queryset.filter(
                         models.Q(order_number__icontains=search) |
-                        models.Q(billing_company_name__icontains=search)
+                        models.Q(customer_company__icontains=search) |
+                        models.Q(customer_name__icontains=search)
                     )
                 
             orders = list(queryset.order_by('-created_at'))
@@ -368,7 +377,7 @@ class OrderQueryService:
     def get_order_with_items(order_id: uuid.UUID, customer: Customer | None = None) -> Result[Order, str]:
         """Get order with related items, optionally scoped to customer"""
         try:
-            from .models import Order
+            from .models import Order  # noqa: PLC0415 - Circular import prevention
             
             queryset = Order.objects.select_related('customer').prefetch_related(
                 'items__product',

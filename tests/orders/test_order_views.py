@@ -6,16 +6,14 @@ Tests authentication, authorization, multi-tenant access, and view functionality
 import uuid
 from unittest.mock import patch
 
-from django.contrib.auth import get_user_model
-from django.test import TestCase, Client
-from django.urls import reverse
 from django.contrib.messages import get_messages
+from django.test import Client, TestCase
+from django.urls import reverse
 
-from apps.customers.models import Customer, CustomerMembership
+from apps.billing.models import Currency
+from apps.customers.models import Customer, CustomerTaxProfile
 from apps.orders.models import Order, OrderItem, OrderStatusHistory
-from apps.users.models import User
-
-User = get_user_model()
+from apps.users.models import CustomerMembership, User
 
 
 class OrderViewsAuthenticationTestCase(TestCase):
@@ -24,11 +22,16 @@ class OrderViewsAuthenticationTestCase(TestCase):
     def setUp(self):
         """Set up test data"""
         self.client = Client()
+        self.currency = Currency.objects.create(
+            code="RON",
+            symbol="lei",
+            decimals=2
+        )
         self.customer = Customer.objects.create(
-            company_name="Test Company SRL",
-            email="test@company.ro",
-            phone="+40123456789",
-            is_active=True
+            name="Test Company SRL",
+            customer_type="company",
+            status="active",
+            primary_email="test@company.ro"
         )
 
     def test_order_list_requires_authentication(self):
@@ -45,7 +48,7 @@ class OrderViewsAuthenticationTestCase(TestCase):
         order = Order.objects.create(
             customer=self.customer,
             order_number="ORD-2024-AUTH-0001",
-            currency="RON"
+            currency=self.currency
         )
         
         url = reverse('orders:order_detail', args=[order.id])
@@ -62,6 +65,9 @@ class OrderViewsAuthenticationTestCase(TestCase):
             email="user@example.com",
             password="testpass123"
         )
+        # Verify user was created
+        self.assertIsNotNone(user)
+        self.assertFalse(user.is_staff)
         
         self.client.login(email="user@example.com", password="testpass123")
         
@@ -82,6 +88,12 @@ class OrderListViewTestCase(TestCase):
         """Set up test data"""
         self.client = Client()
         
+        self.currency = Currency.objects.create(
+            code="RON",
+            symbol="lei",
+            decimals=2
+        )
+        
         # Create staff user
         self.staff_user = User.objects.create_user(
             email="staff@pragmatichost.com",
@@ -97,10 +109,10 @@ class OrderListViewTestCase(TestCase):
         
         # Create customer
         self.customer = Customer.objects.create(
-            company_name="Test Company SRL",
-            email="test@company.ro",
-            phone="+40123456789",
-            is_active=True
+            name="Test Company SRL",
+            customer_type="company",
+            status="active",
+            primary_email="test@company.ro"
         )
         
         # Add customer user to customer
@@ -114,17 +126,15 @@ class OrderListViewTestCase(TestCase):
         self.order1 = Order.objects.create(
             customer=self.customer,
             order_number="ORD-2024-LIST-0001",
-            currency="RON",
-            status="draft",
-            billing_company_name="Test Company SRL"
+            currency=self.currency,
+            status="draft"
         )
         
         self.order2 = Order.objects.create(
             customer=self.customer,
             order_number="ORD-2024-LIST-0002",
-            currency="RON",
-            status="completed",
-            billing_company_name="Test Company SRL"
+            currency=self.currency,
+            status="completed"
         )
 
     def test_staff_user_sees_all_orders(self):
@@ -186,7 +196,7 @@ class OrderListViewTestCase(TestCase):
             Order.objects.create(
                 customer=self.customer,
                 order_number=f"ORD-2024-PAGE-{i:04d}",
-                currency="RON",
+                currency=self.currency,
                 status="draft"
             )
         
@@ -220,6 +230,12 @@ class OrderDetailViewTestCase(TestCase):
         """Set up test data"""
         self.client = Client()
         
+        self.currency = Currency.objects.create(
+            code="RON",
+            symbol="lei",
+            decimals=2
+        )
+        
         self.staff_user = User.objects.create_user(
             email="staff@pragmatichost.com",
             password="testpass123",
@@ -232,10 +248,10 @@ class OrderDetailViewTestCase(TestCase):
         )
         
         self.customer = Customer.objects.create(
-            company_name="Test Company SRL",
-            email="test@company.ro",
-            phone="+40123456789",
-            is_active=True
+            name="Test Company SRL",
+            customer_type="company",
+            status="active",
+            primary_email="test@company.ro"
         )
         
         CustomerMembership.objects.create(
@@ -244,35 +260,46 @@ class OrderDetailViewTestCase(TestCase):
             role="admin"
         )
         
+        # Create tax profile for fiscal code testing
+        CustomerTaxProfile.objects.create(
+            customer=self.customer,
+            cui="RO12345678",
+            is_vat_registered=True
+        )
+        
         self.order = Order.objects.create(
             customer=self.customer,
             order_number="ORD-2024-DETAIL-0001",
-            currency="RON",
+            currency=self.currency,
             status="pending",
             subtotal_cents=10000,
             tax_cents=1900,
             total_cents=11900,
-            billing_company_name="Test Company SRL",
-            billing_contact_name="Ion Popescu",
-            billing_email="ion@company.ro",
-            billing_fiscal_code="RO12345678",
             notes="Test order for detail view"
         )
         
-        # Add order item
-        self.order_item = OrderItem.objects.create(
-            order=self.order,
-            quantity=1,
-            unit_price_cents=10000,
-            line_total_cents=10000,
-            description="Web Hosting Plan",
-            provisioning_status="pending"
-        )
+        # Add order item (using minimal required fields for testing)
+        with patch('apps.products.models.Product') as MockProduct:
+            mock_product = MockProduct.objects.create.return_value
+            mock_product.id = 1
+            mock_product.name = "Web Hosting Plan"
+            mock_product.product_type = "hosting"
+            
+            self.order_item = OrderItem.objects.create(
+                order=self.order,
+                product=mock_product,
+                product_name="Web Hosting Plan",
+                product_type="hosting",
+                billing_period="monthly",
+                quantity=1,
+                unit_price_cents=10000,
+                provisioning_status="pending"
+            )
         
         # Add status history
         OrderStatusHistory.objects.create(
             order=self.order,
-            old_status=None,
+            old_status="",  # Empty string for initial status
             new_status="draft",
             notes="Order created",
             changed_by=self.staff_user
@@ -318,10 +345,10 @@ class OrderDetailViewTestCase(TestCase):
         """Test multi-tenant access control for order detail"""
         # Create another customer and user
         other_customer = Customer.objects.create(
-            company_name="Other Company SRL",
-            email="other@company.ro",
-            phone="+40987654321",
-            is_active=True
+            name="Other Company SRL",
+            customer_type="company",
+            status="active",
+            primary_email="other@company.ro"
         )
         
         other_user = User.objects.create_user(
@@ -381,6 +408,12 @@ class OrderStatusChangeViewTestCase(TestCase):
         """Set up test data"""
         self.client = Client()
         
+        self.currency = Currency.objects.create(
+            code="RON",
+            symbol="lei",
+            decimals=2
+        )
+        
         self.staff_user = User.objects.create_user(
             email="staff@pragmatichost.com",
             password="testpass123",
@@ -388,16 +421,16 @@ class OrderStatusChangeViewTestCase(TestCase):
         )
         
         self.customer = Customer.objects.create(
-            company_name="Test Company SRL",
-            email="test@company.ro",
-            phone="+40123456789",
-            is_active=True
+            name="Test Company SRL",
+            customer_type="company",
+            status="active",
+            primary_email="test@company.ro"
         )
         
         self.order = Order.objects.create(
             customer=self.customer,
             order_number="ORD-2024-STATUS-0001",
-            currency="RON",
+            currency=self.currency,
             status="draft"
         )
 
@@ -425,6 +458,8 @@ class OrderStatusChangeViewTestCase(TestCase):
         # Verify status history created
         self.assertEqual(self.order.status_history.count(), 1)
         history = self.order.status_history.first()
+        self.assertIsNotNone(history)
+        assert history is not None  # Type narrowing
         self.assertEqual(history.old_status, 'draft')
         self.assertEqual(history.new_status, 'pending')
         self.assertEqual(history.notes, 'Order submitted for processing')
@@ -501,6 +536,12 @@ class OrderCancelViewTestCase(TestCase):
         """Set up test data"""
         self.client = Client()
         
+        self.currency = Currency.objects.create(
+            code="RON",
+            symbol="lei",
+            decimals=2
+        )
+        
         self.staff_user = User.objects.create_user(
             email="staff@pragmatichost.com",
             password="testpass123",
@@ -508,16 +549,16 @@ class OrderCancelViewTestCase(TestCase):
         )
         
         self.customer = Customer.objects.create(
-            company_name="Test Company SRL",
-            email="test@company.ro",
-            phone="+40123456789",
-            is_active=True
+            name="Test Company SRL",
+            customer_type="company",
+            status="active",
+            primary_email="test@company.ro"
         )
         
         self.order = Order.objects.create(
             customer=self.customer,
             order_number="ORD-2024-CANCEL-0001",
-            currency="RON",
+            currency=self.currency,
             status="pending"
         )
 
@@ -540,6 +581,8 @@ class OrderCancelViewTestCase(TestCase):
         
         # Verify status history
         history = self.order.status_history.first()
+        self.assertIsNotNone(history)
+        assert history is not None  # Type narrowing
         self.assertEqual(history.new_status, 'cancelled')
         self.assertEqual(history.notes, 'Customer requested cancellation')
         

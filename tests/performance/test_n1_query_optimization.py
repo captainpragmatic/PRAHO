@@ -6,6 +6,7 @@ User.get_accessible_customers() methods use prefetched data efficiently.
 """
 
 from decimal import Decimal
+from typing import Any
 
 from django.conf import settings
 from django.db import connection, reset_queries
@@ -15,9 +16,9 @@ from apps.customers.models import Customer, CustomerBillingProfile, CustomerTaxP
 from apps.users.models import CustomerMembership, User
 
 
-def create_test_user(username_suffix, email, **kwargs):
+def create_test_user(username_suffix: str, email: str, **kwargs: Any) -> User:
     """Create a test user with proper defaults"""
-    user_data = {
+    user_data: dict[str, Any] = {
         'email': email,
         'first_name': f'Test {username_suffix.title()}',
         'last_name': 'User',
@@ -25,10 +26,11 @@ def create_test_user(username_suffix, email, **kwargs):
     }
     user_data.update(kwargs)
 
-    return User.objects.create_user(**user_data)
+    # Extract email for positional argument
+    return User.objects.create_user(email=user_data.pop('email'), **user_data)
 
 
-def create_test_customer(name, created_by_user):
+def create_test_customer(name: str, created_by_user: User) -> Customer:
     """Create a test customer with proper defaults for Romanian compliance"""
     customer = Customer.objects.create(
         name=name,

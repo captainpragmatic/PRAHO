@@ -77,7 +77,7 @@ class PragmaticHostScheduler:
             'reports': Queue('reports', connection=self.redis_conn),
         }
 
-        self.tasks = []
+        self.tasks: list[ScheduledTask] = []
         self.running = False
         self._setup_tasks()
         logger.info("Initialized PragmaticHost beat scheduler")

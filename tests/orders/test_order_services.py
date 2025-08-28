@@ -4,19 +4,20 @@ Tests business logic, Romanian VAT compliance, and service layer functionality.
 """
 
 import uuid
-from decimal import Decimal
 
-from django.test import TestCase
 from django.contrib.auth import get_user_model
+from django.test import TestCase
 
-from apps.customers.models import Customer
-from apps.orders.models import Order, OrderItem, OrderStatusHistory
+from apps.billing.models import Currency
+from apps.customers.models import Customer, CustomerTaxProfile
+from apps.orders.models import Order, OrderItem
+from apps.products.models import Product
 from apps.orders.services import (
-    OrderCreateData,
-    OrderService,
     OrderCalculationService,
+    OrderCreateData,
     OrderNumberingService,
     OrderQueryService,
+    OrderService,
     StatusChangeData,
 )
 
@@ -78,11 +79,25 @@ class OrderNumberingServiceTestCase(TestCase):
 
     def setUp(self):
         """Set up test data"""
+        self.currency = Currency.objects.create(
+            code="RON",
+            symbol="lei",
+            decimals=2
+        )
+        
         self.customer = Customer.objects.create(
-            company_name="Test Company SRL",
-            email="test@company.ro",
-            phone="+40123456789",
-            is_active=True
+            name="Test Company SRL",
+            customer_type="company",
+            status="active",
+            primary_email="test@company.ro"
+        )
+        
+        # Create tax profile for the customer
+        CustomerTaxProfile.objects.create(
+            customer=self.customer,
+            vat_number="RO12345678",
+            cui="RO12345678",
+            is_vat_payer=True
         )
 
     def test_first_order_number_generation(self):
@@ -100,7 +115,7 @@ class OrderNumberingServiceTestCase(TestCase):
         order1 = Order.objects.create(
             customer=self.customer,
             order_number=OrderNumberingService.generate_order_number(self.customer),
-            currency="RON"
+            currency=self.currency
         )
         
         # Generate second order number
@@ -114,10 +129,18 @@ class OrderNumberingServiceTestCase(TestCase):
     def test_order_number_uniqueness_per_customer(self):
         """Test that order numbers are unique per customer"""
         customer2 = Customer.objects.create(
-            company_name="Another Company SRL",
-            email="another@company.ro",
-            phone="+40987654321",
-            is_active=True
+            name="Another Company SRL",
+            customer_type="company",
+            status="active",
+            primary_email="another@company.ro"
+        )
+        
+        # Create tax profile for customer2
+        CustomerTaxProfile.objects.create(
+            customer=customer2,
+            vat_number="RO87654321",
+            cui="RO87654321",
+            is_vat_payer=True
         )
         
         number1 = OrderNumberingService.generate_order_number(self.customer)
@@ -134,11 +157,33 @@ class OrderServiceTestCase(TestCase):
 
     def setUp(self):
         """Set up test data"""
+        self.currency = Currency.objects.create(
+            code="RON",
+            symbol="lei",
+            decimals=2
+        )
+        
         self.customer = Customer.objects.create(
-            company_name="Test Company SRL",
-            email="test@company.ro",
-            phone="+40123456789",
-            is_active=True
+            name="Test Company SRL",
+            customer_type="company",
+            status="active",
+            primary_email="test@company.ro"
+        )
+        
+        # Create tax profile for the customer
+        CustomerTaxProfile.objects.create(
+            customer=self.customer,
+            vat_number="RO12345678",
+            cui="RO12345678",
+            is_vat_payer=True
+        )
+        
+        # Create test product
+        self.product = Product.objects.create(
+            slug="web-hosting-standard",
+            name="Web Hosting Standard",
+            description="Standard web hosting plan",
+            short_description="Basic hosting for small websites"
         )
         
         self.user = User.objects.create_user(
@@ -167,7 +212,7 @@ class OrderServiceTestCase(TestCase):
         
         items = [
             {
-                'product_id': None,
+                'product_id': self.product.id,
                 'service_id': None,
                 'quantity': 1,
                 'unit_price_cents': 10000,  # 100.00 RON
@@ -180,7 +225,7 @@ class OrderServiceTestCase(TestCase):
             customer=self.customer,
             items=items,
             billing_address=billing_address,
-            currency="RON",
+            currency=self.currency.code,
             notes="Test order creation"
         )
         
@@ -189,29 +234,35 @@ class OrderServiceTestCase(TestCase):
         # Verify success
         self.assertTrue(result.is_ok())
         order = result.unwrap()
+        self.assertIsInstance(order, Order)
+        assert isinstance(order, Order)  # Type narrowing
         
         # Verify order details
         self.assertEqual(order.customer, self.customer)
-        self.assertEqual(order.currency, "RON")
+        self.assertEqual(order.currency, self.currency)
         self.assertEqual(order.subtotal_cents, 10000)
         self.assertEqual(order.tax_cents, 1900)  # 19% VAT
         self.assertEqual(order.total_cents, 11900)
         
         # Verify billing address
-        self.assertEqual(order.billing_company_name, "Test Company SRL")
-        self.assertEqual(order.billing_fiscal_code, "RO12345678")
+        self.assertEqual(order.billing_address['company_name'], "Test Company SRL")
+        self.assertEqual(order.billing_address['fiscal_code'], "RO12345678")
         
         # Verify order items created
         self.assertEqual(order.items.count(), 1)
         item = order.items.first()
+        self.assertIsNotNone(item)
+        assert item is not None  # Type narrowing
         self.assertEqual(item.quantity, 1)
         self.assertEqual(item.unit_price_cents, 10000)
-        self.assertEqual(item.description, "Web Hosting Plan")
+        self.assertEqual(item.product_name, "Web Hosting Plan")
         
         # Verify status history created
         self.assertEqual(order.status_history.count(), 1)
         history = order.status_history.first()
-        self.assertIsNone(history.old_status)
+        self.assertIsNotNone(history)
+        assert history is not None  # Type narrowing
+        self.assertEqual(history.old_status, "")
         self.assertEqual(history.new_status, "draft")
         self.assertEqual(history.changed_by, self.user)
 
@@ -221,7 +272,7 @@ class OrderServiceTestCase(TestCase):
         order = Order.objects.create(
             customer=self.customer,
             order_number="ORD-2024-TEST-0001",
-            currency="RON",
+            currency=self.currency,
             status="draft"
         )
         
@@ -242,6 +293,8 @@ class OrderServiceTestCase(TestCase):
         # Verify status history
         self.assertEqual(order.status_history.count(), 1)
         history = order.status_history.first()
+        self.assertIsNotNone(history)
+        assert history is not None  # Type narrowing
         self.assertEqual(history.old_status, "draft")
         self.assertEqual(history.new_status, "pending")
         self.assertEqual(history.notes, "Order submitted for processing")
@@ -252,7 +305,7 @@ class OrderServiceTestCase(TestCase):
         order = Order.objects.create(
             customer=self.customer,
             order_number="ORD-2024-INVALID-0001",
-            currency="RON",
+            currency=self.currency,
             status="completed"  # Terminal status
         )
         
@@ -266,7 +319,7 @@ class OrderServiceTestCase(TestCase):
         
         # Verify failure
         self.assertTrue(result.is_err())
-        error_message = result.unwrap_err()
+        error_message = result.unwrap_err()  # type: ignore[union-attr]
         self.assertIn("Invalid status transition", error_message)
         
         # Verify order status unchanged
@@ -295,7 +348,7 @@ class OrderServiceTestCase(TestCase):
                 order = Order.objects.create(
                     customer=self.customer,
                     order_number=f"ORD-2024-{old_status.upper()}-{new_status.upper()}",
-                    currency="RON",
+                    currency=self.currency,
                     status=old_status
                 )
                 
@@ -314,28 +367,40 @@ class OrderQueryServiceTestCase(TestCase):
 
     def setUp(self):
         """Set up test data"""
+        self.currency = Currency.objects.create(
+            code="RON",
+            symbol="lei",
+            decimals=2
+        )
+        
         self.customer = Customer.objects.create(
-            company_name="Test Company SRL",
-            email="test@company.ro",
-            phone="+40123456789",
-            is_active=True
+            name="Test Company SRL",
+            customer_type="company",
+            status="active",
+            primary_email="test@company.ro"
+        )
+        
+        # Create tax profile for the customer
+        CustomerTaxProfile.objects.create(
+            customer=self.customer,
+            vat_number="RO12345678",
+            cui="RO12345678",
+            is_vat_payer=True
         )
         
         # Create test orders
         self.order1 = Order.objects.create(
             customer=self.customer,
             order_number="ORD-2024-QUERY-0001",
-            currency="RON",
-            status="draft",
-            billing_company_name="Test Company SRL"
+            currency=self.currency,
+            status="draft"
         )
         
         self.order2 = Order.objects.create(
             customer=self.customer,
             order_number="ORD-2024-QUERY-0002",
-            currency="RON",
-            status="completed",
-            billing_company_name="Test Company SRL"
+            currency=self.currency,
+            status="completed"
         )
 
     def test_get_orders_for_customer(self):
@@ -398,20 +463,28 @@ class OrderQueryServiceTestCase(TestCase):
         result = OrderQueryService.get_order_with_items(fake_uuid, self.customer)
         
         self.assertTrue(result.is_err())
-        error_message = result.unwrap_err()
+        error_message = result.unwrap_err()  # type: ignore[union-attr]
         self.assertEqual(error_message, "Order not found")
 
     def test_get_order_wrong_customer(self):
         """Test retrieving order with wrong customer"""
         other_customer = Customer.objects.create(
-            company_name="Other Company SRL",
-            email="other@company.ro",
-            phone="+40987654321",
-            is_active=True
+            name="Other Company SRL",
+            customer_type="company",
+            status="active",
+            primary_email="other@company.ro"
+        )
+        
+        # Create tax profile for other_customer
+        CustomerTaxProfile.objects.create(
+            customer=other_customer,
+            vat_number="RO11111111",
+            cui="RO11111111",
+            is_vat_payer=True
         )
         
         result = OrderQueryService.get_order_with_items(self.order1.id, other_customer)
         
         self.assertTrue(result.is_err())
-        error_message = result.unwrap_err()
+        error_message = result.unwrap_err()  # type: ignore[union-attr]
         self.assertEqual(error_message, "Order not found")

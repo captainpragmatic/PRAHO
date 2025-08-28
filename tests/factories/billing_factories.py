@@ -25,7 +25,7 @@ class PaymentCreationRequest:
     invoice: Invoice | None = None
     currency: Currency | None = None
     amount_cents: int = 1000
-    method: str = 'stripe'
+    payment_method: str = 'stripe'
     status: str = 'succeeded'
 
 
@@ -65,7 +65,7 @@ def create_payment(request: PaymentCreationRequest) -> Payment:
         invoice=request.invoice,
         currency=request.currency,
         amount_cents=request.amount_cents,
-        method=request.method,
+        payment_method=request.payment_method,
         status=request.status
     )
 
@@ -76,7 +76,7 @@ def create_payment_legacy(  # noqa: PLR0913
     invoice: Invoice | None = None,
     currency: Currency | None = None,
     amount_cents: int = 1000,
-    method: str = 'stripe',
+    payment_method: str = 'stripe',
     status: str = 'succeeded'
 ) -> Payment:
     """Legacy wrapper for backward compatibility"""
@@ -85,7 +85,7 @@ def create_payment_legacy(  # noqa: PLR0913
         invoice=invoice,
         currency=currency,
         amount_cents=amount_cents,
-        method=method,
+        payment_method=payment_method,
         status=status
     )
     return create_payment(request)

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -22,19 +23,21 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_POST
 
+from apps.billing.services import RefundData, RefundReason, RefundService, RefundType
 from apps.common.decorators import staff_required
 from apps.common.mixins import get_search_context
 from apps.common.utils import json_error, json_success
 from apps.customers.models import Customer
+from apps.tickets.models import SupportCategory, Ticket
 from apps.users.models import User
 
 from .models import Order
-
-logger = logging.getLogger(__name__)
 from .services import (
     OrderService,
     StatusChangeData,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _get_accessible_customer_ids(user: User) -> list[int]:
@@ -166,7 +169,7 @@ def order_detail(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
 @staff_required
 def order_create(request: HttpRequest) -> HttpResponse:
     """
-    ➕ Create new order (staff only)
+    Create new order (staff only)
     """
     if request.method == 'POST':
         # TODO: Implement order creation form processing
@@ -247,12 +250,11 @@ def order_change_status(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
             'new_status': new_status,
             'status_display': order.get_status_display()
         })
+    # Handle error case - use hasattr to check for error attribute
+    elif hasattr(result, 'error'):
+        return json_error(result.error)
     else:
-        # Handle error case - use hasattr to check for error attribute
-        if hasattr(result, 'error'):
-            return json_error(result.error)
-        else:
-            return json_error("Unknown error occurred")
+        return json_error("Unknown error occurred")
 
 
 @staff_required
@@ -287,24 +289,21 @@ def order_cancel(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     
     if result.is_ok():
         messages.success(request, _("✅ Order has been cancelled."))
+    # Handle error case - use hasattr to check for error attribute
+    elif hasattr(result, 'error'):
+        messages.error(request, f"❌ Failed to cancel order: {result.error}")
     else:
-        # Handle error case - use hasattr to check for error attribute
-        if hasattr(result, 'error'):
-            messages.error(request, f"❌ Failed to cancel order: {result.error}")
-        else:
-            messages.error(request, "❌ Unknown error occurred while cancelling order")
+        messages.error(request, "❌ Unknown error occurred while cancelling order")
     
     return redirect('orders:order_detail', pk=pk)
 
 
 @staff_required
 @require_POST
-def order_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
+def order_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:  # noqa: PLR0911
     """
     💰 Refund an order (bidirectional with invoice refunds)
     """
-    from apps.billing.services import RefundService, RefundData, RefundType, RefundReason
-    from decimal import Decimal
     
     order = get_object_or_404(Order, id=pk)
     
@@ -360,16 +359,15 @@ def order_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
         if result.is_ok():
             refund_result = result.unwrap()
             return json_success({
-                'message': f'Order refund processed successfully',
+                'message': 'Order refund processed successfully',
                 'refund_id': str(refund_result['refund_id']) if refund_result.get('refund_id') else None,
                 'new_status': order.status  # Will be updated by the service
             })
+        # Handle error case - use hasattr to check for error attribute
+        elif hasattr(result, 'error'):
+            return json_error(result.error)
         else:
-            # Handle error case - use hasattr to check for error attribute
-            if hasattr(result, 'error'):
-                return json_error(result.error)
-            else:
-                return json_error("Unknown error occurred")
+            return json_error("Unknown error occurred")
             
     except Exception as e:
         logger.exception(f"Failed to process order refund: {e}")
@@ -382,8 +380,6 @@ def order_refund_request(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
     """
     🎫 Create a refund request ticket for an order (customer-facing)
     """
-    from apps.tickets.models import SupportTicket, SupportCategory
-    from apps.common.utils import json_success, json_error
     
     order = get_object_or_404(Order, id=pk)
     
@@ -432,7 +428,7 @@ def order_refund_request(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
         )
         
         # Create ticket
-        ticket = SupportTicket.objects.create(
+        ticket = Ticket.objects.create(
             title=f"Refund Request for Order {order.order_number}",
             description=f"""
 REFUND REQUEST DETAILS
@@ -462,13 +458,13 @@ This ticket was automatically created from a customer refund request.
             created_by=request.user,
             # Link to order
             content_type=ContentType.objects.get_for_model(Order),
-            object_id=order.id
+            object_id=str(order.id)
         )
         
         logger.info(f"🎫 Refund request ticket #{ticket.ticket_number} created for order {order.order_number} by user {request.user.email}")
         
         return json_success({
-            'message': f'Refund request submitted successfully',
+            'message': 'Refund request submitted successfully',
             'ticket_number': ticket.ticket_number,
             'order_number': order.order_number
         })
@@ -512,7 +508,7 @@ def order_items_list(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
 
 @staff_required
 def order_item_create(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
-    """➕ HTMX: Add order item (to be implemented)"""
+    """HTMX: Add order item (to be implemented)"""
     messages.info(request, _("Order item creation will be implemented next."))
     return redirect('orders:order_detail', pk=pk)
 
