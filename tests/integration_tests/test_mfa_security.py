@@ -21,6 +21,7 @@ import pyotp
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.test import RequestFactory, TestCase, override_settings
+from django.utils import timezone
 from freezegun import freeze_time
 
 from apps.users.mfa import (
@@ -124,7 +125,7 @@ class MFACryptographicSecurityTests(TestCase):
         time_offsets = [-30, 0, 30]  # Previous, current, next 30-second windows
 
         for offset in time_offsets:
-            with freeze_time(datetime.now() + timedelta(seconds=offset)):
+            with freeze_time(timezone.now() + timedelta(seconds=offset)):
                 current_code = totp.now()
 
                 # Service should accept valid codes in tolerance window

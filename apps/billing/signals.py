@@ -21,7 +21,13 @@ from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
 
-from apps.audit.services import AuditEventData, AuditService, ComplianceEventRequest
+from apps.audit.services import (
+    AuditContext,
+    AuditEventData,
+    AuditService,
+    BillingAuditService,
+    ComplianceEventRequest,
+)
 from apps.common.validators import log_security_event
 
 from .models import (
@@ -61,8 +67,8 @@ def handle_invoice_created_or_updated(sender: type[Invoice], instance: Invoice, 
     - Post-refund side effects
     """
     try:
-        # Audit logging for all invoice changes
-        event_type = 'invoice_created' if created else 'invoice_updated'
+        # Enhanced audit logging using BillingAuditService
+        event_type = 'invoice_created' if created else 'invoice_status_changed'
         
         old_values = getattr(instance, '_original_invoice_values', {}) if not created else {}
         new_values = {
@@ -72,16 +78,17 @@ def handle_invoice_created_or_updated(sender: type[Invoice], instance: Invoice, 
             'customer_id': str(instance.customer.id)
         }
         
-        event_data = AuditEventData(
-            event_type=event_type,
-            content_object=instance,
-            old_values=old_values,
-            new_values=new_values,
-            description=f"Invoice {instance.number} {'created' if created else 'updated'}"
-        )
-        
         if not getattr(settings, 'DISABLE_AUDIT_SIGNALS', False):
-            AuditService.log_event(event_data)
+            # Use specialized billing audit service for richer metadata
+            BillingAuditService.log_invoice_event(
+                event_type=event_type,
+                invoice=instance,
+                user=None,  # System event
+                context=AuditContext(actor_type='system'),
+                old_values=old_values,
+                new_values=new_values,
+                description=f"Invoice {instance.number} {'created' if created else 'updated'}"
+            )
         
         if created:
             # New invoice created
@@ -229,16 +236,20 @@ def handle_payment_created_or_updated(sender: type[Payment], instance: Payment, 
             'customer_id': str(instance.customer.id)
         }
         
-        # Audit log
-        event_data = AuditEventData(
-            event_type=event_type,
-            content_object=instance,
-            old_values=old_values,
-            new_values=new_values,
-            description=f"Payment {instance.amount} {instance.currency.code} - {instance.status}"
-        )
+        # Enhanced payment audit logging
         if not getattr(settings, 'DISABLE_AUDIT_SIGNALS', False):
-            AuditService.log_event(event_data)
+            # Determine specific event type based on status change
+            audit_event_type = 'payment_initiated' if created else f'payment_{instance.status}'
+            
+            BillingAuditService.log_payment_event(
+                event_type=audit_event_type,
+                payment=instance,
+                user=None,  # System event
+                context=AuditContext(actor_type='system'),
+                old_values=old_values,
+                new_values=new_values,
+                description=f"Payment {instance.amount} {instance.currency.code} - {instance.status}"
+            )
         
         if created:
             logger.info(f"💳 [Payment] Created payment {instance.id} for {instance.customer}")
@@ -317,6 +328,26 @@ def handle_proforma_invoice_conversion(sender: type[ProformaInvoice], instance: 
     Romanian business practice: Proformas convert to invoices upon payment or acceptance.
     """
     try:
+        # Enhanced proforma audit logging
+        event_type = 'proforma_created' if created else 'proforma_updated'
+        
+        old_values = getattr(instance, '_original_proforma_values', {}) if not created else {}
+        new_values = {
+            'number': instance.number,
+            'total_cents': instance.total_cents,
+            'customer_id': str(instance.customer.id)
+        }
+        
+        if not getattr(settings, 'DISABLE_AUDIT_SIGNALS', False):
+            BillingAuditService.log_proforma_event(
+                event_type=event_type,
+                proforma=instance,
+                user=None,  # System event
+                context=AuditContext(actor_type='system'),
+                old_values=old_values,
+                new_values=new_values,
+                description=f"Proforma {instance.number} {'created' if created else 'updated'}"
+            )
         if not created:
             old_values = getattr(instance, '_original_proforma_values', {})
             old_status = old_values.get('status')

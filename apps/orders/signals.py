@@ -10,7 +10,7 @@ from typing import Any
 from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 
-from apps.audit.services import AuditEventData, AuditService
+from apps.audit.services import AuditContext, AuditEventData, AuditService, OrdersAuditService
 from apps.common.validators import log_security_event
 
 from .models import Order, OrderItem
@@ -45,15 +45,16 @@ def handle_order_created_or_updated(sender: type[Order], instance: Order, create
             'customer_id': str(instance.customer.id)
         }
         
-        event_data = AuditEventData(
+        # Enhanced order audit logging using OrdersAuditService
+        OrdersAuditService.log_order_event(
             event_type=event_type,
-            content_object=instance,
+            order=instance,
+            user=None,  # System event
+            context=AuditContext(actor_type='system'),
             old_values=old_values,
             new_values=new_values,
             description=f"Order {instance.order_number} {'created' if created else 'updated'}"
         )
-        
-        AuditService.log_event(event_data)
         
         if created:
             # Order created - send welcome email
@@ -250,13 +251,25 @@ def handle_order_item_changes(sender: type[OrderItem], instance: OrderItem, crea
             if old_provisioning_status != instance.provisioning_status:
                 _handle_item_provisioning_status_change(instance, old_provisioning_status)
                 
-        # Audit log the change
-        event_data = AuditEventData(
-            event_type='order_item_updated',
-            content_object=instance,
+        # Enhanced order item audit logging
+        event_type = 'order_item_added' if created else 'order_item_updated'
+        old_values = getattr(instance, '_original_item_values', {}) if not created else {}
+        new_values = {
+            'product_name': instance.product_name,
+            'quantity': instance.quantity,
+            'provisioning_status': instance.provisioning_status,
+            'unit_price_cents': instance.unit_price_cents
+        }
+        
+        OrdersAuditService.log_order_item_event(
+            event_type=event_type,
+            order_item=instance,
+            user=None,  # System event
+            context=AuditContext(actor_type='system'),
+            old_values=old_values,
+            new_values=new_values,
             description=f"Order item {'added to' if created else 'updated in'} {instance.order.order_number}"
         )
-        AuditService.log_event(event_data)
         
     except Exception as e:
         logger.exception(f"🔥 [Order Signal] Failed to handle order item change: {e}")
@@ -307,6 +320,24 @@ def _handle_item_provisioning_status_change(item: OrderItem, old_status: str | N
     try:
         new_status = item.provisioning_status
         logger.info(f"⚡ [Order] Item {item.id} provisioning: {old_status} → {new_status}")
+        
+        # Log specific provisioning events with OrdersAuditService
+        provisioning_events = {
+            'in_progress': 'provisioning_started',
+            'completed': 'provisioning_completed', 
+            'failed': 'provisioning_failed',
+            'cancelled': 'provisioning_cancelled'
+        }
+        
+        if new_status in provisioning_events:
+            OrdersAuditService.log_provisioning_event(
+                event_type=provisioning_events[new_status],
+                order_item=item,
+                service=item.service,
+                user=None,  # System event
+                context=AuditContext(actor_type='system'),
+                description=f"Order item provisioning {new_status}: {item.product_name}"
+            )
         
         if new_status == 'completed' and item.service:
             # Item successfully provisioned - send notification

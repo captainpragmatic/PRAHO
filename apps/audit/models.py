@@ -218,6 +218,108 @@ class AuditEvent(models.Model):
         ('support_ticket_closed', 'Support Ticket Closed'),
         
         # ======================================================================
+        # BILLING & INVOICE EVENTS (Romanian e-Factura Compliance)
+        # ======================================================================
+        ('proforma_created', 'Proforma Created'),
+        ('proforma_converted', 'Proforma Converted to Invoice'),
+        ('proforma_expired', 'Proforma Expired'),
+        ('invoice_created', 'Invoice Created'),
+        ('invoice_issued', 'Invoice Issued'),
+        ('invoice_sent', 'Invoice Sent'),
+        ('invoice_paid', 'Invoice Paid'),
+        ('invoice_partially_paid', 'Invoice Partially Paid'),
+        ('invoice_overdue', 'Invoice Overdue'),
+        ('invoice_voided', 'Invoice Voided'),
+        ('invoice_refunded', 'Invoice Refunded'),
+        ('invoice_status_changed', 'Invoice Status Changed'),
+        ('invoice_number_generated', 'Invoice Number Generated'),
+        ('invoice_pdf_generated', 'Invoice PDF Generated'),
+        ('invoice_xml_generated', 'Invoice XML Generated'),
+        ('efactura_submitted', 'e-Factura Submitted'),
+        ('efactura_accepted', 'e-Factura Accepted'),
+        ('efactura_rejected', 'e-Factura Rejected'),
+        ('vat_calculation_applied', 'VAT Calculation Applied'),
+        ('tax_rule_applied', 'Tax Rule Applied'),
+        ('currency_conversion_applied', 'Currency Conversion Applied'),
+        
+        # ======================================================================
+        # PAYMENT PROCESSING EVENTS
+        # ======================================================================
+        ('payment_initiated', 'Payment Initiated'),
+        ('payment_processing', 'Payment Processing'),
+        ('payment_succeeded', 'Payment Succeeded'),
+        ('payment_failed', 'Payment Failed'),
+        ('payment_refunded', 'Payment Refunded'),
+        ('payment_partially_refunded', 'Payment Partially Refunded'),
+        ('payment_retry_scheduled', 'Payment Retry Scheduled'),
+        ('payment_retry_attempted', 'Payment Retry Attempted'),
+        ('payment_retry_succeeded', 'Payment Retry Succeeded'),
+        ('payment_retry_failed', 'Payment Retry Failed'),
+        ('payment_retry_exhausted', 'Payment Retry Exhausted'),
+        ('payment_method_changed', 'Payment Method Changed'),
+        ('payment_gateway_error', 'Payment Gateway Error'),
+        ('payment_fraud_detected', 'Payment Fraud Detected'),
+        ('payment_chargeback_received', 'Payment Chargeback Received'),
+        ('dunning_email_sent', 'Dunning Email Sent'),
+        ('collection_run_started', 'Collection Run Started'),
+        ('collection_run_completed', 'Collection Run Completed'),
+        
+        # ======================================================================  
+        # CREDIT & BALANCE MANAGEMENT
+        # ======================================================================
+        ('credit_added', 'Credit Added'),
+        ('credit_used', 'Credit Used'),
+        ('credit_adjusted', 'Credit Adjusted'),
+        ('credit_expired', 'Credit Expired'),
+        ('balance_low_warning', 'Balance Low Warning'),
+        ('balance_insufficient', 'Balance Insufficient'),
+        ('credit_limit_changed', 'Credit Limit Changed'),
+        ('credit_hold_applied', 'Credit Hold Applied'),
+        ('credit_hold_released', 'Credit Hold Released'),
+        
+        # ======================================================================
+        # ORDER MANAGEMENT EVENTS
+        # ======================================================================
+        ('order_created', 'Order Created'),
+        ('order_updated', 'Order Updated'),
+        ('order_status_changed', 'Order Status Changed'),
+        ('order_item_added', 'Order Item Added'),
+        ('order_item_removed', 'Order Item Removed'),
+        ('order_item_updated', 'Order Item Updated'),
+        ('order_quantity_changed', 'Order Quantity Changed'),
+        ('order_pricing_updated', 'Order Pricing Updated'),
+        ('order_submitted', 'Order Submitted'),
+        ('order_confirmed', 'Order Confirmed'),
+        ('order_processing', 'Order Processing'),
+        ('order_completed', 'Order Completed'),
+        ('order_cancelled_customer', 'Order Cancelled by Customer'),
+        ('order_cancelled_admin', 'Order Cancelled by Admin'),
+        ('order_failed', 'Order Failed'),
+        ('order_refund_requested', 'Order Refund Requested'),
+        ('order_refund_approved', 'Order Refund Approved'),
+        ('order_refund_processed', 'Order Refund Processed'),
+        ('order_discount_applied', 'Order Discount Applied'),
+        ('order_discount_removed', 'Order Discount Removed'),
+        ('order_tax_calculated', 'Order Tax Calculated'),
+        ('order_shipping_updated', 'Order Shipping Updated'),
+        ('order_notes_updated', 'Order Notes Updated'),
+        
+        # ======================================================================
+        # PROVISIONING & SERVICE EVENTS
+        # ======================================================================
+        ('provisioning_started', 'Provisioning Started'),
+        ('provisioning_in_progress', 'Provisioning In Progress'),
+        ('provisioning_completed', 'Provisioning Completed'),
+        ('provisioning_failed', 'Provisioning Failed'),
+        ('provisioning_retried', 'Provisioning Retried'),
+        ('service_configuration_updated', 'Service Configuration Updated'),
+        ('domain_associated', 'Domain Associated'),
+        ('domain_dissociated', 'Domain Dissociated'),
+        ('service_credentials_generated', 'Service Credentials Generated'),
+        ('service_access_granted', 'Service Access Granted'),
+        ('service_access_revoked', 'Service Access Revoked'),
+        
+        # ======================================================================
         # SYSTEM & ADMINISTRATIVE EVENTS
         # ======================================================================
         ('system_maintenance_started', 'System Maintenance Started'),

@@ -548,4 +548,3 @@ def register_audit_signals() -> None:
     
     # The @receiver decorators automatically register the signals
     # This function exists for explicit registration if needed
-    pass

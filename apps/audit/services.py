@@ -640,8 +640,16 @@ class AuditService:
             return 'system_admin'
         
         # Compliance events
-        if action.startswith(('vat_', 'efactura_', 'data_retention')):
+        if action.startswith(('vat_', 'efactura_', 'data_retention', 'tax_rule')):
             return 'compliance'
+        
+        # Billing and financial events
+        if action.startswith(('proforma_', 'invoice_', 'payment_', 'credit_', 'billing_', 'currency_conversion')):
+            return 'business_operation'
+        
+        # Order management events
+        if action.startswith(('order_', 'provisioning_', 'service_', 'domain_')):
+            return 'business_operation'
         
         # Default to business operation
         return 'business_operation'
@@ -660,21 +668,26 @@ class AuditService:
             'password_compromised', '2fa_disabled', '2fa_admin_reset', 'role_assigned', 
             'role_removed', 'permission_granted', 'permission_revoked', 'staff_role_changed',
             'data_export_requested', 'data_deletion_requested', 'gdpr_consent_withdrawn', 
-            'user_impersonation_started', 'system_maintenance_started', 'configuration_changed'
+            'user_impersonation_started', 'system_maintenance_started', 'configuration_changed',
+            'payment_failed', 'payment_fraud_detected', 'payment_chargeback_received', 
+            'invoice_voided', 'invoice_refunded', 'credit_limit_changed', 'credit_hold_applied',
+            'order_cancelled_admin', 'provisioning_failed', 'efactura_rejected'
         ]
         
         # Medium severity events
         medium_actions = [
             'login_success', 'login_failed', 'logout_manual', 'password_changed', 
             '2fa_enabled', 'profile_updated', 'email_changed', 'phone_updated',
-            'customer_membership_created', 'api_key_generated'
+            'customer_membership_created', 'api_key_generated', 'invoice_created', 
+            'invoice_paid', 'payment_succeeded', 'order_created', 'order_completed',
+            'proforma_created', 'provisioning_completed', 'efactura_submitted'
         ]
         
         if action in critical_actions or action.startswith(('security_', 'data_breach')):
             return 'critical'
-        elif action in high_actions or action.startswith(('data_', 'gdpr_', 'role_', 'permission_')):
+        elif action in high_actions or action.startswith(('data_', 'gdpr_', 'role_', 'permission_', 'payment_fraud', 'payment_chargeback')):
             return 'high'
-        elif action in medium_actions or action.startswith(('login_', 'password_', '2fa_', 'profile_')):
+        elif action in medium_actions or action.startswith(('login_', 'password_', '2fa_', 'profile_', 'invoice_', 'payment_', 'order_')):
             return 'medium'
         else:
             return 'low'
@@ -685,7 +698,8 @@ class AuditService:
         sensitive_patterns = [
             'login_', 'password_', '2fa_', 'email_', 'phone_', 'profile_',
             'privacy_', 'gdpr_', 'data_', 'security_', 'role_', 'permission_',
-            'payment_', 'billing_', 'tax_'
+            'payment_', 'billing_', 'tax_', 'invoice_', 'credit_', 'proforma_',
+            'vat_', 'efactura_', 'order_', 'customer_'
         ]
         
         return any(action.startswith(pattern) for pattern in sensitive_patterns)
@@ -1440,6 +1454,522 @@ class GDPRConsentService:
             logger.error(f"🔥 [GDPR Consent] Failed to get consent history for {user.email}: {e}")
             return []
 
+
+# ===============================================================================
+# BILLING AUDIT SERVICE
+# ===============================================================================
+
+class BillingAuditService:
+    """
+    🧾 Specialized billing audit service for Romanian compliance
+    
+    Features:
+    - Invoice lifecycle event tracking
+    - Payment processing audit trails  
+    - VAT and e-Factura compliance logging
+    - Credit and balance management events
+    - Romanian business law compliance
+    """
+
+    @staticmethod
+    def log_invoice_event(
+        event_type: str,
+        invoice: Any,
+        user: User | None = None,
+        context: AuditContext | None = None,
+        old_values: dict[str, Any] | None = None,
+        new_values: dict[str, Any] | None = None,
+        description: str | None = None
+    ) -> AuditEvent:
+        """
+        Log invoice-related audit event with financial context
+        
+        Args:
+            event_type: Type of invoice event (invoice_created, invoice_paid, etc.)
+            invoice: Invoice object being audited
+            user: User performing the action
+            context: Additional audit context
+            old_values: Previous values for comparison
+            new_values: New values for comparison
+            description: Optional description override
+        """
+        # Use default context if none provided
+        if context is None:
+            context = AuditContext(user=user)
+        
+        # Build invoice-specific metadata
+        invoice_metadata = {
+            'invoice_number': invoice.number,
+            'invoice_status': invoice.status,
+            'customer_id': str(invoice.customer.id),
+            'customer_name': invoice.bill_to_name or invoice.customer.company_name,
+            'currency': invoice.currency.code,
+            'total_amount': str(invoice.total),
+            'total_cents': invoice.total_cents,
+            'vat_amount': str(invoice.tax_amount),
+            'vat_cents': invoice.tax_cents,
+            'due_date': invoice.due_at.isoformat() if invoice.due_at else None,
+            'issued_date': invoice.issued_at.isoformat() if invoice.issued_at else None,
+            'is_overdue': invoice.is_overdue(),
+            'romanian_compliance': {
+                'efactura_id': invoice.efactura_id,
+                'efactura_sent': invoice.efactura_sent,
+                'efactura_sent_date': invoice.efactura_sent_date.isoformat() if invoice.efactura_sent_date else None,
+            },
+            **context.metadata
+        }
+        
+        # Enhanced context with invoice metadata
+        enhanced_context = AuditContext(
+            user=context.user,
+            ip_address=context.ip_address,
+            user_agent=context.user_agent,
+            request_id=context.request_id,
+            session_key=context.session_key,
+            metadata=serialize_metadata(invoice_metadata),
+            actor_type=context.actor_type
+        )
+        
+        # Create audit event data
+        event_data = AuditEventData(
+            event_type=event_type,
+            content_object=invoice,
+            old_values=old_values,
+            new_values=new_values,
+            description=description or f"Invoice {event_type.replace('_', ' ').title()}: {invoice.number}"
+        )
+        
+        return AuditService.log_event(event_data, enhanced_context)
+
+    @staticmethod
+    def log_payment_event(
+        event_type: str,
+        payment: Any,
+        user: User | None = None,
+        context: AuditContext | None = None,
+        old_values: dict[str, Any] | None = None,
+        new_values: dict[str, Any] | None = None,
+        description: str | None = None
+    ) -> AuditEvent:
+        """
+        Log payment-related audit event with transaction context
+        
+        Args:
+            event_type: Type of payment event (payment_succeeded, payment_failed, etc.)
+            payment: Payment object being audited
+            user: User performing the action
+            context: Additional audit context
+            old_values: Previous values for comparison
+            new_values: New values for comparison
+            description: Optional description override
+        """
+        # Use default context if none provided
+        if context is None:
+            context = AuditContext(user=user)
+        
+        # Build payment-specific metadata
+        payment_metadata = {
+            'payment_id': str(payment.id) if hasattr(payment, 'id') else None,
+            'customer_id': str(payment.customer.id),
+            'customer_name': payment.customer.company_name,
+            'payment_method': payment.payment_method,
+            'amount': str(payment.amount),
+            'amount_cents': payment.amount_cents,
+            'currency': payment.currency.code,
+            'status': payment.status,
+            'gateway_txn_id': payment.gateway_txn_id,
+            'reference_number': payment.reference_number,
+            'received_at': payment.received_at.isoformat(),
+            'invoice_id': str(payment.invoice.id) if payment.invoice else None,
+            'invoice_number': payment.invoice.number if payment.invoice else None,
+            'financial_impact': True,
+            **context.metadata
+        }
+        
+        # Enhanced context with payment metadata
+        enhanced_context = AuditContext(
+            user=context.user,
+            ip_address=context.ip_address,
+            user_agent=context.user_agent,
+            request_id=context.request_id,
+            session_key=context.session_key,
+            metadata=serialize_metadata(payment_metadata),
+            actor_type=context.actor_type
+        )
+        
+        # Create audit event data  
+        event_data = AuditEventData(
+            event_type=event_type,
+            content_object=payment,
+            old_values=old_values,
+            new_values=new_values,
+            description=description or f"Payment {event_type.replace('_', ' ').title()}: {payment.amount} {payment.currency.code}"
+        )
+        
+        return AuditService.log_event(event_data, enhanced_context)
+
+    @staticmethod
+    def log_proforma_event(
+        event_type: str,
+        proforma: Any,
+        user: User | None = None,
+        context: AuditContext | None = None,
+        old_values: dict[str, Any] | None = None,
+        new_values: dict[str, Any] | None = None,
+        description: str | None = None
+    ) -> AuditEvent:
+        """
+        Log proforma-related audit event
+        
+        Args:
+            event_type: Type of proforma event (proforma_created, proforma_converted, etc.)
+            proforma: ProformaInvoice object being audited
+            user: User performing the action
+            context: Additional audit context
+            old_values: Previous values for comparison
+            new_values: New values for comparison
+            description: Optional description override
+        """
+        # Use default context if none provided
+        if context is None:
+            context = AuditContext(user=user)
+        
+        # Build proforma-specific metadata
+        proforma_metadata = {
+            'proforma_number': proforma.number,
+            'customer_id': str(proforma.customer.id),
+            'customer_name': proforma.bill_to_name or proforma.customer.company_name,
+            'currency': proforma.currency.code,
+            'total_amount': str(proforma.total),
+            'total_cents': proforma.total_cents,
+            'vat_amount': str(proforma.tax_amount),
+            'vat_cents': proforma.tax_cents,
+            'valid_until': proforma.valid_until.isoformat(),
+            'is_expired': proforma.is_expired,
+            'created_at': proforma.created_at.isoformat(),
+            **context.metadata
+        }
+        
+        # Enhanced context with proforma metadata
+        enhanced_context = AuditContext(
+            user=context.user,
+            ip_address=context.ip_address,
+            user_agent=context.user_agent,
+            request_id=context.request_id,
+            session_key=context.session_key,
+            metadata=serialize_metadata(proforma_metadata),
+            actor_type=context.actor_type
+        )
+        
+        # Create audit event data
+        event_data = AuditEventData(
+            event_type=event_type,
+            content_object=proforma,
+            old_values=old_values,
+            new_values=new_values,
+            description=description or f"Proforma {event_type.replace('_', ' ').title()}: {proforma.number}"
+        )
+        
+        return AuditService.log_event(event_data, enhanced_context)
+
+    @staticmethod
+    def log_credit_event(
+        event_type: str,
+        credit_entry: Any,
+        user: User | None = None,
+        context: AuditContext | None = None,
+        description: str | None = None
+    ) -> AuditEvent:
+        """
+        Log credit ledger audit event
+        
+        Args:
+            event_type: Type of credit event (credit_added, credit_used, etc.)
+            credit_entry: CreditLedger object being audited
+            user: User performing the action
+            context: Additional audit context
+            description: Optional description override
+        """
+        # Use default context if none provided
+        if context is None:
+            context = AuditContext(user=user)
+        
+        # Build credit-specific metadata
+        credit_metadata = {
+            'customer_id': str(credit_entry.customer.id),
+            'customer_name': credit_entry.customer.company_name,
+            'delta_amount': str(credit_entry.delta),
+            'delta_cents': credit_entry.delta_cents,
+            'reason': credit_entry.reason,
+            'invoice_id': str(credit_entry.invoice.id) if credit_entry.invoice else None,
+            'payment_id': str(credit_entry.payment.id) if credit_entry.payment else None,
+            'created_at': credit_entry.created_at.isoformat(),
+            'financial_impact': True,
+            **context.metadata
+        }
+        
+        # Enhanced context with credit metadata
+        enhanced_context = AuditContext(
+            user=context.user,
+            ip_address=context.ip_address,
+            user_agent=context.user_agent,
+            request_id=context.request_id,
+            session_key=context.session_key,
+            metadata=serialize_metadata(credit_metadata),
+            actor_type=context.actor_type
+        )
+        
+        # Create audit event data
+        event_data = AuditEventData(
+            event_type=event_type,
+            content_object=credit_entry,
+            description=description or f"Credit {event_type.replace('_', ' ').title()}: {credit_entry.delta} for {credit_entry.customer.company_name}"
+        )
+        
+        return AuditService.log_event(event_data, enhanced_context)
+
+
+# ===============================================================================
+# ORDERS AUDIT SERVICE
+# ===============================================================================
+
+class OrdersAuditService:
+    """
+    📦 Specialized orders audit service for order lifecycle tracking
+    
+    Features:
+    - Complete order lifecycle event tracking
+    - Order item changes and provisioning status
+    - Customer order behavior analysis
+    - Inventory and fulfillment audit trails
+    - Romanian compliance for business orders
+    """
+
+    @staticmethod
+    def log_order_event(
+        event_type: str,
+        order: Any,
+        user: User | None = None,
+        context: AuditContext | None = None,
+        old_values: dict[str, Any] | None = None,
+        new_values: dict[str, Any] | None = None,
+        description: str | None = None
+    ) -> AuditEvent:
+        """
+        Log order-related audit event with business context
+        
+        Args:
+            event_type: Type of order event (order_created, order_status_changed, etc.)
+            order: Order object being audited
+            user: User performing the action
+            context: Additional audit context
+            old_values: Previous values for comparison
+            new_values: New values for comparison
+            description: Optional description override
+        """
+        # Use default context if none provided
+        if context is None:
+            context = AuditContext(user=user)
+        
+        # Build order-specific metadata
+        order_metadata = {
+            'order_number': order.order_number,
+            'order_status': order.status,
+            'customer_id': str(order.customer.id),
+            'customer_email': order.customer_email,
+            'customer_name': order.customer_name,
+            'customer_company': order.customer_company,
+            'customer_vat_id': order.customer_vat_id,
+            'currency': order.currency.code,
+            'total_amount': str(order.total),
+            'total_cents': order.total_cents,
+            'subtotal_cents': order.subtotal_cents,
+            'tax_cents': order.tax_cents,
+            'discount_cents': order.discount_cents,
+            'payment_method': order.payment_method,
+            'transaction_id': order.transaction_id,
+            'is_draft': order.is_draft,
+            'is_paid': order.is_paid,
+            'can_be_cancelled': order.can_be_cancelled,
+            'created_at': order.created_at.isoformat(),
+            'completed_at': order.completed_at.isoformat() if order.completed_at else None,
+            'expires_at': order.expires_at.isoformat() if order.expires_at else None,
+            'invoice_id': str(order.invoice.id) if order.invoice else None,
+            'invoice_number': order.invoice.number if order.invoice else None,
+            'source_tracking': {
+                'source_ip': order.source_ip,
+                'user_agent': order.user_agent[:200] if order.user_agent else None,  # Truncate for storage
+                'referrer': order.referrer,
+                'utm_source': order.utm_source,
+                'utm_medium': order.utm_medium,
+                'utm_campaign': order.utm_campaign,
+            },
+            'items_count': order.items.count() if hasattr(order, 'items') else 0,
+            **context.metadata
+        }
+        
+        # Enhanced context with order metadata
+        enhanced_context = AuditContext(
+            user=context.user,
+            ip_address=context.ip_address,
+            user_agent=context.user_agent,
+            request_id=context.request_id,
+            session_key=context.session_key,
+            metadata=serialize_metadata(order_metadata),
+            actor_type=context.actor_type
+        )
+        
+        # Create audit event data
+        event_data = AuditEventData(
+            event_type=event_type,
+            content_object=order,
+            old_values=old_values,
+            new_values=new_values,
+            description=description or f"Order {event_type.replace('_', ' ').title()}: {order.order_number}"
+        )
+        
+        return AuditService.log_event(event_data, enhanced_context)
+
+    @staticmethod
+    def log_order_item_event(
+        event_type: str,
+        order_item: Any,
+        user: User | None = None,
+        context: AuditContext | None = None,
+        old_values: dict[str, Any] | None = None,
+        new_values: dict[str, Any] | None = None,
+        description: str | None = None
+    ) -> AuditEvent:
+        """
+        Log order item-related audit event with product context
+        
+        Args:
+            event_type: Type of order item event (order_item_added, order_item_updated, etc.)
+            order_item: OrderItem object being audited
+            user: User performing the action
+            context: Additional audit context
+            old_values: Previous values for comparison
+            new_values: New values for comparison
+            description: Optional description override
+        """
+        # Use default context if none provided
+        if context is None:
+            context = AuditContext(user=user)
+        
+        # Build order item-specific metadata
+        item_metadata = {
+            'order_number': order_item.order.order_number,
+            'order_status': order_item.order.status,
+            'product_id': str(order_item.product.id),
+            'product_name': order_item.product_name,
+            'product_type': order_item.product_type,
+            'billing_period': order_item.billing_period,
+            'quantity': order_item.quantity,
+            'unit_price': str(order_item.unit_price),
+            'unit_price_cents': order_item.unit_price_cents,
+            'setup_fee': str(order_item.setup_fee),
+            'setup_cents': order_item.setup_cents,
+            'tax_rate': str(order_item.tax_rate),
+            'tax_amount': str(order_item.tax_amount),
+            'tax_cents': order_item.tax_cents,
+            'line_total': str(order_item.line_total),
+            'line_total_cents': order_item.line_total_cents,
+            'domain_name': order_item.domain_name,
+            'provisioning_status': order_item.provisioning_status,
+            'provisioning_notes': order_item.provisioning_notes,
+            'provisioned_at': order_item.provisioned_at.isoformat() if order_item.provisioned_at else None,
+            'service_id': str(order_item.service.id) if order_item.service else None,
+            'config': order_item.config,
+            **context.metadata
+        }
+        
+        # Enhanced context with order item metadata
+        enhanced_context = AuditContext(
+            user=context.user,
+            ip_address=context.ip_address,
+            user_agent=context.user_agent,
+            request_id=context.request_id,
+            session_key=context.session_key,
+            metadata=serialize_metadata(item_metadata),
+            actor_type=context.actor_type
+        )
+        
+        # Create audit event data
+        event_data = AuditEventData(
+            event_type=event_type,
+            content_object=order_item,
+            old_values=old_values,
+            new_values=new_values,
+            description=description or f"Order Item {event_type.replace('_', ' ').title()}: {order_item.product_name} in {order_item.order.order_number}"
+        )
+        
+        return AuditService.log_event(event_data, enhanced_context)
+
+    @staticmethod
+    def log_provisioning_event(
+        event_type: str,
+        order_item: Any,
+        service: Any | None = None,
+        user: User | None = None,
+        context: AuditContext | None = None,
+        description: str | None = None
+    ) -> AuditEvent:
+        """
+        Log provisioning-related audit event
+        
+        Args:
+            event_type: Type of provisioning event (provisioning_started, provisioning_completed, etc.)
+            order_item: OrderItem being provisioned
+            service: Service object if provisioned
+            user: User performing the action
+            context: Additional audit context
+            description: Optional description override
+        """
+        # Use default context if none provided
+        if context is None:
+            context = AuditContext(user=user)
+        
+        # Build provisioning-specific metadata
+        provisioning_metadata = {
+            'order_number': order_item.order.order_number,
+            'order_item_id': str(order_item.id),
+            'product_name': order_item.product_name,
+            'product_type': order_item.product_type,
+            'domain_name': order_item.domain_name,
+            'provisioning_status': order_item.provisioning_status,
+            'provisioning_notes': order_item.provisioning_notes,
+            'config': order_item.config,
+            'service_id': str(service.id) if service else None,
+            'service_type': service.service_type if service else None,
+            'customer_id': str(order_item.order.customer.id),
+            'customer_name': order_item.order.customer_name,
+            **context.metadata
+        }
+        
+        # Enhanced context with provisioning metadata
+        enhanced_context = AuditContext(
+            user=context.user,
+            ip_address=context.ip_address,
+            user_agent=context.user_agent,
+            request_id=context.request_id,
+            session_key=context.session_key,
+            metadata=serialize_metadata(provisioning_metadata),
+            actor_type=context.actor_type
+        )
+        
+        # Create audit event data using the service as content object if available
+        event_data = AuditEventData(
+            event_type=event_type,
+            content_object=service or order_item,
+            description=description or f"Provisioning {event_type.replace('_', ' ').title()}: {order_item.product_name}"
+        )
+        
+        return AuditService.log_event(event_data, enhanced_context)
+
+
+# Global service instances
+billing_audit_service = BillingAuditService()
+orders_audit_service = OrdersAuditService()
 
 # Global GDPR service instances
 gdpr_export_service = GDPRExportService()

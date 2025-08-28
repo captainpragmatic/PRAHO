@@ -26,6 +26,16 @@ INSTALLED_APPS = [app for app in INSTALLED_APPS if app != 'debug_toolbar']
 # Remove debug toolbar middleware in tests
 MIDDLEWARE = [mw for mw in MIDDLEWARE if 'debug_toolbar' not in mw]
 
+# Ensure SessionMiddleware and MessageMiddleware are present for tests
+required_middleware = [
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',
+]
+
+for mw in required_middleware:
+    if mw not in MIDDLEWARE:
+        MIDDLEWARE.append(mw)
+
 # ===============================================================================
 # TEST DATABASE (In-memory for speed)
 # ===============================================================================
@@ -128,6 +138,12 @@ ALLOWED_HOSTS = ['testserver', 'localhost', '127.0.0.1']
 STRIPE_PUBLISHABLE_KEY = 'pk_test_fake_key'
 STRIPE_SECRET_KEY = 'sk_test_fake_key'
 EFACTURA_ENABLED = False
+
+# ===============================================================================
+# DJANGO MESSAGES FRAMEWORK (Test Configuration)
+# ===============================================================================
+
+MESSAGE_STORAGE = 'django.contrib.messages.storage.cookie.CookieStorage'
 
 # ===============================================================================
 # TASK QUEUE (Synchronous for tests)
