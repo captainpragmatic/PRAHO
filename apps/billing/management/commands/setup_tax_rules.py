@@ -23,7 +23,7 @@ class Command(BaseCommand):
             help='Force recreation of existing tax rules',
         )
 
-    def _get_romanian_tax_rules_data(self, today: date) -> list[dict]:
+    def _get_romanian_tax_rules_data(self, today: date) -> list[dict[str, Any]]:
         """Get Romanian VAT rules configuration."""
         return [
             {
@@ -44,7 +44,7 @@ class Command(BaseCommand):
             }
         ]
 
-    def _get_eu_tax_rules_data(self) -> list[dict]:
+    def _get_eu_tax_rules_data(self) -> list[dict[str, Any]]:
         """Get EU countries VAT rates."""
         return [
             # Germany
@@ -67,7 +67,7 @@ class Command(BaseCommand):
             {'country_code': 'BG', 'rate': Decimal('0.20'), 'reduced_rate': Decimal('0.09')},
         ]
 
-    def _process_tax_rule(self, rule_data: dict, force: bool) -> tuple[int, int]:
+    def _process_tax_rule(self, rule_data: dict[str, Any], force: bool) -> tuple[int, int]:
         """Process a single tax rule. Returns (created_count, updated_count)."""
         existing = TaxRule.objects.filter(
             country_code=rule_data['country_code'],

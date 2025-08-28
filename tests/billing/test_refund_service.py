@@ -4,23 +4,12 @@ Tests the critical financial refund system with bidirectional synchronization.
 """
 
 import uuid
-from decimal import Decimal
-from typing import Any
 
 import pytest
-from django.test import TestCase
 from django.contrib.auth import get_user_model
-from django.db import transaction
+from django.test import TestCase
 
-from apps.billing.services import (
-    RefundService,
-    RefundQueryService,
-    RefundData,
-    RefundType,
-    RefundReason,
-    RefundStatus
-)
-from apps.common.types import Ok, Err
+from apps.billing.services import RefundData, RefundQueryService, RefundReason, RefundService, RefundType
 
 User = get_user_model()
 
@@ -523,8 +512,8 @@ class RefundEdgeCasesTestCase(TestCase):
 
     def test_payment_refund_without_payments(self):
         """Test refund processing when no payments exist"""
-        from apps.orders.models import Order
         from apps.billing.models import Invoice
+        from apps.orders.models import Order
         
         order = Order.objects.create(
             order_number='ORD-2024-0004',

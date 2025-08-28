@@ -113,7 +113,7 @@ class CreditLedgerTestCase(TestCase):
             customer=self.customer,
             currency=self.currency,
             amount_cents=5000,
-            method='bank_transfer',
+            payment_method='bank_transfer',
             status='succeeded'
         )
 
@@ -267,7 +267,7 @@ class CreditLedgerIntegrationTestCase(TestCase):
             invoice=invoice,
             currency=self.currency,
             amount_cents=8000,  # 80.00 EUR (overpaid by 30.00)
-            method='card',
+            payment_method='card',
             status='succeeded'
         )
 
@@ -292,7 +292,7 @@ class CreditLedgerIntegrationTestCase(TestCase):
             customer=self.customer,
             currency=self.currency,
             amount_cents=10000,
-            method='card',
+            payment_method='card',
             status='succeeded'
         )
 
@@ -316,7 +316,7 @@ class CreditLedgerIntegrationTestCase(TestCase):
             customer=self.customer,
             currency=self.currency,
             amount_cents=5000,
-            method='card',
+            payment_method='card',
             status='succeeded'
         )
 
@@ -461,7 +461,7 @@ class CreditLedgerIntegrationTestCase(TestCase):
             customer=self.customer,
             currency=self.currency,
             amount_cents=5000,
-            method='card',
+            payment_method='card',
             status='succeeded'
         )
 
