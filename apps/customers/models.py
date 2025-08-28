@@ -10,14 +10,19 @@ Refactored to normalized structure with soft deletes and separated concerns:
 - CustomerPaymentMethod (Stripe, bank transfers)
 """
 
+from __future__ import annotations
+
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, ClassVar, Optional
+from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
-    pass  # Imported for balance calculations
+    from django.db.models.query import QuerySet
+
+    from apps.users.models import User
 
 from django.core.validators import RegexValidator
 from django.db import models
+from django.db.models.query import QuerySet
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -30,14 +35,14 @@ from apps.common.types import validate_romanian_cui
 class SoftDeleteManager(models.Manager[Any]):
     """Manager for soft delete models - only shows non-deleted records by default"""
 
-    def get_queryset(self) -> models.QuerySet[Any]:
+    def get_queryset(self) -> QuerySet[Any]:
         return super().get_queryset().filter(deleted_at__isnull=True)
 
-    def with_deleted(self) -> models.QuerySet[Any]:
+    def with_deleted(self) -> QuerySet[Any]:
         """Include soft-deleted records"""
         return super().get_queryset()
 
-    def deleted_only(self) -> models.QuerySet[Any]:
+    def deleted_only(self) -> QuerySet[Any]:
         """Only show soft-deleted records"""
         return super().get_queryset().filter(deleted_at__isnull=False)
 
@@ -61,7 +66,7 @@ class SoftDeleteModel(models.Model):
     class Meta:
         abstract = True
 
-    def soft_delete(self, user: Any | None = None) -> None:
+    def soft_delete(self, user: User | None = None) -> None:
         """Soft delete this record"""
         self.deleted_at = timezone.now()
         self.deleted_by = user
@@ -195,21 +200,21 @@ class Customer(SoftDeleteModel):
             return self.company_name
         return self.name
 
-    def get_tax_profile(self) -> Optional['CustomerTaxProfile']:
+    def get_tax_profile(self) -> CustomerTaxProfile | None:
         """Get customer tax profile"""
         try:
             return CustomerTaxProfile.objects.get(customer=self)
         except CustomerTaxProfile.DoesNotExist:
             return None
 
-    def get_billing_profile(self) -> Optional['CustomerBillingProfile']:
+    def get_billing_profile(self) -> CustomerBillingProfile | None:
         """Get customer billing profile"""
         try:
             return CustomerBillingProfile.objects.get(customer=self)
         except CustomerBillingProfile.DoesNotExist:
             return None
 
-    def get_primary_address(self) -> Optional['CustomerAddress']:
+    def get_primary_address(self) -> CustomerAddress | None:
         """Get primary address"""
         return CustomerAddress.objects.filter(
             customer=self,
@@ -217,7 +222,7 @@ class Customer(SoftDeleteModel):
             is_current=True
         ).first()
 
-    def get_billing_address(self) -> Optional['CustomerAddress']:
+    def get_billing_address(self) -> CustomerAddress | None:
         """Get billing address or fall back to primary"""
         billing = CustomerAddress.objects.filter(
             customer=self,
