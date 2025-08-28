@@ -25,6 +25,7 @@ urlpatterns = [
 
     # Two-factor authentication
     path('2fa/setup/', views.mfa_method_selection, name='two_factor_setup'),  # Method selection first
+    path('2fa/method-selection/', views.mfa_method_selection, name='mfa_method_selection'),  # Alternative name for tests
     path('2fa/setup/totp/', views.two_factor_setup_totp, name='two_factor_setup_totp'),  # TOTP-specific
     path('2fa/setup/webauthn/', views.two_factor_setup_webauthn, name='two_factor_setup_webauthn'),  # WebAuthn-specific
     path('2fa/verify/', views.two_factor_verify, name='two_factor_verify'),

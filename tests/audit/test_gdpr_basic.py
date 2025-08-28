@@ -203,15 +203,15 @@ class GDPRViewsBasicTestCase(TestCase):
         self.assertContains(response, 'Data Protection')
 
     def test_consent_history_accessible(self):
-        """Test that consent history page is accessible"""
-        url = reverse('audit:consent_history')
+        """Test that GDPR dashboard shows consent history information"""
+        url = reverse('audit:gdpr_dashboard')
         response = self.client.get(url)
 
         # Should load successfully
         self.assertEqual(response.status_code, 200)
 
         # Should contain expected content
-        self.assertContains(response, 'Consent History')
+        self.assertContains(response, 'Recent Consent Changes')
 
     def test_unauthenticated_access_redirects(self):
         """Test that unauthenticated users are redirected to login"""
@@ -219,7 +219,6 @@ class GDPRViewsBasicTestCase(TestCase):
 
         urls_to_test = [
             reverse('audit:gdpr_dashboard'),
-            reverse('audit:consent_history'),
         ]
 
         for url in urls_to_test:

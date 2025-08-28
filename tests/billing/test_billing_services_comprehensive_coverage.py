@@ -244,14 +244,8 @@ class RefundServiceComprehensiveCoverageTestCase(TransactionTestCase):
         with patch('apps.orders.models.Order.objects.select_related') as mock_select:
             mock_select.return_value.get.return_value = mock_order
             
-            with patch.object(RefundService, '_validate_order_refund_eligibility') as mock_validate:
-                eligibility: RefundEligibility = {
-                    'is_eligible': True,
-                    'reason': 'Eligible',
-                    'max_refund_amount_cents': 15000,
-                    'already_refunded_cents': 0
-                }
-                mock_validate.return_value = Ok(eligibility)
+            with patch.object(RefundService, '_validate_and_prepare_order_refund') as mock_validate:
+                mock_validate.return_value = Ok((mock_order, 15000))
                 
                 with patch.object(RefundService, '_process_bidirectional_refund') as mock_process:
                     refund_result: RefundResult = {
@@ -267,7 +261,7 @@ class RefundServiceComprehensiveCoverageTestCase(TransactionTestCase):
                     }
                     mock_process.return_value = Ok(refund_result)
                     
-                    with patch('apps.common.validators.log_security_event') as mock_log:
+                    with patch('apps.billing.services.log_security_event') as mock_log:
                         refund_data = self._create_refund_data()
                         result = RefundService.refund_order(mock_order.id, refund_data)
                         
@@ -284,14 +278,8 @@ class RefundServiceComprehensiveCoverageTestCase(TransactionTestCase):
         with patch('apps.orders.models.Order.objects.select_related') as mock_select:
             mock_select.return_value.get.return_value = mock_order
             
-            with patch.object(RefundService, '_validate_order_refund_eligibility') as mock_validate:
-                eligibility: RefundEligibility = {
-                    'is_eligible': True,
-                    'reason': 'Eligible',
-                    'max_refund_amount_cents': 15000,
-                    'already_refunded_cents': 0
-                }
-                mock_validate.return_value = Ok(eligibility)
+            with patch.object(RefundService, '_validate_and_prepare_order_refund') as mock_validate:
+                mock_validate.return_value = Ok((mock_order, 5000))
                 
                 with patch.object(RefundService, '_process_bidirectional_refund') as mock_process:
                     refund_result: RefundResult = {
@@ -307,7 +295,7 @@ class RefundServiceComprehensiveCoverageTestCase(TransactionTestCase):
                     }
                     mock_process.return_value = Ok(refund_result)
                     
-                    with patch('apps.common.validators.log_security_event') as mock_log:
+                    with patch('apps.billing.services.log_security_event') as mock_log:
                         refund_data = self._create_refund_data(
                             refund_type=RefundType.PARTIAL,
                             amount_cents=5000
@@ -431,7 +419,7 @@ class RefundServiceComprehensiveCoverageTestCase(TransactionTestCase):
                     }
                     mock_process.return_value = Ok(refund_result)
                     
-                    with patch('apps.common.validators.log_security_event') as mock_log:
+                    with patch('apps.billing.services.log_security_event') as mock_log:
                         refund_data = self._create_refund_data()
                         result = RefundService.refund_invoice(self.invoice.id, refund_data)
                         
@@ -468,7 +456,7 @@ class RefundServiceComprehensiveCoverageTestCase(TransactionTestCase):
                     }
                     mock_process.return_value = Ok(refund_result)
                     
-                    with patch('apps.common.validators.log_security_event') as mock_log:
+                    with patch('apps.billing.services.log_security_event') as mock_log:
                         refund_data = self._create_refund_data(
                             refund_type=RefundType.PARTIAL,
                             amount_cents=5000

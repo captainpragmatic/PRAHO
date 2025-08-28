@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% load static %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans "Audit Management Dashboard" %}{% endblock %}
+
+{% block content %}
+<!-- ===============================================================================
+AUDIT MANAGEMENT DASHBOARD - PRAHO PLATFORM
+Professional interface for staff to manage audit system
+=============================================================================== -->
+
+<div class="min-h-screen bg-slate-900">
+    <!-- Main Content -->
+    <main class="px-6 py-6">
+        <!-- Header Section -->
+        <div class="bg-slate-800 border border-slate-700 rounded-lg p-6 mb-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-2xl font-bold text-white">📊 {% trans "Audit Management Dashboard" %}</h1>
+                    <p class="text-slate-400 mt-1">{% trans "Comprehensive audit system management and monitoring" %}</p>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <span class="text-sm text-slate-400">{% trans "Staff Only" %}</span>
+                    <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse" title="{% trans 'System Active' %}"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Statistics Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+            <!-- Total Events -->
+            <div class="bg-slate-800 border border-slate-700 rounded-lg p-6">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <div class="w-10 h-10 bg-blue-500 bg-opacity-20 rounded-lg flex items-center justify-center">
+                            <span class="text-blue-400 text-xl">📋</span>
+                        </div>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm font-medium text-slate-400">{% trans "Total Events" %}</p>
+                        <p class="text-2xl font-semibold text-white">{{ total_events|default:0 }}</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Events -->
+            <div class="bg-slate-800 border border-slate-700 rounded-lg p-6">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <div class="w-10 h-10 bg-green-500 bg-opacity-20 rounded-lg flex items-center justify-center">
+                            <span class="text-green-400 text-xl">⚡</span>
+                        </div>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm font-medium text-slate-400">{% trans "Recent Events (24h)" %}</p>
+                        <p class="text-2xl font-semibold text-white">{{ recent_events|default:0 }}</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Security Events -->
+            <div class="bg-slate-800 border border-slate-700 rounded-lg p-6">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <div class="w-10 h-10 bg-red-500 bg-opacity-20 rounded-lg flex items-center justify-center">
+                            <span class="text-red-400 text-xl">🔒</span>
+                        </div>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm font-medium text-slate-400">{% trans "Security Events" %}</p>
+                        <p class="text-2xl font-semibold text-white">{{ security_events|default:0 }}</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Compliance Events -->
+            <div class="bg-slate-800 border border-slate-700 rounded-lg p-6">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <div class="w-10 h-10 bg-purple-500 bg-opacity-20 rounded-lg flex items-center justify-center">
+                            <span class="text-purple-400 text-xl">⚖️</span>
+                        </div>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm font-medium text-slate-400">{% trans "Compliance Events" %}</p>
+                        <p class="text-2xl font-semibold text-white">{{ compliance_events|default:0 }}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Management Actions -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <!-- Quick Actions -->
+            <div class="bg-slate-800 border border-slate-700 rounded-lg p-6">
+                <h3 class="text-lg font-semibold text-white mb-4">🚀 {% trans "Quick Actions" %}</h3>
+                <div class="space-y-3">
+                    <a href="{% url 'audit:logs' %}" class="block w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 px-4 rounded-lg transition-colors">
+                        {% trans "View All Logs" %}
+                    </a>
+                    <a href="{% url 'audit:alerts_dashboard' %}" class="block w-full bg-red-600 hover:bg-red-500 text-white font-medium py-2 px-4 rounded-lg transition-colors">
+                        {% trans "View Alerts" %}
+                    </a>
+                    <a href="{% url 'audit:integrity_dashboard' %}" class="block w-full bg-purple-600 hover:bg-purple-500 text-white font-medium py-2 px-4 rounded-lg transition-colors">
+                        {% trans "Check Integrity" %}
+                    </a>
+                </div>
+            </div>
+
+            <!-- System Status -->
+            <div class="bg-slate-800 border border-slate-700 rounded-lg p-6">
+                <h3 class="text-lg font-semibold text-white mb-4">🔧 {% trans "System Status" %}</h3>
+                <div class="space-y-4">
+                    <div class="flex items-center justify-between">
+                        <span class="text-slate-300">{% trans "Audit System" %}</span>
+                        <span class="px-3 py-1 bg-green-500 bg-opacity-20 text-green-400 rounded-full text-sm">{% trans "Active" %}</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-slate-300">{% trans "GDPR Compliance" %}</span>
+                        <span class="px-3 py-1 bg-green-500 bg-opacity-20 text-green-400 rounded-full text-sm">{% trans "Active" %}</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-slate-300">{% trans "Event Processing" %}</span>
+                        <span class="px-3 py-1 bg-green-500 bg-opacity-20 text-green-400 rounded-full text-sm">{% trans "Normal" %}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Activity -->
+        <div class="bg-slate-800 border border-slate-700 rounded-lg p-6">
+            <h3 class="text-lg font-semibold text-white mb-4">📈 {% trans "Recent Activity" %}</h3>
+            {% if recent_activity %}
+                <div class="space-y-3">
+                    {% for event in recent_activity %}
+                        <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
+                            <div class="flex items-center space-x-3">
+                                <div class="w-2 h-2 bg-blue-400 rounded-full"></div>
+                                <div>
+                                    <p class="text-white font-medium">{{ event.action }}</p>
+                                    <p class="text-slate-400 text-sm">{{ event.description|default:event.user.email }}</p>
+                                </div>
+                            </div>
+                            <span class="text-slate-400 text-sm">{{ event.timestamp|date:"H:i" }}</span>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="text-center py-8 text-slate-400">
+                    <p>{% trans "No recent activity" %}</p>
+                </div>
+            {% endif %}
+        </div>
+    </main>
+</div>
+
+{% endblock %}

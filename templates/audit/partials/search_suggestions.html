@@ -1,0 +1,77 @@
+{% load i18n %}
+
+{# Search suggestions partial for audit search auto-completion #}
+{% if suggestions %}
+<div class="bg-white border border-gray-200 rounded-lg shadow-lg mt-1 max-h-60 overflow-y-auto">
+    {% if suggestions.actions %}
+        <div class="p-2 border-b border-gray-100">
+            <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{% trans "Actions" %}</h4>
+            {% for action in suggestions.actions %}
+                <div class="px-2 py-1 hover:bg-gray-100 cursor-pointer text-sm rounded suggestion-item" data-value="{{ action }}">
+                    <span class="text-blue-600">{{ action }}</span>
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+    
+    {% if suggestions.users %}
+        <div class="p-2 border-b border-gray-100">
+            <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{% trans "Users" %}</h4>
+            {% for user in suggestions.users %}
+                <div class="px-2 py-1 hover:bg-gray-100 cursor-pointer text-sm rounded suggestion-item" data-value="{{ user }}">
+                    <span class="text-green-600">{{ user }}</span>
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+    
+    {% if suggestions.ip_addresses %}
+        <div class="p-2 border-b border-gray-100">
+            <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{% trans "IP Addresses" %}</h4>
+            {% for ip in suggestions.ip_addresses %}
+                <div class="px-2 py-1 hover:bg-gray-100 cursor-pointer text-sm rounded suggestion-item" data-value="{{ ip }}">
+                    <span class="text-purple-600">{{ ip }}</span>
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+    
+    {% if suggestions.descriptions %}
+        <div class="p-2">
+            <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{% trans "Descriptions" %}</h4>
+            {% for description in suggestions.descriptions %}
+                <div class="px-2 py-1 hover:bg-gray-100 cursor-pointer text-sm rounded suggestion-item" data-value="{{ description }}">
+                    <span class="text-orange-600">{{ description|truncatechars:50 }}</span>
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Handle suggestion item clicks
+    const suggestionItems = document.querySelectorAll('.suggestion-item');
+    suggestionItems.forEach(item => {
+        item.addEventListener('click', function() {
+            const value = this.getAttribute('data-value');
+            const searchInput = document.querySelector('input[name="search"]');
+            if (searchInput) {
+                searchInput.value = value;
+                // Hide suggestions
+                this.closest('.bg-white').style.display = 'none';
+                // Optionally trigger search
+                const form = searchInput.closest('form');
+                if (form) {
+                    form.dispatchEvent(new Event('submit'));
+                }
+            }
+        });
+    });
+});
+</script>
+{% else %}
+<div class="bg-white border border-gray-200 rounded-lg shadow-lg mt-1 p-3 text-sm text-gray-500">
+    {% trans "No suggestions found" %}
+</div>
+{% endif %}

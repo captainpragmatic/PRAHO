@@ -465,11 +465,11 @@ class GDPRViewsTest(TestCase):
             status='success'
         )
 
-        url = reverse('audit:consent_history')
+        url = reverse('audit:gdpr_dashboard')
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Consent History')
+        self.assertContains(response, 'Recent Consent Changes')
         self.assertContains(response, 'Test consent event')
 
 
@@ -604,7 +604,6 @@ class GDPRSecurityTest(TestCase):
         """Test all GDPR views require authentication"""
         urls = [
             reverse('audit:gdpr_dashboard'),
-            reverse('audit:consent_history'),
             reverse('audit:request_data_export'),
             reverse('audit:request_data_deletion'),
             reverse('audit:withdraw_consent'),

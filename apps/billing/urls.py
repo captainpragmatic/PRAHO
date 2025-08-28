@@ -12,6 +12,9 @@ urlpatterns = [
     # Combined listing (proformas + invoices)
     path('invoices/', views.billing_list, name='invoice_list'),  # Updated view name
     path('invoices/list/', views.billing_list_htmx, name='billing_list_htmx'),  # HTMX endpoint
+    
+    # Proforma list (for redirects and separate access)
+    path('proformas/', views.proforma_list, name='proforma_list'),
 
     # Proforma management (only these can be created manually)
     path('proformas/create/', views.proforma_create, name='proforma_create'),
