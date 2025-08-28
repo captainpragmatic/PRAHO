@@ -345,7 +345,7 @@ class TestSecurityDecorators(TestCase):
         """Test rate limiting decorator"""
         with patch('apps.common.security_decorators.cache') as mock_cache:
             # Setup mock cache behavior - track calls
-            cache_data = {}
+            cache_data: dict[str, int] = {}
 
             def mock_get(key, default=0):
                 return cache_data.get(key, default)

@@ -4,6 +4,7 @@ import hashlib
 import logging
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
 
 from django.conf import settings
@@ -149,7 +150,7 @@ class SecureUserRegistrationService:
         last_name: str
         phone: PhoneNumber | None
         accepts_marketing: bool | None
-        gdpr_consent_date: str | None
+        gdpr_consent_date: datetime | None
 
     class CustomerData(TypedDict):
         """Type definition for customer registration data"""
@@ -905,8 +906,8 @@ class SessionSecurityService:
             "session_rotated_password_change",
             {
                 "user_id": target_user.id,
-                "old_session_key": old_session_key[:8] + "...",  # Truncated for security
-                "new_session_key": new_session_key[:8] + "...",
+                "old_session_key": old_session_key[:8] + "..." if old_session_key else None,  # Truncated for security
+                "new_session_key": new_session_key[:8] + "..." if new_session_key else None,
             },
             cls._get_client_ip(request),
         )
@@ -939,8 +940,8 @@ class SessionSecurityService:
             "session_rotated_2fa_change",
             {
                 "user_id": user.id,
-                "old_session_key": old_session_key[:8] + "...",
-                "new_session_key": new_session_key[:8] + "...",
+                "old_session_key": old_session_key[:8] + "..." if old_session_key else None,
+                "new_session_key": new_session_key[:8] + "..." if new_session_key else None,
             },
             cls._get_client_ip(request),
         )

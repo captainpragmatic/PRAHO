@@ -108,8 +108,10 @@ STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
 # ===============================================================================
 
 LANGUAGE_CODE = 'en-us'
+TIME_ZONE = 'Europe/Bucharest'  # Keep same timezone as production for consistency
 USE_I18N = True
 USE_L10N = True
+USE_TZ = True  # Enable timezone support
 
 # ===============================================================================
 # SECURITY (Relaxed for tests)
@@ -145,3 +147,9 @@ RQ_QUEUES = {
         'ASYNC': False,
     },
 }
+
+# ===============================================================================
+# TEST-SPECIFIC FEATURES (Disable audit signals during testing)
+# ===============================================================================
+
+DISABLE_AUDIT_SIGNALS = True

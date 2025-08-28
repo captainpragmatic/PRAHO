@@ -30,8 +30,8 @@ from django.utils.decorators import method_decorator
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods
 from django.views.generic import DetailView, ListView
-from django_ratelimit.decorators import ratelimit
-from django_ratelimit.exceptions import Ratelimited
+from django_ratelimit.decorators import ratelimit  # type: ignore[import-untyped]
+from django_ratelimit.exceptions import Ratelimited  # type: ignore[import-untyped]
 
 from apps.common.constants import BACKUP_CODE_LENGTH, BACKUP_CODE_LOW_WARNING_THRESHOLD
 from apps.common.utils import (
@@ -762,7 +762,7 @@ class UserDetailView(LoginRequiredMixin, DetailView):
 # ===============================================================================
 
 @require_http_methods(["POST"])
-@ratelimit(key='ip', rate='30/m', method='POST', block=True)  # Rate limit to prevent abuse
+@ratelimit(key='ip', rate='30/m', method='POST', block=True)  # type: ignore[misc] # Rate limit to prevent abuse
 def api_check_email(request: HttpRequest) -> JsonResponse:
     """Check if email is already registered
 

@@ -6,7 +6,7 @@ Romanian hosting provider authentication with multi-customer support.
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Any, ClassVar, cast, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
@@ -15,8 +15,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 if TYPE_CHECKING:
-    from django.db.models.manager import ManyToManyRelatedManager
-    from apps.customers.models import Customer as CustomerType
+    pass
 
 # Cross-app imports for core functionality
 from apps.common.encryption import (  # Core encryption needed for user model

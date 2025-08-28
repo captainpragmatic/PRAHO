@@ -107,10 +107,10 @@
                         </a>
                     </div>
                     
-                    {% if service.customer.phone %}
+                    {% if service.customer.primary_phone %}
                     <div>
                         <p class="text-sm text-slate-400">{% trans 'Phone' %}</p>
-                        <p class="text-white">{{ service.customer.phone }}</p>
+                        <p class="text-white">{{ service.customer.primary_phone }}</p>
                     </div>
                     {% endif %}
                 </div>

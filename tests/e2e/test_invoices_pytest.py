@@ -179,7 +179,7 @@ def verify_invoices_functionality(page: Page, user_type: str) -> bool:
         return False
 
 
-def test_staff_invoices_functionality(page: Page):
+def test_staff_invoices_functionality(page: Page) -> None:
     """Test staff invoice management displays correct content and functions properly."""
     print("🧪 Testing staff invoice functionality with comprehensive monitoring")
     
@@ -204,7 +204,7 @@ def test_staff_invoices_functionality(page: Page):
             pytest.fail("Lost authentication during staff invoices test")
 
 
-def test_customer_invoices_functionality(page: Page):
+def test_customer_invoices_functionality(page: Page) -> None:
     """Test customer invoice access displays correct content and functions properly."""
     print("🧪 Testing customer invoice functionality with comprehensive monitoring")
     
@@ -229,7 +229,7 @@ def test_customer_invoices_functionality(page: Page):
             pytest.fail("Lost authentication during customer invoices test")
 
 
-def test_invoices_role_based_access(page: Page):
+def test_invoices_role_based_access(page: Page) -> None:
     """
     Test that invoices display appropriate content based on user roles.
     
@@ -273,7 +273,7 @@ def test_invoices_role_based_access(page: Page):
         print("  ✅ Invoice role-based access control verified!")
 
 
-def test_invoices_actions_and_interactions(page: Page):
+def test_invoices_actions_and_interactions(page: Page) -> None:
     """
     Test invoice actions and interactive elements work correctly.
     
@@ -364,7 +364,7 @@ def test_invoices_actions_and_interactions(page: Page):
             pytest.fail("Lost authentication during invoice interactions test")
 
 
-def test_invoices_mobile_responsiveness(page: Page):
+def test_invoices_mobile_responsiveness(page: Page) -> None:
     """
     Test invoice management responsiveness across mobile breakpoints.
     
@@ -427,7 +427,7 @@ def test_invoices_mobile_responsiveness(page: Page):
             pytest.fail("Lost authentication during invoice mobile responsiveness test")
 
 
-def test_invoices_mobile_specific_features(page: Page):
+def test_invoices_mobile_specific_features(page: Page) -> None:
     """
     Test invoice features specific to mobile viewport.
     

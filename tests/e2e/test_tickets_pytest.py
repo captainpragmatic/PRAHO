@@ -178,7 +178,7 @@ def verify_tickets_functionality(page: Page, user_type: str) -> bool:
         return False
 
 
-def test_staff_tickets_functionality(page: Page):
+def test_staff_tickets_functionality(page: Page) -> None:
     """Test staff ticket management displays correct content and functions properly."""
     print("🧪 Testing staff ticket functionality with comprehensive monitoring")
     
@@ -203,7 +203,7 @@ def test_staff_tickets_functionality(page: Page):
             pytest.fail("Lost authentication during staff tickets test")
 
 
-def test_customer_tickets_functionality(page: Page):
+def test_customer_tickets_functionality(page: Page) -> None:
     """Test customer ticket access displays correct content and functions properly."""
     print("🧪 Testing customer ticket functionality with comprehensive monitoring")
     
@@ -228,7 +228,7 @@ def test_customer_tickets_functionality(page: Page):
             pytest.fail("Lost authentication during customer tickets test")
 
 
-def test_tickets_role_based_access(page: Page):
+def test_tickets_role_based_access(page: Page) -> None:
     """
     Test that tickets display appropriate content based on user roles.
     
@@ -272,7 +272,7 @@ def test_tickets_role_based_access(page: Page):
         print("  ✅ Ticket role-based access control verified!")
 
 
-def test_tickets_actions_and_interactions(page: Page):
+def test_tickets_actions_and_interactions(page: Page) -> None:
     """
     Test ticket actions and interactive elements work correctly.
     
@@ -363,7 +363,7 @@ def test_tickets_actions_and_interactions(page: Page):
             pytest.fail("Lost authentication during ticket interactions test")
 
 
-def test_tickets_mobile_responsiveness(page: Page):
+def test_tickets_mobile_responsiveness(page: Page) -> None:
     """
     Test ticket management responsiveness across mobile breakpoints.
     
@@ -435,7 +435,7 @@ def test_tickets_mobile_responsiveness(page: Page):
             pytest.fail("Lost authentication during ticket mobile responsiveness test")
 
 
-def test_tickets_mobile_specific_features(page: Page):
+def test_tickets_mobile_specific_features(page: Page) -> None:
     """
     Test ticket features specific to mobile viewport.
     

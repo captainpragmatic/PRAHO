@@ -31,7 +31,7 @@ from tests.e2e.utils import (
 )
 
 
-def test_superuser_dashboard_functionality(page: Page):
+def test_superuser_dashboard_functionality(page: Page) -> None:
     """Test superuser dashboard displays correct content and functions properly."""
     print("🧪 Testing superuser dashboard functionality with comprehensive monitoring")
     
@@ -56,7 +56,7 @@ def test_superuser_dashboard_functionality(page: Page):
             pytest.fail("Lost authentication during superuser dashboard test")
 
 
-def test_customer_dashboard_functionality(page: Page):
+def test_customer_dashboard_functionality(page: Page) -> None:
     """Test customer dashboard displays correct content and functions properly."""
     print("🧪 Testing customer dashboard functionality with comprehensive monitoring")
     
@@ -81,7 +81,7 @@ def test_customer_dashboard_functionality(page: Page):
             pytest.fail("Lost authentication during customer dashboard test")
 
 
-def test_dashboard_role_based_content(page: Page):
+def test_dashboard_role_based_content(page: Page) -> None:
     """
     Test that dashboard displays appropriate content based on user roles.
     
@@ -122,7 +122,7 @@ def test_dashboard_role_based_content(page: Page):
                 pytest.fail(f"Lost authentication during {user_type} content test")
 
 
-def test_dashboard_actions_and_interactions(page: Page):
+def test_dashboard_actions_and_interactions(page: Page) -> None:
     """
     Test dashboard actions and interactive elements work correctly.
     
@@ -205,7 +205,7 @@ def test_dashboard_actions_and_interactions(page: Page):
             pytest.fail("Lost authentication during dashboard interactions test")
 
 
-def test_dashboard_mobile_responsiveness(page: Page):
+def test_dashboard_mobile_responsiveness(page: Page) -> None:
     """
     Test dashboard responsiveness across mobile breakpoints.
     
@@ -268,7 +268,7 @@ def test_dashboard_mobile_responsiveness(page: Page):
             pytest.fail("Lost authentication during dashboard mobile responsiveness test")
 
 
-def test_dashboard_mobile_specific_features(page: Page):
+def test_dashboard_mobile_specific_features(page: Page) -> None:
     """
     Test dashboard features specific to mobile viewport.
     

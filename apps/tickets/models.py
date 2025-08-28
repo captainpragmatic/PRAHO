@@ -166,7 +166,7 @@ class Ticket(models.Model):
 
     # Generic relation for other objects
     content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE, null=True, blank=True)
-    object_id = models.PositiveIntegerField(null=True, blank=True)
+    object_id = models.CharField(max_length=36, blank=True, default='', db_index=True)  # 36 chars for UUIDs, integers fit fine
     related_object = GenericForeignKey('content_type', 'object_id')
 
     # SLA tracking

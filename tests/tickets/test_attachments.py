@@ -101,11 +101,13 @@ class TicketAttachmentTest(TestCase):
         # Check comment was created
         comment = TicketComment.objects.filter(ticket=self.ticket).first()
         self.assertIsNotNone(comment)
+        assert comment is not None  # Type narrowing for MyPy
         self.assertEqual(comment.content, 'This is a test reply with attachment')
 
         # Check attachment was created
         attachment = TicketAttachment.objects.filter(comment=comment).first()
         self.assertIsNotNone(attachment)
+        assert attachment is not None  # Type narrowing for MyPy
         self.assertEqual(attachment.filename, 'test_document.txt')
         self.assertEqual(attachment.content_type, 'text/plain')
         self.assertEqual(attachment.file_size, len(test_content))

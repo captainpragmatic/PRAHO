@@ -192,7 +192,7 @@ class UserProfileForm(forms.ModelForm):
             }),
         }
 
-        labels: ClassVar[dict[str, str]] = {
+        labels: ClassVar[dict[str, Any]] = {
             'preferred_language': _('Preferred language'),
             'timezone': _('Timezone'),
             'date_format': _('Date format'),
