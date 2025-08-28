@@ -3,9 +3,9 @@ URL configuration for PRAHO Platform
 Romanian hosting provider with security-first routing.
 """
 
+
 from django.conf import settings
 from django.conf.urls.static import static
-from django.contrib import admin
 
 # ===============================================================================
 # MAIN URL PATTERNS
@@ -27,8 +27,6 @@ def root_redirect(request: HttpRequest) -> HttpResponseBase:
         return RedirectView.as_view(url='/auth/login/', permanent=False)(request)
 
 urlpatterns = [
-    # Admin panel (customizable URL for security)
-    path(settings.ADMIN_URL if hasattr(settings, 'ADMIN_URL') else 'admin/', admin.site.urls),
 
     # Root redirect - to dashboard if authenticated, to login if not
     path('', root_redirect, name='root'),
@@ -69,14 +67,6 @@ if settings.DEBUG:
 
     # Debug toolbar
     if 'debug_toolbar' in settings.INSTALLED_APPS:
-        import debug_toolbar
+        import debug_toolbar  # type: ignore[import-untyped]
         urlpatterns = [path('__debug__/', include(debug_toolbar.urls)), *urlpatterns]
 
-# ===============================================================================
-# ADMIN SITE CUSTOMIZATION
-# ===============================================================================
-
-admin.site.site_header = "🚀 PRAHO Platform"
-admin.site.site_title = "PragmaticHost"
-admin.site.index_title = "Romanian Hosting Provider Administration"
-admin.site.site_url = "/app/"

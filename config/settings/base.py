@@ -15,7 +15,6 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # Application definition
 DJANGO_APPS: list[str] = [
-    'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
@@ -76,6 +75,7 @@ TEMPLATES = [
                 'django.contrib.messages.context_processors.messages',
                 'apps.common.context_processors.current_customer',
                 'apps.common.context_processors.romanian_business_context',
+                'apps.common.context_processors.navigation_dropdowns',
             ],
         },
     },

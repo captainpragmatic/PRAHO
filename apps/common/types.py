@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
-from django.contrib.admin import ModelAdmin
+# ModelAdmin import removed - Django admin disabled
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.db.models import QuerySet
@@ -36,10 +36,7 @@ E = TypeVar('E')  # Error type
 # Additional type variables for Django patterns
 UserT = TypeVar('UserT', bound=AbstractUser)
 FormT = TypeVar('FormT', bound=Form)
-if TYPE_CHECKING:
-    AdminT = TypeVar('AdminT', bound='ModelAdmin[Any]')
-else:
-    AdminT = TypeVar('AdminT', bound=ModelAdmin)
+# AdminT type variable removed - Django admin disabled
 
 # ===============================================================================
 # RESULT TYPES
@@ -119,7 +116,6 @@ Result = Ok[T] | Err[E]
 # ===============================================================================
 
 M = TypeVar('M', bound=models.Model)  # Model type for Django models
-AdminModel = TypeVar('AdminModel', bound=models.Model)  # Model type for admin
 
 # ===============================================================================
 # REQUEST HANDLING TYPES
@@ -134,12 +130,7 @@ HTMXHandler = Callable[[HttpRequest], HttpResponse]
 # ===============================================================================
 
 QuerySetGeneric = QuerySet[M]
-if TYPE_CHECKING:
-    from typing import TypeVar
-    _AdminModel = TypeVar("_AdminModel", bound=models.Model)
-    ModelAdminGeneric = ModelAdmin[_AdminModel]
-else:
-    ModelAdminGeneric = ModelAdmin
+# ModelAdminGeneric types removed - Django admin disabled
 
 # ===============================================================================
 # BUSINESS TYPES
@@ -156,25 +147,11 @@ DomainName = str  # Valid domain name: "example.com"
 PhoneNumber = str  # International phone format: "+40721123456"
 
 # ===============================================================================
-# ADMIN PATTERN TYPES
+# ADMIN PATTERN TYPES - REMOVED
 # ===============================================================================
 
-if TYPE_CHECKING:
-    AdminDisplayMethod = Callable[[ModelAdmin[M], M], str]
-    AdminPermissionMethod = Callable[[ModelAdmin[M], HttpRequest], bool]
-    AdminActionMethod = Callable[[ModelAdmin[M], HttpRequest, QuerySet[M]], HttpResponse | None]
-    AdminGetFieldsMethod = Callable[[ModelAdmin[M], HttpRequest, M | None], tuple[str, ...]]
-    AdminGetReadonlyMethod = Callable[[ModelAdmin[M], HttpRequest, M | None], tuple[str, ...]]
-    AdminFormMethod = Callable[[ModelAdmin[M], HttpRequest, M | None], type]
-    AdminQuerysetMethod = Callable[[ModelAdmin[M], HttpRequest], QuerySet[M]]
-else:
-    AdminDisplayMethod = Callable[[ModelAdmin, M], str]
-    AdminPermissionMethod = Callable[[ModelAdmin, HttpRequest], bool]
-    AdminActionMethod = Callable[[ModelAdmin, HttpRequest, QuerySet], HttpResponse | None]
-    AdminGetFieldsMethod = Callable[[ModelAdmin, HttpRequest, M | None], tuple[str, ...]]
-    AdminGetReadonlyMethod = Callable[[ModelAdmin, HttpRequest, M | None], tuple[str, ...]]
-    AdminFormMethod = Callable[[ModelAdmin, HttpRequest, M | None], type]
-    AdminQuerysetMethod = Callable[[ModelAdmin, HttpRequest], QuerySet]
+# All admin pattern types removed - Django admin disabled
+# Staff operations now use custom views with role-based access control
 
 # ===============================================================================
 # FORM AND VALIDATION TYPES
@@ -633,7 +610,7 @@ class Notifiable:
 APIResponseData = dict[str, Any] | list[dict[str, Any]]  # API response data
 
 # Common combinations used throughout the platform
-AdminMethodReturnType = str | int | bool | None | HttpResponse
+# AdminMethodReturnType removed - Django admin disabled
 ValidationResult = Result[Any, ValidationErrors]
 ServiceResult = Result[Any, str]
 APIResult = Result[APIResponseData, str]
@@ -684,7 +661,7 @@ AsyncRepoMethod = Callable[..., Any]  # Will be Awaitable[RepoCreateResult]
 DjangoUser = AbstractUser
 DjangoModel = models.Model
 DjangoForm = Form
-DjangoAdmin = ModelAdmin
+# DjangoAdmin removed - Django admin disabled
 DjangoRequest = HttpRequest
 DjangoResponse = HttpResponse
 DjangoQuerySet = QuerySet
@@ -693,4 +670,4 @@ DjangoQuerySet = QuerySet
 UserModel = AbstractUser
 BaseModel = models.Model
 BaseForm = Form
-BaseAdmin = ModelAdmin
+# BaseAdmin removed - Django admin disabled

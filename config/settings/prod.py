@@ -217,14 +217,11 @@ if AWS_STORAGE_BUCKET_NAME:
     STATIC_URL = f'https://{AWS_S3_CUSTOM_DOMAIN}/static/'
 
 # ===============================================================================
-# ADMIN CONFIGURATION (Production Security)
+# CUSTOM STAFF INTERFACE (Admin Removed)
 # ===============================================================================
 
-ADMIN_URL = os.environ.get('ADMIN_URL', 'admin/')
-ADMIN_FORCE_ALLAUTH = False
-
-# Limit admin access to specific IPs (optional)
-ADMIN_ALLOWED_IPS = os.environ.get('ADMIN_ALLOWED_IPS', '').split(',')
+# Django admin has been removed - all staff operations use custom interface
+# Staff interface available at /app/ with role-based access control
 
 # ===============================================================================
 # RATE LIMITING (Production)

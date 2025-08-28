@@ -13,6 +13,7 @@ Centralizes common functionality like:
 
 
 import time
+from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -38,7 +39,7 @@ CUSTOMER_PASSWORD = "admin123"
 # ===============================================================================
 
 @pytest.fixture(autouse=True)
-def setup_console_monitoring(page: Page):
+def setup_console_monitoring(page: Page) -> Generator[Page, None, None]:
     """
     Automatically monitor console errors for all E2E tests.
     
@@ -477,7 +478,7 @@ def check_network_errors(page: Page) -> list[str]:
     Returns:
         list[str]: List of network error messages
     """
-    network_errors = []
+    network_errors: list[str] = []
     
     try:
         # Get network requests (this requires setting up network monitoring)
@@ -515,7 +516,7 @@ def check_html_validation(page: Page) -> list[str]:
     Returns:
         list[str]: List of HTML/HTMX validation issues
     """
-    html_issues = []
+    html_issues: list[str] = []
     
     try:
         # Check for duplicate IDs (major HTML validation issue)
@@ -807,7 +808,7 @@ class ComprehensivePageMonitor:
         self.check_accessibility = config.check_accessibility
         self.check_performance = config.check_performance
         self.ignore_patterns = config.ignore_patterns
-        self.console_messages = []
+        self.console_messages: list[str] = []
     
     def __enter__(self):
         if self.check_console:
@@ -936,7 +937,7 @@ class ConsoleMonitor:
         self.page = page
         self.context = context
         self.ignore_patterns = ignore_patterns or []
-        self.console_messages = []
+        self.console_messages: list[str] = []
     
     def __enter__(self):
         self.console_messages = setup_console_monitoring_standalone(self.page)
@@ -970,49 +971,27 @@ def pytest_configure(config):
 
 def verify_admin_access(page: Page, should_have_access: bool) -> bool:
     """
-    Test admin access with clear expectations and functional validation.
+    Test that Django admin is properly removed from PRAHO platform.
     
-    In PRAHO, staff users don't have explicit "Admin" links in navigation.
-    Instead, they see staff-specific navigation (Customers, Invoices, etc.)
-    and can access Django admin by navigating to /admin/ directly.
+    Django admin has been completely removed from PRAHO. Staff users now use
+    the custom staff interface at /app/ with role-based access control.
+    Admin URLs should return 404 for all users.
     
     Args:
         page: Playwright page object
-        should_have_access: Whether the current user should have admin access
+        should_have_access: Ignored - admin is removed for all users
         
     Returns:
-        bool: True if access control works as expected
-        
-    Example:
-        verify_admin_access(page, should_have_access=True)  # For superuser
-        verify_admin_access(page, should_have_access=False) # For customer
+        bool: True if admin is properly removed (404 response)
     """
-    print(f"🔐 Verifying admin access (should_have_access={should_have_access})")
+    print(f"🔐 Verifying admin is removed (admin URLs should return 404)")
     
-    if should_have_access:
-        return _verify_admin_user_access(page)
-    else:
-        return _verify_non_admin_access_restrictions(page)
-
-
-def _verify_admin_user_access(page: Page) -> bool:
-    """Verify that admin users can access admin features."""
-    # Check for staff navigation elements
-    if not _check_staff_navigation(page):
-        return False
-    
-    # Test Django admin access
-    return _test_django_admin_access(page)
-
-
-def _verify_non_admin_access_restrictions(page: Page) -> bool:
-    """Verify that non-admin users cannot access admin features."""
-    # Check they don't see staff navigation
-    if not _check_no_staff_navigation(page):
-        return False
-    
-    # Test that admin access is blocked
+    # Django admin removed - all users should get 404 when accessing /admin/
     return _test_admin_access_blocked(page)
+
+
+# Legacy admin verification functions removed - Django admin disabled
+# Staff users now use custom interface at /app/ with role-based access control
 
 
 def _check_staff_navigation(page: Page) -> bool:
@@ -1028,35 +1007,7 @@ def _check_staff_navigation(page: Page) -> bool:
     return True
 
 
-def _test_django_admin_access(page: Page) -> bool:
-    """Test that Django admin can be accessed."""
-    try:
-        current_url = page.url
-        page.goto(f"{BASE_URL}/admin/")
-        page.wait_for_load_state("networkidle", timeout=5000)
-        
-        # Should successfully access admin panel
-        if "/admin/" not in page.url:
-            print("❌ Admin user should access admin panel")
-            return False
-        
-        # Check for typical Django admin elements
-        admin_elements = page.locator('body:has-text("Django"), #header, .breadcrumbs, #changelist')
-        if admin_elements.count() == 0:
-            print("❌ Admin panel should load properly")
-            return False
-            
-        print("✅ Django admin access verified")
-        
-        # Navigate back to avoid affecting other tests
-        page.goto(current_url)
-        page.wait_for_load_state("networkidle", timeout=3000)
-        
-        return True
-        
-    except Exception as e:
-        print(f"❌ Admin access failed: {str(e)[:50]}")
-        return False
+# _test_django_admin_access function removed - Django admin disabled
 
 
 def _check_no_staff_navigation(page: Page) -> bool:
@@ -1073,30 +1024,25 @@ def _check_no_staff_navigation(page: Page) -> bool:
 
 
 def _test_admin_access_blocked(page: Page) -> bool:
-    """Test that admin access is properly blocked."""
+    """Test that admin URLs return 404 (admin completely removed)."""
     try:
         current_url = page.url
         page.goto(f"{BASE_URL}/admin/")
         page.wait_for_load_state("networkidle", timeout=5000)
         
-        # Should either be blocked or redirected to login
-        if "/admin/" in page.url and "login" not in page.url.lower():
-            # Check if it's actually showing admin content vs permission denied
-            admin_content = page.locator('body:has-text("Django"), #header, .breadcrumbs')
-            if admin_content.count() > 0:
-                print("❌ Non-admin user should not access admin panel")
-                return False
+        # Admin is completely removed - should get 404
+        # Check for 404 page or Django's "Page not found" text
+        page_text = page.locator('body').text_content()
+        if "404" in page_text or "not found" in page_text.lower() or "page not found" in page_text.lower():
+            print("✅ Admin URLs properly return 404 (admin removed)")
+            return True
+        else:
+            print(f"❌ Admin URL should return 404, but got: {page.url}")
+            print(f"Page content: {page_text[:200]}...")
+            return False
             
-        print("✅ Admin access properly restricted")
-        
-        # Navigate back to avoid affecting other tests
-        page.goto(current_url)
-        page.wait_for_load_state("networkidle", timeout=3000)
-        
-        return True
-        
     except Exception as e:
-        print(f"✅ Admin access blocked (expected): {str(e)[:50]}")
+        print(f"✅ Admin access blocked with exception (expected): {str(e)[:50]}")
         return True
 
 
@@ -1508,7 +1454,7 @@ class MobileTestContext:
             return False
 
 
-def run_responsive_breakpoints_test(page: Page, test_function, *args, **kwargs) -> dict[str, Any]:
+def run_responsive_breakpoints_test(page: Page, test_function: Callable[..., Any], *args: Any, **kwargs: Any) -> dict[str, Any]:
     """
     Test a function across multiple responsive breakpoints.
     
