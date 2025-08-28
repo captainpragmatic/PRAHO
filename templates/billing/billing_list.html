@@ -114,7 +114,10 @@
 
   <!-- Filters and Search -->
   <div class="bg-slate-800 rounded-lg border border-slate-700 p-6 mb-6">
-    <form method="GET" class="flex flex-wrap items-end gap-4">
+    <form method="GET" class="flex flex-wrap items-end gap-4" 
+          hx-get="{% url 'billing:billing_list_htmx' %}"
+          hx-target="#billing-results"
+          hx-trigger="submit, change from:select">
       <!-- Search -->
       <div class="flex-1 min-w-64">
         <label class="block text-sm font-medium text-slate-300 mb-2">
@@ -151,158 +154,32 @@
   <div class="bg-slate-800 rounded-lg border border-slate-700">
     <div class="px-6 py-4 border-b border-slate-700">
       <h3 class="text-lg font-medium text-white">
-        📋 {% trans 'Documents' %} ({{ documents|length }})
+        📋 {% trans 'Documents' %}
+        <span class="text-slate-400" id="document-count">
+          {% if documents %}
+            {% with start=documents.start_index end=documents.end_index total=documents.paginator.count %}
+              ({{ start }}-{{ end }} of {{ total }})
+            {% endwith %}
+          {% endif %}
+        </span>
       </h3>
     </div>
 
-    <div class="overflow-hidden">
-      <table class="min-w-full divide-y divide-slate-700">
-        <thead class="bg-slate-900">
-          <tr>
-            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Type' %}
-            </th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Number' %}
-            </th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Customer' %}
-            </th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Total' %}
-            </th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Status' %}
-            </th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Date' %}
-            </th>
-            <th class="px-6 py-3 text-right text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Actions' %}
-            </th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-slate-700">
-          {% for document in documents %}
-          <tr class="hover:bg-slate-700">
-            <td class="px-6 py-4 whitespace-nowrap">
-              {% if document.type == 'proforma' %}
-                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-900 text-blue-200">
-                  📄 {% trans 'Proforma' %}
-                </span>
-              {% else %}
-                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-900 text-green-200">
-                  🧾 {% trans 'Invoice' %}
-                </span>
-              {% endif %}
-            </td>
-            
-            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">
-              {% if document.type == 'proforma' %}
-                <a href="{% url 'billing:proforma_detail' document.id %}" class="hover:text-blue-300 transition-colors">
-                  {{ document.number }}
-                </a>
-              {% else %}
-                <a href="{% url 'billing:invoice_detail' document.id %}" class="hover:text-blue-300 transition-colors">
-                  {{ document.number }}
-                </a>
-              {% endif %}
-            </td>
-            
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-300">
-              {{ document.customer.company_name|default:document.customer.name }}
-            </td>
-            
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-white font-medium">
-              {{ document.total|floatformat:2 }} {{ document.currency }}
-            </td>
-            
-            <td class="px-6 py-4 whitespace-nowrap">
-              {% if document.type == 'proforma' %}
-                {% if document.status == 'expired' %}
-                  <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-900 text-red-200">
-                    ❌ {% trans 'Expired' %}
-                  </span>
-                {% else %}
-                  {% badge "Valid" variant="success" icon="⏳" %}
-                {% endif %}
-              {% else %}
-                {% if document.status == 'paid' %}
-                  <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-900 text-green-200">
-                    ✅ {% trans 'Paid' %}
-                  </span>
-                {% elif document.status == 'overdue' %}
-                  <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-900 text-red-200">
-                    ❌ {% trans 'Overdue' %}
-                  </span>
-                {% elif document.status == 'sent' %}
-                  <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-900 text-blue-200">
-                    📧 {% trans 'Sent' %}
-                  </span>
-                {% else %}
-                  {% badge "Draft" variant="secondary" icon="📝" %}
-                {% endif %}
-              {% endif %}
-            </td>
-            
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-300">
-              {{ document.created_at|date:"d.m.Y" }}
-            </td>
-            
-            <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-              <div class="flex justify-end space-x-2">
-                {% if document.type == 'proforma' %}
-                  <!-- Proforma Actions -->
-                  <a href="{% url 'billing:proforma_detail' document.id %}" 
-                     class="text-blue-400 hover:text-blue-300">👁️ {% trans 'View' %}</a>
-                  
-                  <a href="{% url 'billing:proforma_pdf' document.id %}" 
-                     class="text-slate-400 hover:text-slate-300">📄 {% trans 'PDF' %}</a>
-                  
-                  {% if document.can_convert %}
-                    <a href="{% url 'billing:proforma_to_invoice' document.id %}" 
-                       class="text-green-400 hover:text-green-300">🔄 {% trans 'Convert' %}</a>
-                  {% endif %}
-                {% else %}
-                  <!-- Invoice Actions -->
-                  <a href="{% url 'billing:invoice_detail' document.id %}" 
-                     class="text-blue-400 hover:text-blue-300">👁️ {% trans 'View' %}</a>
-                  
-                  <a href="{% url 'billing:invoice_pdf' document.id %}" 
-                     class="text-slate-400 hover:text-slate-300">📄 {% trans 'PDF' %}</a>
-                {% endif %}
-              </div>
-            </td>
-          </tr>
-          {% empty %}
-          <tr>
-            <td colspan="7" class="px-6 py-12 text-center">
-              <div class="text-slate-400">
-                <div class="text-4xl mb-4">📋</div>
-                <h3 class="text-lg font-medium mb-2">{% trans 'No documents found' %}</h3>
-                <p class="text-sm">
-                  {% if user.is_staff %}
-                    {% trans 'Create your first proforma to get started.' %}
-                  {% else %}
-                    {% trans 'No billing documents available for your account.' %}
-                  {% endif %}
-                </p>
-                {% if user.is_staff %}
-                  <div class="mt-4">
-                    {% url 'billing:proforma_create' as create_proforma_url %}
-                    {% button "📄 Create First Proforma" variant="primary" href=create_proforma_url %}
-                  </div>
-                {% endif %}
-              </div>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+    <!-- HTMX Content Container -->
+    <div id="billing-results" 
+         hx-get="{% url 'billing:billing_list_htmx' %}{% if request.GET %}?{{ request.GET.urlencode }}{% endif %}"
+         hx-trigger="load"
+         hx-target="#billing-results"
+         hx-swap="innerHTML"
+         hx-include="[name='search'], [name='type']">
+      <!-- Loading State -->
+      <div class="flex items-center justify-center py-12">
+        <div class="text-center text-slate-400">
+          <div class="animate-spin w-8 h-8 border-2 border-slate-600 border-t-blue-500 rounded-full mx-auto mb-4"></div>
+          <p>{% trans 'Loading billing documents...' %}</p>
+        </div>
+      </div>
     </div>
-
-    <!-- ✅ Reusable Pagination Component -->
-    {% include 'components/pagination.html' with page_obj=page_obj extra_params=extra_params %}
   </div>
 </div>
 {% endblock %}

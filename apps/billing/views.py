@@ -33,6 +33,7 @@ from apps.common.mixins import get_search_context
 from apps.common.utils import json_error, json_success
 from apps.customers.models import Customer
 from apps.tickets.models import SupportCategory, Ticket
+from apps.ui.table_helpers import prepare_billing_table_data
 from apps.users.models import User
 
 from .models import (
@@ -98,11 +99,13 @@ def billing_list(request: HttpRequest) -> HttpResponse:
         if search_query:
             proformas_qs = proformas_qs.filter(
                 Q(number__icontains=search_query) |
-                Q(customer__company_name__icontains=search_query)
+                Q(customer__company_name__icontains=search_query) |
+                Q(customer__name__icontains=search_query)
             )
             invoices_qs = invoices_qs.filter(
                 Q(number__icontains=search_query) |
-                Q(customer__company_name__icontains=search_query)
+                Q(customer__company_name__icontains=search_query) |
+                Q(customer__name__icontains=search_query)
             )
 
         # 🎯 For pagination, we need to create a unified dataset
@@ -210,6 +213,126 @@ def billing_list(request: HttpRequest) -> HttpResponse:
             'error_message': 'Unable to load billing data. Please try again later.',
         }
         return render(request, 'billing/billing_list.html', context)
+
+
+@login_required  
+def billing_list_htmx(request: HttpRequest) -> HttpResponse:
+    """
+    🚀 HTMX endpoint for billing documents list with dynamic loading
+    Returns only the results partial for smooth pagination and filtering
+    """
+    # Type guard for authenticated user
+    if not isinstance(request.user, User):
+        return redirect('users:login')
+    
+    try:
+        # Get accessible customers
+        customer_ids = _get_accessible_customer_ids(request.user)
+
+        # Filter by type
+        doc_type = request.GET.get('type', 'all')  # all, proforma, invoice
+
+        # ✅ Get search context for template
+        search_context = get_search_context(request, 'search')
+        search_query = search_context['search_query']
+
+        # Get both proformas and invoices with search applied
+        proformas_qs = ProformaInvoice.objects.filter(customer_id__in=customer_ids).select_related('customer')
+        invoices_qs = Invoice.objects.filter(customer_id__in=customer_ids).select_related('customer')
+
+        # Apply search filter
+        if search_query:
+            proformas_qs = proformas_qs.filter(
+                Q(number__icontains=search_query) |
+                Q(customer__company_name__icontains=search_query) |
+                Q(customer__name__icontains=search_query)
+            )
+            invoices_qs = invoices_qs.filter(
+                Q(number__icontains=search_query) |
+                Q(customer__company_name__icontains=search_query) |
+                Q(customer__name__icontains=search_query)
+            )
+
+        # Build combined list for pagination
+        combined_documents = []
+
+        if doc_type in ['all', 'proforma']:
+            proforma_data = [
+                {
+                    'type': 'proforma',
+                    'obj': proforma,
+                    'id': proforma.pk,
+                    'number': proforma.number,
+                    'customer': proforma.customer,
+                    'total': proforma.total,
+                    'currency': proforma.currency,
+                    'created_at': proforma.created_at,
+                    'status': 'valid' if not proforma.is_expired else 'expired',
+                    'can_edit': (request.user.is_staff or getattr(request.user, 'staff_role', None)) and not proforma.is_expired,
+                    'can_convert': (request.user.is_staff or getattr(request.user, 'staff_role', None)) and not proforma.is_expired,
+                }
+                for proforma in proformas_qs
+            ]
+            combined_documents.extend(proforma_data)
+
+        if doc_type in ['all', 'invoice']:
+            invoice_data = [
+                {
+                    'type': 'invoice',
+                    'obj': invoice,
+                    'id': invoice.pk,
+                    'number': invoice.number,
+                    'customer': invoice.customer,
+                    'total': invoice.total,
+                    'currency': invoice.currency,
+                    'created_at': invoice.created_at,
+                    'status': invoice.status,
+                    'can_edit': False,  # Invoices are immutable
+                    'can_convert': False,
+                }
+                for invoice in invoices_qs
+            ]
+            combined_documents.extend(invoice_data)
+
+        # Sort by creation date (newest first)
+        combined_documents.sort(key=lambda x: x['created_at'] if isinstance(x['created_at'], datetime) else datetime.min, reverse=True)
+
+        # Apply pagination
+        paginator = Paginator(combined_documents, 20)
+        page_number = request.GET.get('page')
+        page_obj = paginator.get_page(page_number)
+        
+        # Build extra_params for pagination
+        extra_params_dict = {k: v for k, v in request.GET.items() if k != 'page'}
+        extra_params = '&'.join([f"{k}={v}" for k, v in extra_params_dict.items()])
+        if extra_params:
+            extra_params = '&' + extra_params
+
+        # Prepare data for standardized table component
+        table_data = prepare_billing_table_data(page_obj, request.user)
+
+        context = {
+            'documents': page_obj,
+            'page_obj': page_obj,
+            'extra_params': extra_params,
+            'table_data': table_data,  # Add table component data
+        }
+
+        return render(request, 'billing/partials/billing_list.html', context)
+        
+    except Exception as e:
+        # Handle errors gracefully for HTMX
+        logger = logging.getLogger(__name__)
+        logger.error(f"HTMX billing list error: {e}")
+        
+        # Return empty partial with error state
+        context = {
+            'documents': [],
+            'page_obj': None,
+            'extra_params': '',
+            'error_message': 'Unable to load billing data.',
+        }
+        return render(request, 'billing/partials/billing_list.html', context)
 
 
 @login_required

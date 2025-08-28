@@ -1,252 +1,75 @@
-{% extends 'base.html' %}
+{% extends "base.html" %}
 {% load i18n %}
-{% load ui_components %}
 
-{% block title %}{% trans 'Services' %} - PRAHO Platform{% endblock %}
+{% block title %}{% trans 'Services' %} - {{ block.super }}{% endblock %}
 
 {% block content %}
-<div class="px-4 py-6">
-  <!-- Header -->
-  <div class="flex justify-between items-center mb-6">
-    <div>
-      <h1 class="text-2xl font-bold text-white">🚀 {% trans 'Hosting Services' %}</h1>
-      <p class="text-slate-400 mt-1">{% trans 'Manage hosting services for Romanian customers' %}</p>
-    </div>
-
-    {% url 'provisioning:service_create' as create_url %}
-    {% button "New Service" variant="primary" href=create_url icon="plus" %}
-  </div>
-
-  <!-- Filters -->
-  <div class="bg-slate-800 rounded-lg p-4 mb-6 border border-slate-700">
-    <form method="get" class="flex gap-4 items-end">
-      <!-- Status Filter -->
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+  <!-- Page Header -->
+  <div class="mb-8">
+    <div class="flex items-center justify-between">
       <div>
-        <label for="status" class="block text-sm font-medium text-slate-300 mb-1">
-          📊 {% trans 'Status' %}
-        </label>
-        <select id="status" name="status"
-          class="px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
-          <option value="">{% trans 'All' %}</option>
-          <option value="active" {% if status_filter == 'active' %}selected{% endif %}>{% trans 'Active' %}</option>
-          <option value="suspended" {% if status_filter == 'suspended' %}selected{% endif %}>{% trans 'Suspended' %}
-          </option>
-          <option value="cancelled" {% if status_filter == 'cancelled' %}selected{% endif %}>{% trans 'Cancelled' %}
-          </option>
-          <option value="pending" {% if status_filter == 'pending' %}selected{% endif %}>{% trans 'Pending' %}</option>
-        </select>
+        <h1 class="text-3xl font-bold text-white">� {% trans 'Services' %}</h1>
+        <p class="mt-2 text-slate-400">{% trans 'Manage hosting services and configurations' %}</p>
       </div>
 
-      {% button "Filter" variant="primary" type="submit" %}
-
-      {% if status_filter %}
-      {% url 'provisioning:services' as services_url %}
-      {% button "Reset" variant="secondary" href=services_url %}
-      {% endif %}
-    </form>
+      <div class="flex space-x-3">
+        {% if can_manage_services %}
+        <a href="{% url 'provisioning:service_create' %}"
+           class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md inline-flex items-center transition-colors">
+          <span class="mr-2">➕</span>
+          {% trans 'New Service' %}
+        </a>
+        {% endif %}
+      </div>
+    </div>
   </div>
 
-  <!-- Summary Stats -->
-  <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
-      <div class="flex items-center">
-        <div class="text-2xl mr-3">✅</div>
-        <div>
-          <p class="text-slate-400 text-sm">{% trans 'Active Services' %}</p>
-          <p class="text-white text-lg font-semibold">{{ active_count }}</p>
-        </div>
-      </div>
-    </div>
+  <!-- Status Filter Tabs -->
+  <div class="mb-6">
+    <div class="border-b border-slate-700">
+      <nav class="-mb-px flex space-x-8">
+        <a href="{% url 'provisioning:services' %}"
+           class="{% if not status_filter %}border-blue-500 text-blue-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
+          📊 {% trans 'All Services' %}
+        </a>
 
-    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
-      <div class="flex items-center">
-        <div class="text-2xl mr-3">📊</div>
-        <div>
-          <p class="text-slate-400 text-sm">{% trans 'Total Services' %}</p>
-          <p class="text-white text-lg font-semibold">{{ total_count }}</p>
-        </div>
-      </div>
-    </div>
+        <a href="{% url 'provisioning:services' %}?status=active"
+           class="{% if status_filter == 'active' %}border-green-500 text-green-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
+          ✅ {% trans 'Active' %}
+        </a>
 
-    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
-      <div class="flex items-center">
-        <div class="text-2xl mr-3">🇷🇴</div>
-        <div>
-          <p class="text-slate-400 text-sm">{% trans 'Romanian Hosting' %}</p>
-          <p class="text-white text-lg font-semibold">Premium</p>
-        </div>
-      </div>
+        <a href="{% url 'provisioning:services' %}?status=suspended"
+           class="{% if status_filter == 'suspended' %}border-red-500 text-red-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
+          ⏸️ {% trans 'Suspended' %}
+        </a>
+
+        <a href="{% url 'provisioning:services' %}?status=pending"
+           class="{% if status_filter == 'pending' %}border-yellow-500 text-yellow-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
+          ⏳ {% trans 'Pending' %}
+        </a>
+
+        <a href="{% url 'provisioning:services' %}?status=cancelled"
+           class="{% if status_filter == 'cancelled' %}border-slate-500 text-slate-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
+          ❌ {% trans 'Cancelled' %}
+        </a>
+      </nav>
     </div>
   </div>
 
   <!-- Services Table -->
-  <div class="bg-slate-800 rounded-lg border border-slate-700">
-    <div class="overflow-x-auto">
-      <table class="w-full">
-        <thead class="bg-slate-700">
-          <tr>
-            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Service' %}
-            </th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Customer' %}
-            </th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Plan' %}
-            </th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Status' %}
-            </th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Creation Date' %}
-            </th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Actions' %}
-            </th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-slate-700">
-          {% for service in services %}
-          <tr class="hover:bg-slate-700/50 transition-colors">
-            <td class="px-6 py-4">
-              <div>
-                <div class="text-white font-medium">
-                  <a href="{% url 'provisioning:service_detail' service.pk %}" class="hover:text-blue-400">
-                    {{ service.name|default:"Service" }}
-                  </a>
-                </div>
-                {% if service.domain %}
-                <div class="text-slate-400 text-sm">{{ service.domain }}</div>
-                {% endif %}
-              </div>
-            </td>
-
-            <td class="px-6 py-4">
-              <div>
-                <div class="text-white">{{ service.customer.company_name }}</div>
-                <div class="text-slate-400 text-sm">{{ service.customer.cui }}</div>
-              </div>
-            </td>
-
-            <td class="px-6 py-4">
-              <div>
-                <div class="text-white">{{ service.service_plan.name }}</div>
-                <div class="text-slate-400 text-sm">{{ service.service_plan.get_plan_type_display }}</div>
-              </div>
-            </td>
-
-            <td class="px-6 py-4">
-              {% if service.status == 'active' %}
-                {% badge "Active" variant="success" icon="✅" %}
-              {% elif service.status == 'suspended' %}
-                {% badge "Suspended" variant="danger" icon="⏸️" %}
-              {% elif service.status == 'cancelled' %}
-                {% badge "Cancelled" variant="secondary" icon="❌" %}
-              {% elif service.status == 'pending' %}
-                {% badge "Pending" variant="warning" icon="⏳" %}
-              {% else %}
-                {% badge service.status|title variant="default" icon="🔍" %}
-              {% endif %}
-            </td>
-
-            <td class="px-6 py-4">
-              <div class="text-white">{{ service.created_at|date:"d.m.Y" }}</div>
-              <div class="text-slate-400 text-sm">{{ service.created_at|time:"H:i" }}</div>
-            </td>
-
-            <td class="px-6 py-4">
-              <div class="flex items-center space-x-2">
-                <a href="{% url 'provisioning:service_detail' service.pk %}"
-                  class="text-blue-400 hover:text-blue-300 text-sm">
-                  {% trans 'View' %}
-                </a>
-                {% if can_manage_services %}
-                    {% if service.status == 'active' %}
-                    <span class="text-slate-600">|</span>
-                    <button hx-post="{% url 'provisioning:service_suspend' service.pk %}"
-                      hx-confirm="{% trans 'Suspend service?' %}" class="text-red-400 hover:text-red-300 text-sm">
-                      {% trans 'Suspend' %}
-                    </button>
-                    {% elif service.status == 'suspended' %}
-                    <span class="text-slate-600">|</span>
-                    <button hx-post="{% url 'provisioning:service_activate' service.pk %}"
-                      hx-confirm="{% trans 'Reactivate service?' %}" class="text-green-400 hover:text-green-300 text-sm">
-                      {% trans 'Reactivate' %}
-                    </button>
-                    {% endif %}
-                    <span class="text-slate-600">|</span>
-                    <a href="{% url 'provisioning:service_edit' service.pk %}"
-                      class="text-green-400 hover:text-green-300 text-sm">
-                      {% trans 'Edit' %}
-                    </a>
-                {% endif %}
-              </div>
-            </td>
-          </tr>
-          {% empty %}
-          <tr>
-            <td colspan="6" class="px-6 py-12 text-center">
-              <div class="text-slate-400">
-                {% if status_filter %}
-                <div class="text-4xl mb-4">🔍</div>
-                <p>{% trans 'No services found for the selected filter' %}</p>
-                {% else %}
-                <div class="text-4xl mb-4">🚀</div>
-                <p>{% trans 'No services yet' %}</p>
-                <p class="mt-2">
-                  <a href="{% url 'provisioning:service_create' %}" class="text-blue-400 hover:text-blue-300">
-                    {% trans 'Create the first service' %} →
-                  </a>
-                </p>
-                {% endif %}
-              </div>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-
-    <!-- Pagination -->
-    {% if services.has_other_pages %}
-    <div class="bg-slate-700 px-6 py-3 border-t border-slate-600">
-      <div class="flex items-center justify-between">
-        <div class="text-sm text-slate-400">
-          {% blocktrans with services.number as page_number and services.paginator.num_pages as num_pages %}
-          Page {{ page_number }} of {{ num_pages }}
-          {% endblocktrans %}
-        </div>
-
-        <div class="flex space-x-1">
-          {% if services.has_previous %}
-          <a href="?page={{ services.previous_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}"
-            class="bg-slate-600 hover:bg-slate-500 text-white px-3 py-1 rounded text-sm">
-            {% trans 'Previous' %}
-          </a>
-          {% endif %}
-
-          {% if services.has_next %}
-          <a href="?page={{ services.next_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}"
-            class="bg-slate-600 hover:bg-slate-500 text-white px-3 py-1 rounded text-sm">
-            {% trans 'Next' %}
-          </a>
-          {% endif %}
-        </div>
-      </div>
-    </div>
-    {% endif %}
-  </div>
+  {% include 'provisioning/partials/services_list.html' %}
 
   <!-- Quick Actions -->
   <div class="mt-6 flex space-x-4">
     <a href="{% url 'provisioning:servers' %}"
-      class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md inline-flex items-center">
+      class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md inline-flex items-center transition-colors">
       <span class="mr-2">🖥️</span>
       {% trans 'Servers' %}
     </a>
 
     <a href="{% url 'provisioning:plans' %}"
-      class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md inline-flex items-center">
+      class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md inline-flex items-center transition-colors">
       <span class="mr-2">📦</span>
       {% trans 'Plans' %}
     </a>

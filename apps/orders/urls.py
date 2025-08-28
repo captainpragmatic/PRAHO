@@ -11,6 +11,7 @@ app_name = 'orders'
 urlpatterns = [
     # Order listing and management
     path('', views.order_list, name='order_list'),
+    path('list/', views.order_list_htmx, name='order_list_htmx'),  # HTMX endpoint
     path('create/', views.order_create, name='order_create'),
     
     # Order detail and lifecycle management

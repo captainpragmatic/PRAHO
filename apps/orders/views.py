@@ -129,6 +129,69 @@ def order_list(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+def order_list_htmx(request: HttpRequest) -> HttpResponse:
+    """
+    🚀 HTMX endpoint for orders list with dynamic loading
+    Returns only the results partial for smooth pagination and filtering
+    """
+    # Type guard for authenticated user
+    if not isinstance(request.user, User):
+        return redirect('users:login')
+    
+    # Get accessible customers
+    customer_ids = _get_accessible_customer_ids(request.user)
+    
+    # Get search context
+    search_context = get_search_context(request, 'search')
+    search_query = search_context['search_query']
+    
+    # Build base queryset
+    queryset = (
+        Order.objects
+        .filter(customer_id__in=customer_ids)
+        .select_related('customer')
+        .prefetch_related('items')
+    )
+    
+    # Apply filters
+    status_filter = request.GET.get('status', '')
+    if status_filter:
+        queryset = queryset.filter(status=status_filter)
+    
+    # Apply search
+    if search_query:
+        queryset = queryset.filter(
+            Q(order_number__icontains=search_query) |
+            Q(billing_company_name__icontains=search_query) |
+            Q(customer__company_name__icontains=search_query)
+        )
+    
+    # Order by newest first
+    queryset = queryset.order_by('-created_at')
+    
+    # Pagination (15 orders per page)
+    paginator = Paginator(queryset, 15)
+    page_number = request.GET.get('page')
+    orders = paginator.get_page(page_number)
+    
+    # Build extra_params for pagination
+    extra_params_dict = {k: v for k, v in request.GET.items() if k != 'page'}
+    extra_params = '&'.join([f"{k}={v}" for k, v in extra_params_dict.items()])
+    if extra_params:
+        extra_params = '&' + extra_params
+    
+    context = {
+        'orders': orders,
+        'page_obj': orders,
+        'extra_params': extra_params,
+        'current_status': status_filter,
+        'is_staff': request.user.is_staff or bool(getattr(request.user, 'staff_role', '')),
+    }
+    
+    return render(request, 'orders/partials/order_list.html', context)
+
+
+@login_required
 def order_detail(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     """
     🔍 Display detailed order view with items and status history

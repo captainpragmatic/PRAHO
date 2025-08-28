@@ -129,6 +129,23 @@ class DataTableConfig:
     empty_message: str = 'Nu există date disponibile.'
 
 
+@dataclass
+class EnhancedTableConfig:
+    """Parameter object for enhanced table configuration"""
+    show_actions: bool = True
+    pagination_enabled: bool = True
+    include_js: bool = True
+    action_column_label: str = ''
+    empty_icon: str = '📋'
+    empty_title: str = ''
+    empty_message: str = ''
+    empty_action_url: str = ''
+    empty_action_text: str = ''
+    htmx_target: str = ''
+    htmx_url: str = ''
+    css_class: str = ''
+
+
 @register.inclusion_tag('components/button.html')
 def button(
     text: str,
@@ -412,6 +429,99 @@ def modal(
     }
 
 
+
+
+@register.inclusion_tag('components/table_enhanced.html')
+def table_enhanced(
+    columns: list[dict[str, Any]],
+    rows: list[dict[str, Any]],
+    *,
+    config: EnhancedTableConfig | None = None,
+    page_obj: Any = None,
+    extra_params: str = '',
+    **kwargs: Any
+) -> dict[str, Any]:
+    """
+    Modern enhanced table component for PRAHO Platform
+    
+    Usage:
+        {% table_enhanced columns=billing_columns rows=billing_rows page_obj=documents pagination_enabled=True %}
+    
+    Column Structure:
+        {
+            'label': 'Document Type',
+            'width': 'w-28',           # Tailwind width class
+            'align': 'center',         # left|center|right
+            'sortable': True           # Enable sorting
+        }
+    
+    Row Structure:
+        {
+            'clickable': True,
+            'click_url': '/billing/invoice/123/',  # Direct URL
+            'click_js': 'navigateToDocument("invoice", "123")',  # Custom JS
+            'cells': [
+                {
+                    'component': 'badge',      # badge|button|text
+                    'text': 'Invoice',
+                    'variant': 'success',
+                    'align': 'center',
+                    'no_wrap': True,
+                    'truncate': False,
+                    'title': 'Tooltip text',
+                    'text_color': 'text-white',
+                    'font_class': 'font-mono'
+                }
+            ],
+            'actions': [
+                {
+                    'component': 'button',     # button|link
+                    'text': '👁️',
+                    'variant': 'secondary',
+                    'size': 'xs',
+                    'href': '/view/123/',
+                    'class': 'px-2'
+                }
+            ]
+        }
+    
+    Args:
+        columns: List of column definitions
+        rows: List of row data
+        show_actions: Show actions column
+        pagination_enabled: Enable pagination
+        include_js: Include navigation JavaScript
+        page_obj: Django paginator page object
+        extra_params: URL parameters for pagination
+        htmx_target: HTMX target selector
+        htmx_url: HTMX endpoint URL
+    """
+    # Use default configuration if not provided
+    if config is None:
+        config = EnhancedTableConfig()
+    
+    # Override with any direct kwargs for backward compatibility
+    for key, value in kwargs.items():
+        if hasattr(config, key) and value is not None:
+            setattr(config, key, value)
+    
+    return {
+        'columns': columns,
+        'rows': rows,
+        'show_actions': config.show_actions,
+        'pagination_enabled': config.pagination_enabled,
+        'include_js': config.include_js,
+        'action_column_label': config.action_column_label,
+        'empty_icon': config.empty_icon,
+        'empty_title': config.empty_title,
+        'empty_message': config.empty_message,
+        'empty_action_url': config.empty_action_url,
+        'empty_action_text': config.empty_action_text,
+        'htmx_target': config.htmx_target,
+        'htmx_url': config.htmx_url,
+        'page_obj': page_obj,
+        'extra_params': extra_params,
+    }
 
 
 @register.inclusion_tag('components/table.html')

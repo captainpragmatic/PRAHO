@@ -181,7 +181,7 @@ def navigation_dropdowns(request: HttpRequest) -> dict[str, Any]:
             {"text": "All Tickets", "url": "/app/tickets/", "icon": "🎫"},
             {"text": "Create Ticket", "url": "/app/tickets/create/", "icon": "+"},
             {"divider": True},
-            {"text": "GDPR Dashboard", "url": "/app/audit/gdpr/", "icon": "🔒"},
+            {"text": "GDPR Management", "url": "/app/audit/gdpr_management/", "icon": "🔒"},
             {"text": "Audit Logs", "url": "/app/audit/logs/", "icon": "📊"},
         ]
         

@@ -1,0 +1,56 @@
+{% comment %}
+===============================================================================
+📄 BILLING DOCUMENTS LIST PARTIAL - PRAHO Platform (COMPONENT VERSION)
+===============================================================================
+HTMX-loaded partial using the standardized clickable_data_table component.
+This demonstrates how to use our reusable table component across the platform.
+===============================================================================
+{% endcomment %}
+
+{% load i18n %}
+{% load ui_components %}
+
+<!-- Multi-target HTMX response -->
+<div hx-swap-oob="innerHTML:#document-count">
+  {% if documents.object_list %}({{ documents.object_list|length }} of {{ documents.paginator.count }}){% else %}(0){% endif %}
+</div>
+
+<!-- Documents Results Container -->
+<div id="billing-results">
+  {% if documents.object_list %}
+    
+    <!-- Use Standardized Enhanced Table Component -->
+    {% table_enhanced 
+       columns=table_data.columns 
+       rows=table_data.rows 
+       page_obj=documents
+       extra_params=extra_params
+       htmx_target='#billing-results'
+       htmx_url='/app/billing/invoices/list/'
+       pagination_enabled=True
+       show_actions=False
+       include_js=True %}
+
+  {% else %}
+    <!-- Empty State -->
+    <div class="text-center py-12">
+      <div class="text-slate-400">
+        <div class="text-4xl mb-4">📋</div>
+        <h3 class="text-lg font-medium mb-2">{% trans 'No documents found' %}</h3>
+        <p class="text-sm">
+          {% if user.is_staff %}
+            {% trans 'Create your first proforma to get started.' %}
+          {% else %}
+            {% trans 'No billing documents available for your account.' %}
+          {% endif %}
+        </p>
+        {% if user.is_staff %}
+          <div class="mt-4">
+            {% url 'billing:proforma_create' as create_proforma_url %}
+            {% button "📄 Create First Proforma" variant="primary" href=create_proforma_url %}
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
+</div>

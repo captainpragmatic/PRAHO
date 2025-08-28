@@ -1,0 +1,118 @@
+{% comment %}
+===============================================================================
+📦 ORDERS LIST PARTIAL - PRAHO Platform  
+===============================================================================
+HTMX-loaded partial for orders list with pagination.
+This template is dynamically loaded and contains only the results section.
+===============================================================================
+{% endcomment %}
+
+{% load i18n %}
+{% load ui_components %}
+
+<!-- Orders Results Container -->
+<div id="orders-results">
+  {% if orders %}
+    <div class="space-y-4">
+      {% for order in orders %}
+        <div class="bg-slate-800 rounded-lg border border-slate-700 hover:border-slate-600 transition-colors">
+          <div class="p-6">
+            <!-- Order Header -->
+            <div class="flex items-start justify-between">
+              <div class="flex-1">
+                <div class="flex items-center space-x-3 mb-2">
+                  <h3 class="text-lg font-semibold text-white">
+                    <a href="{% url 'orders:order_detail' pk=order.id %}" class="hover:text-blue-400 transition-colors">
+                      {{ order.order_number }}
+                    </a>
+                  </h3>
+                  
+                  <!-- Order Status Badge -->
+                  {% if order.status == "draft" %}
+                    {% badge "📝 Draft" variant="secondary" %}
+                  {% elif order.status == "pending" %}
+                    {% badge "⏳ Pending" variant="warning" %}
+                  {% elif order.status == "processing" %}
+                    {% badge "⚙️ Processing" variant="primary" %}
+                  {% elif order.status == "completed" %}
+                    {% badge "✅ Completed" variant="success" %}
+                  {% elif order.status == "cancelled" %}
+                    {% badge "❌ Cancelled" variant="danger" %}
+                  {% elif order.status == "failed" %}
+                    {% badge "🔥 Failed" variant="danger" %}
+                  {% elif order.status == "refunded" %}
+                    {% badge "💰 Refunded" variant="info" %}
+                  {% elif order.status == "partially_refunded" %}
+                    {% badge "💸 Partially Refunded" variant="warning" %}
+                  {% endif %}
+                </div>
+                
+                <!-- Customer Info -->
+                <div class="flex items-center space-x-4 text-sm text-slate-400 mb-3">
+                  <div class="flex items-center">
+                    <span class="mr-1">🏢</span>
+                    {{ order.customer.company_name }}
+                  </div>
+                  <div class="flex items-center">
+                    <span class="mr-1">📅</span>
+                    {{ order.created_at|date:"M d, Y" }}
+                  </div>
+                  <div class="flex items-center">
+                    <span class="mr-1">📦</span>
+                    {{ order.items.count }} {% trans "item" %}{{ order.items.count|pluralize }}
+                  </div>
+                </div>
+
+                <!-- Order Total -->
+                <div class="text-xl font-bold text-white">
+                  {{ order.total_amount|floatformat:2 }} {{ order.currency }}
+                </div>
+              </div>
+              
+              <!-- Quick Actions -->
+              {% if is_staff %}
+              <div class="flex items-center space-x-2">
+                {% url 'orders:order_detail' pk=order.id as detail_url %}
+                {% button "View" variant="secondary" size="sm" href=detail_url %}
+                
+                {% if order.status == 'draft' %}
+                  {% url 'orders:order_edit' pk=order.id as edit_url %}
+                  {% button "Edit" variant="primary" size="sm" href=edit_url %}
+                {% endif %}
+              </div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+    
+    <!-- Enhanced Pagination with HTMX -->
+    {% include 'components/pagination.html' with page_obj=orders extra_params=extra_params htmx_target='#orders-results' htmx_url='/app/orders/list/' %}
+
+  {% else %}
+    <!-- Empty State -->
+    <div class="bg-slate-800 rounded-lg border border-slate-700 p-12 text-center">
+      <div class="text-6xl mb-4">📦</div>
+      <h3 class="text-xl font-semibold text-white mb-2">
+        {% if search_query or current_status %}
+          {% trans "No orders found" %}
+        {% else %}
+          {% trans "No orders yet" %}
+        {% endif %}
+      </h3>
+      <p class="text-slate-400 mb-6">
+        {% if search_query or current_status %}
+          {% trans "Try adjusting your search or filter criteria" %}
+        {% else %}
+          {% trans "Orders will appear here once customers start placing them" %}
+        {% endif %}
+      </p>
+      
+      {% if is_staff and not search_query and not current_status %}
+        {% url 'orders:order_create' as create_url %}
+        {% button "📦 Create First Order" variant="primary" href=create_url %}
+      {% endif %}
+    </div>
+  {% endif %}
+</div>

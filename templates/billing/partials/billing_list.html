@@ -1,0 +1,147 @@
+{% comment %}
+===============================================================================
+📄 BILLING DOCUMENTS LIST PARTIAL - PRAHO Platform  
+===============================================================================
+HTMX-loaded partial for billing documents table with pagination.
+This template includes both the table content and header count update.
+===============================================================================
+{% endcomment %}
+
+{% load i18n %}
+{% load ui_components %}
+
+<!-- Multi-target HTMX response -->
+<div hx-swap-oob="innerHTML:#document-count">
+  {% if documents.object_list %}
+    {% with start=documents.start_index end=documents.end_index total=documents.paginator.count %}
+      ({{ start }}-{{ end }} of {{ total }})
+    {% endwith %}
+  {% else %}
+    (0)
+  {% endif %}
+</div>
+
+<!-- Documents Results Container -->
+<div id="billing-results">
+  {% if documents.object_list %}
+    <!-- Documents Table -->
+    <div class="overflow-hidden">
+      <table class="min-w-full divide-y divide-slate-700">
+        <thead class="bg-slate-900">
+          <tr>
+            <th class="px-6 py-3 text-center text-xs font-medium text-slate-300 uppercase tracking-wider w-28">
+              {% trans 'Type' %}
+            </th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider w-32">
+              {% trans 'Number' %}
+            </th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider w-48">
+              {% trans 'Customer' %}
+            </th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-slate-300 uppercase tracking-wider w-24">
+              {% trans 'Total' %}
+            </th>
+            <th class="px-6 py-3 text-center text-xs font-medium text-slate-300 uppercase tracking-wider w-32">
+              {% trans 'Status' %}
+            </th>
+            <th class="px-6 py-3 text-center text-xs font-medium text-slate-300 uppercase tracking-wider w-24">
+              {% trans 'Date' %}
+            </th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-700">
+          {% for document in documents.object_list %}
+          <tr class="hover:bg-slate-700 cursor-pointer transition-colors" onclick="navigateToDocument('{{ document.type }}', '{{ document.id }}')">
+            <td class="px-6 py-4 whitespace-nowrap text-center">
+              {% if document.type == 'proforma' %}
+                {% badge "📄 Proforma" variant="primary" %}
+              {% else %}
+                {% badge "🧾 Invoice" variant="success" %}
+              {% endif %}
+            </td>
+            
+            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">
+              <div class="truncate font-mono">
+                {{ document.number }}
+              </div>
+            </td>
+            
+            <td class="px-6 py-4 text-sm text-slate-300">
+              <div class="truncate" title="{{ document.customer.company_name|default:document.customer.name }}">
+                {{ document.customer.company_name|default:document.customer.name }}
+              </div>
+            </td>
+            
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-white text-right font-mono">
+              {{ document.total|floatformat:2 }} {{ document.currency }}
+            </td>
+            
+            <td class="px-6 py-4 whitespace-nowrap text-center">
+              {% if document.type == 'proforma' %}
+                {% if document.status == 'expired' %}
+                  {% badge "❌ Expired" variant="danger" %}
+                {% else %}
+                  {% badge "⏳ Valid" variant="success" %}
+                {% endif %}
+              {% else %}
+                {% if document.status == 'paid' %}
+                  {% badge "✅ Paid" variant="success" %}
+                {% elif document.status == 'overdue' %}
+                  {% badge "❌ Overdue" variant="danger" %}
+                {% elif document.status == 'sent' %}
+                  {% badge "📧 Sent" variant="primary" %}
+                {% elif document.status == 'pending' %}
+                  {% badge "⏳ Pending" variant="warning" %}
+                {% elif document.status == 'cancelled' %}
+                  {% badge "❌ Cancelled" variant="danger" %}
+                {% else %}
+                  {% badge "📝 Draft" variant="secondary" %}
+                {% endif %}
+              {% endif %}
+            </td>
+            
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-300 text-center font-mono">
+              {{ document.created_at|date:"d.m.Y" }}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Enhanced Pagination with HTMX -->
+    {% include 'components/pagination.html' with page_obj=page_obj extra_params=extra_params htmx_target='#billing-results' htmx_url='/app/billing/invoices/list/' %}
+
+  {% else %}
+    <!-- Empty State -->
+    <div class="text-center py-12">
+      <div class="text-slate-400">
+        <div class="text-4xl mb-4">📋</div>
+        <h3 class="text-lg font-medium mb-2">{% trans 'No documents found' %}</h3>
+        <p class="text-sm">
+          {% if user.is_staff %}
+            {% trans 'Create your first proforma to get started.' %}
+          {% else %}
+            {% trans 'No billing documents available for your account.' %}
+          {% endif %}
+        </p>
+        {% if user.is_staff %}
+          <div class="mt-4">
+            {% url 'billing:proforma_create' as create_proforma_url %}
+            {% button "📄 Create First Proforma" variant="primary" href=create_proforma_url %}
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
+</div>
+
+<script>
+function navigateToDocument(type, id) {
+  if (type === 'proforma') {
+    window.location.href = "{% url 'billing:proforma_detail' 0 %}".replace('/0/', '/' + id + '/');
+  } else {
+    window.location.href = "{% url 'billing:invoice_detail' 0 %}".replace('/0/', '/' + id + '/');
+  }
+}
+</script>
