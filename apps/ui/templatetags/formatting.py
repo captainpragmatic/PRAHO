@@ -4,6 +4,7 @@ PRAHO PLATFORM - Romanian Formatting Template Tags
 Romanian business formatting for dates, currency, legal compliance
 """
 
+import decimal
 import re
 from decimal import Decimal
 from typing import Any
@@ -512,12 +513,19 @@ def cents_to_currency(value: int | float | Decimal) -> Decimal:
     Args:
         value: Amount in cents
     """
-    if value is None:
+    if value is None or value == '':
         return Decimal("0.00")
 
     try:
-        return Decimal(str(value)) / Decimal("100")
-    except (ValueError, TypeError):
+        # Handle various input types
+        if hasattr(value, '__str__'):
+            str_value = str(value).strip()
+            if str_value == '' or str_value.lower() == 'none':
+                return Decimal("0.00")
+            return Decimal(str_value) / Decimal("100")
+        else:
+            return Decimal(str(value)) / Decimal("100")
+    except (ValueError, TypeError, decimal.InvalidOperation):
         return Decimal("0.00")
 
 
@@ -587,7 +595,7 @@ def highlight_search(text: str, search_term: str) -> SafeString:
         search_term: Term to highlight
     """
     if not text or not search_term:
-        return mark_safe(escape(text) if text else "")
+        return mark_safe(escape(text) if text else "")  # noqa: S308
 
     # First escape HTML to prevent XSS
     escaped_text = escape(text)

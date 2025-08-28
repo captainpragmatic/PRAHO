@@ -26,7 +26,7 @@ def safe_message(value: Any) -> str:
 
     # Allow only safe HTML tags
     allowed_tags = ['b', 'i', 'strong', 'em', 'u']
-    allowed_attributes = {}
+    allowed_attributes: dict[str, list[str]] = {}
 
     # Clean the HTML to prevent XSS
     cleaned = bleach.clean(

@@ -1,9 +1,9 @@
 import json
 import logging
 import uuid
-from typing import Any, Union
+from typing import Any
 
-from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest, JsonResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
@@ -213,7 +213,7 @@ def webhook_status(request: HttpRequest) -> JsonResponse:
 
 
 @require_http_methods(["POST"])
-def retry_webhook(request: HttpRequest, webhook_id: Union[str, int]) -> JsonResponse:
+def retry_webhook(request: HttpRequest, webhook_id: str | int) -> JsonResponse:
     """🔄 Manually retry a failed webhook using result pipeline"""
     if not request.user.is_staff:
         return JsonResponse({'error': 'Unauthorized'}, status=403)
@@ -243,7 +243,7 @@ def retry_webhook(request: HttpRequest, webhook_id: Union[str, int]) -> JsonResp
         }, status=500)
 
 
-def _get_webhook_event(webhook_id: Union[str, int]) -> Result[WebhookEvent, str]:
+def _get_webhook_event(webhook_id: str | int) -> Result[WebhookEvent, str]:
     """Get the webhook event by ID."""
     try:
         # Handle both string UUID and integer input
