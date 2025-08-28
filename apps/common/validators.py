@@ -371,7 +371,7 @@ class SecureInputValidator:
         SecureInputValidator._validate_restricted_fields(user_data)
 
         # Build validated data from required and optional fields
-        validated_data = {}
+        validated_data: dict[str, Any] = {}
         
         # Required fields
         validated_data['email'] = SecureInputValidator._validate_required_email(user_data)
@@ -402,7 +402,7 @@ class SecureInputValidator:
         if not isinstance(customer_data, dict):
             raise ValidationError(_("Invalid input format"))
 
-        validated_data = {}
+        validated_data: dict[str, Any] = {}
 
         # Company name (required)
         if 'company_name' not in customer_data:

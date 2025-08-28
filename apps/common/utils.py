@@ -12,9 +12,6 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from functools import wraps
 from typing import Any, TypedDict, TypeVar
-
-# Type variable for function decorators
-F = TypeVar('F', bound=Callable[..., Any])
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
@@ -23,11 +20,15 @@ from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils.translation import gettext_lazy as _
 
+# Type variable for function decorators
+F = TypeVar('F', bound=Callable[..., Any])
+
 # Import for VAT calculation - handle potential circular import gracefully
+new_calculator: Callable[[int, bool], dict[str, float]] | None
 try:
     from apps.common.types import calculate_romanian_vat as new_calculator
 except ImportError:
-    new_calculator = None  # type: ignore[assignment]
+    new_calculator = None
 
 # ===============================================================================
 # ROMANIAN VALIDATION UTILITIES
@@ -57,7 +58,7 @@ def calculate_romanian_vat(amount: Decimal, vat_rate: int = 19) -> VATCalculatio
     
     # Convert to cents-based calculation for precision
     amount_cents = int(amount * 100)
-    result = new_calculator(amount_cents, include_vat=True)
+    result = new_calculator(amount_cents, include_vat=True)  # type: ignore[call-arg]
     
     return VATCalculation(
         amount_without_vat=Decimal(result['base_amount']) / 100,

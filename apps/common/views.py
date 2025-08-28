@@ -8,7 +8,7 @@ from django.contrib.auth.decorators import login_required
 from django.db.models import Sum
 from django.db.models.query import QuerySet
 from django.http import HttpRequest, HttpResponse
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.utils import timezone
 
 from apps.billing.models import Invoice

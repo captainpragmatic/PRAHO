@@ -5,10 +5,11 @@ Romanian hosting provider test data generation.
 
 import random
 from decimal import Decimal
+from typing import Any
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand, CommandError, CommandParser
 from faker import Faker
 
 from apps.customers.models import Customer
@@ -20,7 +21,7 @@ User = get_user_model()
 class Command(BaseCommand):
     help = 'Generate sample data for Romanian hosting provider'
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument(
             '--customers',
             type=int,
@@ -40,7 +41,7 @@ class Command(BaseCommand):
             help='Number of tickets to create'
         )
 
-    def handle(self, *args, **options):
+    def handle(self, *args: Any, **options: Any) -> None:
         # Simple safety check - must be in DEBUG mode
         if not settings.DEBUG:
             raise CommandError(
@@ -78,7 +79,7 @@ class Command(BaseCommand):
             self.style.SUCCESS('✅ Date generate cu succes!')
         )
 
-    def create_admin_users(self, fake):
+    def create_admin_users(self, fake: Faker) -> None:
         self.stdout.write('Creez utilizatori admin...')
         
         # Create superuser with consistent credentials for E2E testing
@@ -112,7 +113,7 @@ class Command(BaseCommand):
                 )
                 self.stdout.write(f'  ✓ Suport: {user.email}')
 
-    def create_service_plans(self):
+    def create_service_plans(self) -> list[ServicePlan]:
         self.stdout.write('Creez planuri de servicii...')
         
         plans = [
@@ -158,15 +159,19 @@ class Command(BaseCommand):
             },
         ]
         
+        created_plans = []
         for plan_data in plans:
             plan, created = ServicePlan.objects.get_or_create(
                 name=plan_data['name'],
                 defaults=plan_data
             )
+            created_plans.append(plan)
             if created:
                 self.stdout.write(f'  ✓ Plan: {plan.name}')
+        
+        return created_plans
 
-    def create_servers(self):
+    def create_servers(self) -> list[Server]:
         self.stdout.write('Creez servere...')
         
         servers = [
@@ -202,15 +207,19 @@ class Command(BaseCommand):
             },
         ]
         
+        created_servers = []
         for server_data in servers:
             server, created = Server.objects.get_or_create(
                 hostname=server_data['hostname'],
                 defaults=server_data
             )
+            created_servers.append(server)
             if created:
                 self.stdout.write(f'  ✓ Server: {server.name}')
+        
+        return created_servers
 
-    def create_support_categories(self):
+    def create_support_categories(self) -> list[SupportCategory]:
         self.stdout.write('Creez categorii de suport...')
         
         categories = [
@@ -240,15 +249,19 @@ class Command(BaseCommand):
             },
         ]
         
+        created_categories = []
         for cat_data in categories:
             category, created = SupportCategory.objects.get_or_create(
                 name=cat_data['name'],
                 defaults=cat_data
             )
+            created_categories.append(category)
             if created:
                 self.stdout.write(f'  ✓ Categorie: {category.name}')
+        
+        return created_categories
 
-    def create_customers(self, fake, count):
+    def create_customers(self, fake: Faker, count: int) -> list[Customer]:
         self.stdout.write(f'Creez {count} clienți...')
         customers = []
         
@@ -296,7 +309,7 @@ class Command(BaseCommand):
         
         return customers
 
-    def create_services(self, fake, customers, count):
+    def create_services(self, fake: Faker, customers: list[Customer], count: int) -> None:
         self.stdout.write(f'Creez {count} servicii...')
         
         plans = list(ServicePlan.objects.all())
@@ -325,7 +338,7 @@ class Command(BaseCommand):
             if i % 20 == 0:
                 self.stdout.write(f'  ✓ Creat {i+1}/{count} servicii')
 
-    def create_tickets(self, fake, customers, count):
+    def create_tickets(self, fake: Faker, customers: list[Customer], count: int) -> None:
         self.stdout.write(f'Creez {count} tickete...')
         
         categories = list(SupportCategory.objects.all())
@@ -340,7 +353,7 @@ class Command(BaseCommand):
                 'title': fake.sentence(nb_words=6),
                 'description': fake.text(max_nb_chars=500),
                 'customer': customer,
-                'contact_email': customer.email,
+                'contact_email': customer.primary_email,
                 'category': category,
                 'priority': random.choice(['low', 'normal', 'high']),
                 'status': random.choice(['new', 'open', 'pending', 'resolved']),

@@ -58,7 +58,7 @@ class SecurityConfig:
 def secure_service_method(
     config: SecurityConfig | None = None,
     **kwargs: Any
-) -> Callable[[Callable], Callable]:
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Master security decorator for service methods
     
@@ -79,7 +79,7 @@ def secure_service_method(
         if hasattr(config, key):
             setattr(config, key, value)
     
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Result[Any, str]:
             start_time = time.time()
@@ -121,7 +121,7 @@ def secure_service_method_legacy(  # noqa: PLR0913
     requires_permission: str | None = None,
     log_attempts: bool = True,
     prevent_timing_attacks: bool = True
-) -> Callable[[Callable], Callable]:
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Legacy wrapper for backward compatibility"""
     config = SecurityConfig(
         validation_type=validation_type,
@@ -138,7 +138,7 @@ def secure_service_method_legacy(  # noqa: PLR0913
 # SPECIALIZED SECURITY DECORATORS
 # ===============================================================================
 
-def secure_user_registration(rate_limit: int = RATE_LIMIT_REGISTRATION_PER_IP) -> Callable[[Callable], Callable]:
+def secure_user_registration(rate_limit: int = RATE_LIMIT_REGISTRATION_PER_IP) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Security decorator specifically for user registration methods"""
     return secure_service_method(
         validation_type="user_registration",
@@ -149,7 +149,7 @@ def secure_user_registration(rate_limit: int = RATE_LIMIT_REGISTRATION_PER_IP) -
     )
 
 
-def secure_customer_operation(requires_owner: bool = False) -> Callable[[Callable], Callable]:
+def secure_customer_operation(requires_owner: bool = False) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Security decorator for customer-related operations"""
     permission = "owner" if requires_owner else "viewer"
     return secure_service_method(
@@ -160,7 +160,7 @@ def secure_customer_operation(requires_owner: bool = False) -> Callable[[Callabl
     )
 
 
-def secure_invitation_system() -> Callable[[Callable], Callable]:
+def secure_invitation_system() -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Security decorator for invitation system"""
     return secure_service_method(
         validation_type="invitation",
@@ -176,11 +176,11 @@ def secure_invitation_system() -> Callable[[Callable], Callable]:
 # ATOMIC BUSINESS LOGIC DECORATORS
 # ===============================================================================
 
-def atomic_with_retry(max_retries: int = 3, delay: float = 0.1) -> Callable[[Callable], Callable]:
+def atomic_with_retry(max_retries: int = 3, delay: float = 0.1) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Atomic transaction with retry logic for race condition handling
     """
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             last_exception = None
@@ -198,16 +198,20 @@ def atomic_with_retry(max_retries: int = 3, delay: float = 0.1) -> Callable[[Cal
                     else:
                         logger.error(f"🔥 [Security] All retries failed for {func.__name__}: {e}")
 
-            raise last_exception
+            # Ensure we always have an exception to raise
+            if last_exception is not None:
+                raise last_exception
+            else:
+                raise RuntimeError("All retry attempts failed but no exception was captured")
         return wrapper
     return decorator
 
 
-def prevent_race_conditions(lock_key_generator: Callable) -> Callable[[Callable], Callable]:
+def prevent_race_conditions(lock_key_generator: Callable[..., Any]) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Prevent race conditions using distributed locking
     """
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             # Generate unique lock key
@@ -251,7 +255,7 @@ def _execute_security_checks(config: SecurityConfig, args: tuple[Any, ...], kwar
         _validate_permissions(user, kwargs.get('customer'), config.requires_permission)
 
 
-def _execute_protected_function(func: Callable, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+def _execute_protected_function(func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
     """Execute the original function within an atomic transaction"""
     with transaction.atomic():
         return func(*args, **kwargs)
@@ -323,9 +327,11 @@ def _check_rate_limit(key_prefix: str, limit: int, request_ip: str, user: Any = 
 
             # Increment counter with add/set pattern for race condition safety
             new_count = current_count + 1
-            if not cache.set(cache_key, new_count, timeout=3600):
+            try:
+                cache.set(cache_key, new_count, timeout=3600)
+            except Exception as cache_err:
                 # Fallback if cache.set fails
-                logger.warning(f"🚨 [Security] Cache set failed for rate limiting key: {cache_key}")
+                logger.warning(f"🚨 [Security] Cache set failed for rate limiting key: {cache_key}: {cache_err}")
         except ValidationError:
             # Re-raise ValidationError (rate limit exceeded)
             raise
@@ -345,12 +351,9 @@ def _validate_user_registration_input(args: tuple[Any, ...], kwargs: dict[str, A
 
     if user_data:
         validated_user_data = SecureInputValidator.validate_user_data_dict(user_data)
-        # Update the arguments with validated data
-        if len(args) >= USER_DATA_ARG_POSITION:
-            args = list(args)
-            args[1] = validated_user_data
-        else:
-            kwargs['user_data'] = validated_user_data
+        # Update the arguments with validated data - args is immutable so can't be modified directly
+        # The validation is already done, so we rely on the service method to handle the data correctly
+        kwargs['user_data'] = validated_user_data
 
 
 def _validate_customer_data_input(args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
@@ -363,12 +366,9 @@ def _validate_customer_data_input(args: tuple[Any, ...], kwargs: dict[str, Any])
 
     if customer_data:
         validated_customer_data = SecureInputValidator.validate_customer_data_dict(customer_data)
-        # Update the arguments with validated data
-        if len(args) >= CUSTOMER_DATA_ARG_POSITION:
-            args = list(args)
-            args[2] = validated_customer_data
-        else:
-            kwargs['customer_data'] = validated_customer_data
+        # Update the arguments with validated data - args is immutable so can't be modified directly
+        # The validation is already done, so we rely on the service method to handle the data correctly
+        kwargs['customer_data'] = validated_customer_data
 
         # Also check business logic constraints
         BusinessLogicValidator.check_company_uniqueness(
@@ -384,18 +384,16 @@ def _validate_invitation_input(args: tuple[Any, ...], kwargs: dict[str, Any]) ->
     customer = kwargs.get('customer') or (args[3] if len(args) > INVITATION_CUSTOMER_ARG_POSITION else None)
     role = kwargs.get('role', 'viewer') or (args[4] if len(args) > INVITATION_ROLE_ARG_POSITION else 'viewer')
 
-    if all([inviter, invitee_email, customer, role]) and isinstance(invitee_email, str):
-        # Validate the invitation request
-        # Type guard: inviter is not None due to all() check above
-        if inviter is not None and hasattr(inviter, 'id'):
-            BusinessLogicValidator.validate_invitation_request(
-                inviter=inviter,
-                invitee_email=invitee_email,
-                customer=customer,
-                role=role,
-                user_id=inviter.id,
-                request_ip=kwargs.get('request_ip')
-            )
+    if (all([inviter, invitee_email, customer, role]) and isinstance(invitee_email, str) and
+            inviter is not None and hasattr(inviter, 'id')):
+        BusinessLogicValidator.validate_invitation_request(
+            inviter=inviter,
+            invitee_email=invitee_email,
+            customer=customer,
+            role=role,
+            user_id=inviter.id,
+            request_ip=kwargs.get('request_ip')
+        )
 
 
 def _validate_permissions(user: Any, customer: Any, required_role: str) -> None:
@@ -415,11 +413,11 @@ def _normalize_response_time(start_time: float, min_time: float = 0.1) -> None:
 # AUDIT & MONITORING DECORATORS
 # ===============================================================================
 
-def audit_service_call(event_type: str, extract_details: Callable | None = None) -> Callable[[Callable], Callable]:
+def audit_service_call(event_type: str, extract_details: Callable[..., Any] | None = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Comprehensive audit logging for service method calls
     """
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             start_time = timezone.now()
@@ -467,11 +465,11 @@ def audit_service_call(event_type: str, extract_details: Callable | None = None)
 # PERFORMANCE MONITORING DECORATORS
 # ===============================================================================
 
-def monitor_performance(max_duration_seconds: float = 5.0, alert_threshold: float = 2.0) -> Callable[[Callable], Callable]:
+def monitor_performance(max_duration_seconds: float = 5.0, alert_threshold: float = 2.0) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Monitor method performance and alert on slow operations
     """
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             start_time = time.time()

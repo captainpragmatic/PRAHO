@@ -106,6 +106,10 @@ class Err(Generic[E]):
     def and_then(self, func: Callable[[Any], Result[Any, Any]]) -> Result[Any, E]:
         """No-op for error results - return self"""
         return self
+    
+    def unwrap_err(self) -> E:
+        """Get the error value"""
+        return self.error
 
 
 # Result type alias

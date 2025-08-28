@@ -22,7 +22,7 @@ from apps.common.constants import HTTP_CLIENT_ERROR_THRESHOLD
 try:
     from apps.users.services import SessionSecurityService
 except ImportError:
-    SessionSecurityService = None
+    SessionSecurityService = None  # type: ignore[assignment,misc]
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -160,10 +160,7 @@ class AuditMiddleware:
     def _get_client_ip(self, request: HttpRequest) -> str:
         """Get real client IP address"""
         x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-        if x_forwarded_for:
-            ip = x_forwarded_for.split(',')[0].strip()
-        else:
-            ip = request.META.get('REMOTE_ADDR', '127.0.0.1')
+        ip = x_forwarded_for.split(',')[0].strip() if x_forwarded_for else request.META.get('REMOTE_ADDR', '127.0.0.1')
         return ip
 
 
