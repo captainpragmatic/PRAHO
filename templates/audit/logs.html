@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+{% load static %}
+{% load i18n %}
+
+{% block title %}{% trans "Audit Logs" %}{% endblock %}
+
+{% block content %}
+<!-- ===============================================================================
+AUDIT LOGS DASHBOARD - PRAHO PLATFORM
+Dark theme interface for staff/admin audit log monitoring
+=============================================================================== -->
+
+<div class="min-h-screen bg-slate-900">
+    <!-- Main Content -->
+    <main class="px-6 py-6">
+        <!-- Header Section -->
+        <div class="bg-slate-800 border border-slate-700 rounded-lg p-6 mb-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-2xl font-bold text-white">🔍 {% trans "Audit Logs" %}</h1>
+                    <p class="text-slate-400 mt-1">{% trans "Monitor all system activities and security events" %}</p>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <span class="text-sm text-slate-400">{% trans "Staff Access Required" %}</span>
+                    <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filter Section -->
+        <div class="bg-slate-800 border border-slate-700 rounded-lg p-4 mb-6">
+            <h2 class="text-lg font-medium text-white mb-4">🔧 {% trans "Filters" %}</h2>
+            
+            <!-- Filter Form -->
+            <form id="audit-filters" 
+                  hx-get="{% url 'audit:logs_list' %}"
+                  hx-trigger="change, keyup delay:500ms"
+                  hx-target="#audit-results"
+                  hx-indicator="#loading-spinner">
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <!-- Date Range Picker -->
+                    <div class="lg:col-span-1">
+                        <label class="block text-sm font-medium text-slate-300 mb-2">
+                            {% trans "Date Range" %}
+                        </label>
+                        <div class="flex gap-2">
+                            {% include 'components/input.html' with type='date' name='start_date' placeholder='Start date' container_class='flex-1' %}
+                            {% include 'components/input.html' with type='date' name='end_date' placeholder='End date' container_class='flex-1' %}
+                        </div>
+                    </div>
+
+                    <!-- User Filter -->
+                    <div class="relative">
+                        <label class="block text-sm font-medium text-slate-300 mb-2">
+                            {% trans "User" %}
+                        </label>
+                        <select class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-transparent relative z-10"
+                                name="user">
+                            <option value="">{% trans "All Users" %}</option>
+                            {% for user in users %}
+                                <option value="{{ user.id }}">{{ user.email }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <!-- Action Type Filter -->
+                    <div class="relative">
+                        <label class="block text-sm font-medium text-slate-300 mb-2">
+                            {% trans "Action Type" %}
+                        </label>
+                        <select class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-transparent relative z-10"
+                                name="action">
+                            <option value="">{% trans "All Actions" %}</option>
+                            {% for action_value, action_label in action_choices %}
+                                <option value="{{ action_value }}">{{ action_label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Second Row: Content Type Filter -->
+                <div class="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <!-- Content Type Filter -->
+                    <div class="relative">
+                        <label class="block text-sm font-medium text-slate-300 mb-2">
+                            {% trans "Content Type" %}
+                        </label>
+                        <select class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-transparent relative z-10"
+                                name="content_type">
+                            <option value="">{% trans "All Types" %}</option>
+                            {% for ct in content_types %}
+                                <option value="{{ ct.id }}">
+                                    {{ ct.app_label|title }}.{{ ct.model|title }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <!-- IP Address Search -->
+                    <div>
+                        {% include 'components/input.html' with label='IP Address' placeholder='Search by IP...' name='ip_address' html_id='ip_address' %}
+                    </div>
+
+                    <!-- Search Changes -->
+                    <div>
+                        {% include 'components/input.html' with label='Search Changes' placeholder='Search in change data...' name='search' html_id='search' icon_left='search' %}
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="mt-6 flex justify-center gap-3">
+                    {% url 'audit:logs_list' as logs_list_url %}
+                    {% include 'components/button.html' with text='Apply Filters' variant='primary' hx_get=logs_list_url hx_target='#audit-results' hx_include='#audit-filters' %}
+                    {% include 'components/button.html' with text='Reset Filters' variant='secondary' icon='🔄' attrs='onclick="resetFilters()"' %}
+                    {% include 'components/button.html' with text='Export CSV' variant='success' icon='📊' attrs='onclick="exportCSV()"' %}
+                </div>
+            </form>
+        </div>
+
+        <!-- Results Section -->
+        <div class="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-700">
+                <div class="flex items-center justify-between">
+                    <h2 class="text-lg font-medium text-white">📋 {% trans "Audit Events" %}</h2>
+                    <div class="flex items-center space-x-2">
+                        <!-- Loading Spinner -->
+                        <div id="loading-spinner" class="htmx-indicator">
+                            <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+                        </div>
+                        <span class="text-sm text-slate-400" id="results-count">{% trans "Loading..." %}</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Audit Events List -->
+            <div id="audit-results" class="divide-y divide-slate-700">
+                <!-- Initial content loaded via HTMX -->
+                <div class="p-8 text-center">
+                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
+                    <p class="text-slate-400 mt-2">{% trans "Loading audit logs..." %}</p>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- Initialize HTMX -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Load initial results by triggering the HTMX request
+    const auditFilters = document.getElementById('audit-filters');
+    if (auditFilters) {
+        htmx.ajax('GET', '{% url 'audit:logs_list' %}', {
+            target: '#audit-results',
+            source: auditFilters,
+            indicator: '#loading-spinner'
+        });
+    }
+});
+
+// Reset all filters to their default values
+function resetFilters() {
+    const form = document.getElementById('audit-filters');
+    const resetBtn = event.target;
+    
+    if (form) {
+        // Add loading state
+        const originalText = resetBtn.innerHTML;
+        resetBtn.innerHTML = '⏳ {% trans "Resetting..." %}';
+        resetBtn.disabled = true;
+        
+        // Reset all form fields
+        form.reset();
+        
+        // Trigger HTMX request to reload with empty filters
+        htmx.ajax('GET', '{% url 'audit:logs_list' %}', {
+            target: '#audit-results',
+            source: form,
+            indicator: '#loading-spinner'
+        }).then(() => {
+            // Restore button state
+            resetBtn.innerHTML = originalText;
+            resetBtn.disabled = false;
+        });
+    }
+}
+
+// Export filtered audit logs as CSV
+function exportCSV() {
+    const form = document.getElementById('audit-filters');
+    const exportBtn = event.target;
+    
+    if (form) {
+        // Add loading state
+        const originalText = exportBtn.innerHTML;
+        exportBtn.innerHTML = '⏳ {% trans "Exporting..." %}';
+        exportBtn.disabled = true;
+        
+        // Get form data
+        const formData = new FormData(form);
+        const params = new URLSearchParams(formData);
+        
+        // Create download URL with current filters
+        const exportUrl = '{% url 'audit:export_logs_csv' %}?' + params.toString();
+        
+        // Trigger download
+        const link = document.createElement('a');
+        link.href = exportUrl;
+        link.download = '';
+        link.target = '_blank';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        // Restore button state after a short delay
+        setTimeout(() => {
+            exportBtn.innerHTML = originalText;
+            exportBtn.disabled = false;
+        }, 1000);
+    }
+}
+
+// Fix for HTMX loading
+htmx.config.defaultSwapStyle = 'innerHTML';
+htmx.config.defaultSwapDelay = 100;
+</script>
+
+{% endblock %}

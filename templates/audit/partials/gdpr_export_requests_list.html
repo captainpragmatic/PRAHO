@@ -1,0 +1,208 @@
+{% load static %}
+{% load i18n %}
+{% load ui_components %}
+{% load formatting %}
+
+{% if export_requests %}
+    {% for request in export_requests %}
+        <!-- GDPR Export Request Card -->
+        <div class="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden hover:border-slate-600 transition-colors group">
+            <div class="p-4">
+                <div class="flex items-start justify-between">
+                    <!-- Request Details -->
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center space-x-2 mb-2 flex-wrap">
+                            <!-- Status Badge -->
+                            {% if request.status == 'pending' %}
+                                {% badge "⏳ Pending" variant="warning" size="sm" %}
+                            {% elif request.status == 'processing' %}
+                                {% badge "⚙️ Processing" variant="info" size="sm" %}
+                            {% elif request.status == 'completed' %}
+                                {% if current_time > request.expires_at %}
+                                    {% badge "⏰ Expired" variant="danger" size="sm" %}
+                                {% else %}
+                                    {% badge "✅ Completed" variant="success" size="sm" %}
+                                {% endif %}
+                            {% elif request.status == 'failed' %}
+                                {% badge "❌ Failed" variant="danger" size="sm" %}
+                            {% endif %}
+
+                            <!-- Export Type -->
+                            {% badge request.export_type|upper variant="secondary" size="xs" %}
+
+                            <!-- User Info -->
+                            <span class="text-blue-400 text-sm font-medium">{{ request.requested_by.email }}</span>
+
+                            <!-- Timestamp -->
+                            <span class="text-slate-500">•</span>
+                            <span class="text-slate-400 text-sm" title="{{ request.requested_at|date:'Y-m-d H:i:s' }}">
+                                {{ request.requested_at|timesince }} {% trans "ago" %}
+                            </span>
+                        </div>
+
+                        <!-- Export Scope Info -->
+                        <div class="text-white font-medium text-sm mb-1">
+                            {% trans "Export ID:" %} {{ request.id|slice:":8" }}...
+                            {% if request.record_count %}
+                                ({{ request.record_count }} {% trans "records" %})
+                            {% endif %}
+                        </div>
+
+                        <!-- File and Size Info -->
+                        <div class="text-xs text-slate-400 space-x-3 flex flex-wrap items-center">
+                            {% if request.file_size %}
+                                <span class="text-slate-300">📁 {{ request.file_size|filesizeformat }}</span>
+                            {% endif %}
+                            
+                            {% if request.download_count > 0 %}
+                                <span class="text-slate-300">📥 {{ request.download_count }} {% trans "download" %}{% if request.download_count != 1 %}s{% endif %}</span>
+                            {% endif %}
+                            
+                            {% if request.status == 'completed' %}
+                                <span class="{% if current_time > request.expires_at %}text-red-400{% else %}text-green-400{% endif %}">
+                                    ⏰ {% trans "Expires:" %} {{ request.expires_at|date:"M d, Y H:i" }}
+                                </span>
+                            {% endif %}
+
+                            {% if request.error_message %}
+                                <span class="text-red-400">❌ {{ request.error_message|truncatewords:8 }}</span>
+                            {% endif %}
+                        </div>
+
+                        <!-- Export Scope Details -->
+                        {% if request.scope %}
+                        <div class="mt-2 text-xs text-slate-500">
+                            <strong>{% trans "Scope:" %}</strong>
+                            {% for key, value in request.scope.items %}
+                                {% if value %}
+                                    <span class="inline-block bg-slate-700 px-2 py-1 rounded mr-1 mb-1">{{ key|title }}</span>
+                                {% endif %}
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <!-- Actions Panel -->
+                    <div class="flex flex-col space-y-1 ml-4">
+                        <!-- Expand/Details Button -->
+                        <button class="text-slate-400 hover:text-white transition-colors expand-btn"
+                                hx-get="{% url 'audit:gdpr_export_detail' request.id %}"
+                                hx-target="#export-detail-{{ request.id }}"
+                                hx-swap="innerHTML"
+                                hx-indicator="#export-detail-{{ request.id }}-loading"
+                                onclick="toggleExportDetail(this, '{{ request.id }}')"
+                                title="{% trans 'View Details' %}">
+                            <svg class="w-5 h-5 transform transition-transform duration-200 chevron-icon" 
+                                 fill="none" 
+                                 stroke="currentColor" 
+                                 viewBox="0 0 24 24">
+                                <path stroke-linecap="round" 
+                                      stroke-linejoin="round" 
+                                      stroke-width="2" 
+                                      d="M19 9l-7 7-7-7"></path>
+                            </svg>
+                        </button>
+
+                        <!-- Quick Actions -->
+                        <div class="flex flex-col space-y-1">
+                            {% if request.status == 'pending' %}
+                                <form method="post" action="{% url 'audit:process_export_request' request.id %}" class="inline">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="process_now">
+                                    {% button "⚡" variant="success" size="xs" type="submit" title="Process Now" %}
+                                </form>
+                            {% elif request.status == 'completed' and current_time <= request.expires_at %}
+                                {% button "📥" variant="primary" size="xs" href="/app/audit/gdpr_management/download/"|add:request.id|add:"/" title="Download Export" %}
+                            {% elif request.status == 'completed' and current_time > request.expires_at %}
+                                <form method="post" action="{% url 'audit:process_export_request' request.id %}" class="inline">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="delete_expired">
+                                    {% button "🗑️" variant="danger" size="xs" type="submit" hx_confirm="Delete this expired export?" title="Delete Expired" %}
+                                </form>
+                            {% elif request.status == 'processing' %}
+                                <span class="text-blue-400 text-xs animate-pulse">⚙️</span>
+                            {% elif request.status == 'failed' %}
+                                <span class="text-red-400 text-xs">❌</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Expandable Details -->
+                <div id="export-detail-{{ request.id }}" class="mt-4 pt-4 border-t border-slate-700 hidden export-details">
+                    <!-- Loading indicator will be shown here -->
+                    <div id="export-detail-{{ request.id }}-loading" class="htmx-indicator">
+                        <div class="flex items-center justify-center py-4">
+                            <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+                            <span class="ml-2 text-sm text-slate-400">{% trans "Loading details..." %}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    {% endfor %}
+
+    <!-- Pagination -->
+    {% include 'components/pagination.html' with page_obj=export_requests extra_params='' htmx_target='#gdpr-results' htmx_url='/app/audit/gdpr_management/requests/' %}
+
+{% else %}
+    <!-- Empty State -->
+    <div class="text-center py-12">
+        <div class="w-16 h-16 bg-slate-700 rounded-full flex items-center justify-center mx-auto mb-4">
+            <span class="text-4xl">🔒</span>
+        </div>
+        <h3 class="text-lg font-medium text-white mb-2">{% trans "No GDPR export requests found" %}</h3>
+        <p class="text-slate-400 mb-4">{% trans "No export requests match the current filters." %}</p>
+        <p class="text-slate-500 text-sm">
+            {% trans "Users can request data exports from their GDPR dashboard." %}
+        </p>
+    </div>
+{% endif %}
+
+<!-- JavaScript for Export Detail Toggle -->
+<script>
+function toggleExportDetail(button, requestId) {
+    const detailDiv = document.getElementById('export-detail-' + requestId);
+    const chevron = button.querySelector('.chevron-icon');
+    const isHidden = detailDiv.classList.contains('hidden');
+    
+    if (isHidden) {
+        detailDiv.classList.remove('hidden');
+        chevron.style.transform = 'rotate(180deg)';
+        button.closest('.group').classList.add('expanded');
+    } else {
+        detailDiv.classList.add('hidden');
+        chevron.style.transform = 'rotate(0deg)';
+        button.closest('.group').classList.remove('expanded');
+    }
+}
+
+// Update results count after HTMX swap
+document.addEventListener('htmx:afterSwap', function() {
+    const count = document.querySelectorAll('.group').length;
+    const countElement = document.getElementById('results-count');
+    if (countElement) {
+        if (count === 0) {
+            countElement.textContent = '{% trans "No requests" %}';
+        } else if (count === 1) {
+            countElement.textContent = '1 {% trans "request" %}';
+        } else {
+            countElement.textContent = count + ' {% trans "requests" %}';
+        }
+    }
+});
+
+// Auto-refresh for processing requests every 30 seconds
+setInterval(function() {
+    const processingItems = document.querySelectorAll('.group:has(.animate-pulse)');
+    if (processingItems.length > 0) {
+        const form = document.getElementById('gdpr-filters');
+        if (form) {
+            htmx.ajax('GET', '{% url 'audit:gdpr_export_requests_list' %}', {
+                target: '#gdpr-results',
+                source: form
+            });
+        }
+    }
+}, 30000);
+</script>

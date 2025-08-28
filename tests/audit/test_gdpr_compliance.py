@@ -62,7 +62,10 @@ class GDPRExportServiceTestCase(TestCase):
         )
 
         self.assertTrue(result.is_ok())
-        export_request = result.value
+        if result.is_ok():
+            export_request = result.value
+        else:
+            self.fail("Result should be Ok")
 
         self.assertEqual(export_request.requested_by, self.user)
         self.assertEqual(export_request.status, 'pending')
@@ -112,6 +115,8 @@ class GDPRExportServiceTestCase(TestCase):
         export_request.refresh_from_db()
         self.assertEqual(export_request.status, 'completed')
         self.assertIsNotNone(export_request.file_path)
+        self.assertIsNotNone(export_request.file_size)
+        assert export_request.file_size is not None  # Type narrowing
         self.assertGreater(export_request.file_size, 0)
 
         # Verify file exists and contains valid JSON

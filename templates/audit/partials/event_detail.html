@@ -1,0 +1,169 @@
+{% load i18n %}
+
+<!-- Event Detail View using Card Component -->
+<div class="bg-slate-700/50 rounded-lg p-4 space-y-4">
+    
+    <!-- Basic Information -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+            <h4 class="text-sm font-medium text-slate-300 mb-1">{% trans "Timestamp" %}</h4>
+            <p class="text-white text-sm">
+                {{ event.timestamp|date:'Y-m-d H:i:s' }} <br>
+                <span class="text-slate-400">({{ event.timestamp|timesince }} {% trans "ago" %})</span>
+            </p>
+        </div>
+
+        <div>
+            <h4 class="text-sm font-medium text-slate-300 mb-1">{% trans "User" %}</h4>
+            {% if event.user %}
+                <div class="flex items-center space-x-2">
+                    {% include 'components/badge.html' with text=event.user.email variant='primary' size='xs' %}
+                    {% if event.user.get_full_name %}
+                        <span class="text-slate-400 text-xs">{{ event.user.get_full_name }}</span>
+                    {% endif %}
+                </div>
+            {% else %}
+                {% include 'components/badge.html' with text='System Event' variant='secondary' size='xs' %}
+            {% endif %}
+        </div>
+
+        <div>
+            <h4 class="text-sm font-medium text-slate-300 mb-1">{% trans "Action" %}</h4>
+            <!-- Action Badge -->
+            {% if event.action == 'create' %}
+                {% include 'components/badge.html' with text='✅ '|add:event.get_action_display variant='success' size='xs' %}
+            {% elif event.action == 'update' %}
+                {% include 'components/badge.html' with text='🔄 '|add:event.get_action_display variant='info' size='xs' %}
+            {% elif event.action == 'delete' %}
+                {% include 'components/badge.html' with text='❌ '|add:event.get_action_display variant='danger' size='xs' %}
+            {% elif event.action == 'login' %}
+                {% include 'components/badge.html' with text='🔐 '|add:event.get_action_display variant='primary' size='xs' %}
+            {% elif event.action == 'logout' %}
+                {% include 'components/badge.html' with text='👋 '|add:event.get_action_display variant='secondary' size='xs' %}
+            {% elif '2fa' in event.action %}
+                {% include 'components/badge.html' with text='🔒 '|add:event.get_action_display variant='warning' size='xs' %}
+            {% else %}
+                {% include 'components/badge.html' with text='📋 '|add:event.get_action_display variant='secondary' size='xs' %}
+            {% endif %}
+        </div>
+
+        <div>
+            <h4 class="text-sm font-medium text-slate-300 mb-1">{% trans "Content Type" %}</h4>
+            {% if event.content_type %}
+                {% include 'components/badge.html' with text=event.content_type.app_label|title|add:'.'|add:event.content_type.model|title variant='secondary' size='xs' %}
+            {% else %}
+                <p class="text-slate-400 text-sm">{% trans "N/A" %}</p>
+            {% endif %}
+        </div>
+
+        <div>
+            <h4 class="text-sm font-medium text-slate-300 mb-1">{% trans "Object ID" %}</h4>
+            <p class="text-white text-sm font-mono">{{ event.object_id|default:"N/A" }}</p>
+        </div>
+
+        <div>
+            <h4 class="text-sm font-medium text-slate-300 mb-1">{% trans "IP Address" %}</h4>
+            <p class="text-white text-sm font-mono">{{ event.ip_address|default:"N/A" }}</p>
+        </div>
+    </div>
+
+    <!-- Session Information -->
+    {% if event.session_key %}
+        <div>
+            <h4 class="text-sm font-medium text-slate-300 mb-1">{% trans "Session" %}</h4>
+            <p class="text-white text-sm font-mono">...{{ event.session_key|slice:"-8:" }}</p>
+        </div>
+    {% endif %}
+
+    <!-- User Agent -->
+    {% if event.user_agent %}
+        <div>
+            <h4 class="text-sm font-medium text-slate-300 mb-1">{% trans "User Agent" %}</h4>
+            <p class="text-white text-sm">{{ event.user_agent }}</p>
+        </div>
+    {% endif %}
+
+    <!-- Description -->
+    {% if event.description %}
+        <div>
+            <h4 class="text-sm font-medium text-slate-300 mb-1">{% trans "Description" %}</h4>
+            <p class="text-white text-sm">{{ event.description }}</p>
+        </div>
+    {% endif %}
+
+    <!-- Object Information -->
+    {% if event.content_object %}
+        <div>
+            <h4 class="text-sm font-medium text-slate-300 mb-1">{% trans "Target Object" %}</h4>
+            <p class="text-white text-sm">{{ event.content_type.model|title }}: {{ event.content_object }}</p>
+        </div>
+    {% endif %}
+
+    <!-- Changes -->
+    {% if event.old_values or event.new_values %}
+        <div class="space-y-3">
+            {% if event.old_values %}
+                <div>
+                    <h4 class="text-sm font-medium text-slate-300 mb-1">{% trans "Old Values" %}</h4>
+                    <pre class="bg-slate-900 border border-slate-600 rounded-md p-3 text-xs text-slate-300 overflow-x-auto">{{ event.old_values|pprint }}</pre>
+                </div>
+            {% endif %}
+
+            {% if event.new_values %}
+                <div>
+                    <h4 class="text-sm font-medium text-slate-300 mb-1">{% trans "New Values" %}</h4>
+                    <pre class="bg-slate-900 border border-slate-600 rounded-md p-3 text-xs text-slate-300 overflow-x-auto">{{ event.new_values|pprint }}</pre>
+                </div>
+            {% endif %}
+
+            {% if event.old_values and event.new_values %}
+                <div>
+                    <h4 class="text-sm font-medium text-slate-300 mb-1">{% trans "Changes Summary" %}</h4>
+                    <div class="bg-slate-900 border border-slate-600 rounded-md p-3">
+                        <!-- This would show a diff view in a real implementation -->
+                        <p class="text-xs text-slate-400">{% trans "Change detection available in full audit interface" %}</p>
+                    </div>
+                </div>
+            {% endif %}
+        </div>
+    {% endif %}
+
+    <!-- Request ID -->
+    {% if event.request_id %}
+        <div>
+            <h4 class="text-sm font-medium text-slate-300 mb-1">{% trans "Request ID" %}</h4>
+            <p class="text-white text-sm font-mono">{{ event.request_id|slice:":16" }}...</p>
+        </div>
+    {% endif %}
+
+    <!-- Technical Metadata -->
+    <div class="pt-4 border-t border-slate-600">
+        <div class="flex items-center justify-between">
+            <span class="text-xs text-slate-400">
+                {% trans "Event ID" %}: {{ event.id }}
+            </span>
+            {% include 'components/button.html' with text='Close' variant='secondary' size='xs' attrs='onclick="closeEventDetail(this)"' %}
+        </div>
+    </div>
+
+</div>
+
+<!-- JavaScript to handle the details -->
+<script>
+function closeEventDetail(button) {
+    const eventDetailsContainer = button.closest('.event-details');
+    if (eventDetailsContainer) {
+        eventDetailsContainer.classList.add('hidden');
+        // Also rotate the chevron back
+        const expandButton = eventDetailsContainer.parentElement.querySelector('.expand-btn .chevron-icon');
+        if (expandButton) {
+            expandButton.style.transform = 'rotate(0deg)';
+        }
+        // Remove expanded class from the group
+        const group = eventDetailsContainer.closest('.group');
+        if (group) {
+            group.classList.remove('expanded');
+        }
+    }
+}
+</script>

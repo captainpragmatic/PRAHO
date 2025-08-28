@@ -1,0 +1,278 @@
+{% extends "base.html" %}
+{% load static %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans "Staff GDPR Management" %}{% endblock %}
+
+{% block content %}
+<!-- ===============================================================================
+STAFF GDPR MANAGEMENT DASHBOARD - PRAHO PLATFORM
+Professional interface for staff to manage all user GDPR requests
+=============================================================================== -->
+
+<div class="min-h-screen bg-slate-900">
+    <!-- Main Content -->
+    <main class="px-6 py-6">
+        <!-- Header Section -->
+        <div class="bg-slate-800 border border-slate-700 rounded-lg p-6 mb-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-2xl font-bold text-white">🔒 {% trans "GDPR Management Dashboard" %}</h1>
+                    <p class="text-slate-400 mt-1">{% trans "Staff management of all user GDPR data export requests" %}</p>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <span class="text-sm text-slate-400">{% trans "Staff Only" %}</span>
+                    <div class="w-2 h-2 bg-red-500 rounded-full animate-pulse" title="{% trans 'Staff Access Required' %}"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Statistics Overview -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-6">
+            <!-- Pending Requests -->
+            <div class="bg-slate-800 border border-slate-700 rounded-lg p-4">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-sm text-slate-400">{% trans "Pending" %}</p>
+                        <p class="text-2xl font-bold text-yellow-400">{{ export_stats.pending }}</p>
+                    </div>
+                    <div class="w-12 h-12 bg-yellow-500/20 rounded-lg flex items-center justify-center">
+                        <span class="text-yellow-500 text-xl">⏳</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Processing -->
+            <div class="bg-slate-800 border border-slate-700 rounded-lg p-4">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-sm text-slate-400">{% trans "Processing" %}</p>
+                        <p class="text-2xl font-bold text-blue-400">{{ export_stats.processing }}</p>
+                    </div>
+                    <div class="w-12 h-12 bg-blue-500/20 rounded-lg flex items-center justify-center">
+                        <span class="text-blue-500 text-xl">⚙️</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Completed -->
+            <div class="bg-slate-800 border border-slate-700 rounded-lg p-4">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-sm text-slate-400">{% trans "Completed" %}</p>
+                        <p class="text-2xl font-bold text-green-400">{{ export_stats.completed }}</p>
+                    </div>
+                    <div class="w-12 h-12 bg-green-500/20 rounded-lg flex items-center justify-center">
+                        <span class="text-green-500 text-xl">✅</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Failed -->
+            <div class="bg-slate-800 border border-slate-700 rounded-lg p-4">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-sm text-slate-400">{% trans "Failed" %}</p>
+                        <p class="text-2xl font-bold text-red-400">{{ export_stats.failed }}</p>
+                    </div>
+                    <div class="w-12 h-12 bg-red-500/20 rounded-lg flex items-center justify-center">
+                        <span class="text-red-500 text-xl">❌</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Expired -->
+            <div class="bg-slate-800 border border-slate-700 rounded-lg p-4">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-sm text-slate-400">{% trans "Expired" %}</p>
+                        <p class="text-2xl font-bold text-orange-400">{{ export_stats.expired }}</p>
+                    </div>
+                    <div class="w-12 h-12 bg-orange-500/20 rounded-lg flex items-center justify-center">
+                        <span class="text-orange-500 text-xl">🗑️</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filter Section -->
+        <div class="bg-slate-800 border border-slate-700 rounded-lg p-4 mb-6">
+            <h2 class="text-lg font-medium text-white mb-4">🔧 {% trans "Filters" %}</h2>
+            
+            <!-- Filter Form -->
+            <form id="gdpr-filters" 
+                  hx-get="{% url 'audit:gdpr_export_requests_list' %}"
+                  hx-trigger="change, keyup delay:500ms"
+                  hx-target="#gdpr-results"
+                  hx-indicator="#loading-spinner">
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <!-- Status Filter -->
+                    <div class="relative">
+                        <label class="block text-sm font-medium text-slate-300 mb-2">
+                            {% trans "Status" %}
+                        </label>
+                        <select class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-transparent relative z-10"
+                                name="status">
+                            <option value="all">{% trans "All Statuses" %}</option>
+                            <option value="pending">{% trans "Pending" %}</option>
+                            <option value="processing">{% trans "Processing" %}</option>
+                            <option value="completed">{% trans "Completed" %}</option>
+                            <option value="failed">{% trans "Failed" %}</option>
+                        </select>
+                    </div>
+
+                    <!-- User Email Search -->
+                    <div>
+                        <label class="block text-sm font-medium text-slate-300 mb-2">
+                            {% trans "User Email" %}
+                        </label>
+                        <input type="text" 
+                               name="user_email" 
+                               placeholder="{% trans 'Search by user email...' %}"
+                               class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                    </div>
+
+                    <!-- Export Type Filter -->
+                    <div class="relative">
+                        <label class="block text-sm font-medium text-slate-300 mb-2">
+                            {% trans "Export Type" %}
+                        </label>
+                        <select class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-transparent relative z-10"
+                                name="export_type">
+                            <option value="">{% trans "All Types" %}</option>
+                            <option value="gdpr">{% trans "GDPR Export" %}</option>
+                            <option value="audit">{% trans "Audit Export" %}</option>
+                            <option value="billing">{% trans "Billing Export" %}</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Second Row: Date Range and Expiration Filter -->
+                <div class="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <!-- Date Range Picker -->
+                    <div class="lg:col-span-1">
+                        <label class="block text-sm font-medium text-slate-300 mb-2">
+                            {% trans "Date Range" %}
+                        </label>
+                        <div class="flex gap-2">
+                            <input type="date" 
+                                   name="start_date" 
+                                   class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm flex-1 focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            <input type="date" 
+                                   name="end_date" 
+                                   class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm flex-1 focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                        </div>
+                    </div>
+
+                    <!-- Expiration Filter -->
+                    <div class="relative">
+                        <label class="block text-sm font-medium text-slate-300 mb-2">
+                            {% trans "Expiration Status" %}
+                        </label>
+                        <select class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-transparent relative z-10"
+                                name="expired">
+                            <option value="">{% trans "All Exports" %}</option>
+                            <option value="active">{% trans "Active Exports" %}</option>
+                            <option value="expired">{% trans "Expired Exports" %}</option>
+                        </select>
+                    </div>
+
+                    <!-- Empty placeholder for grid alignment -->
+                    <div></div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="mt-6 flex justify-center gap-3">
+                    {% button "Apply Filters" variant="primary" hx_get="/app/audit/gdpr_management/requests/" hx_target="#gdpr-results" hx_include="#gdpr-filters" %}
+                    {% button "Reset Filters" variant="secondary" icon="🔄" attrs="onclick=\"resetFilters()\"" %}
+                    {% button "Refresh Dashboard" variant="info" icon="↻" attrs="onclick=\"window.location.reload()\"" %}
+                </div>
+            </form>
+        </div>
+
+        <!-- Results Section -->
+        <div class="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-700">
+                <div class="flex items-center justify-between">
+                    <h2 class="text-lg font-medium text-white">📋 {% trans "GDPR Export Requests" %}</h2>
+                    <div class="flex items-center space-x-2">
+                        <!-- Loading Spinner -->
+                        <div id="loading-spinner" class="htmx-indicator">
+                            <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+                        </div>
+                        <span class="text-sm text-slate-400" id="results-count">{% trans "Loading..." %}</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- GDPR Export Requests List -->
+            <div id="gdpr-results" class="divide-y divide-slate-700">
+                <!-- Initial content loaded via HTMX -->
+                <div class="p-8 text-center">
+                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
+                    <p class="text-slate-400 mt-2">{% trans "Loading GDPR export requests..." %}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Romanian Compliance Notice -->
+        <div class="mt-6 bg-slate-800 border border-slate-700 rounded-lg p-4">
+            <div class="flex items-center space-x-2">
+                <span class="text-blue-400">🇷🇴</span>
+                <p class="text-slate-400 text-sm">
+                    {% trans "This GDPR management system complies with Romanian Law 190/2018 and EU Regulation 2016/679. All data processing activities are logged for audit purposes." %}
+                </p>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- Initialize HTMX -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Load initial results by triggering the HTMX request
+    const gdprFilters = document.getElementById('gdpr-filters');
+    if (gdprFilters) {
+        htmx.ajax('GET', '{% url 'audit:gdpr_export_requests_list' %}', {
+            target: '#gdpr-results',
+            source: gdprFilters,
+            indicator: '#loading-spinner'
+        });
+    }
+});
+
+// Reset all filters to their default values
+function resetFilters() {
+    const form = document.getElementById('gdpr-filters');
+    const resetBtn = event.target;
+    
+    if (form) {
+        // Add loading state
+        const originalText = resetBtn.innerHTML;
+        resetBtn.innerHTML = '⏳ {% trans "Resetting..." %}';
+        resetBtn.disabled = true;
+        
+        // Reset all form fields
+        form.reset();
+        
+        // Trigger HTMX request to reload with empty filters
+        htmx.ajax('GET', '{% url 'audit:gdpr_export_requests_list' %}', {
+            target: '#gdpr-results',
+            source: form,
+            indicator: '#loading-spinner'
+        }).then(() => {
+            // Restore button state
+            resetBtn.innerHTML = originalText;
+            resetBtn.disabled = false;
+        });
+    }
+}
+
+// Fix for HTMX loading
+htmx.config.defaultSwapStyle = 'innerHTML';
+htmx.config.defaultSwapDelay = 100;
+</script>
+
+{% endblock %}

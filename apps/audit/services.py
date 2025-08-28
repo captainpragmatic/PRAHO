@@ -5,7 +5,8 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
 
 from django.contrib.auth import get_user_model
@@ -24,6 +25,68 @@ from .models import AuditEvent, ComplianceLog, DataExport
 Audit services for PRAHO Platform
 Centralized audit logging for Romanian compliance and security.
 """
+
+
+class AuditJSONEncoder(json.JSONEncoder):
+    """
+    Custom JSON encoder for audit system metadata serialization.
+    
+    Handles common Django and Python types that are not serializable by default:
+    - UUID objects (convert to string)
+    - datetime objects (convert to ISO format)
+    - Decimal objects (convert to string to preserve precision)
+    - Model instances (convert to string representation)
+    """
+    
+    def default(self, obj: Any) -> Any:
+        """Convert non-serializable objects to JSON-serializable formats"""
+        if isinstance(obj, uuid.UUID):
+            return str(obj)
+        elif isinstance(obj, datetime):
+            return obj.isoformat()
+        elif isinstance(obj, Decimal):
+            return str(obj)  # Preserve precision as string
+        elif hasattr(obj, 'pk'):  # Django model instance
+            return f"{obj.__class__.__name__}(pk={obj.pk})"
+        elif hasattr(obj, '__dict__'):  # Generic object with attributes
+            return str(obj)
+        
+        # Let the base class handle other types or raise TypeError
+        return super().default(obj)
+
+
+def serialize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    """
+    Safely serialize metadata dictionary for JSONField storage.
+    
+    Pre-processes the metadata to convert non-serializable objects
+    using our custom encoder before storing in the database.
+    
+    Args:
+        metadata: Raw metadata dictionary that may contain non-serializable objects
+        
+    Returns:
+        Serializable metadata dictionary safe for JSONField
+        
+    Raises:
+        TypeError: If metadata contains objects that cannot be serialized
+    """
+    if not metadata:
+        return {}
+    
+    try:
+        # Use our custom encoder to serialize and then deserialize
+        # This ensures all objects are converted to serializable forms
+        serialized_json = json.dumps(metadata, cls=AuditJSONEncoder, ensure_ascii=False)
+        return json.loads(serialized_json)
+    except (TypeError, ValueError) as e:
+        logger.error(f"🔥 [Audit] Failed to serialize metadata: {e}")
+        # Fallback: return a safe version with error information
+        return {
+            'serialization_error': str(e),
+            'original_keys': list(metadata.keys()) if isinstance(metadata, dict) else 'not_dict',
+            'timestamp': datetime.now().isoformat()
+        }
 
 if TYPE_CHECKING:
     from apps.users.models import User
@@ -77,9 +140,15 @@ class AuditContext:
 
 @dataclass
 class AuditEventData:
-    """Parameter object for audit event data"""
+    """
+    Parameter object for audit event data
+    
+    Supports models with both integer and UUID primary keys.
+    The content_object.pk will be converted to string representation
+    to handle mixed primary key types in the audit system.
+    """
     event_type: str
-    content_object: Any | None = None
+    content_object: Any | None = None  # Any Django model instance
     old_values: dict[str, Any] | None = None
     new_values: dict[str, Any] | None = None
     description: str = ''
@@ -128,13 +197,18 @@ class AuditService:
             # Get content type and object ID - both are required by the model
             if event_data.content_object:
                 content_type = ContentType.objects.get_for_model(event_data.content_object)
-                object_id = event_data.content_object.pk
+                # Convert primary key to string to handle both integers and UUIDs
+                object_id = str(event_data.content_object.pk)
             else:
                 # For events without a specific object, use the User model as a fallback
                 # This ensures we always have valid content_type and object_id
                 content_type = ContentType.objects.get_for_model(User)
-                object_id = context.user.pk if context.user else 1  # Use system user ID=1 as fallback
+                # Convert to string to handle both integer and UUID user PKs
+                object_id = str(context.user.pk) if context.user else "1"  # Use system user ID=1 as fallback
 
+            # Safely serialize metadata before storing
+            serialized_metadata = serialize_metadata(context.metadata)
+            
             # Create audit event
             audit_event = AuditEvent.objects.create(
                 user=context.user,
@@ -149,7 +223,7 @@ class AuditService:
                 user_agent=context.user_agent or '',
                 request_id=context.request_id or str(uuid.uuid4()),
                 session_key=context.session_key or '',
-                metadata=context.metadata
+                metadata=serialized_metadata
             )
 
             logger.info(
@@ -192,7 +266,7 @@ class AuditService:
                 'backup_codes_count': len(request.user.backup_tokens) if request.user.backup_tokens else 0
             })
 
-        # Create enhanced context with metadata
+        # Create enhanced context with metadata (metadata will be serialized in log_event)
         enhanced_context = AuditContext(
             user=request.user,
             ip_address=request.context.ip_address,
@@ -221,14 +295,18 @@ class AuditService:
             request: ComplianceEventRequest containing all compliance event data
         """
         try:
+            # Safely serialize evidence and metadata before storing
+            serialized_evidence = serialize_metadata(request.evidence)
+            serialized_metadata = serialize_metadata(request.metadata)
+            
             compliance_log = ComplianceLog.objects.create(
                 compliance_type=request.compliance_type,
                 reference_id=request.reference_id,
                 description=request.description,
                 user=request.user,
                 status=request.status,
-                evidence=request.evidence,
-                metadata=request.metadata
+                evidence=serialized_evidence,
+                metadata=serialized_metadata
             )
 
             logger.info(
@@ -868,7 +946,7 @@ class GDPRConsentService:
             return Err(f"Consent withdrawal failed: {e!s}")
 
     @classmethod
-    def get_consent_history(cls, user: User) -> list[dict[str, Any]]:
+    def get_consent_history(cls, user: User) -> list[ConsentHistoryEntry]:
         """Get user's consent history for transparency"""
 
         try:
@@ -878,7 +956,7 @@ class GDPRConsentService:
             ).order_by('-timestamp')
 
             # ⚡ PERFORMANCE: Use list comprehension for better performance
-            history = [
+            history: list[ConsentHistoryEntry] = [
                 {
                     'timestamp': log.timestamp.isoformat(),
                     'action': log.description,

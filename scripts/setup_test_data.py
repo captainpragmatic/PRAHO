@@ -32,10 +32,10 @@ from apps.customers.models import (
 from apps.orders.models import Order, OrderItem
 from apps.products.models import (
     Product,
-    ProductPrice,
-    ProductRelationship,
     ProductBundle,
     ProductBundleItem,
+    ProductPrice,
+    ProductRelationship,
 )
 from apps.provisioning.models import Service, ServicePlan
 from apps.tickets.models import SupportCategory, Ticket, TicketComment
@@ -547,7 +547,7 @@ def create_products_if_missing():
         if bundles_created > 0:
             print(f"✅ Created {bundles_created} product bundles with items")
 
-        print(f"✅ Complete product catalog created with all relationships")
+        print("✅ Complete product catalog created with all relationships")
 
     except Exception as e:
         print(f"⚠️  Products creation failed: {e}")

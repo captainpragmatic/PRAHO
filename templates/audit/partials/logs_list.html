@@ -1,0 +1,145 @@
+{% load static %}
+{% load i18n %}
+{% load ui_components %}
+
+{% if audit_events %}
+    {% for event in audit_events %}
+        <!-- Audit Event Card -->
+        <div class="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden hover:border-slate-600 transition-colors group">
+            <div class="p-4">
+                <div class="flex items-start justify-between">
+                    <!-- Event Details -->
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center space-x-2 mb-1 flex-wrap">
+                            <!-- Action Badge using Component -->
+                            {% if event.action == 'create' %}
+                                {% include 'components/badge.html' with text='✅ '|add:event.get_action_display variant='success' size='sm' %}
+                            {% elif event.action == 'update' %}
+                                {% include 'components/badge.html' with text='🔄 '|add:event.get_action_display variant='info' size='sm' %}
+                            {% elif event.action == 'delete' %}
+                                {% include 'components/badge.html' with text='❌ '|add:event.get_action_display variant='danger' size='sm' %}
+                            {% elif event.action == 'login' %}
+                                {% include 'components/badge.html' with text='🔐 '|add:event.get_action_display variant='primary' size='sm' %}
+                            {% elif event.action == 'logout' %}
+                                {% include 'components/badge.html' with text='👋 '|add:event.get_action_display variant='secondary' size='sm' %}
+                            {% elif '2fa' in event.action %}
+                                {% include 'components/badge.html' with text='🔒 '|add:event.get_action_display variant='warning' size='sm' %}
+                            {% else %}
+                                {% include 'components/badge.html' with text='📋 '|add:event.get_action_display variant='secondary' size='sm' %}
+                            {% endif %}
+
+                            <!-- Content Type -->
+                            {% if event.content_type %}
+                                <span class="text-slate-400 text-sm">
+                                    {{ event.content_type.app_label|title }}.{{ event.content_type.model|title }}
+                                </span>
+                            {% endif %}
+
+                            <!-- Timestamp -->
+                            <span class="text-slate-500">•</span>
+                            <span class="text-slate-400 text-sm" title="{{ event.timestamp|date:'Y-m-d H:i:s' }}">
+                                {{ event.timestamp|timesince }} {% trans "ago" %}
+                            </span>
+                        </div>
+
+                        <!-- Description -->
+                        <div class="text-white font-medium text-sm mb-1">
+                            {{ event.description|default:event.action|truncatewords:8 }}
+                        </div>
+
+                        <!-- Metadata -->
+                        <div class="text-xs text-slate-400 space-x-3">
+                            {% if event.user %}
+                                <span class="text-blue-400">{{ event.user.email }}</span>
+                            {% else %}
+                                <span class="text-slate-400">System</span>
+                            {% endif %}
+                            
+                            {% if event.ip_address %}
+                                <span class="font-mono">from {{ event.ip_address }}</span>
+                            {% endif %}
+                            
+                            {% if event.object_id %}
+                                <span class="text-slate-500">ID: {{ event.object_id|slice:":8" }}</span>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <!-- Expand/Collapse Button -->
+                    <button class="text-slate-400 hover:text-white transition-colors expand-btn"
+                            hx-get="{% url 'audit:event_detail' event.id %}"
+                            hx-target="#event-detail-{{ event.id }}"
+                            hx-swap="innerHTML"
+                            hx-indicator="#event-detail-{{ event.id }}-loading"
+                            onclick="toggleEventDetail(this, '{{ event.id }}')"
+                            >
+                        <svg class="w-5 h-5 transform transition-transform duration-200 chevron-icon" 
+                             fill="none" 
+                             stroke="currentColor" 
+                             viewBox="0 0 24 24">
+                            <path stroke-linecap="round" 
+                                  stroke-linejoin="round" 
+                                  stroke-width="2" 
+                                  d="M19 9l-7 7-7-7"></path>
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- Expandable Details -->
+                <div id="event-detail-{{ event.id }}" class="mt-4 pt-4 border-t border-slate-700 hidden event-details">
+                    <!-- Loading indicator will be shown here -->
+                    <div id="event-detail-{{ event.id }}-loading" class="htmx-indicator">
+                        <div class="flex items-center justify-center py-4">
+                            <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+                            <span class="ml-2 text-sm text-slate-400">{% trans "Loading details..." %}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    {% endfor %}
+
+    <!-- Pagination using Component -->
+    {% include 'components/pagination.html' with page_obj=audit_events extra_params='' htmx_target='#audit-results' htmx_url='/app/audit/logs/list/' %}
+
+{% else %}
+    <!-- Empty State -->
+    <div class="text-center py-12">
+        <div class="w-16 h-16 bg-slate-700 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg class="w-8 h-8 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+            </svg>
+        </div>
+        <h3 class="text-lg font-medium text-white mb-2">{% trans "No audit events found" %}</h3>
+        <p class="text-slate-400">{% trans "Try adjusting your filters or clearing search terms." %}</p>
+    </div>
+{% endif %}
+
+<!-- JavaScript for Event Detail Toggle -->
+<script>
+function toggleEventDetail(button, eventId) {
+    const detailDiv = document.getElementById('event-detail-' + eventId);
+    const chevron = button.querySelector('.chevron-icon');
+    const isHidden = detailDiv.classList.contains('hidden');
+    
+    if (isHidden) {
+        detailDiv.classList.remove('hidden');
+        chevron.style.transform = 'rotate(180deg)';
+        button.closest('.group').classList.add('expanded');
+    } else {
+        detailDiv.classList.add('hidden');
+        chevron.style.transform = 'rotate(0deg)';
+        button.closest('.group').classList.remove('expanded');
+    }
+}
+
+// Update results count after HTMX swap
+document.addEventListener('htmx:afterSwap', function() {
+    const count = document.querySelectorAll('.group').length;
+    const countElement = document.getElementById('results-count');
+    if (countElement) {
+        countElement.textContent = count + ' events';
+    }
+});
+</script>

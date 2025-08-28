@@ -1,0 +1,226 @@
+{% load static %}
+{% load i18n %}
+{% load ui_components %}
+{% load formatting %}
+
+<div class="bg-slate-700 rounded-lg p-4">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Request Information -->
+        <div class="space-y-3">
+            <h4 class="font-semibold text-white">📋 {% trans "Request Information" %}</h4>
+            
+            <div class="space-y-2 text-sm">
+                <div class="flex justify-between">
+                    <span class="text-slate-400">{% trans "Request ID:" %}</span>
+                    <span class="text-white font-mono">{{ export_request.id }}</span>
+                </div>
+                
+                <div class="flex justify-between">
+                    <span class="text-slate-400">{% trans "User:" %}</span>
+                    <span class="text-blue-400">{{ export_request.requested_by.email }}</span>
+                </div>
+                
+                <div class="flex justify-between">
+                    <span class="text-slate-400">{% trans "Requested:" %}</span>
+                    <span class="text-white">{{ export_request.requested_at|date:"M d, Y H:i" }}</span>
+                </div>
+                
+                <div class="flex justify-between">
+                    <span class="text-slate-400">{% trans "Export Type:" %}</span>
+                    {% badge export_request.export_type|upper variant="secondary" size="xs" %}
+                </div>
+                
+                <div class="flex justify-between">
+                    <span class="text-slate-400">{% trans "Status:" %}</span>
+                    {% if export_request.status == 'pending' %}
+                        {% badge "⏳ Pending" variant="warning" size="sm" %}
+                    {% elif export_request.status == 'processing' %}
+                        {% badge "⚙️ Processing" variant="info" size="sm" %}
+                    {% elif export_request.status == 'completed' %}
+                        {% if is_expired %}
+                            {% badge "⏰ Expired" variant="danger" size="sm" %}
+                        {% else %}
+                            {% badge "✅ Completed" variant="success" size="sm" %}
+                        {% endif %}
+                    {% elif export_request.status == 'failed' %}
+                        {% badge "❌ Failed" variant="danger" size="sm" %}
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Processing Information -->
+        <div class="space-y-3">
+            <h4 class="font-semibold text-white">⚙️ {% trans "Processing Information" %}</h4>
+            
+            <div class="space-y-2 text-sm">
+                {% if export_request.started_at %}
+                    <div class="flex justify-between">
+                        <span class="text-slate-400">{% trans "Started:" %}</span>
+                        <span class="text-white">{{ export_request.started_at|date:"M d, Y H:i" }}</span>
+                    </div>
+                {% endif %}
+                
+                {% if export_request.completed_at %}
+                    <div class="flex justify-between">
+                        <span class="text-slate-400">{% trans "Completed:" %}</span>
+                        <span class="text-white">{{ export_request.completed_at|date:"M d, Y H:i" }}</span>
+                    </div>
+                {% endif %}
+                
+                {% if export_request.file_size %}
+                    <div class="flex justify-between">
+                        <span class="text-slate-400">{% trans "File Size:" %}</span>
+                        <span class="text-white">{{ export_request.file_size|filesizeformat }}</span>
+                    </div>
+                {% endif %}
+                
+                {% if export_request.record_count %}
+                    <div class="flex justify-between">
+                        <span class="text-slate-400">{% trans "Records:" %}</span>
+                        <span class="text-white">{{ export_request.record_count|floatformat:0 }}</span>
+                    </div>
+                {% endif %}
+                
+                <div class="flex justify-between">
+                    <span class="text-slate-400">{% trans "Downloads:" %}</span>
+                    <span class="text-white">{{ export_request.download_count }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Export Scope Details -->
+    {% if export_request.scope %}
+    <div class="mt-6">
+        <h4 class="font-semibold text-white mb-3">🎯 {% trans "Export Scope" %}</h4>
+        <div class="bg-slate-800 rounded-lg p-3">
+            <div class="grid grid-cols-2 md:grid-cols-3 gap-2">
+                {% for key, value in export_request.scope.items %}
+                    <div class="flex items-center space-x-2">
+                        {% if value %}
+                            <span class="text-green-400">✅</span>
+                            <span class="text-white text-sm">{{ key|title }}</span>
+                        {% else %}
+                            <span class="text-slate-500">❌</span>
+                            <span class="text-slate-500 text-sm">{{ key|title }}</span>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- File Information -->
+    {% if export_request.status == 'completed' %}
+    <div class="mt-6">
+        <h4 class="font-semibold text-white mb-3">📁 {% trans "File Information" %}</h4>
+        <div class="bg-slate-800 rounded-lg p-3">
+            <div class="space-y-2 text-sm">
+                <div class="flex justify-between items-center">
+                    <span class="text-slate-400">{% trans "File Path:" %}</span>
+                    {% if file_exists %}
+                        <span class="text-green-400">✅ {% trans "File exists" %}</span>
+                    {% else %}
+                        <span class="text-red-400">❌ {% trans "File missing" %}</span>
+                    {% endif %}
+                </div>
+                
+                <div class="flex justify-between items-center">
+                    <span class="text-slate-400">{% trans "Expires:" %}</span>
+                    <span class="{% if is_expired %}text-red-400{% else %}text-white{% endif %}">
+                        {{ export_request.expires_at|date:"M d, Y H:i" }}
+                        {% if is_expired %}
+                            ({% trans "Expired" %})
+                        {% else %}
+                            ({{ export_request.expires_at|timeuntil }} {% trans "remaining" %})
+                        {% endif %}
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Error Information -->
+    {% if export_request.error_message %}
+    <div class="mt-6">
+        <h4 class="font-semibold text-white mb-3">❌ {% trans "Error Information" %}</h4>
+        <div class="bg-red-900/30 border border-red-700 rounded-lg p-3">
+            <p class="text-red-300 text-sm">{{ export_request.error_message }}</p>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Staff Actions -->
+    <div class="mt-6 pt-4 border-t border-slate-600">
+        <h4 class="font-semibold text-white mb-3">⚡ {% trans "Staff Actions" %}</h4>
+        <div class="flex flex-wrap gap-2">
+            {% if export_request.status == 'pending' %}
+                <form method="post" action="{% url 'audit:process_export_request' export_request.id %}" class="inline">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="process_now">
+                    {% button "⚡ Process Now" variant="success" size="sm" type="submit" %}
+                </form>
+                
+                <button onclick="showFailForm('{{ export_request.id }}')" 
+                        class="inline-flex items-center px-3 py-1 border border-red-600 text-xs font-medium rounded-md text-red-400 bg-red-900/20 hover:bg-red-900/40 focus:outline-none focus:ring-2 focus:ring-red-500">
+                    ❌ {% trans "Mark as Failed" %}
+                </button>
+                
+            {% elif export_request.status == 'completed' and not is_expired and file_exists %}
+                {% button "📥 Download Export" variant="primary" size="sm" href="/app/audit/gdpr_management/download/"|add:export_request.id|add:"/" %}
+                
+            {% elif export_request.status == 'completed' and is_expired %}
+                <form method="post" action="{% url 'audit:process_export_request' export_request.id %}" class="inline">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="delete_expired">
+                    {% button "🗑️ Delete Expired" variant="danger" size="sm" type="submit" hx_confirm="Are you sure you want to delete this expired export? This action cannot be undone." %}
+                </form>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Modal for marking as failed -->
+<div id="fail-modal-{{ export_request.id }}" class="fixed inset-0 z-50 hidden bg-black bg-opacity-50 flex items-center justify-center">
+    <div class="bg-slate-800 border border-slate-700 rounded-lg p-6 max-w-md w-full mx-4">
+        <h3 class="text-lg font-semibold text-white mb-4">❌ {% trans "Mark Export as Failed" %}</h3>
+        
+        <form method="post" action="{% url 'audit:process_export_request' export_request.id %}">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="mark_failed">
+            
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-slate-300 mb-2">
+                    {% trans "Error Message" %}
+                </label>
+                <textarea name="error_message" 
+                          rows="3" 
+                          required
+                          placeholder="{% trans 'Describe why this export failed...' %}"
+                          class="w-full bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm focus:ring-2 focus:ring-red-500 focus:border-transparent"></textarea>
+            </div>
+            
+            <div class="flex justify-end space-x-3">
+                <button type="button" 
+                        onclick="hideFailForm('{{ export_request.id }}')"
+                        class="px-4 py-2 text-sm font-medium text-slate-300 bg-slate-700 border border-slate-600 rounded-md hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-500">
+                    {% trans "Cancel" %}
+                </button>
+                {% button "Mark as Failed" variant="danger" size="sm" type="submit" %}
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function showFailForm(requestId) {
+    document.getElementById('fail-modal-' + requestId).classList.remove('hidden');
+}
+
+function hideFailForm(requestId) {
+    document.getElementById('fail-modal-' + requestId).classList.add('hidden');
+}
+</script>

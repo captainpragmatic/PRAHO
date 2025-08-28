@@ -56,8 +56,9 @@ class AuditEvent(models.Model):
     action = models.CharField(max_length=30, choices=ACTION_CHOICES, db_index=True)
 
     # What object (generic foreign key)
+    # Support both integer and UUID primary keys (CharField for mixed PK types)
     content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
-    object_id = models.PositiveIntegerField()
+    object_id = models.CharField(max_length=36, db_index=True)  # 36 chars for UUIDs, integers fit fine
     content_object = GenericForeignKey('content_type', 'object_id')
 
     # Changes
