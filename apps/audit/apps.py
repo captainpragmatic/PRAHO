@@ -9,4 +9,8 @@ class AuditConfig(AppConfig):
 
     def ready(self) -> None:
         """Import signal handlers when app is ready."""
-        # No signals defined yet for audit app
+        try:
+            from . import signals  # noqa: F401
+            signals.register_audit_signals()
+        except ImportError:
+            pass

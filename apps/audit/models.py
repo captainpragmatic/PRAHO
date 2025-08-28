@@ -16,17 +16,46 @@ User = get_user_model()
 
 class AuditEvent(models.Model):
     """Immutable audit log for all system changes."""
+    
+    # ======================================================================
+    # AUDIT EVENT CATEGORIES (Security Classification)
+    # ======================================================================
+    CATEGORY_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+        ('authentication', 'Authentication'),
+        ('authorization', 'Authorization'),
+        ('account_management', 'Account Management'),
+        ('data_protection', 'Data Protection'),
+        ('security_event', 'Security Event'),
+        ('business_operation', 'Business Operation'),
+        ('system_admin', 'System Administration'),
+        ('compliance', 'Compliance'),
+        ('privacy', 'Privacy'),
+        ('integration', 'Integration'),
+    )
+    
+    # Security severity levels for threat analysis
+    SEVERITY_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+        ('low', 'Low'),
+        ('medium', 'Medium'),
+        ('high', 'High'),
+        ('critical', 'Critical'),
+    )
 
     ACTION_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+        # ======================================================================
+        # GENERIC CRUD OPERATIONS
+        # ======================================================================
         ('create', 'Create'),
         ('update', 'Update'),
         ('delete', 'Delete'),
-        ('login', 'Login'),
-        ('logout', 'Logout'),
+        ('view', 'View'),
         ('access', 'Access'),
         ('export', 'Export'),
         ('import', 'Import'),
-        # Authentication Events
+        
+        # ======================================================================
+        # AUTHENTICATION EVENTS (ISO 27001, NIST Standards)
+        # ======================================================================
         ('login_success', 'Login Success'),
         ('login_failed', 'Login Failed'),
         ('login_failed_password', 'Login Failed - Invalid Password'),
@@ -39,11 +68,24 @@ class AuditEvent(models.Model):
         ('logout_security_event', 'Security Event Logout'),
         ('account_locked', 'Account Locked'),
         ('account_unlocked', 'Account Unlocked'),
+        ('session_rotation', 'Session Rotation'),
+        ('session_terminated', 'Session Terminated'),
+        
+        # ======================================================================
+        # PASSWORD MANAGEMENT (NIST SP 800-63B)
+        # ======================================================================
         ('password_changed', 'Password Changed'),
         ('password_reset_requested', 'Password Reset Requested'),
         ('password_reset_completed', 'Password Reset Completed'),
-        ('session_rotation', 'Session Rotation'),
-        # 2FA Security Events
+        ('password_reset_failed', 'Password Reset Failed'),
+        ('password_strength_weak', 'Weak Password Attempted'),
+        ('password_compromised', 'Compromised Password Detected'),
+        ('password_expired', 'Password Expired'),
+        ('password_policy_violation', 'Password Policy Violation'),
+        
+        # ======================================================================
+        # 2FA/MFA SECURITY EVENTS (NIST SP 800-63B)
+        # ======================================================================
         ('2fa_enabled', '2FA Enabled'),
         ('2fa_disabled', '2FA Disabled'),
         ('2fa_admin_reset', '2FA Admin Reset'),
@@ -55,6 +97,138 @@ class AuditEvent(models.Model):
         ('2fa_verification_failed', '2FA Verification Failed'),
         ('2fa_setup_started', '2FA Setup Started'),
         ('2fa_setup_completed', '2FA Setup Completed'),
+        ('2fa_recovery_used', '2FA Recovery Code Used'),
+        ('2fa_device_registered', '2FA Device Registered'),
+        ('2fa_device_removed', '2FA Device Removed'),
+        
+        # ======================================================================
+        # PROFILE & ACCOUNT MANAGEMENT (GDPR Article 12-22)
+        # ======================================================================
+        ('profile_updated', 'Profile Updated'),
+        ('profile_picture_changed', 'Profile Picture Changed'),
+        ('email_changed', 'Email Address Changed'),
+        ('email_verification_requested', 'Email Verification Requested'),
+        ('email_verification_completed', 'Email Verification Completed'),
+        ('phone_updated', 'Phone Number Updated'),
+        ('phone_verification_requested', 'Phone Verification Requested'),
+        ('phone_verification_completed', 'Phone Verification Completed'),
+        ('name_changed', 'Name Changed'),
+        ('language_preference_changed', 'Language Preference Changed'),
+        ('timezone_changed', 'Timezone Changed'),
+        ('emergency_contact_updated', 'Emergency Contact Updated'),
+        
+        # ======================================================================
+        # PRIVACY & CONSENT (GDPR Articles 6, 7, 13, 14)
+        # ======================================================================
+        ('privacy_settings_changed', 'Privacy Settings Changed'),
+        ('marketing_consent_granted', 'Marketing Consent Granted'),
+        ('marketing_consent_withdrawn', 'Marketing Consent Withdrawn'),
+        ('gdpr_consent_granted', 'GDPR Consent Granted'),
+        ('gdpr_consent_withdrawn', 'GDPR Consent Withdrawn'),
+        ('data_processing_consent_changed', 'Data Processing Consent Changed'),
+        ('cookie_consent_updated', 'Cookie Consent Updated'),
+        ('privacy_policy_accepted', 'Privacy Policy Accepted'),
+        ('terms_of_service_accepted', 'Terms of Service Accepted'),
+        
+        # ======================================================================
+        # NOTIFICATION PREFERENCES
+        # ======================================================================
+        ('notification_settings_changed', 'Notification Settings Changed'),
+        ('email_notifications_toggled', 'Email Notifications Toggled'),
+        ('sms_notifications_toggled', 'SMS Notifications Toggled'),
+        ('push_notifications_toggled', 'Push Notifications Toggled'),
+        ('notification_frequency_changed', 'Notification Frequency Changed'),
+        
+        # ======================================================================
+        # AUTHORIZATION EVENTS (RBAC/ABAC)
+        # ======================================================================
+        ('role_assigned', 'Role Assigned'),
+        ('role_removed', 'Role Removed'),
+        ('permission_granted', 'Permission Granted'),
+        ('permission_revoked', 'Permission Revoked'),
+        ('access_denied', 'Access Denied'),
+        ('privilege_escalation_attempt', 'Privilege Escalation Attempt'),
+        ('staff_role_changed', 'Staff Role Changed'),
+        ('customer_role_changed', 'Customer Role Changed'),
+        
+        # ======================================================================
+        # CUSTOMER RELATIONSHIP MANAGEMENT
+        # ======================================================================
+        ('customer_membership_created', 'Customer Membership Created'),
+        ('customer_membership_updated', 'Customer Membership Updated'),
+        ('customer_membership_deleted', 'Customer Membership Deleted'),
+        ('primary_customer_changed', 'Primary Customer Changed'),
+        ('customer_access_granted', 'Customer Access Granted'),
+        ('customer_access_revoked', 'Customer Access Revoked'),
+        ('customer_context_switched', 'Customer Context Switched'),
+        
+        # ======================================================================
+        # API & INTEGRATION EVENTS
+        # ======================================================================
+        ('api_key_generated', 'API Key Generated'),
+        ('api_key_regenerated', 'API Key Regenerated'),
+        ('api_key_revoked', 'API Key Revoked'),
+        ('api_key_used', 'API Key Used'),
+        ('api_access_denied', 'API Access Denied'),
+        ('webhook_configured', 'Webhook Configured'),
+        ('webhook_updated', 'Webhook Updated'),
+        ('webhook_removed', 'Webhook Removed'),
+        
+        # ======================================================================
+        # SECURITY EVENTS (ISO 27001 A.12.4)
+        # ======================================================================
+        ('security_incident_detected', 'Security Incident Detected'),
+        ('suspicious_activity', 'Suspicious Activity'),
+        ('brute_force_attempt', 'Brute Force Attempt'),
+        ('ip_blocked', 'IP Address Blocked'),
+        ('ip_unblocked', 'IP Address Unblocked'),
+        ('rate_limit_exceeded', 'Rate Limit Exceeded'),
+        ('malicious_request', 'Malicious Request Detected'),
+        ('security_scan_detected', 'Security Scan Detected'),
+        
+        # ======================================================================
+        # DATA PROTECTION EVENTS (GDPR)
+        # ======================================================================
+        ('data_export_requested', 'Data Export Requested'),
+        ('data_export_completed', 'Data Export Completed'),
+        ('data_export_downloaded', 'Data Export Downloaded'),
+        ('data_deletion_requested', 'Data Deletion Requested'),
+        ('data_deletion_completed', 'Data Deletion Completed'),
+        ('data_anonymization_completed', 'Data Anonymization Completed'),
+        ('data_breach_detected', 'Data Breach Detected'),
+        ('data_breach_contained', 'Data Breach Contained'),
+        ('data_breach_reported', 'Data Breach Reported'),
+        
+        # ======================================================================
+        # BUSINESS OPERATIONS (Romanian Compliance)
+        # ======================================================================
+        ('invoice_accessed', 'Invoice Accessed'),
+        ('invoice_downloaded', 'Invoice Downloaded'),
+        ('payment_method_added', 'Payment Method Added'),
+        ('payment_method_updated', 'Payment Method Updated'),
+        ('payment_method_removed', 'Payment Method Removed'),
+        ('billing_address_updated', 'Billing Address Updated'),
+        ('tax_information_updated', 'Tax Information Updated'),
+        ('order_placed', 'Order Placed'),
+        ('order_cancelled', 'Order Cancelled'),
+        ('service_activated', 'Service Activated'),
+        ('service_suspended', 'Service Suspended'),
+        ('support_ticket_created', 'Support Ticket Created'),
+        ('support_ticket_updated', 'Support Ticket Updated'),
+        ('support_ticket_closed', 'Support Ticket Closed'),
+        
+        # ======================================================================
+        # SYSTEM & ADMINISTRATIVE EVENTS
+        # ======================================================================
+        ('system_maintenance_started', 'System Maintenance Started'),
+        ('system_maintenance_completed', 'System Maintenance Completed'),
+        ('backup_created', 'Backup Created'),
+        ('backup_restored', 'Backup Restored'),
+        ('configuration_changed', 'Configuration Changed'),
+        ('user_impersonation_started', 'User Impersonation Started'),
+        ('user_impersonation_ended', 'User Impersonation Ended'),
+        ('bulk_operation_started', 'Bulk Operation Started'),
+        ('bulk_operation_completed', 'Bulk Operation Completed'),
     )
 
     # Unique event ID
@@ -70,7 +244,15 @@ class AuditEvent(models.Model):
     actor_type = models.CharField(max_length=20, default='user')  # user, system, api
 
     # What
-    action = models.CharField(max_length=30, choices=ACTION_CHOICES, db_index=True)
+    action = models.CharField(max_length=50, choices=ACTION_CHOICES, db_index=True)  # Increased from 30 to 50
+    
+    # Categorization and severity for security analysis
+    category = models.CharField(max_length=30, choices=CATEGORY_CHOICES, default='business_operation', db_index=True)
+    severity = models.CharField(max_length=10, choices=SEVERITY_CHOICES, default='low', db_index=True)
+    
+    # Risk assessment flags
+    is_sensitive = models.BooleanField(default=False, db_index=True)  # PII, financial, or security sensitive
+    requires_review = models.BooleanField(default=False, db_index=True)  # Flagged for manual review
 
     # What object (generic foreign key)
     # Support both integer and UUID primary keys (CharField for mixed PK types)
@@ -94,15 +276,32 @@ class AuditEvent(models.Model):
         db_table = 'audit_event'
         ordering: ClassVar[tuple[str, ...]] = ('-timestamp',)
         indexes: ClassVar[tuple[models.Index, ...]] = (
+            # Core performance indexes
             models.Index(fields=['user', '-timestamp']),
             models.Index(fields=['content_type', 'object_id', '-timestamp']),
             models.Index(fields=['action', '-timestamp']),
             models.Index(fields=['request_id']),
+            
+            # Security analysis indexes
+            models.Index(fields=['category', '-timestamp'], name='idx_audit_category_time'),
+            models.Index(fields=['severity', '-timestamp'], name='idx_audit_severity_time'),
+            models.Index(fields=['is_sensitive', '-timestamp'], name='idx_audit_sensitive_time'),
+            models.Index(fields=['requires_review', '-timestamp'], name='idx_audit_review_time'),
+            
+            # Combined security indexes for threat detection
+            models.Index(fields=['category', 'severity', '-timestamp'], name='idx_audit_cat_sev_time'),
+            models.Index(fields=['user', 'category', '-timestamp'], name='idx_audit_user_cat_time'),
+            models.Index(fields=['ip_address', 'severity', '-timestamp'], name='idx_audit_ip_sev_time'),
+            
             # Authentication-specific indexes for performance
             models.Index(fields=['user', 'action', '-timestamp'], name='idx_audit_user_action_time'),
             models.Index(fields=['ip_address', 'action', '-timestamp'], name='idx_audit_ip_action_time'),
             models.Index(fields=['session_key', '-timestamp'], name='idx_audit_session_time'),
             models.Index(fields=['actor_type', 'action', '-timestamp'], name='idx_audit_actor_action_time'),
+            
+            # Compliance and reporting indexes
+            models.Index(fields=['user', 'category', 'is_sensitive', '-timestamp'], name='idx_audit_compliance'),
+            models.Index(fields=['timestamp', 'category'], name='idx_audit_time_cat'),  # For time-based reporting
         )
 
     def __str__(self) -> str:

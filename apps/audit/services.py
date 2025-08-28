@@ -530,7 +530,7 @@ class AuditService:
         context: AuditContext | None = None
     ) -> AuditEvent:
         """
-        🔐 Log an audit event with full context
+        🔐 Log an audit event with full context and automatic categorization
 
         Args:
             event_data: AuditEventData containing event information
@@ -556,11 +556,21 @@ class AuditService:
             # Safely serialize metadata before storing
             serialized_metadata = serialize_metadata(context.metadata)
             
-            # Create audit event
+            # Get automatic categorization from metadata or determine from action
+            category = context.metadata.get('category', AuditService._get_action_category(event_data.event_type))
+            severity = context.metadata.get('severity', AuditService._get_action_severity(event_data.event_type))
+            is_sensitive = context.metadata.get('is_sensitive', AuditService._is_action_sensitive(event_data.event_type))
+            requires_review = context.metadata.get('requires_review', AuditService._requires_review(event_data.event_type))
+            
+            # Create audit event with categorization
             audit_event = AuditEvent.objects.create(
                 user=context.user,
                 actor_type=context.actor_type,
                 action=event_data.event_type,
+                category=category,
+                severity=severity,
+                is_sensitive=is_sensitive,
+                requires_review=requires_review,
                 content_type=content_type,
                 object_id=object_id,
                 old_values=event_data.old_values or {},
@@ -574,7 +584,7 @@ class AuditService:
             )
 
             logger.info(
-                f"✅ [Audit] {event_data.event_type} event logged for user {context.user.email if context.user else 'System'}"
+                f"✅ [Audit] {event_data.event_type} event logged for user {context.user.email if context.user else 'System'} ({category}/{severity})"
             )
 
             return audit_event
@@ -582,26 +592,136 @@ class AuditService:
         except Exception as e:
             logger.error(f"🔥 [Audit] Failed to log event {event_data.event_type}: {e}")
             raise
+    
+    @staticmethod
+    def _get_action_category(action: str) -> str:
+        """Determine audit event category from action type"""
+        # Authentication events
+        if action.startswith(('login_', 'logout_', 'session_', 'account_')):
+            return 'authentication'
+        
+        # Password events
+        if action.startswith('password_'):
+            return 'authentication'
+        
+        # 2FA events
+        if action.startswith('2fa_'):
+            return 'authentication'
+        
+        # Profile and privacy events
+        if action in ['profile_updated', 'email_changed', 'phone_updated', 'name_changed']:
+            return 'account_management'
+        
+        if action.startswith(('privacy_', 'gdpr_', 'marketing_consent', 'cookie_consent')):
+            return 'privacy'
+        
+        # Authorization events
+        if action in ['role_assigned', 'role_removed', 'permission_granted', 'permission_revoked', 'staff_role_changed']:
+            return 'authorization'
+        
+        # Customer relationship events
+        if action.startswith('customer_'):
+            return 'authorization'
+        
+        # Security events
+        if action.startswith(('security_', 'suspicious_', 'brute_force', 'malicious_')):
+            return 'security_event'
+        
+        # Data protection events
+        if action.startswith(('data_export', 'data_deletion', 'data_breach')):
+            return 'data_protection'
+        
+        # API/Integration events
+        if action.startswith(('api_', 'webhook_')):
+            return 'integration'
+        
+        # System admin events
+        if action.startswith(('system_', 'backup_', 'configuration_', 'user_impersonation')):
+            return 'system_admin'
+        
+        # Compliance events
+        if action.startswith(('vat_', 'efactura_', 'data_retention')):
+            return 'compliance'
+        
+        # Default to business operation
+        return 'business_operation'
+    
+    @staticmethod
+    def _get_action_severity(action: str) -> str:
+        """Determine severity level from action type"""
+        # Critical severity events
+        critical_actions = [
+            'data_breach_detected', 'security_incident_detected', 'account_compromised',
+            'privilege_escalation_attempt', 'malicious_request', 'brute_force_attempt'
+        ]
+        
+        # High severity events
+        high_actions = [
+            'password_compromised', '2fa_disabled', '2fa_admin_reset', 'role_assigned', 
+            'role_removed', 'permission_granted', 'permission_revoked', 'staff_role_changed',
+            'data_export_requested', 'data_deletion_requested', 'gdpr_consent_withdrawn', 
+            'user_impersonation_started', 'system_maintenance_started', 'configuration_changed'
+        ]
+        
+        # Medium severity events
+        medium_actions = [
+            'login_success', 'login_failed', 'logout_manual', 'password_changed', 
+            '2fa_enabled', 'profile_updated', 'email_changed', 'phone_updated',
+            'customer_membership_created', 'api_key_generated'
+        ]
+        
+        if action in critical_actions or action.startswith(('security_', 'data_breach')):
+            return 'critical'
+        elif action in high_actions or action.startswith(('data_', 'gdpr_', 'role_', 'permission_')):
+            return 'high'
+        elif action in medium_actions or action.startswith(('login_', 'password_', '2fa_', 'profile_')):
+            return 'medium'
+        else:
+            return 'low'
+    
+    @staticmethod
+    def _is_action_sensitive(action: str) -> bool:
+        """Determine if action involves sensitive data"""
+        sensitive_patterns = [
+            'login_', 'password_', '2fa_', 'email_', 'phone_', 'profile_',
+            'privacy_', 'gdpr_', 'data_', 'security_', 'role_', 'permission_',
+            'payment_', 'billing_', 'tax_'
+        ]
+        
+        return any(action.startswith(pattern) for pattern in sensitive_patterns)
+    
+    @staticmethod
+    def _requires_review(action: str) -> bool:
+        """Determine if action requires manual review"""
+        review_actions = [
+            'account_locked', 'login_failed_2fa', 'password_compromised',
+            '2fa_disabled', '2fa_admin_reset', 'role_assigned', 'role_removed',
+            'permission_granted', 'permission_revoked', 'staff_role_changed',
+            'privilege_escalation_attempt', 'data_export_requested', 'data_deletion_requested', 
+            'gdpr_consent_withdrawn', 'security_incident_detected', 'suspicious_activity', 
+            'brute_force_attempt', 'user_impersonation_started', 'configuration_changed', 
+            'system_maintenance_started'
+        ]
+        
+        return action in review_actions or action.startswith(('security_', 'data_breach', 'malicious_'))
 
     @staticmethod
     def log_2fa_event(request: TwoFactorAuditRequest) -> AuditEvent:
         """
-        🔐 Log 2FA-specific audit event
+        🔐 Log 2FA-specific audit event with enhanced categorization
 
         Supported event types:
-        - 2fa_enabled
-        - 2fa_disabled
-        - 2fa_admin_reset
-        - 2fa_backup_codes_generated
-        - 2fa_backup_codes_viewed
-        - 2fa_backup_code_used
-        - 2fa_secret_regenerated
-        - 2fa_verification_success
-        - 2fa_verification_failed
+        - 2fa_enabled, 2fa_disabled, 2fa_admin_reset
+        - 2fa_backup_codes_generated, 2fa_backup_codes_viewed, 2fa_backup_code_used
+        - 2fa_secret_regenerated, 2fa_verification_success, 2fa_verification_failed
         """
-        # Enhance metadata with 2FA context
+        # Enhance metadata with 2FA context and automatic categorization
         enhanced_metadata = {
-            'event_category': '2fa_security',
+            'event_category': 'authentication',  # 2FA is always authentication
+            'category': 'authentication',
+            'severity': 'high' if request.event_type in ['2fa_disabled', '2fa_admin_reset'] else 'medium',
+            'is_sensitive': True,  # 2FA events are always sensitive
+            'requires_review': request.event_type in ['2fa_disabled', '2fa_admin_reset'],
             'timestamp': timezone.now().isoformat(),
             **request.context.metadata
         }
