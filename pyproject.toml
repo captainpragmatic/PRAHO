@@ -84,6 +84,7 @@ exclude = [
     "htmlcov",
     "node_modules",
     "media",
+    "tests",
 ]
 
 [tool.ruff.lint]
@@ -215,6 +216,14 @@ ignore = [
     "ANN",      # No type hints needed
 ]
 
+# Django admin files - Allow admin patterns and ClassVar conflicts
+"**/admin.py" = [
+    "RUF012",      # Django admin attributes don't need ClassVar (conflicts with MyPy)
+    "PLR0911",     # Admin methods can have many returns 
+    "PLR0912",     # Admin methods can have many branches
+    "S105", "S106" # Admin may have sample data
+]
+
 # Configuration files - Allow longer lines and flexible naming
 "config/**/*.py" = ["E501", "N802", "N803"]
 "**/settings/*.py" = ["E501", "N802"]
@@ -252,7 +261,20 @@ ignore = [
 # E2E test utilities - Allow test patterns
 "tests/e2e/**/*.py" = [
     "ANN", "D",
-    "S105", "S106"  # E2E test credentials are acceptable  
+    "S105", "S106",  # E2E test credentials are acceptable
+    "F841",          # Unused variables in E2E setup
+    "B007",          # Unused loop variables in test loops
+]
+
+
+# Example files - Allow demonstration patterns  
+"examples/**/*.py" = [
+    "T201", "T203",     # Print statements for examples
+    "F841",             # Unused variables in examples
+    "ANN",              # Type hints not required in examples
+    "D",                # Docstrings not required in examples
+    "PLR2004",          # Magic numbers acceptable in examples
+    "S105", "S106",     # Example credentials acceptable
 ]
 
 # ===============================================================================
