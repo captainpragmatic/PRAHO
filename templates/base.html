@@ -78,39 +78,19 @@
                 <span class="mr-2">📊</span> {% trans 'Dashboard' %}
               </a>
 
-              <!-- Staff/Admin Navigation -->
+              <!-- Staff/Admin Navigation with Dropdowns -->
               {% if user.is_staff or user.staff_role %}
-              <a href="{% url 'customers:list' %}"
-                class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
-                <span class="mr-2">👥</span> {% trans 'Customers' %}
-              </a>
-              <a href="{% url 'billing:invoice_list' %}"
-                class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
-                <span class="mr-2">🧾</span> {% trans 'Invoices' %}
-              </a>
-              <a href="{% url 'tickets:list' %}"
-                class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
-                <span class="mr-2">🎫</span> {% trans 'Tickets' %}
-              </a>
-              <a href="{% url 'provisioning:services' %}"
-                class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
-                <span class="mr-2">🚀</span> {% trans 'Services' %}
-              </a>
+              
+              {% dropdown "Business" business_items icon="🏢" %}
+              {% dropdown "Support" support_items icon="🎫" %}
+              
               {% else %}
-              <!-- Customer User Navigation -->
+              <!-- Customer User Navigation with Dropdowns -->
               {% if user.is_customer_user %}
-              <a href="{% url 'tickets:list' %}"
-                class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
-                <span class="mr-2">🎫</span> {% trans 'My Tickets' %}
-              </a>
-              <a href="{% url 'billing:invoice_list' %}"
-                class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
-                <span class="mr-2">🧾</span> {% trans 'My Invoices' %}
-              </a>
-              <a href="{% url 'provisioning:services' %}"
-                class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
-                <span class="mr-2">🚀</span> {% trans 'My Services' %}
-              </a>
+              
+              {% dropdown "My Account" customer_items icon="👤" %}
+              {% dropdown "Support" customer_support_items icon="🎫" %}
+              
               {% else %}
               <!-- User with no customer access -->
               <span class="text-slate-500 px-3 py-2 text-sm">

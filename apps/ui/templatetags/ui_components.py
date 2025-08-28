@@ -67,7 +67,7 @@ class InputConfig:
     icon_right: str | None = None
     css_class: str = ''
     html_id: str | None = None
-    options: list | None = None
+    options: list[dict[str, Any]] | None = None
     romanian_validation: bool = True
 
 @dataclass
@@ -84,7 +84,7 @@ class CheckboxConfig:
     css_class: str = ''
     container_class: str = ''
     html_id: str | None = None
-    data_attrs: dict | None = None
+    data_attrs: dict[str, Any] | None = None
 
 @dataclass
 class AlertConfig:
@@ -124,7 +124,7 @@ class DataTableConfig:
     sortable: bool = True
     searchable: bool = True
     pagination: bool = True
-    actions: list | None = None
+    actions: list[dict[str, Any]] | None = None
     css_class: str = ''
     empty_message: str = 'Nu există date disponibile.'
 
@@ -416,8 +416,8 @@ def modal(
 
 @register.inclusion_tag('components/table.html')
 def data_table(
-    headers: list,
-    rows: list,
+    headers: list[str],
+    rows: list[list[Any]],
     *,
     config: DataTableConfig | None = None,
     **kwargs: Any
@@ -500,7 +500,7 @@ def card(
     subtitle: str | None = None,
     footer: str | None = None,
     css_class: str = '',
-    actions: list | None = None,
+    actions: list[dict[str, Any]] | None = None,
     **kwargs: Any
 ) -> dict[str, Any]:
     """
@@ -530,7 +530,7 @@ def card(
 
 @register.inclusion_tag('components/breadcrumb.html')
 def breadcrumb(
-    items: list,
+    items: list[dict[str, Any]],
     *,
     css_class: str = '',
     separator: str = '/',
@@ -644,7 +644,7 @@ def format_bytes(bytes_value: int) -> str:
         return "0 B"
 
     units = ['B', 'KB', 'MB', 'GB', 'TB']
-    size = bytes_value
+    size: float = float(bytes_value)
     unit_index = 0
 
     while size >= FILE_SIZE_CONVERSION_FACTOR and unit_index < len(units) - 1:
@@ -706,6 +706,40 @@ def badge(
         'dismissible': config.dismissible,
         'css_class': config.css_class,
         'html_id': config.html_id,
+    }
+
+
+@register.inclusion_tag('components/nav_dropdown.html')
+def dropdown(
+    title: str,
+    items: list[dict[str, Any]],
+    *,
+    icon: str | None = None,
+    **kwargs: Any
+) -> dict[str, Any]:
+    """
+    Romanian hosting provider dropdown navigation component
+    
+    Usage:
+        {% dropdown "Business" business_items icon="🏢" %}
+        {% dropdown "Support" support_items icon="🎫" %}
+    
+    Items format:
+        [
+            {"text": "Customers", "url": "/customers/", "icon": "👥"},
+            {"divider": True},
+            {"text": "Invoices", "url": "/invoices/", "icon": "🧾", "badge": {"text": "3", "variant": "warning"}},
+        ]
+    
+    Args:
+        title: Dropdown button text
+        items: List of menu items
+        icon: Optional icon for dropdown button
+    """
+    return {
+        'title': title,
+        'items': items,
+        'icon': icon,
     }
 
 

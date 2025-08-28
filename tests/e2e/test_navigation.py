@@ -34,7 +34,7 @@ from tests.e2e.utils import (
 )
 
 
-def test_navigation_cross_page_flow(page: Page):
+def test_navigation_cross_page_flow(page: Page) -> None:
     """
     Test navigation between different sections of the application.
     
@@ -117,7 +117,7 @@ def test_navigation_cross_page_flow(page: Page):
         pytest.fail("Lost authentication during navigation flow test")
 
 
-def test_navigation_header_interactions(page: Page):
+def test_navigation_header_interactions(page: Page) -> None:
     """
     Test navigation header button interactions for both superuser and customer accounts.
     
@@ -280,7 +280,7 @@ def _handle_navigation_result(page: Page, element_text: str) -> None:
         navigate_to_dashboard(page)
 
 
-def test_navigation_menu_visibility_by_role(page: Page):
+def test_navigation_menu_visibility_by_role(page: Page) -> None:
     """
     Test that navigation menu items are visible based on user roles.
     
@@ -344,7 +344,7 @@ def test_navigation_menu_visibility_by_role(page: Page):
         print("  ✅ Navigation role-based access control verified!")
 
 
-def test_navigation_dropdown_interactions(page: Page):
+def test_navigation_dropdown_interactions(page: Page) -> None:
     """
     Test dropdown menu interactions in the navigation header.
     
@@ -407,7 +407,7 @@ def test_navigation_dropdown_interactions(page: Page):
         print("  ✅ Navigation dropdown testing completed!")
 
 
-def test_mobile_navigation_responsiveness(page: Page):
+def test_mobile_navigation_responsiveness(page: Page) -> None:
     """
     Test mobile navigation behavior and responsiveness with comprehensive validation.
     
@@ -466,7 +466,7 @@ def test_mobile_navigation_responsiveness(page: Page):
         print("  ✅ Mobile navigation responsiveness testing completed!")
 
 
-def test_navigation_responsive_breakpoints(page: Page):
+def test_navigation_responsive_breakpoints(page: Page) -> None:
     """
     Test navigation functionality across all responsive breakpoints.
     
