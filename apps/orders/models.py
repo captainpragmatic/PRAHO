@@ -412,6 +412,7 @@ class OrderItem(models.Model):
     # Product configuration for provisioning
     config = models.JSONField(
         default=dict,
+        blank=True,
         help_text=_("Product configuration (domain, username, specs, etc.)")
     )
 

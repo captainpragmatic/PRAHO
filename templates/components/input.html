@@ -62,7 +62,7 @@
       {% if placeholder %}<option value="">{{ placeholder }}</option>{% endif %}
       {% if options %}
         {% for option in options %}
-          <option value="{{ option.value }}"{% if option.value == value %} selected{% endif %}>{{ option.label }}</option>
+          <option value="{{ option.value }}"{% if option.value == value %} selected{% endif %}{% if option.data %}{% for key, value in option.data.items %} data-{{ key }}="{{ value }}"{% endfor %}{% endif %}>{{ option.label }}</option>
         {% endfor %}
       {% endif %}
     </select>

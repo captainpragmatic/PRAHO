@@ -1,0 +1,206 @@
+{% load i18n %}
+{% load ui_components %}
+
+<!-- Products Table Content -->
+{% if products %}
+  <div class="overflow-x-auto">
+    <table class="min-w-full divide-y divide-slate-700">
+      <thead class="bg-slate-750">
+        <tr>
+          <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+            {% trans 'Product' %}
+          </th>
+          <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+            {% trans 'Type' %}
+          </th>
+          <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+            {% trans 'Status' %}
+          </th>
+          <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+            {% trans 'Pricing' %}
+          </th>
+          <th class="px-6 py-3 text-right text-xs font-medium text-slate-300 uppercase tracking-wider">
+            {% trans 'Actions' %}
+          </th>
+        </tr>
+      </thead>
+      <tbody class="bg-slate-800 divide-y divide-slate-700">
+        {% for product in products %}
+          <tr class="hover:bg-slate-750 transition-colors">
+            <!-- Product Info -->
+            <td class="px-6 py-4 whitespace-nowrap">
+              <div class="flex items-center">
+                <div>
+                  <div class="text-sm font-medium text-white">
+                    <a href="{% url 'products:product_detail' slug=product.slug %}" 
+                       class="hover:text-blue-400 transition-colors">
+                      {{ product.name }}
+                    </a>
+                    {% if product.is_featured %}
+                      <span class="ml-2 text-yellow-400" title="{% trans 'Featured Product' %}">⭐</span>
+                    {% endif %}
+                  </div>
+                  <div class="text-sm text-slate-400">
+                    {{ product.slug }}
+                    {% if product.short_description %}
+                      - {{ product.short_description|truncatechars:50 }}
+                    {% endif %}
+                  </div>
+                </div>
+              </div>
+            </td>
+
+            <!-- Product Type -->
+            <td class="px-6 py-4 whitespace-nowrap">
+              {% badge product.get_product_type_display variant="secondary" %}
+            </td>
+
+            <!-- Status Badges -->
+            <td class="px-6 py-4 whitespace-nowrap">
+              <div class="flex flex-wrap gap-1">
+                <!-- Active Status Toggle -->
+                <button class="toggle-switch" 
+                        hx-post="{% url 'products:product_toggle_active' slug=product.slug %}"
+                        hx-target="this"
+                        hx-swap="outerHTML"
+                        title="{% trans 'Toggle Active Status' %}">
+                  {% if product.is_active %}
+                    {% badge "Active" variant="success" %}
+                  {% else %}
+                    {% badge "Inactive" variant="danger" %}
+                  {% endif %}
+                </button>
+
+                <!-- Public Status Toggle -->
+                <button class="toggle-switch" 
+                        hx-post="{% url 'products:product_toggle_public' slug=product.slug %}"
+                        hx-target="this"
+                        hx-swap="outerHTML"
+                        title="{% trans 'Toggle Public Visibility' %}">
+                  {% if product.is_public %}
+                    {% badge "Public" variant="info" %}
+                  {% else %}
+                    {% badge "Private" variant="warning" %}
+                  {% endif %}
+                </button>
+              </div>
+            </td>
+
+            <!-- Pricing Info -->
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-300">
+              {% with active_prices=product.get_active_prices %}
+                {% if active_prices %}
+                  <div class="space-y-1">
+                    {% for price in active_prices|slice:":2" %}
+                      <div class="flex items-center justify-between">
+                        <span class="text-xs text-slate-400">{{ price.currency.code }}</span>
+                        <span class="font-medium">{{ price.effective_price|floatformat:0 }}</span>
+                        <span class="text-xs text-slate-400">{{ price.get_billing_period_display|lower }}</span>
+                      </div>
+                    {% endfor %}
+                    {% if active_prices|length > 2 %}
+                      <div class="text-xs text-slate-500">
+                        +{{ active_prices|length|add:"-2" }} {% trans 'more' %}
+                      </div>
+                    {% endif %}
+                  </div>
+                {% else %}
+                  <span class="text-slate-500 italic">{% trans 'No pricing set' %}</span>
+                {% endif %}
+              {% endwith %}
+            </td>
+
+            <!-- Actions -->
+            <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+              <div class="flex items-center justify-end space-x-2">
+                <!-- View Detail -->
+                <a href="{% url 'products:product_detail' slug=product.slug %}" 
+                   class="text-blue-400 hover:text-blue-300 transition-colors" 
+                   title="{% trans 'View Details' %}">
+                  🔍
+                </a>
+                
+                <!-- Edit Product -->
+                <a href="{% url 'products:product_edit' slug=product.slug %}" 
+                   class="text-green-400 hover:text-green-300 transition-colors" 
+                   title="{% trans 'Edit Product' %}">
+                  ✏️
+                </a>
+                
+                <!-- Manage Pricing -->
+                <a href="{% url 'products:product_prices' slug=product.slug %}" 
+                   class="text-yellow-400 hover:text-yellow-300 transition-colors" 
+                   title="{% trans 'Manage Pricing' %}">
+                  💰
+                </a>
+              </div>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Pagination -->
+  {% if products.has_other_pages %}
+    <div class="bg-slate-800 px-6 py-4 border-t border-slate-700">
+      <div class="flex items-center justify-between">
+        <div class="text-sm text-slate-400">
+          {% with start=products.start_index end=products.end_index total=products.paginator.count %}
+            {% blocktrans %}Showing {{ start }} to {{ end }} of {{ total }} products{% endblocktrans %}
+          {% endwith %}
+        </div>
+        
+        <div class="flex items-center space-x-2">
+          {% if products.has_previous %}
+            <a href="?page={{ products.previous_page_number }}{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}{% if request.GET.product_type %}&product_type={{ request.GET.product_type }}{% endif %}{% if request.GET.is_active %}&is_active={{ request.GET.is_active }}{% endif %}{% if request.GET.is_public %}&is_public={{ request.GET.is_public }}{% endif %}"
+               hx-get="{% url 'products:product_list_htmx' %}?page={{ products.previous_page_number }}{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}{% if request.GET.product_type %}&product_type={{ request.GET.product_type }}{% endif %}{% if request.GET.is_active %}&is_active={{ request.GET.is_active }}{% endif %}{% if request.GET.is_public %}&is_public={{ request.GET.is_public }}{% endif %}"
+               hx-target="#product-results"
+               hx-swap="innerHTML"
+               class="px-3 py-2 bg-slate-700 text-white rounded-md hover:bg-slate-600 transition-colors">
+              ← {% trans 'Previous' %}
+            </a>
+          {% endif %}
+          
+          <span class="px-3 py-2 text-slate-400">
+            {% trans 'Page' %} {{ products.number }} {% trans 'of' %} {{ products.paginator.num_pages }}
+          </span>
+          
+          {% if products.has_next %}
+            <a href="?page={{ products.next_page_number }}{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}{% if request.GET.product_type %}&product_type={{ request.GET.product_type }}{% endif %}{% if request.GET.is_active %}&is_active={{ request.GET.is_active }}{% endif %}{% if request.GET.is_public %}&is_public={{ request.GET.is_public }}{% endif %}"
+               hx-get="{% url 'products:product_list_htmx' %}?page={{ products.next_page_number }}{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}{% if request.GET.product_type %}&product_type={{ request.GET.product_type }}{% endif %}{% if request.GET.is_active %}&is_active={{ request.GET.is_active }}{% endif %}{% if request.GET.is_public %}&is_public={{ request.GET.is_public }}{% endif %}"
+               hx-target="#product-results"
+               hx-swap="innerHTML"
+               class="px-3 py-2 bg-slate-700 text-white rounded-md hover:bg-slate-600 transition-colors">
+              {% trans 'Next' %} →
+            </a>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
+{% else %}
+  <!-- Empty State -->
+  <div class="text-center py-12">
+    <div class="text-6xl mb-4">📦</div>
+    <h3 class="text-lg font-medium text-slate-300 mb-2">
+      {% if search_query %}
+        {% trans 'No products found' %}
+      {% else %}
+        {% trans 'No products yet' %}
+      {% endif %}
+    </h3>
+    <p class="text-slate-400 mb-6">
+      {% if search_query %}
+        {% blocktrans %}No products match your search criteria. Try adjusting your filters.{% endblocktrans %}
+      {% else %}
+        {% trans 'Start building your product catalog by creating your first product.' %}
+      {% endif %}
+    </p>
+    {% if not search_query %}
+      {% url 'products:product_create' as create_product_url %}
+      {% button "✨ Create First Product" variant="primary" href=create_product_url %}
+    {% endif %}
+  </div>
+{% endif %}

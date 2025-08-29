@@ -92,9 +92,15 @@
             <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
               {% trans 'Ticket' %}
             </th>
+            {% if user.is_staff %}
             <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
               {% trans 'Customer' %}
             </th>
+            {% else %}
+            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+              {% trans 'Your Company' %}
+            </th>
+            {% endif %}
             <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
               {% trans 'Priority' %}
             </th>
@@ -143,9 +149,23 @@
               </div>
             </td>
             <td class="px-6 py-4 whitespace-nowrap">
+              {% if user.is_staff %}
               <div class="text-sm text-white">{{ ticket.customer.name }}</div>
               {% if ticket.contact_email %}
               <div class="text-sm text-slate-400">{{ ticket.contact_email }}</div>
+              {% endif %}
+              {% else %}
+              <div class="flex items-center">
+                <div class="flex-shrink-0 h-8 w-8">
+                  <div class="h-8 w-8 rounded-full bg-blue-500/20 flex items-center justify-center">
+                    <span class="text-xs font-medium text-blue-300">🏢</span>
+                  </div>
+                </div>
+                <div class="ml-3">
+                  <div class="text-sm font-medium text-white">{{ ticket.customer.name }}</div>
+                  <div class="text-xs text-slate-400">{% trans 'Your Company' %}</div>
+                </div>
+              </div>
               {% endif %}
             </td>
             <td class="px-6 py-4 whitespace-nowrap">

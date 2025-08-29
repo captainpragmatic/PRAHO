@@ -1,0 +1,397 @@
+{% load i18n %}
+{% load ui_components %}
+
+{% comment %}
+Inline order item form for expandable rows
+Simplified version of the full form for better UX in table context
+{% endcomment %}
+
+<form method="POST" 
+      {% if action == 'create' %}
+        action="{% url 'orders:order_item_create' pk=order.id %}"
+      {% else %}
+        action="{% url 'orders:order_item_edit' pk=order.id item_pk=item.id %}"
+      {% endif %}
+      class="space-y-4">
+  {% csrf_token %}
+  
+  <!-- Form Fields in Compact Layout -->
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <!-- Product Selection -->
+    <div class="md:col-span-2 lg:col-span-1">
+      <label for="id_product_inline" class="block text-sm font-medium text-slate-400 mb-2">
+        {% trans "Product/Service" %} <span class="text-red-400">*</span>
+      </label>
+      <select id="id_product_inline" name="product" required
+              class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500">
+        <option value="">{% trans "Select product..." %}</option>
+        {% for option in product_options %}
+          <option value="{{ option.value }}" 
+                  {% if form.product.value == option.value %}selected{% endif %}
+                  data-product-type="{{ option.data.product_type }}"
+                  data-requires-domain="{{ option.data.requires_domain }}"
+                  data-prices='{{ option.data.prices|default:"{}" }}'>
+            {{ option.label }}
+          </option>
+        {% endfor %}
+      </select>
+      {% if form.product.errors %}
+        <p class="mt-1 text-xs text-red-400">{{ form.product.errors.0 }}</p>
+      {% endif %}
+    </div>
+
+    <!-- Quantity -->
+    <div>
+      <label for="id_quantity_inline" class="block text-sm font-medium text-slate-400 mb-2">
+        {% trans "Quantity" %} <span class="text-red-400">*</span>
+      </label>
+      <input type="number" id="id_quantity_inline" name="quantity" 
+             value="{{ form.quantity.value|default:'1' }}" min="1" required
+             class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500">
+      {% if form.quantity.errors %}
+        <p class="mt-1 text-xs text-red-400">{{ form.quantity.errors.0 }}</p>
+      {% endif %}
+    </div>
+
+    <!-- Billing Period -->
+    <div>
+      <label for="id_billing_period_inline" class="block text-sm font-medium text-slate-400 mb-2">
+        {% trans "Billing Period" %} <span class="text-red-400">*</span>
+      </label>
+      <select id="id_billing_period_inline" name="billing_period" required
+              class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500">
+        <option value="">{% trans "Select period..." %}</option>
+        {% for option in billing_period_options %}
+          <option value="{{ option.value }}" {% if form.billing_period.value == option.value %}selected{% endif %}>
+            {{ option.label }}
+          </option>
+        {% endfor %}
+      </select>
+      {% if form.billing_period.errors %}
+        <p class="mt-1 text-xs text-red-400">{{ form.billing_period.errors.0 }}</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Pricing Row -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <!-- Unit Price -->
+    <div>
+      <label for="id_unit_price_cents_inline" class="block text-sm font-medium text-slate-400 mb-2">
+        {% trans "Unit Price" %} ({{ order.currency }}) <span class="text-red-400">*</span>
+      </label>
+      <div class="relative">
+        <input type="number" id="id_unit_price_cents_inline" name="unit_price_cents" 
+               value="{{ form.unit_price_cents.value }}" min="0" step="1" required
+               class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 pr-16 text-sm focus:ring-2 focus:ring-blue-500">
+        <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+          <span class="text-slate-400 text-xs">{% trans "cents" %}</span>
+        </div>
+      </div>
+      {% if form.unit_price_cents.errors %}
+        <p class="mt-1 text-xs text-red-400">{{ form.unit_price_cents.errors.0 }}</p>
+      {% endif %}
+      <p class="mt-1 text-xs text-slate-500">
+        {% trans "Price in cents (e.g., 1999 = 19.99" %} {{ order.currency }})
+      </p>
+    </div>
+
+    <!-- Setup Fee -->
+    <div>
+      <label for="id_setup_cents_inline" class="block text-sm font-medium text-slate-400 mb-2">
+        {% trans "Setup Fee" %} ({{ order.currency }})
+      </label>
+      <div class="relative">
+        <input type="number" id="id_setup_cents_inline" name="setup_cents" 
+               value="{{ form.setup_cents.value|default:'0' }}" min="0" step="1"
+               class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 pr-16 text-sm focus:ring-2 focus:ring-blue-500">
+        <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+          <span class="text-slate-400 text-xs">{% trans "cents" %}</span>
+        </div>
+      </div>
+      {% if form.setup_cents.errors %}
+        <p class="mt-1 text-xs text-red-400">{{ form.setup_cents.errors.0 }}</p>
+      {% endif %}
+      <p class="mt-1 text-xs text-slate-500">
+        {% trans "One-time setup fee in cents" %}
+      </p>
+    </div>
+  </div>
+
+  <!-- Domain Name (conditional) -->
+  <div id="domain-section-inline" style="display: none;">
+    <label for="id_domain_name_inline" class="block text-sm font-medium text-slate-400 mb-2">
+      {% trans "Domain Name" %}
+    </label>
+    <input type="text" id="id_domain_name_inline" name="domain_name" 
+           value="{{ form.domain_name.value }}" placeholder="example.com"
+           class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500">
+    {% if form.domain_name.errors %}
+      <p class="mt-1 text-xs text-red-400">{{ form.domain_name.errors.0 }}</p>
+    {% endif %}
+    <p class="mt-1 text-xs text-slate-500">
+      {% trans "Domain name for this service (if applicable)" %}
+    </p>
+  </div>
+
+  <!-- Configuration (collapsible) -->
+  <div>
+    <details class="bg-slate-900 rounded-lg border border-slate-700 p-3">
+      <summary class="cursor-pointer text-sm font-medium text-slate-300 flex items-center">
+        <span class="mr-2">⚙️</span>{% trans "Advanced Configuration" %}
+      </summary>
+      <div class="mt-3">
+        <textarea id="id_config_inline" name="config" rows="3"
+                  placeholder='{"cpu": 2, "memory": "4GB", "disk": "50GB"}'
+                  class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500">{{ form.config.value }}</textarea>
+        {% if form.config.errors %}
+          <p class="mt-1 text-xs text-red-400">{{ form.config.errors.0 }}</p>
+        {% endif %}
+        <p class="mt-1 text-xs text-slate-500">
+          {% trans "JSON configuration for product-specific settings" %}
+        </p>
+      </div>
+    </details>
+  </div>
+
+  <!-- Debug: Show pricing data -->
+  {% if product_options %}
+    <div class="bg-yellow-900 border border-yellow-700 rounded-lg p-3 mb-4">
+      <h4 class="text-sm font-medium text-yellow-200">🐛 Debug: Pricing Data</h4>
+      {% for option in product_options %}
+        <div class="text-xs text-yellow-300 mt-1">
+          {{ option.label }}: <code>{{ option.data.prices }}</code>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <!-- Real-time Preview -->
+  <div class="bg-green-900 border border-green-700 rounded-lg p-3">
+    <div class="flex items-center mb-2">
+      <span class="text-green-300 text-sm mr-2">💰</span>
+      <h4 class="text-sm font-medium text-green-200">{% trans "Price Preview" %}</h4>
+    </div>
+    <div class="grid grid-cols-3 gap-4 text-sm">
+      <div class="text-center">
+        <div class="text-green-300" id="preview-unit-price-inline">{{ order.currency }} 0.00</div>
+        <div class="text-xs text-green-400">{% trans "Unit Price" %}</div>
+      </div>
+      <div class="text-center">
+        <div class="text-green-300" id="preview-setup-price-inline">{{ order.currency }} 0.00</div>
+        <div class="text-xs text-green-400">{% trans "Setup Fee" %}</div>
+      </div>
+      <div class="text-center">
+        <div class="text-green-200 font-semibold" id="preview-total-inline">{{ order.currency }} 0.00</div>
+        <div class="text-xs text-green-400">{% trans "Line Total" %}</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Action Buttons -->
+  <div class="flex justify-end space-x-3 pt-4 border-t border-slate-700">
+    <button type="button" 
+            {% if action == 'create' %}
+              onclick="cancelAddItemForm()"
+            {% else %}
+              onclick="cancelExpandableEdit('{{ item.id }}')"
+            {% endif %}
+            class="inline-flex items-center px-3 py-2 text-sm font-medium rounded border border-slate-600 text-slate-400 hover:text-white hover:border-slate-500">
+      <span class="mr-1">❌</span>{% trans "Cancel" %}
+    </button>
+    
+    {% if action == 'create' %}
+      <button type="submit"
+              class="inline-flex items-center px-3 py-2 text-sm font-medium rounded border border-green-600 bg-green-600 text-white hover:bg-green-700 focus:ring-2 focus:ring-green-500">
+        <span class="mr-1">➕</span>{% trans "Add Item" %}
+      </button>
+    {% else %}
+      <button type="submit"
+              class="inline-flex items-center px-3 py-2 text-sm font-medium rounded border border-blue-600 bg-blue-600 text-white hover:bg-blue-700 focus:ring-2 focus:ring-blue-500">
+        <span class="mr-1">💾</span>{% trans "Save Changes" %}
+      </button>
+    {% endif %}
+  </div>
+</form>
+
+<script>
+// Real-time price calculations for inline form
+(function() {
+    function updateInlinePricePreview() {
+        const unitPriceCents = parseInt(document.getElementById('id_unit_price_cents_inline')?.value || '0');
+        const setupCents = parseInt(document.getElementById('id_setup_cents_inline')?.value || '0');
+        const quantity = parseInt(document.getElementById('id_quantity_inline')?.value || '1');
+        const currency = '{{ order.currency }}';
+        
+        // Convert cents to currency
+        const unitPrice = (unitPriceCents / 100).toFixed(2);
+        const setupPrice = (setupCents / 100).toFixed(2);
+        const lineTotal = ((unitPriceCents + setupCents) * quantity / 100).toFixed(2);
+        
+        // Update preview displays
+        const unitPriceEl = document.getElementById('preview-unit-price-inline');
+        const setupPriceEl = document.getElementById('preview-setup-price-inline');
+        const totalEl = document.getElementById('preview-total-inline');
+        
+        if (unitPriceEl) unitPriceEl.textContent = `${currency} ${unitPrice}`;
+        if (setupPriceEl) setupPriceEl.textContent = `${currency} ${setupPrice}`;
+        if (totalEl) totalEl.textContent = `${currency} ${lineTotal}`;
+    }
+    
+    function toggleInlineDomainSection() {
+        const productSelect = document.getElementById('id_product_inline');
+        const domainSection = document.getElementById('domain-section-inline');
+        
+        if (productSelect && domainSection) {
+            const selectedOption = productSelect.options[productSelect.selectedIndex];
+            const requiresDomain = selectedOption && selectedOption.dataset.requiresDomain === 'true';
+            
+            if (requiresDomain) {
+                domainSection.style.display = 'block';
+                document.getElementById('id_domain_name_inline').required = true;
+            } else {
+                domainSection.style.display = 'none';
+                document.getElementById('id_domain_name_inline').required = false;
+            }
+        }
+    }
+    
+    function autoPopulatePricing() {
+        const productSelect = document.getElementById('id_product_inline');
+        const billingPeriodSelect = document.getElementById('id_billing_period_inline');
+        const unitPriceInput = document.getElementById('id_unit_price_cents_inline');
+        const setupInput = document.getElementById('id_setup_cents_inline');
+        
+        if (!productSelect || !billingPeriodSelect || !unitPriceInput || !setupInput) {
+            return;
+        }
+        
+        const selectedOption = productSelect.options[productSelect.selectedIndex];
+        const billingPeriod = billingPeriodSelect.value;
+        
+        if (!selectedOption || !selectedOption.value || !billingPeriod) {
+            return;
+        }
+        
+        try {
+            // Get pricing data from product option
+            console.log('\ud83d\udc1b DEBUG: selectedOption.dataset.prices =', selectedOption.dataset.prices);
+            const pricesData = JSON.parse(selectedOption.dataset.prices || '{}');
+            console.log('\ud83d\udc1b DEBUG: pricesData =', pricesData);
+            console.log('\ud83d\udc1b DEBUG: billingPeriod =', billingPeriod);
+            const priceForPeriod = pricesData[billingPeriod];
+            console.log('\ud83d\udc1b DEBUG: priceForPeriod =', priceForPeriod);
+            
+            if (priceForPeriod) {
+                // Only auto-populate if user hasn't manually edited the field
+                if (!unitPriceInput.dataset.manualOverride) {
+                    unitPriceInput.value = priceForPeriod.unit_cents;
+                    addPriceSourceIndicator(unitPriceInput, 'product-default', 'Using product default price');
+                }
+                
+                if (!setupInput.dataset.manualOverride) {
+                    setupInput.value = priceForPeriod.setup_cents;
+                    addPriceSourceIndicator(setupInput, 'product-default', 'Using product default setup fee');
+                }
+                
+                // Update price preview
+                updateInlinePricePreview();
+            } else {
+                // No product pricing available - clear auto-populated prices but keep manual ones
+                if (!unitPriceInput.dataset.manualOverride) {
+                    unitPriceInput.value = '';
+                    addPriceSourceIndicator(unitPriceInput, 'manual-required', 'No default price - manual entry required');
+                }
+                
+                if (!setupInput.dataset.manualOverride) {
+                    setupInput.value = '0';
+                    addPriceSourceIndicator(setupInput, 'manual-default', 'No default setup fee');
+                }
+            }
+        } catch (e) {
+            console.warn('Error parsing product pricing data:', e);
+        }
+    }
+    
+    function addPriceSourceIndicator(input, type, tooltip) {
+        // Remove existing indicator
+        const existingIndicator = input.parentNode.querySelector('.price-source-indicator');
+        if (existingIndicator) {
+            existingIndicator.remove();
+        }
+        
+        // Create new indicator
+        const indicator = document.createElement('div');
+        indicator.className = `price-source-indicator absolute -top-2 -right-2 w-3 h-3 rounded-full text-xs flex items-center justify-center`;
+        indicator.title = tooltip;
+        
+        switch (type) {
+            case 'product-default':
+                indicator.className += ' bg-blue-500 text-white';
+                indicator.textContent = 'P';
+                break;
+            case 'manual-override':
+                indicator.className += ' bg-green-500 text-white';
+                indicator.textContent = 'M';
+                break;
+            case 'manual-required':
+                indicator.className += ' bg-yellow-500 text-white';
+                indicator.textContent = '!';
+                break;
+            case 'manual-default':
+                indicator.className += ' bg-gray-500 text-white';
+                indicator.textContent = '0';
+                break;
+        }
+        
+        // Add to parent (make parent relative if not already)
+        input.parentNode.style.position = 'relative';
+        input.parentNode.appendChild(indicator);
+    }
+    
+    function markAsManualOverride(input) {
+        input.dataset.manualOverride = 'true';
+        addPriceSourceIndicator(input, 'manual-override', 'Manual override price');
+    }
+    
+    // Attach event listeners
+    const unitPriceInput = document.getElementById('id_unit_price_cents_inline');
+    const setupInput = document.getElementById('id_setup_cents_inline');
+    const quantityInput = document.getElementById('id_quantity_inline');
+    const productSelect = document.getElementById('id_product_inline');
+    const billingPeriodSelect = document.getElementById('id_billing_period_inline');
+    
+    // Price calculation events
+    if (unitPriceInput) {
+        unitPriceInput.addEventListener('input', updateInlinePricePreview);
+        // Mark as manual override when user types
+        unitPriceInput.addEventListener('input', function() {
+            if (this.value) markAsManualOverride(this);
+        });
+    }
+    if (setupInput) {
+        setupInput.addEventListener('input', updateInlinePricePreview);
+        // Mark as manual override when user types
+        setupInput.addEventListener('input', function() {
+            markAsManualOverride(this);
+        });
+    }
+    if (quantityInput) quantityInput.addEventListener('input', updateInlinePricePreview);
+    
+    // Auto-population events
+    if (productSelect) {
+        productSelect.addEventListener('change', function() {
+            toggleInlineDomainSection();
+            autoPopulatePricing();
+        });
+    }
+    if (billingPeriodSelect) {
+        billingPeriodSelect.addEventListener('change', autoPopulatePricing);
+    }
+    
+    // Initial updates
+    updateInlinePricePreview();
+    toggleInlineDomainSection();
+    autoPopulatePricing();
+})();
+</script>

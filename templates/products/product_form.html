@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}
+  {% if action == 'create' %}
+    {% trans "Create Product" %} - PRAHO Platform
+  {% else %}
+    {% trans "Edit Product" %}: {{ product.name }} - PRAHO Platform
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto">
+  <!-- Header -->
+  <div class="mb-6">
+    <div class="flex items-center space-x-2 text-sm text-slate-400 mb-2">
+      <a href="{% url 'products:product_list' %}" class="hover:text-blue-400">{% trans 'Products' %}</a>
+      {% if action == 'edit' %}
+        <span>•</span>
+        <a href="{% url 'products:product_detail' slug=product.slug %}" class="hover:text-blue-400">{{ product.name }}</a>
+        <span>•</span>
+        <span>{% trans 'Edit' %}</span>
+      {% else %}
+        <span>•</span>
+        <span>{% trans 'Create' %}</span>
+      {% endif %}
+    </div>
+    <h1 class="text-3xl font-bold text-white">
+      {% if action == 'create' %}
+        ✨ {% trans "Create New Product" %}
+      {% else %}
+        ✏️ {% trans "Edit Product" %}
+      {% endif %}
+    </h1>
+    <p class="mt-2 text-slate-400">
+      {% if action == 'create' %}
+        {% trans "Add a new product to your Romanian hosting catalog" %}
+      {% else %}
+        {% trans "Update product information and settings" %}
+      {% endif %}
+    </p>
+  </div>
+
+  <!-- Romanian Business Notice -->
+  <div class="bg-blue-900 border border-blue-700 rounded-lg p-4 mb-6">
+    <div class="flex items-start">
+      <div class="flex-shrink-0">
+        <span class="text-blue-300 text-xl">🇷🇴</span>
+      </div>
+      <div class="ml-3">
+        <h3 class="text-sm font-medium text-blue-200">{% trans 'Romanian Business Compliance' %}</h3>
+        <div class="mt-1 text-sm text-blue-300">
+          <p>{% trans 'Ensure VAT inclusion settings are correct for Romanian tax compliance. Product pricing will be used for e-Factura generation.' %}</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Form -->
+  <form method="POST" class="space-y-6">
+    {% csrf_token %}
+    
+    <!-- Basic Information -->
+    <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+      <h2 class="text-xl font-semibold text-white mb-6">📋 {% trans 'Basic Information' %}</h2>
+      
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Product Name -->
+        <div class="md:col-span-2">
+          {% input_field "name" label="Product Name" html_id="id_name" placeholder="e.g., Shared Hosting Premium" required=True value=form.name.value help_text="Display name for customers" error=form.name.errors.0 %}
+        </div>
+
+        <!-- Slug -->
+        <div>
+          {% input_field "slug" label="Slug" html_id="id_slug" placeholder="shared-hosting-premium" required=True value=form.slug.value help_text="URL-friendly identifier (auto-generated from name)" error=form.slug.errors.0 %}
+        </div>
+
+        <!-- Product Type -->
+        <div>
+          {% input_field "product_type" input_type="select" label="Product Type" html_id="id_product_type" placeholder="Select product type" required=True options=product_type_options value=form.product_type.value help_text="Category of hosting product" error=form.product_type.errors.0 %}
+        </div>
+
+        <!-- Short Description -->
+        <div class="md:col-span-2">
+          {% input_field "short_description" input_type="textarea" label="Short Description" html_id="id_short_description" placeholder="Brief description for product listings" value=form.short_description.value help_text="Brief description for listings (max 500 chars)" error=form.short_description.errors.0 %}
+        </div>
+
+        <!-- Full Description -->
+        <div class="md:col-span-2">
+          {% input_field "description" input_type="textarea" label="Full Description" html_id="id_description" placeholder="Detailed product description with features and benefits" value=form.description.value help_text="Detailed product description with features and benefits" error=form.description.errors.0 %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Provisioning Settings -->
+    <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+      <h2 class="text-xl font-semibold text-white mb-6">⚙️ {% trans 'Provisioning Settings' %}</h2>
+      
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Module -->
+        <div>
+          {% input_field "module" label="Provisioning Module" html_id="id_module" placeholder="e.g., cpanel, plesk, virtualmin" value=form.module.value help_text="e.g., cpanel, plesk, virtualmin" error=form.module.errors.0 %}
+        </div>
+
+        <!-- Sort Order -->
+        <div>
+          {% input_field "sort_order" input_type="number" label="Sort Order" html_id="id_sort_order" placeholder="0" value=form.sort_order.value|default:"0" help_text="Display order (lower numbers first)" error=form.sort_order.errors.0 %}
+        </div>
+
+        <!-- Domain Requirements -->
+        <div class="md:col-span-2">
+          <fieldset class="border border-slate-600 rounded-lg p-4">
+            <legend class="text-sm font-medium text-slate-300 px-2">{% trans 'Domain Requirements' %}</legend>
+            
+            <div class="space-y-3">
+              {% checkbox_field "requires_domain" label="Customer must provide a domain" html_id="id_requires_domain" checked=form.requires_domain.value %}
+              
+              {% checkbox_field "domain_required_at_signup" label="Domain must be specified during order" html_id="id_domain_required_at_signup" checked=form.domain_required_at_signup.value %}
+            </div>
+          </fieldset>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status & Visibility -->
+    <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+      <h2 class="text-xl font-semibold text-white mb-6">👁️ {% trans 'Status & Visibility' %}</h2>
+      
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {% checkbox_field "is_active" label="Active (available for purchase)" html_id="id_is_active" checked=form.is_active.value %}
+        
+        {% checkbox_field "is_public" label="Public (visible on website)" html_id="id_is_public" checked=form.is_public.value %}
+        
+        {% checkbox_field "is_featured" label="Featured (show prominently)" html_id="id_is_featured" checked=form.is_featured.value %}
+      </div>
+    </div>
+
+    <!-- Romanian Business Settings -->
+    <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+      <h2 class="text-xl font-semibold text-white mb-6">🇷🇴 {% trans 'Romanian Business Settings' %}</h2>
+      
+      {% checkbox_field "includes_vat" label="Prices include 19% Romanian VAT" html_id="id_includes_vat" checked=form.includes_vat.value help_text="Important for e-Factura compliance and tax reporting" %}
+    </div>
+
+    <!-- SEO Settings -->
+    <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+      <h2 class="text-xl font-semibold text-white mb-6">🔍 {% trans 'SEO Settings' %}</h2>
+      
+      <div class="space-y-6">
+        <div>
+          {% input_field "meta_title" label="Meta Title" html_id="id_meta_title" placeholder="SEO title for search engines" value=form.meta_title.value help_text="SEO title for search engines (max 255 chars)" error=form.meta_title.errors.0 %}
+        </div>
+
+        <div>
+          {% input_field "meta_description" input_type="textarea" label="Meta Description" html_id="id_meta_description" placeholder="SEO description for search results" value=form.meta_description.value help_text="SEO description for search results" error=form.meta_description.errors.0 %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Form Actions -->
+    <div class="flex justify-end space-x-3">
+      <a href="{% if action == 'edit' %}{% url 'products:product_detail' slug=product.slug %}{% else %}{% url 'products:product_list' %}{% endif %}" 
+         class="px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-md font-medium transition-colors">
+        ❌ {% trans 'Cancel' %}
+      </a>
+      {% if action == 'create' %}
+        {% button "✨ Create Product" variant="primary" type="submit" %}
+      {% else %}
+        {% button "💾 Save Changes" variant="primary" type="submit" %}
+      {% endif %}
+    </div>
+  </form>
+</div>
+
+<script>
+// Auto-generate slug from name
+document.getElementById('id_name').addEventListener('input', function() {
+    const name = this.value;
+    const slug = name.toLowerCase()
+        .replace(/[^\w\s-]/g, '') // Remove special chars
+        .replace(/[-\s]+/g, '-')   // Replace spaces and multiple dashes
+        .trim('-');                // Remove leading/trailing dashes
+    document.getElementById('id_slug').value = slug;
+});
+</script>
+{% endblock %}

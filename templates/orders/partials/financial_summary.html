@@ -1,0 +1,89 @@
+{% load i18n %}
+{% load formatting %}
+
+<!-- Financial Summary Card -->
+<div id="financial-summary" class="bg-slate-800 rounded-lg border border-slate-700 mb-6">
+  <div class="px-6 py-4 border-b border-slate-700">
+    <h3 class="text-lg font-semibold text-white">💰 {% trans "Financial Summary" %}</h3>
+  </div>
+  <div class="p-6 space-y-4">
+    <div class="flex justify-between">
+      <span class="text-slate-400">{% trans "Subtotal:" %}</span>
+      <span class="text-white">
+        {{ order.subtotal_cents|cents_to_currency|romanian_currency:order.currency }}
+      </span>
+    </div>
+    <div class="flex justify-between">
+      <span class="text-slate-400">{% trans "VAT (19%):" %}</span>
+      <span class="text-white">
+        {{ order.tax_cents|cents_to_currency|romanian_currency:order.currency }}
+      </span>
+    </div>
+    <div class="border-t border-slate-700 pt-4">
+      <div class="flex justify-between">
+        <span class="text-lg font-semibold text-white">{% trans "Total:" %}</span>
+        <span class="text-lg font-semibold text-white">
+          {{ order.total_cents|cents_to_currency|romanian_currency:order.currency }}
+        </span>
+      </div>
+    </div>
+    
+    <div class="mt-4 pt-4 border-t border-slate-700 text-xs text-slate-500">
+      <span class="flex items-center">
+        <span class="mr-1">🇷🇴</span>
+        {% trans "Romanian VAT compliant" %}
+      </span>
+    </div>
+
+    <!-- Item Count Information -->
+    <div class="mt-4 pt-4 border-t border-slate-700">
+      <div class="flex justify-between text-sm">
+        <span class="text-slate-400">{% trans "Items:" %}</span>
+        <span class="text-white">{{ order.items.count }}</span>
+      </div>
+      {% if order.items.count > 0 %}
+        <div class="flex justify-between text-sm mt-1">
+          <span class="text-slate-400">{% trans "Total Quantity:" %}</span>
+          <span class="text-white">
+            {% with total_quantity=order.items.all|length %}
+              {{ order.items.all|length }}
+            {% endwith %}
+          </span>
+        </div>
+      {% endif %}
+    </div>
+
+    <!-- Order Status Information -->
+    <div class="mt-4 pt-4 border-t border-slate-700">
+      <div class="flex justify-between text-sm">
+        <span class="text-slate-400">{% trans "Status:" %}</span>
+        <span class="text-white">
+          {% if order.status == "draft" %}
+            📝 {% trans "Draft" %}
+          {% elif order.status == "pending" %}
+            ⏳ {% trans "Pending" %}
+          {% elif order.status == "processing" %}
+            ⚙️ {% trans "Processing" %}
+          {% elif order.status == "completed" %}
+            ✅ {% trans "Completed" %}
+          {% elif order.status == "cancelled" %}
+            ❌ {% trans "Cancelled" %}
+          {% elif order.status == "failed" %}
+            🔥 {% trans "Failed" %}
+          {% elif order.status == "refunded" %}
+            💰 {% trans "Refunded" %}
+          {% elif order.status == "partially_refunded" %}
+            💸 {% trans "Partially Refunded" %}
+          {% endif %}
+        </span>
+      </div>
+      
+      {% if order.payment_method %}
+        <div class="flex justify-between text-sm mt-1">
+          <span class="text-slate-400">{% trans "Payment:" %}</span>
+          <span class="text-white">{{ order.get_payment_method_display }}</span>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</div>

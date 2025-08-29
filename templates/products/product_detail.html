@@ -1,0 +1,342 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{{ product.name }} - {% trans "Product Details" %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+  <!-- Header with Actions -->
+  <div class="flex justify-between items-start mb-6">
+    <div>
+      <div class="flex items-center space-x-2 text-sm text-slate-400 mb-2">
+        <a href="{% url 'products:product_list' %}" class="hover:text-blue-400">{% trans 'Products' %}</a>
+        <span>•</span>
+        <span>{{ product.name }}</span>
+      </div>
+      <h1 class="text-3xl font-bold text-white flex items-center">
+        🔍 {{ product.name }}
+        {% if product.is_featured %}
+          <span class="ml-3 text-yellow-400" title="{% trans 'Featured Product' %}">⭐</span>
+        {% endif %}
+      </h1>
+      <p class="mt-2 text-slate-400">{{ product.slug }}</p>
+    </div>
+    
+    <div class="flex space-x-3">
+      {% url 'products:product_edit' slug=product.slug as edit_url %}
+      {% button "✏️ Edit" variant="secondary" href=edit_url %}
+      {% url 'products:product_prices' slug=product.slug as prices_url %}
+      {% button "💰 Pricing" variant="primary" href=prices_url %}
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- Main Product Information -->
+    <div class="lg:col-span-2 space-y-6">
+      <!-- Basic Information Card -->
+      <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+        <h2 class="text-xl font-semibold text-white mb-4">📋 {% trans 'Basic Information' %}</h2>
+        
+        <dl class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <dt class="text-sm font-medium text-slate-400">{% trans 'Product Type' %}</dt>
+            <dd class="mt-1">
+              {% badge product.get_product_type_display variant="secondary" %}
+            </dd>
+          </div>
+          
+          {% if product.module %}
+          <div>
+            <dt class="text-sm font-medium text-slate-400">{% trans 'Provisioning Module' %}</dt>
+            <dd class="mt-1 text-sm text-white">{{ product.module }}</dd>
+          </div>
+          {% endif %}
+          
+          <div>
+            <dt class="text-sm font-medium text-slate-400">{% trans 'Sort Order' %}</dt>
+            <dd class="mt-1 text-sm text-white">{{ product.sort_order }}</dd>
+          </div>
+          
+          {% if product.requires_domain %}
+          <div>
+            <dt class="text-sm font-medium text-slate-400">{% trans 'Domain Requirements' %}</dt>
+            <dd class="mt-1">
+              {% if product.domain_required_at_signup %}
+                {% badge "Required at Signup" variant="warning" %}
+              {% else %}
+                {% badge "Optional Domain" variant="info" %}
+              {% endif %}
+            </dd>
+          </div>
+          {% endif %}
+          
+          <div>
+            <dt class="text-sm font-medium text-slate-400">{% trans 'VAT Inclusion' %}</dt>
+            <dd class="mt-1">
+              {% if product.includes_vat %}
+                {% badge "Prices Include VAT" variant="success" %}
+              {% else %}
+                {% badge "Prices Exclude VAT" variant="info" %}
+              {% endif %}
+            </dd>
+          </div>
+          
+          <div>
+            <dt class="text-sm font-medium text-slate-400">{% trans 'Created' %}</dt>
+            <dd class="mt-1 text-sm text-white">{{ product.created_at|date:"j F Y, H:i" }}</dd>
+          </div>
+        </dl>
+
+        {% if product.description %}
+        <div class="mt-6">
+          <dt class="text-sm font-medium text-slate-400 mb-2">{% trans 'Description' %}</dt>
+          <dd class="text-sm text-slate-300 leading-relaxed">{{ product.description|linebreaks }}</dd>
+        </div>
+        {% endif %}
+
+        {% if product.tags %}
+        <div class="mt-6">
+          <dt class="text-sm font-medium text-slate-400 mb-2">{% trans 'Tags' %}</dt>
+          <dd class="flex flex-wrap gap-2">
+            {% for tag in product.tags %}
+              {% badge tag variant="outline" %}
+            {% endfor %}
+          </dd>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Pricing Information -->
+      {% if prices_by_currency %}
+      <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-xl font-semibold text-white">💰 {% trans 'Pricing' %}</h2>
+          {% url 'products:product_prices' slug=product.slug as manage_prices_url %}
+          <a href="{{ manage_prices_url }}" class="text-blue-400 hover:text-blue-300 text-sm">
+            {% trans 'Manage Pricing' %} →
+          </a>
+        </div>
+
+        {% for currency_code, prices in prices_by_currency.items %}
+        <div class="mb-6 last:mb-0">
+          <h3 class="text-lg font-medium text-white mb-3 flex items-center">
+            <span class="mr-2">💱</span>
+            {{ currency_code }}
+            {% if currency_code == 'RON' %}
+              <span class="ml-2 text-xs text-green-400">(Romanian Lei)</span>
+            {% endif %}
+          </h3>
+          
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {% for price in prices %}
+            <div class="bg-slate-700 rounded-lg p-4 border border-slate-600">
+              <div class="flex justify-between items-start mb-2">
+                <span class="text-sm text-slate-400">{{ price.get_billing_period_display }}</span>
+                {% if price.is_active %}
+                  {% badge "Active" variant="success" size="sm" %}
+                {% else %}
+                  {% badge "Inactive" variant="danger" size="sm" %}
+                {% endif %}
+              </div>
+              
+              <div class="text-lg font-semibold text-white">
+                {{ price.effective_price|floatformat:0 }} {{ currency_code }}
+                {% if price.promo_price_cents and price.promo_valid_until %}
+                  <div class="text-sm text-red-400 line-through">
+                    {{ price.amount|floatformat:0 }} {{ currency_code }}
+                  </div>
+                {% endif %}
+              </div>
+              
+              {% if price.setup_cents > 0 %}
+              <div class="text-sm text-slate-400 mt-1">
+                + {{ price.setup_fee|floatformat:0 }} {{ currency_code }} {% trans 'setup' %}
+              </div>
+              {% endif %}
+              
+              {% if price.minimum_quantity > 1 %}
+              <div class="text-xs text-slate-500 mt-2">
+                {% trans 'Min qty:' %} {{ price.minimum_quantity }}
+              </div>
+              {% endif %}
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <!-- Product Relationships -->
+      {% if relationships_from or relationships_to %}
+      <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+        <h2 class="text-xl font-semibold text-white mb-4">🔗 {% trans 'Product Relationships' %}</h2>
+        
+        {% if relationships_from %}
+        <div class="mb-6">
+          <h3 class="text-lg font-medium text-white mb-3">{% trans 'This product relates to:' %}</h3>
+          <div class="space-y-2">
+            {% for rel in relationships_from %}
+            <div class="flex items-center justify-between bg-slate-700 rounded-lg p-3 border border-slate-600">
+              <div class="flex items-center">
+                <span class="text-slate-400 mr-2">{{ rel.get_relationship_type_display }}:</span>
+                <a href="{% url 'products:product_detail' slug=rel.target_product.slug %}" 
+                   class="text-blue-400 hover:text-blue-300">
+                  {{ rel.target_product.name }}
+                </a>
+              </div>
+              {% badge rel.get_relationship_type_display variant="outline" size="sm" %}
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+
+        {% if relationships_to %}
+        <div>
+          <h3 class="text-lg font-medium text-white mb-3">{% trans 'Other products relate to this:' %}</h3>
+          <div class="space-y-2">
+            {% for rel in relationships_to %}
+            <div class="flex items-center justify-between bg-slate-700 rounded-lg p-3 border border-slate-600">
+              <div class="flex items-center">
+                <a href="{% url 'products:product_detail' slug=rel.source_product.slug %}" 
+                   class="text-blue-400 hover:text-blue-300 mr-2">
+                  {{ rel.source_product.name }}
+                </a>
+                <span class="text-slate-400">{{ rel.get_relationship_type_display }} this product</span>
+              </div>
+              {% badge rel.get_relationship_type_display variant="outline" size="sm" %}
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      <!-- Bundle Memberships -->
+      {% if bundle_memberships %}
+      <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+        <h2 class="text-xl font-semibold text-white mb-4">📦 {% trans 'Bundle Memberships' %}</h2>
+        <div class="space-y-3">
+          {% for membership in bundle_memberships %}
+          <div class="flex items-center justify-between bg-slate-700 rounded-lg p-4 border border-slate-600">
+            <div>
+              <div class="font-medium text-white">{{ membership.bundle.name }}</div>
+              <div class="text-sm text-slate-400">
+                {% trans 'Quantity:' %} {{ membership.quantity }}
+                {% if membership.is_required %}
+                  • <span class="text-yellow-400">{% trans 'Required' %}</span>
+                {% else %}
+                  • <span class="text-green-400">{% trans 'Optional' %}</span>
+                {% endif %}
+              </div>
+            </div>
+            {% if membership.override_price %}
+            <div class="text-right">
+              <div class="text-sm text-slate-400">{% trans 'Bundle Price' %}</div>
+              <div class="font-medium text-white">{{ membership.override_price|floatformat:0 }} RON</div>
+            </div>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Sidebar -->
+    <div class="space-y-6">
+      <!-- Status Card -->
+      <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+        <h2 class="text-xl font-semibold text-white mb-4">⚙️ {% trans 'Status & Settings' %}</h2>
+        
+        <div class="space-y-4">
+          <!-- Active Status -->
+          <div class="flex items-center justify-between">
+            <span class="text-slate-400">{% trans 'Active' %}</span>
+            <button class="toggle-switch" 
+                    hx-post="{% url 'products:product_toggle_active' slug=product.slug %}"
+                    hx-target="this"
+                    hx-swap="outerHTML">
+              {% if product.is_active %}
+                {% badge "Active" variant="success" %}
+              {% else %}
+                {% badge "Inactive" variant="danger" %}
+              {% endif %}
+            </button>
+          </div>
+
+          <!-- Public Status -->
+          <div class="flex items-center justify-between">
+            <span class="text-slate-400">{% trans 'Public' %}</span>
+            <button class="toggle-switch" 
+                    hx-post="{% url 'products:product_toggle_public' slug=product.slug %}"
+                    hx-target="this"
+                    hx-swap="outerHTML">
+              {% if product.is_public %}
+                {% badge "Public" variant="info" %}
+              {% else %}
+                {% badge "Private" variant="warning" %}
+              {% endif %}
+            </button>
+          </div>
+
+          <!-- Featured Status -->
+          <div class="flex items-center justify-between">
+            <span class="text-slate-400">{% trans 'Featured' %}</span>
+            <button class="toggle-switch" 
+                    hx-post="{% url 'products:product_toggle_featured' slug=product.slug %}"
+                    hx-target="this"
+                    hx-swap="outerHTML">
+              {% if product.is_featured %}
+                {% badge "Featured" variant="success" %}
+              {% else %}
+                {% badge "Not Featured" variant="secondary" %}
+              {% endif %}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Actions Card -->
+      <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+        <h2 class="text-xl font-semibold text-white mb-4">🚀 {% trans 'Quick Actions' %}</h2>
+        
+        <div class="space-y-3">
+          {% url 'products:product_edit' slug=product.slug as edit_url %}
+          {% button "✏️ Edit Product" variant="primary" href=edit_url class="w-full" %}
+          
+          {% url 'products:product_prices' slug=product.slug as prices_url %}
+          {% button "💰 Manage Pricing" variant="secondary" href=prices_url class="w-full" %}
+          
+          {% url 'products:product_list' as list_url %}
+          {% button "← Back to Products" variant="outline" href=list_url class="w-full" %}
+        </div>
+      </div>
+
+      <!-- SEO Information -->
+      {% if product.meta_title or product.meta_description %}
+      <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+        <h2 class="text-xl font-semibold text-white mb-4">🔍 {% trans 'SEO Information' %}</h2>
+        
+        {% if product.meta_title %}
+        <div class="mb-4">
+          <dt class="text-sm font-medium text-slate-400 mb-1">{% trans 'Meta Title' %}</dt>
+          <dd class="text-sm text-slate-300">{{ product.meta_title }}</dd>
+        </div>
+        {% endif %}
+        
+        {% if product.meta_description %}
+        <div>
+          <dt class="text-sm font-medium text-slate-400 mb-1">{% trans 'Meta Description' %}</dt>
+          <dd class="text-sm text-slate-300">{{ product.meta_description }}</dd>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

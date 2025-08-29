@@ -1,0 +1,349 @@
+{% load i18n %}
+{% load ui_components %}
+
+<form method="POST" 
+      {% if action == 'create' %}
+        action="{% url 'orders:order_item_create' pk=order.id %}"
+      {% else %}
+        action="{% url 'orders:order_item_edit' pk=order.id item_pk=item.id %}"
+      {% endif %}
+      class="space-y-6">
+  {% csrf_token %}
+  
+  <div class="px-6 pt-6 pb-4">
+    <h3 class="text-lg font-medium text-white mb-4">
+      {% if action == 'create' %}
+        ➕ {% trans "Add Order Item" %}
+      {% else %}
+        ✏️ {% trans "Edit Order Item" %}
+      {% endif %}
+    </h3>
+    
+    <!-- Romanian Business Notice -->
+    <div class="bg-blue-900 border border-blue-700 rounded-lg p-4 mb-6">
+      <div class="flex items-start">
+        <div class="flex-shrink-0">
+          <span class="text-blue-300 text-xl">🇷🇴</span>
+        </div>
+        <div class="ml-3">
+          <h4 class="text-sm font-medium text-blue-200">{% trans 'Romanian VAT Compliance' %}</h4>
+          <div class="mt-1 text-sm text-blue-300">
+            <p>{% trans 'VAT will be automatically calculated at 19% for Romanian customers. Prices are stored in cents for precision.' %}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Product Selection -->
+    <div class="mb-6">
+      {% input_field "product" input_type="select" label="Product/Service" html_id="id_product" placeholder="Select a product or service" required=True options=product_options value=form.product.value help_text="Choose from your available products and services" error=form.product.errors.0 %}
+    </div>
+
+    <!-- Quantity and Billing Period Row -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+      <!-- Quantity -->
+      <div>
+        {% input_field "quantity" input_type="number" label="Quantity" html_id="id_quantity" placeholder="1" required=True value=form.quantity.value|default:"1" help_text="Number of units" error=form.quantity.errors.0 %}
+      </div>
+
+      <!-- Billing Period -->
+      <div>
+        {% input_field "billing_period" input_type="select" label="Billing Period" html_id="id_billing_period" placeholder="Select billing period" required=True options=billing_period_options value=form.billing_period.value help_text="How often this will be billed" error=form.billing_period.errors.0 %}
+      </div>
+    </div>
+
+    <!-- Pricing Information -->
+    <div class="bg-slate-900 rounded-lg border border-slate-700 p-4 mb-6">
+      <h4 class="text-sm font-semibold text-slate-300 mb-4">💰 {% trans 'Pricing Information' %}</h4>
+      
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Unit Price -->
+        <div>
+          {% input_field "unit_price_cents" input_type="number" label="Unit Price (cents)" html_id="id_unit_price_cents" placeholder="0" required=True value=form.unit_price_cents.value help_text="Price per unit in cents (e.g., 1999 for 19.99 RON)" error=form.unit_price_cents.errors.0 %}
+        </div>
+
+        <!-- Setup Fee -->
+        <div>
+          {% input_field "setup_cents" input_type="number" label="Setup Fee (cents)" html_id="id_setup_cents" placeholder="0" value=form.setup_cents.value|default:"0" help_text="One-time setup fee in cents" error=form.setup_cents.errors.0 %}
+        </div>
+      </div>
+
+      <!-- Price Display -->
+      <div class="mt-4 p-3 bg-slate-800 rounded-lg">
+        <div class="text-sm space-y-2">
+          <div class="flex justify-between">
+            <span class="text-slate-400">{% trans "Unit Price:" %}</span>
+            <span class="text-white" id="unit-price-display">{{ order.currency }} 0.00</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-slate-400">{% trans "Setup Fee:" %}</span>
+            <span class="text-white" id="setup-price-display">{{ order.currency }} 0.00</span>
+          </div>
+          <div class="flex justify-between border-t border-slate-700 pt-2 font-semibold">
+            <span class="text-white">{% trans "Total per unit:" %}</span>
+            <span class="text-white" id="total-price-display">{{ order.currency }} 0.00</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Domain Configuration (for hosting products) -->
+    <div class="mb-6" id="domain-section" style="display: none;">
+      {% input_field "domain_name" label="Domain Name" html_id="id_domain_name" placeholder="example.com" value=form.domain_name.value help_text="Domain name for this service (if applicable)" error=form.domain_name.errors.0 %}
+    </div>
+
+    <!-- Additional Configuration -->
+
+    <!-- Advanced Configuration (JSON) -->
+    <div class="mb-6">
+      <details class="bg-slate-900 rounded-lg border border-slate-700 p-4">
+        <summary class="cursor-pointer text-sm font-semibold text-slate-300 mb-4">⚙️ {% trans 'Advanced Configuration' %}</summary>
+        {% input_field "config" input_type="textarea" label="Configuration (JSON)" html_id="id_config" placeholder='{"cpu": 2, "memory": "4GB", "disk": "50GB"}' value=form.config.value help_text="JSON configuration for product-specific settings" error=form.config.errors.0 %}
+      </details>
+    </div>
+
+    <!-- Romanian Compliance Summary -->
+    <div class="bg-green-900 border border-green-700 rounded-lg p-4">
+      <div class="flex items-start">
+        <div class="flex-shrink-0">
+          <span class="text-green-300 text-xl">✅</span>
+        </div>
+        <div class="ml-3">
+          <h4 class="text-sm font-medium text-green-200">{% trans 'Tax Calculation Preview' %}</h4>
+          <div class="mt-2 text-sm text-green-300">
+            <div class="space-y-1" id="tax-preview">
+              <div class="flex justify-between">
+                <span>{% trans "Subtotal:" %}</span>
+                <span id="preview-subtotal">{{ order.currency }} 0.00</span>
+              </div>
+              <div class="flex justify-between">
+                <span>{% trans "VAT (19%):" %}</span>
+                <span id="preview-vat">{{ order.currency }} 0.00</span>
+              </div>
+              <div class="flex justify-between font-semibold border-t border-green-700 pt-1">
+                <span>{% trans "Total:" %}</span>
+                <span id="preview-total">{{ order.currency }} 0.00</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Form Actions -->
+  <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
+    <button type="button" 
+            {% if action == 'create' %}
+              onclick="hideAddItemModal()"
+            {% else %}
+              onclick="hideEditItemModal()"
+            {% endif %}
+            class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white">
+      ❌ {% trans "Cancel" %}
+    </button>
+    {% if action == 'create' %}
+      {% button "➕ Add Item" variant="primary" type="submit" %}
+    {% else %}
+      {% button "💾 Save Changes" variant="primary" type="submit" %}
+    {% endif %}
+  </div>
+</form>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Update price displays when values change
+    function updatePriceDisplays() {
+        const unitPriceCents = parseInt(document.getElementById('id_unit_price_cents').value || '0');
+        const setupCents = parseInt(document.getElementById('id_setup_cents').value || '0');
+        const quantity = parseInt(document.getElementById('id_quantity').value || '1');
+        const currency = '{{ order.currency }}';
+        
+        // Convert cents to currency
+        const unitPrice = (unitPriceCents / 100).toFixed(2);
+        const setupPrice = (setupCents / 100).toFixed(2);
+        const totalPerUnit = ((unitPriceCents + setupCents) / 100).toFixed(2);
+        
+        // Update displays
+        document.getElementById('unit-price-display').textContent = `${currency} ${unitPrice}`;
+        document.getElementById('setup-price-display').textContent = `${currency} ${setupPrice}`;
+        document.getElementById('total-price-display').textContent = `${currency} ${totalPerUnit}`;
+        
+        // Update tax preview
+        const lineTotal = (unitPriceCents + setupCents) * quantity;
+        const subtotal = lineTotal / 100;
+        const vatAmount = subtotal * 0.19; // 19% VAT
+        const total = subtotal + vatAmount;
+        
+        document.getElementById('preview-subtotal').textContent = `${currency} ${subtotal.toFixed(2)}`;
+        document.getElementById('preview-vat').textContent = `${currency} ${vatAmount.toFixed(2)}`;
+        document.getElementById('preview-total').textContent = `${currency} ${total.toFixed(2)}`;
+    }
+    
+    // Show/hide domain section based on product selection
+    function toggleDomainSection() {
+        const productSelect = document.getElementById('id_product');
+        const domainSection = document.getElementById('domain-section');
+        
+        if (productSelect && domainSection) {
+            const selectedOption = productSelect.options[productSelect.selectedIndex];
+            const requiresDomain = selectedOption && selectedOption.dataset.requiresDomain === 'true';
+            
+            if (requiresDomain) {
+                domainSection.style.display = 'block';
+                document.getElementById('id_domain_name').required = true;
+            } else {
+                domainSection.style.display = 'none';
+                document.getElementById('id_domain_name').required = false;
+            }
+        }
+    }
+    
+    // Auto-population function for main form
+    function autoPopulateMainFormPricing() {
+        const productSelect = document.getElementById('id_product');
+        const billingPeriodSelect = document.getElementById('id_billing_period');
+        const unitPriceInput = document.getElementById('id_unit_price_cents');
+        const setupInput = document.getElementById('id_setup_cents');
+        
+        if (!productSelect || !billingPeriodSelect || !unitPriceInput || !setupInput) {
+            return;
+        }
+        
+        const selectedOption = productSelect.options[productSelect.selectedIndex];
+        const billingPeriod = billingPeriodSelect.value;
+        
+        if (!selectedOption || !selectedOption.value || !billingPeriod) {
+            return;
+        }
+        
+        try {
+            // Get pricing data from product option
+            console.log('\ud83d\udc1b DEBUG (Main Form): selectedOption.dataset.prices =', selectedOption.dataset.prices);
+            const pricesData = JSON.parse(selectedOption.dataset.prices || '{}');
+            console.log('\ud83d\udc1b DEBUG (Main Form): pricesData =', pricesData);
+            console.log('\ud83d\udc1b DEBUG (Main Form): billingPeriod =', billingPeriod);
+            const priceForPeriod = pricesData[billingPeriod];
+            console.log('\ud83d\udc1b DEBUG (Main Form): priceForPeriod =', priceForPeriod);
+            
+            if (priceForPeriod) {
+                // Only auto-populate if user hasn't manually edited the field
+                if (!unitPriceInput.dataset.manualOverride) {
+                    unitPriceInput.value = priceForPeriod.unit_cents;
+                    unitPriceInput.style.borderColor = '#3b82f6'; // Blue border for auto-populated
+                }
+                
+                if (!setupInput.dataset.manualOverride) {
+                    setupInput.value = priceForPeriod.setup_cents;
+                    setupInput.style.borderColor = '#3b82f6'; // Blue border for auto-populated
+                }
+                
+                // Update price displays
+                updatePriceDisplays();
+            } else {
+                // No product pricing available - clear auto-populated prices but keep manual ones
+                if (!unitPriceInput.dataset.manualOverride) {
+                    unitPriceInput.value = '';
+                    unitPriceInput.style.borderColor = '#f59e0b'; // Yellow border for manual required
+                }
+                
+                if (!setupInput.dataset.manualOverride) {
+                    setupInput.value = '0';
+                    setupInput.style.borderColor = '#6b7280'; // Gray border for default
+                }
+            }
+        } catch (e) {
+            console.warn('Error parsing product pricing data:', e);
+        }
+    }
+    
+    function markMainFormAsManualOverride(input) {
+        input.dataset.manualOverride = 'true';
+        input.style.borderColor = '#10b981'; // Green border for manual override
+    }
+    
+    // Attach event listeners
+    const unitPriceInput = document.getElementById('id_unit_price_cents');
+    const setupInput = document.getElementById('id_setup_cents');
+    const quantityInput = document.getElementById('id_quantity');
+    const productSelect = document.getElementById('id_product');
+    const billingPeriodSelect = document.getElementById('id_billing_period');
+    
+    if (unitPriceInput) {
+        unitPriceInput.addEventListener('input', updatePriceDisplays);
+        unitPriceInput.addEventListener('input', function() {
+            if (this.value) markMainFormAsManualOverride(this);
+        });
+    }
+    if (setupInput) {
+        setupInput.addEventListener('input', updatePriceDisplays);
+        setupInput.addEventListener('input', function() {
+            markMainFormAsManualOverride(this);
+        });
+    }
+    if (quantityInput) quantityInput.addEventListener('input', updatePriceDisplays);
+    
+    if (productSelect) {
+        productSelect.addEventListener('change', function() {
+            toggleDomainSection();
+            autoPopulateMainFormPricing();
+        });
+    }
+    if (billingPeriodSelect) {
+        billingPeriodSelect.addEventListener('change', autoPopulateMainFormPricing);
+    }
+    
+    // Initial updates
+    updatePriceDisplays();
+    toggleDomainSection();
+    autoPopulateMainFormPricing();
+    
+    // Handle form submission
+    const form = document.querySelector('form');
+    if (form) {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(this);
+            
+            fetch(this.action, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'HX-Request': 'true'
+                }
+            }).then(response => response.text())
+            .then(html => {
+                if (html.includes('error') || html.includes('form')) {
+                    // Form has errors, replace the form container
+                    const container = this.closest('[id*="form-container"]');
+                    if (container) {
+                        container.innerHTML = html;
+                    }
+                } else {
+                    // Success - refresh the order items section and close modal
+                    document.getElementById('order-items-section').outerHTML = html;
+                    
+                    // Close appropriate modal
+                    const addModal = document.getElementById('addItemModal');
+                    const editModal = document.getElementById('editItemModal');
+                    if (addModal && !addModal.classList.contains('hidden')) {
+                        addModal.classList.add('hidden');
+                    }
+                    if (editModal && !editModal.classList.contains('hidden')) {
+                        editModal.classList.add('hidden');
+                    }
+                    
+                    // Refresh financial summary
+                    if (typeof refreshFinancialSummary === 'function') {
+                        refreshFinancialSummary();
+                    }
+                }
+            }).catch(error => {
+                console.error('Form submission error:', error);
+                alert('Error submitting form. Please try again.');
+            });
+        });
+    }
+});
+</script>

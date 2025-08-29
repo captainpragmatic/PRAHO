@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from decimal import Decimal
@@ -17,27 +18,63 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.contenttypes.models import ContentType
 from django.core.paginator import Paginator
+from django.db import transaction
 from django.db.models import Q, QuerySet
+from django.forms import ModelForm, modelform_factory
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_POST
 
+from apps.billing.models import Currency
 from apps.billing.services import RefundData, RefundReason, RefundService, RefundType
 from apps.common.decorators import staff_required
 from apps.common.mixins import get_search_context
 from apps.common.utils import json_error, json_success
 from apps.customers.models import Customer
+from apps.products.models import Product
 from apps.tickets.models import SupportCategory, Ticket
 from apps.users.models import User
 
-from .models import Order
+from .models import Order, OrderItem
 from .services import (
     OrderService,
     StatusChangeData,
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ===============================================================================
+# HELPER FUNCTIONS FOR ORDER ITEMS
+# ===============================================================================
+
+def _get_vat_rate_for_customer(customer: Customer) -> Decimal:
+    """
+    Calculate VAT rate for customer based on Romanian tax rules.
+    Romanian customers: 19% VAT
+    EU customers with valid VAT ID: 0% (reverse charge)
+    EU customers without VAT ID: 19%
+    Non-EU customers: 0%
+    """
+    try:
+        tax_profile = customer.get_tax_profile()
+        
+        # Romanian customers always pay 19% VAT
+        if tax_profile and tax_profile.cui and tax_profile.cui.startswith('RO'):
+            return Decimal('0.19')  # 19%
+        
+        # For now, default to 19% VAT for all customers with tax profile
+        # TODO: Implement EU/non-EU logic based on customer address or VAT ID format
+        if tax_profile and tax_profile.is_vat_payer:
+            return Decimal('0.19')  # 19%
+        
+        # No tax profile or not VAT payer: 0%
+        return Decimal('0.00')  # 0%
+        
+    except Exception as e:
+        logger.warning(f"⚠️ [Orders] Could not determine VAT rate for customer {customer.id}: {e}")
+        return Decimal('0.19')  # Default to 19% for safety
 
 
 def _get_accessible_customer_ids(user: User) -> list[int]:
@@ -232,18 +269,122 @@ def order_detail(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
 @staff_required
 def order_create(request: HttpRequest) -> HttpResponse:
     """
-    Create new order (staff only)
+    ✨ Create new order (staff only) with Romanian business compliance
     """
-    if request.method == 'POST':
-        # TODO: Implement order creation form processing
-        messages.info(request, _("Order creation form processing will be implemented next."))
-        return redirect('orders:order_list')
+    # Dynamic form creation for Order
+    order_form = modelform_factory(
+        Order,
+        fields=[
+            'customer', 'currency', 'payment_method', 
+            'notes', 'customer_notes'
+        ]
+    )
     
-    # Get customers for selection
+    if request.method == 'POST':
+        form = order_form(request.POST)
+        if form.is_valid():
+            try:
+                with transaction.atomic():
+                    # Create order from form data
+                    order = form.save(commit=False)
+                    
+                    # Set customer information snapshot
+                    customer = order.customer
+                    tax_profile = customer.get_tax_profile()
+                    billing_address = customer.get_billing_address()
+                    
+                    order.customer_email = customer.primary_email
+                    order.customer_name = customer.get_display_name()
+                    order.customer_company = customer.company_name
+                    order.customer_vat_id = tax_profile.cui if tax_profile else ''
+                    
+                    # Set billing address snapshot from customer
+                    if billing_address:
+                        order.billing_address = {
+                            'company_name': customer.company_name,
+                            'line1': billing_address.address_line1,
+                            'line2': billing_address.address_line2,
+                            'city': billing_address.city,
+                            'county': billing_address.county,
+                            'postal_code': billing_address.postal_code,
+                            'country': billing_address.country,
+                            'vat_id': tax_profile.cui if tax_profile else '',
+                            'contact_person': customer.get_display_name(),
+                            'contact_email': customer.primary_email,
+                            'contact_phone': customer.primary_phone,
+                        }
+                    else:
+                        # Fallback when no billing address exists
+                        order.billing_address = {
+                            'company_name': customer.company_name,
+                            'line1': '',
+                            'line2': '',
+                            'city': '',
+                            'county': '',
+                            'postal_code': '',
+                            'country': 'România',  # Default to Romania
+                            'vat_id': tax_profile.cui if tax_profile else '',
+                            'contact_person': customer.get_display_name(),
+                            'contact_email': customer.primary_email,
+                            'contact_phone': customer.primary_phone,
+                        }
+                    
+                    # Initial totals (will be calculated when items are added)
+                    order.subtotal_cents = 0
+                    order.tax_cents = 0
+                    order.total_cents = 0
+                    
+                    order.save()
+                    
+                    logger.info(f"✅ [Orders] Created order: {order.order_number} for customer {customer.company_name}")
+                    messages.success(request, _(f"✅ Order '{order.order_number}' created successfully. You can now add products."))
+                    return redirect('orders:order_detail', pk=order.id)
+                    
+            except Exception as e:
+                logger.error(f"🔥 [Orders] Error creating order: {e}")
+                messages.error(request, _("❌ Error creating order. Please try again."))
+        else:
+            # Form validation failed - add error message but preserve form data
+            messages.error(request, _("❌ Please correct the errors below. All required fields must be filled in."))
+    else:
+        form = order_form()
+    
+    # Get customers and products for selection
     customers = Customer.objects.filter(status='active').order_by('company_name')
+    currencies = Currency.objects.all().order_by('code')
+    products = Product.objects.filter(is_active=True).order_by('name')
+    
+    # Convert to component format for dropdowns
+    customer_options = []
+    for customer in customers:
+        tax_profile = customer.get_tax_profile()
+        vat_display = tax_profile.cui if tax_profile else 'No CUI'
+        customer_options.append({
+            'value': customer.id, 
+            'label': f"{customer.get_display_name()} ({vat_display})"
+        })
+    
+    currency_options = [
+        {'value': currency.code, 'label': f"{currency.code} - {currency.symbol}"} 
+        for currency in currencies
+    ]
+    
+    payment_method_choices = Order._meta.get_field('payment_method').choices
+    payment_method_options = [
+        {'value': choice[0], 'label': str(choice[1])} 
+        for choice in (payment_method_choices or [])
+    ]
     
     context = {
+        'form': form,
+        'action': 'create',
         'customers': customers,
+        'currencies': currencies,
+        'products': products,
+        'customer_options': customer_options,
+        'currency_options': currency_options,
+        'payment_method_options': payment_method_options,
+        'is_staff_user': True,
     }
     
     return render(request, 'orders/order_form.html', context)
@@ -564,30 +705,399 @@ def order_provision(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
 
 @staff_required
 def order_items_list(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
-    """📋 HTMX: Order items list (to be implemented)"""
-    messages.info(request, _("Order items management will be implemented next."))
-    return redirect('orders:order_detail', pk=pk)
+    """
+    📋 HTMX-powered order items list with real-time updates
+    Returns order items partial for dynamic loading and manipulation
+    """
+    # Type guard for authenticated user
+    if not isinstance(request.user, User):
+        return redirect('users:login')
+    
+    order = get_object_or_404(
+        Order.objects
+        .select_related('customer', 'currency')
+        .prefetch_related(
+            'items__product',
+            'items__service'
+        ),
+        id=pk
+    )
+    
+    # Validate access
+    if access_denied := _validate_order_access(request, order):
+        return access_denied
+    
+    # Get order items with related data
+    items = order.items.select_related('product').order_by('created_at')
+    
+    # Calculate totals for display
+    order.calculate_totals()
+    
+    context = {
+        'order': order,
+        'items': items,
+        'can_edit': order.is_draft or order.status == 'pending',
+        'is_staff': request.user.is_staff or bool(getattr(request.user, 'staff_role', '')),
+    }
+    
+    # Return partial template for HTMX requests
+    template = 'orders/partials/order_items_list.html'
+    return render(request, template, context)
+
+
+def _process_order_item_creation(form: ModelForm, order: Order, pk: uuid.UUID, request: HttpRequest) -> HttpResponse:
+    """Process the creation of a new order item with proper price override logic"""
+    try:
+        with transaction.atomic():
+            # Create order item
+            item = form.save(commit=False)
+            item.order = order
+            
+            # Get product and pricing information
+            product = item.product
+            
+            # INDUSTRY STANDARD PRICING LOGIC:
+            # 1. Use manual override prices if provided
+            # 2. Fall back to product default prices
+            # 3. Error only if both are missing
+            
+            # Check if user provided manual pricing (form data takes precedence)
+            manual_unit_price = item.unit_price_cents
+            manual_setup_price = item.setup_cents
+            
+            # Get product default pricing for this billing period
+            product_price = product.get_price_for_period(
+                order.currency.code,
+                item.billing_period
+            )
+            
+            # Apply pricing hierarchy: Manual Override > Product Default > Error
+            if manual_unit_price and manual_unit_price > 0:
+                # User provided manual unit price - use it (OVERRIDE)
+                item.unit_price_cents = manual_unit_price
+                logger.info(f"💰 [Orders] Using manual override unit price: {manual_unit_price} cents")
+            elif product_price:
+                # No manual price - use product default
+                item.unit_price_cents = product_price.amount_cents
+                logger.info(f"💰 [Orders] Using product default unit price: {product_price.amount_cents} cents")
+            else:
+                # Neither manual nor product price available
+                return json_error(f"No pricing available for {product.name} in {order.currency.code}. Please enter a manual price.")
+            
+            # Same logic for setup fee
+            if manual_setup_price is not None and manual_setup_price >= 0:
+                # User provided manual setup fee (including 0) - use it
+                item.setup_cents = manual_setup_price
+                logger.info(f"🛠️ [Orders] Using manual override setup fee: {manual_setup_price} cents")
+            elif product_price:
+                # No manual setup fee - use product default
+                item.setup_cents = product_price.setup_cents
+                logger.info(f"🛠️ [Orders] Using product default setup fee: {product_price.setup_cents} cents")
+            else:
+                # No product price, default setup to 0
+                item.setup_cents = 0
+            
+            # Calculate VAT for Romanian customers
+            tax_rate = _get_vat_rate_for_customer(order.customer)
+            item.tax_rate = tax_rate
+            
+            # Save the item (totals will be calculated in save method)
+            item.save()
+            
+            # Recalculate order totals
+            order.calculate_totals()
+            
+            logger.info(f"✅ [Orders] Added item {product.name} to order {order.order_number} with final pricing: {item.unit_price_cents}¢ + {item.setup_cents}¢ setup")
+            
+            # Return updated items list for HTMX
+            return order_items_list(request, pk)
+            
+    except Exception as e:
+        logger.error(f"🔥 [Orders] Error adding item to order {order.order_number}: {e}")
+        return json_error("Failed to add item to order")
 
 
 @staff_required
 def order_item_create(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
-    """HTMX: Add order item (to be implemented)"""
-    messages.info(request, _("Order item creation will be implemented next."))
-    return redirect('orders:order_detail', pk=pk)
+    """
+    ✨ Add new order item with VAT calculation and Romanian compliance
+    HTMX endpoint for dynamic item addition
+    """
+    # Type guard for authenticated user
+    if not isinstance(request.user, User):
+        return redirect('users:login')
+    
+    order = get_object_or_404(Order, id=pk)
+    
+    # Validate access
+    if access_denied := _validate_order_access(request, order):
+        return access_denied
+    
+    # Check if order can be edited
+    if not (order.is_draft or order.status == 'pending'):
+        return json_error("Order cannot be modified in current status")
+    
+    # Dynamic form creation for OrderItem
+    order_item_form = modelform_factory(
+        OrderItem,
+        fields=[
+            'product', 'quantity', 'unit_price_cents', 'setup_cents', 
+            'billing_period', 'config', 'domain_name'
+        ]
+    )
+    
+    if request.method == 'POST':
+        form = order_item_form(request.POST)
+        if form.is_valid():
+            return _process_order_item_creation(form, order, pk, request)
+        
+        # Form validation failed
+        errors: list[str] = []
+        for field, field_errors in form.errors.items():
+            errors.extend(f"{field}: {error}" for error in field_errors)
+        return json_error("Validation failed: " + "; ".join(errors))
+    
+    # GET request - show form
+    return _render_order_item_form(request, order_item_form(), order, action='create')
+
+
+def _render_order_item_form(request: HttpRequest, form: ModelForm, order: Order, item: OrderItem = None, action: str = 'create') -> HttpResponse:
+    """Render the order item form with all necessary context"""
+    # Get available products
+    products = Product.objects.filter(is_active=True).order_by('name')
+    
+    # Convert billing period choices to component format
+    billing_period_choices = [
+        ('once', _('One Time')),
+        ('monthly', _('Monthly')),
+        ('quarterly', _('Quarterly')),
+        ('semiannual', _('Semi-Annual')),
+        ('annual', _('Annual')),
+        ('biennial', _('Biennial')),
+        ('triennial', _('Triennial')),
+    ]
+    
+    billing_period_options = [
+        {'value': choice[0], 'label': str(choice[1])} 
+        for choice in billing_period_choices
+    ]
+    
+    # Create product options with pricing data for auto-population
+    product_options = []
+    for product in products:
+        # Get all available prices for this product in the order's currency
+        prices_data = {}
+        for price in product.get_active_prices().filter(currency=order.currency):
+            prices_data[price.billing_period] = {
+                'unit_cents': price.amount_cents,
+                'setup_cents': price.setup_cents,
+                'amount_display': f"{order.currency.code} {price.amount}",
+                'setup_display': f"{order.currency.code} {price.setup_fee}"
+            }
+        
+        product_options.append({
+            'value': product.id,
+            'label': f"{product.name} ({product.get_product_type_display()})",
+            'data': {
+                'product_type': product.product_type,
+                'requires_domain': product.requires_domain,
+                'prices': json.dumps(prices_data)  # JSON-encoded pricing data for auto-population
+            }
+        })
+    
+    context = {
+        'form': form,
+        'order': order,
+        'item': item,
+        'products': products,
+        'product_options': product_options,
+        'billing_period_options': billing_period_options,
+        'action': action,
+    }
+    
+    # Check if this is a request from expandable row (check for inline parameter or HX-Request header)
+    is_inline_request = (
+        request.headers.get('HX-Request') or 
+        request.GET.get('inline') == 'true' or 
+        'expandable' in request.headers.get('HX-Trigger', '')
+    )
+    
+    # Use inline template for expandable rows, full modal template otherwise
+    template = 'orders/partials/order_item_inline_form.html' if is_inline_request else 'orders/order_item_form.html'
+    
+    return render(request, template, context)
+
+
+def _process_order_item_update(form: ModelForm, order: Order, pk: uuid.UUID, request: HttpRequest) -> HttpResponse:
+    """Process the update of an existing order item with proper price override logic"""
+    try:
+        with transaction.atomic():
+            # Get the original item for comparison
+            original_item = OrderItem.objects.get(id=form.instance.id)
+            
+            # Update order item
+            updated_item = form.save(commit=False)
+            
+            # Get product and pricing information
+            product = updated_item.product
+            
+            # Check what fields were changed
+            product_changed = 'product' in form.changed_data
+            billing_period_changed = 'billing_period' in form.changed_data
+            manual_unit_price_changed = 'unit_price_cents' in form.changed_data
+            manual_setup_changed = 'setup_cents' in form.changed_data
+            
+            # INDUSTRY STANDARD PRICING LOGIC FOR UPDATES:
+            # 1. If user manually changed prices - use those (OVERRIDE)
+            # 2. If product/billing period changed but prices not manually changed - auto-update from product
+            # 3. If only other fields changed - keep existing prices
+            # 4. Always respect manual price edits
+            
+            # Get product default pricing for reference
+            product_price = product.get_price_for_period(
+                order.currency.code,
+                updated_item.billing_period
+            )
+            
+            # Handle unit price logic
+            if manual_unit_price_changed:
+                # User explicitly changed unit price - use their value (MANUAL OVERRIDE)
+                logger.info(f"💰 [Orders] Using manual override unit price: {updated_item.unit_price_cents} cents")
+            elif (product_changed or billing_period_changed):
+                # Product or billing period changed - auto-update from product if available
+                if product_price:
+                    updated_item.unit_price_cents = product_price.amount_cents
+                    logger.info(f"💰 [Orders] Auto-updated unit price from product: {product_price.amount_cents} cents")
+                else:
+                    # No product pricing - keep existing price but warn
+                    logger.warning(f"⚠️ [Orders] No product pricing available for {product.name}, keeping existing price: {updated_item.unit_price_cents} cents")
+            # If neither pricing fields nor product/billing changed, keep existing prices
+            
+            # Handle setup fee logic
+            if manual_setup_changed:
+                # User explicitly changed setup fee - use their value
+                logger.info(f"🛠️ [Orders] Using manual override setup fee: {updated_item.setup_cents} cents")
+            elif (product_changed or billing_period_changed):
+                # Product or billing period changed - auto-update from product if available
+                if product_price:
+                    updated_item.setup_cents = product_price.setup_cents
+                    logger.info(f"🛠️ [Orders] Auto-updated setup fee from product: {product_price.setup_cents} cents")
+                else:
+                    # No product pricing - keep existing setup fee
+                    logger.warning(f"⚠️ [Orders] No product pricing available for setup fee, keeping existing: {updated_item.setup_cents} cents")
+            
+            # Recalculate VAT if customer-related or product changed
+            if product_changed or billing_period_changed:
+                tax_rate = _get_vat_rate_for_customer(order.customer)
+                updated_item.tax_rate = tax_rate
+            
+            # Save the updated item (totals will be calculated in save method)
+            updated_item.save()
+            
+            # Recalculate order totals
+            order.calculate_totals()
+            
+            logger.info(f"✅ [Orders] Updated item {product.name} in order {order.order_number} with final pricing: {updated_item.unit_price_cents}¢ + {updated_item.setup_cents}¢ setup")
+            
+            # Return updated items list for HTMX
+            return order_items_list(request, pk)
+            
+    except Exception as e:
+        logger.error(f"🔥 [Orders] Error updating item in order {order.order_number}: {e}")
+        return json_error("Failed to update order item")
 
 
 @staff_required
 def order_item_edit(request: HttpRequest, pk: uuid.UUID, item_pk: uuid.UUID) -> HttpResponse:
-    """✏️ HTMX: Edit order item (to be implemented)"""
-    messages.info(request, _("Order item editing will be implemented next."))
-    return redirect('orders:order_detail', pk=pk)
+    """
+    ✏️ Edit existing order item with inline editing capabilities
+    HTMX endpoint for dynamic item updates
+    """
+    # Type guard for authenticated user
+    if not isinstance(request.user, User):
+        return redirect('users:login')
+    
+    order = get_object_or_404(Order, id=pk)
+    
+    # Validate access
+    if access_denied := _validate_order_access(request, order):
+        return access_denied
+    
+    # Check if order can be edited
+    if not (order.is_draft or order.status == 'pending'):
+        return json_error("Order cannot be modified in current status")
+    
+    item = get_object_or_404(OrderItem, id=item_pk, order=order)
+    
+    # Dynamic form creation for OrderItem
+    order_item_form = modelform_factory(
+        OrderItem,
+        fields=[
+            'product', 'quantity', 'unit_price_cents', 'setup_cents', 
+            'billing_period', 'config', 'domain_name'
+        ]
+    )
+    
+    if request.method == 'POST':
+        form = order_item_form(request.POST, instance=item)
+        if form.is_valid():
+            return _process_order_item_update(form, order, pk, request)
+        
+        # Form validation failed
+        errors: list[str] = []
+        for field, field_errors in form.errors.items():
+            errors.extend(f"{field}: {error}" for error in field_errors)
+        return json_error("Validation failed: " + "; ".join(errors))
+    
+    # GET request - show form
+    form = order_item_form(instance=item)
+    return _render_order_item_form(request, form, order, item=item, action='edit')
 
 
 @staff_required
 @require_POST
 def order_item_delete(request: HttpRequest, pk: uuid.UUID, item_pk: uuid.UUID) -> JsonResponse:
-    """🗑️ HTMX: Delete order item (to be implemented)"""
-    return json_success({'message': 'Order item deletion will be implemented next'})
+    """
+    🗑️ Delete order item with AJAX confirmation
+    Returns success response for HTMX handling
+    """
+    # Type guard for authenticated user
+    if not isinstance(request.user, User):
+        return json_error("Authentication required")
+    
+    order = get_object_or_404(Order, id=pk)
+    
+    # Validate access
+    if not request.user.can_access_customer(order.customer):
+        return json_error("Access denied")
+    
+    # Check if order can be edited
+    if not (order.is_draft or order.status == 'pending'):
+        return json_error("Order cannot be modified in current status")
+    
+    try:
+        item = get_object_or_404(OrderItem, id=item_pk, order=order)
+        product_name = item.product_name
+        
+        with transaction.atomic():
+            # Delete the item
+            item.delete()
+            
+            # Recalculate order totals
+            order.calculate_totals()
+            
+            logger.info(f"✅ [Orders] Deleted item {product_name} from order {order.order_number}")
+            
+            return json_success({
+                'message': f'Item {product_name} removed from order',
+                'order_total': str(order.total),
+                'order_total_cents': order.total_cents,
+                'item_count': order.items.count()
+            })
+            
+    except Exception as e:
+        logger.error(f"🔥 [Orders] Error deleting item from order {order.order_number}: {e}")
+        return json_error("Failed to delete order item")
 
 
 @staff_required
