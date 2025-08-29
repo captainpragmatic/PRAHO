@@ -1,0 +1,69 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% if is_edit %}{% trans "Edit Registrar" %}{% else %}{% trans "Add Registrar" %}{% endif %} - PRAHO Staff{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+  <div class="mb-6">
+    <h1 class="text-2xl font-bold text-slate-900 dark:text-white">
+      {% if is_edit %}✏️ {% trans "Edit Registrar" %}{% else %}🏢 {% trans "Add Registrar" %}{% endif %}
+    </h1>
+    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+      {% if is_edit %}{% trans "Update registrar configuration and credentials." %}{% else %}{% trans "Create a new domain registrar configuration." %}{% endif %}
+    </p>
+  </div>
+
+  <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-6">
+    <form method="post" novalidate class="space-y-6">
+      {% csrf_token %}
+
+      {% if form.non_field_errors %}
+        <div class="mb-4 text-sm text-red-700 bg-red-50 dark:bg-red-900/30 dark:text-red-300 rounded p-3">
+          {{ form.non_field_errors }}
+        </div>
+      {% endif %}
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {% input_field name="display_name" label=_("Display name") value=form.display_name.value html_id="id_display_name" required=True error=form.display_name.errors.0 %}
+        {% input_field name="name" label=_("Name") value=form.name.value html_id="id_name" required=True error=form.name.errors.0 %}
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {% input_field name="website_url" input_type="url" label=_("Website URL") value=form.website_url.value html_id="id_website_url" required=True error=form.website_url.errors.0 %}
+        {% input_field name="api_endpoint" input_type="url" label=_("API endpoint") value=form.api_endpoint.value html_id="id_api_endpoint" required=True help_text=form.fields.api_endpoint.help_text error=form.api_endpoint.errors.0 %}
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {% input_field name="api_username" label=_("API username") value=form.api_username.value html_id="id_api_username" error=form.api_username.errors.0 %}
+        {% input_field name="api_key" input_type="password" label=_("API key") value=form.api_key.value html_id="id_api_key" error=form.api_key.errors.0 icon_right="password-toggle" %}
+        {% input_field name="api_secret" input_type="password" label=_("API secret") value=form.api_secret.value html_id="id_api_secret" error=form.api_secret.errors.0 icon_right="password-toggle" %}
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {% input_field name="webhook_secret" input_type="password" label=_("Webhook secret") value=form.webhook_secret.value html_id="id_webhook_secret" help_text=form.fields.webhook_secret.help_text error=form.webhook_secret.errors.0 icon_right="password-toggle" %}
+        {% input_field name="webhook_endpoint" input_type="url" label=_("Webhook endpoint") value=form.webhook_endpoint.value html_id="id_webhook_endpoint" help_text=form.fields.webhook_endpoint.help_text error=form.webhook_endpoint.errors.0 %}
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {% input_field name="status" input_type="select" label=_("Status") html_id="id_status" required=True options=status_options value=form.status.value error=form.status.errors.0 %}
+        {% input_field name="currency" label=_("Currency") value=form.currency.value|default:"USD" html_id="id_currency" maxlength=3 placeholder="USD" error=form.currency.errors.0 %}
+        {% input_field name="monthly_fee_cents" input_type="number" label=_("Monthly fee (cents)") value=form.monthly_fee_cents.value|default:"0" html_id="id_monthly_fee_cents" min=0 step=1 help_text=form.fields.monthly_fee_cents.help_text error=form.monthly_fee_cents.errors.0 %}
+      </div>
+
+      {% input_field name="default_nameservers" input_type="textarea" label=_("Default nameservers") value=form.default_nameservers.value html_id="id_default_nameservers" rows=3 placeholder='["ns1.example.com", "ns2.example.com"]' help_text=form.fields.default_nameservers.help_text error=form.default_nameservers.errors.0 %}
+
+      <div class="pt-2 flex items-center gap-3">
+        {% if is_edit %}
+          {% button "💾 Save Changes" variant="primary" type="submit" %}
+        {% else %}
+          {% button "💾 Save Registrar" variant="primary" type="submit" %}
+        {% endif %}
+        {% url 'domains:registrar_list' as registrar_list_url %}
+        {% button "Cancel" variant="secondary" href=registrar_list_url %}
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

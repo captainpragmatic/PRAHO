@@ -16,7 +16,8 @@
             </p>
         </div>
         <div class="flex gap-3">
-            {% button "➕ Add TLD" variant="primary" href="#" %}
+            {% url 'domains:tld_create' as tld_create_url %}
+            {% button "➕ Add TLD" variant="primary" href=tld_create_url %}
             {% button "⭐ Featured" variant="secondary" href="?status=featured" %}
         </div>
     </div>
@@ -166,8 +167,9 @@
 
                     <!-- Actions -->
                     <div class="flex items-center gap-2">
-                        {% button "✏️ Edit" variant="secondary" size="sm" href="#" %}
-                        {% button "📊 Pricing" variant="secondary" size="sm" href="#" %}
+                        {% url 'domains:tld_edit' pk=tld.id as tld_edit_url %}
+                        {% button "✏️ Edit" variant="secondary" size="sm" href=tld_edit_url %}
+                        {% button "📊 Pricing" variant="secondary" size="sm" href=tld_edit_url|add:'#pricing' %}
                     </div>
                 </div>
             </div>
@@ -246,4 +248,3 @@
     </div>
 </div>
 {% endblock %}
-

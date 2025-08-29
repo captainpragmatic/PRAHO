@@ -16,8 +16,13 @@
             </p>
         </div>
         <div class="flex gap-3">
-            {% button "➕ Add Registrar" variant="primary" href="#" %}
-            {% button "🔄 Sync All" variant="secondary" href="#" %}
+            {% url 'domains:registrar_create' as registrar_create_url %}
+            {% button "➕ Add Registrar" variant="primary" href=registrar_create_url %}
+
+            <form method="post" action="{% url 'domains:registrar_sync_all' %}" class="inline">
+                {% csrf_token %}
+                {% button "🔄 Sync All" variant="secondary" type="submit" attrs="onclick=\"return confirm('Sync all registrars now?')\"" %}
+            </form>
         </div>
     </div>
 
@@ -165,44 +170,10 @@
                         </div>
                     </div>
 
-                    <!-- Actions -->
-                    <div class="flex items-center space-x-2 flex-shrink-0">
-                        {% if registrar.status == 'active' %}
-                            {% button "⚙️ Configure" variant="secondary" size="sm" href="#" %}
-                        {% endif %}
-                        
-                        {% button "📊 Stats" variant="secondary" size="sm" href="#" %}
-                        
-                        <div class="relative">
-                            <button type="button" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300" 
-                                    onclick="toggleDropdown('dropdown-{{ registrar.id }}')">
-                                <span class="sr-only">{% trans "Open options" %}</span>
-                                ⋮
-                            </button>
-                            <div id="dropdown-{{ registrar.id }}" 
-                                 class="hidden absolute right-0 mt-2 w-48 bg-white dark:bg-slate-700 rounded-md shadow-lg z-10 border border-slate-200 dark:border-slate-600">
-                                <div class="py-1">
-                                    <a href="#" class="block px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600">
-                                        ✏️ {% trans "Edit" %}
-                                    </a>
-                                    <a href="#" class="block px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600">
-                                        🔄 {% trans "Test Connection" %}
-                                    </a>
-                                    <a href="#" class="block px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600">
-                                        📋 {% trans "View Logs" %}
-                                    </a>
-                                    {% if registrar.status == 'active' %}
-                                    <a href="#" class="block px-4 py-2 text-sm text-yellow-700 dark:text-yellow-300 hover:bg-slate-100 dark:hover:bg-slate-600">
-                                        ⏸️ {% trans "Suspend" %}
-                                    </a>
-                                    {% elif registrar.status == 'suspended' %}
-                                    <a href="#" class="block px-4 py-2 text-sm text-green-700 dark:text-green-300 hover:bg-slate-100 dark:hover:bg-slate-600">
-                                        ▶️ {% trans "Activate" %}
-                                    </a>
-                                    {% endif %}
-                                </div>
-                            </div>
-                        </div>
+                    <!-- Action: Configure only -->
+                    <div class="flex items-center flex-shrink-0">
+                        {% url 'domains:registrar_edit' pk=registrar.id as registrar_edit_url %}
+                        {% button "⚙️ Configure" variant="secondary" size="sm" href=registrar_edit_url %}
                     </div>
                 </div>
             </div>
@@ -305,5 +276,6 @@ document.addEventListener('click', function(event) {
         dropdowns.forEach(d => d.classList.add('hidden'));
     }
 });
+// (No per-row dropdown actions; simplified to just "Configure")
 </script>
 {% endblock %}

@@ -1,0 +1,82 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load ui_components %}
+{% load formatting %}
+
+{% block title %}{% if is_edit %}{% trans "Edit TLD" %}{% else %}{% trans "Add TLD" %}{% endif %} - PRAHO Staff{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+  <div class="mb-6">
+    <h1 class="text-2xl font-bold text-slate-900 dark:text-white">
+      {% if is_edit %}✏️ {% trans "Edit TLD" %}{% else %}🌐 {% trans "Add TLD" %}{% endif %}
+    </h1>
+    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+      {% if is_edit %}{% trans "Update TLD configuration, pricing, and settings." %}{% else %}{% trans "Create a new top-level domain with pricing and settings." %}{% endif %}
+    </p>
+  </div>
+
+  <form method="post" novalidate class="space-y-6 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-6">
+    {% csrf_token %}
+
+    {% if form.non_field_errors %}
+      {% alert form.non_field_errors|striptags variant="danger" %}
+    {% endif %}
+
+    <!-- Core -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {% input_field name="extension" label=_("Extension") value=form.extension.value html_id="id_extension" placeholder="com, ro, eu" required=True error=form.extension.errors.0 %}
+      {% input_field name="description" label=_("Description") value=form.description.value html_id="id_description" placeholder="Commercial domains, Romania ccTLD, European Union" required=True error=form.description.errors.0 %}
+    </div>
+
+    <!-- Pricing -->
+    <div id="pricing" class="space-y-4">
+      <h2 class="text-lg font-semibold text-slate-900 dark:text-white">{% trans "Pricing (cents)" %}</h2>
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+        {% input_field name="registration_price_cents" input_type="number" label=_("Registration") value=form.registration_price_cents.value html_id="id_registration_price_cents" min=0 step=1 error=form.registration_price_cents.errors.0 %}
+        {% input_field name="renewal_price_cents" input_type="number" label=_("Renewal") value=form.renewal_price_cents.value html_id="id_renewal_price_cents" min=0 step=1 error=form.renewal_price_cents.errors.0 %}
+        {% input_field name="transfer_price_cents" input_type="number" label=_("Transfer") value=form.transfer_price_cents.value html_id="id_transfer_price_cents" min=0 step=1 error=form.transfer_price_cents.errors.0 %}
+        {% input_field name="registrar_cost_cents" input_type="number" label=_("Registrar Cost") value=form.registrar_cost_cents.value html_id="id_registrar_cost_cents" min=0 step=1 error=form.registrar_cost_cents.errors.0 %}
+      </div>
+    </div>
+
+    <!-- Configuration -->
+    <div class="space-y-4">
+      <h2 class="text-lg font-semibold text-slate-900 dark:text-white">{% trans "Configuration" %}</h2>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {% input_field name="min_registration_period" input_type="number" label=_("Min years") value=form.min_registration_period.value|default:"1" html_id="id_min_registration_period" min=1 max=10 error=form.min_registration_period.errors.0 %}
+        {% input_field name="max_registration_period" input_type="number" label=_("Max years") value=form.max_registration_period.value|default:"10" html_id="id_max_registration_period" min=1 max=10 error=form.max_registration_period.errors.0 %}
+        {% input_field name="grace_period_days" input_type="number" label=_("Grace period (days)") value=form.grace_period_days.value|default:"30" html_id="id_grace_period_days" min=0 step=1 error=form.grace_period_days.errors.0 %}
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {% input_field name="redemption_fee_cents" input_type="number" label=_("Redemption fee (cents)") value=form.redemption_fee_cents.value|default:"0" html_id="id_redemption_fee_cents" min=0 step=1 error=form.redemption_fee_cents.errors.0 %}
+      </div>
+    </div>
+
+    <!-- Flags -->
+    <div class="space-y-4">
+      <h2 class="text-lg font-semibold text-slate-900 dark:text-white">{% trans "Options" %}</h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {% include 'components/checkbox.html' with name='whois_privacy_available' html_id='id_whois_privacy_available' label=_('WHOIS privacy available') checked=form.whois_privacy_available.value %}
+        {% include 'components/checkbox.html' with name='requires_local_presence' html_id='id_requires_local_presence' label=_('Requires local presence (.ro)') checked=form.requires_local_presence.value %}
+      </div>
+      {% input_field name="special_requirements" input_type="textarea" label=_("Special requirements") value=form.special_requirements.value html_id="id_special_requirements" rows=3 error=form.special_requirements.errors.0 %}
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {% include 'components/checkbox.html' with name='is_active' html_id='id_is_active' label=_('Active') checked=form.is_active.value %}
+        {% include 'components/checkbox.html' with name='is_featured' html_id='id_is_featured' label=_('Featured') checked=form.is_featured.value %}
+      </div>
+    </div>
+
+    <div class="pt-2 flex items-center gap-3">
+      {% if is_edit %}
+        {% button "💾 Save Changes" variant="primary" type="submit" %}
+      {% else %}
+        {% button "💾 Save TLD" variant="primary" type="submit" %}
+      {% endif %}
+      {% url 'domains:tld_list' as tld_list_url %}
+      {% button "Cancel" variant="secondary" href=tld_list_url %}
+    </div>
+  </form>
+</div>
+{% endblock %}
+

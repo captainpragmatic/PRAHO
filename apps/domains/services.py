@@ -285,6 +285,39 @@ class RegistrarService:
         fallbacks = RegistrarService.get_fallback_registrars_for_tld(tld)
         return fallbacks.first()
 
+    @staticmethod
+    def sync_all_registrars() -> int:
+        """🔄 Sync all registrars' stats (placeholder).
+
+        - Updates `total_domains` by counting related domains
+        - Sets `last_sync_at` to current time
+        - Clears `last_error`
+
+        Returns number of registrars updated.
+        """
+        from django.utils import timezone
+        from .models import Registrar
+
+        updated = 0
+        for registrar in Registrar.objects.all():
+            try:
+                total = registrar.domains.count()
+                registrar.total_domains = total
+                registrar.last_sync_at = timezone.now()
+                registrar.last_error = ""
+                registrar.save(update_fields=[
+                    'total_domains', 'last_sync_at', 'last_error', 'updated_at'
+                ])
+                updated += 1
+            except Exception as e:
+                logger.error(f"🔥 [Registrar] Sync failed for {registrar.name}: {e}")
+                registrar.last_error = str(e)
+                registrar.last_sync_at = timezone.now()
+                registrar.save(update_fields=['last_error', 'last_sync_at', 'updated_at'])
+
+        logger.info(f"✅ [Registrar] Synced {updated} registrars")
+        return updated
+
 
 # ===============================================================================
 # DOMAIN LIFECYCLE SERVICE

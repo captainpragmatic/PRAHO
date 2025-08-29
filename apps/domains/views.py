@@ -21,6 +21,7 @@ from apps.customers.models import Customer
 from apps.users.models import User
 
 from .models import TLD, Domain, DomainOrderItem, Registrar
+from .forms import RegistrarForm, TLDForm
 from .services import (
     DomainLifecycleService,
     DomainRepository,
@@ -558,6 +559,39 @@ def tld_list(request: HttpRequest) -> HttpResponse:
 
 
 @staff_required
+def tld_create(request: HttpRequest) -> HttpResponse:
+    """🌐 Staff view - Create a new TLD"""
+    if request.method == 'POST':
+        form = TLDForm(request.POST)
+        if form.is_valid():
+            form.save()
+            messages.success(request, _("✅ TLD created successfully"))
+            return redirect('domains:tld_list')
+        messages.error(request, _("❌ Please fix the errors below"))
+    else:
+        form = TLDForm()
+
+    return render(request, 'domains/staff/tld_form.html', {"form": form})
+
+
+@staff_required
+def tld_edit(request: HttpRequest, pk: int) -> HttpResponse:
+    """✏️ Staff view - Edit TLD"""
+    tld = get_object_or_404(TLD, pk=pk)
+    if request.method == 'POST':
+        form = TLDForm(request.POST, instance=tld)
+        if form.is_valid():
+            form.save()
+            messages.success(request, _("✅ TLD updated successfully"))
+            return redirect('domains:tld_list')
+        messages.error(request, _("❌ Please fix the errors below"))
+    else:
+        form = TLDForm(instance=tld)
+
+    return render(request, 'domains/staff/tld_form.html', {"form": form, "tld": tld, "is_edit": True})
+
+
+@staff_required
 def registrar_list(request: HttpRequest) -> HttpResponse:
     """🏢 Staff view - Manage registrars and API configurations"""
     # Type guard: @staff_required ensures authenticated staff user
@@ -593,6 +627,71 @@ def registrar_list(request: HttpRequest) -> HttpResponse:
     }
     
     return render(request, 'domains/staff/registrar_list.html', context)
+
+
+@staff_required
+def registrar_create(request: HttpRequest) -> HttpResponse:
+    """🏢 Staff view - Create a new registrar"""
+    # Build status options for UI component select
+    status_options = [
+        {"value": value, "label": label} for value, label in Registrar.STATUS_CHOICES
+    ]
+    if request.method == 'POST':
+        form = RegistrarForm(request.POST)
+        if form.is_valid():
+            form.save()
+            messages.success(request, _("✅ Registrar created successfully"))
+            return redirect('domains:registrar_list')
+        messages.error(request, _("❌ Please fix the errors below"))
+    else:
+        form = RegistrarForm()
+
+    context = {
+        "form": form,
+        "status_options": status_options,
+    }
+    return render(request, 'domains/staff/registrar_form.html', context)
+
+
+@staff_required
+@require_http_methods(["POST"]) 
+def registrar_sync_all(request: HttpRequest) -> HttpResponse:
+    """🔄 Staff action - Sync all registrars (stats/health)."""
+    count = RegistrarService.sync_all_registrars()
+    messages.success(request, _(f"✅ Synced {count} registrar(s)"))
+    # Support HTMX redirects if applicable
+    response = redirect('domains:registrar_list')
+    try:
+        from django.urls import reverse
+        response["HX-Redirect"] = reverse('domains:registrar_list')
+    except Exception:
+        pass
+    return response
+
+
+@staff_required
+def registrar_edit(request: HttpRequest, pk: int) -> HttpResponse:
+    """✏️ Staff view - Edit an existing registrar"""
+    registrar = get_object_or_404(Registrar, pk=pk)
+    status_options = [{"value": value, "label": label} for value, label in Registrar.STATUS_CHOICES]
+
+    if request.method == 'POST':
+        form = RegistrarForm(request.POST, instance=registrar)
+        if form.is_valid():
+            form.save()
+            messages.success(request, _("✅ Registrar updated successfully"))
+            return redirect('domains:registrar_list')
+        messages.error(request, _("❌ Please fix the errors below"))
+    else:
+        form = RegistrarForm(instance=registrar)
+
+    context = {
+        "form": form,
+        "status_options": status_options,
+        "is_edit": True,
+        "registrar": registrar,
+    }
+    return render(request, 'domains/staff/registrar_form.html', context)
 
 
 @staff_required
