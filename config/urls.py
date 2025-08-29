@@ -42,6 +42,7 @@ urlpatterns = [
 
     # Core business apps
     path('app/customers/', include('apps.customers.urls')),
+    path('app/products/', include('apps.products.urls')),
     path('app/orders/', include('apps.orders.urls')),
     path('app/billing/', include('apps.billing.urls')),
     path('app/tickets/', include('apps.tickets.urls')),
@@ -52,6 +53,9 @@ urlpatterns = [
 
     # GDPR compliance and audit
     path('app/audit/', include('apps.audit.urls')),
+
+    # API endpoints
+    path('api/customers/', include('apps.customers.urls')),
 
     # Background job monitoring (DISABLED - Redis not needed yet)
     # path('django-rq/', include('django_rq.urls')),  # noqa: ERA001

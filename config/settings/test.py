@@ -26,15 +26,20 @@ INSTALLED_APPS = [app for app in INSTALLED_APPS if app != 'debug_toolbar']
 # Remove debug toolbar middleware in tests
 MIDDLEWARE = [mw for mw in MIDDLEWARE if 'debug_toolbar' not in mw]
 
-# Ensure SessionMiddleware and MessageMiddleware are present for tests
-required_middleware = [
+# Ensure proper middleware order for tests - messages framework needs sessions and auth
+# Remove custom middleware that might interfere in tests
+test_middleware = [
+    'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.locale.LocaleMiddleware', 
+    'django.middleware.common.CommonMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-for mw in required_middleware:
-    if mw not in MIDDLEWARE:
-        MIDDLEWARE.append(mw)
+MIDDLEWARE = test_middleware
 
 # ===============================================================================
 # TEST DATABASE (In-memory for speed)
@@ -143,7 +148,7 @@ EFACTURA_ENABLED = False
 # DJANGO MESSAGES FRAMEWORK (Test Configuration)
 # ===============================================================================
 
-MESSAGE_STORAGE = 'django.contrib.messages.storage.cookie.CookieStorage'
+MESSAGE_STORAGE = 'django.contrib.messages.storage.fallback.FallbackStorage'
 
 # ===============================================================================
 # TASK QUEUE (Synchronous for tests)
