@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Audit Integrity Dashboard" %}{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <h1 class="text-3xl font-bold text-gray-900 mb-6">{% trans "Audit Data Integrity" %}</h1>
+    
+    <div class="bg-white shadow rounded-lg p-6 mb-6">
+        <h2 class="text-xl font-semibold mb-4">{% trans "Integrity Status" %}</h2>
+        
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div class="bg-green-50 p-4 rounded">
+                <h3 class="font-medium text-green-900">{% trans "Total Events" %}</h3>
+                <p class="text-2xl font-bold text-green-600">{{ stats.total_events|default:0 }}</p>
+            </div>
+            
+            <div class="bg-blue-50 p-4 rounded">
+                <h3 class="font-medium text-blue-900">{% trans "Verified Events" %}</h3>
+                <p class="text-2xl font-bold text-blue-600">{{ stats.verified_events|default:0 }}</p>
+            </div>
+            
+            <div class="bg-yellow-50 p-4 rounded">
+                <h3 class="font-medium text-yellow-900">{% trans "Sequence Gaps" %}</h3>
+                <p class="text-2xl font-bold text-yellow-600">{{ stats.sequence_gaps|default:0 }}</p>
+            </div>
+            
+            <div class="bg-red-50 p-4 rounded">
+                <h3 class="font-medium text-red-900">{% trans "Hash Mismatches" %}</h3>
+                <p class="text-2xl font-bold text-red-600">{{ stats.hash_mismatches|default:0 }}</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="bg-white shadow rounded-lg p-6">
+        <h2 class="text-xl font-semibold mb-4">{% trans "Recent Integrity Checks" %}</h2>
+        
+        {% if recent_checks %}
+            <div class="space-y-3">
+                {% for check in recent_checks %}
+                    <div class="border border-gray-200 rounded p-3">
+                        <div class="flex justify-between items-center">
+                            <span class="font-medium">{{ check.check_type }}</span>
+                            <span class="text-sm text-gray-500">{{ check.checked_at }}</span>
+                        </div>
+                        {% if check.issues_found %}
+                            <p class="text-sm text-red-600 mt-1">{{ check.issues_found }} issues found</p>
+                        {% else %}
+                            <p class="text-sm text-green-600 mt-1">{% trans "No issues found" %}</p>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="text-gray-500">{% trans "No integrity checks performed yet." %}</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
