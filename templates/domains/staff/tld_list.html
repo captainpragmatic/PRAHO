@@ -1,0 +1,249 @@
+{% extends 'base.html' %}
+{% load ui_components %}
+{% load formatting %}
+{% load i18n %}
+
+{% block title %}{% trans "TLD Management" %} - PRAHO Staff{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <!-- Page Header -->
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <h1 class="text-2xl font-bold text-slate-900 dark:text-white">🌐 {% trans "TLD Management" %}</h1>
+            <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                {% trans "Manage available top-level domains, pricing, and registrars" %}
+            </p>
+        </div>
+        <div class="flex gap-3">
+            {% button "➕ Add TLD" variant="primary" href="#" %}
+            {% button "⭐ Featured" variant="secondary" href="?status=featured" %}
+        </div>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <div class="w-8 h-8 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center">
+                        <span class="text-blue-600 dark:text-blue-400 text-sm">🌐</span>
+                    </div>
+                </div>
+                <div class="ml-3">
+                    <p class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "Total TLDs" %}</p>
+                    <p class="text-lg font-semibold text-slate-900 dark:text-white">{{ total_count }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <div class="w-8 h-8 bg-green-100 dark:bg-green-900 rounded-lg flex items-center justify-center">
+                        <span class="text-green-600 dark:text-green-400 text-sm">🟢</span>
+                    </div>
+                </div>
+                <div class="ml-3">
+                    <p class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "Active" %}</p>
+                    <p class="text-lg font-semibold text-slate-900 dark:text-white">{{ active_count }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <div class="w-8 h-8 bg-yellow-100 dark:bg-yellow-900 rounded-lg flex items-center justify-center">
+                        <span class="text-yellow-600 dark:text-yellow-400 text-sm">⭐</span>
+                    </div>
+                </div>
+                <div class="ml-3">
+                    <p class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "Featured" %}</p>
+                    <p class="text-lg font-semibold text-slate-900 dark:text-white">{{ featured_count }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4 mb-6">
+        <form method="get" class="flex flex-wrap items-end gap-4">
+            <div class="w-full sm:w-auto">
+                <label for="search" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    {% trans "Search" %}
+                </label>
+                <input type="text" id="search" name="search" value="{{ search_query }}"
+                       placeholder=".ro, .com, eu"
+                       class="w-full sm:w-64 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-3 py-2 text-sm" />
+            </div>
+            <div>
+                <label for="status" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    {% trans "Status" %}
+                </label>
+                <select name="status" id="status"
+                        class="block w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-3 py-2 text-sm">
+                    <option value="">{% trans "All" %}</option>
+                    <option value="active" {% if request.GET.status == 'active' %}selected{% endif %}>🟢 {% trans "Active" %}</option>
+                    <option value="inactive" {% if request.GET.status == 'inactive' %}selected{% endif %}>🔴 {% trans "Inactive" %}</option>
+                    <option value="featured" {% if request.GET.status == 'featured' %}selected{% endif %}>⭐ {% trans "Featured" %}</option>
+                </select>
+            </div>
+            <div>
+                <button type="submit" class="inline-flex items-center px-4 py-2 rounded-md bg-slate-900 text-white text-sm hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600">
+                    🔎 {% trans "Filter" %}
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- TLDs List -->
+    <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+        {% if tlds and tlds|length %}
+        <div class="divide-y divide-slate-200 dark:divide-slate-700">
+            {% for tld in tlds %}
+            <div class="p-6">
+                <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                    <!-- TLD Info -->
+                    <div class="flex items-start gap-4">
+                        <div class="flex-shrink-0 w-12 h-12 rounded-lg bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-xl font-bold">
+                            .{{ tld.extension }}
+                        </div>
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <h3 class="text-lg font-semibold text-slate-900 dark:text-white">.{{ tld.extension }}</h3>
+                                {% if tld.is_active %}{% badge "🟢" %}{% else %}{% badge "🔴" %}{% endif %}
+                                {% if tld.is_featured %}{% badge "⭐" variant="secondary" %}{% endif %}
+                                {% if tld.whois_privacy_available %}{% badge "🔒 WHOIS" size="sm" %}{% endif %}
+                            </div>
+                            <p class="text-sm text-slate-600 dark:text-slate-400">{{ tld.description }}</p>
+                            <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                                <span class="font-medium">{% trans "Period:" %}</span>
+                                <span>{{ tld.min_registration_period }}–{{ tld.max_registration_period }} {% trans "years" %}</span>
+                                <span class="font-medium ml-3">{% trans "Grace:" %}</span>
+                                <span>{{ tld.grace_period_days }} {% trans "days" %}</span>
+                                {% if tld.redemption_fee_cents and tld.redemption_fee_cents|add:0 > 0 %}
+                                    <span class="font-medium ml-3">{% trans "Redemption:" %}</span>
+                                    <span>{{ tld.redemption_fee_cents|cents_to_currency|romanian_currency }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Pricing -->
+                    <div class="grid grid-cols-3 gap-4">
+                        <div class="text-center">
+                            <div class="text-xs text-slate-500 dark:text-slate-400">{% trans "Registration" %}</div>
+                            <div class="text-sm font-mono font-semibold">{{ tld.registration_price_cents|cents_to_currency|romanian_currency }}</div>
+                        </div>
+                        <div class="text-center">
+                            <div class="text-xs text-slate-500 dark:text-slate-400">{% trans "Renewal" %}</div>
+                            <div class="text-sm font-mono font-semibold">{{ tld.renewal_price_cents|cents_to_currency|romanian_currency }}</div>
+                        </div>
+                        <div class="text-center">
+                            <div class="text-xs text-slate-500 dark:text-slate-400">{% trans "Transfer" %}</div>
+                            <div class="text-sm font-mono font-semibold">{{ tld.transfer_price_cents|cents_to_currency|romanian_currency }}</div>
+                        </div>
+                    </div>
+
+                    <!-- Registrars -->
+                    <div class="min-w-[260px]">
+                        {% with assignments=tld.registrar_assignments.all %}
+                            {% if assignments %}
+                                <div class="text-sm">
+                                    <div class="text-slate-500 dark:text-slate-400 mb-1">{% trans "Registrars" %}</div>
+                                    <div class="flex flex-wrap gap-1">
+                                        {% for a in assignments %}
+                                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-800 dark:bg-slate-700 dark:text-slate-200">
+                                                {{ a.registrar.display_name }}{% if a.is_primary %} • {% trans "Primary" %}{% else %} • #{{ a.priority }}{% endif %}
+                                            </span>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                            {% else %}
+                                <div class="text-sm text-slate-500 dark:text-slate-400 italic">{% trans "No registrar assignments" %}</div>
+                            {% endif %}
+                        {% endwith %}
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="flex items-center gap-2">
+                        {% button "✏️ Edit" variant="secondary" size="sm" href="#" %}
+                        {% button "📊 Pricing" variant="secondary" size="sm" href="#" %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <!-- Pagination -->
+        {% if tlds.has_other_pages %}
+        <div class="px-6 py-4 border-t border-slate-200 dark:border-slate-700">
+            <nav class="flex items-center justify-between">
+                <div class="flex-1 flex justify-between sm:hidden">
+                    {% if tlds.has_previous %}
+                        <a href="?page={{ tlds.previous_page_number }}" 
+                           class="relative inline-flex items-center px-4 py-2 border border-slate-300 text-sm font-medium rounded-md text-slate-700 bg-white hover:bg-slate-50">
+                            {% trans "Previous" %}
+                        </a>
+                    {% endif %}
+                    {% if tlds.has_next %}
+                        <a href="?page={{ tlds.next_page_number }}" 
+                           class="ml-3 relative inline-flex items-center px-4 py-2 border border-slate-300 text-sm font-medium rounded-md text-slate-700 bg-white hover:bg-slate-50">
+                            {% trans "Next" %}
+                        </a>
+                    {% endif %}
+                </div>
+                <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+                    <div>
+                        <p class="text-sm text-slate-700 dark:text-slate-300">
+                            {% trans "Showing" %}
+                            <span class="font-medium">{{ tlds.start_index }}</span>
+                            {% trans "to" %}
+                            <span class="font-medium">{{ tlds.end_index }}</span>
+                            {% trans "of" %}
+                            <span class="font-medium">{{ tlds.paginator.count }}</span>
+                            {% trans "TLDs" %}
+                        </p>
+                    </div>
+                    <div>
+                        <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px">
+                            {% if tlds.has_previous %}
+                                <a href="?page=1" class="relative inline-flex items-center px-2 py-2 rounded-l-md border border-slate-300 bg-white text-sm font-medium text-slate-500 hover:bg-slate-50">
+                                    {% trans "First" %}
+                                </a>
+                                <a href="?page={{ tlds.previous_page_number }}" class="relative inline-flex items-center px-2 py-2 border border-slate-300 bg-white text-sm font-medium text-slate-500 hover:bg-slate-50">
+                                    ‹
+                                </a>
+                            {% endif %}
+                            
+                            <span class="relative inline-flex items-center px-4 py-2 border border-slate-300 bg-white text-sm font-medium text-slate-700">
+                                {{ tlds.number }}
+                            </span>
+                            
+                            {% if tlds.has_next %}
+                                <a href="?page={{ tlds.next_page_number }}" class="relative inline-flex items-center px-2 py-2 border border-slate-300 bg-white text-sm font-medium text-slate-500 hover:bg-slate-50">
+                                    ›
+                                </a>
+                                <a href="?page={{ tlds.paginator.num_pages }}" class="relative inline-flex items-center px-2 py-2 rounded-r-md border border-slate-300 bg-white text-sm font-medium text-slate-500 hover:bg-slate-50">
+                                    {% trans "Last" %}
+                                </a>
+                            {% endif %}
+                        </nav>
+                    </div>
+                </div>
+            </nav>
+        </div>
+        {% endif %}
+        {% else %}
+        <div class="px-6 py-12 text-center">
+            <div class="text-slate-400 text-6xl mb-4">🌐</div>
+            <h3 class="text-lg font-medium text-slate-900 dark:text-white mb-2">{% trans "No TLDs found" %}</h3>
+            <p class="text-slate-500 dark:text-slate-400 mb-6">
+                {% trans "Get started by adding your first TLD and pricing." %}
+            </p>
+            {% button "➕ Add First TLD" variant="primary" href="#" %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+

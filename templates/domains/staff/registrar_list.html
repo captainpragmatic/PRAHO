@@ -1,0 +1,309 @@
+{% extends 'base.html' %}
+{% load ui_components %}
+{% load formatting %}
+{% load i18n %}
+
+{% block title %}{% trans "Registrar Management" %} - PRAHO Staff{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <!-- Page Header -->
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <h1 class="text-2xl font-bold text-slate-900 dark:text-white">🏢 {% trans "Registrar Management" %}</h1>
+            <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                {% trans "Configure and manage domain registrar integrations" %}
+            </p>
+        </div>
+        <div class="flex gap-3">
+            {% button "➕ Add Registrar" variant="primary" href="#" %}
+            {% button "🔄 Sync All" variant="secondary" href="#" %}
+        </div>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <div class="w-8 h-8 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center">
+                        <span class="text-blue-600 dark:text-blue-400 text-sm">🏢</span>
+                    </div>
+                </div>
+                <div class="ml-3">
+                    <p class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "Total Registrars" %}</p>
+                    <p class="text-lg font-semibold text-slate-900 dark:text-white">{{ total_count }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <div class="w-8 h-8 bg-green-100 dark:bg-green-900 rounded-lg flex items-center justify-center">
+                        <span class="text-green-600 dark:text-green-400 text-sm">🟢</span>
+                    </div>
+                </div>
+                <div class="ml-3">
+                    <p class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "Active" %}</p>
+                    <p class="text-lg font-semibold text-slate-900 dark:text-white">{{ active_count }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <div class="w-8 h-8 bg-yellow-100 dark:bg-yellow-900 rounded-lg flex items-center justify-center">
+                        <span class="text-yellow-600 dark:text-yellow-400 text-sm">🟡</span>
+                    </div>
+                </div>
+                <div class="ml-3">
+                    <p class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "Suspended" %}</p>
+                    <p class="text-lg font-semibold text-slate-900 dark:text-white">{{ suspended_count }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <div class="w-8 h-8 bg-red-100 dark:bg-red-900 rounded-lg flex items-center justify-center">
+                        <span class="text-red-600 dark:text-red-400 text-sm">🔴</span>
+                    </div>
+                </div>
+                <div class="ml-3">
+                    <p class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "Disabled" %}</p>
+                    <p class="text-lg font-semibold text-slate-900 dark:text-white">{{ disabled_count }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4 mb-6">
+        <form method="get" class="flex flex-wrap items-center gap-4">
+            <div>
+                <label for="status" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    {% trans "Status" %}
+                </label>
+                <select name="status" id="status" 
+                        class="block w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-3 py-2 text-sm">
+                    <option value="">{% trans "All Statuses" %}</option>
+                    <option value="active" {% if request.GET.status == 'active' %}selected{% endif %}>🟢 {% trans "Active" %}</option>
+                    <option value="suspended" {% if request.GET.status == 'suspended' %}selected{% endif %}>🟡 {% trans "Suspended" %}</option>
+                    <option value="disabled" {% if request.GET.status == 'disabled' %}selected{% endif %}>🔴 {% trans "Disabled" %}</option>
+                </select>
+            </div>
+            <div class="flex items-end">
+                {% button "🔍 Filter" variant="primary" type="submit" size="sm" %}
+                <a href="{% url 'domains:registrar_list' %}" class="ml-2 text-sm text-slate-500 hover:text-slate-700">{% trans "Clear" %}</a>
+            </div>
+        </form>
+    </div>
+
+    <!-- Registrars List -->
+    <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+        <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+            <h2 class="text-lg font-semibold text-slate-900 dark:text-white">
+                {% trans "Registrars" %} ({{ registrars_page.paginator.count }})
+            </h2>
+        </div>
+
+        {% if registrars_page %}
+        <div class="divide-y divide-slate-200 dark:divide-slate-700">
+            {% for registrar in registrars_page %}
+            <div class="px-6 py-4 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                <div class="flex items-start justify-between">
+                    <div class="flex items-start space-x-4 min-w-0 flex-1">
+                        <!-- Status indicator -->
+                        <div class="flex-shrink-0 pt-1">
+                            {% if registrar.status == 'active' %}
+                                <div class="w-3 h-3 bg-green-400 rounded-full"></div>
+                            {% elif registrar.status == 'suspended' %}
+                                <div class="w-3 h-3 bg-yellow-400 rounded-full"></div>
+                            {% else %}
+                                <div class="w-3 h-3 bg-red-400 rounded-full"></div>
+                            {% endif %}
+                        </div>
+
+                        <!-- Registrar info -->
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center space-x-2 mb-1">
+                                <h3 class="text-lg font-medium text-slate-900 dark:text-white">
+                                    {{ registrar.display_name }}
+                                </h3>
+                                {% badge registrar.get_status_display %}
+                            </div>
+                            
+                            <div class="space-y-1">
+                                <p class="text-sm text-slate-600 dark:text-slate-400">
+                                    <span class="font-medium">{% trans "Website:" %}</span>
+                                    <a href="{{ registrar.website_url }}" target="_blank" 
+                                       class="text-blue-600 dark:text-blue-400 hover:underline ml-1">
+                                        {{ registrar.website_url }}
+                                    </a>
+                                </p>
+                                
+                                <p class="text-sm text-slate-600 dark:text-slate-400">
+                                    <span class="font-medium">{% trans "API Endpoint:" %}</span>
+                                    <code class="ml-1 text-xs bg-slate-100 dark:bg-slate-600 px-1 py-0.5 rounded">
+                                        {{ registrar.api_endpoint }}
+                                    </code>
+                                </p>
+                                
+                                {% if registrar.tld_assignments.all %}
+                                <div class="flex items-center space-x-1 mt-2">
+                                    <span class="text-xs font-medium text-slate-500 dark:text-slate-400">{% trans "TLDs:" %}</span>
+                                    <div class="flex flex-wrap gap-1">
+                                        {% for assignment in registrar.tld_assignments.all %}
+                                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                                                .{{ assignment.tld.extension }}
+                                            </span>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="flex items-center space-x-2 flex-shrink-0">
+                        {% if registrar.status == 'active' %}
+                            {% button "⚙️ Configure" variant="secondary" size="sm" href="#" %}
+                        {% endif %}
+                        
+                        {% button "📊 Stats" variant="secondary" size="sm" href="#" %}
+                        
+                        <div class="relative">
+                            <button type="button" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300" 
+                                    onclick="toggleDropdown('dropdown-{{ registrar.id }}')">
+                                <span class="sr-only">{% trans "Open options" %}</span>
+                                ⋮
+                            </button>
+                            <div id="dropdown-{{ registrar.id }}" 
+                                 class="hidden absolute right-0 mt-2 w-48 bg-white dark:bg-slate-700 rounded-md shadow-lg z-10 border border-slate-200 dark:border-slate-600">
+                                <div class="py-1">
+                                    <a href="#" class="block px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600">
+                                        ✏️ {% trans "Edit" %}
+                                    </a>
+                                    <a href="#" class="block px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600">
+                                        🔄 {% trans "Test Connection" %}
+                                    </a>
+                                    <a href="#" class="block px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600">
+                                        📋 {% trans "View Logs" %}
+                                    </a>
+                                    {% if registrar.status == 'active' %}
+                                    <a href="#" class="block px-4 py-2 text-sm text-yellow-700 dark:text-yellow-300 hover:bg-slate-100 dark:hover:bg-slate-600">
+                                        ⏸️ {% trans "Suspend" %}
+                                    </a>
+                                    {% elif registrar.status == 'suspended' %}
+                                    <a href="#" class="block px-4 py-2 text-sm text-green-700 dark:text-green-300 hover:bg-slate-100 dark:hover:bg-slate-600">
+                                        ▶️ {% trans "Activate" %}
+                                    </a>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <!-- Pagination -->
+        {% if registrars_page.has_other_pages %}
+        <div class="px-6 py-4 border-t border-slate-200 dark:border-slate-700">
+            <nav class="flex items-center justify-between">
+                <div class="flex-1 flex justify-between sm:hidden">
+                    {% if registrars_page.has_previous %}
+                        <a href="?page={{ registrars_page.previous_page_number }}" 
+                           class="relative inline-flex items-center px-4 py-2 border border-slate-300 text-sm font-medium rounded-md text-slate-700 bg-white hover:bg-slate-50">
+                            {% trans "Previous" %}
+                        </a>
+                    {% endif %}
+                    {% if registrars_page.has_next %}
+                        <a href="?page={{ registrars_page.next_page_number }}" 
+                           class="ml-3 relative inline-flex items-center px-4 py-2 border border-slate-300 text-sm font-medium rounded-md text-slate-700 bg-white hover:bg-slate-50">
+                            {% trans "Next" %}
+                        </a>
+                    {% endif %}
+                </div>
+                <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+                    <div>
+                        <p class="text-sm text-slate-700 dark:text-slate-300">
+                            {% trans "Showing" %}
+                            <span class="font-medium">{{ registrars_page.start_index }}</span>
+                            {% trans "to" %}
+                            <span class="font-medium">{{ registrars_page.end_index }}</span>
+                            {% trans "of" %}
+                            <span class="font-medium">{{ registrars_page.paginator.count }}</span>
+                            {% trans "registrars" %}
+                        </p>
+                    </div>
+                    <div>
+                        <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px">
+                            {% if registrars_page.has_previous %}
+                                <a href="?page=1" class="relative inline-flex items-center px-2 py-2 rounded-l-md border border-slate-300 bg-white text-sm font-medium text-slate-500 hover:bg-slate-50">
+                                    {% trans "First" %}
+                                </a>
+                                <a href="?page={{ registrars_page.previous_page_number }}" class="relative inline-flex items-center px-2 py-2 border border-slate-300 bg-white text-sm font-medium text-slate-500 hover:bg-slate-50">
+                                    ‹
+                                </a>
+                            {% endif %}
+                            
+                            <span class="relative inline-flex items-center px-4 py-2 border border-slate-300 bg-white text-sm font-medium text-slate-700">
+                                {{ registrars_page.number }}
+                            </span>
+                            
+                            {% if registrars_page.has_next %}
+                                <a href="?page={{ registrars_page.next_page_number }}" class="relative inline-flex items-center px-2 py-2 border border-slate-300 bg-white text-sm font-medium text-slate-500 hover:bg-slate-50">
+                                    ›
+                                </a>
+                                <a href="?page={{ registrars_page.paginator.num_pages }}" class="relative inline-flex items-center px-2 py-2 rounded-r-md border border-slate-300 bg-white text-sm font-medium text-slate-500 hover:bg-slate-50">
+                                    {% trans "Last" %}
+                                </a>
+                            {% endif %}
+                        </nav>
+                    </div>
+                </div>
+            </nav>
+        </div>
+        {% endif %}
+        
+        {% else %}
+        <div class="px-6 py-12 text-center">
+            <div class="text-slate-400 text-6xl mb-4">🏢</div>
+            <h3 class="text-lg font-medium text-slate-900 dark:text-white mb-2">{% trans "No registrars found" %}</h3>
+            <p class="text-slate-500 dark:text-slate-400 mb-6">
+                {% trans "Get started by adding your first domain registrar." %}
+            </p>
+            {% button "➕ Add First Registrar" variant="primary" href="#" %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+function toggleDropdown(id) {
+    const dropdown = document.getElementById(id);
+    const allDropdowns = document.querySelectorAll('[id^="dropdown-"]');
+    
+    // Close all other dropdowns
+    allDropdowns.forEach(d => {
+        if (d.id !== id) {
+            d.classList.add('hidden');
+        }
+    });
+    
+    // Toggle current dropdown
+    dropdown.classList.toggle('hidden');
+}
+
+// Close dropdowns when clicking outside
+document.addEventListener('click', function(event) {
+    if (!event.target.closest('button') || !event.target.closest('[onclick^="toggleDropdown"]')) {
+        const dropdowns = document.querySelectorAll('[id^="dropdown-"]');
+        dropdowns.forEach(d => d.classList.add('hidden'));
+    }
+});
+</script>
+{% endblock %}

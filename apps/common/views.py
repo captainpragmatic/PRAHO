@@ -2,7 +2,7 @@
 # DASHBOARD VIEW - MAIN PRAHO Platform OVERVIEW
 # ===============================================================================
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from django.contrib.auth.decorators import login_required
 from django.db.models import Sum

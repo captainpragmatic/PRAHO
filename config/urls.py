@@ -47,12 +47,16 @@ urlpatterns = [
     path('app/billing/', include('apps.billing.urls')),
     path('app/tickets/', include('apps.tickets.urls')),
     path('app/provisioning/', include('apps.provisioning.urls')),
+    path('app/domains/', include('apps.domains.urls')),
 
     # External integrations & webhooks
     path('integrations/', include('apps.integrations.urls')),
 
     # GDPR compliance and audit
     path('app/audit/', include('apps.audit.urls')),
+
+    # System configuration (staff only)
+    path('app/settings/', include('apps.system_settings.urls')),
 
     # API endpoints
     path('api/customers/', include('apps.customers.urls')),

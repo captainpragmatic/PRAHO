@@ -1,0 +1,352 @@
+{% extends 'base.html' %}
+{% load ui_components %}
+{% load formatting %}
+{% load i18n %}
+
+{% block title %}🆕 Register Domain - PRAHO{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <!-- Breadcrumb -->
+    <nav class="flex mb-6" aria-label="Breadcrumb">
+        <ol class="inline-flex items-center space-x-1 md:space-x-3">
+            <li class="inline-flex items-center">
+                <a href="{% url 'domains:list' %}" class="inline-flex items-center text-sm font-medium text-slate-700 hover:text-primary-600 dark:text-slate-400 dark:hover:text-white">
+                    🌍 {% trans "Domains" %}
+                </a>
+            </li>
+            <li>
+                <div class="flex items-center">
+                    <span class="mx-2 text-slate-400">/</span>
+                    <span class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "Register" %}</span>
+                </div>
+            </li>
+        </ol>
+    </nav>
+
+    <!-- Page Header -->
+    <div class="text-center mb-8">
+        <h1 class="text-3xl font-bold text-slate-900 dark:text-white">🆕 {% trans "Register New Domain" %}</h1>
+        <p class="mt-2 text-lg text-slate-600 dark:text-slate-300">
+            {% trans "Find and register the perfect domain for your business" %}
+        </p>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <!-- Main Registration Form -->
+        <div class="lg:col-span-2">
+            <!-- Domain Search -->
+            <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-6 mb-6">
+                <h2 class="text-xl font-semibold text-slate-900 dark:text-white mb-4">🔍 {% trans "Domain Search" %}</h2>
+                
+                <form id="domain-search-form" class="space-y-4">
+                    <div>
+                        <label for="domain-search" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                            {% trans "Enter domain name" %}
+                        </label>
+                        <div class="flex">
+                            <input
+                                type="text"
+                                id="domain-search"
+                                name="domain_name"
+                                placeholder="example.com"
+                                class="flex-1 rounded-l-md border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white placeholder-slate-500 dark:placeholder-slate-400 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                                autocomplete="off"
+                            >
+                            <button
+                                type="submit"
+                                class="inline-flex items-center px-4 py-2 border border-l-0 border-slate-300 dark:border-slate-600 rounded-r-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
+                            >
+                                🔍 {% trans "Search" %}
+                            </button>
+                        </div>
+                        <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                            {% trans "Enter the full domain name including extension (e.g., example.com)" %}
+                        </p>
+                    </div>
+                </form>
+
+                <!-- Search Results -->
+                <div id="search-results" class="mt-6 hidden">
+                    <!-- Results will be populated via JavaScript -->
+                </div>
+            </div>
+
+            <!-- Featured TLDs -->
+            <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-6">
+                <h2 class="text-xl font-semibold text-slate-900 dark:text-white mb-4">⭐ {% trans "Popular Extensions" %}</h2>
+                
+                <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                    {% for tld_price in tld_pricing %}
+                        <div class="border border-slate-200 dark:border-slate-700 rounded-lg p-4 hover:border-primary-300 dark:hover:border-primary-600 transition-colors">
+                            <div class="text-center">
+                                <p class="text-lg font-mono font-bold text-slate-900 dark:text-white">.{{ tld_price.tld.extension }}</p>
+                                <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">{{ tld_price.tld.description }}</p>
+                                <p class="text-lg font-bold text-primary-600 dark:text-primary-400 mt-2">
+                                    {{ tld_price.cost_cents|cents_to_currency|romanian_currency }}
+                                    <span class="text-sm font-normal text-slate-500">/{% trans "year" %}</span>
+                                </p>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Registration Form Sidebar -->
+        <div>
+            <!-- Registration Form -->
+            <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-6 sticky top-6">
+                <h3 class="text-lg font-semibold text-slate-900 dark:text-white mb-4">📝 {% trans "Registration Details" %}</h3>
+                
+                <form method="post" id="registration-form" class="hidden">
+                    {% csrf_token %}
+                    <div class="space-y-4">
+                        <!-- Selected Domain (populated by JavaScript) -->
+                        <div id="selected-domain" class="hidden">
+                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                                {% trans "Selected Domain" %}
+                            </label>
+                            <div class="p-3 bg-slate-50 dark:bg-slate-700 rounded-md">
+                                <p class="font-mono text-lg font-bold text-slate-900 dark:text-white" id="domain-name-display"></p>
+                                <p class="text-sm text-slate-500 dark:text-slate-400" id="domain-cost-display"></p>
+                            </div>
+                            <input type="hidden" name="domain_name" id="domain-name-input">
+                        </div>
+
+                        <!-- Customer Selection -->
+                        <div>
+                            <label for="customer_id" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                                👤 {% trans "Customer" %}
+                            </label>
+                            <select
+                                name="customer_id"
+                                id="customer_id"
+                                required
+                                class="block w-full rounded-md border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                            >
+                                <option value="">{% trans "Select customer..." %}</option>
+                                {% for customer in customers %}
+                                    <option value="{{ customer.id }}">
+                                        {{ customer.get_display_name }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <!-- Registration Period -->
+                        <div>
+                            <label for="years" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                                📅 {% trans "Registration Period" %}
+                            </label>
+                            <select
+                                name="years"
+                                id="years"
+                                class="block w-full rounded-md border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                            >
+                                {% for year in years_choices %}
+                                    <option value="{{ year }}" {% if year == 1 %}selected{% endif %}>
+                                        {{ year }} {% trans "year" %}{{ year|pluralize }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <!-- Domain Options -->
+                        <div class="space-y-3">
+                            <h4 class="text-sm font-medium text-slate-700 dark:text-slate-300">⚙️ {% trans "Domain Options" %}</h4>
+                            
+                            <div class="flex items-center">
+                                <input
+                                    id="whois_privacy"
+                                    name="whois_privacy"
+                                    type="checkbox"
+                                    class="h-4 w-4 text-primary-600 focus:ring-primary-500 border-slate-300 dark:border-slate-600 rounded"
+                                >
+                                <label for="whois_privacy" class="ml-2 block text-sm text-slate-900 dark:text-white">
+                                    🔒 {% trans "WHOIS Privacy Protection" %}
+                                    <span class="text-slate-500 dark:text-slate-400">(+5 RON/{% trans "year" %})</span>
+                                </label>
+                            </div>
+
+                            <div class="flex items-center">
+                                <input
+                                    id="auto_renew"
+                                    name="auto_renew"
+                                    type="checkbox"
+                                    checked
+                                    class="h-4 w-4 text-primary-600 focus:ring-primary-500 border-slate-300 dark:border-slate-600 rounded"
+                                >
+                                <label for="auto_renew" class="ml-2 block text-sm text-slate-900 dark:text-white">
+                                    🔄 {% trans "Enable Auto-Renewal" %}
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Total Cost -->
+                        <div class="border-t border-slate-200 dark:border-slate-700 pt-4">
+                            <div class="flex justify-between items-center">
+                                <span class="text-sm font-medium text-slate-700 dark:text-slate-300">{% trans "Total Cost:" %}</span>
+                                <span class="text-lg font-bold text-slate-900 dark:text-white" id="total-cost">-</span>
+                            </div>
+                        </div>
+
+                        <!-- Submit Button -->
+                        <div>
+                            {% button "🆕 Register Domain" type="submit" variant="primary" size="lg" class="w-full" %}
+                        </div>
+                    </div>
+                </form>
+
+                <!-- Initial State -->
+                <div id="initial-state">
+                    <div class="text-center text-slate-500 dark:text-slate-400">
+                        <span class="text-4xl mb-4 block">🔍</span>
+                        <p class="text-sm">
+                            {% trans "Search for a domain to begin registration" %}
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const searchForm = document.getElementById('domain-search-form');
+    const searchInput = document.getElementById('domain-search');
+    const searchResults = document.getElementById('search-results');
+    const registrationForm = document.getElementById('registration-form');
+    const initialState = document.getElementById('initial-state');
+    const selectedDomainDiv = document.getElementById('selected-domain');
+    const domainNameDisplay = document.getElementById('domain-name-display');
+    const domainCostDisplay = document.getElementById('domain-cost-display');
+    const domainNameInput = document.getElementById('domain-name-input');
+    const totalCostDisplay = document.getElementById('total-cost');
+    const yearsSelect = document.getElementById('years');
+    const whoisPrivacyCheck = document.getElementById('whois_privacy');
+
+    let currentDomain = null;
+    let baseCost = 0;
+
+    // Domain search
+    searchForm.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        const domainName = searchInput.value.trim().toLowerCase();
+        if (!domainName) return;
+
+        // Show loading state
+        searchResults.innerHTML = `
+            <div class="text-center py-4">
+                <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600"></div>
+                <p class="mt-2 text-sm text-slate-600 dark:text-slate-400">{% trans "Checking availability..." %}</p>
+            </div>
+        `;
+        searchResults.classList.remove('hidden');
+
+        try {
+            const formData = new FormData();
+            formData.append('domain_name', domainName);
+            formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+
+            const response = await fetch('/app/domains/check-availability/', {
+                method: 'POST',
+                body: formData
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                if (data.available) {
+                    searchResults.innerHTML = `
+                        <div class="border border-green-200 dark:border-green-700 rounded-lg p-4 bg-green-50 dark:bg-green-900/20">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <h3 class="font-mono text-lg font-bold text-slate-900 dark:text-white">${data.domain_name}</h3>
+                                    <p class="text-sm text-green-600 dark:text-green-400">✅ {% trans "Available for registration" %}</p>
+                                    <p class="text-sm text-slate-500 dark:text-slate-400">${data.registrar}</p>
+                                </div>
+                                <div class="text-right">
+                                    <p class="text-lg font-bold text-slate-900 dark:text-white">${(data.pricing['1_year'].total_cost_cents / 100).toFixed(2)} RON</p>
+                                    <button
+                                        type="button"
+                                        onclick="selectDomain('${data.domain_name}', ${data.pricing['1_year'].total_cost_cents})"
+                                        class="mt-2 inline-flex items-center px-3 py-1 border border-transparent text-xs font-medium rounded text-white bg-green-600 hover:bg-green-700"
+                                    >
+                                        {% trans "Select" %}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    searchResults.innerHTML = `
+                        <div class="border border-red-200 dark:border-red-700 rounded-lg p-4 bg-red-50 dark:bg-red-900/20">
+                            <div class="flex items-center">
+                                <span class="text-red-600 dark:text-red-400 mr-3">❌</span>
+                                <div>
+                                    <h3 class="font-mono text-lg font-bold text-slate-900 dark:text-white">${data.domain_name}</h3>
+                                    <p class="text-sm text-red-600 dark:text-red-400">${data.message}</p>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+            } else {
+                searchResults.innerHTML = `
+                    <div class="border border-red-200 dark:border-red-700 rounded-lg p-4 bg-red-50 dark:bg-red-900/20">
+                        <p class="text-red-600 dark:text-red-400">❌ ${data.error}</p>
+                    </div>
+                `;
+            }
+        } catch (error) {
+            searchResults.innerHTML = `
+                <div class="border border-red-200 dark:border-red-700 rounded-lg p-4 bg-red-50 dark:bg-red-900/20">
+                    <p class="text-red-600 dark:text-red-400">❌ {% trans "Error checking availability. Please try again." %}</p>
+                </div>
+            `;
+        }
+    });
+
+    // Select domain function
+    window.selectDomain = function(domainName, costCents) {
+        currentDomain = domainName;
+        baseCost = costCents;
+
+        domainNameDisplay.textContent = domainName;
+        domainNameInput.value = domainName;
+        
+        initialState.classList.add('hidden');
+        registrationForm.classList.remove('hidden');
+        selectedDomainDiv.classList.remove('hidden');
+
+        updateTotalCost();
+    };
+
+    // Update total cost when options change
+    function updateTotalCost() {
+        if (!currentDomain) return;
+
+        const years = parseInt(yearsSelect.value);
+        const whoisPrivacy = whoisPrivacyCheck.checked;
+        
+        let totalCost = baseCost * years;
+        
+        if (whoisPrivacy) {
+            totalCost += 500 * years; // 5 RON per year for WHOIS privacy
+        }
+
+        const costInRon = (totalCost / 100).toFixed(2);
+        totalCostDisplay.textContent = `${costInRon} RON`;
+        domainCostDisplay.textContent = `${costInRon} RON for ${years} year${years > 1 ? 's' : ''}`;
+    }
+
+    yearsSelect.addEventListener('change', updateTotalCost);
+    whoisPrivacyCheck.addEventListener('change', updateTotalCost);
+});
+</script>
+{% endblock %}

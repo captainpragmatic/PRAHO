@@ -177,12 +177,16 @@ def navigation_dropdowns(request: HttpRequest) -> dict[str, Any]:
             {"text": "Invoices", "url": "/app/billing/invoices/", "icon": "🧾"},
             {"text": "Services", "url": "/app/provisioning/services/", "icon": "🚀"},
             {"text": "Domains", "url": "/app/domains/", "icon": "🌐"},
+            {"divider": True},
+            {"text": "Registrars", "url": "/app/domains/admin/registrars/", "icon": "🏢"},
+            {"text": "TLD Management", "url": "/app/domains/admin/tlds/", "icon": "🌍"},
         ]
         
         support_items = [
             {"text": "All Tickets", "url": "/app/tickets/", "icon": "🎫"},
             {"text": "Create Ticket", "url": "/app/tickets/create/", "icon": "+"},
             {"divider": True},
+            {"text": "System Settings", "url": "/app/settings/dashboard/", "icon": "⚙️"},
             {"text": "GDPR Management", "url": "/app/audit/gdpr_management/", "icon": "🔒"},
             {"text": "Audit Logs", "url": "/app/audit/logs/", "icon": "📊"},
         ]

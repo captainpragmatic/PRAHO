@@ -1,0 +1,258 @@
+{% extends 'base.html' %}
+{% load ui_components %}
+{% load formatting %}
+{% load i18n %}
+
+{% block title %}{{ domain.name }} - Domain Details - PRAHO{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <!-- Breadcrumb -->
+    <nav class="flex mb-6" aria-label="Breadcrumb">
+        <ol class="inline-flex items-center space-x-1 md:space-x-3">
+            <li class="inline-flex items-center">
+                <a href="{% url 'domains:list' %}" class="inline-flex items-center text-sm font-medium text-slate-700 hover:text-primary-600 dark:text-slate-400 dark:hover:text-white">
+                    🌍 {% trans "Domains" %}
+                </a>
+            </li>
+            <li>
+                <div class="flex items-center">
+                    <span class="mx-2 text-slate-400">/</span>
+                    <span class="text-sm font-medium text-slate-500 dark:text-slate-400">{{ domain.name }}</span>
+                </div>
+            </li>
+        </ol>
+    </nav>
+
+    <!-- Domain Header -->
+    <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-6 mb-6">
+        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between">
+            <div class="flex-1">
+                <h1 class="text-2xl font-bold text-slate-900 dark:text-white font-mono">{{ domain.name }}</h1>
+                <div class="mt-2 flex flex-wrap items-center gap-3">
+                    {% badge domain.get_status_display variant="success" %}
+                    {% badge domain.tld.extension variant="secondary" %}
+                    {% if domain.whois_privacy %}
+                        {% badge "🔒 WHOIS Privacy" variant="info" size="sm" %}
+                    {% endif %}
+                    {% if domain.auto_renew %}
+                        {% badge "🔄 Auto-Renew" variant="success" size="sm" %}
+                    {% endif %}
+                </div>
+            </div>
+            <div class="mt-4 sm:mt-0 flex gap-2">
+                {% if can_renew %}
+                    {% url 'domains:renew' domain.id as renew_url %}
+                    {% button "🔄 Renew" variant="primary" href=renew_url %}
+                {% endif %}
+                {% if can_modify_dns %}
+                    {% button "⚙️ DNS" variant="secondary" href="#" %}
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Expiry Alert -->
+    {% if expiry_message %}
+        <div class="mb-6">
+            {% if expiry_status == 'expired' %}
+                {% alert expiry_message variant="danger" dismissible=True %}
+            {% elif expiry_status == 'critical' %}
+                {% alert expiry_message variant="danger" dismissible=True %}
+            {% elif expiry_status == 'warning' %}
+                {% alert expiry_message variant="warning" dismissible=True %}
+            {% else %}
+                {% alert expiry_message variant="info" %}
+            {% endif %}
+        </div>
+    {% endif %}
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Main Content -->
+        <div class="lg:col-span-2 space-y-6">
+            <!-- Domain Information -->
+            <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+                    <h2 class="text-lg font-semibold text-slate-900 dark:text-white">📋 {% trans "Domain Information" %}</h2>
+                </div>
+                <div class="px-6 py-4">
+                    <dl class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <dt class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "Status" %}</dt>
+                            <dd class="mt-1">{% badge domain.get_status_display %}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "TLD" %}</dt>
+                            <dd class="mt-1 text-sm text-slate-900 dark:text-white font-mono">.{{ domain.tld.extension }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "Registered" %}</dt>
+                            <dd class="mt-1 text-sm text-slate-900 dark:text-white">
+                                {% if domain.registered_at %}
+                                    {{ domain.registered_at|romanian_date:"long" }}
+                                {% else %}
+                                    {% trans "Not yet registered" %}
+                                {% endif %}
+                            </dd>
+                        </div>
+                        <div>
+                            <dt class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "Expires" %}</dt>
+                            <dd class="mt-1 text-sm text-slate-900 dark:text-white">
+                                {% if domain.expires_at %}
+                                    {{ domain.expires_at|romanian_date:"long" }}
+                                    {% if days_until_expiry is not None %}
+                                        <span class="text-slate-500">({{ days_until_expiry }} {% trans "days" %})</span>
+                                    {% endif %}
+                                {% else %}
+                                    {% trans "Not set" %}
+                                {% endif %}
+                            </dd>
+                        </div>
+                        <div>
+                            <dt class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "Auto-Renew" %}</dt>
+                            <dd class="mt-1">
+                                {% if domain.auto_renew %}
+                                    <span class="text-green-600 dark:text-green-400">✅ {% trans "Enabled" %}</span>
+                                {% else %}
+                                    <span class="text-red-600 dark:text-red-400">❌ {% trans "Disabled" %}</span>
+                                {% endif %}
+                            </dd>
+                        </div>
+                        <div>
+                            <dt class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "WHOIS Privacy" %}</dt>
+                            <dd class="mt-1">
+                                {% if domain.whois_privacy %}
+                                    <span class="text-green-600 dark:text-green-400">🔒 {% trans "Protected" %}</span>
+                                {% else %}
+                                    <span class="text-slate-500 dark:text-slate-400">{% trans "Public" %}</span>
+                                {% endif %}
+                            </dd>
+                        </div>
+                    </dl>
+                </div>
+            </div>
+
+            <!-- Nameservers -->
+            {% if nameservers %}
+                <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                    <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+                        <h2 class="text-lg font-semibold text-slate-900 dark:text-white">🌐 {% trans "Nameservers" %}</h2>
+                    </div>
+                    <div class="px-6 py-4">
+                        <ul class="space-y-2">
+                            {% for ns in nameservers %}
+                                <li class="flex items-center text-sm">
+                                    <span class="w-2 h-2 bg-green-400 rounded-full mr-3"></span>
+                                    <code class="font-mono text-slate-900 dark:text-white">{{ ns }}</code>
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                </div>
+            {% endif %}
+
+            <!-- Order History -->
+            {% if order_items %}
+                <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                    <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+                        <h2 class="text-lg font-semibold text-slate-900 dark:text-white">📦 {% trans "Order History" %}</h2>
+                    </div>
+                    <div class="divide-y divide-slate-200 dark:divide-slate-700">
+                        {% for item in order_items %}
+                            <div class="px-6 py-4">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-sm font-medium text-slate-900 dark:text-white">
+                                            {% if item.action == 'register' %}🆕{% elif item.action == 'renew' %}🔄{% elif item.action == 'transfer' %}📥{% endif %}
+                                            {{ item.get_action_display }} - {{ item.years }} {% trans "year" %}{{ item.years|pluralize }}
+                                        </p>
+                                        <p class="text-sm text-slate-500 dark:text-slate-400">
+                                            {{ item.created_at|romanian_date:"datetime" }}
+                                        </p>
+                                    </div>
+                                    <div class="text-right">
+                                        <p class="text-sm font-medium text-slate-900 dark:text-white">
+                                            {{ item.total_price_cents|cents_to_currency|romanian_currency }}
+                                        </p>
+                                        {% if item.order %}
+                                            <p class="text-sm text-slate-500 dark:text-slate-400">
+                                                Order #{{ item.order.id }}
+                                            </p>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+        </div>
+
+        <!-- Sidebar -->
+        <div class="space-y-6">
+            <!-- Customer Information -->
+            <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+                    <h2 class="text-lg font-semibold text-slate-900 dark:text-white">👤 {% trans "Customer" %}</h2>
+                </div>
+                <div class="px-6 py-4">
+                    <div class="flex items-start">
+                        <div class="flex-shrink-0 h-10 w-10">
+                            <div class="h-10 w-10 rounded-full bg-primary-100 dark:bg-primary-900 flex items-center justify-center">
+                                <span class="text-primary-600 dark:text-primary-400 font-medium text-sm">
+                                    {{ domain.customer.name|slice:":1" }}{% if domain.customer.company_name %}{{ domain.customer.company_name|slice:":1" }}{% endif %}
+                                </span>
+                            </div>
+                        </div>
+                        <div class="ml-3">
+                            <p class="text-sm font-medium text-slate-900 dark:text-white">
+                                {{ domain.customer.get_display_name }}
+                            </p>
+                            {% if domain.customer.company_name %}
+                                <p class="text-sm text-slate-500 dark:text-slate-400">{{ domain.customer.name }}</p>
+                            {% endif %}
+                            <p class="text-sm text-slate-500 dark:text-slate-400">{{ domain.customer.primary_email }}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Registrar Information -->
+            <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+                    <h2 class="text-lg font-semibold text-slate-900 dark:text-white">🏢 {% trans "Registrar" %}</h2>
+                </div>
+                <div class="px-6 py-4">
+                    <p class="text-sm font-medium text-slate-900 dark:text-white">{{ domain.registrar.display_name }}</p>
+                    <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">{{ domain.registrar.website_url }}</p>
+                    {% if domain.registrar_domain_id %}
+                        <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                            ID: <code class="font-mono">{{ domain.registrar_domain_id }}</code>
+                        </p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+                    <h2 class="text-lg font-semibold text-slate-900 dark:text-white">⚡ {% trans "Quick Actions" %}</h2>
+                </div>
+                <div class="px-6 py-4 space-y-3">
+                    {% if can_renew %}
+                        {% url 'domains:renew' domain.id as renew_url_2 %}
+                        {% button "🔄 Renew Domain" variant="primary" size="sm" href=renew_url_2 class="w-full" %}
+                    {% endif %}
+                    {% if can_transfer %}
+                        {% button "📥 Transfer Out" variant="secondary" size="sm" href="#" class="w-full" %}
+                    {% endif %}
+                    {% if can_modify_dns %}
+                        {% button "⚙️ Manage DNS" variant="secondary" size="sm" href="#" class="w-full" %}
+                    {% endif %}
+                    {% button "📊 View Analytics" variant="secondary" size="sm" href="#" class="w-full" %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

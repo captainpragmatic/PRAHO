@@ -1,0 +1,104 @@
+{% extends 'base.html' %}
+{% load ui_components %}
+{% load formatting %}
+{% load i18n %}
+
+{% block title %}🌍 Domain Management - PRAHO{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <!-- Page Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
+        <div>
+            <h1 class="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-3">
+                🌍 {% trans "Domain Management" %}
+                {% if total_count %}
+                    {% badge total_count variant="secondary" size="sm" %}
+                {% endif %}
+            </h1>
+            <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                {% trans "Manage your domain portfolio with comprehensive tools" %}
+            </p>
+        </div>
+        <div class="mt-4 sm:mt-0">
+            {% if can_register_domains %}
+                {% url 'domains:register' as register_url %}
+                {% button "🆕 Register Domain" variant="primary" href=register_url icon="plus" %}
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm font-medium text-slate-600 dark:text-slate-400">{% trans "Total Domains" %}</p>
+                    <p class="text-2xl font-bold text-slate-900 dark:text-white">{{ total_count|default:0 }}</p>
+                </div>
+                <div class="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                    <span class="text-2xl">🌍</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm font-medium text-slate-600 dark:text-slate-400">{% trans "Active Domains" %}</p>
+                    <p class="text-2xl font-bold text-green-600 dark:text-green-400">{{ active_count|default:0 }}</p>
+                </div>
+                <div class="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                    <span class="text-2xl">✅</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm font-medium text-slate-600 dark:text-slate-400">{% trans "Expiring Soon" %}</p>
+                    <p class="text-2xl font-bold text-orange-600 dark:text-orange-400">{{ expiring_count|default:0 }}</p>
+                </div>
+                <div class="p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
+                    <span class="text-2xl">⚠️</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm font-medium text-slate-600 dark:text-slate-400">{% trans "This Month" %}</p>
+                    <p class="text-2xl font-bold text-slate-700 dark:text-slate-300">0</p>
+                </div>
+                <div class="p-3 bg-slate-50 dark:bg-slate-700 rounded-lg">
+                    <span class="text-2xl">📈</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Enhanced Table -->
+    {% if domains %}
+        {% table_enhanced table_data.columns table_data.rows page_obj=domains pagination_enabled=True %}
+    {% else %}
+        <!-- Empty State -->
+        <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 text-center py-12">
+            <div class="mx-auto h-24 w-24 text-slate-400 dark:text-slate-500 mb-4">
+                <span class="text-6xl">🌍</span>
+            </div>
+            <h3 class="mt-2 text-lg font-medium text-slate-900 dark:text-white">{% trans "No domains found" %}</h3>
+            <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                {% trans "Get started by registering your first domain." %}
+            </p>
+            {% if can_register_domains %}
+                <div class="mt-6">
+                    {% url 'domains:register' as register_url %}
+                    {% button "🆕 Register First Domain" variant="primary" href=register_url %}
+                </div>
+            {% endif %}
+        </div>
+    {% endif %}
+</div>
+{% endblock %}
