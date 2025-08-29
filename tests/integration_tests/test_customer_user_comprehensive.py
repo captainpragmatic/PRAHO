@@ -54,7 +54,7 @@ def create_test_customer(name, admin_user, **kwargs):
         'created_by': admin_user
     }
     defaults.update(kwargs)
-    return Customer.objects.create(name=name, **defaults)
+    return Customer.objects.create(**defaults)
 
 
 # ===============================================================================

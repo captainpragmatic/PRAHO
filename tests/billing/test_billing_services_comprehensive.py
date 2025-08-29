@@ -261,6 +261,12 @@ class RefundServiceComprehensiveTestCase(TestCase):
         mock_invoice = Mock()
         mock_invoice.id = uuid.uuid4()
         mock_invoice.total_cents = 10000
+        mock_invoice.refunded_amount_cents = 0  # Track refunded amount
+        # Mock the orders relationship to return empty queryset
+        mock_orders = Mock()
+        mock_orders.exists.return_value = False
+        mock_orders.first.return_value = None
+        mock_invoice.orders.all.return_value = mock_orders
         
         mock_update_invoice.return_value = Ok(True)
         mock_audit.return_value = None

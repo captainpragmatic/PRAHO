@@ -813,13 +813,11 @@ class ProformaToInvoiceViewTestCase(TestCase):
 
     def test_proforma_to_invoice_get(self):
         """Test proforma to invoice GET request"""
-        request = self.factory.get(f'/app/billing/proformas/{self.proforma.pk}/convert/')
-        request.user = self.staff_user
-        
-        response = proforma_to_invoice(request, self.proforma.pk)
+        self.client.force_login(self.staff_user)
+        response = self.client.get(f'/app/billing/proformas/{self.proforma.pk}/convert/')
         
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.context_data['proforma'], self.proforma)
+        self.assertEqual(response.context['proforma'], self.proforma)
 
     def test_proforma_to_invoice_post_success(self):
         """Test successful proforma to invoice conversion"""

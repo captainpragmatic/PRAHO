@@ -19,6 +19,7 @@ from decimal import Decimal
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import AnonymousUser
 from django.contrib.messages.middleware import MessageMiddleware
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.http import HttpRequest, JsonResponse
@@ -216,7 +217,7 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
     def test_validate_pdf_access_unauthorized_user_type(self) -> None:
         """Test _validate_pdf_access with wrong user type (Line 63)."""
         request = self.factory.get('/')
-        request.user = "not_a_user_object"  # Wrong type
+        request.user = AnonymousUser()  # Proper anonymous user
         self._add_session_and_messages(request)
         
         response = _validate_pdf_access(request, self.invoice)
@@ -281,7 +282,7 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
             
             # Should render with error context
             self.assertEqual(response.status_code, 200)
-            self.assertIn('error_message', response.context_data)
+            self.assertIn('error_message', response.context)
 
     def test_billing_list_with_document_type_filter(self) -> None:
         """Test billing_list with document type filtering (Line 83, 110-147)."""
@@ -293,7 +294,7 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
             response = billing_list(request)
             
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.context_data['doc_type'], 'proforma')
+            self.assertEqual(response.context['doc_type'], 'proforma')
 
     def test_billing_list_with_search_query(self) -> None:
         """Test billing_list with search functionality (Line 94-102)."""
@@ -305,7 +306,7 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
             response = billing_list(request)
             
             self.assertEqual(response.status_code, 200)
-            self.assertTrue(response.context_data['has_search'])
+            self.assertTrue(response.context['has_search'])
 
     # ===============================================================================
     # INVOICE DETAIL VIEW TESTS
@@ -314,7 +315,7 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
     def test_invoice_detail_unauthenticated_user_type(self) -> None:
         """Test invoice_detail with wrong user type (Line 222-224)."""
         request = self.factory.get('/')
-        request.user = "not_a_user_object"
+        request.user = AnonymousUser()
         self._add_session_and_messages(request)
         
         response = invoice_detail(request, self.invoice.pk)
@@ -359,7 +360,7 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
     def test_handle_proforma_create_post_unauthenticated_user_type(self) -> None:
         """Test _handle_proforma_create_post with wrong user type (Line 264-265)."""
         request = self.factory.post('/')
-        request.user = "not_a_user_object"
+        request.user = AnonymousUser()
         self._add_session_and_messages(request)
         
         response = _handle_proforma_create_post(request)
@@ -403,7 +404,7 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
     def test_proforma_create_get_unauthenticated_user_type(self) -> None:
         """Test proforma_create GET with wrong user type (Line 311-312)."""
         request = self.factory.get('/')
-        request.user = "not_a_user_object"
+        request.user = AnonymousUser()
         self._add_session_and_messages(request)
         
         response = proforma_create(request)
@@ -417,7 +418,7 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
     def test_proforma_detail_unauthenticated_user_type(self) -> None:
         """Test proforma_detail with wrong user type (Line 331-333)."""
         request = self.factory.get('/')
-        request.user = "not_a_user_object"
+        request.user = AnonymousUser()
         self._add_session_and_messages(request)
         
         response = proforma_detail(request, self.proforma.pk)
@@ -447,7 +448,7 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
     def test_proforma_to_invoice_unauthenticated_user_type(self) -> None:
         """Test proforma_to_invoice with wrong user type (Line 357-360)."""
         request = self.factory.get('/')
-        request.user = "not_a_user_object"
+        request.user = AnonymousUser()
         self._add_session_and_messages(request)
         
         response = proforma_to_invoice(request, self.proforma.pk)
@@ -537,7 +538,8 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
     def test_process_proforma_payment_unauthenticated_user_type(self) -> None:
         """Test process_proforma_payment with wrong user type (Line 439-440)."""
         request = self.factory.post('/')
-        request.user = "not_a_user_object"
+        request.user = AnonymousUser()
+        self._add_session_and_messages(request)
         
         response = process_proforma_payment(request, self.proforma.pk)
         
@@ -865,7 +867,8 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
     def test_proforma_send_unauthenticated_user_type(self) -> None:
         """Test proforma_send with wrong user type (Line 746-747)."""
         request = self.factory.post('/')
-        request.user = "not_a_user_object"
+        request.user = AnonymousUser()
+        self._add_session_and_messages(request)
         
         response = proforma_send(request, self.proforma.pk)
         
@@ -911,11 +914,12 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
     def test_invoice_send_unauthenticated_user_type(self) -> None:
         """Test invoice_send with wrong user type (Line 811-812)."""
         request = self.factory.post('/')
-        request.user = "not_a_user_object"
+        request.user = AnonymousUser()
+        self._add_session_and_messages(request)
         
         response = invoice_send(request, self.invoice.pk)
         
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 302)  # login_required redirects
 
     def test_invoice_send_no_permission(self) -> None:
         """Test invoice_send without customer access (Line 811-812)."""
@@ -965,7 +969,7 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
     def test_generate_e_factura_unauthenticated_user_type(self) -> None:
         """Test generate_e_factura with wrong user type (Line 834-836)."""
         request = self.factory.get('/')
-        request.user = "not_a_user_object"
+        request.user = AnonymousUser()
         self._add_session_and_messages(request)
         
         response = generate_e_factura(request, self.invoice.pk)
@@ -1008,7 +1012,7 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
     def test_payment_list_unauthenticated_user_type(self) -> None:
         """Test payment_list with wrong user type (Line 863-864)."""
         request = self.factory.get('/')
-        request.user = "not_a_user_object"
+        request.user = AnonymousUser()
         self._add_session_and_messages(request)
         
         response = payment_list(request)
@@ -1018,7 +1022,8 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
     def test_process_payment_unauthenticated_user_type(self) -> None:
         """Test process_payment with wrong user type (Line 892-893)."""
         request = self.factory.post('/')
-        request.user = "not_a_user_object"
+        request.user = AnonymousUser()
+        self._add_session_and_messages(request)
         
         response = process_payment(request, self.invoice.pk)
         
@@ -1098,7 +1103,7 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
     def test_billing_reports_unauthenticated_user_type(self) -> None:
         """Test billing_reports with wrong user type (Line 928-929)."""
         request = self.factory.get('/')
-        request.user = "not_a_user_object"
+        request.user = AnonymousUser()
         self._add_session_and_messages(request)
         
         response = billing_reports(request)
@@ -1108,7 +1113,7 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
     def test_vat_report_unauthenticated_user_type(self) -> None:
         """Test vat_report with wrong user type (Line 961-962)."""
         request = self.factory.get('/')
-        request.user = "not_a_user_object"
+        request.user = AnonymousUser()
         self._add_session_and_messages(request)
         
         response = vat_report(request)
@@ -1125,8 +1130,8 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
             response = vat_report(request)
             
             self.assertEqual(response.status_code, 200)
-            self.assertIn('start_date', response.context_data)
-            self.assertIn('end_date', response.context_data)
+            self.assertIn('start_date', response.context)
+            self.assertIn('end_date', response.context)
 
     # ===============================================================================
     # INVOICE REFUND TESTS - HIGH PRIORITY COMPLEX LOGIC
@@ -1135,7 +1140,8 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
     def test_invoice_refund_unauthenticated_user_type(self) -> None:
         """Test invoice_refund with wrong user type (Line 1011-1012)."""
         request = self.factory.post('/')
-        request.user = "not_a_user_object"
+        request.user = AnonymousUser()
+        self._add_session_and_messages(request)
         
         response = invoice_refund(request, self.invoice.id)
         
@@ -1147,16 +1153,18 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
         """Test invoice_refund without customer access (Line 1011-1012)."""
         unauthorized_user = User.objects.create_user(
             email='unauthorized10@example.com',
-            password='testpass123'
+            password='testpass123',
+            is_staff=True  # Must be staff to pass @staff_required decorator
         )
         
         request = self.factory.post('/')
         request.user = unauthorized_user
+        self._add_session_and_messages(request)
         
         with patch.object(unauthorized_user, 'can_access_customer', return_value=False):
             response = invoice_refund(request, self.invoice.id)
             
-            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.status_code, 400)  # json_error returns 400
             response_data = json.loads(response.content)
             self.assertFalse(response_data['success'])
 
@@ -1291,7 +1299,8 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
     def test_invoice_refund_request_unauthenticated_user_type(self) -> None:
         """Test invoice_refund_request with wrong user type (Line 1094-1095)."""
         request = self.factory.post('/')
-        request.user = "not_a_user_object"
+        request.user = AnonymousUser()
+        self._add_session_and_messages(request)
         
         response = invoice_refund_request(request, self.invoice.id)
         
@@ -1403,7 +1412,7 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
     def test_handle_proforma_edit_post_unauthenticated_user_type(self) -> None:
         """Test _handle_proforma_edit_post with wrong user type (Line 644-645)."""
         request = self.factory.post('/')
-        request.user = "not_a_user_object"
+        request.user = AnonymousUser()
         self._add_session_and_messages(request)
         
         response = _handle_proforma_edit_post(request, self.proforma)
@@ -1457,7 +1466,7 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
     def test_proforma_edit_unauthenticated_user_type(self) -> None:
         """Test proforma_edit with wrong user type (Line 700-701)."""
         request = self.factory.get('/')
-        request.user = "not_a_user_object"
+        request.user = AnonymousUser()
         self._add_session_and_messages(request)
         
         response = proforma_edit(request, self.proforma.pk)
@@ -1508,7 +1517,7 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
     def test_invoice_edit_unauthenticated_user_type(self) -> None:
         """Test invoice_edit with wrong user type (Line 765-767)."""
         request = self.factory.get('/')
-        request.user = "not_a_user_object"
+        request.user = AnonymousUser()
         self._add_session_and_messages(request)
         
         response = invoice_edit(request, self.invoice.pk)
@@ -1575,4 +1584,4 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
             response = invoice_edit(request, self.invoice.pk)
             
             self.assertEqual(response.status_code, 200)
-            self.assertIn('invoice', response.context_data)
+            self.assertIn('invoice', response.context)

@@ -18,7 +18,14 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.audit.models import AuditEvent
-from apps.audit.services import AuthenticationAuditService
+from apps.audit.services import (
+    AuthenticationAuditService, 
+    AuthenticationEventData, 
+    LoginFailureEventData, 
+    LogoutEventData, 
+    AccountEventData, 
+    SessionRotationEventData
+)
 from apps.users.models import UserLoginLog
 from apps.users.signals import log_failed_login, log_user_login, log_user_logout
 
@@ -47,11 +54,12 @@ class AuthenticationAuditServiceTest(TestCase):
     
     def test_log_login_success_basic(self):
         """Test basic successful login logging"""
-        audit_event = AuthenticationAuditService.log_login_success(
+        event_data = AuthenticationEventData(
             user=self.user,
             request=self.request,
             authentication_method='password'
         )
+        audit_event = AuthenticationAuditService.log_login_success(event_data)
         
         self.assertIsInstance(audit_event, AuditEvent)
         self.assertEqual(audit_event.action, 'login_success')
@@ -70,12 +78,13 @@ class AuthenticationAuditServiceTest(TestCase):
         self.user.two_factor_enabled = True
         self.user.save()
         
-        audit_event = AuthenticationAuditService.log_login_success(
+        event_data = AuthenticationEventData(
             user=self.user,
             request=self.request,
             authentication_method='2fa_totp',
             metadata={'backup_codes_remaining': 5}
         )
+        audit_event = AuthenticationAuditService.log_login_success(event_data)
         
         self.assertEqual(audit_event.metadata['authentication_method'], '2fa_totp')
         self.assertTrue(audit_event.metadata['user_2fa_enabled'])
@@ -83,11 +92,12 @@ class AuthenticationAuditServiceTest(TestCase):
     
     def test_log_login_failed_user_not_found(self):
         """Test logging failed login for non-existent user"""
-        audit_event = AuthenticationAuditService.log_login_failed(
+        failure_data = LoginFailureEventData(
             email='nonexistent@example.com',
             failure_reason='user_not_found',
             request=self.request
         )
+        audit_event = AuthenticationAuditService.log_login_failed(failure_data)
         
         self.assertEqual(audit_event.action, 'login_failed_user_not_found')
         self.assertIsNone(audit_event.user)
@@ -97,12 +107,13 @@ class AuthenticationAuditServiceTest(TestCase):
     
     def test_log_login_failed_invalid_password(self):
         """Test logging failed login for valid user with invalid password"""
-        audit_event = AuthenticationAuditService.log_login_failed(
+        failure_data = LoginFailureEventData(
             email='test@example.com',
             user=self.user,
             failure_reason='invalid_password',
             request=self.request
         )
+        audit_event = AuthenticationAuditService.log_login_failed(failure_data)
         
         self.assertEqual(audit_event.action, 'login_failed_password')
         self.assertEqual(audit_event.user, self.user)
@@ -114,23 +125,25 @@ class AuthenticationAuditServiceTest(TestCase):
         """Test logging failed login for locked account"""
         # Mock account locked status
         with patch.object(self.user, 'is_account_locked', return_value=True):
-            audit_event = AuthenticationAuditService.log_login_failed(
+            failure_data = LoginFailureEventData(
                 email='test@example.com',
                 user=self.user,
                 failure_reason='account_locked',
                 request=self.request
             )
+            audit_event = AuthenticationAuditService.log_login_failed(failure_data)
         
         self.assertEqual(audit_event.action, 'login_failed_account_locked')
         self.assertEqual(audit_event.metadata['failure_reason'], 'account_locked')
     
     def test_log_logout_manual(self):
         """Test logging manual logout"""
-        audit_event = AuthenticationAuditService.log_logout(
+        logout_data = LogoutEventData(
             user=self.user,
             logout_reason='manual',
             request=self.request
         )
+        audit_event = AuthenticationAuditService.log_logout(logout_data)
         
         self.assertEqual(audit_event.action, 'logout_manual')
         self.assertEqual(audit_event.user, self.user)
@@ -139,11 +152,12 @@ class AuthenticationAuditServiceTest(TestCase):
     
     def test_log_logout_session_expired(self):
         """Test logging session expiration logout"""
-        audit_event = AuthenticationAuditService.log_logout(
+        logout_data = LogoutEventData(
             user=self.user,
             logout_reason='session_expired',
             request=self.request
         )
+        audit_event = AuthenticationAuditService.log_logout(logout_data)
         
         self.assertEqual(audit_event.action, 'logout_session_expired')
         self.assertEqual(audit_event.metadata['logout_reason'], 'session_expired')
@@ -154,11 +168,12 @@ class AuthenticationAuditServiceTest(TestCase):
         self.user.last_login = timezone.now() - timedelta(minutes=30)
         self.user.save()
         
-        audit_event = AuthenticationAuditService.log_logout(
+        logout_data = LogoutEventData(
             user=self.user,
             logout_reason='manual',
             request=self.request
         )
+        audit_event = AuthenticationAuditService.log_logout(logout_data)
         
         self.assertIn('duration_seconds', audit_event.metadata['session_info'])
         self.assertIn('duration_human', audit_event.metadata['session_info'])
@@ -166,12 +181,13 @@ class AuthenticationAuditServiceTest(TestCase):
     
     def test_log_account_locked(self):
         """Test logging account lockout events"""
-        audit_event = AuthenticationAuditService.log_account_locked(
+        account_data = AccountEventData(
             user=self.user,
             trigger_reason='excessive_failed_attempts',
             request=self.request,
             failed_attempts=5
         )
+        audit_event = AuthenticationAuditService.log_account_locked(account_data)
         
         self.assertEqual(audit_event.action, 'account_locked')
         self.assertEqual(audit_event.metadata['lockout_reason'], 'excessive_failed_attempts')
@@ -184,13 +200,14 @@ class AuthenticationAuditServiceTest(TestCase):
         old_session = 'old_session_123'
         new_session = 'new_session_456'
         
-        audit_event = AuthenticationAuditService.log_session_rotation(
+        session_data = SessionRotationEventData(
             user=self.user,
             reason='password_change',
             request=self.request,
             old_session_key=old_session,
             new_session_key=new_session
         )
+        audit_event = AuthenticationAuditService.log_session_rotation(session_data)
         
         self.assertEqual(audit_event.action, 'session_rotation')
         self.assertEqual(audit_event.metadata['rotation_reason'], 'password_change')
@@ -210,11 +227,12 @@ class AuthenticationAuditServiceTest(TestCase):
             }
         }
         
-        audit_event = AuthenticationAuditService.log_login_success(
+        event_data = AuthenticationEventData(
             user=self.user,
             request=self.request,
             metadata=complex_metadata
         )
+        audit_event = AuthenticationAuditService.log_login_success(event_data)
         
         # Should not raise serialization errors
         self.assertIsInstance(audit_event.metadata, dict)
@@ -468,11 +486,12 @@ class AuthenticationAuditQueryPerformanceTest(TestCase):
         """Test that authentication audit queries are efficient"""
         # Create multiple audit events
         for i in range(10):
-            AuthenticationAuditService.log_login_success(
+            event_data = AuthenticationEventData(
                 user=self.user,
                 ip_address=f'192.168.1.{i}',
                 authentication_method='password'
             )
+            AuthenticationAuditService.log_login_success(event_data)
         
         # Test user-based query (should use idx_audit_user_action_time)
         with self.assertNumQueries(1):
@@ -503,10 +522,11 @@ class AuthenticationAuditGDPRComplianceTest(TestCase):
     
     def test_audit_event_contains_required_gdpr_fields(self):
         """Test that audit events contain required GDPR fields"""
-        audit_event = AuthenticationAuditService.log_login_success(
+        event_data = AuthenticationEventData(
             user=self.user,
             ip_address='192.168.1.1'
         )
+        audit_event = AuthenticationAuditService.log_login_success(event_data)
         
         # Check required GDPR fields
         self.assertIsNotNone(audit_event.timestamp)
@@ -520,20 +540,22 @@ class AuthenticationAuditGDPRComplianceTest(TestCase):
     
     def test_audit_event_immutability(self):
         """Test that audit events cannot be modified (GDPR requirement)"""
-        audit_event = AuthenticationAuditService.log_login_success(
+        event_data = AuthenticationEventData(
             user=self.user,
             ip_address='192.168.1.1'
         )
+        audit_event = AuthenticationAuditService.log_login_success(event_data)
         
         # Attempt to modify - should create new record, not update
         original_id = audit_event.id
         original_timestamp = audit_event.timestamp
         
         # Create another event - should have different ID and timestamp
-        audit_event2 = AuthenticationAuditService.log_login_success(
+        event_data2 = AuthenticationEventData(
             user=self.user,
             ip_address='192.168.1.2'
         )
+        audit_event2 = AuthenticationAuditService.log_login_success(event_data2)
         
         self.assertNotEqual(audit_event.id, audit_event2.id)
         self.assertNotEqual(audit_event.timestamp, audit_event2.timestamp)
@@ -545,10 +567,11 @@ class AuthenticationAuditGDPRComplianceTest(TestCase):
     
     def test_personal_data_pseudonymization_ready(self):
         """Test that audit system supports data pseudonymization for GDPR"""
-        audit_event = AuthenticationAuditService.log_login_success(
+        event_data = AuthenticationEventData(
             user=self.user,
             ip_address='192.168.1.1'
         )
+        audit_event = AuthenticationAuditService.log_login_success(event_data)
         
         # The audit system should store user ID and email separately
         # so that email can be pseudonymized while preserving audit trail
