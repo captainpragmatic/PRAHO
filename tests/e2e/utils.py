@@ -32,6 +32,8 @@ SUPERUSER_EMAIL = "admin@pragmatichost.com"
 SUPERUSER_PASSWORD = "admin123"
 CUSTOMER_EMAIL = "customer@pragmatichost.com"
 CUSTOMER_PASSWORD = "admin123"
+CUSTOMER2_EMAIL = "customer2@pragmatichost.com"
+CUSTOMER2_PASSWORD = "admin123"
 
 
 # ===============================================================================
