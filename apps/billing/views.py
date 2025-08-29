@@ -762,7 +762,7 @@ def _validate_customer_assignment(user: User, customer_id: str | None, proforma_
         return None, redirect('billing:invoice_list')
         
     try:
-        customer = get_object_or_404(Customer, pk=customer_id)
+        customer = Customer.objects.get(pk=customer_id)
     except (ValueError, Customer.DoesNotExist):
         if proforma_pk:
             return None, redirect('billing:proforma_detail', pk=proforma_pk)

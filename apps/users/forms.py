@@ -3,6 +3,7 @@ User forms for PRAHO Platform
 Romanian-localized authentication and profile forms.
 """
 
+import pytz
 from typing import Any, ClassVar, TypeVar, cast
 
 from django import forms
@@ -11,7 +12,7 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone  # For GDPR consent timestamps
 from django.utils.translation import gettext_lazy as _
 
-from .models import User, UserProfile
+from .models import User, UserProfile, CustomerMembership
 from .services import UserRegistrationService
 
 T = TypeVar('T')
@@ -122,8 +123,10 @@ class UserRegistrationForm(UserCreationForm):
 
     def clean_email(self) -> str:
         email: str | None = self.cleaned_data.get('email')
-        if email and User.objects.filter(email=email).exists():
-            raise ValidationError(_('An account with this email address already exists.'))
+        if email:
+            email = email.lower()  # Normalize email to lowercase
+            if User.objects.filter(email=email).exists():
+                raise ValidationError(_('An account with this email address already exists.'))
         return cast(str, email)
 
     def save(self, commit: bool = True) -> User:
@@ -212,6 +215,13 @@ class UserProfileForm(forms.ModelForm):
             self.fields['last_name'].initial = self.instance.user.last_name
             self.fields['phone'].initial = self.instance.user.phone
 
+    def clean_timezone(self) -> str:
+        """Validate timezone"""
+        timezone: str | None = self.cleaned_data.get('timezone')
+        if timezone and timezone not in pytz.all_timezones:
+            raise ValidationError(_('Invalid timezone selected.'))
+        return cast(str, timezone)
+
     def save(self, commit: bool = True) -> UserProfile:
         profile = super().save(commit=False)
 
@@ -298,25 +308,20 @@ class PasswordResetRequestForm(forms.Form):
         return cast(str, email)
 
 
-class CustomerMembershipForm(forms.Form):
+class CustomerMembershipForm(forms.ModelForm):
     """Form for managing customer memberships (PostgreSQL-aligned)"""
 
-    user = forms.ModelChoiceField(
-        queryset=User.objects.all(),
-        label=_('User'),
-        widget=forms.Select(attrs={'class': 'form-select'})
-    )
-
-    permissions = forms.MultipleChoiceField(
-        choices=[
-            ('view', _('View')),
-            ('manage', _('Manage')),
-            ('billing', _('Billing')),
-            ('support', _('Support')),
-        ],
-        widget=forms.CheckboxSelectMultiple(attrs={'class': 'form-checkbox-list'}),
-        label=_('Permissions')
-    )
+    class Meta:
+        model = CustomerMembership
+        fields = ['role', 'is_primary']
+        widgets = {
+            'role': forms.Select(attrs={'class': 'form-select'}),
+            'is_primary': forms.CheckboxInput(attrs={'class': 'form-checkbox'}),
+        }
+        labels = {
+            'role': _('Role'),
+            'is_primary': _('Primary Membership'),
+        }
 
 
 class CustomerOnboardingRegistrationForm(UserCreationForm):
@@ -458,6 +463,14 @@ class CustomerOnboardingRegistrationForm(UserCreationForm):
         label=_('I agree to receive marketing communications'),
         required=False,
         help_text=_('Optional: Receive newsletters and product updates.'),
+        widget=forms.CheckboxInput(attrs={
+            'class': 'h-4 w-4 text-blue-600 focus:ring-blue-500 border-slate-600 rounded bg-slate-800'
+        })
+    )
+
+    terms_accepted = forms.BooleanField(
+        label=_('I accept the terms and conditions'),
+        help_text=_('Required: Agreement to terms of service.'),
         widget=forms.CheckboxInput(attrs={
             'class': 'h-4 w-4 text-blue-600 focus:ring-blue-500 border-slate-600 rounded bg-slate-800'
         })

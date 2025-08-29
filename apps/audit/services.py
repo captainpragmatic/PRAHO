@@ -112,7 +112,7 @@ def serialize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
         return {
             'serialization_error': str(e),
             'original_keys': list(metadata.keys()) if isinstance(metadata, dict) else 'not_dict',
-            'timestamp': datetime.now().isoformat()
+            'timestamp': timezone.now().isoformat()
         }
 
 if TYPE_CHECKING:
