@@ -1068,3 +1068,57 @@ class BillingAnalyticsService:
             f"({adjustment_reason})"
         )
         # TODO: Implement LTV adjustments
+
+
+# ===============================================================================
+# PDF GENERATION & EMAIL SERVICES
+# ===============================================================================
+
+def generate_invoice_pdf(invoice: Invoice) -> bytes:
+    """Generate PDF for an invoice"""
+    logger.info(f"📄 [PDF] Generating PDF for invoice {invoice.number}")
+    # TODO: Implement actual PDF generation
+    return b"Mock PDF content for invoice"
+
+
+def generate_proforma_pdf(proforma: Any) -> bytes:  # ProformaInvoice type would create circular import
+    """Generate PDF for a proforma invoice"""
+    logger.info(f"📄 [PDF] Generating PDF for proforma {proforma.number}")
+    # TODO: Implement actual PDF generation  
+    return b"Mock PDF content for proforma"
+
+
+def generate_e_factura_xml(invoice: Invoice) -> str:
+    """Generate e-Factura XML for Romanian compliance"""
+    logger.info(f"🇷🇴 [e-Factura] Generating XML for invoice {invoice.number}")
+    # TODO: Implement actual e-Factura XML generation
+    return "<xml>Mock e-Factura XML content</xml>"
+
+
+def send_invoice_email(invoice: Invoice, recipient_email: str = None) -> bool:
+    """Send invoice via email"""
+    email = recipient_email or invoice.customer.primary_email
+    logger.info(f"📧 [Email] Sending invoice {invoice.number} to {email}")
+    # TODO: Implement actual email sending
+    return True
+
+
+def send_proforma_email(proforma: Any, recipient_email: str = None) -> bool:  # ProformaInvoice type would create circular import
+    """Send proforma invoice via email"""
+    email = recipient_email or proforma.customer.primary_email
+    logger.info(f"📧 [Email] Sending proforma {proforma.number} to {email}")
+    # TODO: Implement actual email sending
+    return True
+
+
+def generate_vat_summary(period_start: str, period_end: str) -> dict[str, Any]:
+    """Generate VAT summary report for Romanian compliance"""
+    logger.info(f"🇷🇴 [VAT Report] Generating VAT summary for {period_start} to {period_end}")
+    # TODO: Implement actual VAT summary generation
+    return {
+        'period_start': period_start,
+        'period_end': period_end,
+        'total_vat': 0,
+        'total_sales': 0,
+        'invoices': []
+    }

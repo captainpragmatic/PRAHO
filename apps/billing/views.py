@@ -63,6 +63,14 @@ def _validate_pdf_access(request: HttpRequest, document: Invoice | ProformaInvoi
     Validate user access to PDF document.
     Returns redirect response if access denied, None if access granted.
     """
+    # Handle None request objects (for testing)
+    if request is None:
+        return redirect('billing:invoice_list')
+    
+    # Handle None document objects (for testing)
+    if document is None:
+        return redirect('billing:invoice_list')
+    
     # Type guard for authenticated user
     if not isinstance(request.user, User) or not request.user.can_access_customer(document.customer):
         messages.error(request, _("❌ You do not have permission to access this document."))
@@ -193,6 +201,9 @@ def billing_list(request: HttpRequest) -> HttpResponse:
         # Handle database errors gracefully
         logger = logging.getLogger(__name__)
         logger.error(f"Database error in billing_list: {e}")
+        
+        # Add error message for user display
+        messages.error(request, _("Unable to load billing data. Please try again later."))
         
         # Return empty context with error handling
         context = {

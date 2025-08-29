@@ -216,13 +216,21 @@ class RefundServiceComprehensiveTestCase(TestCase):
         self.assertTrue(result.is_ok())
         self.assertIsNone(result.unwrap())
 
-    @patch('apps.billing.services.RefundService._create_audit_entry')
     @patch('apps.billing.services.RefundService._update_order_refund_status')
-    def test_process_bidirectional_refund_order_only(self, mock_update_order: Mock, mock_audit: Mock) -> None:
+    @patch('apps.billing.services.RefundService._create_audit_entry')  
+    @patch('apps.billing.models.Invoice.objects.filter')
+    def test_process_bidirectional_refund_order_only(self, mock_invoice_filter: Mock, mock_audit: Mock, mock_update_order: Mock) -> None:
         """Test bidirectional refund processing with order only"""
         mock_order = Mock()
         mock_order.id = uuid.uuid4()
         mock_order.total_cents = 10000
+        mock_order.invoice = None  # No primary invoice relationship
+        
+        # Mock the Invoice filter to return no invoices
+        mock_queryset = Mock()
+        mock_queryset.exists.return_value = False
+        mock_queryset.first.return_value = None
+        mock_invoice_filter.return_value = mock_queryset
         
         mock_update_order.return_value = Ok(True)
         mock_audit.return_value = None
@@ -245,6 +253,9 @@ class RefundServiceComprehensiveTestCase(TestCase):
             refund_amount_cents=10000,
             refund_data=refund_data
         )
+        
+        if result.is_err():
+            self.fail(f"Expected Ok result, got error: {result.error}")
         
         self.assertTrue(result.is_ok())
         refund_result = result.unwrap()

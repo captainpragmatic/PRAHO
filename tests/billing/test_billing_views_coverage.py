@@ -23,6 +23,7 @@ from django.test import Client, TestCase
 from django.urls import reverse
 
 from apps.billing.models import (
+    Currency,
     Invoice,
     Payment,
     ProformaInvoice,
@@ -54,10 +55,12 @@ class BillingViewsCoverageTestCase(TestCase):
         
         # Create customer
         self.customer = Customer.objects.create(
-            business_name='Test Business SRL',
-            cui='RO12345678',
-            vat_number='RO12345678',
-            email='business@test.com'
+            name='Test Business SRL',
+            company_name='Test Business SRL',
+            customer_type='company',
+            primary_email='business@test.com',
+            primary_phone='+40712345678',
+            status='active'
         )
         
         # Create membership for regular user
@@ -67,41 +70,53 @@ class BillingViewsCoverageTestCase(TestCase):
             role='admin'
         )
         
+        # Create currency
+        self.currency = Currency.objects.create(
+            code='EUR',
+            symbol='€',
+            decimals=2
+        )
+        
         # Create proforma for testing
         self.proforma = ProformaInvoice.objects.create(
             customer=self.customer,
             number='PRO-2024-001',
-            amount_cents=119000,  # 1190.00 EUR with 19% VAT
-            tax_cents=19000,
-            due_date='2024-12-31',
-            status='active'
+            currency=self.currency,
+            subtotal_cents=100000,  # 1000.00 EUR
+            tax_cents=19000,       # 190.00 EUR
+            total_cents=119000,    # 1190.00 EUR total
         )
         
         # Create proforma line
         ProformaLine.objects.create(
             proforma=self.proforma,
+            kind='service',
             description='Test Service',
-            quantity=1,
+            quantity=Decimal('1.000'),
             unit_price_cents=100000,  # 1000.00 EUR
-            vat_rate=Decimal('19.00')
+            tax_rate=Decimal('0.1900'),  # 19%
+            line_total_cents=100000
         )
         
         # Create invoice for testing
         self.invoice = Invoice.objects.create(
             customer=self.customer,
             number='INV-2024-001',
-            amount_cents=119000,
-            tax_cents=19000,
-            due_date='2024-12-31',
+            currency=self.currency,
+            subtotal_cents=100000,  # 1000.00 EUR
+            tax_cents=19000,       # 190.00 EUR
+            total_cents=119000,    # 1190.00 EUR total
             status='issued'
         )
         
         # Create payment
         self.payment = Payment.objects.create(
+            customer=self.customer,
             invoice=self.invoice,
             amount_cents=119000,
-            status='completed',
-            payment_method='bank_transfer'
+            currency=self.currency,
+            status='succeeded',
+            payment_method='bank'
         )
         
         self.client = Client()
@@ -189,9 +204,10 @@ class BillingViewsCoverageTestCase(TestCase):
         existing_invoice = Invoice.objects.create(
             customer=self.customer,
             number='INV-2024-002',
-            amount_cents=119000,
+            currency=self.currency,
+            total_cents=119000,
             tax_cents=19000,
-            due_date='2024-12-31',
+            due_at='2024-12-31',
             status='issued',
             meta={'proforma_id': self.proforma.id}
         )
@@ -243,23 +259,20 @@ class BillingViewsCoverageTestCase(TestCase):
         # Should handle payment processing
         self.assertTrue(mock_process.called)
 
-    @patch('apps.billing.views.generate_payment_collection_report')
-    def test_billing_reports_view(self, mock_report):
-        """Test billing_reports view (lines 894-918)"""
-        mock_report.return_value = {'total_collected': 1000000, 'pending': 500000}
-        
+    def test_billing_reports_view(self):
+        """Test billing_reports view (lines 1192-1221)"""
         self.client.force_login(self.staff_user)
         url = reverse('billing:reports')
         
-        response = self.client.get(url, {
-            'start_date': '2024-01-01',
-            'end_date': '2024-12-31'
-        })
+        response = self.client.get(url)
         
         self.assertEqual(response.status_code, 200)
-        mock_report.assert_called_once()
+        self.assertContains(response, 'Financial Reports')
+        # Test that context data is passed to template
+        self.assertIn('monthly_stats', response.context)
+        self.assertIn('total_revenue', response.context)
 
-    @patch('apps.billing.views.generate_vat_summary')
+    @patch('apps.billing.services.generate_vat_summary')
     def test_vat_report_view(self, mock_vat):
         """Test vat_report view (lines 927-953)"""
         mock_vat.return_value = {
@@ -395,17 +408,18 @@ class BillingViewsCoverageTestCase(TestCase):
         """Test customer access checks (line 74, 267, 477, 611, 637)"""
         # Create request with different user types
         other_customer = Customer.objects.create(
-            business_name='Other Business',
-            cui='RO87654321',
-            email='other@test.com'
+            name='Other Business',
+            customer_type='company',
+            primary_email='other@test.com'
         )
         
         invoice_other = Invoice.objects.create(
             customer=other_customer,
             number='INV-OTHER-001',
-            amount_cents=100000,
+            currency=self.currency,
+            total_cents=100000,
             tax_cents=19000,
-            due_date='2024-12-31'
+            due_at='2024-12-31'
         )
         
         # Test access with user not having permission
@@ -444,14 +458,15 @@ class BillingViewsCoverageTestCase(TestCase):
         self.client.force_login(self.staff_user)
         url = reverse('billing:invoice_pdf', kwargs={'pk': self.invoice.pk})
         
-        with patch('apps.billing.services.generate_invoice_pdf') as mock_pdf:
-            mock_pdf.return_value = b'PDF content'
+        with patch('apps.billing.views.RomanianInvoicePDFGenerator') as mock_pdf_gen:
+            mock_response = HttpResponse(b'PDF content', content_type='application/pdf')
+            mock_pdf_gen.return_value.generate_response.return_value = mock_response
             
             response = self.client.get(url)
             
             # Should generate PDF
             self.assertEqual(response.status_code, 200)
-            self.assertTrue(mock_pdf.called)
+            self.assertTrue(mock_pdf_gen.called)
 
 
 class BillingViewsIntegrationTestCase(TestCase):
@@ -467,10 +482,9 @@ class BillingViewsIntegrationTestCase(TestCase):
         )
         
         self.customer = Customer.objects.create(
-            business_name='Integration Test SRL',
-            cui='RO11111111',
-            vat_number='RO11111111',
-            email='integration@customer.com'
+            name='Integration Test SRL',
+            customer_type='company',
+            primary_email='integration@customer.com'
         )
         
         self.client = Client()
@@ -513,9 +527,10 @@ class BillingViewsIntegrationTestCase(TestCase):
         invoice = Invoice.objects.create(
             customer=self.customer,
             number='INV-WORKFLOW-001',
-            amount_cents=119000,
+            currency=self.currency,
+            total_cents=119000,
             tax_cents=19000,
-            due_date='2024-12-31'
+            due_at='2024-12-31'
         )
         
         # Process payment

@@ -283,7 +283,7 @@ class BillingViewsTargetedTestCase(TestCase):
         self.client.force_login(self.staff_user)
         url = reverse('billing:vat_report')
         
-        with patch('apps.billing.views.generate_vat_summary') as mock_vat, \
+        with patch('apps.billing.services.generate_vat_summary') as mock_vat, \
              patch('django.shortcuts.render') as mock_render:
             
             mock_vat.return_value = {

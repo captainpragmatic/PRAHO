@@ -166,10 +166,15 @@ class FinalBillingViewsCoverageTestCase(TestCase):
     def test_validate_pdf_access_with_valid_user(self):
         """Test _validate_pdf_access with valid user"""
         from apps.billing.views import _validate_pdf_access
+        from django.test import RequestFactory
         
-        result = _validate_pdf_access(self.staff_user, self.invoice)
+        factory = RequestFactory()
+        request = factory.get('/test/')
+        request.user = self.staff_user
+        
+        result = _validate_pdf_access(request, self.invoice)
         # This will test the internal logic
-        self.assertIsNotNone(result)  # Should return a result based on user access
+        self.assertIsNone(result)  # Should return None for valid access
 
     def test_get_customers_for_edit_form_with_list(self):
         """Test _get_customers_for_edit_form when get_accessible_customers returns list"""
@@ -392,7 +397,12 @@ class FinalBillingViewsCoverageTestCase(TestCase):
         self.assertEqual(result, [])
         
         # Test PDF access with various scenarios
-        result = _validate_pdf_access(self.staff_user, None)
+        from django.test import RequestFactory
+        factory = RequestFactory()
+        request = factory.get('/test/')
+        request.user = self.staff_user
+        
+        result = _validate_pdf_access(request, None)
         # Test different access patterns
         self.assertIsNotNone(result)  # Should handle None invoice
 
@@ -494,7 +504,7 @@ class FinalBillingViewsCoverageTestCase(TestCase):
         request = self.factory.get('/billing/reports/vat/')
         self.add_middleware_to_request(request, self.staff_user)
         
-        with patch('apps.billing.views.generate_vat_summary') as mock_vat:
+        with patch('apps.billing.services.generate_vat_summary') as mock_vat:
             mock_vat.return_value = {'total_vat': 190000}
             
             response = vat_report(request)

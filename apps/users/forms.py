@@ -3,16 +3,17 @@ User forms for PRAHO Platform
 Romanian-localized authentication and profile forms.
 """
 
-import pytz
+import re
 from typing import Any, ClassVar, TypeVar, cast
 
+import pytz
 from django import forms
 from django.contrib.auth.forms import UserCreationForm
 from django.core.exceptions import ValidationError
 from django.utils import timezone  # For GDPR consent timestamps
 from django.utils.translation import gettext_lazy as _
 
-from .models import User, UserProfile, CustomerMembership
+from .models import CustomerMembership, User, UserProfile
 from .services import UserRegistrationService
 
 T = TypeVar('T')
@@ -129,6 +130,17 @@ class UserRegistrationForm(UserCreationForm):
                 raise ValidationError(_('An account with this email address already exists.'))
         return cast(str, email)
 
+    def clean_phone(self) -> str:
+        """Validate Romanian phone number format"""
+        phone: str | None = self.cleaned_data.get('phone')
+        if phone and phone.strip():
+            phone = phone.strip()
+            # Romanian phone patterns: +40.XX.XXX.XXXX, +40 XXX XXX XXX, 07XXXXXXXX
+            # Allow digits with dots or spaces as separators, or plain 10-digit starting with 0
+            if not re.match(r'^(\+40[\.\s]*[0-9][\.\s0-9]{8,11}[0-9]|0[0-9]{9})$', phone):
+                raise ValidationError(_('Invalid phone number format. Use Romanian format: +40.XX.XXX.XXXX'))
+        return cast(str, phone or '')
+
     def save(self, commit: bool = True) -> User:
         user = super().save(commit=False)
         user.username = self.cleaned_data['email']  # Use email as username
@@ -221,6 +233,17 @@ class UserProfileForm(forms.ModelForm):
         if timezone and timezone not in pytz.all_timezones:
             raise ValidationError(_('Invalid timezone selected.'))
         return cast(str, timezone)
+
+    def clean_phone(self) -> str:
+        """Validate Romanian phone number format"""
+        phone: str | None = self.cleaned_data.get('phone')
+        if phone and phone.strip():
+            phone = phone.strip()
+            # Romanian phone patterns: +40.XX.XXX.XXXX, +40 XXX XXX XXX, 07XXXXXXXX
+            # Allow digits with dots or spaces as separators, or plain 10-digit starting with 0
+            if not re.match(r'^(\+40[\.\s]*[0-9][\.\s0-9]{8,11}[0-9]|0[0-9]{9})$', phone):
+                raise ValidationError(_('Invalid phone number format. Use Romanian format: +40.XX.XXX.XXXX'))
+        return cast(str, phone or '')
 
     def save(self, commit: bool = True) -> UserProfile:
         profile = super().save(commit=False)
@@ -483,8 +506,19 @@ class CustomerOnboardingRegistrationForm(UserCreationForm):
     def clean_vat_number(self) -> str:
         """Validate VAT number format"""
         vat_number: str = self.cleaned_data.get('vat_number', '').strip()
-        if vat_number and not vat_number.startswith('RO'):
-            vat_number = f'RO{vat_number}'
+        if vat_number:
+            # Check if VAT number is in valid Romanian format
+            if not vat_number.startswith('RO'):
+                # Only auto-prepend RO if it looks like a numeric VAT number
+                if vat_number.isdigit() and len(vat_number) >= 6:
+                    vat_number = f'RO{vat_number}'
+                else:
+                    raise ValidationError(_('VAT number must start with RO followed by digits (e.g., RO12345678)'))
+            else:
+                # Validate that after RO we have digits
+                vat_digits = vat_number[2:]
+                if not vat_digits.isdigit() or len(vat_digits) < 6:
+                    raise ValidationError(_('VAT number must start with RO followed by digits (e.g., RO12345678)'))
         return vat_number
 
     def clean_customer_type(self) -> str:

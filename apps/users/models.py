@@ -225,6 +225,11 @@ class User(AbstractUser):
 
     def is_account_locked(self) -> bool:
         """Check if account is currently locked"""
+        # Allow disabling lockout for development/testing
+        from django.conf import settings
+        if getattr(settings, 'DISABLE_ACCOUNT_LOCKOUT', False):
+            return False
+            
         if not self.account_locked_until:
             return False
 
@@ -232,6 +237,10 @@ class User(AbstractUser):
 
     def increment_failed_login_attempts(self) -> None:
         """Increment failed login attempts and apply progressive lockout"""
+        # Allow disabling lockout for development/testing
+        from django.conf import settings
+        if getattr(settings, 'DISABLE_ACCOUNT_LOCKOUT', False):
+            return  # Skip lockout logic completely when disabled
 
         self.failed_login_attempts += 1
 

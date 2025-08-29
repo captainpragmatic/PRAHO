@@ -168,6 +168,62 @@ def create_test_data():
         if created:
             print("✅ Created customer membership")
 
+        # 7.1 Create dedicated E2E users used by Playwright tests
+        # Admin test user (superuser)
+        e2e_admin, _ = User.objects.get_or_create(
+            email='e2e-admin@test.local',
+            defaults={
+                'first_name': 'E2E',
+                'last_name': 'Admin',
+                'is_staff': True,
+                'is_superuser': True,
+                'is_active': True,
+            }
+        )
+        # Ensure known password for repeatable E2E runs
+        e2e_admin.set_password('test123')
+        e2e_admin.save()
+        print("✅ Ensured E2E admin user (e2e-admin@test.local)")
+
+        # Customer test user
+        e2e_customer, _ = User.objects.get_or_create(
+            email='e2e-customer@test.local',
+            defaults={
+                'first_name': 'E2E',
+                'last_name': 'Customer',
+                'is_staff': False,
+                'is_superuser': False,
+                'is_active': True,
+            }
+        )
+        # Ensure known password for repeatable E2E runs
+        e2e_customer.set_password('test123')
+        e2e_customer.save()
+        print("✅ Ensured E2E customer user (e2e-customer@test.local)")
+
+        # Ensure the E2E customer is linked to the test customer organization
+        cm_defaults = {
+            'role': 'owner',
+            'is_primary': True,
+        }
+        cm, cm_created = CustomerMembership.objects.get_or_create(
+            user=e2e_customer,
+            customer=customer,
+            defaults=cm_defaults,
+        )
+        if cm_created:
+            print("✅ Linked E2E customer to test customer organization")
+        else:
+            # Keep membership consistent with expected defaults
+            updated = False
+            for k, v in cm_defaults.items():
+                if getattr(cm, k) != v:
+                    setattr(cm, k, v)
+                    updated = True
+            if updated:
+                cm.save()
+                print("🔧 Updated E2E customer membership settings")
+
         # 8. Create test service plan and service
         try:
             # First create a service plan (required dependency)

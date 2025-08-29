@@ -136,6 +136,7 @@ class WebAuthnCredential(models.Model):
     backup_eligible = models.BooleanField(default=False)
     backup_state = models.BooleanField(default=False)
     user_verified = models.BooleanField(default=False)
+    metadata = models.JSONField(default=dict, blank=True)
 
     # Audit fields
     created_at = models.DateTimeField(auto_now_add=True)
@@ -526,7 +527,7 @@ class WebAuthnService:
         return list(qs)
 
     @staticmethod
-    def delete_credential(user: 'User', credential_identifier: Union[int, str]) -> bool:
+    def delete_credential(user: 'User', credential_identifier: int | str) -> bool:
         try:
             if isinstance(credential_identifier, int):
                 cred = WebAuthnCredential.objects.get(pk=credential_identifier, user=user)
@@ -948,7 +949,7 @@ class MFAService:
         if BackupCodeService.get_remaining_count(user) > 0:
             methods.append('backup_codes')
 
-        if WebAuthnService.is_supported():
+        if WebAuthnService.is_supported() and WebAuthnCredential.objects.filter(user=user, is_active=True).exists():
             methods.append('webauthn')
 
         return methods

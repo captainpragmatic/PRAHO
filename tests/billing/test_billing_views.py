@@ -219,57 +219,105 @@ class BillingListViewTestCase(TestCase):
         self.assertEqual(response.status_code, 302)
 
     def test_billing_list_all_documents(self):
-        """Test billing_list shows all documents by default"""
+        """Test billing_list main page loads correctly and HTMX endpoint shows documents"""
+        # Test the main page loads without errors
         request = self.factory.get('/billing/')
         request.user = self.user
         request = self.add_middleware_to_request(request)
         
         response = billing_list(request)
-        
         self.assertEqual(response.status_code, 200)
-        # Check context is properly loaded
-        self.assertContains(response, 'PRO-001')
-        self.assertContains(response, 'INV-001')
+        # Check that the page renders with HTMX setup
+        self.assertContains(response, 'id="billing-results"')
+        self.assertContains(response, 'hx-get=')
+        
+        # Test the HTMX endpoint that actually contains the documents
+        htmx_request = self.factory.get('/billing/htmx/')
+        htmx_request.user = self.user  
+        htmx_request = self.add_middleware_to_request(htmx_request)
+        
+        # Import the view function we need to test
+        from apps.billing.views import billing_list_htmx
+        
+        htmx_response = billing_list_htmx(htmx_request)
+        self.assertEqual(htmx_response.status_code, 200)
+        
+        # Check that the actual documents are shown in the HTMX response
+        self.assertContains(htmx_response, 'PRO-001')
+        self.assertContains(htmx_response, 'INV-001')
 
     def test_billing_list_filter_by_proforma(self):
         """Test billing_list filtered by proforma type"""
+        # Test the main page loads 
         request = self.factory.get('/billing/?type=proforma')
         request.user = self.user
         request = self.add_middleware_to_request(request)
         
         response = billing_list(request)
-        
         self.assertEqual(response.status_code, 200)
+        
+        # Test the HTMX endpoint with filter
+        from apps.billing.views import billing_list_htmx
+        
+        htmx_request = self.factory.get('/billing/htmx/?type=proforma')
+        htmx_request.user = self.user  
+        htmx_request = self.add_middleware_to_request(htmx_request)
+        
+        htmx_response = billing_list_htmx(htmx_request)
+        self.assertEqual(htmx_response.status_code, 200)
+        
         # Should contain proforma but not invoice
-        self.assertContains(response, 'PRO-001')
-        self.assertNotContains(response, 'INV-001')
+        self.assertContains(htmx_response, 'PRO-001')
+        self.assertNotContains(htmx_response, 'INV-001')
 
     def test_billing_list_filter_by_invoice(self):
         """Test billing_list filtered by invoice type"""
+        # Test the main page loads
         request = self.factory.get('/billing/?type=invoice')
         request.user = self.user
         request = self.add_middleware_to_request(request)
         
         response = billing_list(request)
-        
         self.assertEqual(response.status_code, 200)
+        
+        # Test the HTMX endpoint with filter
+        from apps.billing.views import billing_list_htmx
+        
+        htmx_request = self.factory.get('/billing/htmx/?type=invoice')
+        htmx_request.user = self.user  
+        htmx_request = self.add_middleware_to_request(htmx_request)
+        
+        htmx_response = billing_list_htmx(htmx_request)
+        self.assertEqual(htmx_response.status_code, 200)
+        
         # Should contain invoice but not proforma
-        self.assertContains(response, 'INV-001')
-        self.assertNotContains(response, 'PRO-001')
+        self.assertContains(htmx_response, 'INV-001')
+        self.assertNotContains(htmx_response, 'PRO-001')
 
     def test_billing_list_with_search(self):
         """Test billing_list with search query"""
+        # Test the main page loads
         request = self.factory.get('/billing/?search=PRO-001')
         request.user = self.user
         request = self.add_middleware_to_request(request)
         
         response = billing_list(request)
-        
         self.assertEqual(response.status_code, 200)
+        
+        # Test the HTMX endpoint with search
+        from apps.billing.views import billing_list_htmx
+        
+        htmx_request = self.factory.get('/billing/htmx/?search=PRO-001')
+        htmx_request.user = self.user  
+        htmx_request = self.add_middleware_to_request(htmx_request)
+        
+        htmx_response = billing_list_htmx(htmx_request)
+        self.assertEqual(htmx_response.status_code, 200)
+        
         # Should find the proforma with PRO-001
-        self.assertContains(response, 'PRO-001')
+        self.assertContains(htmx_response, 'PRO-001')
         # Should not contain INV-001 since search doesn't match
-        self.assertNotContains(response, 'INV-001')
+        self.assertNotContains(htmx_response, 'INV-001')
 
     def test_billing_list_staff_permissions(self):
         """Test billing_list with staff user permissions"""
@@ -280,8 +328,10 @@ class BillingListViewTestCase(TestCase):
         response = billing_list(request)
         
         self.assertEqual(response.status_code, 200)
-        # Should contain staff-specific content
-        self.assertContains(response, 'is_staff_user')
+        # Should contain staff-specific content - the unique staff message text
+        self.assertContains(response, 'Manage proformas and invoices following Romanian business practices')
+        # Should contain the "New Proforma" button for staff
+        self.assertContains(response, 'New Proforma')
 
     def test_billing_list_pagination(self):
         """Test billing_list pagination functionality"""
@@ -1099,19 +1149,18 @@ class ErrorHandlingViewsTestCase(TestCase):
         """Test billing_list handles database errors gracefully"""
         request = self.factory.get('/billing/')
         request.user = self.user
+        request = self.add_middleware_to_request(request)
         
         with patch('apps.billing.views._get_accessible_customer_ids') as mock_get_ids:
             mock_get_ids.side_effect = Exception('Database error')
             
             # Should handle the error gracefully without crashing
-            try:
-                response = billing_list(request)
-                # If no exception is raised, the error handling is working
-                self.assertTrue(True)
-                # Response should be valid
-                self.assertIsNotNone(response)
-            except Exception:
-                self.fail("View should handle database errors gracefully")
+            response = billing_list(request)
+            # Response should be valid and contain error handling
+            self.assertIsNotNone(response)
+            self.assertEqual(response.status_code, 200)
+            # Should contain error state in context
+            self.assertContains(response, 'empty')
 
     def test_proforma_create_with_invalid_form_data(self):
         """Test proforma creation with invalid form data"""
@@ -1682,7 +1731,10 @@ class BillingReportsViewsTestCase(TestCase):
         response = self.client.get('/app/billing/reports/')
         
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'revenue')
+        # Check that the reports page loads with correct title
+        self.assertContains(response, 'Financial Reports')
+        # Check that staff-only message is displayed
+        self.assertContains(response, 'Staff only')
 
     def test_vat_report_success(self):
         """Test VAT report view"""
@@ -1690,7 +1742,11 @@ class BillingReportsViewsTestCase(TestCase):
         response = self.client.get('/app/billing/reports/vat/')
         
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'total_vat')
+        # Check for content that actually appears in the VAT report template
+        self.assertContains(response, 'VAT Report')
+        self.assertContains(response, 'VAT Collected')
+        self.assertContains(response, 'Total Sales')
+        self.assertContains(response, 'Net Sales')
 
     def test_vat_report_with_date_range(self):
         """Test VAT report with date range parameters"""

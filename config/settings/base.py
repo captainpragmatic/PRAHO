@@ -42,6 +42,7 @@ LOCAL_APPS: list[str] = [
     'apps.integrations',  # 🔌 External service webhooks & deduplication
     'apps.audit',
     'apps.ui',
+    'apps.system_settings', # ⚙️ System configuration management
 ]
 
 INSTALLED_APPS: list[str] = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS

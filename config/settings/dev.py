@@ -19,6 +19,9 @@ from .base import *  # noqa: F403
 DEBUG = True
 TEMPLATE_DEBUG = True
 
+# Disable account lockout for development and E2E testing
+DISABLE_ACCOUNT_LOCKOUT = True
+
 # Get ALLOWED_HOSTS from environment variable, with sensible development defaults
 allowed_hosts_env = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1,0.0.0.0')
 ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_env.split(',') if host.strip()]
