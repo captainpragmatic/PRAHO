@@ -167,9 +167,17 @@ def log_failed_login(sender: Any, credentials: dict[str, Any], request: HttpRequ
 
 
 def _get_client_ip(request: HttpRequest) -> str:
-    """Get client IP address from request"""
+    """Get client IP address from various headers"""
+    # Check X-Real-IP header first (commonly used by nginx)
+    x_real_ip = request.META.get('HTTP_X_REAL_IP')
+    if x_real_ip:
+        return x_real_ip.strip()
+    
+    # Check X-Forwarded-For header
     x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-    ip = x_forwarded_for.split(',')[0].strip() if x_forwarded_for else request.META.get('REMOTE_ADDR', '127.0.0.1')
-
-    # Ensure we always return a valid IP address
+    if x_forwarded_for:
+        return x_forwarded_for.split(',')[0].strip()
+    
+    # Fall back to REMOTE_ADDR with default
+    ip = request.META.get('REMOTE_ADDR', '127.0.0.1')
     return ip if ip else '127.0.0.1'

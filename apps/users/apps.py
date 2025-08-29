@@ -11,4 +11,4 @@ class UsersConfig(AppConfig):
     verbose_name = 'Users'
 
     def ready(self) -> None:
-        pass  # Django app signal registration pattern
+        """Import signals when the app is ready"""

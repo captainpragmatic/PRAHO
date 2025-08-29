@@ -22,7 +22,6 @@ from django.db import transaction
 from django.db.models import Count, Q, QuerySet, Sum
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.test import RequestFactory
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_POST
@@ -672,16 +671,50 @@ def process_proforma_payment(request: HttpRequest, pk: int) -> HttpResponse:
         return JsonResponse({'error': 'Unauthorized'}, status=403)
 
     if request.method == 'POST':
-        # Convert proforma to invoice first
-        factory = RequestFactory()
-        convert_request = factory.post('')
-        convert_request.user = request.user
+        # Convert proforma to invoice first using the billing service
+        # Instead of calling the view directly (which causes messages issues),
+        # we'll duplicate the conversion logic here
+        
+        # Check if already converted
+        existing_invoice = Invoice.objects.filter(meta__proforma_id=proforma.id).first()
+        if existing_invoice:
+            # Already converted, process payment on existing invoice
+            invoice = existing_invoice
+        else:
+            # Convert proforma to invoice
+            sequence, created = InvoiceSequence.objects.get_or_create(scope='default')
+            invoice_number = sequence.get_next_number('INV')
 
-        # Call conversion view
-        proforma_to_invoice(convert_request, pk)
+            # Create invoice from proforma
+            invoice = Invoice.objects.create(
+                customer=proforma.customer,
+                number=invoice_number,
+                status='draft',
+                currency=proforma.currency,
+                total_cents=proforma.total_cents,
+                tax_cents=proforma.tax_cents,
+                subtotal_cents=proforma.subtotal_cents,
+                due_at=proforma.valid_until if proforma.valid_until else timezone.now() + timezone.timedelta(days=30),
+                issued_at=timezone.now(),
+                meta={'proforma_id': proforma.id},
+                converted_from_proforma=proforma,
+            )
 
-        # If conversion successful, process payment on the new invoice
-        invoice = Invoice.objects.filter(meta__proforma_id=proforma.id).first()
+            # Copy all line items
+            from apps.billing.models import InvoiceLine
+            for proforma_line in proforma.lines.all():
+                InvoiceLine.objects.create(
+                    invoice=invoice,
+                    kind=proforma_line.kind,
+                    service=proforma_line.service,
+                    description=proforma_line.description,
+                    quantity=proforma_line.quantity,
+                    unit_price_cents=proforma_line.unit_price_cents,
+                    tax_rate=proforma_line.tax_rate,
+                    line_total_cents=proforma_line.line_total_cents,
+                )
+
+        # Process payment on the invoice
         if invoice:
             # Process payment on the invoice
             amount = Decimal(request.POST.get('amount', str(invoice.total)))

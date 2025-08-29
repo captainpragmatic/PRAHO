@@ -1158,10 +1158,18 @@ class SessionSecurityService:
 
     @classmethod
     def _get_client_ip(cls, request: HttpRequest) -> str:
-        """Get real client IP address"""
+        """Get real client IP address from various headers"""
+        # Check X-Real-IP header first (commonly used by nginx)
+        x_real_ip = request.META.get('HTTP_X_REAL_IP')
+        if x_real_ip:
+            return x_real_ip.strip()
+        
+        # Check X-Forwarded-For header
         x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
         if x_forwarded_for:
             return x_forwarded_for.split(",")[0].strip()
+        
+        # Fall back to REMOTE_ADDR
         return request.META.get("REMOTE_ADDR", "")
 
     @classmethod

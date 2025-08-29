@@ -12,6 +12,9 @@ urlpatterns = [
     # Customer listing and search
     path('', views.customer_list, name='list'),
     path('search/', views.customer_search_api, name='search_api'),
+    
+    # API endpoints
+    path('<int:customer_id>/services/', views.customer_services_api, name='services_api'),
 
     # Customer CRUD
     path('create/', views.customer_create, name='create'),

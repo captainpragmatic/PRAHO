@@ -33,7 +33,7 @@ from django.views.generic import DetailView, ListView
 from django_ratelimit.decorators import ratelimit  # type: ignore[import-untyped]
 from django_ratelimit.exceptions import Ratelimited  # type: ignore[import-untyped]
 
-from apps.audit.services import AuthenticationAuditService
+from apps.audit.services import AuthenticationAuditService, LogoutEventData
 from apps.common.constants import BACKUP_CODE_LENGTH, BACKUP_CODE_LOW_WARNING_THRESHOLD
 from apps.common.utils import (
     json_error,
@@ -185,7 +185,7 @@ def logout_view(request: HttpRequest) -> HttpResponse:
         
         # Log logout event BEFORE clearing session
         try:
-            AuthenticationAuditService.log_logout(  # type: ignore[call-arg]  # type: ignore[call-arg]
+            logout_data = LogoutEventData(
                 user=user,
                 logout_reason='manual',
                 request=request,
@@ -195,6 +195,7 @@ def logout_view(request: HttpRequest) -> HttpResponse:
                     'user_agent': request.META.get('HTTP_USER_AGENT', ''),
                 }
             )
+            AuthenticationAuditService.log_logout(logout_data)
             logger.info(f"✅ [Logout View] Audit logged for {user.email}")
         except Exception as e:
             # Don't let audit logging break logout
@@ -528,13 +529,13 @@ def two_factor_verify(request: HttpRequest) -> HttpResponse:
     """Verify 2FA token during login"""
     user_id = request.session.get('pre_2fa_user_id')
     if not user_id:
-        return redirect('login')
+        return redirect('users:login')
 
     try:
         user = User.objects.get(id=user_id)
     except User.DoesNotExist:
         del request.session['pre_2fa_user_id']
-        return redirect('login')
+        return redirect('users:login')
 
     if request.method == 'POST':
         form = TwoFactorVerifyForm(request.POST)
@@ -686,7 +687,7 @@ def user_profile(request: HttpRequest) -> HttpResponse:
         if form.is_valid():
             form.save()
             messages.success(request, _('Profile updated successfully.'))
-            return redirect('user_profile')
+            return redirect('users:user_profile')
     else:
         form = UserProfileForm(instance=profile)
 
@@ -839,7 +840,16 @@ def _log_user_login(request: HttpRequest, user: User, status: str) -> None:
 
 
 def _get_client_ip(request: HttpRequest) -> str:
-    """Get client IP address"""
+    """Get client IP address from various headers"""
+    # Check X-Real-IP header first (commonly used by nginx)
+    x_real_ip = request.META.get('HTTP_X_REAL_IP')
+    if x_real_ip:
+        return x_real_ip.strip()
+    
+    # Check X-Forwarded-For header
     x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-    ip = x_forwarded_for.split(',')[0] if x_forwarded_for else request.META.get('REMOTE_ADDR', '')
-    return ip
+    if x_forwarded_for:
+        return x_forwarded_for.split(',')[0].strip()
+    
+    # Fall back to REMOTE_ADDR
+    return request.META.get('REMOTE_ADDR', '')

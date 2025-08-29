@@ -143,17 +143,18 @@ def current_customer(request: HttpRequest) -> dict[str, Any]:
     # For staff users (staff_role is set), they don't have a "current customer" by default
     staff_role = getattr(request.user, 'staff_role', None)
     if staff_role:
-        # Staff can switch customer context via session
-        customer_id = request.session.get('staff_customer_context')
-        if customer_id:
-            from apps.customers.models import (  # Cross-app import to avoid circular dependencies  # noqa: PLC0415
-                Customer,
-            )
-            try:
-                customer = Customer.objects.get(id=customer_id)
-                return {'current_customer': customer}
-            except Customer.DoesNotExist:
-                pass
+        # Staff can switch customer context via session (check if session exists)
+        if hasattr(request, 'session') and request.session:
+            customer_id = request.session.get('staff_customer_context')
+            if customer_id:
+                from apps.customers.models import (  # Cross-app import to avoid circular dependencies  # noqa: PLC0415
+                    Customer,
+                )
+                try:
+                    customer = Customer.objects.get(id=customer_id)
+                    return {'current_customer': customer}
+                except Customer.DoesNotExist:
+                    pass
         return {'current_customer': None}
 
     # For customer users, get their primary customer
@@ -170,6 +171,7 @@ def navigation_dropdowns(request: HttpRequest) -> dict[str, Any]:
     if request.user.is_staff or getattr(request.user, 'staff_role', None):
         business_items = [
             {"text": "Customers", "url": "/app/customers/", "icon": "👥"},
+            {"text": "Products", "url": "/app/products/", "icon": "🛍️"},
             {"text": "Orders", "url": "/app/orders/", "icon": "🛒"},
             {"divider": True},
             {"text": "Invoices", "url": "/app/billing/invoices/", "icon": "🧾"},
@@ -217,9 +219,14 @@ def navigation_dropdowns(request: HttpRequest) -> dict[str, Any]:
 
 def gdpr_compliance(request: HttpRequest) -> dict[str, Any]:
     """GDPR compliance context"""
+    # Check if session exists (for test environments)
+    consent_required = True  # Default to requiring consent
+    if hasattr(request, 'session') and request.session:
+        consent_required = not request.session.get('gdpr_consent', False)
+    
     return {
         'gdpr': {
-            'consent_required': not request.session.get('gdpr_consent', False),
+            'consent_required': consent_required,
             'privacy_policy_url': '/privacy-policy/',
             'data_processing_url': '/data-processing/',
             'cookie_policy_url': '/cookie-policy/',

@@ -663,3 +663,24 @@ def customer_assign_user(request: HttpRequest, customer_id: int) -> HttpResponse
         return _handle_user_assignment_post(request, customer)
     
     return _render_assignment_form(request, None, customer)
+
+
+# ===============================================================================
+# API ENDPOINTS
+# ===============================================================================
+
+@login_required
+def customer_services_api(request: HttpRequest, customer_id: int) -> JsonResponse:
+    """
+    🔗 API endpoint for customer services (for ticket form)
+    Returns empty list for now - placeholder for future service management
+    """
+    # Verify user has access to this customer
+    user = cast(User, request.user)
+    accessible_customers = user.get_accessible_customers()
+    if not accessible_customers.filter(id=customer_id).exists():
+        return JsonResponse({'error': 'Access denied'}, status=403)
+    
+    # For now, return empty services list
+    # TODO: Implement actual service management
+    return JsonResponse([], safe=False)

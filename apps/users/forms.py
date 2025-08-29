@@ -258,17 +258,17 @@ class TwoFactorVerifyForm(forms.Form):
 
     token = forms.CharField(
         label=_('2FA Code'),
-        max_length=6,
+        max_length=8,  # Support both TOTP (6 digits) and backup codes (8 digits)
         min_length=6,
         widget=forms.TextInput(attrs={
             'class': 'form-input text-center',
             'placeholder': '123456',
             'autocomplete': 'off',
             'autofocus': True,
-            'pattern': '[0-9]{6}',
+            'pattern': '[0-9]{6,8}',  # Accept 6-8 digits
             'inputmode': 'numeric'
         }),
-        help_text=_('Enter the code from the authenticator app')
+        help_text=_('Enter the code from the authenticator app or backup code')
     )
 
     def clean_token(self) -> str:
