@@ -168,7 +168,7 @@ def generate_invoice_number(year: int | None = None) -> str:
         year = get_romanian_now().year
 
     # Format: YYYY-000001 (sequential per year)
-    from apps.billing.models import Invoice  # noqa: PLC0415 # Cross-app import to avoid circular dependencies
+    from apps.billing.models import Invoice  # Cross-app import to avoid circular dependencies  # noqa: PLC0415
 
     # Get next invoice number for this year
     last_invoice = Invoice.objects.filter(

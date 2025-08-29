@@ -361,7 +361,7 @@ class CustomerBillingProfile(SoftDeleteModel):
 
     def get_account_balance(self) -> Decimal:
         """Get customer account balance"""
-        from apps.billing.models import Invoice  # noqa: PLC0415 # Cross-app import for balance calculation
+        from apps.billing.models import Invoice  # Cross-app import for balance calculation  # noqa: PLC0415
         invoices = Invoice.objects.filter(customer=self.customer)
         total_due = sum(
             invoice.amount_due for invoice in invoices

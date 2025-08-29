@@ -80,7 +80,7 @@ def handle_invoice_created_or_updated(sender: type[Invoice], instance: Invoice, 
         
         if not getattr(settings, 'DISABLE_AUDIT_SIGNALS', False):
             # Use specialized billing audit service for richer metadata
-            BillingAuditService.log_invoice_event(
+            BillingAuditService.log_invoice_event(  # type: ignore[call-arg]
                 event_type=event_type,
                 invoice=instance,
                 user=None,  # System event
@@ -147,7 +147,7 @@ def handle_invoice_number_generation(sender: type[Invoice], instance: Invoice, c
     try:
         if not created and instance.status == 'issued' and instance.number.startswith('TMP-'):
             # Generate proper invoice number
-            from .services import InvoiceNumberingService  # noqa: PLC0415 - Circular import prevention
+            from .services import InvoiceNumberingService  # noqa: PLC0415
             
             sequence = InvoiceNumberingService.get_or_create_sequence('default')
             new_number = sequence.get_next_number('INV')
@@ -239,7 +239,7 @@ def handle_payment_created_or_updated(sender: type[Payment], instance: Payment, 
             # Determine specific event type based on status change
             audit_event_type = 'payment_initiated' if created else f'payment_{instance.status}'
             
-            BillingAuditService.log_payment_event(
+            BillingAuditService.log_payment_event(  # type: ignore[call-arg]
                 event_type=audit_event_type,
                 payment=instance,
                 user=None,  # System event
@@ -337,7 +337,7 @@ def handle_proforma_invoice_conversion(sender: type[ProformaInvoice], instance: 
         }
         
         if not getattr(settings, 'DISABLE_AUDIT_SIGNALS', False):
-            BillingAuditService.log_proforma_event(
+            BillingAuditService.log_proforma_event(  # type: ignore[call-arg]
                 event_type=event_type,
                 proforma=instance,
                 user=None,  # System event
@@ -537,7 +537,7 @@ def _sync_orders_on_invoice_status_change(invoice: Invoice, old_status: str, new
         if not invoice.orders.exists():
             return
             
-        from apps.orders.services import OrderService, StatusChangeData  # noqa: PLC0415 - Service integration
+        from apps.orders.services import OrderService, StatusChangeData  # noqa: PLC0415
         
         if new_status == 'paid' and old_status != 'paid':
             # Invoice paid - advance orders to processing
@@ -580,7 +580,7 @@ def _activate_payment_services(payment: Payment) -> None:
         if not payment.invoice:
             return
             
-        from apps.provisioning.services import ServiceActivationService  # noqa: PLC0415 - Service integration
+        from apps.provisioning.services import ServiceActivationService  # noqa: PLC0415
         
         for order in payment.invoice.orders.all():
             for item in order.items.filter(service__isnull=False):
@@ -601,7 +601,7 @@ def _activate_payment_services(payment: Payment) -> None:
 def _update_customer_payment_credit(payment: Payment, old_status: str) -> None:
     """Update customer credit score based on payment events"""
     try:
-        from apps.customers.services import CustomerCreditService  # noqa: PLC0415 - Service integration
+        from apps.customers.services import CustomerCreditService  # noqa: PLC0415
         
         event_type = None
         if payment.status == 'succeeded' and old_status != 'succeeded':
@@ -903,7 +903,7 @@ def _handle_retry_completion(retry_attempt: PaymentRetryAttempt) -> None:
 def _update_billing_analytics(invoice: Invoice, created: bool) -> None:
     """Update billing analytics and KPIs when invoices change"""
     try:
-        from apps.billing.services import BillingAnalyticsService  # noqa: PLC0415 - Circular import prevention
+        from apps.billing.services import BillingAnalyticsService  # noqa: PLC0415
         
         # Update billing metrics
         BillingAnalyticsService.update_invoice_metrics(
@@ -929,7 +929,7 @@ def _update_billing_analytics(invoice: Invoice, created: bool) -> None:
 def _update_billing_refund_metrics(invoice: Invoice) -> None:
     """Update billing-specific refund metrics"""
     try:
-        from apps.billing.services import BillingAnalyticsService  # noqa: PLC0415 - Circular import prevention
+        from apps.billing.services import BillingAnalyticsService  # noqa: PLC0415
         
         BillingAnalyticsService.record_invoice_refund(
             invoice=invoice,
@@ -954,7 +954,7 @@ def _update_billing_refund_metrics(invoice: Invoice) -> None:
 def _send_invoice_created_email(invoice: Invoice) -> None:
     """Send invoice created notification"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415 - Service integration
+        from apps.notifications.services import EmailService  # noqa: PLC0415
         
         EmailService.send_template_email(
             template_key='invoice_created',
@@ -972,7 +972,7 @@ def _send_invoice_created_email(invoice: Invoice) -> None:
 def _send_invoice_issued_email(invoice: Invoice) -> None:
     """Send invoice issued notification"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415 - Service integration
+        from apps.notifications.services import EmailService  # noqa: PLC0415
         
         EmailService.send_template_email(
             template_key='invoice_issued',
@@ -990,7 +990,7 @@ def _send_invoice_issued_email(invoice: Invoice) -> None:
 def _send_payment_received_email(invoice: Invoice) -> None:
     """Send payment received confirmation"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415 - Service integration
+        from apps.notifications.services import EmailService  # noqa: PLC0415
         
         EmailService.send_template_email(
             template_key='payment_received',
@@ -1007,7 +1007,7 @@ def _send_payment_received_email(invoice: Invoice) -> None:
 def _send_invoice_overdue_email(invoice: Invoice) -> None:
     """Send overdue invoice notification"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415 - Service integration
+        from apps.notifications.services import EmailService  # noqa: PLC0415
         
         EmailService.send_template_email(
             template_key='invoice_overdue',
@@ -1026,7 +1026,7 @@ def _send_invoice_overdue_email(invoice: Invoice) -> None:
 def _send_invoice_voided_email(invoice: Invoice) -> None:
     """Send invoice voided notification"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415 - Service integration
+        from apps.notifications.services import EmailService  # noqa: PLC0415
         
         EmailService.send_template_email(
             template_key='invoice_voided',
@@ -1043,7 +1043,7 @@ def _send_invoice_voided_email(invoice: Invoice) -> None:
 def _send_payment_success_email(payment: Payment) -> None:
     """Send payment success notification"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415 - Service integration
+        from apps.notifications.services import EmailService  # noqa: PLC0415
         
         EmailService.send_template_email(
             template_key='payment_success',
@@ -1061,7 +1061,7 @@ def _send_payment_success_email(payment: Payment) -> None:
 def _send_payment_failed_email(payment: Payment) -> None:
     """Send payment failure notification"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415 - Service integration
+        from apps.notifications.services import EmailService  # noqa: PLC0415
         
         EmailService.send_template_email(
             template_key='payment_failed',
@@ -1080,7 +1080,7 @@ def _send_payment_failed_email(payment: Payment) -> None:
 def _send_payment_refund_email(payment: Payment) -> None:
     """Send payment refund notification"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415 - Service integration
+        from apps.notifications.services import EmailService  # noqa: PLC0415
         
         EmailService.send_template_email(
             template_key='payment_refund',
@@ -1098,7 +1098,7 @@ def _send_payment_refund_email(payment: Payment) -> None:
 def _send_invoice_refund_confirmation(invoice: Invoice) -> None:
     """Send customer confirmation about invoice refund"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415 - Service integration
+        from apps.notifications.services import EmailService  # noqa: PLC0415
         
         EmailService.send_template_email(
             template_key='invoice_refund_confirmation',
@@ -1120,7 +1120,7 @@ def _send_invoice_refund_confirmation(invoice: Invoice) -> None:
 def _send_retry_success_email(retry_attempt: PaymentRetryAttempt) -> None:
     """Send retry success notification"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415 - Service integration
+        from apps.notifications.services import EmailService  # noqa: PLC0415
         
         EmailService.send_template_email(
             template_key='payment_retry_success',
@@ -1138,7 +1138,7 @@ def _send_retry_success_email(retry_attempt: PaymentRetryAttempt) -> None:
 def _notify_finance_team_large_refund(invoice: Invoice) -> None:
     """Notify finance team about large refunds"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415 - Service integration
+        from apps.notifications.services import EmailService  # noqa: PLC0415
         
         EmailService.send_template_email(
             template_key='finance_large_refund_alert',
@@ -1174,7 +1174,7 @@ def _requires_efactura_submission(invoice: Invoice) -> bool:
 def _trigger_efactura_submission(invoice: Invoice) -> None:
     """Trigger e-Factura submission for Romanian compliance"""
     try:
-        from apps.billing.tasks import submit_efactura  # noqa: PLC0415 - Circular import prevention
+        from apps.billing.tasks import submit_efactura  # noqa: PLC0415
         submit_efactura.delay(str(invoice.id))
         logger.info(f"🏛️ [e-Factura] Queued submission for {invoice.number}")
     except ImportError:
@@ -1185,7 +1185,7 @@ def _schedule_payment_reminders(invoice: Invoice) -> None:
     """Schedule payment reminder emails"""
     try:
         if invoice.due_at:
-            from apps.billing.tasks import schedule_payment_reminders  # noqa: PLC0415 - Circular import prevention
+            from apps.billing.tasks import schedule_payment_reminders  # noqa: PLC0415
             schedule_payment_reminders.delay(str(invoice.id))
     except ImportError:
         logger.info(f"📅 [Invoice] Would schedule reminders for {invoice.number}")
@@ -1194,7 +1194,7 @@ def _schedule_payment_reminders(invoice: Invoice) -> None:
 def _cancel_payment_reminders(invoice: Invoice) -> None:
     """Cancel scheduled payment reminders"""
     try:
-        from apps.billing.tasks import cancel_payment_reminders  # noqa: PLC0415 - Circular import prevention
+        from apps.billing.tasks import cancel_payment_reminders  # noqa: PLC0415
         cancel_payment_reminders.delay(str(invoice.id))
     except ImportError:
         logger.info(f"🚫 [Invoice] Would cancel reminders for {invoice.number}")
@@ -1203,7 +1203,7 @@ def _cancel_payment_reminders(invoice: Invoice) -> None:
 def _trigger_dunning_process(invoice: Invoice) -> None:
     """Start automated dunning process for overdue invoice"""
     try:
-        from apps.billing.tasks import start_dunning_process  # noqa: PLC0415 - Circular import prevention
+        from apps.billing.tasks import start_dunning_process  # noqa: PLC0415
         start_dunning_process.delay(str(invoice.id))
     except ImportError:
         logger.warning(f"⚠️ [Invoice] Would start dunning for {invoice.number}")
@@ -1212,7 +1212,7 @@ def _trigger_dunning_process(invoice: Invoice) -> None:
 def _schedule_payment_retry(payment: Payment) -> None:
     """Schedule payment retry according to policy"""
     try:
-        from apps.billing.services import PaymentRetryService  # noqa: PLC0415 - Circular import prevention
+        from apps.billing.services import PaymentRetryService  # noqa: PLC0415
         
         policy = PaymentRetryService.get_customer_retry_policy(payment.customer)
         if policy and policy.is_active:
@@ -1241,7 +1241,7 @@ def _update_customer_billing_stats(customer: Any) -> None:
 def _update_customer_invoice_history(invoice: Invoice, event_type: str) -> None:
     """Update customer invoice payment patterns"""
     try:
-        from apps.customers.services import CustomerAnalyticsService  # noqa: PLC0415 - Service integration
+        from apps.customers.services import CustomerAnalyticsService  # noqa: PLC0415
         
         CustomerAnalyticsService.record_invoice_event(
             customer=invoice.customer,
@@ -1259,7 +1259,7 @@ def _update_customer_invoice_history(invoice: Invoice, event_type: str) -> None:
 def _activate_pending_services(invoice: Invoice) -> None:
     """Activate services that were pending payment"""
     try:
-        from apps.provisioning.services import ServiceActivationService  # noqa: PLC0415 - Service integration
+        from apps.provisioning.services import ServiceActivationService  # noqa: PLC0415
         
         orders = invoice.orders.all()
         for order in orders:
@@ -1275,7 +1275,7 @@ def _activate_pending_services(invoice: Invoice) -> None:
 def _handle_overdue_service_suspension(invoice: Invoice) -> None:
     """Handle service suspension for overdue invoices"""
     try:
-        from apps.provisioning.services import ServiceManagementService  # noqa: PLC0415 - Service integration
+        from apps.provisioning.services import ServiceManagementService  # noqa: PLC0415
         
         # Find all services related to overdue invoice orders
         services = [
@@ -1380,7 +1380,7 @@ def _handle_efactura_refund_reporting(invoice: Invoice) -> None:
         # Check if this invoice was submitted to e-Factura
         if invoice.efactura_sent and invoice.bill_to_country == 'RO':
             
-            from apps.billing.services import EFacturaService  # noqa: PLC0415 - Circular import prevention
+            from apps.billing.services import EFacturaService  # noqa: PLC0415
             
             # Generate refund notification for e-Factura
             result = EFacturaService.generate_refund_notification(
@@ -1472,7 +1472,7 @@ def _invalidate_invoice_caches(invoice: Invoice) -> None:
 def _cancel_invoice_webhooks(invoice: Invoice) -> None:
     """Cancel pending webhooks for deleted invoice"""
     try:
-        from apps.integrations.models import WebhookDelivery  # noqa: PLC0415 - Cross-app model import
+        from apps.integrations.models import WebhookDelivery  # noqa: PLC0415
         
         # Use customer and event type since WebhookDelivery doesn't use GenericForeignKey
         cancelled_count = WebhookDelivery.objects.filter(
@@ -1491,7 +1491,7 @@ def _cancel_invoice_webhooks(invoice: Invoice) -> None:
 def _revert_customer_credit_score(customer: Any, event_type: str) -> None:
     """Revert customer credit score changes"""
     try:
-        from apps.customers.services import CustomerCreditService  # noqa: PLC0415 - Service integration
+        from apps.customers.services import CustomerCreditService  # noqa: PLC0415
         
         CustomerCreditService.revert_credit_change(
             customer=customer,

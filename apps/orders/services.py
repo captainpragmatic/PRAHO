@@ -136,7 +136,7 @@ class OrderNumberingService:
     @transaction.atomic
     def generate_order_number(customer: Customer) -> str:
         """Generate sequential order number for customer compliance"""
-        from .models import Order  # noqa: PLC0415 - Circular import prevention
+        from .models import Order  # noqa: PLC0415
         
         current_year = timezone.now().year
         prefix = f"ORD-{current_year}-{str(customer.pk).zfill(8)}"
@@ -177,7 +177,7 @@ class OrderService:
     def create_order(data: OrderCreateData, created_by: User | None = None) -> Result[Order, str]:
         """Create new order with validation and audit trail"""
         try:
-            from .models import Order, OrderItem  # noqa: PLC0415 - Circular import prevention
+            from .models import Order, OrderItem  # noqa: PLC0415
             
             # Generate order number
             order_number = OrderNumberingService.generate_order_number(data.customer)
@@ -308,7 +308,7 @@ class OrderService:
         changed_by: User | None
     ) -> None:
         """Create order status history entry"""
-        from .models import OrderStatusHistory  # noqa: PLC0415 - Circular import prevention
+        from .models import OrderStatusHistory  # noqa: PLC0415
         
         OrderStatusHistory.objects.create(
             order=order,
@@ -350,7 +350,7 @@ class OrderQueryService:
     ) -> Result[list[Order], str]:
         """Get orders for a specific customer with optional filtering"""
         try:
-            from .models import Order  # noqa: PLC0415 - Circular import prevention
+            from .models import Order  # noqa: PLC0415
             
             queryset = Order.objects.filter(customer=customer).select_related('customer')
             
@@ -377,7 +377,7 @@ class OrderQueryService:
     def get_order_with_items(order_id: uuid.UUID, customer: Customer | None = None) -> Result[Order, str]:
         """Get order with related items, optionally scoped to customer"""
         try:
-            from .models import Order  # noqa: PLC0415 - Circular import prevention
+            from .models import Order  # noqa: PLC0415
             
             queryset = Order.objects.select_related('customer').prefetch_related(
                 'items__product',

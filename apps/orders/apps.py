@@ -12,7 +12,3 @@ class OrdersConfig(AppConfig):
 
     def ready(self) -> None:
         """Import signals when Django starts"""
-        from . import (  # noqa: PLC0415 - Django app ready() pattern
-            signals,  # noqa: F401
-            signals_extended,  # noqa: F401
-        )

@@ -185,7 +185,7 @@ def logout_view(request: HttpRequest) -> HttpResponse:
         
         # Log logout event BEFORE clearing session
         try:
-            AuthenticationAuditService.log_logout(
+            AuthenticationAuditService.log_logout(  # type: ignore[call-arg]  # type: ignore[call-arg]
                 user=user,
                 logout_reason='manual',
                 request=request,

@@ -41,7 +41,7 @@ def handle_order_domain_provisioning(sender: type[Order], instance: Order, creat
         if domain_items.exists():
             for item in domain_items:
                 try:
-                    from apps.domains.services import DomainRegistrationService  # noqa: PLC0415 - Service integration
+                    from apps.domains.services import DomainRegistrationService  # noqa: PLC0415
                     
                     # Queue domain registration
                     result = DomainRegistrationService.queue_domain_registration(
@@ -106,7 +106,7 @@ def handle_service_group_management(sender: type[OrderItem], instance: OrderItem
             bundle_group = instance.config['bundle_group']
             
             try:
-                from apps.provisioning.services import ServiceGroupService  # noqa: PLC0415 - Service integration
+                from apps.provisioning.services import ServiceGroupService  # noqa: PLC0415
                 
                 # Create or update service group for this bundle
                 result = ServiceGroupService.create_or_update_bundle_group(
@@ -149,7 +149,7 @@ def handle_failed_provisioning_ticket_creation(sender: type[OrderItem], instance
             instance.service is not None):
             
             try:
-                from apps.tickets.services import TicketCreateData, TicketService  # noqa: PLC0415 - Service integration
+                from apps.tickets.services import TicketCreateData, TicketService  # noqa: PLC0415
                 
                 ticket_data = TicketCreateData(
                     customer=instance.order.customer,
@@ -238,7 +238,7 @@ def handle_order_item_service_cleanup(sender: type[OrderItem], instance: OrderIt
     try:
         if instance.service:
             try:
-                from apps.provisioning.services import ServiceManagementService  # noqa: PLC0415 - Service integration
+                from apps.provisioning.services import ServiceManagementService  # noqa: PLC0415
                 
                 # Mark service for review if order item is deleted
                 result = ServiceManagementService.mark_service_for_review(
@@ -282,7 +282,7 @@ def handle_external_system_sync(sender: type[Order], instance: Order, created: b
             
             for integration in active_integrations:
                 try:
-                    from apps.integrations.services import ExternalSyncService  # noqa: PLC0415 - Service integration
+                    from apps.integrations.services import ExternalSyncService  # noqa: PLC0415
                     
                     # Queue sync job for each active integration
                     ExternalSyncService.queue_order_sync(
@@ -307,7 +307,7 @@ def handle_external_system_sync(sender: type[Order], instance: Order, created: b
 def _update_customer_order_history(order: Order, event_type: str) -> None:
     """Update customer order statistics and payment history"""
     try:
-        from apps.customers.services import CustomerStatsService  # noqa: PLC0415 - Service integration
+        from apps.customers.services import CustomerStatsService  # noqa: PLC0415
         
         CustomerStatsService.update_order_stats(
             customer=order.customer,
@@ -355,7 +355,7 @@ def _cleanup_generated_documents(order: Order) -> None:
 def _cancel_order_webhooks(order: Order) -> None:
     """Cancel any pending webhook deliveries for the order"""
     try:
-        from apps.integrations.models import WebhookDelivery  # noqa: PLC0415 - Cross-app model import
+        from apps.integrations.models import WebhookDelivery  # noqa: PLC0415
         
         # Cancel pending webhooks related to this order
         # Use customer and event type since WebhookDelivery doesn't use GenericForeignKey

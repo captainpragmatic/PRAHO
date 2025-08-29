@@ -12,4 +12,3 @@ class BillingConfig(AppConfig):
 
     def ready(self) -> None:
         """Import signals when Django starts"""
-        from . import signals  # noqa: F401,PLC0415

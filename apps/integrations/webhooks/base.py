@@ -463,7 +463,7 @@ def get_webhook_processor(source: str) -> BaseWebhookProcessor | None:
     🏭 Factory function to get appropriate webhook processor
     """
     # Import here to avoid circular imports
-    from .stripe import StripeWebhookProcessor  # noqa: PLC0415 # Factory pattern avoids circular imports
+    from .stripe import StripeWebhookProcessor  # Factory pattern avoids circular imports  # noqa: PLC0415
     # from .virtualmin import VirtualminWebhookProcessor  # TODO: Implement  # noqa: ERA001
     # from .paypal import PayPalWebhookProcessor  # TODO: Implement  # noqa: ERA001
 

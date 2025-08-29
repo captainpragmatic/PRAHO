@@ -9,3 +9,6 @@ class CustomersConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
     name = 'apps.customers'
     verbose_name = 'Customers'
+
+    def ready(self) -> None:
+        """Import signals when the app is ready"""

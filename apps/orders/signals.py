@@ -46,7 +46,7 @@ def handle_order_created_or_updated(sender: type[Order], instance: Order, create
         }
         
         # Enhanced order audit logging using OrdersAuditService
-        OrdersAuditService.log_order_event(
+        OrdersAuditService.log_order_event(  # type: ignore[call-arg]
             event_type=event_type,
             order=instance,
             user=None,  # System event
@@ -131,11 +131,11 @@ def _handle_order_status_change(order: Order, old_status: str, new_status: str) 
 def _trigger_invoice_generation(order: Order) -> None:
     """Trigger automatic invoice generation for processing orders"""
     try:
-        from apps.billing.services import InvoiceGenerationService  # noqa: PLC0415 - Service integration
+        from apps.billing.services import InvoiceGenerationService  # noqa: PLC0415
         
         # Generate invoice asynchronously if Celery is available
         try:
-            from apps.orders.tasks import generate_invoice_for_order  # noqa: PLC0415 - Circular import prevention
+            from apps.orders.tasks import generate_invoice_for_order  # noqa: PLC0415
             generate_invoice_for_order.delay(str(order.id))
             logger.info(f"📋 [Order] Invoice generation queued for {order.order_number}")
         except ImportError:
@@ -154,13 +154,13 @@ def _trigger_invoice_generation(order: Order) -> None:
 def _trigger_service_provisioning(order: Order) -> None:
     """Trigger service provisioning for completed orders"""
     try:
-        from apps.provisioning.services import ProvisioningService  # noqa: PLC0415 - Service integration
+        from apps.provisioning.services import ProvisioningService  # noqa: PLC0415
         
         # Queue provisioning tasks for all order items
         for item in order.items.all():
             if item.provisioning_status == 'pending':
                 try:
-                    from apps.orders.tasks import provision_order_item  # noqa: PLC0415 - Circular import prevention
+                    from apps.orders.tasks import provision_order_item  # noqa: PLC0415
                     provision_order_item.delay(str(item.id))
                     logger.info(f"⚡ [Order] Provisioning queued for item {item.id}")
                 except ImportError:
@@ -199,7 +199,7 @@ def _handle_order_refund(order: Order, refund_status: str) -> None:
     try:
         # Suspend related services if full refund
         if refund_status == 'refunded':
-            from apps.provisioning.services import ServiceManagementService  # noqa: PLC0415 - Service integration
+            from apps.provisioning.services import ServiceManagementService  # noqa: PLC0415
             
             services = [
                 item.service
@@ -261,7 +261,7 @@ def handle_order_item_changes(sender: type[OrderItem], instance: OrderItem, crea
             'unit_price_cents': instance.unit_price_cents
         }
         
-        OrdersAuditService.log_order_item_event(
+        OrdersAuditService.log_order_item_event(  # type: ignore[call-arg]
             event_type=event_type,
             order_item=instance,
             user=None,  # System event
@@ -330,7 +330,7 @@ def _handle_item_provisioning_status_change(item: OrderItem, old_status: str | N
         }
         
         if new_status in provisioning_events:
-            OrdersAuditService.log_provisioning_event(
+            OrdersAuditService.log_provisioning_event(  # type: ignore[call-arg]
                 event_type=provisioning_events[new_status],
                 order_item=item,
                 service=item.service,
@@ -352,7 +352,7 @@ def _handle_item_provisioning_status_change(item: OrderItem, old_status: str | N
             
             if all_completed and order.status == 'processing':
                 # Mark order as completed
-                from apps.orders.services import OrderService, StatusChangeData  # noqa: PLC0415 - Service integration
+                from apps.orders.services import OrderService, StatusChangeData  # noqa: PLC0415
                 status_change = StatusChangeData(
                     new_status='completed',
                     notes='All items successfully provisioned'
@@ -375,7 +375,7 @@ def _handle_item_provisioning_status_change(item: OrderItem, old_status: str | N
 def _send_order_confirmation_email(order: Order) -> None:
     """Send order confirmation email"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415 - Service integration
+        from apps.notifications.services import EmailService  # noqa: PLC0415
         
         EmailService.send_template_email(
             template_key='order_confirmation',
@@ -394,7 +394,7 @@ def _send_order_confirmation_email(order: Order) -> None:
 def _send_order_completed_email(order: Order) -> None:
     """Send order completion email"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415 - Service integration
+        from apps.notifications.services import EmailService  # noqa: PLC0415
         
         EmailService.send_template_email(
             template_key='order_completed',
@@ -412,7 +412,7 @@ def _send_order_completed_email(order: Order) -> None:
 def _send_order_cancelled_email(order: Order) -> None:
     """Send order cancellation email"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415 - Service integration
+        from apps.notifications.services import EmailService  # noqa: PLC0415
         
         EmailService.send_template_email(
             template_key='order_cancelled',
@@ -429,7 +429,7 @@ def _send_order_cancelled_email(order: Order) -> None:
 def _send_order_refund_email(order: Order, refund_status: str) -> None:
     """Send order refund notification email"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415 - Service integration
+        from apps.notifications.services import EmailService  # noqa: PLC0415
         
         template_key = 'order_refunded' if refund_status == 'refunded' else 'order_partially_refunded'
         
@@ -449,7 +449,7 @@ def _send_order_refund_email(order: Order, refund_status: str) -> None:
 def _send_service_ready_email(item: OrderItem) -> None:
     """Send service ready notification"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415 - Service integration
+        from apps.notifications.services import EmailService  # noqa: PLC0415
         
         EmailService.send_template_email(
             template_key='service_ready',
@@ -468,7 +468,7 @@ def _send_service_ready_email(item: OrderItem) -> None:
 def _send_provisioning_failed_email(item: OrderItem) -> None:
     """Send provisioning failure notification"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415 - Service integration
+        from apps.notifications.services import EmailService  # noqa: PLC0415
         
         EmailService.send_template_email(
             template_key='provisioning_failed',

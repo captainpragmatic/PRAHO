@@ -11,7 +11,12 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.http import HttpRequest
 
-from apps.audit.services import AuthenticationAuditService
+from apps.audit.services import (
+    AuthenticationAuditService,
+    AuthenticationEventData,
+    LoginFailureEventData,
+    LogoutEventData,
+)
 
 from .models import User, UserProfile
 
@@ -53,7 +58,7 @@ def log_user_login(sender: Any, request: HttpRequest, user: User, **kwargs: Any)
                 del request.session['pre_2fa_user_id']
         
         # Log the successful login
-        AuthenticationAuditService.log_login_success(
+        auth_event_data = AuthenticationEventData(
             user=user,
             request=request,
             authentication_method=authentication_method,
@@ -63,6 +68,7 @@ def log_user_login(sender: Any, request: HttpRequest, user: User, **kwargs: Any)
                 'session_exists': bool(request.session.session_key),
             }
         )
+        AuthenticationAuditService.log_login_success(auth_event_data)
         
         logger.info(f"✅ [Auth Signal] Login success logged for {user.email} via {authentication_method}")
         
@@ -90,17 +96,18 @@ def log_user_logout(sender: Any, request: HttpRequest, user: User | None, **kwar
         # Try to get session context (may be limited after logout)
         session_key = getattr(request.session, 'session_key', None)
         
-        AuthenticationAuditService.log_logout(
+        logout_event_data = LogoutEventData(
             user=user,
             logout_reason=logout_reason,
             request=request,
-            session_key=session_key,
             metadata={
                 'signal_triggered': True,
                 'logout_method': 'django_signal',
                 'session_flushed': True,
+                'session_key': session_key,
             }
         )
+        AuthenticationAuditService.log_logout(logout_event_data)
         
         logger.info(f"✅ [Auth Signal] Logout logged for {user.email}")
         
@@ -138,7 +145,7 @@ def log_failed_login(sender: Any, credentials: dict[str, Any], request: HttpRequ
             except User.DoesNotExist:
                 failure_reason = 'user_not_found'
         
-        AuthenticationAuditService.log_login_failed(
+        failure_event_data = LoginFailureEventData(
             email=email,
             user=user,
             failure_reason=failure_reason,
@@ -150,6 +157,7 @@ def log_failed_login(sender: Any, credentials: dict[str, Any], request: HttpRequ
                 'credentials_provided': list(credentials.keys()) if credentials else [],
             }
         )
+        AuthenticationAuditService.log_login_failed(failure_event_data)
         
         logger.info(f"✅ [Auth Signal] Login failure logged for {email}: {failure_reason}")
         

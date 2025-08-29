@@ -199,7 +199,7 @@ class RefundService:
         order_id: uuid.UUID, refund_data: RefundData
     ) -> Result[tuple[Order, int], str]:
         """Validate order and prepare refund amount calculation"""
-        from apps.orders.models import Order  # noqa: PLC0415 - Circular import prevention
+        from apps.orders.models import Order  # noqa: PLC0415
 
         # Get order with related data
         try:
@@ -298,7 +298,7 @@ class RefundService:
         invoice_id: int, refund_data: RefundData
     ) -> Result[tuple[Invoice, int], str]:
         """Validate invoice and prepare refund amount calculation"""
-        from .models import Invoice  # noqa: PLC0415 - Circular import prevention
+        from .models import Invoice  # noqa: PLC0415
 
         # Get invoice with related data
         try:
@@ -341,7 +341,7 @@ class RefundService:
         It ensures that refunding one entity automatically refunds the other.
         """
         try:
-            from .models import Invoice  # noqa: PLC0415 - Circular import prevention
+            from .models import Invoice  # noqa: PLC0415  # noqa: PLC0415
 
             audit_entries_created = 0
             order_status_updated = False
@@ -426,7 +426,7 @@ class RefundService:
     ) -> Result[bool, str]:
         """Update order status based on refund amount"""
         try:
-            from apps.orders.services import OrderService, StatusChangeData  # noqa: PLC0415 - Service integration
+            from apps.orders.services import OrderService, StatusChangeData  # noqa: PLC0415
 
             # Calculate total refunded amount
             current_refunded = RefundService._get_order_refunded_amount(order)
@@ -540,7 +540,7 @@ class RefundService:
         to issue actual refunds to customers.
         """
         try:
-            from .models import Payment  # noqa: PLC0415 - Circular import prevention
+            from .models import Payment  # noqa: PLC0415
 
             # Find payments to refund
             payments_to_refund = []
@@ -840,7 +840,7 @@ class RefundService:
             }
 
             if entity_type == 'order':
-                from apps.orders.models import Order  # noqa: PLC0415 - Circular import prevention
+                from apps.orders.models import Order  # noqa: PLC0415
                 # Order uses UUID primary key
                 if not isinstance(entity_id, uuid.UUID):
                     return Err(f"Order ID must be UUID, got {type(entity_id)}")
@@ -848,7 +848,7 @@ class RefundService:
                 return RefundService._validate_order_refund_eligibility(order, refund_data)
                 
             elif entity_type == 'invoice':
-                from .models import Invoice  # noqa: PLC0415 - Circular import prevention
+                from .models import Invoice  # noqa: PLC0415  # noqa: PLC0415
                 # Invoice uses AutoField (int) primary key
                 if not isinstance(entity_id, int):
                     return Err(f"Invoice ID must be int, got {type(entity_id)}")
@@ -865,7 +865,7 @@ class RefundService:
     @staticmethod
     def _check_order_eligibility(entity_id: uuid.UUID | int, error_response: dict[str, Any]) -> dict[str, Any]:
         """Check eligibility for order refunds"""
-        from apps.orders.models import Order  # noqa: PLC0415 - Circular import prevention
+        from apps.orders.models import Order  # noqa: PLC0415
         
         # Validate entity_id type for orders (should be UUID)
         if not isinstance(entity_id, uuid.UUID):
@@ -896,7 +896,7 @@ class RefundService:
     @staticmethod
     def _check_invoice_eligibility(entity_id: uuid.UUID | int, error_response: dict[str, Any]) -> dict[str, Any]:
         """Check eligibility for invoice refunds"""
-        from .models import Invoice  # noqa: PLC0415 - Circular import prevention
+        from .models import Invoice  # noqa: PLC0415
         
         # Validate entity_id type for invoices (should be int)
         if not isinstance(entity_id, int):
@@ -938,7 +938,7 @@ class RefundQueryService:
             refunds = []
             
             if entity_type == 'order':
-                from apps.orders.models import Order  # noqa: PLC0415 - Circular import prevention
+                from apps.orders.models import Order  # noqa: PLC0415
                 # Order uses UUID primary key
                 if not isinstance(entity_id, uuid.UUID):
                     return Err(f"Order ID must be UUID, got {type(entity_id)}")
@@ -947,7 +947,7 @@ class RefundQueryService:
                     refunds = order.meta['refunds']
                     
             elif entity_type == 'invoice':
-                from .models import Invoice  # noqa: PLC0415 - Circular import prevention
+                from .models import Invoice  # noqa: PLC0415  # noqa: PLC0415
                 # Invoice uses AutoField (int) primary key
                 if not isinstance(entity_id, int):
                     return Err(f"Invoice ID must be int, got {type(entity_id)}")

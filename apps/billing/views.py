@@ -262,7 +262,7 @@ def proforma_list(request: HttpRequest) -> HttpResponse:
         ]
 
         # Sort by creation date (newest first)
-        proforma_documents.sort(key=lambda x: x['created_at'], reverse=True)
+        proforma_documents.sort(key=lambda x: x['created_at'], reverse=True)  # type: ignore[arg-type,return-value]
 
         # ⚡ PERFORMANCE: Implement pagination for 25 items per page (Romanian business scale)
         paginator = Paginator(proforma_documents, 25)
@@ -417,7 +417,7 @@ def billing_list_htmx(request: HttpRequest) -> HttpResponse:
             extra_params = '&' + extra_params
 
         # Prepare data for standardized table component
-        table_data = prepare_billing_table_data(page_obj, request.user)
+        table_data = prepare_billing_table_data(list(page_obj), request.user)
 
         context = {
             'documents': page_obj,
@@ -436,7 +436,7 @@ def billing_list_htmx(request: HttpRequest) -> HttpResponse:
         # Return empty partial with error state
         context = {
             'documents': [],
-            'page_obj': None,
+            'page_obj': None,  # type: ignore[dict-item]
             'extra_params': '',
             'error_message': 'Unable to load billing data.',
         }
