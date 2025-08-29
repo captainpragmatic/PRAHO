@@ -72,6 +72,113 @@ def setup_console_monitoring(page: Page) -> Generator[Page, None, None]:
 # AUTHENTICATION UTILITIES
 # ===============================================================================
 
+def login_user_with_retry(page: Page, email: str, password: str, max_attempts: int = 3) -> bool:
+    """
+    Enhanced login function with retry logic and better debugging.
+    
+    Args:
+        page: Playwright page object
+        email: User email
+        password: User password
+        max_attempts: Maximum number of login attempts
+        
+    Returns:
+        bool: True if login successful, False otherwise
+    """
+    print(f"🔐 Logging in {email} (with retry logic)")
+    
+    for attempt in range(max_attempts):
+        if attempt > 0:
+            print(f"🔄 Login attempt {attempt + 1}/{max_attempts}")
+            
+        # Navigate to login page fresh
+        try:
+            page.goto(f"{BASE_URL}/auth/login/", timeout=10000)
+            page.wait_for_load_state("networkidle", timeout=5000)
+        except Exception as e:
+            print(f"❌ Cannot navigate to login page: {str(e)[:50]}")
+            if attempt == max_attempts - 1:
+                return False
+            continue
+            
+        # Wait for form elements with extended timeout
+        try:
+            page.wait_for_selector('input[name="email"]', timeout=8000)
+            page.wait_for_selector('input[name="password"]', timeout=8000)
+            page.wait_for_selector('button[type="submit"], input[type="submit"]', timeout=8000)
+            print("  ✅ Login form elements ready")
+        except Exception as e:
+            print(f"❌ Login form not ready: {str(e)[:50]}")
+            if attempt == max_attempts - 1:
+                return False
+            continue
+        
+        # Clear and fill form fields
+        try:
+            email_field = page.locator('input[name="email"]')
+            password_field = page.locator('input[name="password"]')
+            
+            # Clear fields first
+            email_field.clear()
+            password_field.clear()
+            
+            # Fill with explicit wait between actions
+            email_field.fill(email)
+            page.wait_for_timeout(500)  # Small delay
+            password_field.fill(password)
+            page.wait_for_timeout(500)  # Small delay
+            
+            print("  ✅ Form fields filled")
+        except Exception as e:
+            print(f"❌ Cannot fill login form: {str(e)[:50]}")
+            if attempt == max_attempts - 1:
+                return False
+            continue
+            
+        # Submit form with enhanced waiting
+        try:
+            submit_button = page.locator('button[type="submit"], input[type="submit"]').first
+            submit_button.click()
+            print("  ✅ Form submitted")
+            
+            # Wait for response with multiple strategies
+            page.wait_for_load_state("networkidle", timeout=10000)
+            
+            # Check for successful redirect
+            page.wait_for_timeout(2000)  # Give time for redirect
+            current_url = page.url
+            
+            if "/app/" in current_url:
+                print(f"✅ Successfully logged in as {email}")
+                return True
+            elif "/auth/login/" in current_url:
+                # Still on login page - check for error messages
+                error_elements = page.locator('.alert, .error, [role="alert"]')
+                if error_elements.count() > 0:
+                    error_text = error_elements.first.text_content() or "Unknown error"
+                    print(f"  ⚠️ Login error message: {error_text[:100]}")
+                else:
+                    print("  ⚠️ Still on login page, no error message visible")
+                    
+                if attempt == max_attempts - 1:
+                    return False
+                continue
+            else:
+                print(f"  ℹ️ Redirected to unexpected page: {current_url}")
+                if "/app/" in current_url or "dashboard" in current_url:
+                    print(f"✅ Login successful (alternate redirect): {email}")
+                    return True
+                    
+        except Exception as e:
+            print(f"❌ Form submission failed: {str(e)[:50]}")
+            if attempt == max_attempts - 1:
+                return False
+            continue
+    
+    print(f"❌ Login failed after {max_attempts} attempts for {email}")
+    return False
+
+
 def login_user(page: Page, email: str, password: str) -> bool:
     """
     Helper to login user with improved error handling.

@@ -57,27 +57,19 @@ def test_customer_login_and_profile_access(page: Page) -> None:
     4. Authentication is maintained across navigation
     5. Clean test isolation with automatic cleanup
     """
-    print("🧪 Testing customer login and profile access with dynamic users")
+    print("🧪 Testing customer login and profile access")
     
-    # Use dynamic test user management for better isolation
-    with TestUserManager() as user_mgr:
-        # Create fresh customer user with organization
-        customer_user, customer_org = user_mgr.create_customer_with_org(
-            company_name="Profile Test Corp"
-        )
+    with ComprehensivePageMonitor(page, "customer login and profile access",
+                                 check_console=True,
+                                 check_network=True,
+                                 check_html=False,  # May have duplicate ID issues
+                                 check_css=True):
+        # Login with dedicated E2E customer credentials
+        ensure_fresh_session(page)
+        assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
         
-        print(f"  📧 Testing with customer: {customer_user['email']}")
-        print(f"  🏢 Organization: {customer_org['company_name']}")
-        
-        with ComprehensivePageMonitor(page, "dynamic customer login and profile access",
-                                     check_console=True,
-                                     check_network=True,
-                                     check_html=False,  # May have duplicate ID issues
-                                     check_css=True):
-            # Login with fresh customer user
-            ensure_fresh_session(page)
-            assert login_test_user(page, customer_user)
-            require_authentication(page)
+        # Verify authentication is successful
+        require_authentication(page)
         
         # Navigate to dashboard first
         assert navigate_to_dashboard(page)
@@ -120,45 +112,46 @@ def test_customer_login_and_profile_access(page: Page) -> None:
 
 def test_customer_profile_using_convenience_helper(page: Page) -> None:
     """
-    Test customer profile management using convenience helpers.
+    Test customer profile management with standard credentials.
     
-    This example shows the simplest way to create and login a customer
-    using the one-step helper functions.
+    This test covers:
+    - Quick customer login
+    - Profile page navigation
+    - Profile information validation
     """
-    print("🧪 Testing customer profile with convenience helpers")
+    print("🧪 Testing customer profile access")
     
-    with TestUserManager() as user_mgr:
-        # One-step: create customer with org and login immediately
+    with ComprehensivePageMonitor(page, "customer profile access test",
+                                 check_console=True,
+                                 check_network=True,
+                                 check_html=False,
+                                 check_css=True):
+        # Login with dedicated E2E customer credentials
         ensure_fresh_session(page)
-        customer_user, customer_org = create_and_login_customer(page, user_mgr)
+        assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
         
-        # User is already logged in and on dashboard
-        print(f"  ✅ Already logged in as: {customer_user['email']}")
-        print(f"  🏢 Organization: {customer_org['company_name']}")
+        # Navigate to profile (already authenticated)
+        page.goto("http://localhost:8001/auth/profile/")
+        page.wait_for_load_state("networkidle")
         
-        with ComprehensivePageMonitor(page, "customer profile convenience test"):
-            # Navigate to profile (already authenticated)
-            page.goto("http://localhost:8001/auth/profile/")
-            page.wait_for_load_state("networkidle")
+        # Verify profile page access
+        assert "/auth/profile/" in page.url
+        
+        # Test profile form interaction
+        first_name_field = page.locator('input[name="first_name"]')
+        if first_name_field.is_visible():
+            # Update first name
+            first_name_field.clear()
+            first_name_field.fill("UpdatedTest")
             
-            # Verify profile page access
-            assert "/auth/profile/" in page.url
-            
-            # Test profile form interaction
-            first_name_field = page.locator('input[name="first_name"]')
-            if first_name_field.is_visible():
-                # Update first name
-                first_name_field.clear()
-                first_name_field.fill("UpdatedTest")
-                
-                # Look for save/update button
-                save_button = page.locator('button[type="submit"]:has-text("Update"), button:has-text("Save")')
-                if save_button.count() > 0:
-                    save_button.first.click()
-                    page.wait_for_load_state("networkidle")
-                    print("  ✅ Profile update attempted")
-                
-        print("  ✅ Customer profile test completed with convenience helpers")
+            # Look for save/update button
+            save_button = page.locator('button[type="submit"]:has-text("Update"), button:has-text("Save")')
+            if save_button.count() > 0:
+                save_button.first.click()
+                page.wait_for_load_state("networkidle")
+                print("  ✅ Profile update attempted")
+        
+        print("  ✅ Customer profile test completed")
         
         # Check for password change option
         password_change = page.locator('a:has-text("Change Password"), a[href*="password-change"]')

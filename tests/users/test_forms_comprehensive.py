@@ -286,7 +286,7 @@ class UserRegistrationFormTest(BaseFormTestCase):
         
         form = UserRegistrationForm(data=form_data)
         self.assertTrue(form.is_valid())
-        self.assertEqual(form.cleaned_data['email'], 'UPPERCASE@example.com')
+        self.assertEqual(form.cleaned_data['email'], 'uppercase@example.com')
 
 
 # ===============================================================================
@@ -360,6 +360,7 @@ class UserProfileFormTest(BaseFormTestCase):
             'phone': '+40.21.987.6543',
             'preferred_language': 'ro',
             'timezone': 'Europe/Bucharest',
+            'date_format': '%d.%m.%Y',
         }
         
         form = UserProfileForm(data=form_data, instance=self.profile)
@@ -396,6 +397,7 @@ class UserProfileFormTest(BaseFormTestCase):
             'phone': '+40.21.123.4567',
             'preferred_language': 'en',
             'timezone': 'Europe/Bucharest',
+            'date_format': '%d.%m.%Y',
             'emergency_contact_name': 'Emergency Contact Name',
             'emergency_contact_phone': '+40.21.555.0000'
         }
@@ -656,15 +658,17 @@ class CustomerOnboardingRegistrationFormTest(BaseFormTestCase):
             'password2': 'complexpassword123',
             'phone': '+40.21.123.4567',
             'company_name': 'New Company SRL',
-            'customer_type': 'business',
+            'customer_type': 'company',
             'vat_number': 'RO12345678',
             'registration_number': 'J40/123/2023',
-            'billing_address': 'Str. Test 123',
-            'billing_city': 'Bucharest',
-            'billing_postal_code': '010101',
+            'address_line1': 'Str. Test 123',
+            'city': 'Bucharest',
+            'county': 'Ilfov',
+            'postal_code': '010101',
             'accepts_marketing': False,
             'gdpr_consent': True,
-            'terms_accepted': True
+            'terms_accepted': True,
+            'data_processing_consent': True
         }
         
         form = CustomerOnboardingRegistrationForm(data=form_data)

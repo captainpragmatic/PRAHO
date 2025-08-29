@@ -287,8 +287,17 @@ class RegisterViewTest(BaseViewTestCase):
             'password2': 'complexpassword123',
             'first_name': 'New',
             'last_name': 'User',
+            'customer_type': 'individual',
+            'customer_name': 'New User',
+            'company_name': 'Individual User',  # Required for Romanian compliance
+            'terms_accepted': True,  # Required for Romanian compliance
             'gdpr_consent': True,
-            # Add other required form fields
+            'data_processing_consent': True,
+            'phone': '+40712345678',
+            'address_line1': 'Test Address 123',
+            'city': 'Bucharest',
+            'county': 'Bucharest',
+            'postal_code': '123456',
         })
         
         self.assertRedirects(response, reverse('users:login'))
@@ -524,7 +533,7 @@ class TwoFactorViewsTest(BaseViewTestCase):
         self.client.force_login(self.user)
         response = self.client.get(reverse('users:two_factor_setup_totp'))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'TOTP')
+        self.assertContains(response, 'Authenticator App')
         
     @patch('pyotp.random_base32')
     def test_two_factor_setup_totp_post_valid(self, mock_random: Mock) -> None:
@@ -532,13 +541,17 @@ class TwoFactorViewsTest(BaseViewTestCase):
         mock_random.return_value = 'TESTBASE32SECRET'
         self.client.force_login(self.user)
         
+        # Set up session with secret (as would be done by GET request)
+        session = self.client.session
+        session['2fa_secret'] = 'TESTBASE32SECRET'
+        session.save()
+        
         # Generate valid TOTP token
         totp = pyotp.TOTP('TESTBASE32SECRET')
         valid_token = totp.now()
         
         response = self.client.post(reverse('users:two_factor_setup_totp'), {
-            'token': valid_token,
-            'secret': 'TESTBASE32SECRET'
+            'token': valid_token
         })
         
         self.assertEqual(response.status_code, 302)  # Success redirect
@@ -579,6 +592,12 @@ class TwoFactorViewsTest(BaseViewTestCase):
     def test_two_factor_backup_codes_get(self) -> None:
         """Test backup codes view GET"""
         self.client.force_login(self.user)
+        
+        # Set up session with backup codes (required for view)
+        session = self.client.session
+        session['new_backup_codes'] = ['CODE1', 'CODE2', 'CODE3']
+        session.save()
+        
         response = self.client.get(reverse('users:two_factor_backup_codes'))
         self.assertEqual(response.status_code, 200)
         
@@ -590,7 +609,8 @@ class TwoFactorViewsTest(BaseViewTestCase):
         self.client.force_login(self.user)
         response = self.client.post(reverse('users:two_factor_regenerate_backup_codes'))
         
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 302)  # Redirect to backup codes page
+        self.assertRedirects(response, reverse('users:two_factor_backup_codes'))
         
         # Check backup codes were generated
         self.user.refresh_from_db()
@@ -898,7 +918,17 @@ class IntegrationTest(BaseViewTestCase):
                 'password2': 'complexpassword123',
                 'first_name': 'New',
                 'last_name': 'User',
+                'customer_type': 'individual',
+                'customer_name': 'New User',
+                'company_name': 'Individual User',  # Required for Romanian compliance
+                'terms_accepted': True,  # Required for Romanian compliance
                 'gdpr_consent': True,
+                'data_processing_consent': True,
+                'phone': '+40712345678',
+                'address_line1': 'Test Address 123',
+                'city': 'Bucharest',
+                'county': 'Bucharest',
+                'postal_code': '123456',
             })
         
         self.assertRedirects(response, reverse('users:login'))

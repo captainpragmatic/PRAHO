@@ -155,6 +155,9 @@ class MinimalCustomerOnboardingFormTestCase(TestCase):
             'password2': 'complex_password_123',
             'customer_type': 'individual',
             'customer_name': 'Test User',
+            'company_name': 'Test Individual',  # Required for Romanian compliance
+            'terms_accepted': True,  # Required for Romanian compliance
+            'gdpr_consent': True,  # Required for Romanian GDPR compliance
             'phone': '+40712345678',
             'address_line1': 'Test Street 123',
             'city': 'Bucharest',
@@ -178,6 +181,9 @@ class MinimalCustomerOnboardingFormTestCase(TestCase):
             'password2': 'complex_password_123',
             'customer_type': 'company',
             'customer_name': 'Test Company SRL',
+            'company_name': 'Test Company SRL',  # Required for Romanian business
+            'terms_accepted': True,  # Required for Romanian compliance
+            'gdpr_consent': True,  # Required for Romanian GDPR compliance
             'phone': '+40712345678',
             'address_line1': 'Test Street 123',
             'city': 'Bucharest',

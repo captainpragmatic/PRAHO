@@ -35,8 +35,8 @@ class EnhancedUserModelTest(TestCase):
         
         self.customer = Customer.objects.create(
             name='Test Customer',
-            email='customer@example.com',
-            customer_type='business'
+            primary_email='customer@example.com',
+            customer_type='company'
         )
     
     def test_user_manager_create_superuser_validation(self) -> None:
@@ -158,7 +158,7 @@ class EnhancedUserModelTest(TestCase):
         customer2 = Customer.objects.create(
             name='Primary Customer',
             email='primary@example.com',
-            customer_type='business'
+            customer_type='company'
         )
         CustomerMembership.objects.create(
             user=self.user,
@@ -399,8 +399,8 @@ class EnhancedCustomerMembershipTest(TestCase):
         
         self.customer = Customer.objects.create(
             name='Test Customer',
-            email='customer@example.com',
-            customer_type='business'
+            primary_email='customer@example.com',
+            customer_type='company'
         )
         
         self.admin_user = UserModel.objects.create_user(
@@ -768,8 +768,8 @@ class ModelEdgeCasesTest(TestCase):
         """Test model Meta attributes"""
         # User model
         self.assertEqual(UserModel._meta.db_table, 'users')
-        self.assertEqual(str(UserModel._meta.verbose_name), 'User')
-        self.assertEqual(str(UserModel._meta.verbose_name_plural), 'Users')
+        self.assertEqual(str(UserModel._meta.verbose_name), 'Utilizator')
+        self.assertEqual(str(UserModel._meta.verbose_name_plural), 'Utilizatori')
         
         # CustomerMembership model
         self.assertEqual(CustomerMembership._meta.db_table, 'customer_membership')

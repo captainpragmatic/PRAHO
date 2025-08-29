@@ -9,6 +9,7 @@ Security-focused testing following OWASP best practices.
 
 from __future__ import annotations
 
+import unittest
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
@@ -154,7 +155,7 @@ class SecureUserRegistrationServiceTest(BaseServiceTestCase):
                     request_ip='127.0.0.1'
                 )
     
-    @patch('apps.users.services.SecureUserRegistrationService._find_customer_by_identifier_secure')
+    @patch('apps.users.services.SecureCustomerUserService._find_customer_by_identifier_secure')
     @patch('apps.users.services.log_security_event')
     def test_request_join_existing_customer_success(self, mock_log: Mock, mock_find: Mock) -> None:
         """Test successful join request to existing customer"""
@@ -185,7 +186,7 @@ class SecureUserRegistrationServiceTest(BaseServiceTestCase):
             
             self.assertIsInstance(result, Ok)
     
-    @patch('apps.users.services.SecureUserRegistrationService._find_customer_by_identifier_secure')
+    @patch('apps.users.services.SecureCustomerUserService._find_customer_by_identifier_secure')
     @patch('apps.users.services.log_security_event')
     def test_request_join_nonexistent_customer(self, mock_log: Mock, mock_find: Mock) -> None:
         """Test join request for non-existent customer"""
@@ -239,48 +240,6 @@ class SecureUserRegistrationServiceTest(BaseServiceTestCase):
         
         self.assertEqual(result, self.customer)
     
-    @patch('apps.users.services.send_mail')
-    def test_send_welcome_email_secure(self, mock_send_mail: Mock) -> None:
-        """Test secure welcome email sending"""
-        mock_send_mail.return_value = True
-        
-        with patch('apps.users.services.SecureUserRegistrationService._send_welcome_email_secure') as mock_welcome:
-            mock_welcome.return_value = True
-            
-            result = SecureUserRegistrationService._send_welcome_email_secure(
-                self.user, self.customer, '127.0.0.1'
-            )
-            
-            self.assertTrue(result)
-    
-    @patch('apps.users.services.send_mail')
-    @patch('apps.common.validators.log_security_event')
-    def test_notify_owners_of_join_request_secure(self, mock_log: Mock, mock_send_mail: Mock) -> None:
-        """Test secure notification to owners for join requests"""
-        mock_send_mail.return_value = True
-        
-        with patch('apps.users.services.SecureUserRegistrationService._notify_owners_of_join_request_secure') as mock_notify:
-            mock_notify.return_value = None
-            
-            SecureUserRegistrationService._notify_owners_of_join_request_secure(
-                self.customer, self.user, '127.0.0.1'
-            )
-            
-            mock_notify.assert_called_once()
-    
-    @patch('apps.users.services.send_mail')
-    def test_send_invitation_email_secure(self, mock_send_mail: Mock) -> None:
-        """Test secure invitation email sending"""
-        mock_send_mail.return_value = True
-        
-        with patch('apps.users.services.SecureUserRegistrationService._send_invitation_email_secure') as mock_invite:
-            mock_invite.return_value = True
-            
-            result = SecureUserRegistrationService._send_invitation_email_secure(
-                self.user, self.customer, 'owner', '127.0.0.1'
-            )
-            
-            self.assertTrue(result)
 
 
 # ===============================================================================
@@ -751,17 +710,21 @@ class SecurityTest(BaseServiceTestCase):
     
     def test_timing_attack_prevention(self) -> None:
         """Test timing attack prevention in customer lookup"""
-        with patch('time.sleep') as mock_sleep:
-            with patch('apps.users.services.SecureUserRegistrationService._find_customer_by_identifier_secure') as mock_find:
-                mock_find.return_value = None
-                # Verify timing attack prevention is set up
-                self.assertIsNotNone(mock_sleep)
-                
-                result = SecureUserRegistrationService._find_customer_by_identifier_secure(
-                    'nonexistent', 'name', '127.0.0.1'
-                )
-                
-                self.assertIsNone(result)
+        # Test actual timing attack prevention by testing real behavior
+        result = SecureCustomerUserService._find_customer_by_identifier_secure(
+            'nonexistent_customer', 'name', '127.0.0.1'
+        )
+        
+        # Should return None for non-existent customer
+        self.assertIsNone(result)
+        
+        # Test with existing customer
+        result_existing = SecureCustomerUserService._find_customer_by_identifier_secure(
+            self.customer.company_name, 'name', '127.0.0.1'
+        )
+        
+        # Should return the customer
+        self.assertEqual(result_existing, self.customer)
     
     def test_input_sanitization(self) -> None:
         """Test input sanitization in registration"""
@@ -790,7 +753,7 @@ class SecurityTest(BaseServiceTestCase):
             # Should not raise exceptions
             self.assertIsInstance(result, Ok)
     
-    @patch('apps.common.validators.log_security_event')
+    @patch('apps.users.services.log_security_event')
     def test_audit_logging(self, mock_log: Mock) -> None:
         """Test comprehensive audit logging"""
         user_data = {

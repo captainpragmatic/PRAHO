@@ -394,17 +394,23 @@ class WebAuthnServiceTestCase(TestCase):
             first_name='Test',
             last_name='User'
         )
+        self.factory = RequestFactory()
+        self.request = self.factory.get('/')
+        self.request.session = SessionStore()
 
     def test_is_supported(self):
         """Test WebAuthn support check"""
-        # WebAuthn is not implemented yet, should return False
+        # WebAuthn is supported with basic local model storage
         result = WebAuthnService.is_supported()
-        self.assertFalse(result)
+        self.assertTrue(result)
 
-    def test_generate_registration_options_not_implemented(self):
-        """Test WebAuthn registration options (not implemented)"""
-        result = WebAuthnService.generate_registration_options(self.user)
-        self.assertIsNone(result)
+    def test_generate_registration_options(self):
+        """Test WebAuthn registration options"""
+        result = WebAuthnService.generate_registration_options(self.request, self.user)
+        self.assertIsInstance(result, dict)
+        self.assertIn('challenge', result)
+        self.assertIn('rp', result)
+        self.assertIn('user', result)
 
     def test_verify_registration_not_implemented(self):
         """Test WebAuthn registration verification (not implemented)"""
@@ -412,10 +418,12 @@ class WebAuthnServiceTestCase(TestCase):
         result = WebAuthnService.verify_registration(self.user, credential_data)
         self.assertFalse(result)
 
-    def test_generate_authentication_options_not_implemented(self):
-        """Test WebAuthn authentication options (not implemented)"""
-        result = WebAuthnService.generate_authentication_options(self.user)
-        self.assertIsNone(result)
+    def test_generate_authentication_options(self):
+        """Test WebAuthn authentication options"""
+        result = WebAuthnService.generate_authentication_options(self.request, self.user)
+        self.assertIsInstance(result, dict)
+        self.assertIn('challenge', result)
+        self.assertIn('allowCredentials', result)
 
     def test_verify_authentication_not_implemented(self):
         """Test WebAuthn authentication verification (not implemented)"""
@@ -475,7 +483,7 @@ class MFAServiceTestCase(TestCase):
 
         audit_log = audit_logs.first()
         self.assertEqual(audit_log.content_object, self.user)
-        self.assertEqual(audit_log.object_id, self.user.id)
+        self.assertEqual(audit_log.object_id, str(self.user.id))
 
     def test_enable_totp_already_enabled(self):
         """Test enabling TOTP when already enabled"""
