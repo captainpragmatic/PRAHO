@@ -677,8 +677,16 @@ def customer_services_api(request: HttpRequest, customer_id: int) -> JsonRespons
     """
     # Verify user has access to this customer
     user = cast(User, request.user)
-    accessible_customers = user.get_accessible_customers()
-    if not accessible_customers.filter(id=customer_id).exists():
+    accessible_customers_list = user.get_accessible_customers()
+    if isinstance(accessible_customers_list, QuerySet):
+        customers_qs = accessible_customers_list
+    elif accessible_customers_list:
+        customer_ids = [c.id for c in accessible_customers_list]
+        customers_qs = Customer.objects.filter(id__in=customer_ids)
+    else:
+        customers_qs = Customer.objects.none()
+
+    if not customers_qs.filter(id=customer_id).exists():
         return JsonResponse({'error': 'Access denied'}, status=403)
     
     # For now, return empty services list

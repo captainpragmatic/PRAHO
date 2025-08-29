@@ -82,6 +82,7 @@ screenshot_*.png
 
 # LLM Assistant Files
 CLAUDE.md
+AGENTS.md
 .claude*
 copilot-instructions*
 cursor-instructions*

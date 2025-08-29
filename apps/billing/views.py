@@ -701,7 +701,7 @@ def process_proforma_payment(request: HttpRequest, pk: int) -> HttpResponse:
             )
 
             # Copy all line items
-            from apps.billing.models import InvoiceLine
+            from apps.billing.models import InvoiceLine  # noqa: PLC0415
             for proforma_line in proforma.lines.all():
                 InvoiceLine.objects.create(
                     invoice=invoice,

@@ -932,8 +932,6 @@ def _process_order_item_update(form: ModelForm, order: Order, pk: uuid.UUID, req
     """Process the update of an existing order item with proper price override logic"""
     try:
         with transaction.atomic():
-            # Get the original item for comparison
-            original_item = OrderItem.objects.get(id=form.instance.id)
             
             # Update order item
             updated_item = form.save(commit=False)
