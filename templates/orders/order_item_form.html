@@ -219,23 +219,17 @@ document.addEventListener('DOMContentLoaded', function() {
         
         try {
             // Get pricing data from product option
-            console.log('\ud83d\udc1b DEBUG (Main Form): selectedOption.dataset.prices =', selectedOption.dataset.prices);
             const pricesData = JSON.parse(selectedOption.dataset.prices || '{}');
-            console.log('\ud83d\udc1b DEBUG (Main Form): pricesData =', pricesData);
-            console.log('\ud83d\udc1b DEBUG (Main Form): billingPeriod =', billingPeriod);
             const priceForPeriod = pricesData[billingPeriod];
-            console.log('\ud83d\udc1b DEBUG (Main Form): priceForPeriod =', priceForPeriod);
             
             if (priceForPeriod) {
                 // Only auto-populate if user hasn't manually edited the field
                 if (!unitPriceInput.dataset.manualOverride) {
                     unitPriceInput.value = priceForPeriod.unit_cents;
-                    unitPriceInput.style.borderColor = '#3b82f6'; // Blue border for auto-populated
                 }
                 
                 if (!setupInput.dataset.manualOverride) {
                     setupInput.value = priceForPeriod.setup_cents;
-                    setupInput.style.borderColor = '#3b82f6'; // Blue border for auto-populated
                 }
                 
                 // Update price displays
@@ -244,22 +238,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 // No product pricing available - clear auto-populated prices but keep manual ones
                 if (!unitPriceInput.dataset.manualOverride) {
                     unitPriceInput.value = '';
-                    unitPriceInput.style.borderColor = '#f59e0b'; // Yellow border for manual required
                 }
                 
                 if (!setupInput.dataset.manualOverride) {
                     setupInput.value = '0';
-                    setupInput.style.borderColor = '#6b7280'; // Gray border for default
                 }
             }
         } catch (e) {
-            console.warn('Error parsing product pricing data:', e);
+            // Ignore parsing errors
         }
     }
     
     function markMainFormAsManualOverride(input) {
         input.dataset.manualOverride = 'true';
-        input.style.borderColor = '#10b981'; // Green border for manual override
     }
     
     // Attach event listeners

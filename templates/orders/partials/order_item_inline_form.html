@@ -82,7 +82,7 @@ Simplified version of the full form for better UX in table context
       </label>
       <div class="relative">
         <input type="number" id="id_unit_price_cents_inline" name="unit_price_cents" 
-               value="{{ form.unit_price_cents.value }}" min="0" step="1" required
+               value="{{ form.unit_price_cents.value|default:'' }}" min="0" step="1" required
                class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 pr-16 text-sm focus:ring-2 focus:ring-blue-500">
         <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
           <span class="text-slate-400 text-xs">{% trans "cents" %}</span>
@@ -124,7 +124,7 @@ Simplified version of the full form for better UX in table context
       {% trans "Domain Name" %}
     </label>
     <input type="text" id="id_domain_name_inline" name="domain_name" 
-           value="{{ form.domain_name.value }}" placeholder="example.com"
+           value="{{ form.domain_name.value|default:'' }}" placeholder="example.com"
            class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500">
     {% if form.domain_name.errors %}
       <p class="mt-1 text-xs text-red-400">{{ form.domain_name.errors.0 }}</p>
@@ -143,7 +143,7 @@ Simplified version of the full form for better UX in table context
       <div class="mt-3">
         <textarea id="id_config_inline" name="config" rows="3"
                   placeholder='{"cpu": 2, "memory": "4GB", "disk": "50GB"}'
-                  class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500">{{ form.config.value }}</textarea>
+                  class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500">{{ form.config.value|default:'' }}</textarea>
         {% if form.config.errors %}
           <p class="mt-1 text-xs text-red-400">{{ form.config.errors.0 }}</p>
         {% endif %}
@@ -153,18 +153,6 @@ Simplified version of the full form for better UX in table context
       </div>
     </details>
   </div>
-
-  <!-- Debug: Show pricing data -->
-  {% if product_options %}
-    <div class="bg-yellow-900 border border-yellow-700 rounded-lg p-3 mb-4">
-      <h4 class="text-sm font-medium text-yellow-200">🐛 Debug: Pricing Data</h4>
-      {% for option in product_options %}
-        <div class="text-xs text-yellow-300 mt-1">
-          {{ option.label }}: <code>{{ option.data.prices }}</code>
-        </div>
-      {% endfor %}
-    </div>
-  {% endif %}
 
   <!-- Real-time Preview -->
   <div class="bg-green-900 border border-green-700 rounded-lg p-3">
@@ -275,23 +263,17 @@ Simplified version of the full form for better UX in table context
         
         try {
             // Get pricing data from product option
-            console.log('\ud83d\udc1b DEBUG: selectedOption.dataset.prices =', selectedOption.dataset.prices);
             const pricesData = JSON.parse(selectedOption.dataset.prices || '{}');
-            console.log('\ud83d\udc1b DEBUG: pricesData =', pricesData);
-            console.log('\ud83d\udc1b DEBUG: billingPeriod =', billingPeriod);
             const priceForPeriod = pricesData[billingPeriod];
-            console.log('\ud83d\udc1b DEBUG: priceForPeriod =', priceForPeriod);
             
             if (priceForPeriod) {
                 // Only auto-populate if user hasn't manually edited the field
                 if (!unitPriceInput.dataset.manualOverride) {
                     unitPriceInput.value = priceForPeriod.unit_cents;
-                    addPriceSourceIndicator(unitPriceInput, 'product-default', 'Using product default price');
                 }
                 
                 if (!setupInput.dataset.manualOverride) {
                     setupInput.value = priceForPeriod.setup_cents;
-                    addPriceSourceIndicator(setupInput, 'product-default', 'Using product default setup fee');
                 }
                 
                 // Update price preview
@@ -300,58 +282,19 @@ Simplified version of the full form for better UX in table context
                 // No product pricing available - clear auto-populated prices but keep manual ones
                 if (!unitPriceInput.dataset.manualOverride) {
                     unitPriceInput.value = '';
-                    addPriceSourceIndicator(unitPriceInput, 'manual-required', 'No default price - manual entry required');
                 }
                 
                 if (!setupInput.dataset.manualOverride) {
                     setupInput.value = '0';
-                    addPriceSourceIndicator(setupInput, 'manual-default', 'No default setup fee');
                 }
             }
         } catch (e) {
-            console.warn('Error parsing product pricing data:', e);
+            // Ignore parsing errors
         }
-    }
-    
-    function addPriceSourceIndicator(input, type, tooltip) {
-        // Remove existing indicator
-        const existingIndicator = input.parentNode.querySelector('.price-source-indicator');
-        if (existingIndicator) {
-            existingIndicator.remove();
-        }
-        
-        // Create new indicator
-        const indicator = document.createElement('div');
-        indicator.className = `price-source-indicator absolute -top-2 -right-2 w-3 h-3 rounded-full text-xs flex items-center justify-center`;
-        indicator.title = tooltip;
-        
-        switch (type) {
-            case 'product-default':
-                indicator.className += ' bg-blue-500 text-white';
-                indicator.textContent = 'P';
-                break;
-            case 'manual-override':
-                indicator.className += ' bg-green-500 text-white';
-                indicator.textContent = 'M';
-                break;
-            case 'manual-required':
-                indicator.className += ' bg-yellow-500 text-white';
-                indicator.textContent = '!';
-                break;
-            case 'manual-default':
-                indicator.className += ' bg-gray-500 text-white';
-                indicator.textContent = '0';
-                break;
-        }
-        
-        // Add to parent (make parent relative if not already)
-        input.parentNode.style.position = 'relative';
-        input.parentNode.appendChild(indicator);
     }
     
     function markAsManualOverride(input) {
         input.dataset.manualOverride = 'true';
-        addPriceSourceIndicator(input, 'manual-override', 'Manual override price');
     }
     
     // Attach event listeners
