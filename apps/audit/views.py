@@ -4,6 +4,7 @@ Comprehensive data subject rights implementation with industry-standard UI/UX.
 """
 
 import csv
+import datetime
 import json
 import logging
 import uuid
@@ -23,6 +24,7 @@ from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from django.utils.translation import gettext as _
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_POST
@@ -83,6 +85,31 @@ def _get_client_ip(request: HttpRequest) -> str | None:
     if x_forwarded_for:
         return x_forwarded_for.split(',')[0]
     return request.META.get('REMOTE_ADDR')
+
+
+def _parse_date_filters(filters: dict) -> dict:
+    """Parse date strings to timezone-aware datetime objects to prevent naive datetime warnings."""
+    parsed_filters = filters.copy()
+    
+    for key in ['start_date', 'end_date']:
+        if parsed_filters.get(key):
+            date_str = parsed_filters[key]
+            if isinstance(date_str, str):
+                # Try to parse as date string (YYYY-MM-DD format)
+                parsed_date = parse_date(date_str)
+                if parsed_date:
+                    if key == 'start_date':
+                        # Convert to timezone-aware datetime at start of day
+                        parsed_filters[key] = timezone.make_aware(
+                            datetime.datetime.combine(parsed_date, datetime.time.min)
+                        )
+                    else:  # end_date
+                        # Convert to timezone-aware datetime at end of day
+                        parsed_filters[key] = timezone.make_aware(
+                            datetime.datetime.combine(parsed_date, datetime.time.max)
+                        )
+    
+    return parsed_filters
 
 
 # ===============================================================================
@@ -638,7 +665,10 @@ def logs_list(request: HttpRequest) -> HttpResponse:
     # Ensure user is authenticated before passing to service
     if not request.user.is_authenticated:
         return HttpResponseForbidden()
-    queryset, query_info = audit_search_service.build_advanced_query(filters, request.user)
+    
+    # Parse date filters to prevent naive datetime warnings
+    parsed_filters = _parse_date_filters(filters)
+    queryset, query_info = audit_search_service.build_advanced_query(parsed_filters, request.user)
     
     # Pagination
     page = request.GET.get('page', 1)
@@ -693,7 +723,10 @@ def export_logs(request: HttpRequest) -> HttpResponse:
     # Ensure user is authenticated before passing to service
     if not request.user.is_authenticated:
         return HttpResponseForbidden()
-    queryset, _ = audit_search_service.build_advanced_query(filters, request.user)
+    
+    # Parse date filters to prevent naive datetime warnings
+    parsed_filters = _parse_date_filters(filters)
+    queryset, _ = audit_search_service.build_advanced_query(parsed_filters, request.user)
     
     # Limit export size for performance
     max_export_size = 10000

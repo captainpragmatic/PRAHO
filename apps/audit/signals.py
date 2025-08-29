@@ -136,6 +136,10 @@ def _get_action_category_severity(action: str) -> tuple[str, str, bool, bool]:
         'permission_granted': ('authorization', 'high', True, True),
         'permission_revoked': ('authorization', 'high', True, True),
         'staff_role_changed': ('authorization', 'high', True, True),
+        'customer_role_changed': ('authorization', 'high', True, True),
+        'customer_membership_deleted': ('authorization', 'high', True, True),
+        'customer_membership_created': ('authorization', 'medium', True, False),
+        'customer_membership_updated': ('authorization', 'medium', True, False),
         'invoice_accessed': ('business_operation', 'low', False, False),
         'payment_method_added': ('business_operation', 'low', False, False),
         'order_placed': ('business_operation', 'low', False, False),
@@ -163,11 +167,39 @@ def _get_action_category_severity(action: str) -> tuple[str, str, bool, bool]:
     return ('business_operation', 'low', False, False)
 
 
-def _create_audit_event(event_data: AuditEventCreationData) -> None:
+def _create_audit_event(  # noqa: PLR0913  # Audit event creation requires comprehensive parameter set for full context capture
+    event_data: AuditEventCreationData | None = None,
+    *,
+    action: str | None = None,
+    user: User | None = None,
+    content_object: Any = None,
+    old_values: dict[str, Any] | None = None,
+    new_values: dict[str, Any] | None = None,
+    description: str = '',
+    request: HttpRequest | None = None,
+    metadata: dict[str, Any] | None = None
+) -> None:
     """
     Unified audit event creation with automatic categorization
+    
+    Supports both new dataclass API and legacy keyword arguments for backward compatibility.
     """
     try:
+        # Handle backward compatibility - convert keyword arguments to dataclass
+        if event_data is None:
+            if action is None:
+                raise ValueError("Either event_data or action must be provided")
+            event_data = AuditEventCreationData(
+                action=action,
+                user=user,
+                content_object=content_object,
+                old_values=old_values,
+                new_values=new_values,
+                description=description,
+                request=request,
+                metadata=metadata or {}
+            )
+        
         # Get context from request
         context = _get_audit_context_from_request(event_data.request, event_data.user)
         
@@ -210,7 +242,8 @@ def _create_audit_event(event_data: AuditEventCreationData) -> None:
         
     except Exception as e:
         # Never let audit logging break application functionality
-        logger.error(f"🔥 [Audit Signal] Failed to log {event_data.action}: {e}")
+        action_desc = event_data.action if event_data else action or "unknown action"
+        logger.error(f"🔥 [Audit Signal] Failed to log {action_desc}: {e}")
 
 
 # ===============================================================================

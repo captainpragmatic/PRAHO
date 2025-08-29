@@ -6,7 +6,7 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
 
@@ -40,6 +40,13 @@ MIN_SEARCH_QUERY_LENGTH = 2  # Minimum length for search queries
 HIGH_VALUE_PLAN_THRESHOLD_RON = 500  # 500 RON threshold for high-value plans
 SERVER_OVERLOAD_THRESHOLD_PERCENT = 85  # 85% resource usage threshold
 LONG_RUNNING_TASK_THRESHOLD_SECONDS = 1800  # 30 minutes (1800 seconds)
+
+# Webhook health and reliability constants
+WEBHOOK_HEALTHY_RESPONSE_THRESHOLD = 300  # HTTP status < 300 indicates healthy endpoint
+WEBHOOK_FAST_RESPONSE_THRESHOLD_MS = 1000  # < 1000ms is considered fast response
+WEBHOOK_MEDIUM_RESPONSE_THRESHOLD_MS = 3000  # < 3000ms is considered medium response
+WEBHOOK_MAX_RETRY_THRESHOLD = 5  # Maximum retry attempts before failure
+WEBHOOK_SUSPICIOUS_RETRY_THRESHOLD = 3  # Retry count indicating suspicious behavior
 
 """
 Audit services for PRAHO Platform
@@ -255,6 +262,7 @@ class BusinessEventData:
     old_values: dict[str, Any] | None = None
     new_values: dict[str, Any] | None = None
     description: str | None = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -623,17 +631,18 @@ class AuditService:
                 'profile_updated', 'email_changed', 'phone_updated', 'name_changed'
             ],
             'privacy': [
-                'privacy_', 'gdpr_', 'marketing_consent', 'cookie_consent'
+                'privacy_', 'gdpr_', 'marketing_consent_', 'cookie_consent_'
             ],
             'authorization': [
                 'role_assigned', 'role_removed', 'permission_granted', 
-                'permission_revoked', 'staff_role_changed', 'customer_'
+                'permission_revoked', 'staff_role_changed', 'customer_',
+                'privilege_escalation_attempt'
             ],
             'security_event': [
-                'security_', 'suspicious_', 'brute_force', 'malicious_', 'data_breach'
+                'security_', 'suspicious_', 'brute_force_', 'malicious_', 'data_breach_'
             ],
             'data_protection': [
-                'data_export', 'data_deletion'
+                'data_export_', 'data_deletion_'
             ],
             'integration': [
                 'api_', 'webhook_'
@@ -668,7 +677,7 @@ class AuditService:
         # Critical severity events
         critical_actions = [
             'data_breach_detected', 'security_incident_detected', 'account_compromised',
-            'privilege_escalation_attempt', 'malicious_request', 'brute_force_attempt'
+            'malicious_request', 'brute_force_attempt'
         ]
         
         # High severity events
@@ -679,14 +688,15 @@ class AuditService:
             'user_impersonation_started', 'system_maintenance_started', 'configuration_changed',
             'payment_failed', 'payment_fraud_detected', 'payment_chargeback_received', 
             'invoice_voided', 'invoice_refunded', 'credit_limit_changed', 'credit_hold_applied',
-            'order_cancelled_admin', 'provisioning_failed', 'efactura_rejected'
+            'order_cancelled_admin', 'provisioning_failed', 'efactura_rejected',
+            'privilege_escalation_attempt'
         ]
         
         # Medium severity events
         medium_actions = [
             'login_success', 'login_failed', 'logout_manual', 'account_locked', 'session_rotation',
             'password_changed', '2fa_enabled', 'profile_updated', 'email_changed', 'phone_updated',
-            'customer_membership_created', 'api_key_generated', 'invoice_created', 
+            'customer_membership_created', 'api_key_generated',
             'invoice_paid', 'payment_succeeded', 'order_created', 'order_completed',
             'proforma_created', 'provisioning_completed', 'efactura_submitted'
         ]
@@ -695,7 +705,7 @@ class AuditService:
             return 'critical'
         elif action in high_actions or action.startswith(('data_', 'gdpr_', 'privacy_', 'marketing_consent', 'cookie_consent', 'role_', 'permission_', 'payment_fraud', 'payment_chargeback')):
             return 'high'
-        elif action in medium_actions or action.startswith(('login_', 'password_', '2fa_', 'profile_', 'invoice_', 'payment_', 'order_')):
+        elif action in medium_actions or action.startswith(('login_', 'password_', '2fa_', 'profile_', 'payment_', 'order_')):
             return 'medium'
         else:
             return 'low'
@@ -706,16 +716,22 @@ class AuditService:
         # Specific sensitive actions
         sensitive_actions = [
             'account_locked', 'account_unlocked', 'session_rotation', 'session_terminated',
-            'suspicious_activity', 'brute_force_attempt', 'malicious_request'
+            'suspicious_activity', 'brute_force_attempt', 'malicious_request', 
+            'privilege_escalation_attempt'
         ]
         
-        # Sensitive patterns
+        # Sensitive patterns (excluding some common business operations)
         sensitive_patterns = [
             'login_', 'logout_', 'password_', '2fa_', 'email_', 'phone_', 'profile_',
             'privacy_', 'gdpr_', 'marketing_consent', 'cookie_consent', 'data_', 'security_', 
-            'role_', 'permission_', 'payment_', 'billing_', 'tax_', 'invoice_', 'credit_', 
-            'proforma_', 'vat_', 'efactura_', 'order_', 'customer_'
+            'role_', 'permission_', 'payment_', 'billing_', 'tax_', 'credit_', 
+            'proforma_', 'vat_', 'efactura_', 'customer_'
         ]
+        
+        # Non-sensitive invoice actions (basic business operations)
+        non_sensitive_invoice_actions = ['invoice_created', 'invoice_sent']
+        if action in non_sensitive_invoice_actions:
+            return False
         
         return action in sensitive_actions or any(action.startswith(pattern) for pattern in sensitive_patterns)
     
@@ -3283,13 +3299,23 @@ class AuditSearchService:
         filters: dict[str, Any],
         query_info: dict[str, Any]
     ) -> models.QuerySet[AuditEvent]:
-        """Apply date range filters."""
+        """Apply date range filters with timezone awareness."""
         if filters.get('start_date'):
-            queryset = queryset.filter(timestamp__gte=filters['start_date'])
+            start_date = filters['start_date']
+            # Convert date to timezone-aware datetime at start of day
+            if isinstance(start_date, date) and not isinstance(start_date, datetime):
+                start_date = datetime.combine(start_date, datetime.min.time())
+                start_date = timezone.make_aware(start_date) if timezone.is_naive(start_date) else start_date
+            queryset = queryset.filter(timestamp__gte=start_date)
             query_info['filters_applied'].append('date_range_start')
         
         if filters.get('end_date'):
-            queryset = queryset.filter(timestamp__lte=filters['end_date'])
+            end_date = filters['end_date']
+            # Convert date to timezone-aware datetime at end of day
+            if isinstance(end_date, date) and not isinstance(end_date, datetime):
+                end_date = datetime.combine(end_date, datetime.max.time())
+                end_date = timezone.make_aware(end_date) if timezone.is_naive(end_date) else end_date
+            queryset = queryset.filter(timestamp__lte=end_date)
             query_info['filters_applied'].append('date_range_end')
         
         return queryset
@@ -3892,6 +3918,288 @@ class ProductsAuditService:
                 key: change.get('to_cents') or change.get('to_amount') or change.get('to_percent')
                 for key, change in changes.items() 
                 if isinstance(change, dict) and any(k.startswith('to_') for k in change)
+            }
+        )
+        
+        return AuditService.log_event(audit_event_data, enhanced_context)
+
+
+# ===============================================================================
+# INTEGRATIONS AUDIT SERVICE - WEBHOOK RELIABILITY MONITORING
+# ===============================================================================
+
+class IntegrationsAuditService:
+    """
+    🔌 Streamlined integrations audit service for webhook reliability monitoring
+    
+    Features:
+    - Webhook delivery success/failure tracking
+    - Third-party service health monitoring  
+    - Reliability metrics for SLA monitoring
+    - Security logging for webhook attacks
+    """
+    
+    @staticmethod
+    def log_webhook_success(  # noqa: PLR0913  # Webhook audit requires multiple related parameters
+        webhook_event: Any,
+        response_time_ms: int,
+        response_status: int = 200,
+        reliability_context: dict[str, Any] | None = None,
+        user: User | None = None,
+        context: AuditContext | None = None
+    ) -> AuditEvent:
+        """
+        Log successful webhook delivery for reliability monitoring
+        
+        Args:
+            webhook_event: The successful WebhookEvent instance
+            response_time_ms: Response time in milliseconds
+            response_status: HTTP status code from processing
+            reliability_context: Service health and reliability metrics
+            user: System user (if applicable)
+            context: Additional audit context
+        """
+        # Use default context if none provided
+        if context is None:
+            context = AuditContext(user=user)
+        
+        # Build webhook success metadata
+        success_metadata = {
+            'webhook_id': str(webhook_event.id),
+            'source': webhook_event.source,
+            'event_type': webhook_event.event_type,
+            'event_id': webhook_event.event_id,
+            'performance_metrics': {
+                'response_time_ms': response_time_ms,
+                'response_status': response_status,
+                'processing_duration': webhook_event.processing_duration.total_seconds() if webhook_event.processing_duration else None,
+                'retry_count': webhook_event.retry_count,
+            },
+            'service_health': {
+                'source_service': webhook_event.source,
+                'delivery_successful': True,
+                'endpoint_healthy': response_status < WEBHOOK_HEALTHY_RESPONSE_THRESHOLD,
+                'reliability_score': 'high' if response_time_ms < WEBHOOK_FAST_RESPONSE_THRESHOLD_MS else 'medium' if response_time_ms < WEBHOOK_MEDIUM_RESPONSE_THRESHOLD_MS else 'low',
+            },
+            'security_context': {
+                'ip_address': webhook_event.ip_address,
+                'user_agent': webhook_event.user_agent,
+                'signature_verified': bool(webhook_event.signature),
+                'payload_size_bytes': len(str(webhook_event.payload)) if webhook_event.payload else 0,
+            },
+            'reliability_tracking': reliability_context or {},
+            'processed_at': webhook_event.processed_at.isoformat() if webhook_event.processed_at else None,
+            **context.metadata
+        }
+        
+        # Enhanced context
+        enhanced_context = AuditContext(
+            user=context.user,
+            ip_address=context.ip_address or webhook_event.ip_address,
+            user_agent=context.user_agent or webhook_event.user_agent,
+            request_id=context.request_id,
+            session_key=context.session_key,
+            metadata=serialize_metadata(success_metadata),
+            actor_type=context.actor_type or 'webhook_processor'
+        )
+        
+        # Create audit event
+        audit_event_data = AuditEventData(
+            event_type='webhook_delivery_success',
+            content_object=webhook_event,
+            description=f"Webhook delivered successfully: {webhook_event.source}.{webhook_event.event_type} ({response_time_ms}ms)",
+            old_values={'status': 'pending'},
+            new_values={
+                'status': 'processed',
+                'response_time_ms': response_time_ms,
+                'response_status': response_status,
+                'retry_count': webhook_event.retry_count,
+            }
+        )
+        
+        return AuditService.log_event(audit_event_data, enhanced_context)
+    
+    @staticmethod
+    def log_webhook_failure(  # noqa: PLR0913  # Webhook failure audit requires multiple error context parameters
+        webhook_event: Any,
+        error_details: dict[str, Any],
+        security_flags: dict[str, bool] | None = None,
+        reliability_context: dict[str, Any] | None = None,
+        user: User | None = None,
+        context: AuditContext | None = None
+    ) -> AuditEvent:
+        """
+        Log webhook delivery failure for reliability monitoring and security analysis
+        
+        Args:
+            webhook_event: The failed WebhookEvent instance
+            error_details: Failure details and error analysis
+            security_flags: Security indicators for suspicious activity
+            reliability_context: Service health degradation metrics
+            user: System user (if applicable)
+            context: Additional audit context
+        """
+        # Use default context if none provided
+        if context is None:
+            context = AuditContext(user=user)
+        
+        # Analyze failure severity
+        failure_severity = 'medium'
+        if webhook_event.retry_count >= WEBHOOK_MAX_RETRY_THRESHOLD:  # Max retries exhausted
+            failure_severity = 'high'
+        elif security_flags and any(security_flags.values()):
+            failure_severity = 'critical'  # Security concern
+        elif error_details.get('error_type') == 'timeout':
+            failure_severity = 'low'  # Temporary issue
+        
+        # Build webhook failure metadata
+        failure_metadata = {
+            'webhook_id': str(webhook_event.id),
+            'source': webhook_event.source,
+            'event_type': webhook_event.event_type,
+            'event_id': webhook_event.event_id,
+            'failure_analysis': {
+                'error_message': webhook_event.error_message,
+                'error_type': error_details.get('error_type', 'unknown'),
+                'error_category': error_details.get('category', 'processing_error'),
+                'failure_severity': failure_severity,
+                'retry_count': webhook_event.retry_count,
+                'retry_exhausted': webhook_event.retry_count >= WEBHOOK_MAX_RETRY_THRESHOLD,
+                'next_retry_at': webhook_event.next_retry_at.isoformat() if webhook_event.next_retry_at else None,
+            },
+            'service_degradation': {
+                'source_service': webhook_event.source,
+                'service_health_impact': error_details.get('service_impact', 'low'),
+                'endpoint_availability': error_details.get('endpoint_status', 'unknown'),
+                'failure_pattern': error_details.get('pattern', 'isolated'),
+            },
+            'security_indicators': security_flags or {
+                'suspicious_ip': False,
+                'malformed_payload': False,
+                'invalid_signature': False,
+                'rate_limit_exceeded': False,
+                'repeated_failures': webhook_event.retry_count > WEBHOOK_SUSPICIOUS_RETRY_THRESHOLD,
+            },
+            'reliability_tracking': reliability_context or {},
+            'failed_at': timezone.now().isoformat(),
+            **context.metadata
+        }
+        
+        # Enhanced context
+        enhanced_context = AuditContext(
+            user=context.user,
+            ip_address=context.ip_address or webhook_event.ip_address,
+            user_agent=context.user_agent or webhook_event.user_agent,
+            request_id=context.request_id,
+            session_key=context.session_key,
+            metadata=serialize_metadata(failure_metadata),
+            actor_type=context.actor_type or 'webhook_processor'
+        )
+        
+        # Create audit event
+        audit_event_data = AuditEventData(
+            event_type='webhook_delivery_failure',
+            content_object=webhook_event,
+            description=f"Webhook delivery failed: {webhook_event.source}.{webhook_event.event_type} - {error_details.get('error_type', 'unknown error')} (attempt {webhook_event.retry_count})",
+            old_values={'status': 'pending'},
+            new_values={
+                'status': 'failed',
+                'error_message': webhook_event.error_message,
+                'retry_count': webhook_event.retry_count,
+                'failure_severity': failure_severity,
+            }
+        )
+        
+        return AuditService.log_event(audit_event_data, enhanced_context)
+    
+    @staticmethod
+    def log_webhook_retry_exhausted(  # noqa: PLR0913  # Webhook retry exhaustion tracking needs comprehensive failure context
+        webhook_event: Any,
+        total_attempts: int,
+        final_error: str,
+        reliability_impact: dict[str, Any] | None = None,
+        user: User | None = None,
+        context: AuditContext | None = None
+    ) -> AuditEvent:
+        """
+        Log webhook retry exhaustion for reliability monitoring and alerting
+        
+        Args:
+            webhook_event: The failed WebhookEvent instance
+            total_attempts: Total number of delivery attempts
+            final_error: Final error message after all retries
+            reliability_impact: Service reliability degradation assessment
+            user: System user (if applicable)
+            context: Additional audit context
+        """
+        # Use default context if none provided
+        if context is None:
+            context = AuditContext(user=user)
+        
+        # Calculate retry timeline
+        retry_timeline = None
+        if webhook_event.received_at and webhook_event.processed_at:
+            total_duration = webhook_event.processed_at - webhook_event.received_at
+            retry_timeline = {
+                'first_attempt': webhook_event.received_at.isoformat(),
+                'final_attempt': webhook_event.processed_at.isoformat(),
+                'total_duration_hours': total_duration.total_seconds() / 3600,
+                'retry_backoff_successful': False,
+            }
+        
+        # Build retry exhaustion metadata
+        exhaustion_metadata = {
+            'webhook_id': str(webhook_event.id),
+            'source': webhook_event.source,
+            'event_type': webhook_event.event_type,
+            'event_id': webhook_event.event_id,
+            'retry_analysis': {
+                'total_attempts': total_attempts,
+                'final_error': final_error,
+                'retry_pattern': 'exponential_backoff',
+                'max_retries_reached': True,
+                'timeline': retry_timeline,
+            },
+            'service_reliability': {
+                'source_service': webhook_event.source,
+                'persistent_failure': True,
+                'requires_investigation': True,
+                'sla_impact': reliability_impact.get('sla_breach', False) if reliability_impact else False,
+                'customer_impact': reliability_impact.get('customer_impact_level', 'medium') if reliability_impact else 'medium',
+            },
+            'alerting_context': {
+                'alert_required': True,
+                'escalation_needed': total_attempts >= WEBHOOK_MAX_RETRY_THRESHOLD,
+                'ops_team_notification': True,
+                'customer_notification_needed': reliability_impact.get('customer_visible', False) if reliability_impact else False,
+            },
+            'reliability_tracking': reliability_impact or {},
+            'exhausted_at': timezone.now().isoformat(),
+            **context.metadata
+        }
+        
+        # Enhanced context
+        enhanced_context = AuditContext(
+            user=context.user,
+            ip_address=context.ip_address or webhook_event.ip_address,
+            user_agent=context.user_agent or webhook_event.user_agent,
+            request_id=context.request_id,
+            session_key=context.session_key,
+            metadata=serialize_metadata(exhaustion_metadata),
+            actor_type=context.actor_type or 'webhook_processor'
+        )
+        
+        # Create audit event
+        audit_event_data = AuditEventData(
+            event_type='webhook_retry_exhausted',
+            content_object=webhook_event,
+            description=f"Webhook retry exhausted: {webhook_event.source}.{webhook_event.event_type} after {total_attempts} attempts - {final_error}",
+            old_values={'status': 'failed', 'retry_count': total_attempts - 1},
+            new_values={
+                'status': 'failed',
+                'retry_count': total_attempts,
+                'retry_exhausted': True,
+                'requires_manual_intervention': True,
             }
         )
         

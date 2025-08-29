@@ -21,6 +21,12 @@ from django.db.models import F
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+# Date constants for tax rate validation
+JANUARY = 1  # First month of year
+DECEMBER = 12  # Last month of year
+FIRST_DAY_OF_MONTH = 1  # First day of month
+LAST_DAY_OF_DECEMBER = 31  # Last day of December
+
 # ===============================================================================
 # CURRENCY & FX MODELS
 # ===============================================================================
@@ -55,7 +61,7 @@ class FXRate(models.Model):
         )
 
     def __str__(self) -> str:
-        return f"{self.base_code}/{self.quote_code} = {self.rate} ({self.as_of})"
+        return f"{self.base_code.code}/{self.quote_code.code} = {self.rate:.8f} ({self.as_of})"
 
 
 # ===============================================================================
@@ -692,6 +698,14 @@ class TaxRule(models.Model):
 
     def __str__(self) -> str:
         rate_display = f"{self.rate * 100:.2f}%"
+        # Simple format for full year ranges (common case)
+        if (self.valid_to and
+            self.valid_from.month == JANUARY and self.valid_from.day == FIRST_DAY_OF_MONTH and
+            self.valid_to.month == DECEMBER and self.valid_to.day == LAST_DAY_OF_DECEMBER and
+            self.valid_from.year == self.valid_to.year):
+            return f"{self.country_code} {self.tax_type.upper()} {rate_display}"
+        
+        # Detailed format for specific date ranges
         if self.valid_to:
             return f"{self.country_code} {self.tax_type.upper()} {rate_display} ({self.valid_from} - {self.valid_to})"
         return f"{self.country_code} {self.tax_type.upper()} {rate_display} (from {self.valid_from})"
@@ -795,7 +809,9 @@ class VATValidation(models.Model):
         ordering = ('-validation_date',)
 
     def __str__(self) -> str:
-        status = "✓ Valid" if self.is_valid else "✗ Invalid"
+        status = "Valid" if self.is_valid else "Invalid"
+        if self.company_name:
+            return f"{self.full_vat_number} ({self.company_name}) - {status}"
         return f"{self.full_vat_number} - {status}"
 
     def is_expired(self) -> bool:
@@ -989,7 +1005,7 @@ class PaymentRetryAttempt(models.Model):
         ordering = ('payment', 'attempt_number')
 
     def __str__(self) -> str:
-        return f"Retry #{self.attempt_number} for Payment {self.payment.id} - {self.status}"
+        return f"Attempt {self.attempt_number} for Payment {self.payment.id} - {self.status}"
 
 
 class PaymentCollectionRun(models.Model):
@@ -1092,7 +1108,7 @@ class PaymentCollectionRun(models.Model):
         duration = ""
         if self.completed_at:
             duration = f" ({(self.completed_at - self.started_at).total_seconds():.0f}s)"
-        return f"Collection Run {self.started_at.strftime('%Y-%m-%d %H:%M')} - {self.status}{duration}"
+        return f"{self.run_type} Collection Run {self.started_at.strftime('%Y-%m-%d %H:%M')} - {self.status}{duration}"
 
     @property
     def amount_recovered(self) -> Decimal:
