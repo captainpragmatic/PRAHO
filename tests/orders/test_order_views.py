@@ -13,6 +13,7 @@ from django.urls import reverse
 from apps.billing.models import Currency
 from apps.customers.models import Customer, CustomerTaxProfile
 from apps.orders.models import Order, OrderItem, OrderStatusHistory
+from apps.products.models import Product
 from apps.users.models import CustomerMembership, User
 
 
@@ -264,7 +265,7 @@ class OrderDetailViewTestCase(TestCase):
         CustomerTaxProfile.objects.create(
             customer=self.customer,
             cui="RO12345678",
-            is_vat_registered=True
+            is_vat_payer=True
         )
         
         self.order = Order.objects.create(
@@ -278,23 +279,25 @@ class OrderDetailViewTestCase(TestCase):
             notes="Test order for detail view"
         )
         
+        # Create a real product for testing
+        self.product = Product.objects.create(
+            slug="web-hosting-plan",
+            name="Web Hosting Plan",
+            product_type="hosting",
+            is_active=True
+        )
+        
         # Add order item (using minimal required fields for testing)
-        with patch('apps.products.models.Product') as MockProduct:
-            mock_product = MockProduct.objects.create.return_value
-            mock_product.id = 1
-            mock_product.name = "Web Hosting Plan"
-            mock_product.product_type = "hosting"
-            
-            self.order_item = OrderItem.objects.create(
-                order=self.order,
-                product=mock_product,
-                product_name="Web Hosting Plan",
-                product_type="hosting",
-                billing_period="monthly",
-                quantity=1,
-                unit_price_cents=10000,
-                provisioning_status="pending"
-            )
+        self.order_item = OrderItem.objects.create(
+            order=self.order,
+            product=self.product,
+            product_name="Web Hosting Plan",
+            product_type="hosting",
+            billing_period="monthly",
+            quantity=1,
+            unit_price_cents=10000,
+            provisioning_status="pending"
+        )
         
         # Add status history
         OrderStatusHistory.objects.create(
@@ -477,12 +480,12 @@ class OrderStatusChangeViewTestCase(TestCase):
             'notes': 'Trying to revert completed order'
         }, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
         
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 400)
         
         # Check error response
         data = response.json()
         self.assertFalse(data['success'])
-        self.assertIn('Invalid status transition', data['error'])
+        self.assertIn('Invalid status transition', data['message'])
         
         # Verify order status unchanged
         self.order.refresh_from_db()
@@ -522,11 +525,11 @@ class OrderStatusChangeViewTestCase(TestCase):
             'notes': 'Notes without status'
         }, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
         
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 400)
         
         data = response.json()
         self.assertFalse(data['success'])
-        self.assertEqual(data['error'], 'Status is required')
+        self.assertEqual(data['message'], 'Status is required')
 
 
 class OrderCancelViewTestCase(TestCase):

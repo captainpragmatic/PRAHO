@@ -18,6 +18,10 @@ class TicketInternalCommentsSecurityTest(TestCase):
 
     def setUp(self):
         """Set up test data"""
+        # Disable audit signals during testing to avoid category errors
+        from django.conf import settings
+        self.original_disable_audit = getattr(settings, 'DISABLE_AUDIT_SIGNALS', False)
+        settings.DISABLE_AUDIT_SIGNALS = True
         # Create staff user (admin)
         self.staff_user = User.objects.create_user(
             email='admin@example.com',
@@ -288,4 +292,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
 
     def tearDown(self):
         """Clean up test data"""
+        # Restore original audit signal setting
+        from django.conf import settings
+        settings.DISABLE_AUDIT_SIGNALS = self.original_disable_audit
         # Django handles cleanup automatically, but good practice

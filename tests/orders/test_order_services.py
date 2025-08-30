@@ -105,7 +105,7 @@ class OrderNumberingServiceTestCase(TestCase):
         order_number = OrderNumberingService.generate_order_number(self.customer)
         
         # Should follow format: ORD-YYYY-CUSTOMER_ID_PREFIX-XXXX
-        self.assertTrue(order_number.startswith("ORD-2024-"))
+        self.assertTrue(order_number.startswith("ORD-2025-"))
         self.assertTrue(order_number.endswith("-0001"))
         self.assertIn(str(self.customer.pk).replace('-', '')[:8].upper(), order_number)
 
@@ -121,9 +121,10 @@ class OrderNumberingServiceTestCase(TestCase):
         # Generate second order number
         order_number2 = OrderNumberingService.generate_order_number(self.customer)
         
-        # Should be sequential
-        prefix = order1.order_number[:-4]  # Remove -XXXX part
-        expected_number2 = f"{prefix}-0002"
+        # Should be sequential - same base format but with incremented sequence
+        parts = order1.order_number.split('-')  # ['ORD', '2025', 'XXXXXXXX', '0001']
+        expected_parts = parts[:-1] + ['0002']  # Replace sequence with 0002
+        expected_number2 = '-'.join(expected_parts)
         self.assertEqual(order_number2, expected_number2)
 
     def test_order_number_uniqueness_per_customer(self):
@@ -388,6 +389,14 @@ class OrderQueryServiceTestCase(TestCase):
             is_vat_payer=True
         )
         
+        # Create a product for testing
+        self.product = Product.objects.create(
+            slug="test-product",
+            name="Test Product",
+            product_type="hosting",
+            is_active=True
+        )
+        
         # Create test orders
         self.order1 = Order.objects.create(
             customer=self.customer,
@@ -440,10 +449,13 @@ class OrderQueryServiceTestCase(TestCase):
         # Add item to order
         OrderItem.objects.create(
             order=self.order1,
+            product=self.product,
             quantity=1,
             unit_price_cents=5000,
             line_total_cents=5000,
-            description="Test Item"
+            product_name="Test Item",
+            product_type="hosting",
+            billing_period="monthly"
         )
         
         result = OrderQueryService.get_order_with_items(self.order1.id, self.customer)
@@ -455,7 +467,7 @@ class OrderQueryServiceTestCase(TestCase):
         # Verify prefetched items
         items = list(order.items.all())
         self.assertEqual(len(items), 1)
-        self.assertEqual(items[0].description, "Test Item")
+        self.assertEqual(items[0].product_name, "Test Item")
 
     def test_get_nonexistent_order(self):
         """Test retrieving non-existent order"""
