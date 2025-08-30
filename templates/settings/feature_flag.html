@@ -1,0 +1,17 @@
+<!-- Feature Flag Component -->
+<div class="feature-flag" data-feature="{{ feature_key }}">
+    {% if is_enabled %}
+        <div class="feature-enabled">
+            {{ enabled_content|default:"Feature is enabled" }}
+        </div>
+    {% else %}
+        <div class="feature-disabled">
+            {{ disabled_content|default:"Feature is disabled" }}
+        </div>
+    {% endif %}
+    {% if error %}
+        <div class="feature-error text-danger">
+            <small>Feature flag error: {{ error }}</small>
+        </div>
+    {% endif %}
+</div>

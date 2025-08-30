@@ -1,0 +1,303 @@
+{% extends 'base.html' %}
+{% load ui_components %}
+{% load settings_tags %}
+{% load i18n %}
+
+{% block title %}{% trans "System Settings" %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6">
+    <!-- Header -->
+    <div class="mb-8">
+        <h1 class="text-3xl font-bold text-white">⚙️ {% trans "System Settings" %}</h1>
+        <p class="mt-2 text-slate-400">
+            {% trans "Configure platform-wide settings for billing, users, domains, and more" %}
+        </p>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <!-- Total Settings -->
+        <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <div class="w-8 h-8 text-2xl">⚙️</div>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm font-medium text-slate-400">{% trans "Total Settings" %}</p>
+                    <p class="text-2xl font-semibold text-white">{{ total_settings|default:0 }}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Public Settings -->
+        <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <div class="w-8 h-8 text-2xl">🔓</div>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm font-medium text-slate-400">{% trans "Public Settings" %}</p>
+                    <p class="text-2xl font-semibold text-white">{{ public_settings_count|default:0 }}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Restart Required -->
+        <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <div class="w-8 h-8 text-2xl">🔄</div>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm font-medium text-slate-400">{% trans "Restart Required" %}</p>
+                    <p class="text-2xl font-semibold text-white">{{ restart_required_count|default:0 }}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Categories -->
+        <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <div class="w-8 h-8 text-2xl">📊</div>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm font-medium text-slate-400">{% trans "Categories" %}</p>
+                    <p class="text-2xl font-semibold text-white">{{ categories.count }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="bg-slate-800 rounded-lg border border-slate-700 mb-8">
+        <div class="p-6">
+            <h3 class="text-lg font-medium text-white mb-4">⚡ {% trans "Quick Actions" %}</h3>
+            <div class="flex flex-wrap gap-3">
+                <button 
+                    onclick="refreshCache()" 
+                    class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-blue-600 rounded-lg hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 transition-all duration-200"
+                    title="{% trans 'Clear Redis cache for all settings (cached values reset to database)' %}"
+                >
+                    🔄 {% trans "Refresh Cache" %}
+                </button>
+                <a 
+                    href="{% url 'settings:export_settings' %}" 
+                    class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-slate-600 border border-slate-600 rounded-lg hover:bg-slate-700 focus:ring-4 focus:ring-slate-300 transition-all duration-200"
+                >
+                    📥 {% trans "Export Settings" %}
+                </a>
+                <a 
+                    href="{% url 'settings:health_check' %}" 
+                    target="_blank"
+                    class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-green-600 border border-green-600 rounded-lg hover:bg-green-700 focus:ring-4 focus:ring-green-300 transition-all duration-200"
+                >
+                    🏥 {% trans "Health Check" %}
+                </a>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Settings Management Interface -->
+    {% if categories %}
+    <div class="bg-slate-800 rounded-lg border border-slate-700">
+        <div class="border-b border-slate-700">
+            <h3 class="text-lg font-medium text-white p-6 pb-4">⚙️ {% trans "Settings Management" %}</h3>
+            
+            <!-- Tab Navigation -->
+            <nav class="flex space-x-8 px-6" aria-label="Tabs">
+                {% for category in categories %}
+                <button 
+                    class="tab-button py-4 px-1 border-b-2 font-medium text-sm transition-colors duration-200 {% if forloop.first %}border-blue-500 text-blue-400{% else %}border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-300{% endif %}"
+                    hx-get="{% url 'settings:category_management_partial' category.key %}"
+                    hx-target="#settings-content"
+                    hx-indicator="#settings-loading"
+                    onclick="setActiveTab(this)"
+                >
+                    <span class="text-lg mr-2">
+                        {% if category.key == 'billing' %}💰
+                        {% elif category.key == 'users' %}👥
+                        {% elif category.key == 'domains' %}🌐
+                        {% elif category.key == 'provisioning' %}🚀
+                        {% elif category.key == 'security' %}🔒
+                        {% elif category.key == 'notifications' %}📧
+                        {% elif category.key == 'integrations' %}🔗
+                        {% elif category.key == 'system' %}⚙️
+                        {% else %}📋{% endif %}
+                    </span>
+                    {{ category.name }}
+                </button>
+                {% endfor %}
+            </nav>
+        </div>
+        
+        <!-- Loading Indicator -->
+        <div id="settings-loading" class="htmx-indicator">
+            <div class="flex items-center justify-center py-8">
+                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                <span class="ml-3 text-slate-400">{% trans "Loading settings..." %}</span>
+            </div>
+        </div>
+        
+        <!-- Settings Content Area -->
+        <div id="settings-content" class="p-8">
+            <!-- Initial content will be loaded via HTMX for first category -->
+            <div class="text-center py-12">
+                <div class="text-slate-400 text-4xl mb-4">⚙️</div>
+                <h3 class="text-lg font-medium text-white mb-2">{% trans "Select a Category" %}</h3>
+                <p class="text-slate-400">{% trans "Choose a settings category above to manage its configuration" %}</p>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+    // Tab management
+    function setActiveTab(clickedTab) {
+        // Remove active state from all tabs
+        document.querySelectorAll('.tab-button').forEach(tab => {
+            tab.classList.remove('border-blue-500', 'text-blue-400');
+            tab.classList.add('border-transparent', 'text-slate-400');
+        });
+        
+        // Add active state to clicked tab
+        clickedTab.classList.remove('border-transparent', 'text-slate-400');
+        clickedTab.classList.add('border-blue-500', 'text-blue-400');
+    }
+    
+    // Auto-load first category on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        const firstTab = document.querySelector('.tab-button');
+        if (firstTab) {
+            // Simulate click to load first category
+            setTimeout(() => {
+                firstTab.click();
+            }, 500);
+        }
+    });
+    
+    // Handle successful settings updates
+    document.addEventListener('htmx:afterRequest', function(event) {
+        if (event.detail.target.id === 'form-result' && event.detail.successful) {
+            try {
+                const response = JSON.parse(event.detail.xhr.responseText);
+                if (response.success) {
+                    // Show success notification at the top of the page
+                    const notification = document.createElement('div');
+                    notification.className = 'fixed top-4 right-4 bg-green-600 border border-green-500 rounded-lg p-4 text-white z-50 shadow-lg';
+                    notification.innerHTML = `
+                        <div class="flex items-center">
+                            <div class="text-xl mr-3">✅</div>
+                            <div>
+                                <strong>{% trans "Settings Updated!" %}</strong>
+                                <p class="text-green-100 text-sm">${response.updated} {% trans "settings were updated successfully" %}</p>
+                            </div>
+                        </div>
+                    `;
+                    
+                    document.body.appendChild(notification);
+                    
+                    // Auto-remove after 5 seconds
+                    setTimeout(() => {
+                        notification.style.transition = 'opacity 0.5s';
+                        notification.style.opacity = '0';
+                        setTimeout(() => notification.remove(), 500);
+                    }, 5000);
+                }
+            } catch (e) {
+                // Ignore JSON parse errors
+            }
+        }
+    });
+    </script>
+    {% else %}
+    <div class="bg-slate-800 rounded-lg border border-slate-700">
+        <div class="p-6">
+            <div class="text-center py-12">
+                <div class="text-slate-400 text-6xl mb-4">📋</div>
+                <h3 class="text-lg font-medium text-white mb-2">{% trans "No Settings Categories" %}</h3>
+                <p class="text-slate-400">{% trans "Settings categories will appear here once created." %}</p>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Error Display -->
+    {% if error %}
+    <div class="bg-slate-800 rounded-lg border border-slate-700 mt-8">
+        <div class="p-6">
+            <div class="flex">
+                <div class="flex-shrink-0">
+                    <div class="text-xl">⚠️</div>
+                </div>
+                <div class="ml-3">
+                    <h3 class="text-lg font-medium text-red-400">{% trans "Error Loading Settings" %}</h3>
+                    <div class="mt-2 text-sm text-slate-400">
+                        {% trans "Failed to load settings dashboard" %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+</div>
+
+<script>
+async function refreshCache() {
+  try {
+    // Show loading state
+    const button = event.target;
+    const originalText = button.innerHTML;
+    button.innerHTML = '⏳ {% trans "Refreshing..." %}';
+    button.disabled = true;
+    
+    const response = await fetch('/app/settings/api/cache/refresh/', {
+      method: 'POST',
+      headers: {
+        'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]')?.value || '',
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      // Show success notification
+      const notification = document.createElement('div');
+      notification.className = 'fixed top-4 right-4 bg-green-600 border border-green-500 rounded-lg p-4 text-white z-50 shadow-lg';
+      notification.innerHTML = `
+        <div class="flex items-center">
+          <div class="text-xl mr-3">✅</div>
+          <div>
+            <strong>{% trans "Cache Refreshed!" %}</strong>
+            <p class="text-green-100 text-sm">{% trans "All settings cache cleared successfully" %}</p>
+          </div>
+        </div>
+      `;
+      
+      document.body.appendChild(notification);
+      
+      // Auto-remove notification
+      setTimeout(() => {
+        notification.style.transition = 'opacity 0.5s';
+        notification.style.opacity = '0';
+        setTimeout(() => notification.remove(), 500);
+      }, 3000);
+      
+    } else {
+      alert('❌ Error refreshing cache: ' + data.error);
+    }
+  } catch (error) {
+    alert('❌ Network error: ' + error.message);
+  } finally {
+    // Restore button
+    button.innerHTML = originalText;
+    button.disabled = false;
+  }
+}
+</script>
+
+{% csrf_token %}
+{% endblock %}

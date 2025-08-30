@@ -1,0 +1,23 @@
+<!-- System Setting Display Component -->
+<div class="setting-display mb-3">
+    <div class="d-flex justify-content-between align-items-center">
+        <div class="setting-info">
+            <strong class="setting-label">{{ label }}</strong>
+            {% if description %}
+                <small class="text-muted d-block">{{ description }}</small>
+            {% endif %}
+        </div>
+        <div class="setting-value">
+            {{ display_value|default:"(not set)" }}
+            {% if show_default and default_value %}
+                <small class="text-muted">(default: {{ default_value }})</small>
+            {% endif %}
+        </div>
+    </div>
+    {% if help_text %}
+        <small class="form-text text-muted mt-1">{{ help_text }}</small>
+    {% endif %}
+    {% if error %}
+        <small class="text-danger mt-1">Error: {{ error }}</small>
+    {% endif %}
+</div>

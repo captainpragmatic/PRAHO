@@ -135,6 +135,15 @@ USE_TZ = True  # Enable timezone support
 SECRET_KEY = 'django-test-key-not-secure'
 ALLOWED_HOSTS = ['testserver', 'localhost', '127.0.0.1']
 
+# Explicit test flag so views can soften behaviors (e.g., rate limits)
+TESTING = True
+
+# ===============================================================================
+# ENCRYPTION (Test encryption key)
+# ===============================================================================
+
+ENCRYPTION_KEY = 'iuTrSBoKchmRt7RiySTHNuANNDmWe_xIqZWtMQaLMXs='
+
 # ===============================================================================
 # EXTERNAL SERVICES (Disabled in tests)
 # ===============================================================================
@@ -174,3 +183,10 @@ RQ_QUEUES = {
 # ===============================================================================
 
 DISABLE_AUDIT_SIGNALS = True
+
+# ===============================================================================
+# SECURITY TESTING (Enable account lockout for proper testing)
+# ===============================================================================
+
+# Enable account lockout in tests to ensure security features work properly
+DISABLE_ACCOUNT_LOCKOUT = False

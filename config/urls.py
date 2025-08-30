@@ -56,7 +56,7 @@ urlpatterns = [
     path('app/audit/', include('apps.audit.urls')),
 
     # System configuration (staff only)
-    path('app/settings/', include('apps.system_settings.urls')),
+    path('app/settings/', include('apps.settings.urls')),
 
     # API endpoints
     path('api/customers/', include('apps.customers.urls')),
