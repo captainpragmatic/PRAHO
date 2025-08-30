@@ -116,10 +116,21 @@ def service_create(request: HttpRequest) -> HttpResponse:
                 return redirect('provisioning:services')
             plan = get_object_or_404(ServicePlan, pk=plan_id)
 
+            # Generate a unique username for the service
+            base_username = f"srv_{customer.id}_{domain.replace('.', '_').replace('-', '_')}"[:90]
+            username = base_username
+            counter = 1
+            while Service.objects.filter(username=username).exists():
+                username = f"{base_username}_{counter}"[:100]
+                counter += 1
+            
             service = Service.objects.create(
                 customer=customer,
                 service_plan=plan,
+                service_name=f"{plan.name} - {domain}",  # Generate service name
                 domain=domain,
+                username=username,
+                price=plan.price_monthly,  # Set the monthly price from the plan
                 status='pending',
             )
 
@@ -239,7 +250,7 @@ def service_activate(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 def plan_list(request: HttpRequest) -> HttpResponse:
     """📋 Display available hosting plans"""
-    plans = ServicePlan.objects.filter(is_active=True).order_by('price')
+    plans = ServicePlan.objects.filter(is_active=True).order_by('price_monthly')
 
     context = {
         'plans': plans,

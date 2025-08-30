@@ -7,6 +7,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from django.conf import settings
 from django.db.models.signals import post_save, pre_delete
 from django.dispatch import Signal, receiver
 from django.http import HttpRequest
@@ -229,14 +230,7 @@ def _create_audit_event(  # noqa: PLR0913  # Audit event creation requires compr
         )
         
         # Log the event
-        audit_event = AuditService.log_event(audit_event_data, context)
-        
-        # Update the audit event with classification fields
-        audit_event.category = category
-        audit_event.severity = severity
-        audit_event.is_sensitive = is_sensitive
-        audit_event.requires_review = requires_review
-        audit_event.save(update_fields=['category', 'severity', 'is_sensitive', 'requires_review'])
+        AuditService.log_event(audit_event_data, context)
         
         logger.info(f"✅ [Audit Signal] {event_data.action} logged for user {event_data.user.email if event_data.user else 'System'} ({category}/{severity})")
         
@@ -251,7 +245,7 @@ def _create_audit_event(  # noqa: PLR0913  # Audit event creation requires compr
 # ===============================================================================
 
 @receiver(post_save, sender=User)
-def audit_user_profile_changes(sender: type[User], instance: User, created: bool, **kwargs: Any) -> None:
+def audit_user_profile_changes(sender: type[User], instance: User, created: bool, **kwargs: Any) -> None:  # noqa: PLR0912,C901 # Audit requires comprehensive field checking
     """
     Audit User model changes for security and compliance
     
@@ -265,6 +259,10 @@ def audit_user_profile_changes(sender: type[User], instance: User, created: bool
     """
     if created:
         # New user creation is logged by the view, not here
+        return
+    
+    # Check if audit signals are disabled (for testing)
+    if getattr(settings, 'DISABLE_AUDIT_SIGNALS', False):
         return
     
     try:
@@ -370,6 +368,10 @@ def audit_user_profile_preferences(sender: type[UserProfile], instance: UserProf
     if created:
         return
     
+    # Check if audit signals are disabled (for testing)
+    if getattr(settings, 'DISABLE_AUDIT_SIGNALS', False):
+        return
+    
     try:
         # Similar to User model, we'll use update_fields when available
         update_fields = kwargs.get('update_fields')
@@ -443,6 +445,10 @@ def audit_user_profile_preferences(sender: type[UserProfile], instance: UserProf
 @receiver(post_save, sender=CustomerMembership)
 def audit_customer_membership_changes(sender: type[CustomerMembership], instance: CustomerMembership, created: bool, **kwargs: Any) -> None:
     """Audit customer membership changes for authorization tracking"""
+    # Check if audit signals are disabled (for testing)
+    if getattr(settings, 'DISABLE_AUDIT_SIGNALS', False):
+        return
+    
     try:
         if created:
             _create_audit_event(AuditEventCreationData(
@@ -498,6 +504,10 @@ def audit_customer_membership_changes(sender: type[CustomerMembership], instance
 @receiver(pre_delete, sender=CustomerMembership)
 def audit_customer_membership_deletion(sender: type[CustomerMembership], instance: CustomerMembership, **kwargs: Any) -> None:
     """Audit customer membership deletion"""
+    # Check if audit signals are disabled (for testing)
+    if getattr(settings, 'DISABLE_AUDIT_SIGNALS', False):
+        return
+    
     try:
         _create_audit_event(AuditEventCreationData(
             action='customer_membership_deleted',

@@ -48,6 +48,7 @@ class Order(models.Model):
     STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
         ('draft', _('Draft')),             # Cart/Quote stage - can be modified
         ('pending', _('Pending')),         # Awaiting payment
+        ('confirmed', _('Confirmed')),     # Payment confirmed, ready for processing
         ('processing', _('Processing')),   # Payment received, provisioning in progress
         ('completed', _('Completed')),     # Fully provisioned and delivered
         ('cancelled', _('Cancelled')),     # Cancelled by customer or admin
@@ -66,6 +67,10 @@ class Order(models.Model):
     EDITABLE_FIELDS_BY_STATUS: ClassVar[dict[str, list[str]]] = {
         'draft': ['*'],  # Everything editable
         'pending': ['*'],  # Everything editable (payment not processed yet)
+        'confirmed': [
+            'notes', 'delivery_date', 'shipping_address_line1', 'shipping_address_line2',
+            'shipping_city', 'shipping_county', 'shipping_postal_code', 'shipping_country'
+        ],  # Limited to delivery and notes
         'processing': [
             'notes', 'delivery_date', 'shipping_address_line1', 'shipping_address_line2',
             'shipping_city', 'shipping_county', 'shipping_postal_code', 'shipping_country'
@@ -272,12 +277,12 @@ class Order(models.Model):
     @property
     def is_paid(self) -> bool:
         """Check if order has been paid"""
-        return self.status in ['processing', 'completed']
+        return self.status in ['confirmed', 'processing', 'completed']
 
     @property
     def can_be_cancelled(self) -> bool:
         """Check if order can be cancelled"""
-        return self.status in ['draft', 'pending']
+        return self.status in ['draft', 'pending', 'confirmed']
 
     def can_edit_field(self, field_name: str) -> bool:
         """Check if a specific field can be edited based on current status"""

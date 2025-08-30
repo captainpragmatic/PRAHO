@@ -19,6 +19,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from apps.common.types import EmailAddress, Err, Ok, Result
+from apps.common.validators import log_security_event
 from apps.tickets.models import Ticket  # Import for GDPR data export
 
 from .models import (
@@ -47,6 +48,16 @@ WEBHOOK_FAST_RESPONSE_THRESHOLD_MS = 1000  # < 1000ms is considered fast respons
 WEBHOOK_MEDIUM_RESPONSE_THRESHOLD_MS = 3000  # < 3000ms is considered medium response
 WEBHOOK_MAX_RETRY_THRESHOLD = 5  # Maximum retry attempts before failure
 WEBHOOK_SUSPICIOUS_RETRY_THRESHOLD = 3  # Retry count indicating suspicious behavior
+
+
+# Type definitions for security audit service
+class RateLimitEventData(TypedDict):
+    """Rate limit event data structure for security auditing."""
+    endpoint: str
+    ip_address: str
+    user_agent: str
+    rate_limit_key: str
+    rate_limit_rate: str
 
 """
 Audit services for PRAHO Platform
@@ -588,6 +599,10 @@ class AuditService:
             is_sensitive = context.metadata.get('is_sensitive', AuditService._is_action_sensitive(event_data.event_type))
             requires_review = context.metadata.get('requires_review', AuditService._requires_review(event_data.event_type))
             
+            # Ensure category is never None (fallback to default)
+            if category is None:
+                category = 'business_operation'
+            
             # Create audit event with categorization
             audit_event = AuditEvent.objects.create(
                 user=context.user,
@@ -655,7 +670,8 @@ class AuditService:
             ],
             'business_operation': [
                 'proforma_', 'invoice_', 'payment_', 'credit_', 'billing_', 
-                'currency_conversion', 'order_', 'provisioning_', 'service_', 'domain_'
+                'currency_conversion', 'order_', 'provisioning_', 'service_', 'domain_',
+                'support_ticket_'
             ]
         }
         
@@ -3927,6 +3943,441 @@ class ProductsAuditService:
 # ===============================================================================
 # INTEGRATIONS AUDIT SERVICE - WEBHOOK RELIABILITY MONITORING
 # ===============================================================================
+
+class DomainsAuditService:
+    """
+    🌐 Comprehensive domain management audit service
+    
+    Features:
+    - Domain lifecycle tracking (registration, renewal, transfer, expiration)
+    - TLD configuration and pricing change monitoring
+    - Registrar management and API credential security
+    - Domain security events (EPP codes, lock status, WHOIS privacy)
+    - Romanian .ro domain compliance tracking
+    - Cross-registrar operation logging
+    """
+    
+    @staticmethod
+    def log_domain_event(  # noqa: PLR0913  # Domain audit requires multiple domain-specific parameters
+        event_type: str,
+        domain: Any,
+        user: User | None = None,
+        context: AuditContext | None = None,
+        old_values: dict[str, Any] | None = None,
+        new_values: dict[str, Any] | None = None,
+        description: str | None = None,
+        security_context: dict[str, Any] | None = None
+    ) -> AuditEvent:
+        """
+        Log domain lifecycle and management events
+        
+        Args:
+            event_type: Type of domain event (domain_registered, domain_renewed, etc.)
+            domain: The Domain instance
+            user: User performing the action (if applicable)
+            context: Additional audit context
+            old_values: Previous values for change tracking
+            new_values: New values after change
+            description: Human-readable event description
+            security_context: Security-related metadata
+        """
+        # Use default context if none provided
+        if context is None:
+            context = AuditContext(user=user)
+            
+        # Build domain event metadata
+        domain_metadata = {
+            'domain_id': str(domain.id),
+            'domain_name': domain.name,
+            'domain_status': domain.status,
+            'registrar': domain.registrar.name if domain.registrar else None,
+            'tld_extension': domain.tld.extension if domain.tld else None,
+            'registration_date': domain.registered_at.isoformat() if domain.registered_at else None,
+            'expiration_date': domain.expires_at.isoformat() if domain.expires_at else None,
+            'auto_renew': domain.auto_renew_enabled,
+            'whois_privacy': domain.whois_privacy_enabled,
+            'domain_lock_status': domain.is_locked,
+            'customer_id': str(domain.customer.id) if domain.customer else None,
+            'nameservers': [ns.hostname for ns in domain.nameservers.all()] if hasattr(domain, 'nameservers') else [],
+            'old_values': old_values or {},
+            'new_values': new_values or {},
+            'security_context': security_context or {},
+            **context.metadata
+        }
+        
+        # Enhanced context with domain-specific information
+        enhanced_context = AuditContext(
+            user=context.user,
+            ip_address=context.ip_address,
+            user_agent=context.user_agent,
+            request_id=context.request_id,
+            session_key=context.session_key,
+            metadata=serialize_metadata(domain_metadata),
+            actor_type=context.actor_type or ('user' if user else 'system')
+        )
+        
+        # Generate description if not provided
+        if not description:
+            description = f"Domain {event_type.replace('_', ' ')}: {domain.name}"
+            
+        # Create audit event
+        audit_event_data = AuditEventData(
+            event_type=event_type,
+            content_object=domain,
+            description=description,
+            old_values=old_values or {},
+            new_values=new_values or {}
+        )
+        
+        return AuditService.log_event(audit_event_data, enhanced_context)
+    
+    @staticmethod
+    def log_tld_event(  # noqa: PLR0913  # TLD audit requires multiple configuration parameters
+        event_type: str,
+        tld: Any,
+        user: User | None = None,
+        context: AuditContext | None = None,
+        old_values: dict[str, Any] | None = None,
+        new_values: dict[str, Any] | None = None,
+        description: str | None = None
+    ) -> AuditEvent:
+        """
+        Log TLD configuration and pricing changes
+        
+        Args:
+            event_type: Type of TLD event (tld_created, tld_pricing_updated, etc.)
+            tld: The TLD instance
+            user: User performing the action
+            context: Additional audit context
+            old_values: Previous configuration values
+            new_values: New configuration values
+            description: Human-readable event description
+        """
+        # Use default context if none provided
+        if context is None:
+            context = AuditContext(user=user)
+            
+        # Build TLD event metadata
+        tld_metadata = {
+            'tld_id': str(tld.id),
+            'extension': tld.extension,
+            'description': tld.description,
+            'pricing': {
+                'registration_cents': tld.registration_price_cents,
+                'renewal_cents': tld.renewal_price_cents,
+                'transfer_cents': tld.transfer_price_cents,
+            },
+            'is_active': tld.is_active,
+            'old_values': old_values or {},
+            'new_values': new_values or {},
+            **context.metadata
+        }
+        
+        # Enhanced context
+        enhanced_context = AuditContext(
+            user=context.user,
+            ip_address=context.ip_address,
+            user_agent=context.user_agent,
+            request_id=context.request_id,
+            session_key=context.session_key,
+            metadata=serialize_metadata(tld_metadata),
+            actor_type=context.actor_type or 'user'
+        )
+        
+        # Generate description if not provided
+        if not description:
+            description = f"TLD {event_type.replace('_', ' ')}: .{tld.extension}"
+            
+        # Create audit event
+        audit_event_data = AuditEventData(
+            event_type=event_type,
+            content_object=tld,
+            description=description,
+            old_values=old_values or {},
+            new_values=new_values or {}
+        )
+        
+        return AuditService.log_event(audit_event_data, enhanced_context)
+    
+    @staticmethod
+    def log_registrar_event(  # noqa: PLR0913  # Registrar audit requires multiple security parameters
+        event_type: str,
+        registrar: Any,
+        user: User | None = None,
+        context: AuditContext | None = None,
+        old_values: dict[str, Any] | None = None,
+        new_values: dict[str, Any] | None = None,
+        description: str | None = None,
+        security_sensitive: bool = False
+    ) -> AuditEvent:
+        """
+        Log registrar configuration and security events
+        
+        Args:
+            event_type: Type of registrar event (registrar_created, api_credentials_updated, etc.)
+            registrar: The Registrar instance
+            user: User performing the action
+            context: Additional audit context
+            old_values: Previous configuration values
+            new_values: New configuration values
+            description: Human-readable event description
+            security_sensitive: Whether this event involves sensitive security data
+        """
+        # Use default context if none provided
+        if context is None:
+            context = AuditContext(user=user)
+            
+        # Build registrar event metadata (sanitize sensitive data)
+        registrar_metadata = {
+            'registrar_id': str(registrar.id),
+            'registrar_name': registrar.name,
+            'api_url': registrar.api_url if not security_sensitive else '[REDACTED]',
+            'is_active': registrar.is_active,
+            'supported_tlds': [tld.extension for tld in registrar.supported_tlds.all()] if hasattr(registrar, 'supported_tlds') else [],
+            'security_event': security_sensitive,
+            'old_values': old_values or {},
+            'new_values': new_values or {},
+            **context.metadata
+        }
+        
+        # Enhanced context with security classification
+        enhanced_context = AuditContext(
+            user=context.user,
+            ip_address=context.ip_address,
+            user_agent=context.user_agent,
+            request_id=context.request_id,
+            session_key=context.session_key,
+            metadata=serialize_metadata(registrar_metadata),
+            actor_type=context.actor_type or 'user'
+        )
+        
+        # Generate description if not provided
+        if not description:
+            action_desc = event_type.replace('_', ' ')
+            if security_sensitive:
+                action_desc += ' [SECURITY]'
+            description = f"Registrar {action_desc}: {registrar.name}"
+            
+        # Create audit event
+        audit_event_data = AuditEventData(
+            event_type=event_type,
+            content_object=registrar,
+            description=description,
+            old_values=old_values or {},
+            new_values=new_values or {}
+        )
+        
+        return AuditService.log_event(audit_event_data, enhanced_context)
+    
+    @staticmethod
+    def log_domain_order_event(  # noqa: PLR0913  # Order audit requires multiple order-specific parameters
+        event_type: str,
+        domain_order_item: Any,
+        user: User | None = None,
+        context: AuditContext | None = None,
+        old_values: dict[str, Any] | None = None,
+        new_values: dict[str, Any] | None = None,
+        description: str | None = None
+    ) -> AuditEvent:
+        """
+        Log domain order processing events
+        
+        Args:
+            event_type: Type of order event (domain_order_created, domain_order_processed, etc.)
+            domain_order_item: The DomainOrderItem instance
+            user: User performing the action
+            context: Additional audit context
+            old_values: Previous order values
+            new_values: New order values
+            description: Human-readable event description
+        """
+        # Use default context if none provided
+        if context is None:
+            context = AuditContext(user=user)
+            
+        # Build domain order event metadata
+        order_metadata = {
+            'order_item_id': str(domain_order_item.id),
+            'order_id': str(domain_order_item.order.id) if domain_order_item.order else None,
+            'domain_name': domain_order_item.domain_name,
+            'operation_type': domain_order_item.operation_type,
+            'registrar': domain_order_item.registrar.name if domain_order_item.registrar else None,
+            'tld_extension': domain_order_item.tld.extension if domain_order_item.tld else None,
+            'price_cents': domain_order_item.price_cents,
+            'customer_id': str(domain_order_item.order.customer.id) if domain_order_item.order and domain_order_item.order.customer else None,
+            'old_values': old_values or {},
+            'new_values': new_values or {},
+            **context.metadata
+        }
+        
+        # Enhanced context
+        enhanced_context = AuditContext(
+            user=context.user,
+            ip_address=context.ip_address,
+            user_agent=context.user_agent,
+            request_id=context.request_id,
+            session_key=context.session_key,
+            metadata=serialize_metadata(order_metadata),
+            actor_type=context.actor_type or ('user' if user else 'system')
+        )
+        
+        # Generate description if not provided
+        if not description:
+            description = f"Domain order {event_type.replace('_', ' ')}: {domain_order_item.domain_name} ({domain_order_item.operation_type})"
+            
+        # Create audit event
+        audit_event_data = AuditEventData(
+            event_type=event_type,
+            content_object=domain_order_item,
+            description=description,
+            old_values=old_values or {},
+            new_values=new_values or {}
+        )
+        
+        return AuditService.log_event(audit_event_data, enhanced_context)
+    
+    @staticmethod
+    def log_domain_security_event(  # noqa: PLR0913  # Security audit requires multiple security parameters
+        event_type: str,
+        domain: Any,
+        security_action: str,
+        user: User | None = None,
+        context: AuditContext | None = None,
+        security_metadata: dict[str, Any] | None = None,
+        description: str | None = None
+    ) -> AuditEvent:
+        """
+        Log domain security-related events
+        
+        Args:
+            event_type: Type of security event (epp_code_generated, domain_lock_changed, etc.)
+            domain: The Domain instance
+            security_action: Specific security action taken
+            user: User performing the action
+            context: Additional audit context
+            security_metadata: Security-specific metadata
+            description: Human-readable event description
+        """
+        # Use default context if none provided
+        if context is None:
+            context = AuditContext(user=user)
+            
+        # Build security event metadata
+        security_event_metadata = {
+            'domain_id': str(domain.id),
+            'domain_name': domain.name,
+            'security_action': security_action,
+            'registrar': domain.registrar.name if domain.registrar else None,
+            'customer_id': str(domain.customer.id) if domain.customer else None,
+            'security_metadata': security_metadata or {},
+            'timestamp': timezone.now().isoformat(),
+            **context.metadata
+        }
+        
+        # Log to security system
+        log_security_event(
+            f'domain_{security_action}',
+            security_event_metadata
+        )
+        
+        # Enhanced context for audit system
+        enhanced_context = AuditContext(
+            user=context.user,
+            ip_address=context.ip_address,
+            user_agent=context.user_agent,
+            request_id=context.request_id,
+            session_key=context.session_key,
+            metadata=serialize_metadata(security_event_metadata),
+            actor_type=context.actor_type or 'user'
+        )
+        
+        # Generate description if not provided
+        if not description:
+            description = f"Domain security: {security_action} for {domain.name}"
+            
+        # Create audit event
+        audit_event_data = AuditEventData(
+            event_type=event_type,
+            content_object=domain,
+            description=description,
+            old_values={},
+            new_values={'security_action': security_action}
+        )
+        
+        return AuditService.log_event(audit_event_data, enhanced_context)
+
+
+class SecurityAuditService:
+    """
+    🛡️ Security audit service for tracking security-related events
+    
+    Features:
+    - Rate limiting violations
+    - Authentication attacks
+    - Suspicious activity patterns
+    - IP-based threat monitoring
+    """
+    
+    @staticmethod
+    def log_rate_limit_event(
+        event_data: RateLimitEventData,
+        user: User | None = None,
+        context: AuditContext | None = None
+    ) -> AuditEvent:
+        """
+        Log rate limiting violations for security monitoring
+        
+        Args:
+            event_data: Rate limit event data including endpoint, IP, user agent, etc.
+            user: User if authenticated
+            context: Additional audit context
+        """
+        if context is None:
+            context = AuditContext(user=user)
+        
+        # Build rate limit metadata
+        metadata = {
+            'endpoint': event_data['endpoint'],
+            'ip_address': event_data['ip_address'],
+            'user_agent': event_data['user_agent'],
+            'rate_limit_config': {
+                'key': event_data['rate_limit_key'],
+                'rate': event_data['rate_limit_rate'],
+            },
+            'security_classification': 'rate_limit_violation',
+            'risk_level': 'medium',
+            'timestamp': timezone.now().isoformat(),
+        }
+        
+        # Add user information if authenticated
+        if user:
+            metadata['user_info'] = {
+                'user_id': user.id,
+                'email': user.email,
+                'is_staff': user.is_staff,
+                'last_login': user.last_login.isoformat() if user.last_login else None,
+            }
+        
+        # Log security event
+        log_security_event(
+            event_type='rate_limit_violation',
+            details=metadata,
+            request_ip=event_data['ip_address']
+        )
+        
+        return AuditEvent.objects.create(
+            category='security',
+            action='rate_limit_exceeded',
+            resource_type='system',
+            resource_id=event_data['endpoint'],
+            user=user,
+            ip_address=event_data['ip_address'],
+            user_agent=event_data['user_agent'],
+            metadata=metadata,
+            severity='medium',
+            tags=['security', 'rate_limiting', 'protection']
+        )
+
 
 class IntegrationsAuditService:
     """

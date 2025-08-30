@@ -25,8 +25,11 @@ class ServiceActivationService:
     """
     
     @staticmethod
-    def activate_services_for_invoice(invoice: Invoice) -> None:
+    def activate_services_for_invoice(invoice: Invoice | None) -> None:
         """Activate services when invoice is paid"""
+        if invoice is None:
+            logger.warning("⚠️ [Provisioning] Cannot activate services for None invoice")
+            return
         logger.info(f"⚙️ [Provisioning] Would activate services for paid invoice {invoice.number}")
         # TODO: Implement actual service activation
     

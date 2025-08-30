@@ -6,7 +6,7 @@ Tests industry-standard audit requirements (GDPR, ISO 27001, NIST, SOX, PCI DSS)
 import pytest
 from django.contrib.auth import get_user_model
 from django.db.models.signals import post_save, pre_delete
-from django.test import RequestFactory, TestCase, TransactionTestCase
+from django.test import RequestFactory, TestCase, TransactionTestCase, override_settings
 from unittest.mock import Mock, patch
 
 from apps.audit.models import AuditEvent
@@ -136,6 +136,7 @@ class TestAuditSignalHelpers(TestCase):
         assert 'test' in audit_event.metadata
 
 
+@override_settings(DISABLE_AUDIT_SIGNALS=False)
 class TestUserProfileAuditSignals(TransactionTestCase):
     """Test user profile change audit signals"""
     
@@ -264,6 +265,7 @@ class TestUserProfileAuditSignals(TransactionTestCase):
         assert audit_events.exists()
 
 
+@override_settings(DISABLE_AUDIT_SIGNALS=False)
 class TestUserProfilePreferencesAudit(TransactionTestCase):
     """Test UserProfile preferences audit logging"""
     
@@ -336,6 +338,7 @@ class TestUserProfilePreferencesAudit(TransactionTestCase):
         assert 'security_relevant' in audit_event.metadata
 
 
+@override_settings(DISABLE_AUDIT_SIGNALS=False)
 class TestCustomerMembershipAudit(TransactionTestCase):
     """Test customer membership audit logging"""
     

@@ -139,7 +139,9 @@ class OrderNumberingService:
         from .models import Order  # noqa: PLC0415
         
         current_year = timezone.now().year
-        prefix = f"ORD-{current_year}-{str(customer.pk).zfill(8)}"
+        # Use first 8 characters of UUID hex (no hyphens) as customer identifier
+        customer_id = str(customer.pk).replace('-', '')[:8].upper()
+        prefix = f"ORD-{current_year}-{customer_id}"
         
         # Get the highest existing order number for this customer and year
         latest_order = (
@@ -322,10 +324,11 @@ class OrderService:
     def _is_valid_status_transition(old_status: str, new_status: str) -> bool:
         """Validate order status transitions according to business rules"""
         
-        # Define valid transitions
+        # Define valid transitions based on Romanian business logic
         valid_transitions = {
             'draft': ['pending', 'cancelled'],
-            'pending': ['processing', 'cancelled', 'failed'],
+            'pending': ['confirmed', 'cancelled', 'failed'],
+            'confirmed': ['processing', 'cancelled'],
             'processing': ['completed', 'failed', 'cancelled'],
             'completed': ['refunded', 'partially_refunded'],  # Allow refunds from completed
             'cancelled': [],  # Terminal state  

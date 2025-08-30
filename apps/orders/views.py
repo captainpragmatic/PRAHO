@@ -133,7 +133,7 @@ def order_list(request: HttpRequest) -> HttpResponse:
     if search_query:
         queryset = queryset.filter(
             Q(order_number__icontains=search_query) |
-            Q(billing_company_name__icontains=search_query) |
+            Q(customer_company__icontains=search_query) |
             Q(customer__company_name__icontains=search_query)
         )
     
@@ -199,7 +199,7 @@ def order_list_htmx(request: HttpRequest) -> HttpResponse:
     if search_query:
         queryset = queryset.filter(
             Q(order_number__icontains=search_query) |
-            Q(billing_company_name__icontains=search_query) |
+            Q(customer_company__icontains=search_query) |
             Q(customer__company_name__icontains=search_query)
         )
     
@@ -253,14 +253,22 @@ def order_detail(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     if access_denied := _validate_order_access(request, order):
         return access_denied
     
+    is_staff = request.user.is_staff or bool(getattr(request.user, 'staff_role', ''))
+    editable_fields = order.get_editable_fields()
+    
+    # Determine if order can be edited based on status and user permissions
+    can_edit = (
+        is_staff and 
+        len(editable_fields) > 0 and
+        order.status not in ['completed', 'cancelled', 'refunded']  # Terminal states
+    )
+    
     context = {
         'order': order,
-        'is_staff': request.user.is_staff or bool(getattr(request.user, 'staff_role', '')),
-        'can_edit': (
-            request.user.is_staff or bool(getattr(request.user, 'staff_role', ''))
-        ) and len(order.get_editable_fields()) > 0,
-        'editable_fields': order.get_editable_fields(),
-        'can_edit_all': order.get_editable_fields() == ['*'],
+        'is_staff': is_staff,
+        'can_edit': can_edit,
+        'editable_fields': editable_fields,
+        'can_edit_all': editable_fields == ['*'],
     }
     
     return render(request, 'orders/order_detail.html', context)
@@ -449,7 +457,8 @@ def order_change_status(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
     result = OrderService.update_order_status(order, status_data)
     
     if result.is_ok():
-        return json_success({
+        return JsonResponse({
+            'success': True,
             'message': f'Order status changed to {new_status}',
             'new_status': new_status,
             'status_display': order.get_status_display()
@@ -733,11 +742,21 @@ def order_items_list(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     # Calculate totals for display
     order.calculate_totals()
     
+    is_staff = request.user.is_staff or bool(getattr(request.user, 'staff_role', ''))
+    editable_fields = order.get_editable_fields()
+    
+    # Use consistent can_edit logic with order_detail view
+    can_edit = (
+        is_staff and 
+        len(editable_fields) > 0 and
+        order.status not in ['completed', 'cancelled', 'refunded']  # Terminal states
+    )
+    
     context = {
         'order': order,
         'items': items,
-        'can_edit': order.is_draft or order.status == 'pending',
-        'is_staff': request.user.is_staff or bool(getattr(request.user, 'staff_role', '')),
+        'can_edit': can_edit,
+        'is_staff': is_staff,
     }
     
     # Return partial template for HTMX requests
