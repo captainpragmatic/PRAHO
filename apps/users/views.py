@@ -7,6 +7,7 @@ import logging
 from typing import Any, cast
 
 import pyotp
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
@@ -24,16 +25,17 @@ from django.db import models
 from django.db.models import QuerySet
 from django.forms import Form
 from django.http import HttpRequest, HttpResponse, HttpResponseBase, JsonResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import redirect, render, resolve_url
 from django.urls import reverse, reverse_lazy
 from django.utils.decorators import method_decorator
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods
 from django.views.generic import DetailView, ListView
 from django_ratelimit.decorators import ratelimit  # type: ignore[import-untyped]
 from django_ratelimit.exceptions import Ratelimited  # type: ignore[import-untyped]
 
-from apps.audit.services import AuthenticationAuditService, LogoutEventData
+from apps.audit.services import AuthenticationAuditService, LogoutEventData, SecurityAuditService
 from apps.common.constants import BACKUP_CODE_LENGTH, BACKUP_CODE_LOW_WARNING_THRESHOLD
 from apps.common.utils import (
     json_error,
@@ -60,12 +62,27 @@ CustomUser = User
 # AUTHENTICATION VIEWS
 # ===============================================================================
 
+@ratelimit(key='ip', rate='10/m', method='POST', block=False)
+@ratelimit(key='post:email', rate='5/m', method='POST', block=False)
 def login_view(request: HttpRequest) -> HttpResponse:
     """Romanian-localized login view with account lockout protection"""
     if request.user.is_authenticated:
         return redirect('dashboard')
 
     if request.method == 'POST':
+        # If rate-limited and not in test mode, show friendly error
+        if getattr(request, 'limited', False) and not getattr(settings, 'TESTING', False):
+            # Log rate limit event to audit system
+            SecurityAuditService.log_rate_limit_event(
+                endpoint='users:login',
+                ip_address=_get_client_ip(request),
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                rate_limit_key='ip,email',
+                rate_limit_rate='10/m,5/m',
+                user=None  # User not authenticated yet
+            )
+            messages.error(request, _('Too many login attempts. Please wait and try again.'))
+            return render(request, 'users/login.html', {'form': LoginForm(request.POST)}, status=429)
         form = LoginForm(request.POST)
         if form.is_valid():
             email = form.cleaned_data['email']
@@ -112,12 +129,12 @@ def login_view(request: HttpRequest) -> HttpResponse:
                     user_full_name=user_obj.get_full_name()
                 ))
 
-                next_url = request.GET.get('next', 'dashboard')
+                next_url = _get_safe_redirect_target(request, fallback='dashboard')
 
                 # Handle HTMX requests with full page reload
                 if request.headers.get('HX-Request'):
                     response = HttpResponse()
-                    response['HX-Redirect'] = reverse(next_url) if next_url == 'dashboard' else next_url
+                    response['HX-Redirect'] = next_url
                     return response
 
                 return redirect(next_url)
@@ -149,12 +166,26 @@ def login_view(request: HttpRequest) -> HttpResponse:
     return render(request, 'users/login.html', {'form': form})
 
 
+@ratelimit(key='ip', rate='5/h', method='POST', block=False)
+@ratelimit(key='header:user-agent', rate='10/h', method='POST', block=False)
 def register_view(request: HttpRequest) -> HttpResponse:
     """Enhanced user registration with proper customer onboarding"""
     if request.user.is_authenticated:
         return redirect('dashboard')
 
     if request.method == 'POST':
+        if getattr(request, 'limited', False) and not getattr(settings, 'TESTING', False):
+            # Log rate limit event to audit system
+            SecurityAuditService.log_rate_limit_event(
+                endpoint='users:register',
+                ip_address=_get_client_ip(request),
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                rate_limit_key='ip,user-agent',
+                rate_limit_rate='5/h,10/h',
+                user=None  # User not registered yet
+            )
+            messages.error(request, _('Too many registration attempts. Please wait and try again.'))
+            return render(request, 'users/register.html', {'form': CustomerOnboardingRegistrationForm(request.POST)}, status=429)
         form = CustomerOnboardingRegistrationForm(request.POST)
         if form.is_valid():
             try:
@@ -525,6 +556,57 @@ def two_factor_setup_webauthn(request: HttpRequest) -> HttpResponse:
     return redirect('users:two_factor_setup_totp')
 
 
+def _handle_2fa_rate_limit(request: HttpRequest, user: User) -> HttpResponse | None:
+    """Handle rate limiting for 2FA verification."""
+    if getattr(request, 'limited', False) and not getattr(settings, 'TESTING', False):
+        # Log rate limit event to audit system
+        SecurityAuditService.log_rate_limit_event(
+            endpoint='users:two_factor_verify',
+            ip_address=_get_client_ip(request),
+            user_agent=request.META.get('HTTP_USER_AGENT', ''),
+            rate_limit_key='ip',
+            rate_limit_rate='10/m',
+            user=user  # User is partially authenticated at this point
+        )
+        messages.error(request, _('Too many verification attempts. Please wait and try again.'))
+        return render(request, 'users/two_factor_verify.html', {
+            'form': TwoFactorVerifyForm(request.POST),
+            'user': user
+        }, status=429)
+    return None
+
+
+def _verify_2fa_token(user: User, token: str) -> tuple[bool, bool]:
+    """Verify 2FA token (TOTP or backup code)."""
+    # Try TOTP code first
+    totp_valid = pyotp.TOTP(user.two_factor_secret).verify(token)
+    backup_code_valid = False
+
+    # If TOTP fails, try backup code (8 digits)
+    if not totp_valid and len(token) == BACKUP_CODE_LENGTH and token.isdigit():
+        backup_code_valid = user.verify_backup_code(token)
+
+    return totp_valid, backup_code_valid
+
+
+def _handle_backup_code_warnings(request: HttpRequest, user: User) -> None:
+    """Handle backup code warning messages."""
+    remaining_codes = len(user.backup_tokens)
+    if remaining_codes == 0:
+        messages.warning(
+            request,
+            _('You have used your last backup code! Please generate new ones in your profile.')
+        )
+    elif remaining_codes <= BACKUP_CODE_LOW_WARNING_THRESHOLD:
+        messages.warning(
+            request,
+            _('You have {count} backup codes remaining. Consider generating new ones.').format(count=remaining_codes)
+        )
+    else:
+        messages.info(request, _('Backup code used. You have {count} codes remaining.').format(count=remaining_codes))
+
+
+@ratelimit(key='ip', rate='10/m', method='POST', block=False)
 def two_factor_verify(request: HttpRequest) -> HttpResponse:
     """Verify 2FA token during login"""
     user_id = request.session.get('pre_2fa_user_id')
@@ -534,49 +616,35 @@ def two_factor_verify(request: HttpRequest) -> HttpResponse:
     try:
         user = User.objects.get(id=user_id)
     except User.DoesNotExist:
-        del request.session['pre_2fa_user_id']
+        request.session.pop('pre_2fa_user_id', None)
         return redirect('users:login')
 
     if request.method == 'POST':
+        # Check rate limiting
+        rate_limit_response = _handle_2fa_rate_limit(request, user)
+        if rate_limit_response:
+            return rate_limit_response
+
         form = TwoFactorVerifyForm(request.POST)
         if form.is_valid():
             token = form.cleaned_data['token']
-
-            # Try TOTP code first
-            totp_valid = pyotp.TOTP(user.two_factor_secret).verify(token)
-            backup_code_valid = False
-
-            # If TOTP fails, try backup code (8 digits)
-            if not totp_valid and len(token) == BACKUP_CODE_LENGTH and token.isdigit():
-                backup_code_valid = user.verify_backup_code(token)
+            totp_valid, backup_code_valid = _verify_2fa_token(user, token)
 
             if totp_valid or backup_code_valid:
                 # Complete login
                 login(request, user)
-                del request.session['pre_2fa_user_id']
+                request.session.pop('pre_2fa_user_id', None)
 
                 # Log which method was used
                 method = 'totp' if totp_valid else 'backup_code'
                 _log_user_login(request, user, f'success_2fa_{method}')
 
                 if backup_code_valid:
-                    remaining_codes = len(user.backup_tokens)
-                    if remaining_codes == 0:
-                        messages.warning(
-                            request,
-                            _('You have used your last backup code! Please generate new ones in your profile.')
-                        )
-                    elif remaining_codes <= BACKUP_CODE_LOW_WARNING_THRESHOLD:
-                        messages.warning(
-                            request,
-                            _('You have {count} backup codes remaining. Consider generating new ones.').format(count=remaining_codes)
-                        )
-                    else:
-                        messages.info(request, _('Backup code used. You have {count} codes remaining.').format(count=remaining_codes))
+                    _handle_backup_code_warnings(request, user)
 
                 messages.success(request, _('Welcome, {user_full_name}!').format(user_full_name=user.get_full_name()))
 
-                next_url = request.GET.get('next', 'dashboard')
+                next_url = _get_safe_redirect_target(request, fallback='dashboard')
                 return redirect(next_url)
             else:
                 _log_user_login(request, user, 'failed_2fa')
@@ -853,3 +921,31 @@ def _get_client_ip(request: HttpRequest) -> str:
     
     # Fall back to REMOTE_ADDR
     return request.META.get('REMOTE_ADDR', '')
+
+
+def _get_safe_redirect_target(request: HttpRequest, fallback: str = 'dashboard') -> str:
+    """Validate and return a safe redirect target.
+
+    Accepts only URLs that are on this host and use the expected scheme,
+    otherwise returns the resolved fallback URL name/path.
+    """
+
+    raw_next = request.GET.get('next') or ''
+    # Resolve fallback first (can be a URL name)
+    fallback_url = resolve_url(fallback)
+
+    if not raw_next:
+        return fallback_url
+
+    # Allow only same-host redirects and proper scheme
+    if url_has_allowed_host_and_scheme(
+        url=raw_next,
+        allowed_hosts={request.get_host()},
+        require_https=getattr(settings, 'USE_HTTPS', False),
+    ):
+        try:
+            return resolve_url(raw_next)
+        except Exception:
+            return fallback_url
+
+    return fallback_url

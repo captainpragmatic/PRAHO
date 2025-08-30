@@ -762,17 +762,21 @@ class SecurityTest(BaseServiceTestCase):
             'last_name': 'Test',
         }
         
-        with patch('apps.users.services.SecureUserRegistrationService.register_new_customer_owner') as mock_register:
-            mock_register.return_value = Ok((self.user, self.customer))
-            
-            SecureUserRegistrationService.register_new_customer_owner(
-                user_data=user_data,
-                customer_data={'company_name': 'Audit Company'},
-                request_ip='127.0.0.1'
-            )
-            
-            # Should log security events
-            mock_log.assert_called()
+        # Don't mock the main method, let it run so logging happens
+        with patch('apps.users.services.User.objects.create_user') as mock_create_user:
+            mock_create_user.return_value = self.user
+            with patch('apps.users.services.Customer.objects.create') as mock_create_customer:
+                mock_create_customer.return_value = self.customer
+                with patch('apps.users.services.CustomerMembership.objects.create') as mock_create_membership:
+                    
+                    SecureUserRegistrationService.register_new_customer_owner(
+                        user_data=user_data,
+                        customer_data={'company_name': 'Audit Company'},
+                        request_ip='127.0.0.1'
+                    )
+                    
+                    # Should log security events
+                    mock_log.assert_called()
     
     def test_session_security_suspicious_activity(self) -> None:
         """Test session security with suspicious activity"""

@@ -16,27 +16,27 @@ class UsersURLsTest(TestCase):
     def test_login_url(self) -> None:
         """Test login URL pattern"""
         url = reverse('users:login')
-        self.assertEqual(url, '/users/login/')
+        self.assertEqual(url, '/auth/login/')
         
-        resolver = resolve('/users/login/')
+        resolver = resolve('/auth/login/')
         self.assertEqual(resolver.view_name, 'users:login')
         self.assertEqual(resolver.func.__name__, 'login_view')
     
     def test_logout_url(self) -> None:
         """Test logout URL pattern"""
         url = reverse('users:logout')
-        self.assertEqual(url, '/users/logout/')
+        self.assertEqual(url, '/auth/logout/')
         
-        resolver = resolve('/users/logout/')
+        resolver = resolve('/auth/logout/')
         self.assertEqual(resolver.view_name, 'users:logout')
         self.assertEqual(resolver.func.__name__, 'logout_view')
     
     def test_register_url(self) -> None:
         """Test register URL pattern"""
         url = reverse('users:register')
-        self.assertEqual(url, '/users/register/')
+        self.assertEqual(url, '/auth/register/')
         
-        resolver = resolve('/users/register/')
+        resolver = resolve('/auth/register/')
         self.assertEqual(resolver.view_name, 'users:register')
         self.assertEqual(resolver.func.__name__, 'register_view')
     
@@ -44,61 +44,61 @@ class UsersURLsTest(TestCase):
         """Test password reset URL patterns"""
         # Password reset request
         url = reverse('users:password_reset')
-        self.assertEqual(url, '/users/password-reset/')
+        self.assertEqual(url, '/auth/password-reset/')
         
         # Password reset done
         url = reverse('users:password_reset_done')
-        self.assertEqual(url, '/users/password-reset/done/')
+        self.assertEqual(url, '/auth/password-reset/done/')
         
         # Password reset confirm
         url = reverse('users:password_reset_confirm', kwargs={'uidb64': 'test', 'token': 'test'})
-        self.assertEqual(url, '/users/password-reset-confirm/test/test/')
+        self.assertEqual(url, '/auth/password-reset-confirm/test/test/')
         
         # Password reset complete
         url = reverse('users:password_reset_complete')
-        self.assertEqual(url, '/users/password-reset-complete/')
+        self.assertEqual(url, '/auth/password-reset-complete/')
     
     def test_password_change_url(self) -> None:
         """Test password change URL pattern"""
         url = reverse('users:password_change')
-        self.assertEqual(url, '/users/password-change/')
+        self.assertEqual(url, '/auth/password-change/')
     
     def test_two_factor_urls(self) -> None:
         """Test two-factor authentication URL patterns"""
         # Method selection
         url = reverse('users:two_factor_setup')
-        self.assertEqual(url, '/users/2fa/setup/')
+        self.assertEqual(url, '/auth/2fa/setup/')
         
         # TOTP setup
         url = reverse('users:two_factor_setup_totp')
-        self.assertEqual(url, '/users/2fa/setup/totp/')
+        self.assertEqual(url, '/auth/2fa/setup/totp/')
         
         # WebAuthn setup
         url = reverse('users:two_factor_setup_webauthn')
-        self.assertEqual(url, '/users/2fa/setup/webauthn/')
+        self.assertEqual(url, '/auth/2fa/setup/webauthn/')
         
         # Verify
         url = reverse('users:two_factor_verify')
-        self.assertEqual(url, '/users/2fa/verify/')
+        self.assertEqual(url, '/auth/2fa/verify/')
         
         # Backup codes
         url = reverse('users:two_factor_backup_codes')
-        self.assertEqual(url, '/users/2fa/backup-codes/')
+        self.assertEqual(url, '/auth/2fa/backup-codes/')
         
         # Regenerate backup codes
         url = reverse('users:two_factor_regenerate_backup_codes')
-        self.assertEqual(url, '/users/2fa/regenerate-backup-codes/')
+        self.assertEqual(url, '/auth/2fa/regenerate-backup-codes/')
         
         # Disable
         url = reverse('users:two_factor_disable')
-        self.assertEqual(url, '/users/2fa/disable/')
+        self.assertEqual(url, '/auth/2fa/disable/')
     
     def test_profile_url(self) -> None:
         """Test user profile URL pattern"""
         url = reverse('users:user_profile')
-        self.assertEqual(url, '/users/profile/')
+        self.assertEqual(url, '/auth/profile/')
         
-        resolver = resolve('/users/profile/')
+        resolver = resolve('/auth/profile/')
         self.assertEqual(resolver.view_name, 'users:user_profile')
         self.assertEqual(resolver.func.__name__, 'user_profile')
     
@@ -106,25 +106,25 @@ class UsersURLsTest(TestCase):
         """Test user management URL patterns"""
         # User list
         url = reverse('users:user_list')
-        self.assertEqual(url, '/users/users/')
+        self.assertEqual(url, '/auth/users/')
         
-        resolver = resolve('/users/users/')
+        resolver = resolve('/auth/users/')
         self.assertEqual(resolver.view_name, 'users:user_list')
         
         # User detail
         url = reverse('users:user_detail', kwargs={'pk': 1})
-        self.assertEqual(url, '/users/users/1/')
+        self.assertEqual(url, '/auth/users/1/')
         
-        resolver = resolve('/users/users/1/')
+        resolver = resolve('/auth/users/1/')
         self.assertEqual(resolver.view_name, 'users:user_detail')
         self.assertEqual(resolver.kwargs, {'pk': 1})
     
     def test_api_urls(self) -> None:
         """Test API endpoint URL patterns"""
         url = reverse('users:api_check_email')
-        self.assertEqual(url, '/users/api/check-email/')
+        self.assertEqual(url, '/auth/api/check-email/')
         
-        resolver = resolve('/users/api/check-email/')
+        resolver = resolve('/auth/api/check-email/')
         self.assertEqual(resolver.view_name, 'users:api_check_email')
         self.assertEqual(resolver.func.__name__, 'api_check_email')
     

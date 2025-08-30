@@ -872,8 +872,8 @@ class MFASecurityTestCase(TestCase):
         # Disable TOTP
         MFAService.disable_totp(self.user, request=request)
 
-        # Verify audit trail
-        audit_logs = AuditEvent.objects.filter(user=self.user).order_by('timestamp')
+        # Verify audit trail (exclude profile_updated events as they're triggered by model saves)
+        audit_logs = AuditEvent.objects.filter(user=self.user).exclude(action='profile_updated').order_by('timestamp')
 
         expected_actions = ['2fa_enabled', '2fa_backup_codes_generated', '2fa_disabled']
         actual_actions = [log.action for log in audit_logs]
@@ -883,7 +883,7 @@ class MFASecurityTestCase(TestCase):
         # Verify each log has proper details
         for log in audit_logs:
             self.assertEqual(log.content_object, self.user)
-            self.assertEqual(log.object_id, self.user.id)
+            self.assertEqual(log.object_id, str(self.user.id))  # object_id is stored as string
             self.assertIsNotNone(log.description)
 
 
@@ -959,8 +959,8 @@ class MFAIntegrationTestCase(TestCase):
         self.assertFalse(status['totp_enabled'])
         self.assertEqual(status['backup_codes_count'], 0)  # Use correct key
 
-        # 10. Verify complete audit trail
-        audit_logs = AuditEvent.objects.filter(user=self.user).order_by('timestamp')
+        # 10. Verify complete audit trail (exclude profile_updated events as they're triggered by model saves)
+        audit_logs = AuditEvent.objects.filter(user=self.user).exclude(action='profile_updated').order_by('timestamp')
         expected_actions = [
             '2fa_enabled',                    # Enable TOTP
             '2fa_verification_success',       # TOTP verification

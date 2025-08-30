@@ -104,9 +104,9 @@ class LoginViewTests(TestCase):
             'password': 'testpass123'
         })
         
-        # Currently the login view allows locked account logins - this might be a bug
-        # but for test fixing purposes, updating to match current behavior
-        self.assertEqual(response.status_code, 302)  # Login succeeds despite locked account
+        # Login should be blocked for locked account
+        self.assertEqual(response.status_code, 200)  # Form re-rendered with error
+        self.assertContains(response, 'Account temporarily locked')
 
     def test_login_view_nonexistent_user_failed_login_log(self) -> None:
         """Test login with non-existent user creates proper log entry"""
@@ -118,7 +118,7 @@ class LoginViewTests(TestCase):
         # Should render form with generic error
         self.assertEqual(response.status_code, 200)
         messages = list(get_messages(response.wsgi_request))
-        self.assertTrue(any("Email sau parolă incorectă." in str(msg) for msg in messages))
+        self.assertTrue(any("Incorrect email or password." in str(msg) for msg in messages))
         
         # Check failed login log for non-existent user
         log = UserLoginLog.objects.filter(
@@ -137,7 +137,7 @@ class LoginViewTests(TestCase):
         # Should render form with error
         self.assertEqual(response.status_code, 200)
         messages = list(get_messages(response.wsgi_request))
-        self.assertTrue(any("Email sau parolă incorectă." in str(msg) for msg in messages))
+        self.assertTrue(any("Incorrect email or password." in str(msg) for msg in messages))
         
         # Check failed attempts incremented
         self.user.refresh_from_db()
@@ -1339,7 +1339,7 @@ class EdgeCaseTests(TestCase):
         
         self.assertEqual(response.status_code, 200)
         messages = list(get_messages(response.wsgi_request))
-        self.assertTrue(any("Email sau parolă incorectă." in str(msg) for msg in messages))
+        self.assertTrue(any("Incorrect email or password." in str(msg) for msg in messages))
 
     def test_cache_clear_on_teardown(self) -> None:
         """Ensure cache is cleared between tests"""

@@ -51,12 +51,11 @@ class MinimalUserRegistrationFormTestCase(TestCase):
             'email': 'test@example.com',
             'password1': 'complex_password_123',
             'password2': 'complex_password_123',
+            'gdpr_consent': True,  # Required for Romanian GDPR compliance
         }
         form = UserRegistrationForm(data=form_data)
-        if not form.is_valid():
-            print("Form errors:", form.errors)
-        # Form may be valid or invalid depending on additional requirements
-        # We're just testing that it processes the data
+        # Test that the form processes the data correctly
+        self.assertTrue(form.is_valid())
 
     def test_registration_form_email_validation(self):
         """Test email validation in registration form"""
@@ -65,6 +64,7 @@ class MinimalUserRegistrationFormTestCase(TestCase):
             'email': 'test@example.com',
             'password1': 'complex_password_123',
             'password2': 'complex_password_123',
+            'gdpr_consent': True,  # Required for Romanian GDPR compliance
         }
         form = UserRegistrationForm(data=form_data)
         # Just test that form processes without errors

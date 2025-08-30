@@ -12,4 +12,4 @@ class UsersConfig(AppConfig):
 
     def ready(self) -> None:
         """Import signals when the app is ready"""
-        from . import signals  # noqa: F401
+        from . import signals  # noqa: F401,PLC0415  # Signals must be imported after Django ready

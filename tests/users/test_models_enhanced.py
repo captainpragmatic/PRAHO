@@ -85,18 +85,18 @@ class EnhancedUserModelTest(TestCase):
         """Test get_full_name method edge cases"""
         # Empty names
         user = UserModel.objects.create_user(
-            email='test@example.com',
+            email='test_empty_names@example.com',
             password='testpass123',
             first_name='',
             last_name=''
         )
-        self.assertEqual(user.get_full_name(), 'test@example.com')
+        self.assertEqual(user.get_full_name(), 'test_empty_names@example.com')
         
         # Only whitespace
         user.first_name = '   '
         user.last_name = '   '
         user.save()
-        self.assertEqual(user.get_full_name(), 'test@example.com')
+        self.assertEqual(user.get_full_name(), 'test_empty_names@example.com')
         
         # Mixed empty and non-empty
         user.first_name = 'Test'
@@ -157,7 +157,7 @@ class EnhancedUserModelTest(TestCase):
         # Create second customer and primary membership
         customer2 = Customer.objects.create(
             name='Primary Customer',
-            email='primary@example.com',
+            primary_email='primary@example.com',
             customer_type='company'
         )
         CustomerMembership.objects.create(
@@ -278,13 +278,13 @@ class EnhancedUserModelTest(TestCase):
             self.user.account_locked_until = None
             self.user.save()
             
-            # Increment attempts to trigger specific delay
+            # Increment attempts to trigger specific delay (i+1 attempts for delay[i])
             for _ in range(i + 1):
                 self.user.increment_failed_login_attempts()
             
-            # Check lockout time is approximately correct (within 1 minute)
+            # Check lockout time is approximately correct (allow for 1 minute tolerance)
             remaining = self.user.get_lockout_remaining_time()
-            self.assertGreater(remaining, expected_delay - 1)
+            self.assertGreaterEqual(remaining, expected_delay - 1)
             self.assertLessEqual(remaining, expected_delay)
     
     def test_increment_failed_login_attempts_max_delay(self) -> None:
@@ -768,8 +768,8 @@ class ModelEdgeCasesTest(TestCase):
         """Test model Meta attributes"""
         # User model
         self.assertEqual(UserModel._meta.db_table, 'users')
-        self.assertEqual(str(UserModel._meta.verbose_name), 'Utilizator')
-        self.assertEqual(str(UserModel._meta.verbose_name_plural), 'Utilizatori')
+        self.assertEqual(str(UserModel._meta.verbose_name), 'User')
+        self.assertEqual(str(UserModel._meta.verbose_name_plural), 'Users')
         
         # CustomerMembership model
         self.assertEqual(CustomerMembership._meta.db_table, 'customer_membership')

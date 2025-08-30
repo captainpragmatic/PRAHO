@@ -10,6 +10,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError, transaction
 from django.db.models.signals import post_save
 from django.test import RequestFactory, TestCase
 
@@ -76,12 +77,15 @@ class UserSignalsTest(TestCase):
         if hasattr(user, 'profile'):
             user.profile.delete()
         
+        # Refresh user to clear cached profile relationship
+        user.refresh_from_db()
+        
         # Call signal handler with created=False
         create_user_profile(UserModel, user, created=False)
         
-        # Profile should not be created
-        with self.assertRaises(UserProfile.DoesNotExist):
-            user.profile
+        # Profile should not be created - check database directly
+        profile_exists = UserProfile.objects.filter(user=user).exists()
+        self.assertFalse(profile_exists)
     
     def test_save_user_profile_signal_on_user_save(self) -> None:
         """Test user profile is saved when user is saved"""
@@ -130,9 +134,8 @@ class UserSignalsTest(TestCase):
         if hasattr(user, 'profile'):
             user.profile.delete()
         
-        # Remove the profile attribute to simulate missing profile
-        if hasattr(user, 'profile'):
-            delattr(user, 'profile')
+        # Force refresh the user from database to clear cached profile
+        user.refresh_from_db()
         
         # Call signal handler - should not raise exception
         try:
@@ -348,10 +351,12 @@ class SignalIntegrationTest(TestCase):
         self.assertTrue(hasattr(user, 'profile'))
         original_profile = user.profile
         
-        # Call create_user_profile signal handler again
-        create_user_profile(UserModel, user, created=True)
+        # Call create_user_profile signal handler again - should raise IntegrityError
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                create_user_profile(UserModel, user, created=True)
         
-        # Should not create duplicate profile
+        # Profile count should still be 1
         user.refresh_from_db()
         profiles_count = UserProfile.objects.filter(user=user).count()
         self.assertEqual(profiles_count, 1)

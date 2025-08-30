@@ -15,6 +15,7 @@ and follows the principle of single responsibility for security-critical code.
 """
 
 import base64
+import hashlib
 import io
 import logging
 import secrets
@@ -148,7 +149,7 @@ class WebAuthnCredential(models.Model):
         db_table = 'webauthn_credentials'  # Keep original table name from migration
         verbose_name = 'WebAuthn Credential'
         verbose_name_plural = 'WebAuthn Credentials'
-        constraints = [
+        constraints: ClassVar = [
             models.UniqueConstraint(fields=['user', 'credential_id'], name='uniq_user_credential')
         ]
         indexes: ClassVar[tuple[models.Index, ...]] = (
@@ -358,8 +359,6 @@ class BackupCodeService:
 
         Uses HMAC-SHA256-like behavior via Django's SECRET_KEY; not intended for user passwords.
         """
-        import hashlib
-
         normalized = (code or '').strip().upper()
         pepper = getattr(settings, 'SECRET_KEY', '')
         h = hashlib.sha256()
@@ -520,7 +519,7 @@ class WebAuthnService:
         return False
 
     @staticmethod
-    def get_user_credentials(user: 'User', *, include_inactive: bool = False):
+    def get_user_credentials(user: 'User', *, include_inactive: bool = False) -> list['WebAuthnCredential']:
         qs = WebAuthnCredential.objects.filter(user=user)
         if not include_inactive:
             qs = qs.filter(is_active=True)

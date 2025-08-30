@@ -8,6 +8,7 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
+from django.conf import settings
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
 from django.db.models import QuerySet
@@ -226,7 +227,6 @@ class User(AbstractUser):
     def is_account_locked(self) -> bool:
         """Check if account is currently locked"""
         # Allow disabling lockout for development/testing
-        from django.conf import settings
         if getattr(settings, 'DISABLE_ACCOUNT_LOCKOUT', False):
             return False
             
@@ -238,7 +238,6 @@ class User(AbstractUser):
     def increment_failed_login_attempts(self) -> None:
         """Increment failed login attempts and apply progressive lockout"""
         # Allow disabling lockout for development/testing
-        from django.conf import settings
         if getattr(settings, 'DISABLE_ACCOUNT_LOCKOUT', False):
             return  # Skip lockout logic completely when disabled
 

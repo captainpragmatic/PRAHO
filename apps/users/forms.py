@@ -18,6 +18,9 @@ from .services import UserRegistrationService
 
 T = TypeVar('T')
 
+# Romanian VAT number validation constants
+MIN_VAT_DIGITS = 6  # Minimum number of digits in Romanian VAT number
+
 
 class LoginForm(forms.Form):
     """Romanian login form"""
@@ -336,12 +339,12 @@ class CustomerMembershipForm(forms.ModelForm):
 
     class Meta:
         model = CustomerMembership
-        fields = ['role', 'is_primary']
-        widgets = {
+        fields: ClassVar = ['role', 'is_primary']
+        widgets: ClassVar = {
             'role': forms.Select(attrs={'class': 'form-select'}),
             'is_primary': forms.CheckboxInput(attrs={'class': 'form-checkbox'}),
         }
-        labels = {
+        labels: ClassVar = {
             'role': _('Role'),
             'is_primary': _('Primary Membership'),
         }
@@ -510,14 +513,14 @@ class CustomerOnboardingRegistrationForm(UserCreationForm):
             # Check if VAT number is in valid Romanian format
             if not vat_number.startswith('RO'):
                 # Only auto-prepend RO if it looks like a numeric VAT number
-                if vat_number.isdigit() and len(vat_number) >= 6:
+                if vat_number.isdigit() and len(vat_number) >= MIN_VAT_DIGITS:
                     vat_number = f'RO{vat_number}'
                 else:
                     raise ValidationError(_('VAT number must start with RO followed by digits (e.g., RO12345678)'))
             else:
                 # Validate that after RO we have digits
                 vat_digits = vat_number[2:]
-                if not vat_digits.isdigit() or len(vat_digits) < 6:
+                if not vat_digits.isdigit() or len(vat_digits) < MIN_VAT_DIGITS:
                     raise ValidationError(_('VAT number must start with RO followed by digits (e.g., RO12345678)'))
         return vat_number
 
