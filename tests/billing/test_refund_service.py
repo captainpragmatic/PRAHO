@@ -566,10 +566,11 @@ class TestRefundServiceWithFixtures:
         
         from apps.customers.models import Customer
         customer = Customer.objects.create(
+            name='Test Company',
             company_name='Test Company',
-            email='test@company.com',
-            fiscal_code='12345678',
-            vat_number='RO12345678'
+            customer_type='company',
+            status='active',
+            primary_email='test@company.com'
         )
         
         from apps.billing.models import Currency

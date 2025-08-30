@@ -48,9 +48,16 @@ from .models import (
 from .services import RefundData, RefundReason, RefundService, RefundType
 
 
-def _get_accessible_customer_ids(user: User) -> list[int]:
+def _get_accessible_customer_ids(user: User | None) -> list[int]:
     """Helper to get customer IDs that user can access"""
-    accessible_customers = user.get_accessible_customers()
+    if user is None:
+        return []
+    
+    try:
+        accessible_customers = user.get_accessible_customers()
+    except AttributeError:
+        # Handle cases where user doesn't have get_accessible_customers method
+        return []
 
     if isinstance(accessible_customers, QuerySet):
         return list(accessible_customers.values_list('id', flat=True))
@@ -607,7 +614,7 @@ def proforma_to_invoice(request: HttpRequest, pk: int) -> HttpResponse:
         return redirect('billing:proforma_detail', pk=pk)
 
     # Check if already converted
-    existing_invoice = Invoice.objects.filter(meta__proforma_id=proforma.id).first()
+    existing_invoice = Invoice.objects.filter(converted_from_proforma=proforma).first()
     if existing_invoice:
         messages.warning(request, _("⚠️ This proforma has already been converted to invoice #{number}").format(number=existing_invoice.number))
         return redirect('billing:invoice_detail', pk=existing_invoice.pk)
@@ -640,7 +647,7 @@ def proforma_to_invoice(request: HttpRequest, pk: int) -> HttpResponse:
             bill_to_postal=proforma.bill_to_postal,
             bill_to_country=proforma.bill_to_country,
             # Link back to proforma
-            meta={'proforma_id': proforma.id, 'proforma_number': proforma.number}
+            converted_from_proforma=proforma
         )
 
         # Copy line items
@@ -687,7 +694,7 @@ def process_proforma_payment(request: HttpRequest, pk: int) -> HttpResponse:
         # we'll duplicate the conversion logic here
         
         # Check if already converted
-        existing_invoice = Invoice.objects.filter(meta__proforma_id=proforma.id).first()
+        existing_invoice = Invoice.objects.filter(converted_from_proforma=proforma).first()
         if existing_invoice:
             # Already converted, process payment on existing invoice
             invoice = existing_invoice
@@ -707,7 +714,6 @@ def process_proforma_payment(request: HttpRequest, pk: int) -> HttpResponse:
                 subtotal_cents=proforma.subtotal_cents,
                 due_at=proforma.valid_until if proforma.valid_until else timezone.now() + timezone.timedelta(days=30),
                 issued_at=timezone.now(),
-                meta={'proforma_id': proforma.id},
                 converted_from_proforma=proforma,
             )
 
@@ -961,7 +967,10 @@ def _get_customers_for_edit_form(user: User) -> QuerySet[Customer, Customer]:
             id__in=[c.id for c in accessible_customers]
         ).select_related('tax_profile', 'billing_profile')
     else:
-        # Fallback - assume it's already a QuerySet
+        # Fallback - return empty queryset if None or other unexpected value
+        if accessible_customers is None:
+            return Customer.objects.none()
+        # Assume it's already a QuerySet
         return accessible_customers.select_related('tax_profile', 'billing_profile')
 
 

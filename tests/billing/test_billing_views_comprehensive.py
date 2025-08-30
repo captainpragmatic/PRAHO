@@ -187,8 +187,9 @@ class BillingViewsComprehensiveTestCase(TestCase):
 
     def test_validate_customer_assignment_invalid_id(self):
         """Test _validate_customer_assignment with invalid customer ID"""
-        with self.assertRaises(Http404):
-            _validate_customer_assignment(self.user, '99999', None)
+        customer, error_response = _validate_customer_assignment(self.user, '99999', None)
+        self.assertIsNone(customer)
+        self.assertIsNotNone(error_response)
 
     def test_process_valid_until_date_valid(self):
         """Test _process_valid_until_date with valid date"""
@@ -446,7 +447,7 @@ class BillingViewsComprehensiveTestCase(TestCase):
         self.assertEqual(response.status_code, 302)
         
         # Verify invoice was created
-        invoice = Invoice.objects.filter(meta__proforma_id=self.proforma.id).first()
+        invoice = Invoice.objects.filter(converted_from_proforma=self.proforma).first()
         self.assertIsNotNone(invoice)
 
     def test_proforma_to_invoice_expired(self):

@@ -1095,7 +1095,7 @@ def generate_e_factura_xml(invoice: Invoice) -> str:
     return "<xml>Mock e-Factura XML content</xml>"
 
 
-def send_invoice_email(invoice: Invoice, recipient_email: str = None) -> bool:
+def send_invoice_email(invoice: Invoice, recipient_email: str | None = None) -> bool:
     """Send invoice via email"""
     email = recipient_email or invoice.customer.primary_email
     logger.info(f"📧 [Email] Sending invoice {invoice.number} to {email}")
@@ -1103,7 +1103,7 @@ def send_invoice_email(invoice: Invoice, recipient_email: str = None) -> bool:
     return True
 
 
-def send_proforma_email(proforma: Any, recipient_email: str = None) -> bool:  # ProformaInvoice type would create circular import
+def send_proforma_email(proforma: Any, recipient_email: str | None = None) -> bool:  # ProformaInvoice type would create circular import
     """Send proforma invoice via email"""
     email = recipient_email or proforma.customer.primary_email
     logger.info(f"📧 [Email] Sending proforma {proforma.number} to {email}")

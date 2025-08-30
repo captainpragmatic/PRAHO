@@ -255,8 +255,9 @@ class BillingViewsTestCase(TestCase):
 
     def test_validate_customer_assignment_invalid_id(self) -> None:
         """Test _validate_customer_assignment with invalid customer ID"""
-        with self.assertRaises(Http404):
-            _validate_customer_assignment(self.user, '99999', None)
+        customer, error_response = _validate_customer_assignment(self.user, '99999', None)
+        self.assertIsNone(customer)
+        self.assertIsNotNone(error_response)
 
     def test_validate_customer_assignment_no_access(self) -> None:
         """Test _validate_customer_assignment with no access to customer"""
@@ -554,7 +555,7 @@ class BillingViewsTestCase(TestCase):
             number='INV-EXISTING-001',
             status='issued',
             total_cents=self.proforma.total_cents,
-            meta={'proforma_id': self.proforma.id}
+            converted_from_proforma=self.proforma
         )
         
         request = self.factory.post(f'/proforma/{self.proforma.pk}/convert/')

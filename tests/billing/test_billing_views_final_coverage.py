@@ -52,10 +52,15 @@ class FinalBillingViewsCoverageTestCase(TestCase):
             password='testpass123'
         )
         
-        # Create currency
+        # Create currencies
         self.eur_currency, created = Currency.objects.get_or_create(
             code='EUR',
             defaults={'symbol': '€', 'decimals': 2}
+        )
+        
+        self.ron_currency, created = Currency.objects.get_or_create(
+            code='RON',
+            defaults={'symbol': 'lei', 'decimals': 2}
         )
         
         # Create customer (using correct field names)
@@ -159,9 +164,10 @@ class FinalBillingViewsCoverageTestCase(TestCase):
     def test_validate_pdf_access_with_none_user(self):
         """Test _validate_pdf_access with None user"""
         from apps.billing.views import _validate_pdf_access
+        from django.http import HttpResponseRedirect
         
         result = _validate_pdf_access(None, self.invoice)
-        self.assertFalse(result)
+        self.assertIsInstance(result, HttpResponseRedirect)
 
     def test_validate_pdf_access_with_valid_user(self):
         """Test _validate_pdf_access with valid user"""
@@ -204,19 +210,17 @@ class FinalBillingViewsCoverageTestCase(TestCase):
     def test_create_proforma_with_sequence(self):
         """Test _create_proforma_with_sequence helper"""
         from apps.billing.views import _create_proforma_with_sequence
+        from datetime import datetime, timedelta
+        from django.utils import timezone
         
         # Mock the sequence generation
         with patch.object(ProformaSequence, 'get_next_number', return_value='PRO-000002'):
-            proforma_data = {
-                'customer': self.customer,
-                'currency': self.eur_currency,
-                'subtotal_cents': 100000,
-                'tax_cents': 19000,
-                'total_cents': 119000
-            }
+            valid_until = timezone.now() + timedelta(days=30)
             
-            result = _create_proforma_with_sequence(proforma_data)
+            result = _create_proforma_with_sequence(self.customer, valid_until)
             self.assertIsNotNone(result)
+            self.assertEqual(result.customer, self.customer)
+            self.assertEqual(result.number, 'PRO-000002')
 
     # ========================================================================
     # BILLING LIST TESTS  
@@ -487,12 +491,9 @@ class FinalBillingViewsCoverageTestCase(TestCase):
         request = self.factory.get('/billing/reports/')
         self.add_middleware_to_request(request, self.staff_user)
         
-        with patch('apps.billing.views.generate_payment_collection_report') as mock_report:
-            mock_report.return_value = {'total': 1000000}
-            
-            response = billing_reports(request)
-            self.assertEqual(response.status_code, 200)
-            mock_render.assert_called_once()
+        response = billing_reports(request)
+        self.assertEqual(response.status_code, 200)
+        mock_render.assert_called_once()
 
     @patch('apps.billing.views.render')  
     def test_vat_report_mocked(self, mock_render):

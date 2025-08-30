@@ -506,7 +506,7 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
             currency=self.currency,
             status='issued',
             total_cents=5950,
-            meta={'proforma_id': self.proforma.id}
+            converted_from_proforma=self.proforma
         )
         
         request = self.factory.get('/')
@@ -540,7 +540,7 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
             
             self.assertEqual(response.status_code, 302)
             # Verify invoice was created
-            self.assertTrue(Invoice.objects.filter(meta__proforma_id=self.proforma.id).exists())
+            self.assertTrue(Invoice.objects.filter(converted_from_proforma=self.proforma).exists())
 
     # ===============================================================================
     # PROCESS PROFORMA PAYMENT TESTS - HIGH PRIORITY
@@ -590,7 +590,7 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
             self.assertTrue(response_data['success'])
             
             # Verify an invoice was created from the proforma
-            invoice = Invoice.objects.filter(meta__proforma_id=self.proforma.id).first()
+            invoice = Invoice.objects.filter(converted_from_proforma=self.proforma).first()
             self.assertIsNotNone(invoice)
 
     def test_process_proforma_payment_conversion_failed(self) -> None:

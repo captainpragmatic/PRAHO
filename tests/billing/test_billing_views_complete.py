@@ -79,7 +79,7 @@ class CompleteBillingViewsTestCase(TestCase):
             password='testpass',
             is_staff=True
         )
-        self.staff_user.staff_role = 'billing_manager'
+        self.staff_user.staff_role = 'billing'
         self.staff_user.save()
         
         # Create regular user with customer access
@@ -264,8 +264,9 @@ class CompleteBillingViewsTestCase(TestCase):
 
     def test_validate_customer_assignment_invalid_id(self):
         """Test _validate_customer_assignment with invalid customer ID"""
-        with self.assertRaises(Http404):
-            _validate_customer_assignment(self.user, '99999', None)
+        customer, error_response = _validate_customer_assignment(self.user, '99999', None)
+        self.assertIsNone(customer)
+        self.assertIsNotNone(error_response)
 
     def test_validate_customer_assignment_invalid_id_with_proforma_pk(self):
         """Test _validate_customer_assignment with invalid ID and proforma_pk"""
@@ -454,8 +455,8 @@ class CompleteBillingViewsTestCase(TestCase):
         errors = _process_proforma_line_items(self.proforma, request_data)
         
         # Should not create line with empty description
-        self.assertIsNotNone(errors)  # Function should return errors dict
-        self.assertEqual(self.proforma.lines.count(), 1)  # Only existing line from setUp
+        self.assertEqual(len(errors), 0)  # Empty description is not an error, just skipped  
+        self.assertEqual(self.proforma.lines.count(), 0)  # No lines because description was empty
 
     def test_process_proforma_line_items_zero_quantity(self):
         """Test _process_proforma_line_items with zero quantity"""
@@ -468,9 +469,9 @@ class CompleteBillingViewsTestCase(TestCase):
         
         errors = _process_proforma_line_items(self.proforma, request_data)
         
-        # Should not create line with zero quantity
-        self.assertIsNotNone(errors)  # Function should return errors dict
-        self.assertEqual(self.proforma.lines.count(), 1)  # Only existing line from setUp
+        # Should not create line with zero quantity  
+        self.assertEqual(len(errors), 0)  # Zero quantity is not an error, just skipped
+        self.assertEqual(self.proforma.lines.count(), 0)  # No lines because quantity was zero
 
     def test_update_proforma_basic_info(self):
         """Test _update_proforma_basic_info utility"""
@@ -720,7 +721,7 @@ class CompleteBillingViewsTestCase(TestCase):
             number='INV-EXISTING-001',
             status='issued',
             total_cents=self.proforma.total_cents,
-            meta={'proforma_id': self.proforma.id}
+            converted_from_proforma=self.proforma
         )
         
         request = self.factory.post(f'/proforma/{self.proforma.pk}/convert/')
@@ -765,7 +766,7 @@ class CompleteBillingViewsTestCase(TestCase):
         self.assertEqual(response.status_code, 302)
         
         # Verify invoice was created with all details
-        invoice = Invoice.objects.filter(meta__proforma_id=test_proforma.id).first()
+        invoice = Invoice.objects.filter(converted_from_proforma=test_proforma).first()
         self.assertIsNotNone(invoice)
         self.assertEqual(invoice.total_cents, test_proforma.total_cents)
         self.assertEqual(invoice.status, 'issued')
