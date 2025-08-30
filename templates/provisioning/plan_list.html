@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+{% load i18n %}
+
+{% block title %}{% trans "Planuri de găzduire" %} - {{ block.super }}{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <h1 class="text-3xl font-bold text-gray-900 mb-8">{% trans "Planuri de găzduire disponibile" %}</h1>
+    
+    {% if plans %}
+        <div class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {% for plan in plans %}
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <h2 class="text-xl font-semibold text-gray-900 mb-2">{{ plan.name }}</h2>
+                <p class="text-sm text-gray-600 mb-4">{{ plan.description }}</p>
+                <div class="text-2xl font-bold text-blue-600 mb-4">
+                    {{ plan.price_monthly }} RON/{% trans "lună" %}
+                </div>
+                <div class="text-sm text-gray-500">
+                    <div>{% trans "Spațiu disc" %}: {{ plan.disk_space_gb }}GB</div>
+                    <div>{% trans "Trafic" %}: {{ plan.bandwidth_gb }}GB</div>
+                    <div>{% trans "Conturi email" %}: {{ plan.email_accounts }}</div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="text-center py-12">
+            <p class="text-gray-600 text-lg">{% trans "Nu sunt disponibile planuri de găzduire în acest moment." %}</p>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}

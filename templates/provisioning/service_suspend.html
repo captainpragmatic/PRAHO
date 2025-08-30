@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}
+{% trans "Suspend Service" %} - PRAHO Platform
+{% endblock %}
+
+{% block content %}
+<div class="px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto">
+  <!-- Header -->
+  <div class="sm:flex sm:items-center mb-6">
+    <div class="sm:flex-auto">
+      <div class="flex items-center space-x-4">
+        <a href="{% url 'provisioning:service_detail' service.pk %}" class="text-slate-400 hover:text-white">
+          ← {% trans 'Back to Service' %}
+        </a>
+      </div>
+      <h1 class="text-2xl font-semibold text-white mt-4 romanian-flag">
+        ⏸️ {% trans "Suspend Service" %}
+      </h1>
+      <p class="mt-2 text-sm text-slate-400">
+        {% trans "Confirm suspension of hosting service" %}
+      </p>
+    </div>
+  </div>
+
+  <!-- Confirmation Form -->
+  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg overflow-hidden">
+    <div class="p-8">
+      <div class="mb-6">
+        <h3 class="text-lg font-medium text-white mb-4">
+          {% trans 'Service Details' %}
+        </h3>
+        
+        <div class="bg-slate-700 rounded-lg p-4 space-y-2">
+          <div class="flex justify-between">
+            <span class="text-slate-300">{% trans 'Service:' %}</span>
+            <span class="text-white font-medium">{{ service.service_name }}</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-slate-300">{% trans 'Domain:' %}</span>
+            <span class="text-white font-medium">{{ service.domain }}</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-slate-300">{% trans 'Customer:' %}</span>
+            <span class="text-white font-medium">{{ service.customer.company_name }}</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-slate-300">{% trans 'Current Status:' %}</span>
+            <span class="text-green-400 font-medium">{{ service.get_status_display }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="mb-6 p-4 bg-yellow-900/20 border border-yellow-600/50 rounded-lg">
+        <div class="flex">
+          <div class="flex-shrink-0">
+            <svg class="h-5 w-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+            </svg>
+          </div>
+          <div class="ml-3">
+            <h3 class="text-sm font-medium text-yellow-400">
+              {% trans 'Warning' %}
+            </h3>
+            <p class="mt-1 text-sm text-yellow-300">
+              {% trans 'Suspending this service will make it inaccessible to customers. This action can be reversed by reactivating the service.' %}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <form method="post" class="space-y-6">
+        {% csrf_token %}
+        
+        <!-- Form Actions -->
+        <div class="flex items-center justify-between pt-6 border-t border-slate-600">
+          <a href="{% url 'provisioning:service_detail' service.pk %}" 
+             class="bg-slate-600 hover:bg-slate-500 text-white px-4 py-2 rounded-md transition-colors">
+            {% trans 'Cancel' %}
+          </a>
+          
+          <button type="submit" 
+                  class="bg-yellow-600 hover:bg-yellow-700 text-white px-6 py-2 rounded-md transition-colors">
+            ⏸️ {% trans 'Suspend Service' %}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
