@@ -2,7 +2,7 @@
 {% load i18n %}
 {% load ui_components %}
 
-{% block title %}{% trans "Create Invoice" %} - PRAHO Platform{% endblock %}
+{% block title %}{% if invoice %}{% trans "Edit Invoice" %}{% else %}{% trans "Create Invoice" %}{% endif %} - PRAHO Platform{% endblock %}
 
 {% block content %}
 <div class="px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto">
@@ -15,10 +15,14 @@
         </a>
       </div>
       <h1 class="text-3xl font-bold text-white mt-4">
-        🧾 {% trans "Create New Invoice" %}
+        🧾 {% if invoice %}{% trans "Edit Invoice" %} #{{ invoice.number }}{% else %}{% trans "Create New Invoice" %}{% endif %}
       </h1>
       <p class="mt-2 text-slate-400">
-        {% trans "Create a new invoice for a customer with Romanian VAT compliance" %}
+        {% if invoice %}
+          {% trans "Edit this draft invoice for" %} {{ invoice.customer.display_name }}
+        {% else %}
+          {% trans "Create a new invoice for a customer with Romanian VAT compliance" %}
+        {% endif %}
       </p>
     </div>
   </div>

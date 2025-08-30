@@ -32,11 +32,20 @@
         {% if order.status == "completed" or order.status == "partially_refunded" %}
           {% button "💰 Refund Order" onclick="showRefundModal()" variant="success" %}
         {% endif %}
+        
+        {% if order.status not in "cancelled,refunded,completed" %}
+          <button 
+            type="button"
+            onclick="showStatusModal()"
+            class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-slate-600 text-white bg-slate-700 hover:bg-slate-600 focus:ring-2 focus:ring-blue-500">
+            🔄 {% trans "Change Status" %}
+          </button>
+        {% endif %}
       {% elif not is_staff and order.status in "completed,partially_refunded" %}
         <!-- Refund Request Button for Customers -->
         {% button "🎫 Request Refund" onclick="showOrderRefundRequestModal()" variant="primary" %}
         
-        {% if order.status not in "cancelled,refunded" %}
+        {% if order.status not in "cancelled,refunded,completed" %}
           <button 
             type="button"
             onclick="showStatusModal()"
@@ -94,7 +103,7 @@
               <dd class="mt-1 text-sm text-white">
                 <a href="{% url 'customers:detail' customer_id=order.customer.id %}" 
                    class="hover:text-blue-400 transition-colors">
-                  {{ order.customer.company_name }}
+                  {{ order.customer.name }}
                 </a>
               </dd>
             </div>
@@ -139,11 +148,10 @@
             <div>
               <h4 class="text-sm font-semibold text-slate-300 mb-3">{% trans "Company Details" %}</h4>
               <div class="space-y-2 text-sm text-slate-400">
-                <div><strong class="text-white">{{ order.billing_company_name }}</strong></div>
-                <div>{{ order.billing_contact_name }}</div>
-                <div>{{ order.billing_email }}</div>
-                {% if order.billing_phone %}
-                  <div>{{ order.billing_phone }}</div>
+                <div><strong class="text-white">{{ order.customer.name }}</strong></div>
+                <div>{{ order.customer.primary_email }}</div>
+                {% if order.customer.tax_profile %}
+                  <div>{% trans "CUI" %}: {{ order.customer.tax_profile.cui }}</div>
                 {% endif %}
               </div>
             </div>
@@ -253,7 +261,7 @@
 </div>
 
 <!-- Status Change Modal (for staff) -->
-{% if is_staff and order.status not in "cancelled,refunded" %}
+{% if is_staff and order.status not in "cancelled,refunded,completed" %}
 <div id="statusModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
   <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
     <div class="fixed inset-0 transition-opacity" aria-hidden="true">

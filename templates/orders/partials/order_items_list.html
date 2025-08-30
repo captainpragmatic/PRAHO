@@ -109,7 +109,7 @@
               {% endif %}
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm sticky right-0 bg-slate-800 border-l border-slate-700">
-              {% if request.resolver_match.url_name == 'order_edit' and order.status in "draft,pending" %}
+              {% if request.resolver_match.url_name == 'order_edit' and can_edit %}
                 {% comment %}Edit mode - expandable row controls{% endcomment %}
                 <div class="flex flex-col sm:flex-row space-y-1 sm:space-y-0 sm:space-x-2">
                   <button type="button"
@@ -130,7 +130,7 @@
                     <span class="hidden sm:block">{% trans "Delete" %}</span>
                   </button>
                 </div>
-              {% elif is_staff and order.status in "draft,pending" %}
+              {% elif is_staff and can_edit %}
                 {% comment %}Detail view with edit access - show edit link{% endcomment %}
                 <div class="text-sm">
                   <a href="{% url 'orders:order_edit' pk=order.id %}" 
@@ -146,7 +146,7 @@
           </tr>
           
           {% comment %}Expandable edit row - hidden by default, shows when Edit is clicked{% endcomment %}
-          {% if request.resolver_match.url_name == 'order_edit' and order.status in "draft,pending" %}
+          {% if request.resolver_match.url_name == 'order_edit' and can_edit %}
           <tr id="edit-row-{{ item.id }}" class="hidden bg-slate-900 border-l-4 border-blue-500">
             <td colspan="7" class="px-6 py-4">
               <div class="bg-slate-800 rounded-lg border border-slate-600 p-4">
@@ -304,6 +304,7 @@ Modals are now only used for the original order detail view (read-only mode)
 Edit mode uses inline expandable forms for better context preservation
 {% endcomment %}
 
+{% if request.resolver_match.url_name == 'order_edit' and can_edit %}
 <script>
 // ===============================================================================
 // EXPANDABLE ROW PATTERN FOR ORDER ITEMS - PRAHO Platform
@@ -718,3 +719,4 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('🚀 [Orders] Expandable row system initialized');
 });
 </script>
+{% endif %}
