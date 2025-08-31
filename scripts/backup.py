@@ -19,7 +19,7 @@ import django
 from botocore.exceptions import ClientError
 
 # Setup Django environment
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.prod')
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.prod")
 django.setup()
 
 from django.conf import settings
@@ -27,11 +27,8 @@ from django.conf import settings
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('/var/log/pragmatichost/backup.log'),
-        logging.StreamHandler(sys.stdout)
-    ]
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler("/var/log/pragmatichost/backup.log"), logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
 
@@ -39,7 +36,7 @@ logger = logging.getLogger(__name__)
 class PragmaticHostBackup:
     """
     Romanian hosting provider backup system
-    
+
     Features:
     - Database backup (PostgreSQL/SQLite)
     - Media files backup
@@ -49,10 +46,10 @@ class PragmaticHostBackup:
     - Email notifications
     """
 
-    def __init__(self, backup_dir: str = '/backups/pragmatichost'):
+    def __init__(self, backup_dir: str = "/backups/pragmatichost"):
         """
         Initialize backup system
-        
+
         Args:
             backup_dir: Local backup directory
         """
@@ -63,18 +60,20 @@ class PragmaticHostBackup:
         self.retention_days = 30
 
         # S3 configuration (if available)
-        self.s3_enabled = all([
-            hasattr(settings, 'AWS_ACCESS_KEY_ID'),
-            hasattr(settings, 'AWS_SECRET_ACCESS_KEY'),
-            hasattr(settings, 'AWS_STORAGE_BUCKET_NAME')
-        ])
+        self.s3_enabled = all(
+            [
+                hasattr(settings, "AWS_ACCESS_KEY_ID"),
+                hasattr(settings, "AWS_SECRET_ACCESS_KEY"),
+                hasattr(settings, "AWS_STORAGE_BUCKET_NAME"),
+            ]
+        )
 
         if self.s3_enabled:
             self.s3_client = boto3.client(
-                's3',
+                "s3",
                 aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
                 aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-                region_name=getattr(settings, 'AWS_S3_REGION_NAME', 'eu-west-1')
+                region_name=getattr(settings, "AWS_S3_REGION_NAME", "eu-west-1"),
             )
             self.s3_bucket = settings.AWS_STORAGE_BUCKET_NAME
 
@@ -83,11 +82,11 @@ class PragmaticHostBackup:
     def create_full_backup(self) -> bool:
         """
         Create a complete backup of the system
-        
+
         Returns:
             True if backup was successful
         """
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_name = f"pragmatichost_backup_{timestamp}"
         backup_path = self.backup_dir / backup_name
         backup_path.mkdir(exist_ok=True)
@@ -142,28 +141,28 @@ class PragmaticHostBackup:
         try:
             logger.info("Backing up database...")
 
-            db_config = settings.DATABASES['default']
-            db_backup_path = backup_path / 'database'
+            db_config = settings.DATABASES["default"]
+            db_backup_path = backup_path / "database"
             db_backup_path.mkdir(exist_ok=True)
 
-            if db_config['ENGINE'] == 'django.db.backends.postgresql':
+            if db_config["ENGINE"] == "django.db.backends.postgresql":
                 # PostgreSQL backup
-                dump_file = db_backup_path / 'pragmatichost.sql'
+                dump_file = db_backup_path / "pragmatichost.sql"
 
                 cmd = [
-                    'pg_dump',
+                    "pg_dump",
                     f"--host={db_config['HOST']}",
                     f"--port={db_config['PORT']}",
                     f"--username={db_config['USER']}",
                     f"--dbname={db_config['NAME']}",
-                    '--no-password',
-                    '--verbose',
-                    '--format=custom',
-                    f"--file={dump_file}"
+                    "--no-password",
+                    "--verbose",
+                    "--format=custom",
+                    f"--file={dump_file}",
                 ]
 
                 env = os.environ.copy()
-                env['PGPASSWORD'] = db_config['PASSWORD']
+                env["PGPASSWORD"] = db_config["PASSWORD"]
 
                 result = subprocess.run(cmd, check=False, env=env, capture_output=True, text=True)
 
@@ -172,20 +171,20 @@ class PragmaticHostBackup:
                     return False
 
                 # Compress the dump
-                with open(dump_file, 'rb') as f_in, gzip.open(f"{dump_file}.gz", 'wb') as f_out:
+                with open(dump_file, "rb") as f_in, gzip.open(f"{dump_file}.gz", "wb") as f_out:
                     shutil.copyfileobj(f_in, f_out)
 
                 dump_file.unlink()  # Remove uncompressed file
 
-            elif db_config['ENGINE'] == 'django.db.backends.sqlite3':
+            elif db_config["ENGINE"] == "django.db.backends.sqlite3":
                 # SQLite backup
-                db_file = Path(db_config['NAME'])
+                db_file = Path(db_config["NAME"])
                 if db_file.exists():
-                    backup_file = db_backup_path / 'db.sqlite3'
+                    backup_file = db_backup_path / "db.sqlite3"
                     shutil.copy2(db_file, backup_file)
 
                     # Compress the database
-                    with open(backup_file, 'rb') as f_in, gzip.open(f"{backup_file}.gz", 'wb') as f_out:
+                    with open(backup_file, "rb") as f_in, gzip.open(f"{backup_file}.gz", "wb") as f_out:
                         shutil.copyfileobj(f_in, f_out)
 
                     backup_file.unlink()  # Remove uncompressed file
@@ -214,16 +213,10 @@ class PragmaticHostBackup:
                 logger.info("No media files to backup")
                 return True
 
-            media_backup_path = backup_path / 'media'
+            media_backup_path = backup_path / "media"
 
             # Use rsync for efficient copying
-            cmd = [
-                'rsync',
-                '-av',
-                '--progress',
-                f"{media_root}/",
-                f"{media_backup_path}/"
-            ]
+            cmd = ["rsync", "-av", "--progress", f"{media_root}/", f"{media_backup_path}/"]
 
             result = subprocess.run(cmd, check=False, capture_output=True, text=True)
 
@@ -243,17 +236,17 @@ class PragmaticHostBackup:
         try:
             logger.info("Backing up configuration...")
 
-            config_backup_path = backup_path / 'config'
+            config_backup_path = backup_path / "config"
             config_backup_path.mkdir(exist_ok=True)
 
             # Configuration files to backup
             config_files = [
-                '.env',
-                'docker-compose.yml',
-                'Dockerfile',
-                'pyproject.toml',
-                'requirements/',
-                'config/settings/',
+                ".env",
+                "docker-compose.yml",
+                "Dockerfile",
+                "pyproject.toml",
+                "requirements/",
+                "config/settings/",
             ]
 
             project_root = Path(settings.BASE_DIR).parent
@@ -281,14 +274,7 @@ class PragmaticHostBackup:
 
             archive_path = self.backup_dir / f"{backup_name}.tar.gz"
 
-            cmd = [
-                'tar',
-                '-czf',
-                str(archive_path),
-                '-C',
-                str(backup_path.parent),
-                backup_path.name
-            ]
+            cmd = ["tar", "-czf", str(archive_path), "-C", str(backup_path.parent), backup_path.name]
 
             result = subprocess.run(cmd, check=False, capture_output=True, text=True)
 
@@ -315,9 +301,9 @@ class PragmaticHostBackup:
                 self.s3_bucket,
                 s3_key,
                 ExtraArgs={
-                    'StorageClass': 'STANDARD_IA',  # Cheaper storage for backups
-                    'ServerSideEncryption': 'AES256'
-                }
+                    "StorageClass": "STANDARD_IA",  # Cheaper storage for backups
+                    "ServerSideEncryption": "AES256",
+                },
             )
 
             logger.info(f"Backup uploaded to S3: s3://{self.s3_bucket}/{s3_key}")
@@ -336,7 +322,7 @@ class PragmaticHostBackup:
             deleted_count = 0
 
             # Cleanup local backups
-            for backup_file in self.backup_dir.glob('pragmatichost_backup_*.tar.gz'):
+            for backup_file in self.backup_dir.glob("pragmatichost_backup_*.tar.gz"):
                 if backup_file.stat().st_mtime < cutoff_date.timestamp():
                     backup_file.unlink()
                     deleted_count += 1
@@ -344,17 +330,11 @@ class PragmaticHostBackup:
             # Cleanup S3 backups (if enabled)
             if self.s3_enabled:
                 try:
-                    response = self.s3_client.list_objects_v2(
-                        Bucket=self.s3_bucket,
-                        Prefix='backups/pragmatichost/'
-                    )
+                    response = self.s3_client.list_objects_v2(Bucket=self.s3_bucket, Prefix="backups/pragmatichost/")
 
-                    for obj in response.get('Contents', []):
-                        if obj['LastModified'].replace(tzinfo=None) < cutoff_date:
-                            self.s3_client.delete_object(
-                                Bucket=self.s3_bucket,
-                                Key=obj['Key']
-                            )
+                    for obj in response.get("Contents", []):
+                        if obj["LastModified"].replace(tzinfo=None) < cutoff_date:
+                            self.s3_client.delete_object(Bucket=self.s3_bucket, Key=obj["Key"])
                             deleted_count += 1
 
                 except ClientError as e:
@@ -385,10 +365,10 @@ class PragmaticHostBackup:
     def restore_backup(self, backup_file: str) -> bool:
         """
         Restore from a backup file
-        
+
         Args:
             backup_file: Path to backup archive
-            
+
         Returns:
             True if restore was successful
         """
@@ -416,66 +396,52 @@ class PragmaticHostBackup:
         backups = []
 
         # Local backups
-        for backup_file in self.backup_dir.glob('pragmatichost_backup_*.tar.gz'):
+        for backup_file in self.backup_dir.glob("pragmatichost_backup_*.tar.gz"):
             stat = backup_file.stat()
-            backups.append({
-                'name': backup_file.name,
-                'path': str(backup_file),
-                'size': stat.st_size,
-                'created': datetime.fromtimestamp(stat.st_mtime),
-                'location': 'local'
-            })
+            backups.append(
+                {
+                    "name": backup_file.name,
+                    "path": str(backup_file),
+                    "size": stat.st_size,
+                    "created": datetime.fromtimestamp(stat.st_mtime),
+                    "location": "local",
+                }
+            )
 
         # S3 backups (if enabled)
         if self.s3_enabled:
             try:
-                response = self.s3_client.list_objects_v2(
-                    Bucket=self.s3_bucket,
-                    Prefix='backups/pragmatichost/'
-                )
+                response = self.s3_client.list_objects_v2(Bucket=self.s3_bucket, Prefix="backups/pragmatichost/")
 
                 # ⚡ PERFORMANCE: Use list extend for better performance than multiple appends
-                backups.extend([
-                    {
-                        'name': obj['Key'].split('/')[-1],
-                        'path': f"s3://{self.s3_bucket}/{obj['Key']}",
-                        'size': obj['Size'],
-                        'created': obj['LastModified'].replace(tzinfo=None),
-                        'location': 's3'
-                    }
-                    for obj in response.get('Contents', [])
-                ])
+                backups.extend(
+                    [
+                        {
+                            "name": obj["Key"].split("/")[-1],
+                            "path": f"s3://{self.s3_bucket}/{obj['Key']}",
+                            "size": obj["Size"],
+                            "created": obj["LastModified"].replace(tzinfo=None),
+                            "location": "s3",
+                        }
+                        for obj in response.get("Contents", [])
+                    ]
+                )
 
             except ClientError as e:
                 logger.warning(f"Failed to list S3 backups: {e}")
 
-        return sorted(backups, key=lambda x: x['created'], reverse=True)
+        return sorted(backups, key=lambda x: x["created"], reverse=True)
 
 
 def main():
     """Main backup script entry point"""
     import argparse
 
-    parser = argparse.ArgumentParser(description='PragmaticHost Backup System')
-    parser.add_argument(
-        '--backup-dir',
-        default='/backups/pragmatichost',
-        help='Local backup directory'
-    )
-    parser.add_argument(
-        '--list',
-        action='store_true',
-        help='List available backups'
-    )
-    parser.add_argument(
-        '--restore',
-        help='Restore from backup file'
-    )
-    parser.add_argument(
-        '--verbose',
-        action='store_true',
-        help='Enable verbose logging'
-    )
+    parser = argparse.ArgumentParser(description="PragmaticHost Backup System")
+    parser.add_argument("--backup-dir", default="/backups/pragmatichost", help="Local backup directory")
+    parser.add_argument("--list", action="store_true", help="List available backups")
+    parser.add_argument("--restore", help="Restore from backup file")
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
 
     args = parser.parse_args()
 
@@ -515,5 +481,5 @@ def main():
         sys.exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

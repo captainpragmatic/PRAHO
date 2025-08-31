@@ -27,14 +27,14 @@ def get_modified_python_files(staged_only: bool = False, since: str | None = Non
         else:
             # Get files modified since last commit
             cmd = ["git", "diff", "--name-only", "HEAD"]
-        
+
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        files = result.stdout.strip().split('\n')
-        
+        files = result.stdout.strip().split("\n")
+
         # Filter for Python files
-        python_files = [f for f in files if f.endswith('.py') and Path(f).exists()]
+        python_files = [f for f in files if f.endswith(".py") and Path(f).exists()]
         return python_files
-        
+
     except subprocess.CalledProcessError as e:
         print(f"❌ Error getting git changes: {e}")
         return []
@@ -43,28 +43,28 @@ def get_modified_python_files(staged_only: bool = False, since: str | None = Non
 def should_check_file(file_path: str) -> bool:
     """Determine if a file should be type-checked based on path."""
     path = Path(file_path)
-    
+
     # Skip non-app files
-    if not str(path).startswith('apps/'):
+    if not str(path).startswith("apps/"):
         return False
-    
+
     # Skip migrations
-    if 'migrations' in str(path):
+    if "migrations" in str(path):
         return False
-    
+
     # Skip test files (handled separately)
-    if 'test' in str(path).lower():
+    if "test" in str(path).lower():
         return False
-    
+
     # Focus on high-impact modules
     high_impact_patterns = [
-        'apps/common/',
-        'apps/users/',
-        'apps/billing/',
-        'apps/customers/',
-        'apps/audit/',
+        "apps/common/",
+        "apps/users/",
+        "apps/billing/",
+        "apps/customers/",
+        "apps/audit/",
     ]
-    
+
     return any(pattern in str(path) for pattern in high_impact_patterns)
 
 
@@ -74,24 +74,24 @@ def run_mypy_on_files(files: list[str], verbose: bool = False) -> bool:
         if verbose:
             print("ℹ️  No Python files to check")
         return True
-    
+
     # Filter files based on impact
     files_to_check = [f for f in files if should_check_file(f)]
-    
+
     if not files_to_check:
         if verbose:
             print("ℹ️  No high-impact files to check")
         return True
-    
+
     if verbose:
         print(f"🔍 Checking {len(files_to_check)} files:")
         for f in files_to_check:
             print(f"  • {f}")
-    
+
     # Run mypy
     cmd = ["mypy", *files_to_check]
     result = subprocess.run(cmd, check=False, capture_output=True, text=True)
-    
+
     if result.returncode == 0:
         print("✅ Type checking passed")
         if verbose and result.stdout.strip():
@@ -111,24 +111,21 @@ def main() -> int:
     parser.add_argument("--staged", action="store_true", help="Check only staged files")
     parser.add_argument("--since", help="Check files modified since this commit")
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
-    
+
     args = parser.parse_args()
-    
+
     print("🎯 PRAHO Platform - Type Safety Check")
-    
+
     # Get modified files
-    files = get_modified_python_files(
-        staged_only=args.staged, 
-        since=args.since
-    )
-    
+    files = get_modified_python_files(staged_only=args.staged, since=args.since)
+
     if not files:
         print("ℹ️  No Python files modified")
         return 0
-    
+
     # Run type checking
     success = run_mypy_on_files(files, verbose=args.verbose)
-    
+
     return 0 if success else 1
 
 

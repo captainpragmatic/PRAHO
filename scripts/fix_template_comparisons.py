@@ -4,7 +4,7 @@
 Automatically fix template syntax issues in Django templates.
 
 This script prevents TemplateSyntaxError by fixing:
-- Comparison operator spacing (==, !=, <, >, <=, >=)  
+- Comparison operator spacing (==, !=, <, >, <=, >=)
 - Filter argument spacing (|filter : arg -> |filter:arg)
 """
 
@@ -22,24 +22,25 @@ TEMPLATE_DIRS = [
 ]
 
 COMPARISON_OPERATORS = [
-    r'(\w+)(==)(\w+)',  # var==value -> var == value
-    r'(\w+)(!=)(\w+)',  # var!=value -> var != value
-    r'(\w+)(<=)(\w+)',  # var<=value -> var <= value
-    r'(\w+)(>=)(\w+)',  # var>=value -> var >= value
+    r"(\w+)(==)(\w+)",  # var==value -> var == value
+    r"(\w+)(!=)(\w+)",  # var!=value -> var != value
+    r"(\w+)(<=)(\w+)",  # var<=value -> var <= value
+    r"(\w+)(>=)(\w+)",  # var>=value -> var >= value
     # Only match < and > if they're clearly within Django template tags
-    r'({%\s+if\s+[^%]*\w+)(<)(\w+[^%]*%})',   # {% if var<value %}
-    r'({%\s+if\s+[^%]*\w+)(>)(\w+[^%]*%})',   # {% if var>value %}
+    r"({%\s+if\s+[^%]*\w+)(<)(\w+[^%]*%})",  # {% if var<value %}
+    r"({%\s+if\s+[^%]*\w+)(>)(\w+[^%]*%})",  # {% if var>value %}
 ]
 
 # Filter argument patterns (spaces around : in filter arguments)
 FILTER_PATTERNS = [
-    r'(\|\s*\w+\s*):\s+(\w+)',  # |filter : arg -> |filter:arg
-    r'(\|\s*\w+)\s+:\s*(\w+)',  # |filter : arg -> |filter:arg
+    r"(\|\s*\w+\s*):\s+(\w+)",  # |filter : arg -> |filter:arg
+    r"(\|\s*\w+)\s+:\s*(\w+)",  # |filter : arg -> |filter:arg
 ]
 
 # ===============================================================================
 # UTILITY FUNCTIONS
 # ===============================================================================
+
 
 def check_if_recently_modified(file_path: Path) -> bool:
     """Check if file was modified in the last 5 minutes (could be IDE auto-formatting)"""
@@ -50,6 +51,7 @@ def check_if_recently_modified(file_path: Path) -> bool:
     except OSError:
         return False
 
+
 def detect_potential_auto_formatting(changes: list[str], file_path: Path) -> list[str]:
     """Detect if issues might be caused by IDE auto-formatting"""
     warnings = []
@@ -58,11 +60,12 @@ def detect_potential_auto_formatting(changes: list[str], file_path: Path) -> lis
         warnings.append("⚠️  File modified recently - could be IDE auto-formatting")
 
     # Check for multiple comparison operators fixed (common in auto-formatting)
-    operator_count = len([c for c in changes if any(op in c for op in ['==', '!=', '<=', '>=', '<', '>'])])
+    operator_count = len([c for c in changes if any(op in c for op in ["==", "!=", "<=", ">=", "<", ">"])])
     if operator_count > 2:
         warnings.append("⚠️  Multiple operators affected - check IDE settings")
 
     return warnings
+
 
 def find_template_files(base_dir: Path) -> list[Path]:
     """Find all Django template files"""
@@ -81,6 +84,7 @@ def find_template_files(base_dir: Path) -> list[Path]:
                 template_files.extend(template_dir.glob("**/*.html"))
 
     return sorted(set(template_files))
+
 
 def fix_template_syntax(content: str) -> tuple[str, list[str]]:
     """Fix comparison operators and filter syntax in template content"""
@@ -115,15 +119,16 @@ def fix_template_syntax(content: str) -> tuple[str, list[str]]:
 
     return fixed_content, changes
 
+
 def process_template_file(file_path: Path) -> tuple[bool, list[str]]:
     """Process a single template file"""
     try:
-        original_content = file_path.read_text(encoding='utf-8')
+        original_content = file_path.read_text(encoding="utf-8")
         fixed_content, changes = fix_template_syntax(original_content)
 
         if changes:
             # Write fixed content directly
-            file_path.write_text(fixed_content, encoding='utf-8')
+            file_path.write_text(fixed_content, encoding="utf-8")
 
             return True, changes
 
@@ -133,9 +138,11 @@ def process_template_file(file_path: Path) -> tuple[bool, list[str]]:
         print(f"❌ Error processing {file_path}: {e}")
         return False, []
 
+
 # ===============================================================================
 # MAIN EXECUTION
 # ===============================================================================
+
 
 def main() -> None:
     """Main execution function"""
@@ -192,6 +199,7 @@ def main() -> None:
         print()
         print("🧪 Run tests to verify the fixes work correctly")
 
+
 def check_only() -> int:
     """Check for issues without fixing them"""
 
@@ -212,7 +220,7 @@ def check_only() -> int:
         relative_path = file_path.relative_to(project_root)
 
         try:
-            content = file_path.read_text(encoding='utf-8')
+            content = file_path.read_text(encoding="utf-8")
             _, changes = fix_template_syntax(content)
 
             if changes:
@@ -245,6 +253,7 @@ def check_only() -> int:
         print(f"❌ Found {issues_found} issues in {files_with_issues} files")
         print("🔧 Run 'python scripts/fix_template_comparisons.py' to fix them")
         return 1
+
 
 if __name__ == "__main__":
     import sys
