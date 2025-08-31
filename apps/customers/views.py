@@ -55,32 +55,32 @@ def customer_list(request: HttpRequest) -> HttpResponse:
         customers = Customer.objects.none()
 
     # Search functionality - updated for new model structure
-    search_query = request.GET.get('search', '')
+    search_query = request.GET.get("search", "")
     if search_query:
         customers = customers.filter(
-            Q(company_name__icontains=search_query) |
-            Q(name__icontains=search_query) |
-            Q(primary_email__icontains=search_query) |
-            Q(tax_profile__cui__icontains=search_query)  # Search in related tax profile
+            Q(company_name__icontains=search_query)
+            | Q(name__icontains=search_query)
+            | Q(primary_email__icontains=search_query)
+            | Q(tax_profile__cui__icontains=search_query)  # Search in related tax profile
         ).distinct()
 
     # Expected queries: 3 (customers + tax profiles + addresses for display)
-    customers = customers.select_related('tax_profile', 'billing_profile')\
-                        .prefetch_related('addresses')\
-                        .order_by('-created_at')
+    customers = (
+        customers.select_related("tax_profile", "billing_profile").prefetch_related("addresses").order_by("-created_at")
+    )
 
     # Pagination
     paginator = Paginator(customers, 25)
-    page_number = request.GET.get('page')
+    page_number = request.GET.get("page")
     customers_page = paginator.get_page(page_number)
 
     context = {
-        'customers': customers_page,
-        'search_query': search_query,
-        'total_customers': customers.count(),
+        "customers": customers_page,
+        "search_query": search_query,
+        "total_customers": customers.count(),
     }
 
-    return render(request, 'customers/list.html', context)
+    return render(request, "customers/list.html", context)
 
 
 @login_required
@@ -94,27 +94,29 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
     # Check access permissions
     user = cast(User, request.user)  # Safe due to @login_required
     if not user.can_access_customer(customer):
-        messages.error(request, _('Access denied to this customer'))
-        return redirect('customers:list')
+        messages.error(request, _("Access denied to this customer"))
+        return redirect("customers:list")
 
     # Expected queries: 4 (customer + tax + billing + addresses)
-    customer = Customer.objects.select_related('tax_profile', 'billing_profile')\
-                              .prefetch_related('addresses', 'notes')\
-                              .get(id=customer_id)
+    customer = (
+        Customer.objects.select_related("tax_profile", "billing_profile")
+        .prefetch_related("addresses", "notes")
+        .get(id=customer_id)
+    )
 
     # Get recent notes
-    recent_notes = customer.notes.order_by('-created_at')[:5]
+    recent_notes = customer.notes.order_by("-created_at")[:5]
 
     context = {
-        'customer': customer,
-        'tax_profile': customer.get_tax_profile(),
-        'billing_profile': customer.get_billing_profile(),
-        'primary_address': customer.get_primary_address(),
-        'billing_address': customer.get_billing_address(),
-        'recent_notes': recent_notes,
+        "customer": customer,
+        "tax_profile": customer.get_tax_profile(),
+        "billing_profile": customer.get_billing_profile(),
+        "primary_address": customer.get_primary_address(),
+        "billing_address": customer.get_billing_address(),
+        "recent_notes": recent_notes,
     }
 
-    return render(request, 'customers/detail.html', context)
+    return render(request, "customers/detail.html", context)
 
 
 def _handle_user_creation_for_customer(request: HttpRequest, customer: Customer, form_data: dict, result: dict) -> None:
@@ -122,10 +124,10 @@ def _handle_user_creation_for_customer(request: HttpRequest, customer: Customer,
     created_by_user = cast(User, request.user)  # Safe in authenticated contexts
     user_creation_request = UserCreationRequest(
         customer=customer,
-        first_name=form_data.get('first_name', ''),
-        last_name=form_data.get('last_name', ''),
-        send_welcome=result['send_welcome_email'],
-        created_by=created_by_user
+        first_name=form_data.get("first_name", ""),
+        last_name=form_data.get("last_name", ""),
+        send_welcome=result["send_welcome_email"],
+        created_by=created_by_user,
     )
     user_result = CustomerUserService.create_user_for_customer(user_creation_request)
 
@@ -134,28 +136,20 @@ def _handle_user_creation_for_customer(request: HttpRequest, customer: Customer,
         _show_user_creation_success_message(request, customer, user, email_sent)
     else:
         messages.success(
-            request,
-            _('✅ Customer "{customer_name}" created successfully').format(customer_name=customer.name)
+            request, _('✅ Customer "{customer_name}" created successfully').format(customer_name=customer.name)
         )
-        messages.error(
-            request,
-            _('❌ Failed to create user account: {error}').format(error=user_result.unwrap_err())
-        )
+        messages.error(request, _("❌ Failed to create user account: {error}").format(error=user_result.unwrap_err()))
 
 
 def _handle_user_linking_for_customer(request: HttpRequest, customer: Customer, result: dict) -> None:
     """Handle linking existing user to a new customer."""
-    existing_user = result['existing_user']
+    existing_user = result["existing_user"]
     if not existing_user:
         return
-        
+
     created_by_user = cast(User, request.user)  # Safe in authenticated contexts
     user_linking_request = UserLinkingRequest(
-        user=existing_user,
-        customer=customer,
-        role='owner',
-        is_primary=True,
-        created_by=created_by_user
+        user=existing_user, customer=customer, role="owner", is_primary=True, created_by=created_by_user
     )
     link_result = CustomerUserService.link_existing_user(user_linking_request)
 
@@ -163,59 +157,51 @@ def _handle_user_linking_for_customer(request: HttpRequest, customer: Customer, 
         messages.success(
             request,
             _('✅ Customer "{customer_name}" created and linked to user {email}').format(
-                customer_name=customer.name,
-                email=existing_user.email
-            )
+                customer_name=customer.name, email=existing_user.email
+            ),
         )
     else:
         messages.success(
-            request,
-            _('✅ Customer "{customer_name}" created successfully').format(customer_name=customer.name)
+            request, _('✅ Customer "{customer_name}" created successfully').format(customer_name=customer.name)
         )
-        messages.error(
-            request,
-            _('❌ Failed to link user: {error}').format(error=link_result.unwrap_err())
-        )
+        messages.error(request, _("❌ Failed to link user: {error}").format(error=link_result.unwrap_err()))
 
 
 def _handle_skip_user_for_customer(request: HttpRequest, customer: Customer) -> None:
     """Handle skipping user assignment for a new customer."""
     messages.success(
         request,
-        _('✅ Customer "{customer_name}" created successfully. No user assigned.').format(customer_name=customer.name)
+        _('✅ Customer "{customer_name}" created successfully. No user assigned.').format(customer_name=customer.name),
     )
-    messages.info(
-        request,
-        _('💡 You can assign users later from the customer detail page.')
-    )
+    messages.info(request, _("💡 You can assign users later from the customer detail page."))
 
 
 def _handle_customer_create_post(request: HttpRequest) -> HttpResponse:
     """Handle POST request for customer creation."""
     form = CustomerCreationForm(request.POST)
     if not form.is_valid():
-        messages.error(request, _('❌ Please correct the errors below'))
+        messages.error(request, _("❌ Please correct the errors below"))
         return _render_customer_form(request, form)
 
     try:
         # Save customer and get result data
         user = cast(User, request.user)  # Safe in authenticated contexts
         result = form.save(user=user)
-        customer = result['customer']
-        user_action = result['user_action']
+        customer = result["customer"]
+        user_action = result["user_action"]
 
         # Handle user assignment based on action
-        if user_action == 'create':
+        if user_action == "create":
             _handle_user_creation_for_customer(request, customer, form.cleaned_data, result)
-        elif user_action == 'link':
+        elif user_action == "link":
             _handle_user_linking_for_customer(request, customer, result)
         else:  # user_action == 'skip'
             _handle_skip_user_for_customer(request, customer)
 
-        return redirect('customers:detail', customer_id=customer.pk)
+        return redirect("customers:detail", customer_id=customer.pk)
 
     except Exception as e:
-        messages.error(request, _('❌ Error creating customer: {error}').format(error=str(e)))
+        messages.error(request, _("❌ Error creating customer: {error}").format(error=str(e)))
         return _render_customer_form(request, form)
 
 
@@ -223,12 +209,12 @@ def _render_customer_form(request: HttpRequest, form: CustomerCreationForm | Non
     """Render the customer creation form."""
     if form is None:
         form = CustomerCreationForm()
-    
+
     context = {
-        'form': form,
-        'action': _('Create'),
+        "form": form,
+        "action": _("Create"),
     }
-    return render(request, 'customers/form.html', context)
+    return render(request, "customers/form.html", context)
 
 
 @staff_required
@@ -237,9 +223,9 @@ def customer_create(request: HttpRequest) -> HttpResponse:
     + Create new customer with all profiles and optional user assignment
     Uses composite form to handle normalized structure and user creation/linking
     """
-    if request.method == 'POST':
+    if request.method == "POST":
         return _handle_customer_create_post(request)
-    
+
     return _render_customer_form(request)
 
 
@@ -254,27 +240,29 @@ def customer_edit(request: HttpRequest, customer_id: int) -> HttpResponse:
     # Check access permissions
     user = cast(User, request.user)  # Safe due to @staff_required
     if not user.can_access_customer(customer):
-        messages.error(request, _('Access denied to this customer'))
-        return redirect('customers:list')
+        messages.error(request, _("Access denied to this customer"))
+        return redirect("customers:list")
 
-    if request.method == 'POST':
+    if request.method == "POST":
         form = CustomerForm(request.POST, instance=customer)
         if form.is_valid():
             form.save()
-            messages.success(request, _('✅ Customer "{customer_name}" updated').format(customer_name=customer.get_display_name()))
-            return redirect('customers:detail', customer_id=customer.id)
+            messages.success(
+                request, _('✅ Customer "{customer_name}" updated').format(customer_name=customer.get_display_name())
+            )
+            return redirect("customers:detail", customer_id=customer.id)
         else:
-            messages.error(request, _('❌ Please correct the errors below'))
+            messages.error(request, _("❌ Please correct the errors below"))
     else:
         form = CustomerForm(instance=customer)
 
     context = {
-        'form': form,
-        'customer': customer,
-        'action': _('Edit'),
+        "form": form,
+        "customer": customer,
+        "action": _("Edit"),
     }
 
-    return render(request, 'customers/form.html', context)
+    return render(request, "customers/form.html", context)
 
 
 @staff_required
@@ -287,31 +275,31 @@ def customer_tax_profile(request: HttpRequest, customer_id: int) -> HttpResponse
     # Check access permissions
     user = cast(User, request.user)  # Safe due to @staff_required
     if not user.can_access_customer(customer):
-        messages.error(request, _('Access denied to this customer'))
-        return redirect('customers:list')
+        messages.error(request, _("Access denied to this customer"))
+        return redirect("customers:list")
 
     # Get or create tax profile
     tax_profile, created = CustomerTaxProfile.objects.get_or_create(customer=customer)
 
-    if request.method == 'POST':
+    if request.method == "POST":
         form = CustomerTaxProfileForm(request.POST, instance=tax_profile)
         if form.is_valid():
             form.save()
-            messages.success(request, _('✅ Tax profile updated successfully'))
-            return redirect('customers:detail', customer_id=customer.id)
+            messages.success(request, _("✅ Tax profile updated successfully"))
+            return redirect("customers:detail", customer_id=customer.id)
         else:
-            messages.error(request, _('❌ Please correct the errors below'))
+            messages.error(request, _("❌ Please correct the errors below"))
     else:
         form = CustomerTaxProfileForm(instance=tax_profile)
 
     context = {
-        'form': form,
-        'customer': customer,
-        'tax_profile': tax_profile,
-        'action': _('Tax Profile'),
+        "form": form,
+        "customer": customer,
+        "tax_profile": tax_profile,
+        "action": _("Tax Profile"),
     }
 
-    return render(request, 'customers/tax_profile_form.html', context)
+    return render(request, "customers/tax_profile_form.html", context)
 
 
 @staff_required
@@ -324,31 +312,31 @@ def customer_billing_profile(request: HttpRequest, customer_id: int) -> HttpResp
     # Check access permissions
     user = cast(User, request.user)  # Safe due to @staff_required
     if not user.can_access_customer(customer):
-        messages.error(request, _('Access denied to this customer'))
-        return redirect('customers:list')
+        messages.error(request, _("Access denied to this customer"))
+        return redirect("customers:list")
 
     # Get or create billing profile
     billing_profile, created = CustomerBillingProfile.objects.get_or_create(customer=customer)
 
-    if request.method == 'POST':
+    if request.method == "POST":
         form = CustomerBillingProfileForm(request.POST, instance=billing_profile)
         if form.is_valid():
             form.save()
-            messages.success(request, _('✅ Billing profile updated successfully'))
-            return redirect('customers:detail', customer_id=customer.id)
+            messages.success(request, _("✅ Billing profile updated successfully"))
+            return redirect("customers:detail", customer_id=customer.id)
         else:
-            messages.error(request, _('❌ Please correct the errors below'))
+            messages.error(request, _("❌ Please correct the errors below"))
     else:
         form = CustomerBillingProfileForm(instance=billing_profile)
 
     context = {
-        'form': form,
-        'customer': customer,
-        'billing_profile': billing_profile,
-        'action': _('Billing Profile'),
+        "form": form,
+        "customer": customer,
+        "billing_profile": billing_profile,
+        "action": _("Billing Profile"),
     }
 
-    return render(request, 'customers/billing_profile_form.html', context)
+    return render(request, "customers/billing_profile_form.html", context)
 
 
 @staff_required
@@ -361,10 +349,10 @@ def customer_address_add(request: HttpRequest, customer_id: int) -> HttpResponse
     # Check access permissions
     user = cast(User, request.user)  # Safe due to @staff_required
     if not user.can_access_customer(customer):
-        messages.error(request, _('Access denied to this customer'))
-        return redirect('customers:list')
+        messages.error(request, _("Access denied to this customer"))
+        return redirect("customers:list")
 
-    if request.method == 'POST':
+    if request.method == "POST":
         form = CustomerAddressForm(request.POST)
         if form.is_valid():
             address = form.save(commit=False)
@@ -373,9 +361,7 @@ def customer_address_add(request: HttpRequest, customer_id: int) -> HttpResponse
             # Handle current address versioning
             address_type = address.address_type
             existing_current = CustomerAddress.objects.filter(
-                customer=customer,
-                address_type=address_type,
-                is_current=True
+                customer=customer, address_type=address_type, is_current=True
             ).first()
 
             if existing_current:
@@ -384,20 +370,22 @@ def customer_address_add(request: HttpRequest, customer_id: int) -> HttpResponse
                 address.version = existing_current.version + 1
 
             address.save()
-            messages.success(request, _('✅ {address_type} address added').format(address_type=address.get_address_type_display()))
-            return redirect('customers:detail', customer_id=customer.id)
+            messages.success(
+                request, _("✅ {address_type} address added").format(address_type=address.get_address_type_display())
+            )
+            return redirect("customers:detail", customer_id=customer.id)
         else:
-            messages.error(request, _('❌ Please correct the errors below'))
+            messages.error(request, _("❌ Please correct the errors below"))
     else:
         form = CustomerAddressForm()
 
     context = {
-        'form': form,
-        'customer': customer,
-        'action': _('Add Address'),
+        "form": form,
+        "customer": customer,
+        "action": _("Add Address"),
     }
 
-    return render(request, 'customers/address_form.html', context)
+    return render(request, "customers/address_form.html", context)
 
 
 @staff_required
@@ -410,10 +398,10 @@ def customer_note_add(request: HttpRequest, customer_id: int) -> HttpResponse:
     # Check access permissions
     user = cast(User, request.user)  # Safe due to @staff_required
     if not user.can_access_customer(customer):
-        messages.error(request, _('Access denied to this customer'))
-        return redirect('customers:list')
+        messages.error(request, _("Access denied to this customer"))
+        return redirect("customers:list")
 
-    if request.method == 'POST':
+    if request.method == "POST":
         form = CustomerNoteForm(request.POST)
         if form.is_valid():
             note = form.save(commit=False)
@@ -421,20 +409,20 @@ def customer_note_add(request: HttpRequest, customer_id: int) -> HttpResponse:
             user = cast(User, request.user)  # Safe due to @staff_required
             note.created_by = user
             note.save()
-            messages.success(request, _('✅ Note added successfully'))
-            return redirect('customers:detail', customer_id=customer.id)
+            messages.success(request, _("✅ Note added successfully"))
+            return redirect("customers:detail", customer_id=customer.id)
         else:
-            messages.error(request, _('❌ Please correct the errors below'))
+            messages.error(request, _("❌ Please correct the errors below"))
     else:
         form = CustomerNoteForm()
 
     context = {
-        'form': form,
-        'customer': customer,
-        'action': _('Add Note'),
+        "form": form,
+        "customer": customer,
+        "action": _("Add Note"),
     }
 
-    return render(request, 'customers/note_form.html', context)
+    return render(request, "customers/note_form.html", context)
 
 
 @staff_required
@@ -447,24 +435,24 @@ def customer_delete(request: HttpRequest, customer_id: int) -> HttpResponse:
     # Check access permissions
     user = cast(User, request.user)  # Safe due to @staff_required
     if not user.can_access_customer(customer):
-        messages.error(request, _('Access denied to this customer'))
-        return redirect('customers:list')
+        messages.error(request, _("Access denied to this customer"))
+        return redirect("customers:list")
 
-    if request.method == 'POST':
+    if request.method == "POST":
         # Soft delete preserves all related data
         user = cast(User, request.user)  # Safe due to @staff_required
         customer.soft_delete(user=user)
         messages.success(
             request,
-            _('🗑️ Customer "{customer_name}" deleted successfully').format(customer_name=customer.get_display_name())
+            _('🗑️ Customer "{customer_name}" deleted successfully').format(customer_name=customer.get_display_name()),
         )
-        return redirect('customers:list')
+        return redirect("customers:list")
 
     context = {
-        'customer': customer,
+        "customer": customer,
     }
 
-    return render(request, 'customers/delete_confirm.html', context)
+    return render(request, "customers/delete_confirm.html", context)
 
 
 @login_required
@@ -472,58 +460,57 @@ def customer_search_api(request: HttpRequest) -> JsonResponse:
     """
     🔍 AJAX customer search for dropdowns
     """
-    query = request.GET.get('q', '')
+    query = request.GET.get("q", "")
     if len(query) < SEARCH_QUERY_MIN_LENGTH:
-        return JsonResponse({'results': []})
+        return JsonResponse({"results": []})
 
     user = cast(User, request.user)  # Safe due to @login_required
     customers = user.get_accessible_customers()
 
     # Filter based on search query
-    if hasattr(customers, 'filter'):  # QuerySet
+    if hasattr(customers, "filter"):  # QuerySet
         customers = customers.filter(
-            Q(name__icontains=query) |
-            Q(company_name__icontains=query) |
-            Q(primary_email__icontains=query)
+            Q(name__icontains=query) | Q(company_name__icontains=query) | Q(primary_email__icontains=query)
         )[:10]
     else:  # List
         customers = [
-            c for c in customers
-            if query.lower() in c.name.lower() or
-               query.lower() in c.company_name.lower() or
-               query.lower() in c.primary_email.lower()
+            c
+            for c in customers
+            if query.lower() in c.name.lower()
+            or query.lower() in c.company_name.lower()
+            or query.lower() in c.primary_email.lower()
         ][:10]
 
     results = [
         {
-            'id': customer.id,
-            'text': customer.get_display_name(),
-            'email': customer.primary_email,
+            "id": customer.id,
+            "text": customer.get_display_name(),
+            "email": customer.primary_email,
         }
         for customer in customers
     ]
 
-    return JsonResponse({'results': results})
+    return JsonResponse({"results": results})
 
 
-def _validate_customer_assign_access(request: HttpRequest, user: 'User', customer: Customer) -> HttpResponse | None:
+def _validate_customer_assign_access(request: HttpRequest, user: "User", customer: Customer) -> HttpResponse | None:
     """Validate user access to assign users to customer."""
     if not user.can_access_customer(customer):
-        messages.error(request, _('Access denied to this customer'))
-        return redirect('customers:list')
+        messages.error(request, _("Access denied to this customer"))
+        return redirect("customers:list")
     return None
 
 
 def _handle_user_creation_action(request: HttpRequest, customer: Customer, assignment_data: dict) -> None:
     """Handle the 'create' action for user assignment."""
-    send_welcome = bool(assignment_data.get('send_welcome_email', True))
+    send_welcome = bool(assignment_data.get("send_welcome_email", True))
     created_by_user = cast(User, request.user)  # Safe in authenticated contexts
     user_creation_request = UserCreationRequest(
         customer=customer,
-        first_name=assignment_data['first_name'],
-        last_name=assignment_data['last_name'],
+        first_name=assignment_data["first_name"],
+        last_name=assignment_data["last_name"],
         send_welcome=send_welcome,
-        created_by=created_by_user
+        created_by=created_by_user,
     )
     user_result = CustomerUserService.create_user_for_customer(user_creation_request)
 
@@ -532,47 +519,41 @@ def _handle_user_creation_action(request: HttpRequest, customer: Customer, assig
         _show_user_creation_success_message(request, customer, user, email_sent)
     else:
         error_result = cast(Err, user_result)
-        messages.error(
-            request,
-            _('❌ Failed to create user account: {error}').format(error=error_result.error)
-        )
+        messages.error(request, _("❌ Failed to create user account: {error}").format(error=error_result.error))
 
 
-def _show_user_creation_success_message(request: HttpRequest, customer: Customer, user: 'User', email_sent: bool) -> None:
+def _show_user_creation_success_message(
+    request: HttpRequest, customer: Customer, user: "User", email_sent: bool
+) -> None:
     """Show appropriate success message for user creation."""
     if email_sent:
         messages.success(
             request,
-            _('✅ User account created for {customer_name}. Welcome email sent to {email}').format(
-                customer_name=customer.name,
-                email=user.email
-            )
+            _("✅ User account created for {customer_name}. Welcome email sent to {email}").format(
+                customer_name=customer.name, email=user.email
+            ),
         )
     else:
         messages.success(
             request,
-            _('✅ User account created for {customer_name}: {email}').format(
-                customer_name=customer.name,
-                email=user.email
-            )
+            _("✅ User account created for {customer_name}: {email}").format(
+                customer_name=customer.name, email=user.email
+            ),
         )
-        messages.warning(
-            request,
-            _('⚠️ Welcome email could not be sent. Please inform the user manually.')
-        )
+        messages.warning(request, _("⚠️ Welcome email could not be sent. Please inform the user manually."))
 
 
 def _handle_user_linking_action(request: HttpRequest, customer: Customer, assignment_data: dict) -> None:
     """Handle the 'link' action for user assignment."""
-    existing_user = assignment_data['existing_user']
-    role = assignment_data['role']
+    existing_user = assignment_data["existing_user"]
+    role = assignment_data["role"]
 
     if not existing_user:
-        messages.error(request, _('❌ No user selected for linking'))
+        messages.error(request, _("❌ No user selected for linking"))
         return
-    
+
     if not isinstance(existing_user, User):
-        messages.error(request, _('❌ Invalid user selected'))
+        messages.error(request, _("❌ Invalid user selected"))
         return
 
     created_by_user = cast(User, request.user)  # Safe in authenticated contexts
@@ -581,7 +562,7 @@ def _handle_user_linking_action(request: HttpRequest, customer: Customer, assign
         customer=customer,
         role=role,
         is_primary=False,  # Existing customers might already have primary users
-        created_by=created_by_user
+        created_by=created_by_user,
     )
     link_result = CustomerUserService.link_existing_user(user_linking_request)
 
@@ -589,24 +570,18 @@ def _handle_user_linking_action(request: HttpRequest, customer: Customer, assign
         messages.success(
             request,
             _('✅ User {email} linked to customer "{customer_name}" with {role} role').format(
-                email=existing_user.email,
-                customer_name=customer.name,
-                role=role
-            )
+                email=existing_user.email, customer_name=customer.name, role=role
+            ),
         )
     else:
         error_result = cast(Err, link_result)
-        messages.error(
-            request,
-            _('❌ Failed to link user: {error}').format(error=error_result.error)
-        )
+        messages.error(request, _("❌ Failed to link user: {error}").format(error=error_result.error))
 
 
 def _handle_user_skip_action(request: HttpRequest, customer: Customer) -> None:
     """Handle the 'skip' action for user assignment."""
     messages.info(
-        request,
-        _('💡 User assignment skipped for customer "{customer_name}"').format(customer_name=customer.name)
+        request, _('💡 User assignment skipped for customer "{customer_name}"').format(customer_name=customer.name)
     )
 
 
@@ -614,39 +589,41 @@ def _handle_user_assignment_post(request: HttpRequest, customer: Customer) -> Ht
     """Handle POST request for user assignment."""
     form = CustomerUserAssignmentForm(data=request.POST, customer=customer)
     if not form.is_valid():
-        messages.error(request, _('❌ Please correct the errors below'))
+        messages.error(request, _("❌ Please correct the errors below"))
         return _render_assignment_form(request, form, customer)
 
     try:
         created_by_user = cast(User, request.user)  # Safe in authenticated contexts
         assignment_data = form.save(customer=customer, created_by=created_by_user)
-        action = assignment_data['action']
+        action = assignment_data["action"]
 
-        if action == 'create':
+        if action == "create":
             _handle_user_creation_action(request, customer, assignment_data)
-        elif action == 'link':
+        elif action == "link":
             _handle_user_linking_action(request, customer, assignment_data)
         else:  # action == 'skip'
             _handle_user_skip_action(request, customer)
 
-        return redirect('customers:detail', customer_id=customer.pk)
+        return redirect("customers:detail", customer_id=customer.pk)
 
     except Exception as e:
-        messages.error(request, _('❌ Error assigning user: {error}').format(error=str(e)))
+        messages.error(request, _("❌ Error assigning user: {error}").format(error=str(e)))
         return _render_assignment_form(request, form, customer)
 
 
-def _render_assignment_form(request: HttpRequest, form: CustomerUserAssignmentForm | None, customer: Customer) -> HttpResponse:
+def _render_assignment_form(
+    request: HttpRequest, form: CustomerUserAssignmentForm | None, customer: Customer
+) -> HttpResponse:
     """Render the user assignment form."""
     if form is None:
         form = CustomerUserAssignmentForm(customer=customer)
-    
+
     context = {
-        'form': form,
-        'customer': customer,
-        'action': _('Assign User'),
+        "form": form,
+        "customer": customer,
+        "action": _("Assign User"),
     }
-    return render(request, 'customers/assign_user.html', context)
+    return render(request, "customers/assign_user.html", context)
 
 
 @staff_required
@@ -663,15 +640,16 @@ def customer_assign_user(request: HttpRequest, customer_id: int) -> HttpResponse
     if error_response:
         return error_response
 
-    if request.method == 'POST':
+    if request.method == "POST":
         return _handle_user_assignment_post(request, customer)
-    
+
     return _render_assignment_form(request, None, customer)
 
 
 # ===============================================================================
 # API ENDPOINTS
 # ===============================================================================
+
 
 @login_required
 def customer_services_api(request: HttpRequest, customer_id: int) -> JsonResponse:
@@ -691,8 +669,8 @@ def customer_services_api(request: HttpRequest, customer_id: int) -> JsonRespons
         customers_qs = Customer.objects.none()
 
     if not customers_qs.filter(id=customer_id).exists():
-        return JsonResponse({'error': 'Access denied'}, status=403)
-    
+        return JsonResponse({"error": "Access denied"}, status=403)
+
     # For now, return empty services list
     # TODO: Implement actual service management
     return JsonResponse([], safe=False)

@@ -41,9 +41,11 @@ logger = logging.getLogger(__name__)
 # SECURITY DECORATOR PARAMETER OBJECTS
 # ===============================================================================
 
+
 @dataclass
 class SecurityConfig:
     """Parameter object for security decorator configuration"""
+
     validation_type: str = "general"
     rate_limit_key: str | None = None
     rate_limit: int | None = None
@@ -51,17 +53,18 @@ class SecurityConfig:
     log_attempts: bool = True
     prevent_timing_attacks: bool = True
 
+
 # ===============================================================================
 # COMPREHENSIVE SERVICE SECURITY DECORATOR
 # ===============================================================================
 
+
 def secure_service_method(
-    config: SecurityConfig | None = None,
-    **kwargs: Any
+    config: SecurityConfig | None = None, **kwargs: Any
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Master security decorator for service methods
-    
+
     Args:
         validation_type: Type of validation ('user_registration', 'customer_data', 'invitation')
         rate_limit_key: Cache key prefix for rate limiting
@@ -73,18 +76,18 @@ def secure_service_method(
     # Use default config if none provided and merge with kwargs
     if config is None:
         config = SecurityConfig()
-    
+
     # Override config with any direct kwargs for backward compatibility
     for key, value in kwargs.items():
         if hasattr(config, key):
             setattr(config, key, value)
-    
+
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Result[Any, str]:
             start_time = time.time()
-            request_ip = kwargs.get('request_ip', 'unknown')
-            user = kwargs.get('user')
+            request_ip = kwargs.get("request_ip", "unknown")
+            user = kwargs.get("user")
 
             try:
                 # Execute security checks
@@ -110,6 +113,7 @@ def secure_service_method(
                     _normalize_response_time(start_time)
 
         return wrapper
+
     return decorator
 
 
@@ -120,7 +124,7 @@ def secure_service_method_legacy(  # noqa: PLR0913
     rate_limit: int | None = None,
     requires_permission: str | None = None,
     log_attempts: bool = True,
-    prevent_timing_attacks: bool = True
+    prevent_timing_attacks: bool = True,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Legacy wrapper for backward compatibility"""
     config = SecurityConfig(
@@ -129,7 +133,7 @@ def secure_service_method_legacy(  # noqa: PLR0913
         rate_limit=rate_limit,
         requires_permission=requires_permission,
         log_attempts=log_attempts,
-        prevent_timing_attacks=prevent_timing_attacks
+        prevent_timing_attacks=prevent_timing_attacks,
     )
     return secure_service_method(config)
 
@@ -138,14 +142,17 @@ def secure_service_method_legacy(  # noqa: PLR0913
 # SPECIALIZED SECURITY DECORATORS
 # ===============================================================================
 
-def secure_user_registration(rate_limit: int = RATE_LIMIT_REGISTRATION_PER_IP) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+
+def secure_user_registration(
+    rate_limit: int = RATE_LIMIT_REGISTRATION_PER_IP,
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Security decorator specifically for user registration methods"""
     return secure_service_method(
         validation_type="user_registration",
         rate_limit_key="registration",
         rate_limit=rate_limit,
         log_attempts=True,
-        prevent_timing_attacks=True
+        prevent_timing_attacks=True,
     )
 
 
@@ -153,10 +160,7 @@ def secure_customer_operation(requires_owner: bool = False) -> Callable[[Callabl
     """Security decorator for customer-related operations"""
     permission = "owner" if requires_owner else "viewer"
     return secure_service_method(
-        validation_type="customer_data",
-        requires_permission=permission,
-        log_attempts=True,
-        prevent_timing_attacks=True
+        validation_type="customer_data", requires_permission=permission, log_attempts=True, prevent_timing_attacks=True
     )
 
 
@@ -168,7 +172,7 @@ def secure_invitation_system() -> Callable[[Callable[..., Any]], Callable[..., A
         rate_limit=10,  # 10 invitations per hour
         requires_permission="owner",
         log_attempts=True,
-        prevent_timing_attacks=True
+        prevent_timing_attacks=True,
     )
 
 
@@ -176,10 +180,12 @@ def secure_invitation_system() -> Callable[[Callable[..., Any]], Callable[..., A
 # ATOMIC BUSINESS LOGIC DECORATORS
 # ===============================================================================
 
+
 def atomic_with_retry(max_retries: int = 3, delay: float = 0.1) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Atomic transaction with retry logic for race condition handling
     """
+
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -203,14 +209,19 @@ def atomic_with_retry(max_retries: int = 3, delay: float = 0.1) -> Callable[[Cal
                 raise last_exception
             else:
                 raise RuntimeError("All retry attempts failed but no exception was captured")
+
         return wrapper
+
     return decorator
 
 
-def prevent_race_conditions(lock_key_generator: Callable[..., Any]) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+def prevent_race_conditions(
+    lock_key_generator: Callable[..., Any],
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Prevent race conditions using distributed locking
     """
+
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -229,6 +240,7 @@ def prevent_race_conditions(lock_key_generator: Callable[..., Any]) -> Callable[
                 raise ValidationError(_("Operation in progress, please try again"))
 
         return wrapper
+
     return decorator
 
 
@@ -236,7 +248,10 @@ def prevent_race_conditions(lock_key_generator: Callable[..., Any]) -> Callable[
 # SECURITY DECORATOR HELPER FUNCTIONS
 # ===============================================================================
 
-def _execute_security_checks(config: SecurityConfig, args: tuple[Any, ...], kwargs: dict[str, Any], request_ip: str, user: Any) -> None:
+
+def _execute_security_checks(
+    config: SecurityConfig, args: tuple[Any, ...], kwargs: dict[str, Any], request_ip: str, user: Any
+) -> None:
     """Execute all security checks for the decorator"""
     # 1. Rate Limiting Check
     if config.rate_limit_key and config.rate_limit:
@@ -252,7 +267,9 @@ def _execute_security_checks(config: SecurityConfig, args: tuple[Any, ...], kwar
 
     # 3. Permission Validation
     if config.requires_permission:
-        _validate_permissions(user, kwargs.get('customer'), config.requires_permission)
+        # Extract user and customer from request objects if available
+        extracted_user, extracted_customer = _extract_user_and_customer(args, kwargs, user)
+        _validate_permissions(extracted_user, extracted_customer, config.requires_permission)
 
 
 def _execute_protected_function(func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
@@ -264,41 +281,48 @@ def _execute_protected_function(func: Callable[..., Any], args: tuple[Any, ...],
 def _log_success_event(config: SecurityConfig, method_name: str, user: Any, request_ip: str) -> None:
     """Log successful method execution"""
     if config.log_attempts:
-        log_security_event('method_success', {
-            'method': method_name,
-            'validation_type': config.validation_type,
-            'user_id': user.id if user else None
-        }, request_ip)
+        log_security_event(
+            "method_success",
+            {"method": method_name, "validation_type": config.validation_type, "user_id": user.id if user else None},
+            request_ip,
+        )
 
 
-def _handle_validation_error(e: ValidationError, config: SecurityConfig, method_name: str, user: Any, request_ip: str) -> Result[Any, str]:
+def _handle_validation_error(
+    e: ValidationError, config: SecurityConfig, method_name: str, user: Any, request_ip: str
+) -> Result[Any, str]:
     """Handle validation errors with proper logging"""
     if config.log_attempts:
-        log_security_event('validation_failed', {
-            'method': method_name,
-            'error': str(e),
-            'validation_type': config.validation_type,
-            'user_id': user.id if user else None
-        }, request_ip)
-    
+        log_security_event(
+            "validation_failed",
+            {
+                "method": method_name,
+                "error": str(e),
+                "validation_type": config.validation_type,
+                "user_id": user.id if user else None,
+            },
+            request_ip,
+        )
+
     return Err(SecureErrorHandler.safe_error_response(e, config.validation_type))
 
 
-def _handle_unexpected_error(e: Exception, config: SecurityConfig, method_name: str, user: Any, request_ip: str) -> Result[Any, str]:
+def _handle_unexpected_error(
+    e: Exception, config: SecurityConfig, method_name: str, user: Any, request_ip: str
+) -> Result[Any, str]:
     """Handle unexpected errors with proper logging"""
     if config.log_attempts:
-        log_security_event('method_error', {
-            'method': method_name,
-            'error': str(e),
-            'user_id': user.id if user else None
-        }, request_ip)
-    
+        log_security_event(
+            "method_error", {"method": method_name, "error": str(e), "user_id": user.id if user else None}, request_ip
+        )
+
     return Err(SecureErrorHandler.safe_error_response(e, "general"))
 
 
 # ===============================================================================
 # HELPER FUNCTIONS
 # ===============================================================================
+
 
 def _check_rate_limit(key_prefix: str, limit: int, request_ip: str, user: Any = None) -> None:
     """Check rate limiting with user and IP tracking"""
@@ -314,12 +338,11 @@ def _check_rate_limit(key_prefix: str, limit: int, request_ip: str, user: Any = 
 
             if current_count >= limit:
                 try:
-                    log_security_event('rate_limit_exceeded', {
-                        'key': key_prefix,
-                        'identifier': identifier,
-                        'limit': limit,
-                        'current': current_count
-                    }, request_ip)
+                    log_security_event(
+                        "rate_limit_exceeded",
+                        {"key": key_prefix, "identifier": identifier, "limit": limit, "current": current_count},
+                        request_ip,
+                    )
                 except Exception as e:
                     # Log the logging error but don't fail rate limiting
                     logger.warning(f"⚠️ [Security] Failed to log rate limit event: {e}")  # nosec B110 - Intentional exception handling with logging
@@ -346,14 +369,13 @@ def _validate_user_registration_input(args: tuple[Any, ...], kwargs: dict[str, A
     user_data = None
     if len(args) >= USER_DATA_ARG_POSITION and isinstance(args[1], dict):
         user_data = args[1]
-    elif 'user_data' in kwargs:
-        user_data = kwargs['user_data']
+    elif "user_data" in kwargs:
+        user_data = kwargs["user_data"]
 
     if user_data:
-        validated_user_data = SecureInputValidator.validate_user_data_dict(user_data)
-        # Update the arguments with validated data - args is immutable so can't be modified directly
-        # The validation is already done, so we rely on the service method to handle the data correctly
-        kwargs['user_data'] = validated_user_data
+        SecureInputValidator.validate_user_data_dict(user_data)
+        # Validation is complete - the service method will use the original args
+        # Don't modify kwargs to avoid positional/keyword argument conflicts
 
 
 def _validate_customer_data_input(args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
@@ -361,39 +383,62 @@ def _validate_customer_data_input(args: tuple[Any, ...], kwargs: dict[str, Any])
     customer_data = None
     if len(args) >= CUSTOMER_DATA_ARG_POSITION and isinstance(args[2], dict):
         customer_data = args[2]
-    elif 'customer_data' in kwargs:
-        customer_data = kwargs['customer_data']
+    elif "customer_data" in kwargs:
+        customer_data = kwargs["customer_data"]
 
     if customer_data:
         validated_customer_data = SecureInputValidator.validate_customer_data_dict(customer_data)
-        # Update the arguments with validated data - args is immutable so can't be modified directly
-        # The validation is already done, so we rely on the service method to handle the data correctly
-        kwargs['customer_data'] = validated_customer_data
+        # Validation is complete - the service method will use the original args
+        # Don't modify kwargs to avoid positional/keyword argument conflicts
 
         # Also check business logic constraints
-        BusinessLogicValidator.check_company_uniqueness(
-            validated_customer_data,
-            kwargs.get('request_ip')
-        )
+        BusinessLogicValidator.check_company_uniqueness(validated_customer_data, kwargs.get("request_ip"))
 
 
 def _validate_invitation_input(args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
     """Validate invitation input data"""
-    inviter = kwargs.get('inviter') or (args[1] if len(args) > INVITER_ARG_POSITION else None)
-    invitee_email = kwargs.get('invitee_email') or (args[2] if len(args) > INVITEE_EMAIL_ARG_POSITION else None)
-    customer = kwargs.get('customer') or (args[3] if len(args) > INVITATION_CUSTOMER_ARG_POSITION else None)
-    role = kwargs.get('role', 'viewer') or (args[4] if len(args) > INVITATION_ROLE_ARG_POSITION else 'viewer')
+    inviter = kwargs.get("inviter") or (args[1] if len(args) > INVITER_ARG_POSITION else None)
+    invitee_email = kwargs.get("invitee_email") or (args[2] if len(args) > INVITEE_EMAIL_ARG_POSITION else None)
+    customer = kwargs.get("customer") or (args[3] if len(args) > INVITATION_CUSTOMER_ARG_POSITION else None)
+    role = kwargs.get("role", "viewer") or (args[4] if len(args) > INVITATION_ROLE_ARG_POSITION else "viewer")
 
-    if (all([inviter, invitee_email, customer, role]) and isinstance(invitee_email, str) and
-            inviter is not None and hasattr(inviter, 'id')):
+    if (
+        all([inviter, invitee_email, customer, role])
+        and isinstance(invitee_email, str)
+        and inviter is not None
+        and hasattr(inviter, "id")
+    ):
         BusinessLogicValidator.validate_invitation_request(
             inviter=inviter,
             invitee_email=invitee_email,
             customer=customer,
             role=role,
             user_id=inviter.id,
-            request_ip=kwargs.get('request_ip')
+            request_ip=kwargs.get("request_ip"),
         )
+
+
+def _extract_user_and_customer(args: tuple[Any, ...], kwargs: dict[str, Any], fallback_user: Any) -> tuple[Any, Any]:
+    """Extract user and customer from request objects or kwargs"""
+    user = fallback_user
+    customer = kwargs.get("customer")
+
+    # Check if second argument (after cls) is a request object with user and customer attributes
+    if len(args) > 1:
+        request_obj = args[1]
+        if hasattr(request_obj, "customer"):
+            customer = request_obj.customer or customer
+
+            # Priority order for user extraction: created_by > inviter > user
+            # This ensures we validate the permissions of the user performing the action
+            if hasattr(request_obj, "created_by") and request_obj.created_by:
+                user = request_obj.created_by
+            elif hasattr(request_obj, "inviter") and request_obj.inviter:
+                user = request_obj.inviter
+            elif hasattr(request_obj, "user") and request_obj.user:
+                user = request_obj.user
+
+    return user, customer
 
 
 def _validate_permissions(user: Any, customer: Any, required_role: str) -> None:
@@ -413,16 +458,20 @@ def _normalize_response_time(start_time: float, min_time: float = 0.1) -> None:
 # AUDIT & MONITORING DECORATORS
 # ===============================================================================
 
-def audit_service_call(event_type: str, extract_details: Callable[..., Any] | None = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+
+def audit_service_call(
+    event_type: str, extract_details: Callable[..., Any] | None = None
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Comprehensive audit logging for service method calls
     """
+
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             start_time = timezone.now()
-            user = kwargs.get('user') or (args[0] if len(args) > 0 and hasattr(args[0], 'id') else None)
-            request_ip = kwargs.get('request_ip')
+            user = kwargs.get("user") or (args[0] if len(args) > 0 and hasattr(args[0], "id") else None)
+            request_ip = kwargs.get("request_ip")
 
             # Extract additional details if provided
             details = {}
@@ -436,28 +485,37 @@ def audit_service_call(event_type: str, extract_details: Callable[..., Any] | No
                 result = func(*args, **kwargs)
 
                 # Log successful operation
-                log_security_event(f"{event_type}_success", {
-                    'method': func.__name__,
-                    'duration_ms': (timezone.now() - start_time).total_seconds() * 1000,
-                    'user_id': user.id if user else None,
-                    **details
-                }, request_ip)
+                log_security_event(
+                    f"{event_type}_success",
+                    {
+                        "method": func.__name__,
+                        "duration_ms": (timezone.now() - start_time).total_seconds() * 1000,
+                        "user_id": user.id if user else None,
+                        **details,
+                    },
+                    request_ip,
+                )
 
                 return result
 
             except Exception as e:
                 # Log failed operation
-                log_security_event(f"{event_type}_failed", {
-                    'method': func.__name__,
-                    'duration_ms': (timezone.now() - start_time).total_seconds() * 1000,
-                    'error': str(e)[:200],  # Truncate long errors
-                    'user_id': user.id if user else None,
-                    **details
-                }, request_ip)
+                log_security_event(
+                    f"{event_type}_failed",
+                    {
+                        "method": func.__name__,
+                        "duration_ms": (timezone.now() - start_time).total_seconds() * 1000,
+                        "error": str(e)[:200],  # Truncate long errors
+                        "user_id": user.id if user else None,
+                        **details,
+                    },
+                    request_ip,
+                )
 
                 raise
 
         return wrapper
+
     return decorator
 
 
@@ -465,10 +523,14 @@ def audit_service_call(event_type: str, extract_details: Callable[..., Any] | No
 # PERFORMANCE MONITORING DECORATORS
 # ===============================================================================
 
-def monitor_performance(max_duration_seconds: float = 5.0, alert_threshold: float = 2.0) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+
+def monitor_performance(
+    max_duration_seconds: float = 5.0, alert_threshold: float = 2.0
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Monitor method performance and alert on slow operations
     """
+
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -494,4 +556,5 @@ def monitor_performance(max_duration_seconds: float = 5.0, alert_threshold: floa
                 raise
 
         return wrapper
+
     return decorator

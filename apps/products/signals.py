@@ -17,20 +17,20 @@ from .models import Product, ProductPrice
 logger = logging.getLogger(__name__)
 
 # Romanian business constants for hosting products
-ROMANIAN_VAT_RATE = Decimal('0.19')  # 19% VAT rate for Romanian hosting services
+ROMANIAN_VAT_RATE = Decimal("0.19")  # 19% VAT rate for Romanian hosting services
 PRICING_THRESHOLDS: dict[str, Any] = {
-    'significant_change_percent': 15,  # Alert when price changes by more than 15%
-    'high_value_product_ron': 500,    # Products over 500 RON need approval tracking
-    'promotional_discount_limit': 50,  # Maximum promotional discount percentage
-    'vat_compliance_check': True,      # Always verify VAT calculations
+    "significant_change_percent": 15,  # Alert when price changes by more than 15%
+    "high_value_product_ron": 500,  # Products over 500 RON need approval tracking
+    "promotional_discount_limit": 50,  # Maximum promotional discount percentage
+    "vat_compliance_check": True,  # Always verify VAT calculations
 }
 
 # Product categories requiring special audit attention
 HIGH_ATTENTION_CATEGORIES: list[str] = [
-    'dedicated',     # Dedicated servers require detailed tracking
-    'vps',          # VPS changes affect multiple customers
-    'ssl',          # SSL certificates have legal compliance aspects
-    'domain',       # Domain registrations have ROTLD compliance
+    "dedicated",  # Dedicated servers require detailed tracking
+    "vps",  # VPS changes affect multiple customers
+    "ssl",  # SSL certificates have legal compliance aspects
+    "domain",  # Domain registrations have ROTLD compliance
 ]
 
 
@@ -38,7 +38,7 @@ HIGH_ATTENTION_CATEGORIES: list[str] = [
 def capture_product_changes(sender: type[Product], instance: Product, **kwargs: Any) -> None:
     """
     Capture product changes to determine what changed for audit logging.
-    
+
     This pre_save signal captures the old values so we can compare in post_save.
     Focus on pricing, availability, and key business fields.
     """
@@ -74,7 +74,7 @@ def capture_product_changes(sender: type[Product], instance: Product, **kwargs: 
 def log_product_lifecycle_events(sender: type[Product], instance: Product, created: bool, **kwargs: Any) -> None:
     """
     Log product creation and key business changes for catalog management.
-    
+
     Events logged:
     - Product creation with initial configuration
     - Availability changes (active/inactive, public/private)
@@ -85,19 +85,17 @@ def log_product_lifecycle_events(sender: type[Product], instance: Product, creat
         if created:
             # New product created
             romanian_context = {
-                'vat_rate_applied': float(ROMANIAN_VAT_RATE * 100),  # Convert to percentage
-                'includes_vat': instance.includes_vat,
-                'product_category': instance.product_type,
-                'requires_rotld_compliance': instance.product_type == 'domain',
-                'high_attention_category': instance.product_type in HIGH_ATTENTION_CATEGORIES,
+                "vat_rate_applied": float(ROMANIAN_VAT_RATE * 100),  # Convert to percentage
+                "includes_vat": instance.includes_vat,
+                "product_category": instance.product_type,
+                "requires_rotld_compliance": instance.product_type == "domain",
+                "high_attention_category": instance.product_type in HIGH_ATTENTION_CATEGORIES,
             }
-            
+
             ProductsAuditService.log_product_created(
-                product=instance,
-                romanian_business_context=romanian_context,
-                context=None
+                product=instance, romanian_business_context=romanian_context, context=None
             )
-            
+
         else:
             # Check for availability changes
             availability_changed = _check_availability_changes(instance)
@@ -106,12 +104,12 @@ def log_product_lifecycle_events(sender: type[Product], instance: Product, creat
                     product=instance,
                     changes=availability_changed,
                     romanian_business_context={
-                        'vat_compliance_affected': availability_changed.get('vat_setting_changed', False),
-                        'customer_impact_level': _assess_customer_impact(instance),
+                        "vat_compliance_affected": availability_changed.get("vat_setting_changed", False),
+                        "customer_impact_level": _assess_customer_impact(instance),
                     },
-                    context=None
+                    context=None,
                 )
-                
+
     except Exception as e:
         logger.error("🔥 [Products] Error in product lifecycle logging: %s", e)
 
@@ -152,7 +150,7 @@ def capture_price_changes(sender: type[ProductPrice], instance: ProductPrice, **
 def log_price_changes(sender: type[ProductPrice], instance: ProductPrice, created: bool, **kwargs: Any) -> None:
     """
     Log pricing changes for Romanian VAT compliance and customer transparency.
-    
+
     Important for:
     - Grandfathered pricing for existing customers
     - VAT compliance (19% Romanian rate)
@@ -163,45 +161,45 @@ def log_price_changes(sender: type[ProductPrice], instance: ProductPrice, create
         if created:
             # New price created - log initial pricing setup
             romanian_context = {
-                'currency': instance.currency.code,
-                'billing_period': instance.billing_period,
-                'includes_vat': instance.product.includes_vat,
-                'vat_rate_applied': float(ROMANIAN_VAT_RATE * 100),
-                'high_value_product': instance.amount_cents > (PRICING_THRESHOLDS['high_value_product_ron'] * 100),
+                "currency": instance.currency.code,
+                "billing_period": instance.billing_period,
+                "includes_vat": instance.product.includes_vat,
+                "vat_rate_applied": float(ROMANIAN_VAT_RATE * 100),
+                "high_value_product": instance.amount_cents > (PRICING_THRESHOLDS["high_value_product_ron"] * 100),
             }
-            
+
             # We don't log every new price creation as it's too verbose
             # Only log if it's for a high-attention category or high-value product
-            if (instance.product.product_type in HIGH_ATTENTION_CATEGORIES or 
-                instance.amount_cents > (PRICING_THRESHOLDS['high_value_product_ron'] * 100)):
-                
+            if instance.product.product_type in HIGH_ATTENTION_CATEGORIES or instance.amount_cents > (
+                PRICING_THRESHOLDS["high_value_product_ron"] * 100
+            ):
                 ProductsAuditService.log_product_pricing_changed(
                     product_price=instance,
-                    change_type='price_created',
-                    changes={'new_price_cents': instance.amount_cents},
+                    change_type="price_created",
+                    changes={"new_price_cents": instance.amount_cents},
                     romanian_business_context=romanian_context,
-                    context=None
+                    context=None,
                 )
         else:
             # Check for significant pricing changes
             pricing_changes = _check_pricing_changes(instance)
             if pricing_changes:
                 romanian_context = {
-                    'currency': instance.currency.code,
-                    'billing_period': instance.billing_period,
-                    'vat_compliance_verified': True,
-                    'grandfathered_customers_affected': pricing_changes.get('price_increased', False),
-                    'promotional_pricing_active': bool(instance.promo_price_cents),
+                    "currency": instance.currency.code,
+                    "billing_period": instance.billing_period,
+                    "vat_compliance_verified": True,
+                    "grandfathered_customers_affected": pricing_changes.get("price_increased", False),
+                    "promotional_pricing_active": bool(instance.promo_price_cents),
                 }
-                
+
                 ProductsAuditService.log_product_pricing_changed(
                     product_price=instance,
-                    change_type='price_updated',
+                    change_type="price_updated",
                     changes=pricing_changes,
                     romanian_business_context=romanian_context,
-                    context=None
+                    context=None,
                 )
-                
+
     except Exception as e:
         logger.error("🔥 [Products] Error in price change logging: %s", e)
 
@@ -209,138 +207,132 @@ def log_price_changes(sender: type[ProductPrice], instance: ProductPrice, create
 def _check_availability_changes(instance: Product) -> dict[str, Any] | None:
     """
     Check what availability-related fields changed on a product.
-    
+
     Returns dictionary of changes or None if no significant changes.
     """
     changes = {}
-    
+
     # Check activity status changes
-    if hasattr(instance, '_old_is_active') and instance._old_is_active != instance.is_active:
-        changes['availability_changed'] = {
-            'from': instance._old_is_active,
-            'to': instance.is_active,
-            'impact': 'high' if not instance.is_active else 'medium'
+    if hasattr(instance, "_old_is_active") and instance._old_is_active != instance.is_active:
+        changes["availability_changed"] = {
+            "from": instance._old_is_active,
+            "to": instance.is_active,
+            "impact": "high" if not instance.is_active else "medium",
         }
-    
+
     # Check public visibility changes
-    if hasattr(instance, '_old_is_public') and instance._old_is_public != instance.is_public:
-        changes['visibility_changed'] = {
-            'from': instance._old_is_public,
-            'to': instance.is_public,
-            'impact': 'medium'
-        }
-    
+    if hasattr(instance, "_old_is_public") and instance._old_is_public != instance.is_public:
+        changes["visibility_changed"] = {"from": instance._old_is_public, "to": instance.is_public, "impact": "medium"}
+
     # Check featured status changes
-    if hasattr(instance, '_old_is_featured') and instance._old_is_featured != instance.is_featured:
-        changes['featured_changed'] = {
-            'from': instance._old_is_featured,
-            'to': instance.is_featured,
-            'impact': 'low'
-        }
-    
+    if hasattr(instance, "_old_is_featured") and instance._old_is_featured != instance.is_featured:
+        changes["featured_changed"] = {"from": instance._old_is_featured, "to": instance.is_featured, "impact": "low"}
+
     # Check VAT setting changes (important for Romanian compliance)
-    if hasattr(instance, '_old_includes_vat') and instance._old_includes_vat != instance.includes_vat:
-        changes['vat_setting_changed'] = {
-            'from': instance._old_includes_vat,
-            'to': instance.includes_vat,
-            'impact': 'high',  # VAT changes are critical for compliance
-            'requires_price_recalculation': True
+    if hasattr(instance, "_old_includes_vat") and instance._old_includes_vat != instance.includes_vat:
+        changes["vat_setting_changed"] = {
+            "from": instance._old_includes_vat,
+            "to": instance.includes_vat,
+            "impact": "high",  # VAT changes are critical for compliance
+            "requires_price_recalculation": True,
         }
-    
+
     # Check product type changes (affects provisioning)
-    if hasattr(instance, '_old_product_type') and instance._old_product_type != instance.product_type:
-        changes['product_type_changed'] = {
-            'from': instance._old_product_type,
-            'to': instance.product_type,
-            'impact': 'high',  # Product type changes are significant
-            'provisioning_impact': True
+    if hasattr(instance, "_old_product_type") and instance._old_product_type != instance.product_type:
+        changes["product_type_changed"] = {
+            "from": instance._old_product_type,
+            "to": instance.product_type,
+            "impact": "high",  # Product type changes are significant
+            "provisioning_impact": True,
         }
-    
+
     return changes if changes else None
 
 
 def _check_pricing_changes(instance: ProductPrice) -> dict[str, Any] | None:
     """
     Check what pricing fields changed and calculate impact.
-    
+
     Returns dictionary of changes or None if no significant changes.
     """
     changes = {}
-    
+
     # Check main price changes
-    if (hasattr(instance, '_old_amount_cents') and 
-        instance._old_amount_cents != instance.amount_cents and 
-        instance._old_amount_cents):
+    if (
+        hasattr(instance, "_old_amount_cents")
+        and instance._old_amount_cents != instance.amount_cents
+        and instance._old_amount_cents
+    ):
         old_amount = Decimal(instance._old_amount_cents) / 100
         new_amount = Decimal(instance.amount_cents) / 100
         percent_change = abs((new_amount - old_amount) / old_amount * 100)
-        
+
         # Only log if change is significant
-        if percent_change >= PRICING_THRESHOLDS['significant_change_percent']:
-            changes['price_changed'] = {
-                'from_cents': instance._old_amount_cents,
-                'to_cents': instance.amount_cents,
-                'from_amount': float(old_amount),
-                'to_amount': float(new_amount),
-                'percent_change': float(percent_change),
-                'price_increased': new_amount > old_amount,
-                'significant': True
+        if percent_change >= PRICING_THRESHOLDS["significant_change_percent"]:
+            changes["price_changed"] = {
+                "from_cents": instance._old_amount_cents,
+                "to_cents": instance.amount_cents,
+                "from_amount": float(old_amount),
+                "to_amount": float(new_amount),
+                "percent_change": float(percent_change),
+                "price_increased": new_amount > old_amount,
+                "significant": True,
             }
-    
+
     # Check setup fee changes
-    if hasattr(instance, '_old_setup_cents') and instance._old_setup_cents != instance.setup_cents:
-        changes['setup_fee_changed'] = {
-            'from_cents': instance._old_setup_cents,
-            'to_cents': instance.setup_cents,
-            'from_amount': float(Decimal(instance._old_setup_cents or 0) / 100),
-            'to_amount': float(Decimal(instance.setup_cents) / 100)
+    if hasattr(instance, "_old_setup_cents") and instance._old_setup_cents != instance.setup_cents:
+        changes["setup_fee_changed"] = {
+            "from_cents": instance._old_setup_cents,
+            "to_cents": instance.setup_cents,
+            "from_amount": float(Decimal(instance._old_setup_cents or 0) / 100),
+            "to_amount": float(Decimal(instance.setup_cents) / 100),
         }
-    
+
     # Check promotional pricing changes
-    if hasattr(instance, '_old_promo_price_cents') and instance._old_promo_price_cents != instance.promo_price_cents:
-        changes['promotional_pricing_changed'] = {
-            'from_cents': instance._old_promo_price_cents,
-            'to_cents': instance.promo_price_cents,
-            'promotion_added': instance.promo_price_cents and not instance._old_promo_price_cents,
-            'promotion_removed': not instance.promo_price_cents and instance._old_promo_price_cents
+    if hasattr(instance, "_old_promo_price_cents") and instance._old_promo_price_cents != instance.promo_price_cents:
+        changes["promotional_pricing_changed"] = {
+            "from_cents": instance._old_promo_price_cents,
+            "to_cents": instance.promo_price_cents,
+            "promotion_added": instance.promo_price_cents and not instance._old_promo_price_cents,
+            "promotion_removed": not instance.promo_price_cents and instance._old_promo_price_cents,
         }
-    
+
     # Check discount changes
-    if hasattr(instance, '_old_discount_percent') and instance._old_discount_percent != instance.discount_percent:
-        changes['discount_changed'] = {
-            'from_percent': float(instance._old_discount_percent or 0),
-            'to_percent': float(instance.discount_percent),
-            'discount_increased': instance.discount_percent > (instance._old_discount_percent or 0)
+    if hasattr(instance, "_old_discount_percent") and instance._old_discount_percent != instance.discount_percent:
+        changes["discount_changed"] = {
+            "from_percent": float(instance._old_discount_percent or 0),
+            "to_percent": float(instance.discount_percent),
+            "discount_increased": instance.discount_percent > (instance._old_discount_percent or 0),
         }
-    
+
     # Check availability changes
-    if hasattr(instance, '_old_is_active') and instance._old_is_active != instance.is_active:
-        changes['price_availability_changed'] = {
-            'from': instance._old_is_active,
-            'to': instance.is_active,
-            'price_disabled': not instance.is_active
+    if hasattr(instance, "_old_is_active") and instance._old_is_active != instance.is_active:
+        changes["price_availability_changed"] = {
+            "from": instance._old_is_active,
+            "to": instance.is_active,
+            "price_disabled": not instance.is_active,
         }
-    
+
     return changes if changes else None
 
 
 def _assess_customer_impact(product: Product) -> str:
     """
     Assess the potential impact of product changes on customers.
-    
+
     Returns impact level: 'low', 'medium', 'high', 'critical'
     """
     # High attention categories automatically get higher impact
     if product.product_type in HIGH_ATTENTION_CATEGORIES:
-        return 'high'
-    
+        return "high"
+
     # Featured products have medium impact
     if product.is_featured:
-        return 'medium'
-    
+        return "medium"
+
     # Check if product becomes unavailable
     if not product.is_active:
-        return 'high'
-    
+        return "high"
+
     # Default to low impact
-    return 'low'
+    return "low"

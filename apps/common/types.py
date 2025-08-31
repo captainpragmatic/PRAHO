@@ -30,21 +30,23 @@ if TYPE_CHECKING:
     pass
 
 # Type variables for generic Result
-T = TypeVar('T')  # Success type
-E = TypeVar('E')  # Error type
+T = TypeVar("T")  # Success type
+E = TypeVar("E")  # Error type
 
 # Additional type variables for Django patterns
-UserT = TypeVar('UserT', bound=AbstractUser)
-FormT = TypeVar('FormT', bound=Form)
+UserT = TypeVar("UserT", bound=AbstractUser)
+FormT = TypeVar("FormT", bound=Form)
 # AdminT type variable removed - Django admin disabled
 
 # ===============================================================================
 # RESULT TYPES
 # ===============================================================================
 
+
 @dataclass(frozen=True)
 class Ok(Generic[T]):
     """Success result containing a value"""
+
     value: T
 
     def is_ok(self) -> bool:
@@ -67,14 +69,14 @@ class Ok(Generic[T]):
             return Ok(func(self.value))
         except Exception as e:
             return Err(str(e))
-    
+
     def and_then(self, func: Callable[[T], Result[Any, Any]]) -> Result[Any, Any]:
         """Chain operations that can fail"""
         try:
             return func(self.value)
         except Exception as e:
             return Err(str(e))
-    
+
     def unwrap_err(self) -> Any:
         """Raises an exception since this is success, not error - provides consistent API"""
         raise ValueError(f"Called unwrap_err on Ok: {self.value}")
@@ -83,6 +85,7 @@ class Ok(Generic[T]):
 @dataclass(frozen=True)
 class Err(Generic[E]):
     """Error result containing an error value"""
+
     error: E
 
     def is_ok(self) -> bool:
@@ -102,11 +105,11 @@ class Err(Generic[E]):
     def map(self, func: Callable[[Any], Any]) -> Result[Any, E]:
         """No-op for error results"""
         return self
-    
+
     def and_then(self, func: Callable[[Any], Result[Any, Any]]) -> Result[Any, E]:
         """No-op for error results - return self"""
         return self
-    
+
     def unwrap_err(self) -> E:
         """Get the error value"""
         return self.error
@@ -119,7 +122,7 @@ Result = Ok[T] | Err[E]
 # TYPE VARIABLES
 # ===============================================================================
 
-M = TypeVar('M', bound=models.Model)  # Model type for Django models
+M = TypeVar("M", bound=models.Model)  # Model type for Django models
 
 # ===============================================================================
 # REQUEST HANDLING TYPES
@@ -217,9 +220,11 @@ ROMANIAN_VAT_RATE_PERCENT = 19  # For display purposes
 # ROMANIAN BUSINESS SPECIFIC TYPES
 # ===============================================================================
 
+
 @dataclass(frozen=True)
 class RomanianVATNumber:
     """Romanian VAT number validation"""
+
     value: VATString
 
     def __post_init__(self) -> None:
@@ -228,7 +233,7 @@ class RomanianVATNumber:
 
     def is_valid(self) -> bool:
         """Validate Romanian VAT number format"""
-        if not self.value.startswith('RO'):
+        if not self.value.startswith("RO"):
             return False
 
         digits = self.value[2:]
@@ -241,15 +246,16 @@ class RomanianVATNumber:
 @dataclass(frozen=True)
 class Money:
     """Money type with currency support"""
+
     amount: int  # Store in cents/bani for precision
-    currency: str = 'RON'
+    currency: str = "RON"
 
     def __post_init__(self) -> None:
-        if self.currency not in ['RON', 'EUR', 'USD']:
+        if self.currency not in ["RON", "EUR", "USD"]:
             raise ValueError(f"Unsupported currency: {self.currency}")
 
     @classmethod
-    def from_decimal(cls, amount: float, currency: str = 'RON') -> Money:
+    def from_decimal(cls, amount: float, currency: str = "RON") -> Money:
         """Create Money from decimal amount"""
         return cls(int(amount * 100), currency)
 
@@ -258,7 +264,7 @@ class Money:
         return self.amount / 100
 
     def __str__(self) -> str:
-        if self.currency == 'RON':
+        if self.currency == "RON":
             return f"{self.to_decimal():.2f} lei"
         else:
             return f"{self.currency} {self.to_decimal():.2f}"
@@ -268,9 +274,11 @@ class Money:
 # BUSINESS ENTITY TYPES
 # ===============================================================================
 
+
 @dataclass(frozen=True)
 class CUI:
     """Romanian CUI (Company Unique Identifier)"""
+
     value: CUIString
 
     def __post_init__(self) -> None:
@@ -279,7 +287,7 @@ class CUI:
 
     def is_valid(self) -> bool:
         """Validate Romanian CUI format"""
-        if not self.value.startswith('RO'):
+        if not self.value.startswith("RO"):
             return False
 
         digits = self.value[2:]
@@ -296,12 +304,13 @@ class CUI:
 # VALIDATION HELPERS
 # ===============================================================================
 
+
 def validate_romanian_cui(cui: str) -> Result[CUIString, str]:
     """Validate Romanian CUI (company ID) - accepts only numeric format (no RO prefix)"""
     # CUI should not have RO prefix (that's for VAT numbers)
-    if cui.startswith('RO'):
+    if cui.startswith("RO"):
         return Err("CUI should not have RO prefix")
-    
+
     if not cui.isdigit():
         return Err("CUI must contain only digits")
 
@@ -314,10 +323,10 @@ def validate_romanian_cui(cui: str) -> Result[CUIString, str]:
 
 def validate_email(email: str) -> Result[EmailAddress, str]:
     """Basic email validation"""
-    if '@' not in email:
+    if "@" not in email:
         return Err("Invalid email format")
 
-    parts = email.split('@')
+    parts = email.split("@")
     if len(parts) != EMAIL_PARTS_COUNT:
         return Err("Invalid email format")
 
@@ -330,7 +339,7 @@ def validate_email(email: str) -> Result[EmailAddress, str]:
 
 def calculate_romanian_vat(amount_cents: int, include_vat: bool = True) -> dict[str, float]:
     """Calculate Romanian VAT (19%) for the given amount"""
-    
+
     if include_vat:
         # Amount includes VAT, extract base amount
         base_amount = int(amount_cents / (1 + ROMANIAN_VAT_RATE))
@@ -341,10 +350,10 @@ def calculate_romanian_vat(amount_cents: int, include_vat: bool = True) -> dict[
         vat_amount = int(amount_cents * ROMANIAN_VAT_RATE)
 
     return {
-        'base_amount': base_amount,
-        'vat_amount': vat_amount,
-        'total_amount': base_amount + vat_amount,
-        'vat_rate': ROMANIAN_VAT_RATE
+        "base_amount": base_amount,
+        "vat_amount": vat_amount,
+        "total_amount": base_amount + vat_amount,
+        "vat_rate": ROMANIAN_VAT_RATE,
     }
 
 
@@ -352,16 +361,16 @@ def validate_domain_name(domain: str) -> Result[DomainName, str]:
     """Validate domain name format"""
     if not domain:
         return Err("Domain name is required")
-    
+
     # Basic domain validation regex
-    pattern = r'^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$'
-    
+    pattern = r"^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$"
+
     if not re.match(pattern, domain, re.IGNORECASE):
         return Err("Invalid domain name format")
-    
+
     if len(domain) > DOMAIN_NAME_MAX_LENGTH:  # RFC 1035 max length
         return Err("Domain name too long")
-    
+
     return Ok(DomainName(domain.lower()))
 
 
@@ -521,12 +530,14 @@ GDPRProcessingBasis = str  # GDPR legal basis for processing
 # COMMON EXCEPTIONS
 # ===============================================================================
 
+
 class BusinessError(Exception):
     """Base exception for business logic errors"""
 
 
 class ValidationError(BusinessError):
     """Validation error with field information"""
+
     def __init__(self, field: str, message: str):
         self.field = field
         self.message = message
@@ -569,19 +580,23 @@ class APIRateLimitError(BusinessError):
 # PROTOCOL DEFINITIONS 📜
 # ===============================================================================
 
+
 class Serializable:
     """Protocol for objects that can be serialized to JSON"""
+
     def serialize(self) -> dict[str, Any]: ...
 
 
 class Auditable:
     """Protocol for objects that support audit logging"""
+
     def get_audit_data(self) -> AuditChanges: ...
     def get_audit_entity(self) -> AuditEntity: ...
 
 
 class Billable:
     """Protocol for objects that can generate billing entries"""
+
     def get_billing_amount(self) -> Amount: ...
     def get_billing_description(self) -> str: ...
     def get_billing_currency(self) -> Currency: ...
@@ -589,6 +604,7 @@ class Billable:
 
 class Provisionable:
     """Protocol for services that can be provisioned"""
+
     def provision(self) -> Result[ServiceConfig, str]: ...
     def deprovision(self) -> Result[bool, str]: ...
     def get_status(self) -> ServiceStatus: ...
@@ -596,12 +612,14 @@ class Provisionable:
 
 class Cacheable:
     """Protocol for objects that can be cached"""
+
     def get_cache_key(self) -> CacheKey: ...
     def get_cache_ttl(self) -> CacheTTL: ...
 
 
 class Notifiable:
     """Protocol for objects that can receive notifications"""
+
     def get_notification_preferences(self) -> dict[NotificationType, bool]: ...
     def get_notification_address(self, channel: NotificationChannel) -> str: ...
 
@@ -610,7 +628,7 @@ class Notifiable:
 # COMPLEX TYPE COMBINATIONS 🔄
 # ===============================================================================
 
-# API data types  
+# API data types
 APIResponseData = dict[str, Any] | list[dict[str, Any]]  # API response data
 
 # Common combinations used throughout the platform

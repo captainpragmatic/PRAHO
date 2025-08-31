@@ -25,60 +25,54 @@ StripeEventHandler = Callable[[str, dict[str, Any]], tuple[bool, str]]
 # STRIPE WEBHOOK PROCESSOR
 # ===============================================================================
 
+
 class StripeWebhookProcessor(BaseWebhookProcessor):
     """
     💳 Stripe webhook processor with deduplication
-    
+
     Handles Stripe events:
     - payment_intent.succeeded → Update Payment status
-    - payment_intent.payment_failed → Mark payment failed  
+    - payment_intent.payment_failed → Mark payment failed
     - invoice.payment_succeeded → Update Invoice status
     - invoice.payment_failed → Trigger dunning process
     - customer.created → Link Stripe customer to our Customer
     - charge.dispute.created → Alert for dispute handling
     """
 
-    source_name = 'stripe'
+    source_name = "stripe"
 
     def extract_event_id(self, payload: dict[str, Any]) -> str:
         """🔍 Extract Stripe event ID"""
-        return payload.get('id', '')
+        return payload.get("id", "")
 
     def extract_event_type(self, payload: dict[str, Any]) -> str:
         """🏷️ Extract Stripe event type"""
-        return payload.get('type', '')
+        return payload.get("type", "")
 
-    def verify_signature(
-        self,
-        payload: dict[str, Any],
-        signature: str,
-        headers: dict[str, str]
-    ) -> bool:
+    def verify_signature(self, payload: dict[str, Any], signature: str, headers: dict[str, str]) -> bool:
         """🔐 Verify Stripe webhook signature"""
-        webhook_secret = getattr(settings, 'STRIPE_WEBHOOK_SECRET', None)
+        webhook_secret = getattr(settings, "STRIPE_WEBHOOK_SECRET", None)
 
         if not webhook_secret:
             logger.warning("⚠️ STRIPE_WEBHOOK_SECRET not configured - skipping signature verification")
             return True  # Allow in development
 
         # Get raw payload for signature verification
-        payload_body = json.dumps(payload, separators=(',', ':')).encode('utf-8')
+        payload_body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
 
         return verify_stripe_signature(
-            payload_body=payload_body,
-            stripe_signature=signature,
-            webhook_secret=webhook_secret
+            payload_body=payload_body, stripe_signature=signature, webhook_secret=webhook_secret
         )
 
     def __init__(self) -> None:
         super().__init__()
         # Event handler registry - maps event prefixes to handler methods
         self._event_handlers: dict[str, StripeEventHandler] = {
-            'payment_intent.': self.handle_payment_intent_event,
-            'invoice.': self.handle_invoice_event,
-            'customer.': self.handle_customer_event,
-            'charge.': self.handle_charge_event,
-            'setup_intent.': self.handle_setup_intent_event,
+            "payment_intent.": self.handle_payment_intent_event,
+            "invoice.": self.handle_invoice_event,
+            "customer.": self.handle_customer_event,
+            "charge.": self.handle_charge_event,
+            "setup_intent.": self.handle_setup_intent_event,
         }
 
     def handle_event(self, webhook_event: WebhookEvent) -> tuple[bool, str]:
@@ -89,7 +83,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         try:
             # Find appropriate handler using registry
             handler = self._find_event_handler(event_type)
-            
+
             if handler:
                 return handler(event_type, payload)
             else:
@@ -110,8 +104,8 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
 
     def handle_payment_intent_event(self, event_type: str, payload: dict[str, Any]) -> tuple[bool, str]:
         """💳 Handle PaymentIntent events"""
-        payment_intent = payload.get('data', {}).get('object', {})
-        stripe_payment_id = payment_intent.get('id')
+        payment_intent = payload.get("data", {}).get("object", {})
+        stripe_payment_id = payment_intent.get("id")
 
         if not stripe_payment_id:
             return False, "Missing PaymentIntent ID"
@@ -124,15 +118,17 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             logger.warning(f"⚠️ Payment not found for Stripe PaymentIntent: {stripe_payment_id}")
             return True, f"Payment not found (external): {stripe_payment_id}"
 
-        if event_type == 'payment_intent.succeeded':
+        if event_type == "payment_intent.succeeded":
             # Payment succeeded
-            payment.status = 'succeeded'
-            payment.meta.update({
-                'stripe_payment_intent': stripe_payment_id,
-                'stripe_payment_method': payment_intent.get('payment_method'),
-                'stripe_amount_received': payment_intent.get('amount_received'),
-            })
-            payment.save(update_fields=['status', 'meta'])
+            payment.status = "succeeded"
+            payment.meta.update(
+                {
+                    "stripe_payment_intent": stripe_payment_id,
+                    "stripe_payment_method": payment_intent.get("payment_method"),
+                    "stripe_amount_received": payment_intent.get("amount_received"),
+                }
+            )
+            payment.save(update_fields=["status", "meta"])
 
             # Update associated invoice if exists
             if payment.invoice:
@@ -141,16 +137,18 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             logger.info(f"✅ Payment {payment.id} marked as succeeded from Stripe")
             return True, f"Payment {payment.id} succeeded"
 
-        elif event_type == 'payment_intent.payment_failed':
+        elif event_type == "payment_intent.payment_failed":
             # Payment failed
-            failure_reason = payment_intent.get('last_payment_error', {}).get('message', 'Unknown error')
+            failure_reason = payment_intent.get("last_payment_error", {}).get("message", "Unknown error")
 
-            payment.status = 'failed'
-            payment.meta.update({
-                'stripe_payment_intent': stripe_payment_id,
-                'stripe_failure_reason': failure_reason,
-            })
-            payment.save(update_fields=['status', 'meta'])
+            payment.status = "failed"
+            payment.meta.update(
+                {
+                    "stripe_payment_intent": stripe_payment_id,
+                    "stripe_failure_reason": failure_reason,
+                }
+            )
+            payment.save(update_fields=["status", "meta"])
 
             # Trigger dunning process if this was an invoice payment
             if payment.invoice:
@@ -165,15 +163,15 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
 
     def handle_invoice_event(self, event_type: str, payload: dict[str, Any]) -> tuple[bool, str]:
         """🧾 Handle Stripe Invoice events"""
-        stripe_invoice = payload.get('data', {}).get('object', {})
-        stripe_invoice_id = stripe_invoice.get('id')
+        stripe_invoice = payload.get("data", {}).get("object", {})
+        stripe_invoice_id = stripe_invoice.get("id")
 
-        if event_type == 'invoice.payment_succeeded':
+        if event_type == "invoice.payment_succeeded":
             # Find our invoice by Stripe ID or customer
             logger.info(f"🎉 Stripe invoice payment succeeded: {stripe_invoice_id}")
             return True, f"Invoice payment succeeded: {stripe_invoice_id}"
 
-        elif event_type == 'invoice.payment_failed':
+        elif event_type == "invoice.payment_failed":
             # Trigger dunning process
             logger.warning(f"❌ Stripe invoice payment failed: {stripe_invoice_id}")
             return True, f"Invoice payment failed: {stripe_invoice_id}"
@@ -183,19 +181,19 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
 
     def handle_customer_event(self, event_type: str, payload: dict[str, Any]) -> tuple[bool, str]:
         """👤 Handle Stripe Customer events"""
-        stripe_customer = payload.get('data', {}).get('object', {})
-        stripe_customer_id = stripe_customer.get('id')
+        stripe_customer = payload.get("data", {}).get("object", {})
+        stripe_customer_id = stripe_customer.get("id")
 
-        if event_type == 'customer.created':
+        if event_type == "customer.created":
             # Link Stripe customer to our customer record
-            customer_email = stripe_customer.get('email')
+            customer_email = stripe_customer.get("email")
 
             if customer_email:
                 try:
                     customer = Customer.objects.get(primary_email=customer_email)
                     # Store Stripe customer ID in metadata
-                    customer.meta['stripe_customer_id'] = stripe_customer_id
-                    customer.save(update_fields=['meta'])
+                    customer.meta["stripe_customer_id"] = stripe_customer_id
+                    customer.save(update_fields=["meta"])
 
                     logger.info(f"🔗 Linked Stripe customer {stripe_customer_id} to {customer}")
                     return True, f"Customer linked: {customer}"
@@ -208,10 +206,10 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
 
     def handle_charge_event(self, event_type: str, payload: dict[str, Any]) -> tuple[bool, str]:
         """💰 Handle Stripe Charge events"""
-        charge = payload.get('data', {}).get('object', {})
-        charge_id = charge.get('id')
+        charge = payload.get("data", {}).get("object", {})
+        charge_id = charge.get("id")
 
-        if event_type == 'charge.dispute.created':
+        if event_type == "charge.dispute.created":
             # Alert for dispute handling
             logger.critical(f"🚨 DISPUTE CREATED for charge {charge_id} - manual review required!")
 
@@ -220,14 +218,14 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
 
             return True, f"Dispute created for charge: {charge_id}"
 
-        elif event_type == 'charge.succeeded':
+        elif event_type == "charge.succeeded":
             # Charge succeeded - payment completed
             logger.info(f"✅ Stripe charge succeeded: {charge_id}")
             return True, f"Charge succeeded: {charge_id}"
 
-        elif event_type == 'charge.failed':
+        elif event_type == "charge.failed":
             # Charge failed
-            failure_reason = charge.get('failure_message', 'Unknown error')
+            failure_reason = charge.get("failure_message", "Unknown error")
             logger.warning(f"❌ Stripe charge failed: {charge_id} - {failure_reason}")
             return True, f"Charge failed: {charge_id}"
 
@@ -235,13 +233,13 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
 
     def handle_setup_intent_event(self, event_type: str, payload: dict[str, Any]) -> tuple[bool, str]:
         """🔧 Handle SetupIntent events (for saved payment methods)"""
-        setup_intent = payload.get('data', {}).get('object', {})
-        setup_intent_id = setup_intent.get('id')
+        setup_intent = payload.get("data", {}).get("object", {})
+        setup_intent_id = setup_intent.get("id")
 
-        if event_type == 'setup_intent.succeeded':
+        if event_type == "setup_intent.succeeded":
             # Payment method saved successfully
-            payment_method = setup_intent.get('payment_method')
-            customer_id = setup_intent.get('customer')
+            payment_method = setup_intent.get("payment_method")
+            customer_id = setup_intent.get("customer")
 
             logger.info(f"💾 Payment method saved: {payment_method} for customer {customer_id}")
             return True, f"SetupIntent succeeded: {setup_intent_id}"

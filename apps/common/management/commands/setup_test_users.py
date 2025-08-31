@@ -1,6 +1,7 @@
 """
 Test user setup command - only for testing environments
 """
+
 from typing import Any
 
 from django.conf import settings
@@ -9,48 +10,47 @@ from django.core.management.base import BaseCommand, CommandError
 
 User = get_user_model()
 
+
 class Command(BaseCommand):
-    help = 'Create test users for E2E testing (test environments only)'
+    help = "Create test users for E2E testing (test environments only)"
 
     def handle(self, *args: Any, **options: Any) -> None:
         # Strict test-only enforcement
         if not settings.DEBUG:
             raise CommandError("❌ This command only runs in DEBUG mode")
-        
-        if 'test' not in settings.DATABASES['default']['NAME'].lower():
+
+        if "test" not in settings.DATABASES["default"]["NAME"].lower():
             raise CommandError("❌ This command requires a test database")
 
         # Create consistent test users
         self._create_test_admin()
         self._create_test_support()
-        
-        self.stdout.write(
-            self.style.SUCCESS('✅ Test users created successfully')
-        )
+
+        self.stdout.write(self.style.SUCCESS("✅ Test users created successfully"))
 
     def _create_test_admin(self) -> None:
         """Create admin user for E2E tests"""
-        email = 'admin@example.com'
+        email = "admin@example.com"
         if not User.objects.filter(email=email).exists():
             User.objects.create_user(
                 email=email,
-                password='admin123',  # Only for tests
-                first_name='Test',
-                last_name='Admin',
+                password="admin123",  # Only for tests
+                first_name="Test",
+                last_name="Admin",
                 is_superuser=True,
-                is_staff=True
+                is_staff=True,
             )
-            self.stdout.write(f'✓ Test admin: {email}')
+            self.stdout.write(f"✓ Test admin: {email}")
 
     def _create_test_support(self) -> None:
         """Create support user for E2E tests"""
-        email = 'support@example.com'
+        email = "support@example.com"
         if not User.objects.filter(email=email).exists():
             User.objects.create_user(
                 email=email,
-                password='support123',  # Only for tests
-                first_name='Test',
-                last_name='Support',
-                role='support'
+                password="support123",  # Only for tests
+                first_name="Test",
+                last_name="Support",
+                role="support",
             )
-            self.stdout.write(f'✓ Test support: {email}')
+            self.stdout.write(f"✓ Test support: {email}")

@@ -24,10 +24,12 @@ class RegistrarForm(forms.ModelForm):
             "monthly_fee_cents",
         ]
         widgets: ClassVar = {
-            "default_nameservers": forms.Textarea(attrs={
-                "rows": 3,
-                "placeholder": '["ns1.example.com", "ns2.example.com"]',
-            }),
+            "default_nameservers": forms.Textarea(
+                attrs={
+                    "rows": 3,
+                    "placeholder": '["ns1.example.com", "ns2.example.com"]',
+                }
+            ),
         }
 
 

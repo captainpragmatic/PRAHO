@@ -51,29 +51,35 @@ MAX_CUI_LENGTH = 10
 MAX_DESCRIPTION_LENGTH = 1000
 
 # Romanian specific patterns
-ROMANIAN_VAT_PATTERN = r'^RO[0-9]{2,10}$'
-ROMANIAN_CUI_PATTERN = r'^[0-9]{2,10}$'
+ROMANIAN_VAT_PATTERN = r"^RO[0-9]{2,10}$"
+ROMANIAN_CUI_PATTERN = r"^[0-9]{2,10}$"
 
 # Suspicious input patterns (injection attempts)
 SUSPICIOUS_PATTERNS = [
-    r'<script[^>]*>.*?</script>',  # XSS
-    r'javascript:',  # XSS
-    r'on\w+\s*=',  # Event handlers
-    r'(union|select|insert|update|delete|drop|create|alter)\s+',  # SQL injection
-    r'--\s*',  # SQL comments
-    r'/\*.*?\*/',  # SQL comments
-    r'eval\s*\(',  # Code execution
-    r'exec\s*\(',  # Code execution
-    r'[\r\n]',  # Newlines/control characters
+    r"<script[^>]*>.*?</script>",  # XSS
+    r"javascript:",  # XSS
+    r"on\w+\s*=",  # Event handlers
+    r"(union|select|insert|update|delete|drop|create|alter)\s+",  # SQL injection
+    r"--\s*",  # SQL comments
+    r"/\*.*?\*/",  # SQL comments
+    r"eval\s*\(",  # Code execution
+    r"exec\s*\(",  # Code execution
+    r"[\r\n]",  # Newlines/control characters
 ]
 
 # Allowed user roles for customer membership
-ALLOWED_CUSTOMER_ROLES = ['owner', 'admin', 'manager', 'viewer']
+ALLOWED_CUSTOMER_ROLES = ["owner", "admin", "manager", "viewer"]
 
 # Admin-only fields that should never be in user input
 RESTRICTED_USER_FIELDS = [
-    'is_staff', 'is_superuser', 'is_active', 'user_permissions',
-    'groups', 'last_login', 'date_joined', 'staff_role'
+    "is_staff",
+    "is_superuser",
+    "is_active",
+    "user_permissions",
+    "groups",
+    "last_login",
+    "date_joined",
+    "staff_role",
 ]
 
 
@@ -81,19 +87,21 @@ RESTRICTED_USER_FIELDS = [
 # CORE VALIDATION DECORATORS
 # ===============================================================================
 
-F = TypeVar('F', bound=Callable[..., Any])
+F = TypeVar("F", bound=Callable[..., Any])
+
 
 def rate_limited(key_prefix: str, limit: int, window_minutes: int = 60) -> Callable[[F], F]:
     """
     Rate limiting decorator with Redis-like behavior using Django cache
     Prevents DoS and abuse attacks
     """
+
     def decorator(func: F) -> F:
         @wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             # Extract IP or user identifier
-            request_ip = kwargs.get('request_ip') or 'unknown'
-            user_id = kwargs.get('user_id', '')
+            request_ip = kwargs.get("request_ip") or "unknown"
+            user_id = kwargs.get("user_id", "")
 
             # Create rate limit key
             rate_key = f"{key_prefix}:{request_ip}:{user_id}"
@@ -102,9 +110,7 @@ def rate_limited(key_prefix: str, limit: int, window_minutes: int = 60) -> Calla
             current_count = cache.get(rate_key, 0)
             if current_count >= limit:
                 logger.warning(f"🚨 [Security] Rate limit exceeded for {rate_key}")
-                raise ValidationError(
-                    _("Too many requests. Please try again later.")
-                )
+                raise ValidationError(_("Too many requests. Please try again later."))
 
             # Execute function
             result = func(*args, **kwargs)
@@ -113,7 +119,9 @@ def rate_limited(key_prefix: str, limit: int, window_minutes: int = 60) -> Calla
             cache.set(rate_key, current_count + 1, timeout=window_minutes * 60)
 
             return result
+
         return cast(F, wrapper)
+
     return decorator
 
 
@@ -121,6 +129,7 @@ def timing_safe_validator(func: F) -> F:
     """
     Decorator to prevent timing attacks by ensuring consistent execution time
     """
+
     @wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         start_time = time.time()
@@ -141,12 +150,14 @@ def timing_safe_validator(func: F) -> F:
         if not success:
             raise result
         return result
+
     return cast(F, wrapper)
 
 
 # ===============================================================================
 # INPUT SANITIZATION & VALIDATION
 # ===============================================================================
+
 
 class SecureInputValidator:
     """Comprehensive input validation with security focus"""
@@ -177,7 +188,7 @@ class SecureInputValidator:
             raise ValidationError(_("Invalid input format")) from None
 
         # Log suspicious attempts
-        if '@' not in email or email.count('@') > 1:
+        if "@" not in email or email.count("@") > 1:
             logger.warning(f"🚨 [Security] Suspicious email format: {email[:20]}...")
 
         return EmailAddress(email)
@@ -254,7 +265,7 @@ class SecureInputValidator:
         if result.is_err():
             error_result = cast(Err[str], result)
             raise ValidationError(_(error_result.error))
-        
+
         return result.unwrap()
 
     @staticmethod
@@ -275,7 +286,7 @@ class SecureInputValidator:
             raise ValidationError(_("Company name too short"))
 
         # Check for highly suspicious administrative patterns only
-        admin_patterns = [r'\badmin\b', r'\broot\b', r'\bsystem\b', r'\bsuperuser\b']
+        admin_patterns = [r"\badmin\b", r"\broot\b", r"\bsystem\b", r"\bsuperuser\b"]
         if any(re.search(pattern, company_name.lower()) for pattern in admin_patterns):
             raise ValidationError(_("Invalid company name"))
 
@@ -306,56 +317,50 @@ class SecureInputValidator:
     @staticmethod
     def _validate_required_email(user_data: dict[str, Any]) -> str:
         """Validate required email field."""
-        if 'email' not in user_data:
+        if "email" not in user_data:
             raise ValidationError(_("Required field missing"))
-        return SecureInputValidator.validate_email_secure(
-            user_data['email'], 'registration'
-        )
+        return SecureInputValidator.validate_email_secure(user_data["email"], "registration")
 
     @staticmethod
     def _validate_required_names(user_data: dict[str, Any]) -> tuple[str, str]:
         """Validate required first_name and last_name fields."""
-        if 'first_name' not in user_data:
+        if "first_name" not in user_data:
             raise ValidationError(_("Required field missing"))
-        if 'last_name' not in user_data:
+        if "last_name" not in user_data:
             raise ValidationError(_("Required field missing"))
-            
-        first_name = SecureInputValidator.validate_name_secure(
-            user_data['first_name'], 'first_name'
-        )
-        last_name = SecureInputValidator.validate_name_secure(
-            user_data['last_name'], 'last_name'
-        )
+
+        first_name = SecureInputValidator.validate_name_secure(user_data["first_name"], "first_name")
+        last_name = SecureInputValidator.validate_name_secure(user_data["last_name"], "last_name")
         return first_name, last_name
 
     @staticmethod
     def _validate_optional_phone(user_data: dict[str, Any]) -> str | None:
         """Validate optional phone field."""
-        if 'phone' not in user_data:
+        if "phone" not in user_data:
             return None
-            
-        phone = user_data['phone']
+
+        phone = user_data["phone"]
         if not isinstance(phone, str):
             raise ValidationError(_("Invalid input format"))
-            
+
         SecureInputValidator._check_malicious_patterns(phone)
         return phone.strip()
 
     @staticmethod
     def _validate_marketing_consent(user_data: dict[str, Any]) -> bool | None:
         """Validate marketing consent boolean field."""
-        if 'accepts_marketing' not in user_data:
+        if "accepts_marketing" not in user_data:
             return None
-            
-        if not isinstance(user_data['accepts_marketing'], bool | str):
+
+        if not isinstance(user_data["accepts_marketing"], bool | str):
             raise ValidationError(_("Invalid input format"))
-            
-        return bool(user_data['accepts_marketing'])
+
+        return bool(user_data["accepts_marketing"])
 
     @staticmethod
     def _validate_gdpr_consent(user_data: dict[str, Any]) -> datetime | None:
         """Validate GDPR consent timestamp."""
-        if not user_data.get('gdpr_consent_date'):
+        if not user_data.get("gdpr_consent_date"):
             return None
         return timezone.now()
 
@@ -372,25 +377,25 @@ class SecureInputValidator:
 
         # Build validated data from required and optional fields
         validated_data: dict[str, Any] = {}
-        
+
         # Required fields
-        validated_data['email'] = SecureInputValidator._validate_required_email(user_data)
+        validated_data["email"] = SecureInputValidator._validate_required_email(user_data)
         first_name, last_name = SecureInputValidator._validate_required_names(user_data)
-        validated_data['first_name'] = first_name
-        validated_data['last_name'] = last_name
+        validated_data["first_name"] = first_name
+        validated_data["last_name"] = last_name
 
         # Optional fields
         phone = SecureInputValidator._validate_optional_phone(user_data)
         if phone is not None:
-            validated_data['phone'] = phone
-            
+            validated_data["phone"] = phone
+
         marketing_consent = SecureInputValidator._validate_marketing_consent(user_data)
         if marketing_consent is not None:
-            validated_data['accepts_marketing'] = marketing_consent
-            
+            validated_data["accepts_marketing"] = marketing_consent
+
         gdpr_consent = SecureInputValidator._validate_gdpr_consent(user_data)
         if gdpr_consent is not None:
-            validated_data['gdpr_consent_date'] = gdpr_consent
+            validated_data["gdpr_consent_date"] = gdpr_consent
 
         return validated_data
 
@@ -405,34 +410,32 @@ class SecureInputValidator:
         validated_data: dict[str, Any] = {}
 
         # Company name (required)
-        if 'company_name' not in customer_data:
+        if "company_name" not in customer_data:
             raise ValidationError(_("Required field missing"))
-        validated_data['company_name'] = SecureInputValidator.validate_company_name(
-            customer_data['company_name']
-        )
+        validated_data["company_name"] = SecureInputValidator.validate_company_name(customer_data["company_name"])
 
         # Customer type validation
-        if 'customer_type' in customer_data:
-            allowed_types = ['individual', 'srl', 'pfa', 'sa', 'ngo', 'other']
-            customer_type = customer_data['customer_type'].lower()
+        if "customer_type" in customer_data:
+            allowed_types = ["individual", "srl", "pfa", "sa", "ngo", "other"]
+            customer_type = customer_data["customer_type"].lower()
             if customer_type not in allowed_types:
                 raise ValidationError(_("Invalid customer type"))
-            validated_data['customer_type'] = customer_type
+            validated_data["customer_type"] = customer_type
 
         # VAT number (optional but validated if provided)
-        if 'vat_number' in customer_data:
-            validated_data['vat_number'] = SecureInputValidator.validate_vat_number_romanian(
-                customer_data['vat_number']
+        if "vat_number" in customer_data:
+            validated_data["vat_number"] = SecureInputValidator.validate_vat_number_romanian(
+                customer_data["vat_number"]
             )
 
         # Registration number/CUI (optional but validated if provided)
-        if 'registration_number' in customer_data:
-            validated_data['registration_number'] = SecureInputValidator.validate_cui_romanian(
-                customer_data['registration_number']
+        if "registration_number" in customer_data:
+            validated_data["registration_number"] = SecureInputValidator.validate_cui_romanian(
+                customer_data["registration_number"]
             )
 
         # Address fields (optional)
-        address_fields = ['billing_address', 'billing_city', 'billing_postal_code']
+        address_fields = ["billing_address", "billing_city", "billing_postal_code"]
         for field in address_fields:
             if customer_data.get(field):
                 value = customer_data[field].strip()
@@ -456,6 +459,7 @@ class SecureInputValidator:
 # BUSINESS LOGIC VALIDATORS
 # ===============================================================================
 
+
 class BusinessLogicValidator:
     """Business logic validation with race condition prevention"""
 
@@ -472,14 +476,12 @@ class BusinessLogicValidator:
             raise ValidationError(_("Service temporarily unavailable"))
         cache.set(cache_key, current_checks + 1, timeout=3600)
 
-        company_name = company_data.get('company_name', '').strip()
-        vat_number = company_data.get('vat_number', '').strip()
-        registration_number = company_data.get('registration_number', '').strip()
+        company_name = company_data.get("company_name", "").strip()
+        vat_number = company_data.get("vat_number", "").strip()
+        registration_number = company_data.get("registration_number", "").strip()
 
         # Create deterministic hash for atomic checking
-        check_hash = hashlib.sha256(
-            f"{company_name}:{vat_number}:{registration_number}".encode()
-        ).hexdigest()
+        check_hash = hashlib.sha256(f"{company_name}:{vat_number}:{registration_number}".encode()).hexdigest()
 
         # Atomic check with database transaction
         with transaction.atomic():
@@ -489,19 +491,19 @@ class BusinessLogicValidator:
             existing_reg = None
 
             if company_name:
-                existing_company = Customer.objects.select_for_update().filter(
-                    company_name__iexact=company_name
-                ).first()
+                existing_company = (
+                    Customer.objects.select_for_update().filter(company_name__iexact=company_name).first()
+                )
 
             if vat_number:
-                existing_vat = CustomerTaxProfile.objects.select_for_update().filter(
-                    vat_number=vat_number
-                ).first()
+                existing_vat = CustomerTaxProfile.objects.select_for_update().filter(vat_number=vat_number).first()
 
             if registration_number:
-                existing_reg = CustomerTaxProfile.objects.select_for_update().filter(
-                    registration_number=registration_number
-                ).first()
+                existing_reg = (
+                    CustomerTaxProfile.objects.select_for_update()
+                    .filter(registration_number=registration_number)
+                    .first()
+                )
 
             # Generic error message (no enumeration)
             if existing_company or existing_vat or existing_reg:
@@ -509,17 +511,21 @@ class BusinessLogicValidator:
                 raise ValidationError(_("Registration validation failed"))
 
     @staticmethod
-    def validate_user_permissions(user: Any, customer: Any, required_role: str = 'owner') -> None:
+    def validate_user_permissions(user: Any, customer: Any, required_role: str = "owner") -> None:
         """
         TOCTOU-safe permission validation
         """
         # Check current membership atomically
         with transaction.atomic():
-            membership = CustomerMembership.objects.select_for_update().filter(
-                user=user,
-                customer=customer,
-                role__in=['owner', 'admin'] if required_role == 'owner' else [required_role]
-            ).first()
+            membership = (
+                CustomerMembership.objects.select_for_update()
+                .filter(
+                    user=user,
+                    customer=customer,
+                    role__in=["owner", "admin"] if required_role == "owner" else [required_role],
+                )
+                .first()
+            )
 
             if not membership:
                 logger.warning(f"🚨 [Security] Permission denied for user {user.id} on customer {customer.id}")
@@ -537,21 +543,18 @@ class BusinessLogicValidator:
         Comprehensive invitation validation with rate limiting
         """
         # Validate inviter permissions (TOCTOU-safe)
-        BusinessLogicValidator.validate_user_permissions(inviter, customer, 'owner')
+        BusinessLogicValidator.validate_user_permissions(inviter, customer, "owner")
 
         # Validate role
         SecureInputValidator.validate_customer_role(role)
 
         # Validate invitee email
-        validated_email = SecureInputValidator.validate_email_secure(invitee_email, 'invitation')
+        validated_email = SecureInputValidator.validate_email_secure(invitee_email, "invitation")
 
         # Check for existing membership (prevent duplicate invitations)
         existing_user = User.objects.filter(email=validated_email).first()
         if existing_user:
-            existing_membership = CustomerMembership.objects.filter(
-                user=existing_user,
-                customer=customer
-            ).first()
+            existing_membership = CustomerMembership.objects.filter(user=existing_user, customer=customer).first()
             if existing_membership:
                 raise ValidationError(_("User already has access to this organization"))
 
@@ -559,6 +562,7 @@ class BusinessLogicValidator:
 # ===============================================================================
 # SECURE ERROR HANDLING
 # ===============================================================================
+
 
 class SecureErrorHandler:
     """Security-conscious error handling preventing information disclosure"""
@@ -579,7 +583,7 @@ class SecureErrorHandler:
             "invitation": _("Invitation could not be sent. Please try again later."),
             "validation": _("The provided information is invalid."),
             "permission": _("You don't have permission to perform this action."),
-            "general": _("An error occurred. Please try again later.")
+            "general": _("An error occurred. Please try again later."),
         }
 
         return generic_messages.get(context, generic_messages["general"]) + f" (ID: {error_id})"
@@ -589,12 +593,12 @@ class SecureErrorHandler:
 # AUDIT LOGGING INTEGRATION
 # ===============================================================================
 
+
 def log_security_event(event_type: str, details: dict[str, Any], request_ip: str | None = None) -> None:
     """
     Log security events for monitoring and forensics
     """
     try:
-
         # For now, just log to standard logger to avoid transaction issues
         logger.warning(f"🚨 [Security] {event_type}: {details} from IP: {request_ip}")
 

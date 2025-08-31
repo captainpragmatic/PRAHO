@@ -18,44 +18,38 @@ from apps.common.constants import FILE_SIZE_CONVERSION_FACTOR_FLOAT
 class SupportCategory(models.Model):
     """Support ticket categories"""
 
-    name = models.CharField(max_length=100, verbose_name=_('Category Name'))
-    name_en = models.CharField(max_length=100, verbose_name=_('Name (EN)'))
-    description = models.TextField(blank=True, verbose_name=_('Description'))
+    name = models.CharField(max_length=100, verbose_name=_("Category Name"))
+    name_en = models.CharField(max_length=100, verbose_name=_("Name (EN)"))
+    description = models.TextField(blank=True, verbose_name=_("Description"))
 
     # Romanian specific categories
-    icon = models.CharField(max_length=50, default='help-circle', verbose_name=_('Icon'))
-    color = models.CharField(max_length=7, default='#3B82F6', verbose_name=_('Color'))
+    icon = models.CharField(max_length=50, default="help-circle", verbose_name=_("Icon"))
+    color = models.CharField(max_length=7, default="#3B82F6", verbose_name=_("Color"))
 
     # Service level
-    sla_response_hours = models.PositiveIntegerField(
-        default=24,
-        verbose_name=_('SLA Response (hours)')
-    )
-    sla_resolution_hours = models.PositiveIntegerField(
-        default=72,
-        verbose_name=_('SLA Resolution (hours)')
-    )
+    sla_response_hours = models.PositiveIntegerField(default=24, verbose_name=_("SLA Response (hours)"))
+    sla_resolution_hours = models.PositiveIntegerField(default=72, verbose_name=_("SLA Resolution (hours)"))
 
     # Auto-assignment
     auto_assign_to = models.ForeignKey(
-        'users.User',
+        "users.User",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        limit_choices_to={'role__in': ['support', 'admin']},
-        verbose_name=_('Auto Assign To')
+        limit_choices_to={"role__in": ["support", "admin"]},
+        verbose_name=_("Auto Assign To"),
     )
 
-    is_active = models.BooleanField(default=True, verbose_name=_('Active'))
-    sort_order = models.PositiveIntegerField(default=0, verbose_name=_('Sort Order'))
+    is_active = models.BooleanField(default=True, verbose_name=_("Active"))
+    sort_order = models.PositiveIntegerField(default=0, verbose_name=_("Sort Order"))
 
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        db_table = 'support_categories'
-        verbose_name = _('Support Category')
-        verbose_name_plural = _('Support Categories')
-        ordering: ClassVar[tuple[str, ...]] = ('sort_order', 'name')
+        db_table = "support_categories"
+        verbose_name = _("Support Category")
+        verbose_name_plural = _("Support Categories")
+        ordering: ClassVar[tuple[str, ...]] = ("sort_order", "name")
 
     def __str__(self) -> str:
         return self.name
@@ -65,109 +59,80 @@ class Ticket(models.Model):
     """Customer support ticket"""
 
     STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
-        ('new', _('New')),
-        ('open', _('Open')),
-        ('pending', _('Pending')),
-        ('resolved', _('Resolved')),
-        ('closed', _('Closed')),
-        ('cancelled', _('Cancelled')),
+        ("new", _("New")),
+        ("open", _("Open")),
+        ("pending", _("Pending")),
+        ("resolved", _("Resolved")),
+        ("closed", _("Closed")),
+        ("cancelled", _("Cancelled")),
     )
 
     PRIORITY_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
-        ('low', _('Low')),
-        ('normal', _('Normal')),
-        ('high', _('High')),
-        ('urgent', _('Urgent')),
-        ('critical', _('Critical')),
+        ("low", _("Low")),
+        ("normal", _("Normal")),
+        ("high", _("High")),
+        ("urgent", _("Urgent")),
+        ("critical", _("Critical")),
     )
 
     SOURCE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
-        ('web', _('Website')),
-        ('email', _('Email')),
-        ('phone', _('Phone')),
-        ('chat', _('Chat')),
-        ('api', _('API')),
-        ('internal', _('Internal')),
+        ("web", _("Website")),
+        ("email", _("Email")),
+        ("phone", _("Phone")),
+        ("chat", _("Chat")),
+        ("api", _("API")),
+        ("internal", _("Internal")),
     )
 
     # Ticket identification
-    ticket_number = models.CharField(
-        max_length=20,
-        unique=True,
-        verbose_name=_('Ticket Number')
-    )
+    ticket_number = models.CharField(max_length=20, unique=True, verbose_name=_("Ticket Number"))
 
     # Basic info
-    title = models.CharField(max_length=200, verbose_name=_('Title'))
-    description = models.TextField(verbose_name=_('Description'))
+    title = models.CharField(max_length=200, verbose_name=_("Title"))
+    description = models.TextField(verbose_name=_("Description"))
 
     # Customer and assignment
     customer = models.ForeignKey(
-        'customers.Customer',
-        on_delete=models.CASCADE,
-        related_name='tickets',
-        verbose_name=_('Customer')
+        "customers.Customer", on_delete=models.CASCADE, related_name="tickets", verbose_name=_("Customer")
     )
-    contact_person = models.CharField(
-        max_length=100,
-        blank=True,
-        verbose_name=_('Contact Person')
-    )
-    contact_email = models.EmailField(verbose_name=_('Contact Email'))
-    contact_phone = models.CharField(max_length=20, blank=True, verbose_name=_('Contact Phone'))
+    contact_person = models.CharField(max_length=100, blank=True, verbose_name=_("Contact Person"))
+    contact_email = models.EmailField(verbose_name=_("Contact Email"))
+    contact_phone = models.CharField(max_length=20, blank=True, verbose_name=_("Contact Phone"))
 
     # Classification
-    category = models.ForeignKey(
-        SupportCategory,
-        on_delete=models.SET_NULL,
-        null=True,
-        verbose_name=_('Category')
-    )
-    priority = models.CharField(
-        max_length=20,
-        choices=PRIORITY_CHOICES,
-        default='normal',
-        verbose_name=_('Priority')
-    )
-    status = models.CharField(
-        max_length=20,
-        choices=STATUS_CHOICES,
-        default='new',
-        verbose_name=_('Status')
-    )
-    source = models.CharField(
-        max_length=20,
-        choices=SOURCE_CHOICES,
-        default='web',
-        verbose_name=_('Source')
-    )
+    category = models.ForeignKey(SupportCategory, on_delete=models.SET_NULL, null=True, verbose_name=_("Category"))
+    priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default="normal", verbose_name=_("Priority"))
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="new", verbose_name=_("Status"))
+    source = models.CharField(max_length=20, choices=SOURCE_CHOICES, default="web", verbose_name=_("Source"))
 
     # Assignment
     assigned_to = models.ForeignKey(
-        'users.User',
+        "users.User",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        limit_choices_to={'role__in': ['support', 'admin', 'manager']},
-        related_name='assigned_tickets',
-        verbose_name=_('Assigned To')
+        limit_choices_to={"role__in": ["support", "admin", "manager"]},
+        related_name="assigned_tickets",
+        verbose_name=_("Assigned To"),
     )
-    assigned_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Assigned At'))
+    assigned_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Assigned At"))
 
     # Service relation
     related_service = models.ForeignKey(
-        'provisioning.Service',
+        "provisioning.Service",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='tickets',
-        verbose_name=_('Related Service')
+        related_name="tickets",
+        verbose_name=_("Related Service"),
     )
 
     # Generic relation for other objects
     content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE, null=True, blank=True)
-    object_id = models.CharField(max_length=36, blank=True, default='', db_index=True)  # 36 chars for UUIDs, integers fit fine
-    related_object = GenericForeignKey('content_type', 'object_id')
+    object_id = models.CharField(
+        max_length=36, blank=True, default="", db_index=True
+    )  # 36 chars for UUIDs, integers fit fine
+    related_object = GenericForeignKey("content_type", "object_id")
 
     # SLA tracking
     sla_response_due = models.DateTimeField(null=True, blank=True)
@@ -177,56 +142,37 @@ class Ticket(models.Model):
 
     # Time tracking
     estimated_hours = models.DecimalField(
-        max_digits=5,
-        decimal_places=2,
-        null=True,
-        blank=True,
-        verbose_name=_('Estimated Hours')
+        max_digits=5, decimal_places=2, null=True, blank=True, verbose_name=_("Estimated Hours")
     )
-    actual_hours = models.DecimalField(
-        max_digits=5,
-        decimal_places=2,
-        default=0,
-        verbose_name=_('Actual Hours')
-    )
+    actual_hours = models.DecimalField(max_digits=5, decimal_places=2, default=0, verbose_name=_("Actual Hours"))
 
     # Customer satisfaction
     satisfaction_rating = models.PositiveIntegerField(
-        null=True,
-        blank=True,
-        verbose_name=_('Satisfaction Rating (1-5)')
+        null=True, blank=True, verbose_name=_("Satisfaction Rating (1-5)")
     )
-    satisfaction_comment = models.TextField(blank=True, verbose_name=_('Satisfaction Comment'))
+    satisfaction_comment = models.TextField(blank=True, verbose_name=_("Satisfaction Comment"))
 
     # Flags
-    is_escalated = models.BooleanField(default=False, verbose_name=_('Escalated'))
-    is_public = models.BooleanField(default=True, verbose_name=_('Public for Customer'))
-    requires_customer_response = models.BooleanField(
-        default=False,
-        verbose_name=_('Requires Customer Response')
-    )
+    is_escalated = models.BooleanField(default=False, verbose_name=_("Escalated"))
+    is_public = models.BooleanField(default=True, verbose_name=_("Public for Customer"))
+    requires_customer_response = models.BooleanField(default=False, verbose_name=_("Requires Customer Response"))
 
     # Audit
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Created At'))
-    updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Updated At'))
-    created_by = models.ForeignKey(
-        'users.User',
-        on_delete=models.SET_NULL,
-        null=True,
-        related_name='created_tickets'
-    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("Created At"))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_("Updated At"))
+    created_by = models.ForeignKey("users.User", on_delete=models.SET_NULL, null=True, related_name="created_tickets")
 
     class Meta:
-        db_table = 'tickets'
-        verbose_name = _('Support Ticket')
-        verbose_name_plural = _('Support Tickets')
-        ordering: ClassVar[tuple[str, ...]] = ('-created_at',)
+        db_table = "tickets"
+        verbose_name = _("Support Ticket")
+        verbose_name_plural = _("Support Tickets")
+        ordering: ClassVar[tuple[str, ...]] = ("-created_at",)
         indexes: ClassVar[tuple[models.Index, ...]] = (
-            models.Index(fields=['customer', 'status']),
-            models.Index(fields=['assigned_to', 'status']),
-            models.Index(fields=['status', 'priority']),
-            models.Index(fields=['category']),
-            models.Index(fields=['ticket_number']),
+            models.Index(fields=["customer", "status"]),
+            models.Index(fields=["assigned_to", "status"]),
+            models.Index(fields=["status", "priority"]),
+            models.Index(fields=["category"]),
+            models.Index(fields=["ticket_number"]),
         )
 
     def __str__(self) -> str:
@@ -238,12 +184,8 @@ class Ticket(models.Model):
 
         # Set SLA deadlines
         if not self.sla_response_due and self.category:
-            self.sla_response_due = timezone.now() + timedelta(
-                hours=self.category.sla_response_hours
-            )
-            self.sla_resolution_due = timezone.now() + timedelta(
-                hours=self.category.sla_resolution_hours
-            )
+            self.sla_response_due = timezone.now() + timedelta(hours=self.category.sla_response_hours)
+            self.sla_resolution_due = timezone.now() + timedelta(hours=self.category.sla_resolution_hours)
 
         super().save(*args, **kwargs)
 
@@ -252,12 +194,10 @@ class Ticket(models.Model):
         year = timezone.now().year
 
         # Get last ticket number for this year
-        last_ticket = Ticket.objects.filter(
-            ticket_number__startswith=f"TK{year}"
-        ).order_by('ticket_number').last()
+        last_ticket = Ticket.objects.filter(ticket_number__startswith=f"TK{year}").order_by("ticket_number").last()
 
         if last_ticket:
-            last_num = int(last_ticket.ticket_number.split('-')[1])
+            last_num = int(last_ticket.ticket_number.split("-")[1])
             next_num = last_num + 1
         else:
             next_num = 1
@@ -283,91 +223,68 @@ class Ticket(models.Model):
     def get_priority_color(self) -> str:
         """Get color for priority display"""
         colors = {
-            'low': '#10B981',      # Green
-            'normal': '#3B82F6',   # Blue
-            'high': '#F59E0B',     # Amber
-            'urgent': '#EF4444',   # Red
-            'critical': '#7C2D12', # Dark red
+            "low": "#10B981",  # Green
+            "normal": "#3B82F6",  # Blue
+            "high": "#F59E0B",  # Amber
+            "urgent": "#EF4444",  # Red
+            "critical": "#7C2D12",  # Dark red
         }
-        return colors.get(self.priority, '#6B7280')
+        return colors.get(self.priority, "#6B7280")
 
     def get_status_color(self) -> str:
         """Get color for status display"""
         colors = {
-            'new': '#8B5CF6',      # Purple
-            'open': '#3B82F6',     # Blue
-            'pending': '#F59E0B',  # Amber
-            'resolved': '#10B981', # Green
-            'closed': '#6B7280',   # Gray
-            'cancelled': '#EF4444', # Red
+            "new": "#8B5CF6",  # Purple
+            "open": "#3B82F6",  # Blue
+            "pending": "#F59E0B",  # Amber
+            "resolved": "#10B981",  # Green
+            "closed": "#6B7280",  # Gray
+            "cancelled": "#EF4444",  # Red
         }
-        return colors.get(self.status, '#6B7280')
+        return colors.get(self.status, "#6B7280")
 
 
 class TicketComment(models.Model):
     """Comments/replies on support tickets"""
 
     COMMENT_TYPE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
-        ('customer', _('Customer')),
-        ('support', _('Support')),
-        ('internal', _('Internal')),
-        ('system', _('System')),
+        ("customer", _("Customer")),
+        ("support", _("Support")),
+        ("internal", _("Internal")),
+        ("system", _("System")),
     )
 
-    ticket = models.ForeignKey(
-        Ticket,
-        on_delete=models.CASCADE,
-        related_name='comments',
-        verbose_name=_('Ticket')
-    )
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="comments", verbose_name=_("Ticket"))
 
-    content = models.TextField(verbose_name=_('Content'))
+    content = models.TextField(verbose_name=_("Content"))
     comment_type = models.CharField(
-        max_length=20,
-        choices=COMMENT_TYPE_CHOICES,
-        default='support',
-        verbose_name=_('Comment Type')
+        max_length=20, choices=COMMENT_TYPE_CHOICES, default="support", verbose_name=_("Comment Type")
     )
 
     # Author (can be staff or customer)
-    author = models.ForeignKey(
-        'users.User',
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        verbose_name=_('Author')
-    )
-    author_name = models.CharField(
-        max_length=100,
-        blank=True,
-        verbose_name=_('Author Name')
-    )
-    author_email = models.EmailField(blank=True, verbose_name=_('Author Email'))
+    author = models.ForeignKey("users.User", on_delete=models.SET_NULL, null=True, blank=True, verbose_name=_("Author"))
+    author_name = models.CharField(max_length=100, blank=True, verbose_name=_("Author Name"))
+    author_email = models.EmailField(blank=True, verbose_name=_("Author Email"))
 
     # Visibility
-    is_public = models.BooleanField(default=True, verbose_name=_('Public'))
-    is_solution = models.BooleanField(default=False, verbose_name=_('Is Solution'))
+    is_public = models.BooleanField(default=True, verbose_name=_("Public"))
+    is_solution = models.BooleanField(default=False, verbose_name=_("Is Solution"))
 
     # Time tracking
-    time_spent = models.DecimalField(
-        max_digits=5,
-        decimal_places=2,
-        default=0,
-        verbose_name=_('Time Spent (hours)')
-    )
+    time_spent = models.DecimalField(max_digits=5, decimal_places=2, default=0, verbose_name=_("Time Spent (hours)"))
 
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Created At'))
-    updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Updated At'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("Created At"))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_("Updated At"))
 
     class Meta:
-        db_table = 'ticket_comments'
-        verbose_name = _('Ticket Comment')
-        verbose_name_plural = _('Ticket Comments')
-        ordering: ClassVar[tuple[str, ...]] = ('created_at',)
+        db_table = "ticket_comments"
+        verbose_name = _("Ticket Comment")
+        verbose_name_plural = _("Ticket Comments")
+        ordering: ClassVar[tuple[str, ...]] = ("created_at",)
         indexes: ClassVar[tuple[models.Index, ...]] = (
-            models.Index(fields=['ticket', 'created_at']),
-            models.Index(fields=['comment_type']),
-            models.Index(fields=['is_public']),
+            models.Index(fields=["ticket", "created_at"]),
+            models.Index(fields=["comment_type"]),
+            models.Index(fields=["is_public"]),
         )
 
     def __str__(self) -> str:
@@ -377,55 +294,42 @@ class TicketComment(models.Model):
         """Get comment author name"""
         if self.author:
             return self.author.get_full_name()
-        return self.author_name or 'Anonim'
+        return self.author_name or "Anonim"
 
 
 class TicketAttachment(models.Model):
     """File attachments for tickets"""
 
-    ticket = models.ForeignKey(
-        Ticket,
-        on_delete=models.CASCADE,
-        related_name='attachments',
-        verbose_name=_('Ticket')
-    )
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="attachments", verbose_name=_("Ticket"))
     comment = models.ForeignKey(
         TicketComment,
         on_delete=models.CASCADE,
         null=True,
         blank=True,
-        related_name='attachments',
-        verbose_name=_('Comment')
+        related_name="attachments",
+        verbose_name=_("Comment"),
     )
 
-    file = models.FileField(
-        upload_to='tickets/attachments/',
-        verbose_name=_('File')
-    )
-    filename = models.CharField(max_length=255, verbose_name=_('Filename'))
-    file_size = models.PositiveIntegerField(verbose_name=_('File Size'))
-    content_type = models.CharField(max_length=100, verbose_name=_('Content Type'))
+    file = models.FileField(upload_to="tickets/attachments/", verbose_name=_("File"))
+    filename = models.CharField(max_length=255, verbose_name=_("Filename"))
+    file_size = models.PositiveIntegerField(verbose_name=_("File Size"))
+    content_type = models.CharField(max_length=100, verbose_name=_("Content Type"))
 
     # Security
-    is_safe = models.BooleanField(default=True, verbose_name=_('Safe'))
+    is_safe = models.BooleanField(default=True, verbose_name=_("Safe"))
     virus_scan_result = models.CharField(max_length=50, blank=True)
 
-    uploaded_by = models.ForeignKey(
-        'users.User',
-        on_delete=models.SET_NULL,
-        null=True,
-        verbose_name=_('Uploaded By')
-    )
-    uploaded_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Uploaded At'))
+    uploaded_by = models.ForeignKey("users.User", on_delete=models.SET_NULL, null=True, verbose_name=_("Uploaded By"))
+    uploaded_at = models.DateTimeField(auto_now_add=True, verbose_name=_("Uploaded At"))
 
     class Meta:
-        db_table = 'ticket_attachments'
-        verbose_name = _('Ticket Attachment')
-        verbose_name_plural = _('Ticket Attachments')
-        ordering: ClassVar[tuple[str, ...]] = ('uploaded_at',)
+        db_table = "ticket_attachments"
+        verbose_name = _("Ticket Attachment")
+        verbose_name_plural = _("Ticket Attachments")
+        ordering: ClassVar[tuple[str, ...]] = ("uploaded_at",)
         indexes: ClassVar[tuple[models.Index, ...]] = (
-            models.Index(fields=['ticket']),
-            models.Index(fields=['comment']),
+            models.Index(fields=["ticket"]),
+            models.Index(fields=["comment"]),
         )
 
     def __str__(self) -> str:
@@ -434,7 +338,7 @@ class TicketAttachment(models.Model):
     def get_file_size_display(self) -> str:
         """Human readable file size"""
         size: float = float(self.file_size)
-        for unit in ['B', 'KB', 'MB', 'GB']:
+        for unit in ["B", "KB", "MB", "GB"]:
             if size < FILE_SIZE_CONVERSION_FACTOR_FLOAT:
                 return f"{size:.1f} {unit}"
             size /= FILE_SIZE_CONVERSION_FACTOR_FLOAT
@@ -444,48 +348,31 @@ class TicketAttachment(models.Model):
 class TicketWorklog(models.Model):
     """Work time tracking for tickets"""
 
-    ticket = models.ForeignKey(
-        Ticket,
-        on_delete=models.CASCADE,
-        related_name='worklogs',
-        verbose_name=_('Ticket')
-    )
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="worklogs", verbose_name=_("Ticket"))
 
-    user = models.ForeignKey(
-        'users.User',
-        on_delete=models.CASCADE,
-        verbose_name=_('User')
-    )
+    user = models.ForeignKey("users.User", on_delete=models.CASCADE, verbose_name=_("User"))
 
-    description = models.TextField(verbose_name=_('Activity Description'))
-    time_spent = models.DecimalField(
-        max_digits=5,
-        decimal_places=2,
-        verbose_name=_('Time Spent (hours)')
-    )
+    description = models.TextField(verbose_name=_("Activity Description"))
+    time_spent = models.DecimalField(max_digits=5, decimal_places=2, verbose_name=_("Time Spent (hours)"))
 
     # Billing
-    is_billable = models.BooleanField(default=False, verbose_name=_('Billable'))
+    is_billable = models.BooleanField(default=False, verbose_name=_("Billable"))
     hourly_rate = models.DecimalField(
-        max_digits=8,
-        decimal_places=2,
-        null=True,
-        blank=True,
-        verbose_name=_('Hourly Rate')
+        max_digits=8, decimal_places=2, null=True, blank=True, verbose_name=_("Hourly Rate")
     )
 
-    work_date = models.DateField(verbose_name=_('Work Date'))
+    work_date = models.DateField(verbose_name=_("Work Date"))
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        db_table = 'ticket_worklogs'
-        verbose_name = _('Ticket Worklog')
-        verbose_name_plural = _('Ticket Worklogs')
-        ordering: ClassVar[tuple[str, ...]] = ('-work_date',)
+        db_table = "ticket_worklogs"
+        verbose_name = _("Ticket Worklog")
+        verbose_name_plural = _("Ticket Worklogs")
+        ordering: ClassVar[tuple[str, ...]] = ("-work_date",)
         indexes: ClassVar[tuple[models.Index, ...]] = (
-            models.Index(fields=['ticket', 'work_date']),
-            models.Index(fields=['user', 'work_date']),
-            models.Index(fields=['is_billable']),
+            models.Index(fields=["ticket", "work_date"]),
+            models.Index(fields=["user", "work_date"]),
+            models.Index(fields=["is_billable"]),
         )
 
     def __str__(self) -> str:

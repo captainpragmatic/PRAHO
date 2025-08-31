@@ -31,8 +31,8 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
     # Type guard: @login_required ensures request.user is authenticated User instance
     user = request.user
     if not user.is_authenticated:
-        return redirect('login')
-    
+        return redirect("login")
+
     accessible_customers_list = user.get_accessible_customers()
 
     # Convert to QuerySet for database queries
@@ -48,10 +48,10 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
 
     # Calculate key statistics
     stats = {
-        'total_customers': accessible_customers.count(),
-        'monthly_revenue': _calculate_monthly_revenue(accessible_customers),
-        'open_tickets': _count_open_tickets(accessible_customers),
-        'active_services': _count_active_services(accessible_customers),
+        "total_customers": accessible_customers.count(),
+        "monthly_revenue": _calculate_monthly_revenue(accessible_customers),
+        "open_tickets": _count_open_tickets(accessible_customers),
+        "active_services": _count_active_services(accessible_customers),
     }
 
     # ===============================================================================
@@ -61,57 +61,55 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
     thirty_days_ago = timezone.now() - timedelta(days=30)
 
     # Recent invoices with Romanian formatting
-    recent_invoices = Invoice.objects.filter(
-        customer__in=accessible_customers,
-        created_at__gte=thirty_days_ago
-    ).select_related('customer').order_by('-created_at')[:5]
+    recent_invoices = (
+        Invoice.objects.filter(customer__in=accessible_customers, created_at__gte=thirty_days_ago)
+        .select_related("customer")
+        .order_by("-created_at")[:5]
+    )
 
     # Recent support tickets
-    recent_tickets = Ticket.objects.filter(
-        customer__in=accessible_customers,
-        created_at__gte=thirty_days_ago
-    ).select_related('customer').order_by('-created_at')[:5]
+    recent_tickets = (
+        Ticket.objects.filter(customer__in=accessible_customers, created_at__gte=thirty_days_ago)
+        .select_related("customer")
+        .order_by("-created_at")[:5]
+    )
 
     context = {
-        'stats': stats,
-        'recent_invoices': recent_invoices,
-        'recent_tickets': recent_tickets,
-        'current_time': timezone.now(),
-        'app_version': '1.0.0',
-        'current_year': timezone.now().year,
+        "stats": stats,
+        "recent_invoices": recent_invoices,
+        "recent_tickets": recent_tickets,
+        "current_time": timezone.now(),
+        "app_version": "1.0.0",
+        "current_year": timezone.now().year,
     }
 
-    return render(request, 'dashboard.html', context)
+    return render(request, "dashboard.html", context)
 
 
 # ===============================================================================
 # HELPER FUNCTIONS - BUSINESS LOGIC
 # ===============================================================================
 
+
 def _calculate_monthly_revenue(customers: QuerySet[Customer]) -> int:
     """Calculate total revenue for current month in RON"""
     current_month = timezone.now().replace(day=1)
 
-    monthly_total = Invoice.objects.filter(
-        customer__in=customers,
-        created_at__gte=current_month,
-        status='paid'
-    ).aggregate(total=Sum('total_cents'))['total'] or 0
+    monthly_total = (
+        Invoice.objects.filter(customer__in=customers, created_at__gte=current_month, status="paid").aggregate(
+            total=Sum("total_cents")
+        )["total"]
+        or 0
+    )
 
     return monthly_total
 
 
 def _count_open_tickets(customers: QuerySet[Customer]) -> int:
     """Count open support tickets requiring attention"""
-    return Ticket.objects.filter(
-        customer__in=customers,
-        status__in=['open', 'in_progress']
-    ).count()
+    return Ticket.objects.filter(customer__in=customers, status__in=["open", "in_progress"]).count()
 
 
 def _count_active_services(customers: QuerySet[Customer]) -> int:
     """Count active hosting services"""
-    return Service.objects.filter(
-        customer__in=customers,
-        status='active'
-    ).count()
+    return Service.objects.filter(customer__in=customers, status="active").count()

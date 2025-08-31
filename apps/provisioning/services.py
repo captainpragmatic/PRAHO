@@ -18,12 +18,13 @@ logger = logging.getLogger(__name__)
 # SERVICE ACTIVATION SERVICE
 # ===============================================================================
 
+
 class ServiceActivationService:
     """
     Service activation and provisioning service.
     Placeholder implementation for signal compatibility.
     """
-    
+
     @staticmethod
     def activate_services_for_invoice(invoice: Invoice | None) -> None:
         """Activate services when invoice is paid"""
@@ -32,15 +33,15 @@ class ServiceActivationService:
             return
         logger.info(f"⚙️ [Provisioning] Would activate services for paid invoice {invoice.number}")
         # TODO: Implement actual service activation
-    
+
     @staticmethod
-    def suspend_services_for_customer(customer_id: int, reason: str = 'payment_overdue') -> None:
+    def suspend_services_for_customer(customer_id: int, reason: str = "payment_overdue") -> None:
         """Suspend services for customer"""
         logger.info(f"⚙️ [Provisioning] Would suspend services for customer {customer_id} - {reason}")
         # TODO: Implement service suspension
-    
+
     @staticmethod
-    def reactivate_services_for_customer(customer_id: int, reason: str = 'payment_received') -> None:
+    def reactivate_services_for_customer(customer_id: int, reason: str = "payment_received") -> None:
         """Reactivate suspended services"""
         logger.info(f"⚙️ [Provisioning] Would reactivate services for customer {customer_id} - {reason}")
         # TODO: Implement service reactivation

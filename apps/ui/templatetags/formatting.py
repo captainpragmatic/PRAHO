@@ -513,14 +513,14 @@ def cents_to_currency(value: int | float | Decimal) -> Decimal:
     Args:
         value: Amount in cents
     """
-    if value is None or value == '':
+    if value is None or value == "":
         return Decimal("0.00")
 
     try:
         # Handle various input types
-        if hasattr(value, '__str__'):
+        if hasattr(value, "__str__"):
             str_value = str(value).strip()
-            if str_value == '' or str_value.lower() == 'none':
+            if str_value == "" or str_value.lower() == "none":
                 return Decimal("0.00")
             return Decimal(str_value) / Decimal("100")
         else:

@@ -26,7 +26,7 @@ def _get_accessible_customer_ids(user: User) -> list[int]:
     accessible_customers = user.get_accessible_customers()
 
     if isinstance(accessible_customers, QuerySet):
-        return list(accessible_customers.values_list('id', flat=True))
+        return list(accessible_customers.values_list("id", flat=True))
     else:
         return [c.id for c in accessible_customers] if accessible_customers else []
 
@@ -37,30 +37,34 @@ def service_list(request: HttpRequest) -> HttpResponse:
     # Type guard: @login_required ensures authenticated user
     user = cast(User, request.user)
     customer_ids = _get_accessible_customer_ids(user)
-    services = Service.objects.filter(customer_id__in=customer_ids).select_related('customer', 'service_plan').order_by('-created_at')
+    services = (
+        Service.objects.filter(customer_id__in=customer_ids)
+        .select_related("customer", "service_plan")
+        .order_by("-created_at")
+    )
 
     # Filter by status
-    status_filter = request.GET.get('status')
+    status_filter = request.GET.get("status")
     if status_filter:
         services = services.filter(status=status_filter)
 
     # Pagination
     paginator = Paginator(services, 25)
-    page_number = request.GET.get('page')
+    page_number = request.GET.get("page")
     services_page = paginator.get_page(page_number)
 
     # Only staff can manage services (edit/suspend)
-    can_manage_services = user.is_staff or getattr(user, 'staff_role', None)
+    can_manage_services = user.is_staff or getattr(user, "staff_role", None)
 
     context = {
-        'services': services_page,
-        'status_filter': status_filter,
-        'active_count': services.filter(status='active').count(),
-        'total_count': services.count(),
-        'can_manage_services': can_manage_services,
+        "services": services_page,
+        "status_filter": status_filter,
+        "active_count": services.filter(status="active").count(),
+        "total_count": services.count(),
+        "can_manage_services": can_manage_services,
     }
 
-    return render(request, 'provisioning/service_list.html', context)
+    return render(request, "provisioning/service_list.html", context)
 
 
 @login_required
@@ -73,17 +77,17 @@ def service_detail(request: HttpRequest, pk: int) -> HttpResponse:
     # Security check
     if not user.can_access_customer(service.customer):
         messages.error(request, _("❌ You do not have permission to access this service."))
-        return redirect('provisioning:services')
+        return redirect("provisioning:services")
 
     # Only staff can manage services (edit/suspend)
-    can_manage = (user.is_staff or getattr(user, 'staff_role', None)) and service.status in ['active', 'suspended']
+    can_manage = (user.is_staff or getattr(user, "staff_role", None)) and service.status in ["active", "suspended"]
 
     context = {
-        'service': service,
-        'can_manage': can_manage,
+        "service": service,
+        "can_manage": can_manage,
     }
 
-    return render(request, 'provisioning/service_detail.html', context)
+    return render(request, "provisioning/service_detail.html", context)
 
 
 @staff_required
@@ -93,7 +97,7 @@ def service_create(request: HttpRequest) -> HttpResponse:
     user = cast(User, request.user)
     # Get user's customers for dropdown
     accessible_customers = user.get_accessible_customers()
-    if hasattr(accessible_customers, 'all'):
+    if hasattr(accessible_customers, "all"):
         customers = accessible_customers.all()
     elif isinstance(accessible_customers, list | tuple):
         customers = Customer.objects.filter(id__in=[c.id for c in accessible_customers])
@@ -101,10 +105,10 @@ def service_create(request: HttpRequest) -> HttpResponse:
         customers = accessible_customers
     plans = ServicePlan.objects.filter(is_active=True)
 
-    if request.method == 'POST':
-        customer_id = request.POST.get('customer_id')
-        plan_id = request.POST.get('plan_id')
-        domain = request.POST.get('domain')
+    if request.method == "POST":
+        customer_id = request.POST.get("customer_id")
+        plan_id = request.POST.get("plan_id")
+        domain = request.POST.get("domain")
 
         if customer_id and plan_id and domain:
             customer = get_object_or_404(Customer, pk=customer_id)
@@ -113,7 +117,7 @@ def service_create(request: HttpRequest) -> HttpResponse:
             accessible_customer_ids = _get_accessible_customer_ids(user)
             if int(customer_id) not in accessible_customer_ids:
                 messages.error(request, _("❌ You do not have permission to create services for this customer."))
-                return redirect('provisioning:services')
+                return redirect("provisioning:services")
             plan = get_object_or_404(ServicePlan, pk=plan_id)
 
             # Generate a unique username for the service
@@ -123,7 +127,7 @@ def service_create(request: HttpRequest) -> HttpResponse:
             while Service.objects.filter(username=username).exists():
                 username = f"{base_username}_{counter}"[:100]
                 counter += 1
-            
+
             service = Service.objects.create(
                 customer=customer,
                 service_plan=plan,
@@ -131,20 +135,20 @@ def service_create(request: HttpRequest) -> HttpResponse:
                 domain=domain,
                 username=username,
                 price=plan.price_monthly,  # Set the monthly price from the plan
-                status='pending',
+                status="pending",
             )
 
             messages.success(request, _("✅ Service for {domain} has been created!").format(domain=domain))
-            return redirect('provisioning:service_detail', pk=service.pk)
+            return redirect("provisioning:service_detail", pk=service.pk)
         else:
             messages.error(request, _("❌ All fields are required."))
 
     context = {
-        'customers': customers,
-        'plans': plans,
+        "customers": customers,
+        "plans": plans,
     }
 
-    return render(request, 'provisioning/service_form.html', context)
+    return render(request, "provisioning/service_form.html", context)
 
 
 @staff_required
@@ -157,11 +161,11 @@ def service_edit(request: HttpRequest, pk: int) -> HttpResponse:
     # Security check
     if not user.can_access_customer(service.customer):
         messages.error(request, _("❌ You do not have permission to edit this service."))
-        return redirect('provisioning:services')
+        return redirect("provisioning:services")
 
     # Get user's customers for dropdown
     accessible_customers = user.get_accessible_customers()
-    if hasattr(accessible_customers, 'all'):
+    if hasattr(accessible_customers, "all"):
         customers = accessible_customers.all()
     elif isinstance(accessible_customers, list | tuple):
         customers = Customer.objects.filter(id__in=[c.id for c in accessible_customers])
@@ -169,10 +173,10 @@ def service_edit(request: HttpRequest, pk: int) -> HttpResponse:
         customers = accessible_customers
     plans = ServicePlan.objects.filter(is_active=True)
 
-    if request.method == 'POST':
-        customer_id = request.POST.get('customer_id')
-        plan_id = request.POST.get('plan_id')
-        domain = request.POST.get('domain')
+    if request.method == "POST":
+        customer_id = request.POST.get("customer_id")
+        plan_id = request.POST.get("plan_id")
+        domain = request.POST.get("domain")
 
         if customer_id and plan_id and domain:
             customer = get_object_or_404(Customer, pk=customer_id)
@@ -181,7 +185,7 @@ def service_edit(request: HttpRequest, pk: int) -> HttpResponse:
             accessible_customer_ids = _get_accessible_customer_ids(user)
             if int(customer_id) not in accessible_customer_ids:
                 messages.error(request, _("❌ You do not have permission to move services to this customer."))
-                return redirect('provisioning:service_detail', pk=pk)
+                return redirect("provisioning:service_detail", pk=pk)
 
             plan = get_object_or_404(ServicePlan, pk=plan_id)
 
@@ -192,18 +196,18 @@ def service_edit(request: HttpRequest, pk: int) -> HttpResponse:
             service.save()
 
             messages.success(request, _("✅ Service {domain} has been updated!").format(domain=domain))
-            return redirect('provisioning:service_detail', pk=service.pk)
+            return redirect("provisioning:service_detail", pk=service.pk)
         else:
             messages.error(request, _("❌ All fields are required."))
 
     context = {
-        'service': service,
-        'customers': customers,
-        'plans': plans,
-        'is_edit': True,
+        "service": service,
+        "customers": customers,
+        "plans": plans,
+        "is_edit": True,
     }
 
-    return render(request, 'provisioning/service_form.html', context)
+    return render(request, "provisioning/service_form.html", context)
 
 
 @staff_required
@@ -216,16 +220,16 @@ def service_suspend(request: HttpRequest, pk: int) -> HttpResponse:
     # Security check
     if not user.can_access_customer(service.customer):
         messages.error(request, _("❌ You do not have permission to suspend this service."))
-        return redirect('provisioning:services')
+        return redirect("provisioning:services")
 
-    if request.method == 'POST':
-        service.status = 'suspended'
+    if request.method == "POST":
+        service.status = "suspended"
         service.save()
 
         messages.success(request, _("⏸️ Service {domain} has been suspended!").format(domain=service.domain))
-        return redirect('provisioning:service_detail', pk=pk)
+        return redirect("provisioning:service_detail", pk=pk)
 
-    return render(request, 'provisioning/service_suspend.html', {'service': service})
+    return render(request, "provisioning/service_suspend.html", {"service": service})
 
 
 @staff_required
@@ -238,36 +242,36 @@ def service_activate(request: HttpRequest, pk: int) -> HttpResponse:
     # Security check
     if not user.can_access_customer(service.customer):
         messages.error(request, _("❌ You do not have permission to activate this service."))
-        return redirect('provisioning:services')
+        return redirect("provisioning:services")
 
-    service.status = 'active'
+    service.status = "active"
     service.save()
 
     messages.success(request, _("▶️ Service {domain} has been activated!").format(domain=service.domain))
-    return redirect('provisioning:service_detail', pk=pk)
+    return redirect("provisioning:service_detail", pk=pk)
 
 
 @login_required
 def plan_list(request: HttpRequest) -> HttpResponse:
     """📋 Display available hosting plans"""
-    plans = ServicePlan.objects.filter(is_active=True).order_by('price_monthly')
+    plans = ServicePlan.objects.filter(is_active=True).order_by("price_monthly")
 
     context = {
-        'plans': plans,
+        "plans": plans,
     }
 
-    return render(request, 'provisioning/plan_list.html', context)
+    return render(request, "provisioning/plan_list.html", context)
 
 
 @staff_required
 def server_list(request: HttpRequest) -> HttpResponse:
     """🖥️ Display server infrastructure"""
-    servers = Server.objects.all().order_by('name')
+    servers = Server.objects.all().order_by("name")
 
     context = {
-        'servers': servers,
-        'active_servers': servers.filter(status='active').count(),
-        'total_servers': servers.count(),
+        "servers": servers,
+        "active_servers": servers.filter(status="active").count(),
+        "total_servers": servers.count(),
     }
 
-    return render(request, 'provisioning/server_list.html', context)
+    return render(request, "provisioning/server_list.html", context)

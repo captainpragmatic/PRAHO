@@ -15,155 +15,153 @@ class PaymentRetryPolicySetup:
     Handles setup and management of payment retry policies.
     Encapsulates Romanian business logic for payment collection strategies.
     """
-    
+
     def __init__(self, stdout_writer: Any, force: bool = False) -> None:
         self.stdout = stdout_writer
         self.force = force
         self.created_count = 0
         self.updated_count = 0
-        
+
     def setup_policies(self) -> None:
         """Set up all standard payment retry policies."""
         self.stdout.write("💳 Setting up payment retry policies...")
-        
+
         policies = self._get_policy_configurations()
         self._create_or_update_policies(policies)
         self._ensure_single_default_policy()
         self._display_setup_summary()
         self._display_active_policies()
         self._display_next_steps()
-        
+
     def _get_policy_configurations(self) -> list[dict[str, Any]]:
         """Get standard retry policy configurations for Romanian hosting business."""
         return [
             {
-                'name': 'Standard Hosting',
-                'description': 'Default policy for regular hosting customers',
-                'retry_intervals_days': [1, 3, 7, 14],  # 4 attempts over 2 weeks
-                'max_attempts': 4,
-                'suspend_service_after_days': 21,  # 3 weeks
-                'terminate_service_after_days': 60,  # 2 months
-                'send_dunning_emails': True,
-                'email_template_prefix': 'dunning_standard',
-                'is_default': True,
-                'is_active': True,
-                'meta': {
-                    'description': 'Balanced approach for most customers',
-                    'target_segment': 'Individual and small business customers',
-                    'recovery_rate': 'Expected 25-30%'
-                }
+                "name": "Standard Hosting",
+                "description": "Default policy for regular hosting customers",
+                "retry_intervals_days": [1, 3, 7, 14],  # 4 attempts over 2 weeks
+                "max_attempts": 4,
+                "suspend_service_after_days": 21,  # 3 weeks
+                "terminate_service_after_days": 60,  # 2 months
+                "send_dunning_emails": True,
+                "email_template_prefix": "dunning_standard",
+                "is_default": True,
+                "is_active": True,
+                "meta": {
+                    "description": "Balanced approach for most customers",
+                    "target_segment": "Individual and small business customers",
+                    "recovery_rate": "Expected 25-30%",
+                },
             },
             {
-                'name': 'VIP Customer',
-                'description': 'Extended grace period for VIP customers',
-                'retry_intervals_days': [1, 3, 7, 14, 21, 30],  # 6 attempts over 1 month
-                'max_attempts': 6,
-                'suspend_service_after_days': 45,  # 6+ weeks
-                'terminate_service_after_days': 90,  # 3 months
-                'send_dunning_emails': True,
-                'email_template_prefix': 'dunning_vip',
-                'is_default': False,
-                'is_active': True,
-                'meta': {
-                    'description': 'Extended grace for high-value customers',
-                    'target_segment': 'Enterprise and VIP customers',
-                    'recovery_rate': 'Expected 35-40%'
-                }
+                "name": "VIP Customer",
+                "description": "Extended grace period for VIP customers",
+                "retry_intervals_days": [1, 3, 7, 14, 21, 30],  # 6 attempts over 1 month
+                "max_attempts": 6,
+                "suspend_service_after_days": 45,  # 6+ weeks
+                "terminate_service_after_days": 90,  # 3 months
+                "send_dunning_emails": True,
+                "email_template_prefix": "dunning_vip",
+                "is_default": False,
+                "is_active": True,
+                "meta": {
+                    "description": "Extended grace for high-value customers",
+                    "target_segment": "Enterprise and VIP customers",
+                    "recovery_rate": "Expected 35-40%",
+                },
             },
             {
-                'name': 'Low Value Service',
-                'description': 'Aggressive collection for low-value services',
-                'retry_intervals_days': [1, 3, 7],  # 3 attempts over 1 week
-                'max_attempts': 3,
-                'suspend_service_after_days': 14,  # 2 weeks
-                'terminate_service_after_days': 30,  # 1 month
-                'send_dunning_emails': True,
-                'email_template_prefix': 'dunning_basic',
-                'is_default': False,
-                'is_active': True,
-                'meta': {
-                    'description': 'Quick resolution for low-value services',
-                    'target_segment': 'Customers with services < €10/month',
-                    'recovery_rate': 'Expected 20-25%'
-                }
+                "name": "Low Value Service",
+                "description": "Aggressive collection for low-value services",
+                "retry_intervals_days": [1, 3, 7],  # 3 attempts over 1 week
+                "max_attempts": 3,
+                "suspend_service_after_days": 14,  # 2 weeks
+                "terminate_service_after_days": 30,  # 1 month
+                "send_dunning_emails": True,
+                "email_template_prefix": "dunning_basic",
+                "is_default": False,
+                "is_active": True,
+                "meta": {
+                    "description": "Quick resolution for low-value services",
+                    "target_segment": "Customers with services < €10/month",
+                    "recovery_rate": "Expected 20-25%",
+                },
             },
             {
-                'name': 'Trial Customer',
-                'description': 'Gentle approach for trial customers',
-                'retry_intervals_days': [2, 5, 10],  # 3 attempts over 10 days
-                'max_attempts': 3,
-                'suspend_service_after_days': 15,  # 2+ weeks
-                'terminate_service_after_days': 30,  # 1 month
-                'send_dunning_emails': True,
-                'email_template_prefix': 'dunning_trial',
-                'is_default': False,
-                'is_active': True,
-                'meta': {
-                    'description': 'Educational approach for new customers',
-                    'target_segment': 'Customers in trial period',
-                    'recovery_rate': 'Expected 15-20%'
-                }
+                "name": "Trial Customer",
+                "description": "Gentle approach for trial customers",
+                "retry_intervals_days": [2, 5, 10],  # 3 attempts over 10 days
+                "max_attempts": 3,
+                "suspend_service_after_days": 15,  # 2+ weeks
+                "terminate_service_after_days": 30,  # 1 month
+                "send_dunning_emails": True,
+                "email_template_prefix": "dunning_trial",
+                "is_default": False,
+                "is_active": True,
+                "meta": {
+                    "description": "Educational approach for new customers",
+                    "target_segment": "Customers in trial period",
+                    "recovery_rate": "Expected 15-20%",
+                },
             },
             {
-                'name': 'Domain Only',
-                'description': 'Domain service specific policy',
-                'retry_intervals_days': [1, 7, 14, 30],  # 4 attempts over 1 month
-                'max_attempts': 4,
-                'suspend_service_after_days': 45,  # Before domain expires
-                'terminate_service_after_days': None,  # Manual intervention
-                'send_dunning_emails': True,
-                'email_template_prefix': 'dunning_domain',
-                'is_default': False,
-                'is_active': True,
-                'meta': {
-                    'description': 'Domain-specific with expiration awareness',
-                    'target_segment': 'Domain registration customers',
-                    'recovery_rate': 'Expected 30-35%',
-                    'notes': 'Careful timing to avoid domain expiration'
-                }
+                "name": "Domain Only",
+                "description": "Domain service specific policy",
+                "retry_intervals_days": [1, 7, 14, 30],  # 4 attempts over 1 month
+                "max_attempts": 4,
+                "suspend_service_after_days": 45,  # Before domain expires
+                "terminate_service_after_days": None,  # Manual intervention
+                "send_dunning_emails": True,
+                "email_template_prefix": "dunning_domain",
+                "is_default": False,
+                "is_active": True,
+                "meta": {
+                    "description": "Domain-specific with expiration awareness",
+                    "target_segment": "Domain registration customers",
+                    "recovery_rate": "Expected 30-35%",
+                    "notes": "Careful timing to avoid domain expiration",
+                },
             },
             {
-                'name': 'High Risk',
-                'description': 'Fast collection for high-risk customers',
-                'retry_intervals_days': [1, 2, 5],  # 3 attempts over 5 days
-                'max_attempts': 3,
-                'suspend_service_after_days': 7,   # 1 week
-                'terminate_service_after_days': 14, # 2 weeks
-                'send_dunning_emails': True,
-                'email_template_prefix': 'dunning_risk',
-                'is_default': False,
-                'is_active': True,
-                'meta': {
-                    'description': 'Rapid collection for fraud risk',
-                    'target_segment': 'Customers flagged as high risk',
-                    'recovery_rate': 'Expected 10-15%'
-                }
+                "name": "High Risk",
+                "description": "Fast collection for high-risk customers",
+                "retry_intervals_days": [1, 2, 5],  # 3 attempts over 5 days
+                "max_attempts": 3,
+                "suspend_service_after_days": 7,  # 1 week
+                "terminate_service_after_days": 14,  # 2 weeks
+                "send_dunning_emails": True,
+                "email_template_prefix": "dunning_risk",
+                "is_default": False,
+                "is_active": True,
+                "meta": {
+                    "description": "Rapid collection for fraud risk",
+                    "target_segment": "Customers flagged as high risk",
+                    "recovery_rate": "Expected 10-15%",
+                },
             },
             {
-                'name': 'Test Policy',
-                'description': 'Testing and development policy - DO NOT USE IN PRODUCTION',
-                'retry_intervals_days': [1],  # 1 attempt only
-                'max_attempts': 1,
-                'suspend_service_after_days': 3,
-                'terminate_service_after_days': 7,
-                'send_dunning_emails': False,  # No emails in test
-                'email_template_prefix': 'dunning_test',
-                'is_default': False,
-                'is_active': False,  # Inactive by default
-                'meta': {
-                    'description': 'For testing dunning system only',
-                    'target_segment': 'Internal testing',
-                    'recovery_rate': 'N/A - Testing only'
-                }
-            }
+                "name": "Test Policy",
+                "description": "Testing and development policy - DO NOT USE IN PRODUCTION",
+                "retry_intervals_days": [1],  # 1 attempt only
+                "max_attempts": 1,
+                "suspend_service_after_days": 3,
+                "terminate_service_after_days": 7,
+                "send_dunning_emails": False,  # No emails in test
+                "email_template_prefix": "dunning_test",
+                "is_default": False,
+                "is_active": False,  # Inactive by default
+                "meta": {
+                    "description": "For testing dunning system only",
+                    "target_segment": "Internal testing",
+                    "recovery_rate": "N/A - Testing only",
+                },
+            },
         ]
-        
+
     def _create_or_update_policies(self, policies: list[dict[str, Any]]) -> None:
         """Create or update payment retry policies."""
         for policy_data in policies:
-            existing = PaymentRetryPolicy.objects.filter(
-                name=policy_data['name']
-            ).first()
+            existing = PaymentRetryPolicy.objects.filter(name=policy_data["name"]).first()
 
             if existing and not self.force:
                 self.stdout.write(f"  ⏭️  Skipping existing: {existing.name}")
@@ -173,7 +171,7 @@ class PaymentRetryPolicySetup:
                 self._update_existing_policy(existing, policy_data)
             else:
                 self._create_new_policy(policy_data)
-                
+
     def _update_existing_policy(self, existing: PaymentRetryPolicy, policy_data: dict[str, Any]) -> None:
         """Update an existing payment retry policy."""
         for key, value in policy_data.items():
@@ -181,7 +179,7 @@ class PaymentRetryPolicySetup:
         existing.save()
         self.updated_count += 1
         self.stdout.write(f"  🔄 Updated: {existing.name}")
-        
+
     def _create_new_policy(self, policy_data: dict[str, Any]) -> None:
         """Create a new payment retry policy."""
         policy = PaymentRetryPolicy.objects.create(**policy_data)
@@ -201,7 +199,7 @@ class PaymentRetryPolicySetup:
 
     def _display_setup_summary(self) -> None:
         """Display setup completion summary."""
-        self.stdout.write("\n" + "="*60)
+        self.stdout.write("\n" + "=" * 60)
         self.stdout.write("📋 Payment Retry Policies Setup Complete!")
         self.stdout.write(f"   ✅ Created: {self.created_count} new policies")
         if self.updated_count > 0:
@@ -211,7 +209,7 @@ class PaymentRetryPolicySetup:
     def _display_active_policies(self) -> None:
         """Display active retry policies information."""
         self.stdout.write("\n💳 Active Retry Policies:")
-        active_policies = PaymentRetryPolicy.objects.filter(is_active=True).order_by('name')
+        active_policies = PaymentRetryPolicy.objects.filter(is_active=True).order_by("name")
         for policy in active_policies:
             attempts = len(policy.retry_intervals_days)
             max_days = max(policy.retry_intervals_days) if policy.retry_intervals_days else 0
@@ -243,18 +241,18 @@ class PaymentRetryPolicySetup:
 
 
 class Command(BaseCommand):
-    help = 'Set up payment retry policies for failed payment recovery'
+    help = "Set up payment retry policies for failed payment recovery"
 
     def add_arguments(self, parser: Any) -> None:
         parser.add_argument(
-            '--force',
-            action='store_true',
-            help='Force recreation of existing policies',
+            "--force",
+            action="store_true",
+            help="Force recreation of existing policies",
         )
 
     def handle(self, *args: Any, **options: Any) -> None:
         """Set up standard payment retry policies using dedicated setup class."""
-        force = options.get('force', False)
-        
+        force = options.get("force", False)
+
         policy_setup = PaymentRetryPolicySetup(self.stdout, force)
         policy_setup.setup_policies()

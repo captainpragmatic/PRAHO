@@ -20,6 +20,7 @@ from django.utils.translation import gettext_lazy as _
 # PRODUCT CATALOG MODELS
 # ===============================================================================
 
+
 class Product(models.Model):
     """
     Core product definition for hosting services.
@@ -31,124 +32,73 @@ class Product(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     # Basic Information
-    slug = models.SlugField(
-        unique=True,
-        max_length=100,
-        help_text=_("URL-friendly identifier")
-    )
-    name = models.CharField(
-        max_length=200,
-        help_text=_("Display name for customers")
-    )
-    description = models.TextField(
-        blank=True,
-        help_text=_("Detailed product description")
-    )
-    short_description = models.CharField(
-        max_length=500,
-        blank=True,
-        help_text=_("Brief description for listings")
-    )
+    slug = models.SlugField(unique=True, max_length=100, help_text=_("URL-friendly identifier"))
+    name = models.CharField(max_length=200, help_text=_("Display name for customers"))
+    description = models.TextField(blank=True, help_text=_("Detailed product description"))
+    short_description = models.CharField(max_length=500, blank=True, help_text=_("Brief description for listings"))
 
     # Product categorization
     PRODUCT_TYPES: ClassVar[tuple[tuple[str, str], ...]] = (
-        ('shared_hosting', _('Shared Hosting')),
-        ('vps', _('VPS')),
-        ('dedicated', _('Dedicated Server')),
-        ('domain', _('Domain Registration')),
-        ('ssl', _('SSL Certificate')),
-        ('email', _('Email Hosting')),
-        ('backup', _('Backup Service')),
-        ('addon', _('Add-on Service')),
-        ('license', _('Software License')),
-        ('support', _('Support Package')),
+        ("shared_hosting", _("Shared Hosting")),
+        ("vps", _("VPS")),
+        ("dedicated", _("Dedicated Server")),
+        ("domain", _("Domain Registration")),
+        ("ssl", _("SSL Certificate")),
+        ("email", _("Email Hosting")),
+        ("backup", _("Backup Service")),
+        ("addon", _("Add-on Service")),
+        ("license", _("Software License")),
+        ("support", _("Support Package")),
     )
-    product_type = models.CharField(
-        max_length=30,
-        choices=PRODUCT_TYPES,
-        help_text=_("Product category")
-    )
+    product_type = models.CharField(max_length=30, choices=PRODUCT_TYPES, help_text=_("Product category"))
 
     # Module configuration for provisioning
     module = models.CharField(
-        max_length=50,
-        blank=True,
-        help_text=_("Provisioning module name (e.g., 'cpanel', 'plesk', 'virtualmin')")
+        max_length=50, blank=True, help_text=_("Provisioning module name (e.g., 'cpanel', 'plesk', 'virtualmin')")
     )
     module_config = models.JSONField(
-        default=dict,
-        blank=True,
-        help_text=_("Module-specific configuration for provisioning")
+        default=dict, blank=True, help_text=_("Module-specific configuration for provisioning")
     )
 
     # Status and availability
-    is_active = models.BooleanField(
-        default=True,
-        help_text=_("Whether product is available for purchase")
-    )
-    is_featured = models.BooleanField(
-        default=False,
-        help_text=_("Show prominently on website")
-    )
-    is_public = models.BooleanField(
-        default=True,
-        help_text=_("Visible on public website")
-    )
+    is_active = models.BooleanField(default=True, help_text=_("Whether product is available for purchase"))
+    is_featured = models.BooleanField(default=False, help_text=_("Show prominently on website"))
+    is_public = models.BooleanField(default=True, help_text=_("Visible on public website"))
 
     # Requirements and constraints
-    requires_domain = models.BooleanField(
-        default=False,
-        help_text=_("Customer must provide a domain")
-    )
-    domain_required_at_signup = models.BooleanField(
-        default=False,
-        help_text=_("Domain must be specified during order")
-    )
+    requires_domain = models.BooleanField(default=False, help_text=_("Customer must provide a domain"))
+    domain_required_at_signup = models.BooleanField(default=False, help_text=_("Domain must be specified during order"))
 
     # Display and ordering
-    sort_order = models.PositiveIntegerField(
-        default=0,
-        help_text=_("Display order (lower numbers first)")
-    )
+    sort_order = models.PositiveIntegerField(default=0, help_text=_("Display order (lower numbers first)"))
 
-        # SEO and metadata
+    # SEO and metadata
     meta_title = models.CharField(max_length=255, blank=True)
     meta_description = models.TextField(blank=True)
 
     # Tags - using JSONField for SQLite compatibility
-    tags = models.JSONField(
-        default=list,
-        blank=True,
-        help_text="Tags for filtering and search (as JSON array)"
-    )
+    tags = models.JSONField(default=list, blank=True, help_text="Tags for filtering and search (as JSON array)")
 
     # Romanian specific
-    includes_vat = models.BooleanField(
-        default=False,
-        help_text=_("Whether displayed prices include VAT")
-    )
+    includes_vat = models.BooleanField(default=False, help_text=_("Whether displayed prices include VAT"))
 
     # Additional metadata
-    meta = models.JSONField(
-        default=dict,
-        blank=True,
-        help_text=_("Additional product metadata")
-    )
+    meta = models.JSONField(default=dict, blank=True, help_text=_("Additional product metadata"))
 
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'products'
-        verbose_name = _('Product')
-        verbose_name_plural = _('Products')
-        ordering: ClassVar[tuple[str, ...]] = ('sort_order', 'name')
+        db_table = "products"
+        verbose_name = _("Product")
+        verbose_name_plural = _("Products")
+        ordering: ClassVar[tuple[str, ...]] = ("sort_order", "name")
         indexes: ClassVar[tuple[models.Index, ...]] = (
-            models.Index(fields=['slug']),
-            models.Index(fields=['product_type', 'is_active']),
-            models.Index(fields=['is_active', 'is_public']),
-            models.Index(fields=['sort_order']),
+            models.Index(fields=["slug"]),
+            models.Index(fields=["product_type", "is_active"]),
+            models.Index(fields=["is_active", "is_public"]),
+            models.Index(fields=["sort_order"]),
         )
 
     def __str__(self) -> str:
@@ -161,11 +111,7 @@ class Product(models.Model):
     def get_price_for_period(self, currency_code: str, billing_period: str) -> ProductPrice | None:
         """Get price for specific currency and billing period"""
         try:
-            return self.prices.get(
-                currency__code=currency_code,
-                billing_period=billing_period,
-                is_active=True
-            )
+            return self.prices.get(currency__code=currency_code, billing_period=billing_period, is_active=True)
         except ProductPrice.DoesNotExist:
             return None
 
@@ -179,98 +125,68 @@ class ProductPrice(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     # Product relationship
-    product = models.ForeignKey(
-        Product,
-        on_delete=models.CASCADE,
-        related_name='prices'
-    )
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="prices")
 
     # Currency
-    currency = models.ForeignKey(
-        'billing.Currency',
-        on_delete=models.PROTECT,
-        help_text=_("Currency for this price")
-    )
+    currency = models.ForeignKey("billing.Currency", on_delete=models.PROTECT, help_text=_("Currency for this price"))
 
     # Billing configuration
     BILLING_PERIODS: ClassVar[tuple[tuple[str, str], ...]] = (
-        ('once', _('One Time')),
-        ('monthly', _('Monthly')),
-        ('quarterly', _('Quarterly')),
-        ('semiannual', _('Semi-Annual')),
-        ('annual', _('Annual')),
-        ('biennial', _('Biennial')),
-        ('triennial', _('Triennial')),
+        ("once", _("One Time")),
+        ("monthly", _("Monthly")),
+        ("quarterly", _("Quarterly")),
+        ("semiannual", _("Semi-Annual")),
+        ("annual", _("Annual")),
+        ("biennial", _("Biennial")),
+        ("triennial", _("Triennial")),
     )
-    billing_period = models.CharField(
-        max_length=20,
-        choices=BILLING_PERIODS,
-        help_text=_("Billing frequency")
-    )
+    billing_period = models.CharField(max_length=20, choices=BILLING_PERIODS, help_text=_("Billing frequency"))
 
     # Pricing in cents to avoid float precision issues
     amount_cents = models.BigIntegerField(
-        validators=[MinValueValidator(0)],
-        help_text=_("Recurring price in cents (e.g., 2999 for 29.99 RON)")
+        validators=[MinValueValidator(0)], help_text=_("Recurring price in cents (e.g., 2999 for 29.99 RON)")
     )
     setup_cents = models.BigIntegerField(
-        default=0,
-        validators=[MinValueValidator(0)],
-        help_text=_("One-time setup fee in cents")
+        default=0, validators=[MinValueValidator(0)], help_text=_("One-time setup fee in cents")
     )
 
     # Optional pricing features
     discount_percent = models.DecimalField(
         max_digits=5,
         decimal_places=2,
-        default=Decimal('0.00'),
+        default=Decimal("0.00"),
         validators=[MinValueValidator(0), MaxValueValidator(100)],
-        help_text=_("Percentage discount (0-100)")
+        help_text=_("Percentage discount (0-100)"),
     )
 
     # Minimum commitment
-    minimum_quantity = models.PositiveIntegerField(
-        default=1,
-        help_text=_("Minimum quantity that can be ordered")
-    )
+    minimum_quantity = models.PositiveIntegerField(default=1, help_text=_("Minimum quantity that can be ordered"))
     maximum_quantity = models.PositiveIntegerField(
-        null=True,
-        blank=True,
-        help_text=_("Maximum quantity (blank for unlimited)")
+        null=True, blank=True, help_text=_("Maximum quantity (blank for unlimited)")
     )
 
     # Promotional pricing
     promo_price_cents = models.BigIntegerField(
-        null=True,
-        blank=True,
-        validators=[MinValueValidator(0)],
-        help_text=_("Promotional price in cents")
+        null=True, blank=True, validators=[MinValueValidator(0)], help_text=_("Promotional price in cents")
     )
-    promo_valid_until = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text=_("When promotional pricing expires")
-    )
+    promo_valid_until = models.DateTimeField(null=True, blank=True, help_text=_("When promotional pricing expires"))
 
     # Status
-    is_active = models.BooleanField(
-        default=True,
-        help_text=_("Whether this price is available")
-    )
+    is_active = models.BooleanField(default=True, help_text=_("Whether this price is available"))
 
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'product_prices'
-        verbose_name = _('Product Price')
-        verbose_name_plural = _('Product Prices')
-        unique_together: ClassVar[tuple[tuple[str, ...], ...]] = (('product', 'currency', 'billing_period'),)
-        ordering: ClassVar[tuple[str, ...]] = ('billing_period', 'amount_cents')
+        db_table = "product_prices"
+        verbose_name = _("Product Price")
+        verbose_name_plural = _("Product Prices")
+        unique_together: ClassVar[tuple[tuple[str, ...], ...]] = (("product", "currency", "billing_period"),)
+        ordering: ClassVar[tuple[str, ...]] = ("billing_period", "amount_cents")
         indexes: ClassVar[tuple[models.Index, ...]] = (
-            models.Index(fields=['currency', 'billing_period']),
-            models.Index(fields=['is_active']),
+            models.Index(fields=["currency", "billing_period"]),
+            models.Index(fields=["is_active"]),
         )
 
     def __str__(self) -> str:
@@ -289,9 +205,7 @@ class ProductPrice(models.Model):
     @property
     def effective_price_cents(self) -> int:
         """Get effective price considering promotions"""
-        if (self.promo_price_cents and
-            self.promo_valid_until and
-            timezone.now() <= self.promo_valid_until):
+        if self.promo_price_cents and self.promo_valid_until and timezone.now() <= self.promo_valid_until:
             return self.promo_price_cents
         return self.amount_cents
 
@@ -310,67 +224,49 @@ class ProductRelationship(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     # Product relationships
-    source_product = models.ForeignKey(
-        Product,
-        on_delete=models.CASCADE,
-        related_name='relationships_from'
-    )
-    target_product = models.ForeignKey(
-        Product,
-        on_delete=models.CASCADE,
-        related_name='relationships_to'
-    )
+    source_product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="relationships_from")
+    target_product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="relationships_to")
 
     # Relationship types
     RELATIONSHIP_TYPES: ClassVar[tuple[tuple[str, str], ...]] = (
-        ('requires', _('Requires')),              # Source requires target
-        ('includes', _('Includes')),              # Source includes target
-        ('upgrades_to', _('Can Upgrade To')),     # Source can upgrade to target
-        ('cross_sell', _('Cross-sell')),          # Suggest target with source
-        ('upsell', _('Upsell')),                  # Higher-tier alternative
-        ('downsell', _('Downsell')),              # Lower-tier alternative
-        ('incompatible', _('Incompatible With')), # Cannot be ordered together
-        ('replaces', _('Replaces')),              # Source replaces target
+        ("requires", _("Requires")),  # Source requires target
+        ("includes", _("Includes")),  # Source includes target
+        ("upgrades_to", _("Can Upgrade To")),  # Source can upgrade to target
+        ("cross_sell", _("Cross-sell")),  # Suggest target with source
+        ("upsell", _("Upsell")),  # Higher-tier alternative
+        ("downsell", _("Downsell")),  # Lower-tier alternative
+        ("incompatible", _("Incompatible With")),  # Cannot be ordered together
+        ("replaces", _("Replaces")),  # Source replaces target
     )
     relationship_type = models.CharField(
-        max_length=20,
-        choices=RELATIONSHIP_TYPES,
-        help_text=_("Type of relationship between products")
+        max_length=20, choices=RELATIONSHIP_TYPES, help_text=_("Type of relationship between products")
     )
 
     # Optional configuration
-    config = models.JSONField(
-        default=dict,
-        blank=True,
-        help_text=_("Relationship-specific configuration")
-    )
+    config = models.JSONField(default=dict, blank=True, help_text=_("Relationship-specific configuration"))
 
     # Ordering and priority
-    sort_order = models.PositiveIntegerField(
-        default=0,
-        help_text=_("Display order for relationships of same type")
-    )
+    sort_order = models.PositiveIntegerField(default=0, help_text=_("Display order for relationships of same type"))
 
     # Status
-    is_active = models.BooleanField(
-        default=True,
-        help_text=_("Whether this relationship is active")
-    )
+    is_active = models.BooleanField(default=True, help_text=_("Whether this relationship is active"))
 
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'product_relationships'
-        verbose_name = _('Product Relationship')
-        verbose_name_plural = _('Product Relationships')
-        unique_together: ClassVar[tuple[tuple[str, ...], ...]] = (('source_product', 'target_product', 'relationship_type'),)
-        ordering: ClassVar[tuple[str, ...]] = ('sort_order', 'created_at')
+        db_table = "product_relationships"
+        verbose_name = _("Product Relationship")
+        verbose_name_plural = _("Product Relationships")
+        unique_together: ClassVar[tuple[tuple[str, ...], ...]] = (
+            ("source_product", "target_product", "relationship_type"),
+        )
+        ordering: ClassVar[tuple[str, ...]] = ("sort_order", "created_at")
         indexes: ClassVar[tuple[models.Index, ...]] = (
-            models.Index(fields=['source_product', 'relationship_type']),
-            models.Index(fields=['target_product', 'relationship_type']),
-            models.Index(fields=['is_active']),
+            models.Index(fields=["source_product", "relationship_type"]),
+            models.Index(fields=["target_product", "relationship_type"]),
+            models.Index(fields=["is_active"]),
         )
 
     def __str__(self) -> str:
@@ -386,36 +282,24 @@ class ProductBundle(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     # Basic information
-    name = models.CharField(
-        max_length=200,
-        help_text=_("Bundle name")
-    )
-    description = models.TextField(
-        blank=True,
-        help_text=_("Bundle description")
-    )
+    name = models.CharField(max_length=200, help_text=_("Bundle name"))
+    description = models.TextField(blank=True, help_text=_("Bundle description"))
 
     # Status
-    is_active = models.BooleanField(
-        default=True,
-        help_text=_("Whether bundle is available")
-    )
+    is_active = models.BooleanField(default=True, help_text=_("Whether bundle is available"))
 
     # Discount configuration
     discount_type = models.CharField(
         max_length=20,
         choices=[
-            ('percent', _('Percentage Discount')),
-            ('fixed', _('Fixed Amount Discount')),
-            ('override', _('Override Total Price')),
+            ("percent", _("Percentage Discount")),
+            ("fixed", _("Fixed Amount Discount")),
+            ("override", _("Override Total Price")),
         ],
-        default='percent'
+        default="percent",
     )
     discount_value = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        default=Decimal('0.00'),
-        help_text=_("Discount percentage or fixed amount")
+        max_digits=10, decimal_places=2, default=Decimal("0.00"), help_text=_("Discount percentage or fixed amount")
     )
 
     # Metadata
@@ -426,10 +310,10 @@ class ProductBundle(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'product_bundles'
-        verbose_name = _('Product Bundle')
-        verbose_name_plural = _('Product Bundles')
-        ordering: ClassVar[tuple[str, ...]] = ('name',)
+        db_table = "product_bundles"
+        verbose_name = _("Product Bundle")
+        verbose_name_plural = _("Product Bundles")
+        ordering: ClassVar[tuple[str, ...]] = ("name",)
 
     def __str__(self) -> str:
         return self.name
@@ -443,54 +327,36 @@ class ProductBundleItem(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     # Bundle relationship
-    bundle = models.ForeignKey(
-        ProductBundle,
-        on_delete=models.CASCADE,
-        related_name='items'
-    )
-    product = models.ForeignKey(
-        Product,
-        on_delete=models.CASCADE,
-        related_name='bundle_items'
-    )
+    bundle = models.ForeignKey(ProductBundle, on_delete=models.CASCADE, related_name="items")
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="bundle_items")
 
     # Quantity and configuration
-    quantity = models.PositiveIntegerField(
-        default=1,
-        help_text=_("Quantity of this product in the bundle")
-    )
+    quantity = models.PositiveIntegerField(default=1, help_text=_("Quantity of this product in the bundle"))
 
     # Optional price override
     override_price_cents = models.BigIntegerField(
         null=True,
         blank=True,
         validators=[MinValueValidator(0)],
-        help_text=_("Override price for this product in bundle (in cents)")
+        help_text=_("Override price for this product in bundle (in cents)"),
     )
 
     # Configuration
-    config = models.JSONField(
-        default=dict,
-        blank=True,
-        help_text=_("Product configuration within bundle")
-    )
+    config = models.JSONField(default=dict, blank=True, help_text=_("Product configuration within bundle"))
 
     # Optional requirement
-    is_required = models.BooleanField(
-        default=True,
-        help_text=_("Whether this product is required in the bundle")
-    )
+    is_required = models.BooleanField(default=True, help_text=_("Whether this product is required in the bundle"))
 
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'product_bundle_items'
-        verbose_name = _('Product Bundle Item')
-        verbose_name_plural = _('Product Bundle Items')
-        unique_together: ClassVar[tuple[tuple[str, ...], ...]] = (('bundle', 'product'),)
-        ordering: ClassVar[tuple[str, ...]] = ('created_at',)
+        db_table = "product_bundle_items"
+        verbose_name = _("Product Bundle Item")
+        verbose_name_plural = _("Product Bundle Items")
+        unique_together: ClassVar[tuple[tuple[str, ...], ...]] = (("bundle", "product"),)
+        ordering: ClassVar[tuple[str, ...]] = ("created_at",)
 
     def __str__(self) -> str:
         return f"{self.bundle.name} - {self.product.name} x{self.quantity}"
