@@ -64,16 +64,32 @@ def _check_dangerous_proxy_ranges(trusted_proxies: list[str]) -> list[Any]:
 
 def _check_public_proxy_ranges(trusted_proxies: list[str]) -> list[Any]:
     """Check for public IP ranges that might be suspicious."""
-    public_ranges = ["1.0.0.0/8", "8.8.8.8/32"]
-    return [
-        DjangoWarning(
-            f'Public IP range in IPWARE_TRUSTED_PROXY_LIST: "{public}"',
-            hint="Ensure this public range is actually your load balancer",
-            id="security.W033",
-        )
-        for public in public_ranges
-        if public in trusted_proxies
-    ]
+    import ipaddress
+    
+    # Common public IP ranges that are suspicious as proxy headers
+    suspicious_public_ranges = ["1.0.0.0/8", "8.8.8.0/24", "8.8.4.0/24"]
+    warnings = []
+    
+    for proxy in trusted_proxies:
+        try:
+            proxy_network = ipaddress.ip_network(proxy, strict=False)
+            for suspicious_range in suspicious_public_ranges:
+                suspicious_network = ipaddress.ip_network(suspicious_range)
+                
+                # Check if ranges overlap (either proxy contains suspicious or vice versa)
+                if proxy_network.overlaps(suspicious_network):
+                    warnings.append(DjangoWarning(
+                        f'Public IP range in IPWARE_TRUSTED_PROXY_LIST: "{proxy}" overlaps with "{suspicious_range}"',
+                        hint="Ensure this public range is actually your load balancer",
+                        id="security.W033",
+                    ))
+                    break  # Only warn once per proxy
+                    
+        except (ipaddress.AddressValueError, ValueError):
+            # Skip invalid IP ranges - they'll be caught by other checks
+            continue
+            
+    return warnings
 
 
 @register(Tags.security)

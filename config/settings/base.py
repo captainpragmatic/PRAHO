@@ -353,3 +353,16 @@ IPWARE_TRUSTED_PROXY_LIST: list[str] = []
 # Always configure proxy SSL header (used by load balancers)
 # Only meaningful when behind a load balancer/reverse proxy
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# ===============================================================================
+# RATE LIMITING CONFIGURATION 🔒
+# ===============================================================================
+
+# Rate limiting key function for intelligent user/IP-based limiting
+RATELIMIT_KEY = "apps.users.ratelimit_keys.user_or_ip"
+
+# Cache backend for rate limiting (uses Redis in production)
+RATELIMIT_USE_CACHE = "default"
+
+# Enable rate limiting (can be disabled in development)
+RATELIMIT_ENABLE = True

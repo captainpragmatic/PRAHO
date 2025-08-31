@@ -1118,65 +1118,103 @@ class APICheckEmailTests(TestCase):
         """Test API check email only allows POST"""
         response = self.client.get(reverse('users:api_check_email'))
         self.assertEqual(response.status_code, 405)  # Method not allowed
-
-    def test_api_check_email_missing_email(self) -> None:
-        """Test API check email with missing email parameter"""
-        response = self.client.post(reverse('users:api_check_email'), {})
-        # API correctly returns 400 for missing required parameter
-        self.assertEqual(response.status_code, 400)
         
-        data = response.json()
-        self.assertFalse(data['success'])
-        # Just verify there's an error field - message may vary with translation
-        self.assertIn('error', data)
-
-    def test_api_check_email_invalid_format(self) -> None:
-        """Test API check email with invalid email format"""
-        response = self.client.post(reverse('users:api_check_email'), {
-            'email': 'invalid-email-format'
+    def test_api_check_email_uniform_response_any_input(self) -> None:
+        """Test hardened email check returns uniform response for any input"""
+        # Test various inputs - all should return identical response
+        test_emails = [
+            '',  # Missing email parameter  
+            'invalid-format',  # Invalid format
+            'existing@example.com',  # Existing user
+            'new@example.com',  # Available email
+        ]
+        
+        responses = []
+        for email in test_emails:
+            response = self.client.post(reverse('users:api_check_email'), {'email': email})
+            responses.append(response)
+        
+        # SECURITY: All responses must be identical
+        for response in responses:
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertTrue(data['success'])
+            self.assertEqual(data['message'], 'Please complete registration to continue')
+            # Never reveals email existence or validation details
+            self.assertNotIn('exists', data)
+            self.assertNotIn('error', data)
+            self.assertNotIn('available', data['message'].lower())
+            self.assertNotIn('taken', data['message'].lower())
+            
+    def test_api_check_email_no_enumeration_oracle(self) -> None:
+        """Test that endpoint provides no enumeration oracle"""
+        # Create a known user
+        User = get_user_model()
+        User.objects.create_user(email='known@example.com', password='test123')
+        
+        # Test known existing vs unknown email
+        existing_response = self.client.post(reverse('users:api_check_email'), {
+            'email': 'known@example.com'
         })
-        # API correctly returns 400 for invalid input
-        self.assertEqual(response.status_code, 400)
-        
-        data = response.json()
-        self.assertFalse(data['success'])
-        # Just verify that there's an error message indicating the email format issue
-        # The API may return different error structures (400 status is sufficient validation)
-        self.assertIn('error', data)
-
-    def test_api_check_email_existing_email(self) -> None:
-        """Test API check email with existing email"""
-        response = self.client.post(reverse('users:api_check_email'), {
-            'email': 'existing@example.com'
+        unknown_response = self.client.post(reverse('users:api_check_email'), {
+            'email': 'unknown@example.com'
         })
-        self.assertEqual(response.status_code, 200)
         
-        data = response.json()
-        self.assertTrue(data['success'])
-        self.assertTrue(data['data']['exists'])
-        self.assertEqual(data['data']['email'], 'existing@example.com')
-        # Accept both English and Romanian translations
-        self.assertTrue(
-            "Email already in use" in data['data']['message'] or 
-            "Email deja folosit" in data['data']['message']
-        )
-
-    def test_api_check_email_available_email(self) -> None:
-        """Test API check email with available email"""
-        response = self.client.post(reverse('users:api_check_email'), {
-            'email': 'new@example.com'
-        })
-        self.assertEqual(response.status_code, 200)
+        # SECURITY: Must be impossible to distinguish responses
+        self.assertEqual(existing_response.status_code, unknown_response.status_code)
+        self.assertEqual(existing_response.content, unknown_response.content)
         
-        data = response.json()
-        self.assertTrue(data['success'])
-        self.assertFalse(data['data']['exists'])
-        self.assertEqual(data['data']['email'], 'new@example.com')
-        # Accept both English and Romanian translations
-        self.assertTrue(
-            "Email available" in data['data']['message'] or 
-            "Email disponibil" in data['data']['message']
-        )
+        # Verify neither response reveals existence
+        existing_data = existing_response.json()
+        unknown_data = unknown_response.json()
+        
+        self.assertNotIn('exists', existing_data)
+        self.assertNotIn('exists', unknown_data)
+        self.assertEqual(existing_data['message'], unknown_data['message'])
+        
+    def test_api_check_email_rate_limiting_soft(self) -> None:
+        """Test soft rate limiting behavior"""
+        from django.test import override_settings
+        
+        with override_settings(RATELIMIT_ENABLE=True):
+            # Make requests up to the rate limit (10/m configured)
+            responses = []
+            for i in range(12):  # Exceed the 10/m limit
+                response = self.client.post(reverse('users:api_check_email'), {
+                    'email': f'test{i}@example.com'
+                })
+                responses.append(response)
+            
+            # SECURITY: Soft rate limiting - no 429 errors, uniform responses maintained
+            for response in responses:
+                self.assertEqual(response.status_code, 200)  # Never 429
+                data = response.json()
+                self.assertTrue(data['success'])
+                self.assertEqual(data['message'], 'Please complete registration to continue')
+                
+    def test_api_check_email_timing_consistency(self) -> None:
+        """Test response timing consistency to prevent timing attacks"""
+        import time
+        
+        start_times = []
+        end_times = []
+        
+        # Test multiple requests to verify consistent timing
+        for i in range(3):
+            start = time.time()
+            response = self.client.post(reverse('users:api_check_email'), {
+                'email': f'timing{i}@example.com'
+            })
+            end = time.time()
+            
+            start_times.append(start)
+            end_times.append(end)
+            self.assertEqual(response.status_code, 200)
+        
+        # Verify minimum delay is enforced (should be > 80ms)
+        durations = [end - start for start, end in zip(start_times, end_times)]
+        for duration in durations:
+            self.assertGreater(duration, 0.07)  # At least base delay
 
 
 class HelperFunctionTests(TestCase):

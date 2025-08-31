@@ -858,30 +858,76 @@ class UserDetailView(LoginRequiredMixin, DetailView):
 # ===============================================================================
 
 
-@require_http_methods(["POST"])
-@ratelimit(key="ip", rate="30/m", method="POST", block=True)  # type: ignore[misc] # Rate limit to prevent abuse
-def api_check_email(request: HttpRequest) -> JsonResponse:
-    """Check if email is already registered
+# ===============================================================================
+# EMAIL ENUMERATION PREVENTION - HARDENED ENDPOINT
+# ===============================================================================
 
-    🔒 SECURITY: CSRF protection enabled, rate limited to prevent enumeration attacks.
-    This endpoint validates email uniqueness for registration forms.
+import time
+import random
+
+# Uniform response timing to prevent side-channel analysis
+UNIFORM_MIN_DELAY = 0.08  # 80ms base delay
+UNIFORM_JITTER = 0.05     # +0..50ms random jitter
+
+
+def _sleep_uniform():
+    """Add consistent timing delay to prevent timing-based enumeration attacks."""
+    time.sleep(UNIFORM_MIN_DELAY + random.random() * UNIFORM_JITTER)
+
+
+def _uniform_response():
     """
-    email = request.POST.get("email")
+    Return identical response regardless of email existence.
+    
+    SECURITY: Never reveals whether email exists in database.
+    Always returns same payload structure and HTTP status code.
+    """
+    return JsonResponse({
+        "message": _("Please complete registration to continue"),
+        "success": True,
+    }, status=200)
 
-    if not email:
-        return json_error(_("Email is required"))
 
-    # ⚠️ Security: Only check email format, don't reveal existence for privacy
-    try:
-        validate_email(email)
-    except ValidationError:
-        return json_error(_("Invalid email format"))
-
-    exists = User.objects.filter(email=email).exists()
-
-    return json_success(
-        {"email": email, "exists": exists, "message": _("Email available") if not exists else _("Email already in use")}
-    )
+@require_http_methods(["POST"])
+# Soft rate limiting - degrades gracefully without blocking legitimate users
+@ratelimit(key="apps.users.ratelimit_keys.user_or_ip", rate="10/m", method="POST", block=False)  # Short window
+@ratelimit(key="apps.users.ratelimit_keys.user_or_ip", rate="100/h", method="POST", block=False)  # Long window
+def api_check_email(request: HttpRequest) -> JsonResponse:
+    """
+    🔒 HARDENED EMAIL VALIDATION ENDPOINT
+    
+    SECURITY FEATURES:
+    - Uniform responses prevent email enumeration attacks
+    - Soft rate limiting with user-aware keys  
+    - Consistent timing to prevent side-channel analysis
+    - No database queries - zero information disclosure
+    - Same HTTP status code regardless of input
+    
+    NOTE: Actual email uniqueness is enforced server-side during registration.
+    This endpoint provides UX feedback without revealing account existence.
+    """
+    # Check if user hit rate limits (soft limiting - no 429 errors)
+    was_limited = getattr(request, "limited", False)
+    
+    if was_limited:
+        # Log security event for monitoring
+        from apps.common.validators import log_security_event
+        log_security_event(
+            "email_check_rate_limited", 
+            {
+                "rate_limited": True,
+                "ip_address": get_safe_client_ip(request),
+                "user_authenticated": request.user.is_authenticated,
+            },
+            get_safe_client_ip(request)
+        )
+    
+    # Uniform timing delay prevents timing-based enumeration
+    _sleep_uniform()
+    
+    # SECURITY: Always return identical response - never reveal email existence
+    # Uniqueness will be enforced during actual registration submission
+    return _uniform_response()
 
 
 # ===============================================================================

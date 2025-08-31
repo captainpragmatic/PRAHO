@@ -777,37 +777,53 @@ class UserDetailViewTest(BaseViewTestCase):
 class APIEndpointsTest(BaseViewTestCase):
     """Test API endpoints"""
     
-    def test_api_check_email_available(self) -> None:
-        """Test email availability check for available email"""
+    def test_api_check_email_uniform_response_available(self) -> None:
+        """Test hardened email check returns uniform response for available email"""
         response = self.client.post(reverse('users:api_check_email'), {'email': 'available@example.com'})
         self.assertEqual(response.status_code, 200)
         
         data = json.loads(response.content)
-        self.assertFalse(data['data']['exists'])  # Available means not exists
+        self.assertTrue(data['success'])
+        self.assertEqual(data['message'], 'Please complete registration to continue')
+        # SECURITY: Never reveals email existence
+        self.assertNotIn('exists', data)
+        self.assertNotIn('available', data['message'].lower())
         
-    def test_api_check_email_taken(self) -> None:
-        """Test email availability check for taken email"""
+    def test_api_check_email_uniform_response_taken(self) -> None:
+        """Test hardened email check returns identical response for taken email"""
         response = self.client.post(reverse('users:api_check_email'), {'email': 'test@example.com'})
         self.assertEqual(response.status_code, 200)
         
         data = json.loads(response.content)
-        self.assertTrue(data['data']['exists'])  # Taken means exists
+        self.assertTrue(data['success'])
+        self.assertEqual(data['message'], 'Please complete registration to continue')
+        # SECURITY: Never reveals email existence - identical to available response
+        self.assertNotIn('exists', data)
+        self.assertNotIn('taken', data['message'].lower())
         
-    def test_api_check_email_invalid(self) -> None:
-        """Test email availability check for invalid email"""
-        response = self.client.post(reverse('users:api_check_email'), {'email': 'invalid-email'})
-        self.assertEqual(response.status_code, 400)
+    def test_api_check_email_uniform_response_shape(self) -> None:
+        """Test that response shape is identical regardless of email existence"""
+        # Test available email
+        response1 = self.client.post(reverse('users:api_check_email'), {'email': 'new@example.com'})
+        data1 = json.loads(response1.content)
         
-        data = json.loads(response.content)
-        self.assertFalse(data['success'])
+        # Test existing email
+        response2 = self.client.post(reverse('users:api_check_email'), {'email': 'test@example.com'})
+        data2 = json.loads(response2.content)
         
-    def test_api_check_email_missing_param(self) -> None:
-        """Test email availability check without email parameter"""
-        response = self.client.post(reverse('users:api_check_email'), {})
-        self.assertEqual(response.status_code, 400)
+        # SECURITY: Responses must be identical
+        self.assertEqual(response1.status_code, response2.status_code)
+        self.assertEqual(data1.keys(), data2.keys())
+        self.assertEqual(data1['message'], data2['message'])
+        self.assertEqual(data1['success'], data2['success'])
         
-        data = json.loads(response.content)
-        self.assertFalse(data['success'])
+    def test_api_check_email_no_database_queries(self) -> None:
+        """Test that hardened endpoint makes no database queries"""
+        with self.assertNumQueries(0):  # Zero database queries
+            response = self.client.post(reverse('users:api_check_email'), {'email': 'any@example.com'})
+            self.assertEqual(response.status_code, 200)
+            data = json.loads(response.content)
+            self.assertTrue(data['success'])
 
 
 # ===============================================================================
