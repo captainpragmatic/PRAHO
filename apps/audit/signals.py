@@ -159,8 +159,8 @@ def _get_action_category_severity(action: str) -> tuple[str, str, bool, bool]:
 
                 # Handle dynamic requires_review
                 final_requires_review: bool = (
-                    bool(requires_review(action)) if callable(requires_review) else bool(requires_review)
-                )  # type: ignore
+                    bool(requires_review(action)) if callable(requires_review) else bool(requires_review)  # type: ignore[no-untyped-call]
+                )
 
                 return category, final_severity, is_sensitive, final_requires_review
 

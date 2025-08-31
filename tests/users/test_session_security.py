@@ -134,12 +134,27 @@ class SessionSecurityServiceTestCase(TestCase):
         mock_log.assert_called_once()
 
     @patch('apps.users.services.log_security_event')
-    def test_detect_suspicious_activity_multiple_ips(self, mock_log):
+    @patch('apps.users.services.cache')  # Mock the cache to control behavior
+    def test_detect_suspicious_activity_multiple_ips(self, mock_cache, mock_log):
         """Test detection of suspicious activity with multiple IPs"""
         request = self._get_authenticated_request()
+        
+        # Mock cache to simulate storing/retrieving IP history
+        stored_ips = []
+        def mock_cache_get(key, default=None):
+            if key.startswith('recent_ips:'):
+                return stored_ips.copy()
+            return default
+            
+        def mock_cache_set(key, value, timeout=None):
+            if key.startswith('recent_ips:'):
+                stored_ips[:] = value  # Update the stored list in place
+                
+        mock_cache.get.side_effect = mock_cache_get
+        mock_cache.set.side_effect = mock_cache_set
 
         # Simulate multiple IP addresses in quick succession
-        with patch('apps.common.request_ip.get_safe_client_ip') as mock_ip:
+        with patch('apps.users.services.get_safe_client_ip') as mock_ip:
             # First IP
             mock_ip.return_value = '192.168.1.1'
             is_suspicious = SessionSecurityService.detect_suspicious_activity(request)

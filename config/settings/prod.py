@@ -23,7 +23,7 @@ from .base import *  # noqa: F403
 # ===============================================================================
 
 # Validate SECRET_KEY meets production security requirements
-validate_production_secret_key()  # noqa: F405
+validate_production_secret_key()
 
 # ===============================================================================
 # PRODUCTION FLAGS
@@ -111,7 +111,7 @@ SESSION_SAVE_EVERY_REQUEST = True  # Update session on every request
 # ===============================================================================
 
 DATABASES["default"].update(
-    {  # noqa: F405
+    {
         "CONN_MAX_AGE": 600,
         "OPTIONS": {
             "application_name": "pragmatichost_crm_prod",
@@ -215,7 +215,7 @@ SERVER_EMAIL = DEFAULT_FROM_EMAIL
 # ===============================================================================
 
 CACHES["default"].update(
-    {  # noqa: F405
+    {
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
             "CONNECTION_POOL_KWARGS": {
@@ -317,7 +317,7 @@ BACKUP_ENCRYPTION_KEY = os.environ.get("BACKUP_ENCRYPTION_KEY")
 # ===============================================================================
 
 # Database connection pooling
-DATABASES["default"]["OPTIONS"]["MAX_CONNS"] = 20  # noqa: F405
+DATABASES["default"]["OPTIONS"]["MAX_CONNS"] = 20
 
 # Template caching
 TEMPLATE_LOADERS = [

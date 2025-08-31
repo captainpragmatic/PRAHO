@@ -151,6 +151,7 @@ ignore = [
     "DTZ005", # timezone-naive datetime (Django handles this)
     "S104",   # Hardcoded bind all interfaces (dev server)
     "DJ008",  # Model meta ordering (style preference)
+    "F405",   # undefined-local-with-import-star (Django settings pattern)
     
     # ❌ TYPE HINT EDGE CASES
     # "ANN101", # Missing type annotation for self (REMOVED IN NEWER RUFF)

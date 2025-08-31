@@ -4,6 +4,8 @@ Romanian-localized authentication and profile forms.
 """
 
 import logging
+import secrets
+import time
 from typing import Any, cast
 
 import pyotp
@@ -20,7 +22,6 @@ from django.contrib.auth.views import (
     PasswordResetView,
 )
 from django.core.exceptions import ValidationError
-from django.core.validators import validate_email
 from django.db import models
 from django.db.models import QuerySet
 from django.forms import Form
@@ -38,10 +39,7 @@ from django_ratelimit.exceptions import Ratelimited  # type: ignore[import-untyp
 from apps.audit.services import AuthenticationAuditService, LogoutEventData, RateLimitEventData, SecurityAuditService
 from apps.common.constants import BACKUP_CODE_LENGTH, BACKUP_CODE_LOW_WARNING_THRESHOLD
 from apps.common.request_ip import get_safe_client_ip
-from apps.common.utils import (
-    json_error,
-    json_success,
-)
+from apps.common.validators import log_security_event
 
 from .forms import (
     CustomerOnboardingRegistrationForm,
@@ -862,20 +860,18 @@ class UserDetailView(LoginRequiredMixin, DetailView):
 # EMAIL ENUMERATION PREVENTION - HARDENED ENDPOINT
 # ===============================================================================
 
-import time
-import random
-
 # Uniform response timing to prevent side-channel analysis
 UNIFORM_MIN_DELAY = 0.08  # 80ms base delay
 UNIFORM_JITTER = 0.05     # +0..50ms random jitter
 
 
-def _sleep_uniform():
+def _sleep_uniform() -> None:
     """Add consistent timing delay to prevent timing-based enumeration attacks."""
-    time.sleep(UNIFORM_MIN_DELAY + random.random() * UNIFORM_JITTER)
+    # Use secrets for cryptographically secure randomness in security context
+    time.sleep(UNIFORM_MIN_DELAY + secrets.randbits(16) / 65536.0 * UNIFORM_JITTER)
 
 
-def _uniform_response():
+def _uniform_response() -> JsonResponse:
     """
     Return identical response regardless of email existence.
     
@@ -890,8 +886,8 @@ def _uniform_response():
 
 @require_http_methods(["POST"])
 # Soft rate limiting - degrades gracefully without blocking legitimate users
-@ratelimit(key="apps.users.ratelimit_keys.user_or_ip", rate="10/m", method="POST", block=False)  # Short window
-@ratelimit(key="apps.users.ratelimit_keys.user_or_ip", rate="100/h", method="POST", block=False)  # Long window
+@ratelimit(key="apps.users.ratelimit_keys.user_or_ip", rate="10/m", method="POST", block=False)  # type: ignore[misc]  # Short window
+@ratelimit(key="apps.users.ratelimit_keys.user_or_ip", rate="100/h", method="POST", block=False)  # type: ignore[misc]  # Long window
 def api_check_email(request: HttpRequest) -> JsonResponse:
     """
     🔒 HARDENED EMAIL VALIDATION ENDPOINT
@@ -911,7 +907,6 @@ def api_check_email(request: HttpRequest) -> JsonResponse:
     
     if was_limited:
         # Log security event for monitoring
-        from apps.common.validators import log_security_event
         log_security_event(
             "email_check_rate_limited", 
             {

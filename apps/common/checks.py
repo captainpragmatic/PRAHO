@@ -64,7 +64,6 @@ def _check_dangerous_proxy_ranges(trusted_proxies: list[str]) -> list[Any]:
 
 def _check_public_proxy_ranges(trusted_proxies: list[str]) -> list[Any]:
     """Check for public IP ranges that might be suspicious."""
-    import ipaddress
     
     # Common public IP ranges that are suspicious as proxy headers
     suspicious_public_ranges = ["1.0.0.0/8", "8.8.8.0/24", "8.8.4.0/24"]
@@ -153,7 +152,7 @@ def check_proxy_ssl_configuration(app_configs: Any, **kwargs: Any) -> list[Any]:
     Ensures SECURE_PROXY_SSL_HEADER is properly configured when
     using trusted proxies in production.
     """
-    errors = []
+    errors: list[Any] = []
 
     trusted_proxies = getattr(settings, "IPWARE_TRUSTED_PROXY_LIST", [])
     proxy_ssl_header = getattr(settings, "SECURE_PROXY_SSL_HEADER", None)

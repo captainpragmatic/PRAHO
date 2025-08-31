@@ -2,11 +2,14 @@
 # CUSTOMERS VIEWS - NORMALIZED MODEL STRUCTURE
 # ===============================================================================
 
+import logging
 from typing import cast
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
+from django.db import IntegrityError
 from django.db.models import Q, QuerySet
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -33,6 +36,8 @@ from .models import (
     CustomerBillingProfile,
     CustomerTaxProfile,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @login_required
@@ -177,7 +182,7 @@ def _handle_skip_user_for_customer(request: HttpRequest, customer: Customer) -> 
 
 
 def _handle_customer_create_post(request: HttpRequest) -> HttpResponse:
-    """Handle POST request for customer creation."""
+    """Handle POST request for customer creation with secure error handling."""
     form = CustomerCreationForm(request.POST)
     if not form.is_valid():
         messages.error(request, _("❌ Please correct the errors below"))
@@ -200,9 +205,27 @@ def _handle_customer_create_post(request: HttpRequest) -> HttpResponse:
 
         return redirect("customers:detail", customer_id=customer.pk)
 
+    except ValidationError as e:
+        # Known validation issues - safe to show some details
+        messages.error(request, _("❌ Please check your input: Invalid data provided"))
+        logger.warning(f"Customer creation validation error for user {request.user.id}: {e}")
+        
+    except IntegrityError as e:
+        # Database constraint violations - generic message
+        messages.error(request, _("❌ This customer information conflicts with existing data"))
+        logger.error(f"Customer creation integrity error for user {request.user.id}: {e}")
+        
+    except PermissionDenied as e:
+        # Authorization issues
+        messages.error(request, _("❌ You don't have permission to create customers"))
+        logger.warning(f"Unauthorized customer creation attempt by user {request.user.id}: {e}")
+        
     except Exception as e:
-        messages.error(request, _("❌ Error creating customer: {error}").format(error=str(e)))
-        return _render_customer_form(request, form)
+        # Unexpected errors - completely generic message
+        messages.error(request, _("❌ Unable to create customer. Please contact support if this continues"))
+        logger.exception(f"Unexpected error creating customer for user {request.user.id}: {e}")
+
+    return _render_customer_form(request, form)
 
 
 def _render_customer_form(request: HttpRequest, form: CustomerCreationForm | None = None) -> HttpResponse:
@@ -586,7 +609,7 @@ def _handle_user_skip_action(request: HttpRequest, customer: Customer) -> None:
 
 
 def _handle_user_assignment_post(request: HttpRequest, customer: Customer) -> HttpResponse:
-    """Handle POST request for user assignment."""
+    """Handle POST request for user assignment with secure error handling."""
     form = CustomerUserAssignmentForm(data=request.POST, customer=customer)
     if not form.is_valid():
         messages.error(request, _("❌ Please correct the errors below"))
@@ -606,9 +629,27 @@ def _handle_user_assignment_post(request: HttpRequest, customer: Customer) -> Ht
 
         return redirect("customers:detail", customer_id=customer.pk)
 
+    except ValidationError as e:
+        # Known validation issues - safe to show some details
+        messages.error(request, _("❌ Please check your input: Invalid user assignment data"))
+        logger.warning(f"User assignment validation error for customer {customer.id} by user {request.user.id}: {e}")
+        
+    except IntegrityError as e:
+        # Database constraint violations - generic message
+        messages.error(request, _("❌ This user assignment conflicts with existing data"))
+        logger.error(f"User assignment integrity error for customer {customer.id} by user {request.user.id}: {e}")
+        
+    except PermissionDenied as e:
+        # Authorization issues
+        messages.error(request, _("❌ You don't have permission to assign users to this customer"))
+        logger.warning(f"Unauthorized user assignment attempt for customer {customer.id} by user {request.user.id}: {e}")
+        
     except Exception as e:
-        messages.error(request, _("❌ Error assigning user: {error}").format(error=str(e)))
-        return _render_assignment_form(request, form, customer)
+        # Unexpected errors - completely generic message
+        messages.error(request, _("❌ Unable to assign user. Please contact support if this continues"))
+        logger.exception(f"Unexpected error assigning user to customer {customer.id} by user {request.user.id}: {e}")
+
+    return _render_assignment_form(request, form, customer)
 
 
 def _render_assignment_form(

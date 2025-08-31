@@ -2,6 +2,7 @@
 Staging settings for PRAHO Platform
 Staging environment configuration for pre-production testing.
 """
+from pathlib import Path
 
 from .base import *  # noqa: F403
 
@@ -99,7 +100,7 @@ IPWARE_TRUSTED_PROXY_LIST = [
 # ===============================================================================
 
 DATABASES["default"].update(
-    {  # noqa: F405
+    {
         "CONN_MAX_AGE": 300,  # Shorter than production
         "OPTIONS": {
             "application_name": "pragmatichost_staging",
@@ -174,7 +175,7 @@ SERVER_EMAIL = DEFAULT_FROM_EMAIL
 # ===============================================================================
 
 CACHES["default"].update(
-    {  # noqa: F405
+    {
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
             "CONNECTION_POOL_KWARGS": {
@@ -224,7 +225,7 @@ MONITORING = {
 
 # Use local static file serving for staging
 STATIC_URL = "/static/"
-STATIC_ROOT = "/var/www/staging-static/"
+STATIC_ROOT = Path("/var/www/staging-static/")
 
 # ===============================================================================
 # DEVELOPMENT HELPERS (Staging specific)
