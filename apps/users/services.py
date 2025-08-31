@@ -30,6 +30,7 @@ from apps.common.constants import (
     MIN_RESPONSE_TIME_SECONDS,
     SUSPICIOUS_IP_THRESHOLD,
 )
+from apps.common.request_ip import get_safe_client_ip
 from apps.common.types import (
     CUIString,
     EmailAddress,
@@ -155,20 +156,6 @@ class SecureUserRegistrationService:
         billing_postal_code: str | None
 
     @classmethod
-    # @secure_user_registration(rate_limit=5)  # Disabled for testing
-    # @atomic_with_retry(max_retries=3)
-    # @prevent_race_conditions(
-    #     lambda cls, ud, cd, **kwargs: f"{ud.get('email', '')}:{cd.get('company_name', '')}"
-    # )
-    # @audit_service_call(
-    #     "user_registration",
-    #     lambda cls, ud, cd, **kwargs: {
-    #         "email": ud.get("email", ""),
-    #         "company_name": cd.get("company_name", ""),
-    #         "customer_type": cd.get("customer_type", ""),
-    #     },
-    # )
-    # @monitor_performance(max_duration_seconds=10.0, alert_threshold=3.0)
     def register_new_customer_owner(
         cls,
         user_data: dict[str, Any],
@@ -1041,7 +1028,7 @@ class SessionSecurityService:
                 "old_session_key": old_session_key[:8] + "..." if old_session_key else None,  # Truncated for security
                 "new_session_key": new_session_key[:8] + "..." if new_session_key else None,
             },
-            cls._get_client_ip(request),
+            get_safe_client_ip(request),
         )
 
         # Type guard: target_user could be AnonymousUser from request.user
@@ -1075,7 +1062,7 @@ class SessionSecurityService:
                 "old_session_key": old_session_key[:8] + "..." if old_session_key else None,
                 "new_session_key": new_session_key[:8] + "..." if new_session_key else None,
             },
-            cls._get_client_ip(request),
+            get_safe_client_ip(request),
         )
 
         logger.warning(f"🔄 [SessionSecurity] Session rotated for {user.email} after 2FA change")
@@ -1117,7 +1104,7 @@ class SessionSecurityService:
                 "timeout_seconds": timeout_seconds,
                 "policy": cls._get_timeout_policy_name(timeout_seconds),
             },
-            cls._get_client_ip(request),
+            get_safe_client_ip(request),
         )
 
     @classmethod
@@ -1161,7 +1148,7 @@ class SessionSecurityService:
         log_security_event(
             "shared_device_mode_enabled",
             {"user_id": request.user.id, "timeout_seconds": timeout},
-            cls._get_client_ip(request),
+            get_safe_client_ip(request),
         )
 
         logger.info(f"📱 [SessionSecurity] Shared device mode enabled for {request.user.email}")
@@ -1173,7 +1160,7 @@ class SessionSecurityService:
             return False
 
         user_id = request.user.id
-        current_ip = cls._get_client_ip(request)
+        current_ip = get_safe_client_ip(request)
 
         # Check for rapid IP changes (simplified detection)
         cache_key = f"recent_ips:{user_id}"
@@ -1219,7 +1206,7 @@ class SessionSecurityService:
         }
 
         # Use existing security logging
-        log_security_event(f"session_activity_{activity_type}", activity_data, cls._get_client_ip(request))
+        log_security_event(f"session_activity_{activity_type}", activity_data, get_safe_client_ip(request))
 
         # Log critical activities with warning level
         if activity_type in ["login", "logout", "password_changed", "2fa_disabled"]:
@@ -1288,21 +1275,6 @@ class SessionSecurityService:
             if key in request.session:
                 del request.session[key]
 
-    @classmethod
-    def _get_client_ip(cls, request: HttpRequest) -> str:
-        """Get real client IP address from various headers"""
-        # Check X-Real-IP header first (commonly used by nginx)
-        x_real_ip = request.META.get('HTTP_X_REAL_IP')
-        if x_real_ip:
-            return x_real_ip.strip()
-        
-        # Check X-Forwarded-For header
-        x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
-        if x_forwarded_for:
-            return x_forwarded_for.split(",")[0].strip()
-        
-        # Fall back to REMOTE_ADDR
-        return request.META.get("REMOTE_ADDR", "")
 
     @classmethod
     def _get_timeout_policy_name(cls, timeout_seconds: int) -> str:

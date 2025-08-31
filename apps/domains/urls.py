@@ -16,7 +16,7 @@ urlpatterns = [
     path('check-availability/', views.check_availability, name='check_availability'),
     path('<uuid:domain_id>/renew/', views.domain_renew, name='renew'),
     # TODO: Add DNS management view
-    # path('<uuid:domain_id>/dns/', views.domain_dns, name='dns'),
+    # path('<uuid:domain_id>/dns/', views.domain_dns, name='dns'),  # noqa: ERA001
     
     # Staff management views
     path('admin/', views.domain_admin_list, name='admin_list'),

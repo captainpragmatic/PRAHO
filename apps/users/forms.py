@@ -565,7 +565,7 @@ class CustomerOnboardingRegistrationForm(UserCreationForm):
         )
 
         if result.is_err():
-            raise ValidationError(f'Registration failed: {result.error}')
+            raise ValidationError(f'Registration failed: {result.unwrap_err()}')
 
         user, customer = result.unwrap()
         return user

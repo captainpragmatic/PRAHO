@@ -10,7 +10,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django_ratelimit.decorators import ratelimit  # type: ignore[import-untyped]
 
-from apps.audit.services import SecurityAuditService
+from apps.audit.services import RateLimitEventData, SecurityAuditService
 from apps.common.types import Err, Ok, Result
 
 from .models import WebhookEvent
@@ -54,12 +54,15 @@ class WebhookView(View):
             logger.warning(f"🚨 [Security] Rate limit exceeded for {self.source_name} webhook from IP: {ip_address}")
             
             # Log to SecurityAuditService for comprehensive audit trail
-            SecurityAuditService.log_rate_limit_event(
+            rate_limit_data = RateLimitEventData(
                 endpoint=f'integrations:webhook_{self.source_name}',
                 ip_address=ip_address,
                 user_agent=user_agent,
                 rate_limit_key='ip',
-                rate_limit_rate='60/m,1000/h',
+                rate_limit_rate='60/m,1000/h'
+            )
+            SecurityAuditService.log_rate_limit_event(
+                event_data=rate_limit_data,
                 user=None  # Webhooks are unauthenticated
             )
             
@@ -203,7 +206,7 @@ class PayPalWebhookView(WebhookView):
 # WEBHOOK MANAGEMENT API
 # ===============================================================================
 
-@ratelimit(key='user', rate='30/m', method='GET', block=False)
+@ratelimit(key='user', rate='30/m', method='GET', block=False)  # type: ignore[misc]
 def webhook_status(request: HttpRequest) -> JsonResponse:
     """📊 Webhook processing status and statistics"""
     if not request.user.is_staff:
@@ -212,12 +215,15 @@ def webhook_status(request: HttpRequest) -> JsonResponse:
     # Handle rate limiting for authenticated users
     if getattr(request, 'limited', False):
         logger.warning(f"🚨 [Security] Rate limit exceeded for webhook status API by user: {request.user.email}")
-        SecurityAuditService.log_rate_limit_event(
+        rate_limit_data = RateLimitEventData(
             endpoint='integrations:webhook_status',
             ip_address=request.META.get('REMOTE_ADDR', ''),
             user_agent=request.META.get('HTTP_USER_AGENT', ''),
             rate_limit_key='user',
-            rate_limit_rate='30/m',
+            rate_limit_rate='30/m'
+        )
+        SecurityAuditService.log_rate_limit_event(
+            event_data=rate_limit_data,
             user=request.user if request.user.is_authenticated else None
         )
         return JsonResponse({
@@ -268,7 +274,7 @@ def webhook_status(request: HttpRequest) -> JsonResponse:
 
 
 @require_http_methods(["POST"])
-@ratelimit(key='user', rate='10/m', method='POST', block=False)
+@ratelimit(key='user', rate='10/m', method='POST', block=False)  # type: ignore[misc]
 def retry_webhook(request: HttpRequest, webhook_id: str | int) -> JsonResponse:
     """🔄 Manually retry a failed webhook using result pipeline"""
     if not request.user.is_staff:
@@ -277,12 +283,15 @@ def retry_webhook(request: HttpRequest, webhook_id: str | int) -> JsonResponse:
     # Handle rate limiting for webhook retries
     if getattr(request, 'limited', False):
         logger.warning(f"🚨 [Security] Rate limit exceeded for webhook retry by user: {request.user.email}")
-        SecurityAuditService.log_rate_limit_event(
+        rate_limit_data = RateLimitEventData(
             endpoint='integrations:retry_webhook',
             ip_address=request.META.get('REMOTE_ADDR', ''),
             user_agent=request.META.get('HTTP_USER_AGENT', ''),
             rate_limit_key='user',
-            rate_limit_rate='10/m',
+            rate_limit_rate='10/m'
+        )
+        SecurityAuditService.log_rate_limit_event(
+            event_data=rate_limit_data,
             user=request.user if request.user.is_authenticated else None
         )
         return JsonResponse({

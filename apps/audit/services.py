@@ -18,6 +18,7 @@ from django.db import models, transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from apps.common.request_ip import get_safe_client_ip
 from apps.common.types import EmailAddress, Err, Ok, Result
 from apps.common.validators import log_security_event
 from apps.tickets.models import Ticket  # Import for GDPR data export
@@ -300,7 +301,7 @@ class AuthenticationAuditService:
         """
         # Extract context from request if provided
         if event_data.request:
-            event_data.ip_address = event_data.ip_address or _get_client_ip_from_request(event_data.request)
+            event_data.ip_address = event_data.ip_address or get_safe_client_ip(event_data.request)
             event_data.user_agent = event_data.user_agent or event_data.request.META.get('HTTP_USER_AGENT', '')
             event_data.session_key = event_data.session_key or event_data.request.session.session_key
         
@@ -356,7 +357,7 @@ class AuthenticationAuditService:
         """
         # Extract context from request if provided
         if failure_data.request:
-            failure_data.ip_address = failure_data.ip_address or _get_client_ip_from_request(failure_data.request)
+            failure_data.ip_address = failure_data.ip_address or get_safe_client_ip(failure_data.request)
             failure_data.user_agent = failure_data.user_agent or failure_data.request.META.get('HTTP_USER_AGENT', '')
         
         # Determine the appropriate action based on failure reason
@@ -424,7 +425,7 @@ class AuthenticationAuditService:
         """
         # Extract context from request if provided
         if logout_data.request:
-            logout_data.ip_address = logout_data.ip_address or _get_client_ip_from_request(logout_data.request)
+            logout_data.ip_address = logout_data.ip_address or get_safe_client_ip(logout_data.request)
             logout_data.user_agent = logout_data.user_agent or logout_data.request.META.get('HTTP_USER_AGENT', '')
             logout_data.session_key = logout_data.session_key or getattr(logout_data.request.session, 'session_key', None)
         
@@ -486,7 +487,7 @@ class AuthenticationAuditService:
             account_data: Account event data containing user and context info
         """
         if account_data.request:
-            account_data.ip_address = account_data.ip_address or _get_client_ip_from_request(account_data.request)
+            account_data.ip_address = account_data.ip_address or get_safe_client_ip(account_data.request)
         
         auth_metadata = {
             'lockout_reason': account_data.trigger_reason,
@@ -535,7 +536,7 @@ class AuthenticationAuditService:
         
         context = AuditContext(
             user=session_data.user,
-            ip_address=_get_client_ip_from_request(session_data.request) if session_data.request else None,
+            ip_address=get_safe_client_ip(session_data.request) if session_data.request else None,
             session_key=session_data.new_session_key,
             metadata=auth_metadata,
             actor_type='system'
@@ -549,13 +550,6 @@ class AuthenticationAuditService:
         
         return AuditService.log_event(audit_event_data, context)
 
-
-def _get_client_ip_from_request(request: Any) -> str:
-    """Extract client IP address from Django request"""
-    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-    ip = x_forwarded_for.split(',')[0].strip() if x_forwarded_for else request.META.get('REMOTE_ADDR', '127.0.0.1')
-    
-    return ip if ip else '127.0.0.1'
 
 
 class AuditService:
@@ -4366,16 +4360,16 @@ class SecurityAuditService:
         )
         
         return AuditEvent.objects.create(
-            category='security',
+            category='security_event',
             action='rate_limit_exceeded',
-            resource_type='system',
-            resource_id=event_data['endpoint'],
             user=user,
             ip_address=event_data['ip_address'],
             user_agent=event_data['user_agent'],
             metadata=metadata,
             severity='medium',
-            tags=['security', 'rate_limiting', 'protection']
+            description=f"Rate limit exceeded for endpoint: {event_data['endpoint']}",
+            content_type=ContentType.objects.get_for_model(User),
+            object_id=str(user.id) if user else 'anonymous'
         )
 
 

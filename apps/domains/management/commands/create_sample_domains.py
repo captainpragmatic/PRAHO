@@ -1,16 +1,19 @@
 # ===============================================================================
 # CREATE SAMPLE DOMAINS COMMAND - PRAHO DEVELOPMENT DATA
 # ===============================================================================
+# NOTE: Uses random module for sample data generation (non-cryptographic purposes)
 
 import random
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
+from apps.billing.models import Currency
 from apps.customers.models import Customer
-from apps.domains.models import Domain, DomainOrderItem, Registrar, TLD, TLDRegistrarAssignment
+from apps.domains.models import TLD, Domain, DomainOrderItem, Registrar, TLDRegistrarAssignment
+from apps.orders.models import Order
 
 
 class Command(BaseCommand):
@@ -313,11 +316,11 @@ class Command(BaseCommand):
                     tld = TLD.objects.get(extension=tld_extension)
                 except TLD.DoesNotExist:
                     # Fallback to random TLD
-                    tld = random.choice(available_tlds)
+                    tld = random.choice(available_tlds)  # noqa: S311 # Sample data generation
                     domain_name = f"{domain_name.split('.')[0]}.{tld.extension}"
             else:
                 # Generate random domain
-                tld = random.choice(available_tlds) 
+                tld = random.choice(available_tlds)  # noqa: S311 # Sample data generation 
                 domain_name = f"sample-domain-{i+1}.{tld.extension}"
             
             # Get primary registrar for this TLD
@@ -329,17 +332,18 @@ class Command(BaseCommand):
                 registrar = assignment.registrar
             except TLDRegistrarAssignment.DoesNotExist:
                 # Fallback to any active registrar
-                registrar = Registrar.objects.filter(status='active').first()
-                if not registrar:
-                    self.stdout.write(f"   ❌ No active registrar found")
+                registrar_candidate = Registrar.objects.filter(status='active').first()
+                if not registrar_candidate:
+                    self.stdout.write("   ❌ No active registrar found")
                     continue
+                registrar = registrar_candidate
             
             # Random customer
-            customer = random.choice(customers)
+            customer = random.choice(customers)  # noqa: S311 # Sample data generation
             
             # Random dates
-            registered_at = timezone.now() - timedelta(days=random.randint(30, 365))
-            expires_at = registered_at + timedelta(days=365 * random.randint(1, 3))  # 1-3 years
+            registered_at = timezone.now() - timedelta(days=random.randint(30, 365))  # noqa: S311 # Sample data generation
+            expires_at = registered_at + timedelta(days=365 * random.randint(1, 3))  # noqa: S311 # Sample data generation
             
             # Create domain
             domain, created = Domain.objects.get_or_create(
@@ -348,13 +352,13 @@ class Command(BaseCommand):
                     'tld': tld,
                     'registrar': registrar,
                     'customer': customer,
-                    'status': random.choice(['active', 'active', 'active', 'pending']),  # Mostly active
+                    'status': random.choice(['active', 'active', 'active', 'pending']),  # noqa: S311 # Sample data generation
                     'registered_at': registered_at,
                     'expires_at': expires_at,
-                    'registrar_domain_id': f"DOM_{random.randint(100000, 999999)}",
-                    'epp_code': f"EPP{random.randint(100000, 999999)}",
-                    'auto_renew': random.choice([True, True, False]),  # Mostly auto-renew
-                    'whois_privacy': random.choice([True, False]) if tld.whois_privacy_available else False,
+                    'registrar_domain_id': f"DOM_{random.randint(100000, 999999)}",  # noqa: S311 # Sample data generation
+                    'epp_code': f"EPP{random.randint(100000, 999999)}",  # noqa: S311 # Sample data generation
+                    'auto_renew': random.choice([True, True, False]),  # noqa: S311 # Sample data generation
+                    'whois_privacy': random.choice([True, False]) if tld.whois_privacy_available else False,  # noqa: S311 # Sample data generation
                     'locked': True,
                     'nameservers': registrar.default_nameservers or [],
                     'last_paid_amount_cents': tld.registration_price_cents,
@@ -381,9 +385,6 @@ class Command(BaseCommand):
         # Note: This assumes an Order model exists. 
         # If not available, skip order creation to avoid errors.
         try:
-            from apps.orders.models import Order
-            from apps.billing.models import Currency
-            
             # Get RON currency or create it
             currency, _ = Currency.objects.get_or_create(
                 code='RON',
@@ -391,7 +392,8 @@ class Command(BaseCommand):
             )
             
             # Generate order number
-            order_number = f"DOM-{domain.registered_at.strftime('%Y%m%d')}-{domain.id.hex[:8].upper()}"
+            date_str = domain.registered_at.strftime('%Y%m%d') if domain.registered_at else timezone.now().strftime('%Y%m%d')
+            order_number = f"DOM-{date_str}-{domain.id.hex[:8].upper()}"
             
             # Create a sample order for the domain registration
             order = Order.objects.create(
@@ -402,7 +404,7 @@ class Command(BaseCommand):
                 tax_cents=int(domain.last_paid_amount_cents * 0.19),  # 19% VAT
                 total_cents=int(domain.last_paid_amount_cents * 1.19),
                 status='completed',
-                created_at=domain.registered_at,
+                created_at=domain.registered_at or timezone.now(),
                 notes=f"Domain registration: {domain.name}"
             )
             
@@ -424,4 +426,4 @@ class Command(BaseCommand):
             
         except ImportError:
             # Orders app not available, skip order creation
-            self.stdout.write(f"     ⚠️  Orders app not available, skipped order history")
+            self.stdout.write("     ⚠️  Orders app not available, skipped order history")

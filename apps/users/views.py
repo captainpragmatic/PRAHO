@@ -35,8 +35,9 @@ from django.views.generic import DetailView, ListView
 from django_ratelimit.decorators import ratelimit  # type: ignore[import-untyped]
 from django_ratelimit.exceptions import Ratelimited  # type: ignore[import-untyped]
 
-from apps.audit.services import AuthenticationAuditService, LogoutEventData, SecurityAuditService
+from apps.audit.services import AuthenticationAuditService, LogoutEventData, RateLimitEventData, SecurityAuditService
 from apps.common.constants import BACKUP_CODE_LENGTH, BACKUP_CODE_LOW_WARNING_THRESHOLD
+from apps.common.request_ip import get_safe_client_ip
 from apps.common.utils import (
     json_error,
     json_success,
@@ -62,8 +63,8 @@ CustomUser = User
 # AUTHENTICATION VIEWS
 # ===============================================================================
 
-@ratelimit(key='ip', rate='10/m', method='POST', block=False)
-@ratelimit(key='post:email', rate='5/m', method='POST', block=False)
+@ratelimit(key='ip', rate='10/m', method='POST', block=False)  # type: ignore[misc]
+@ratelimit(key='post:email', rate='5/m', method='POST', block=False)  # type: ignore[misc]
 def login_view(request: HttpRequest) -> HttpResponse:
     """Romanian-localized login view with account lockout protection"""
     if request.user.is_authenticated:
@@ -73,12 +74,15 @@ def login_view(request: HttpRequest) -> HttpResponse:
         # If rate-limited and not in test mode, show friendly error
         if getattr(request, 'limited', False) and not getattr(settings, 'TESTING', False):
             # Log rate limit event to audit system
-            SecurityAuditService.log_rate_limit_event(
+            rate_limit_data = RateLimitEventData(
                 endpoint='users:login',
-                ip_address=_get_client_ip(request),
+                ip_address=get_safe_client_ip(request),
                 user_agent=request.META.get('HTTP_USER_AGENT', ''),
                 rate_limit_key='ip,email',
-                rate_limit_rate='10/m,5/m',
+                rate_limit_rate='10/m,5/m'
+            )
+            SecurityAuditService.log_rate_limit_event(
+                event_data=rate_limit_data,
                 user=None  # User not authenticated yet
             )
             messages.error(request, _('Too many login attempts. Please wait and try again.'))
@@ -113,13 +117,13 @@ def login_view(request: HttpRequest) -> HttpResponse:
                 user_obj.reset_failed_login_attempts()
 
                 # Update login tracking
-                user_obj.last_login_ip = _get_client_ip(request)
+                user_obj.last_login_ip = get_safe_client_ip(request)
                 user_obj.save(update_fields=['last_login_ip'])
 
                 # Log successful login
                 UserLoginLog.objects.create(
                     user=user_obj,
-                    ip_address=_get_client_ip(request),
+                    ip_address=get_safe_client_ip(request),
                     user_agent=request.META.get('HTTP_USER_AGENT', ''),
                     status='success'
                 )
@@ -146,7 +150,7 @@ def login_view(request: HttpRequest) -> HttpResponse:
                     # Log failed login attempt
                     UserLoginLog.objects.create(
                         user=user,
-                        ip_address=_get_client_ip(request),
+                        ip_address=get_safe_client_ip(request),
                         user_agent=request.META.get('HTTP_USER_AGENT', ''),
                         status='failed_password'
                     )
@@ -154,7 +158,7 @@ def login_view(request: HttpRequest) -> HttpResponse:
                     # Log failed login for non-existent user (no user object)
                     UserLoginLog.objects.create(
                         user=None,
-                        ip_address=_get_client_ip(request),
+                        ip_address=get_safe_client_ip(request),
                         user_agent=request.META.get('HTTP_USER_AGENT', ''),
                         status='failed_user_not_found'
                     )
@@ -166,8 +170,8 @@ def login_view(request: HttpRequest) -> HttpResponse:
     return render(request, 'users/login.html', {'form': form})
 
 
-@ratelimit(key='ip', rate='5/h', method='POST', block=False)
-@ratelimit(key='header:user-agent', rate='10/h', method='POST', block=False)
+@ratelimit(key='ip', rate='5/h', method='POST', block=False)  # type: ignore[misc]
+@ratelimit(key='header:user-agent', rate='10/h', method='POST', block=False)  # type: ignore[misc]
 def register_view(request: HttpRequest) -> HttpResponse:
     """Enhanced user registration with proper customer onboarding"""
     if request.user.is_authenticated:
@@ -176,12 +180,15 @@ def register_view(request: HttpRequest) -> HttpResponse:
     if request.method == 'POST':
         if getattr(request, 'limited', False) and not getattr(settings, 'TESTING', False):
             # Log rate limit event to audit system
-            SecurityAuditService.log_rate_limit_event(
+            rate_limit_data = RateLimitEventData(
                 endpoint='users:register',
-                ip_address=_get_client_ip(request),
+                ip_address=get_safe_client_ip(request),
                 user_agent=request.META.get('HTTP_USER_AGENT', ''),
                 rate_limit_key='ip,user-agent',
-                rate_limit_rate='5/h,10/h',
+                rate_limit_rate='5/h,10/h'
+            )
+            SecurityAuditService.log_rate_limit_event(
+                event_data=rate_limit_data,
                 user=None  # User not registered yet
             )
             messages.error(request, _('Too many registration attempts. Please wait and try again.'))
@@ -265,7 +272,7 @@ class SecurePasswordResetView(PasswordResetView):
             # Log rate limit exceeded
             UserLoginLog.objects.create(
                 user=None,
-                ip_address=_get_client_ip(request),
+                ip_address=get_safe_client_ip(request),
                 user_agent=request.META.get('HTTP_USER_AGENT', ''),
                 status='password_reset_rate_limited'
             )
@@ -278,7 +285,7 @@ class SecurePasswordResetView(PasswordResetView):
         # Log password reset attempt for audit trail
         UserLoginLog.objects.create(
             user=None,  # Don't reveal if user exists in logs
-            ip_address=_get_client_ip(self.request),
+            ip_address=get_safe_client_ip(self.request),
             user_agent=self.request.META.get('HTTP_USER_AGENT', ''),
             status='password_reset_requested'
         )
@@ -305,7 +312,7 @@ class SecurePasswordResetConfirmView(PasswordResetConfirmView):
             # Log rate limit exceeded
             UserLoginLog.objects.create(
                 user=None,
-                ip_address=_get_client_ip(request),
+                ip_address=get_safe_client_ip(request),
                 user_agent=request.META.get('HTTP_USER_AGENT', ''),
                 status='password_confirm_rate_limited'
             )
@@ -324,7 +331,7 @@ class SecurePasswordResetConfirmView(PasswordResetConfirmView):
         # Enhanced security logging
         UserLoginLog.objects.create(
             user=user,
-            ip_address=_get_client_ip(self.request),
+            ip_address=get_safe_client_ip(self.request),
             user_agent=self.request.META.get('HTTP_USER_AGENT', ''),
             status='password_reset_completed'
         )
@@ -338,13 +345,13 @@ class SecurePasswordResetConfirmView(PasswordResetConfirmView):
             # Log lockout reset
             UserLoginLog.objects.create(
                 user=user,
-                ip_address=_get_client_ip(self.request),
+                ip_address=get_safe_client_ip(self.request),
                 user_agent=self.request.META.get('HTTP_USER_AGENT', ''),
                 status='account_lockout_reset'
             )
 
         # 🔒 Clean up 2FA secrets and rotate sessions for security
-        SessionSecurityService.cleanup_2fa_secrets_on_recovery(user, _get_client_ip(self.request))
+        SessionSecurityService.cleanup_2fa_secrets_on_recovery(user, get_safe_client_ip(self.request))
 
         return super().form_valid(form)
 
@@ -352,7 +359,7 @@ class SecurePasswordResetConfirmView(PasswordResetConfirmView):
         # Log failed password reset confirmation
         UserLoginLog.objects.create(
             user=None,
-            ip_address=_get_client_ip(self.request),
+            ip_address=get_safe_client_ip(self.request),
             user_agent=self.request.META.get('HTTP_USER_AGENT', ''),
             status='password_reset_failed'
         )
@@ -391,7 +398,7 @@ class SecurePasswordChangeView(PasswordChangeView):
             if request.user.is_authenticated:
                 UserLoginLog.objects.create(
                     user=cast(User, request.user),
-                    ip_address=_get_client_ip(request),
+                    ip_address=get_safe_client_ip(request),
                     user_agent=request.META.get('HTTP_USER_AGENT', ''),
                     status='password_change_rate_limited'
                 )
@@ -404,7 +411,7 @@ class SecurePasswordChangeView(PasswordChangeView):
         # Log successful password change for audit - user is guaranteed to be authenticated due to LoginRequiredMixin
         UserLoginLog.objects.create(
             user=cast(User, self.request.user),
-            ip_address=_get_client_ip(self.request),
+            ip_address=get_safe_client_ip(self.request),
             user_agent=self.request.META.get('HTTP_USER_AGENT', ''),
             status='password_changed'
         )
@@ -422,7 +429,7 @@ class SecurePasswordChangeView(PasswordChangeView):
         # Log failed password change attempt - user is guaranteed to be authenticated due to LoginRequiredMixin
         UserLoginLog.objects.create(
             user=cast(User, self.request.user),
-            ip_address=_get_client_ip(self.request),
+            ip_address=get_safe_client_ip(self.request),
             user_agent=self.request.META.get('HTTP_USER_AGENT', ''),
             status='password_change_failed'
         )
@@ -560,12 +567,15 @@ def _handle_2fa_rate_limit(request: HttpRequest, user: User) -> HttpResponse | N
     """Handle rate limiting for 2FA verification."""
     if getattr(request, 'limited', False) and not getattr(settings, 'TESTING', False):
         # Log rate limit event to audit system
-        SecurityAuditService.log_rate_limit_event(
+        rate_limit_data = RateLimitEventData(
             endpoint='users:two_factor_verify',
-            ip_address=_get_client_ip(request),
+            ip_address=get_safe_client_ip(request),
             user_agent=request.META.get('HTTP_USER_AGENT', ''),
             rate_limit_key='ip',
-            rate_limit_rate='10/m',
+            rate_limit_rate='10/m'
+        )
+        SecurityAuditService.log_rate_limit_event(
+            event_data=rate_limit_data,
             user=user  # User is partially authenticated at this point
         )
         messages.error(request, _('Too many verification attempts. Please wait and try again.'))
@@ -606,7 +616,7 @@ def _handle_backup_code_warnings(request: HttpRequest, user: User) -> None:
         messages.info(request, _('Backup code used. You have {count} codes remaining.').format(count=remaining_codes))
 
 
-@ratelimit(key='ip', rate='10/m', method='POST', block=False)
+@ratelimit(key='ip', rate='10/m', method='POST', block=False)  # type: ignore[misc]
 def two_factor_verify(request: HttpRequest) -> HttpResponse:
     """Verify 2FA token during login"""
     user_id = request.session.get('pre_2fa_user_id')
@@ -728,7 +738,7 @@ def two_factor_disable(request: HttpRequest) -> HttpResponse:
         # Log the action
         UserLoginLog.objects.create(
             user=user,
-            ip_address=_get_client_ip(request),
+            ip_address=get_safe_client_ip(request),
             user_agent=request.META.get('HTTP_USER_AGENT', ''),
             status='two_factor_disabled'
         )
@@ -894,33 +904,18 @@ def _log_user_login(request: HttpRequest, user: User, status: str) -> None:
     """Log user login attempt"""
     UserLoginLog.objects.create(
         user=user,
-        ip_address=_get_client_ip(request),
+        ip_address=get_safe_client_ip(request),
         user_agent=request.META.get('HTTP_USER_AGENT', ''),
         status=status
     )
 
     # Update user's last login IP
     if status == 'success':
-        user.last_login_ip = _get_client_ip(request)
+        user.last_login_ip = get_safe_client_ip(request)
         user.failed_login_attempts = 0  # Reset failed attempts
         user.account_locked_until = None
         user.save(update_fields=['last_login_ip', 'failed_login_attempts', 'account_locked_until'])
 
-
-def _get_client_ip(request: HttpRequest) -> str:
-    """Get client IP address from various headers"""
-    # Check X-Real-IP header first (commonly used by nginx)
-    x_real_ip = request.META.get('HTTP_X_REAL_IP')
-    if x_real_ip:
-        return x_real_ip.strip()
-    
-    # Check X-Forwarded-For header
-    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-    if x_forwarded_for:
-        return x_forwarded_for.split(',')[0].strip()
-    
-    # Fall back to REMOTE_ADDR
-    return request.META.get('REMOTE_ADDR', '')
 
 
 def _get_safe_redirect_target(request: HttpRequest, fallback: str = 'dashboard') -> str:

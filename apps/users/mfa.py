@@ -77,7 +77,7 @@ logger = logging.getLogger(__name__)
 try:  # pragma: no cover - presence is test-patched
     import webauthn  # type: ignore[import-not-found]
 except Exception:  # pragma: no cover
-    webauthn = None  # type: ignore[assignment]
+    webauthn = None
 
 
 # ===============================================================================
@@ -300,7 +300,7 @@ class TOTPService:
             qr.make(fit=True)
             img = qr.make_image(fill_color="black", back_color="white")
             buf = io.BytesIO()
-            img.save(buf, format='PNG')
+            img.save(buf)
             data = base64.b64encode(buf.getvalue()).decode()
             return f"data:image/png;base64,{data}"
         except Exception as e:  # pragma: no cover - exercised by patched test
@@ -547,10 +547,10 @@ class WebAuthnService:
             verified = False
             result: dict[str, Any] | None = None
             if webauthn is not None and hasattr(webauthn, 'verify_registration_response'):
-                result = webauthn.verify_registration_response(registration_data, challenge=request.session.get('webauthn_challenge'))  # type: ignore[misc]
+                result = webauthn.verify_registration_response(registration_data, challenge=request.session.get('webauthn_challenge'))
                 verified = bool(result and result.get('verified'))
 
-            if not verified and not result:
+            if not verified and not result and request.user.is_authenticated:
                 # Fallback: basic structure check
                 verified = WebAuthnService.verify_registration(request.user, registration_data)
 

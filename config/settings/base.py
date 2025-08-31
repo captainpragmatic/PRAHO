@@ -26,6 +26,7 @@ DJANGO_APPS: list[str] = [
 THIRD_PARTY_APPS: list[str] = [
     'rest_framework',
     'django_extensions',
+    'ipware',
 ]
 
 LOCAL_APPS: list[str] = [
@@ -50,6 +51,7 @@ INSTALLED_APPS: list[str] = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 MIDDLEWARE: list[str] = [
     'apps.common.middleware.RequestIDMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'apps.common.middleware.SecurityHeadersMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.locale.LocaleMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -336,3 +338,16 @@ COMPANY_WEBSITE = os.environ.get('COMPANY_WEBSITE', 'https://praho.ro')
 # VAT settings for Romanian compliance
 VAT_RATE = 0.19  # 19% Romanian VAT rate
 VAT_ENABLED = True
+
+# ===============================================================================
+# SECURE IP DETECTION CONFIGURATION 🔒
+# ===============================================================================
+
+# Configure trusted proxy handling for secure IP detection
+# This prevents IP spoofing attacks against rate limiting and audit logging
+# Default: trust no proxy headers (safe for development)
+IPWARE_TRUSTED_PROXY_LIST: list[str] = []
+
+# Always configure proxy SSL header (used by load balancers)
+# Only meaningful when behind a load balancer/reverse proxy
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')

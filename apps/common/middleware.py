@@ -17,6 +17,7 @@ from django.http import HttpRequest, HttpResponse
 from django.utils import timezone
 
 from apps.common.constants import HTTP_CLIENT_ERROR_THRESHOLD
+from apps.common.request_ip import get_safe_client_ip
 
 # Import for session security - handle potential circular import gracefully
 try:
@@ -62,13 +63,13 @@ class SecurityHeadersMiddleware:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         response = self.get_response(request)
 
-        # Content Security Policy - Enhanced security
+        # Content Security Policy - Enhanced security with trusted CDN support
         if not response.get('Content-Security-Policy'):
             csp = (
                 "default-src 'self'; "
-                "style-src 'self' 'unsafe-inline' fonts.googleapis.com; "  # unsafe-inline needed for Tailwind
+                "style-src 'self' 'unsafe-inline' fonts.googleapis.com cdn.tailwindcss.com; "
                 "font-src 'self' fonts.gstatic.com; "
-                "script-src 'self' 'unsafe-inline'; "  # Removed unsafe-eval for better security
+                "script-src 'self' 'unsafe-inline' unpkg.com cdn.tailwindcss.com; "  # Allow trusted CDNs
                 "img-src 'self' data: https:; "
                 "connect-src 'self'; "
                 "object-src 'none'; "  # Prevent Flash/Java execution
@@ -122,7 +123,7 @@ class AuditMiddleware:
             'method': request.method,
             'path': request.path,
             'user_id': user_id,
-            'ip_address': self._get_client_ip(request),
+            'ip_address': get_safe_client_ip(request),
             'user_agent': request.META.get('HTTP_USER_AGENT', ''),
             'timestamp': time.time(),
         }
@@ -157,11 +158,6 @@ class AuditMiddleware:
 
         logger.info('audit', extra=audit_data)
 
-    def _get_client_ip(self, request: HttpRequest) -> str:
-        """Get real client IP address"""
-        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-        ip = x_forwarded_for.split(',')[0].strip() if x_forwarded_for else request.META.get('REMOTE_ADDR', '127.0.0.1')
-        return ip
 
 
 # ===============================================================================

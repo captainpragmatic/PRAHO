@@ -17,20 +17,24 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from django.db import transaction
 from django.db.models import Q, QuerySet
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from .models import TLD, Domain, DomainOrderItem, Registrar
+
 if TYPE_CHECKING:
     from apps.customers.models import Customer
     from apps.orders.models import Order
 
-    from .models import TLD, Domain, DomainOrderItem, Registrar
-
 logger = logging.getLogger(__name__)
+
+# Domain name validation constants
+MIN_DOMAIN_NAME_LENGTH = 3  # Minimum length for domain names
+MAX_DOMAIN_NAME_LENGTH = 253  # Maximum length per RFC 1035
 
 
 # ===============================================================================
@@ -47,7 +51,6 @@ class DomainRepository:
     @staticmethod
     def get_customer_domains(customer: Customer) -> QuerySet[Domain]:
         """📋 Get all domains for a customer with optimized queries"""
-        from .models import Domain
         
         return Domain.objects.filter(
             customer=customer
@@ -58,7 +61,6 @@ class DomainRepository:
     @staticmethod
     def get_expiring_domains(days: int = 30) -> QuerySet[Domain]:
         """⚠️ Get domains expiring within specified days"""
-        from .models import Domain
         
         cutoff_date = timezone.now() + timedelta(days=days)
         return Domain.objects.filter(
@@ -70,7 +72,6 @@ class DomainRepository:
     @staticmethod
     def get_auto_renewal_candidates() -> QuerySet[Domain]:
         """🔄 Get domains eligible for auto-renewal"""
-        from .models import Domain
         
         # Domains expiring in 7 days or less, with auto_renew enabled
         renewal_cutoff = timezone.now() + timedelta(days=7)
@@ -84,7 +85,6 @@ class DomainRepository:
     @staticmethod
     def search_domains(query: str, customer: Customer | None = None) -> QuerySet[Domain]:
         """🔍 Search domains by name with optional customer filter"""
-        from .models import Domain
         
         queryset = Domain.objects.filter(
             name__icontains=query
@@ -98,7 +98,6 @@ class DomainRepository:
     @staticmethod
     def get_registrar_domains(registrar: Registrar, status: str | None = None) -> QuerySet[Domain]:
         """🏢 Get domains managed by specific registrar"""
-        from .models import Domain
         
         queryset = Domain.objects.filter(
             registrar=registrar
@@ -122,35 +121,35 @@ class DomainValidationService:
     """
 
     @staticmethod
-    def validate_domain_name(domain_name: str) -> tuple[bool, str]:
+    def validate_domain_name(domain_name: str) -> tuple[bool, str]:  # noqa: PLR0911 # Domain validation requires multiple early returns
         """🔍 Validate domain name format and characters"""
         if not domain_name:
-            return False, _("Domain name is required")
+            return False, cast(str, _("Domain name is required"))
         
         # Remove leading/trailing whitespace
         domain_name = domain_name.strip().lower()
         
         # Check length
-        if len(domain_name) < 3:
-            return False, _("Domain name too short (minimum 3 characters)")
-        if len(domain_name) > 253:
-            return False, _("Domain name too long (maximum 253 characters)")
+        if len(domain_name) < MIN_DOMAIN_NAME_LENGTH:
+            return False, cast(str, _("Domain name too short (minimum 3 characters)"))
+        if len(domain_name) > MAX_DOMAIN_NAME_LENGTH:
+            return False, cast(str, _("Domain name too long (maximum 253 characters)"))
         
         # Check for valid characters (letters, numbers, dots, hyphens)
         if not all(c.isalnum() or c in '.-' for c in domain_name):
-            return False, _("Domain name contains invalid characters")
+            return False, cast(str, _("Domain name contains invalid characters"))
         
         # Check for proper structure
         if '..' in domain_name:
-            return False, _("Domain name cannot contain consecutive dots")
+            return False, cast(str, _("Domain name cannot contain consecutive dots"))
         if domain_name.startswith('-') or domain_name.endswith('-'):
-            return False, _("Domain name cannot start or end with hyphen")
+            return False, cast(str, _("Domain name cannot start or end with hyphen"))
         if domain_name.startswith('.') or domain_name.endswith('.'):
-            return False, _("Domain name cannot start or end with dot")
+            return False, cast(str, _("Domain name cannot start or end with dot"))
         
         # Must contain at least one dot (TLD)
         if '.' not in domain_name:
-            return False, _("Domain name must include TLD (e.g., .com, .ro)")
+            return False, cast(str, _("Domain name must include TLD (e.g., .com, .ro)"))
         
         return True, ""
 
@@ -183,7 +182,6 @@ class TLDService:
     @staticmethod
     def get_available_tlds() -> QuerySet[TLD]:
         """📋 Get all active TLDs with pricing"""
-        from .models import TLD
         
         return TLD.objects.filter(
             is_active=True
@@ -194,7 +192,6 @@ class TLDService:
     @staticmethod
     def get_featured_tlds() -> QuerySet[TLD]:
         """⭐ Get featured TLDs for homepage"""
-        from .models import TLD
         
         return TLD.objects.filter(
             is_active=True,
@@ -204,7 +201,6 @@ class TLDService:
     @staticmethod
     def get_tld_pricing(tld_extension: str) -> TLD | None:
         """💰 Get TLD pricing and configuration"""
-        from .models import TLD
         
         try:
             return TLD.objects.get(
@@ -264,7 +260,6 @@ class RegistrarService:
     @staticmethod
     def get_fallback_registrars_for_tld(tld: TLD) -> QuerySet[Registrar]:
         """🔄 Get fallback registrars for TLD in priority order"""
-        from .models import Registrar
         
         return Registrar.objects.filter(
             tld_assignments__tld=tld,
@@ -295,9 +290,6 @@ class RegistrarService:
 
         Returns number of registrars updated.
         """
-        from django.utils import timezone
-        from .models import Registrar
-
         updated = 0
         for registrar in Registrar.objects.all():
             try:
@@ -339,7 +331,6 @@ class DomainLifecycleService:
         auto_renew: bool = True
     ) -> tuple[bool, Domain | str]:
         """🆕 Create new domain registration"""
-        from .models import Domain
         
         # Validate domain name
         is_valid, error_msg = DomainValidationService.validate_domain_name(domain_name)
@@ -350,16 +341,16 @@ class DomainLifecycleService:
         tld_extension = DomainValidationService.extract_tld_from_domain(domain_name)
         tld = TLDService.get_tld_pricing(tld_extension)
         if not tld:
-            return False, _(f"TLD '.{tld_extension}' is not supported")
+            return False, cast(str, _(f"TLD '.{tld_extension}' is not supported"))
         
         # Select registrar
         registrar = RegistrarService.select_best_registrar_for_tld(tld)
         if not registrar:
-            return False, _("No available registrar for this TLD")
+            return False, cast(str, _("No available registrar for this TLD"))
         
         # Check if domain already exists
         if Domain.objects.filter(name=domain_name.lower()).exists():
-            return False, _("Domain is already registered in the system")
+            return False, cast(str, _("Domain is already registered in the system"))
         
         try:
             with transaction.atomic():
@@ -383,16 +374,16 @@ class DomainLifecycleService:
                 
         except Exception as e:
             logger.error(f"🔥 [Domain] Failed to create domain registration: {e}")
-            return False, _("Failed to create domain registration")
+            return False, cast(str, _("Failed to create domain registration"))
 
     @staticmethod
     def process_domain_renewal(domain: Domain, years: int = 1) -> tuple[bool, str]:
         """🔄 Process domain renewal"""
         if domain.status != 'active':
-            return False, _("Domain must be active to renew")
+            return False, cast(str, _("Domain must be active to renew"))
         
         if not domain.expires_at:
-            return False, _("Domain expiration date is not set")
+            return False, cast(str, _("Domain expiration date is not set"))
         
         try:
             with transaction.atomic():
@@ -408,11 +399,11 @@ class DomainLifecycleService:
                     f"🔄 [Domain] Renewed domain {domain.name} for {years} years, expires: {new_expiration}"
                 )
                 
-                return True, _("Domain renewed successfully")
+                return True, cast(str, _("Domain renewed successfully"))
                 
         except Exception as e:
             logger.error(f"🔥 [Domain] Failed to renew domain {domain.name}: {e}")
-            return False, _("Failed to renew domain")
+            return False, cast(str, _("Failed to renew domain"))
 
     @staticmethod
     def update_domain_expiration(domain: Domain, new_expiration: datetime) -> bool:
@@ -443,7 +434,6 @@ class DomainNotificationService:
     @staticmethod
     def get_domains_needing_renewal_notice() -> QuerySet[Domain]:
         """📧 Get domains that need renewal notices"""
-        from .models import Domain
         
         # Domains expiring in 30, 14, 7, 3, 1 days
         notice_periods = [30, 14, 7, 3, 1]
@@ -481,7 +471,7 @@ class DomainOrderService:
     """
 
     @staticmethod
-    def create_domain_order_item(
+    def create_domain_order_item(  # noqa: PLR0913 # Domain order requires multiple configuration parameters
         order: Order,
         domain_name: str,
         action: str,
@@ -491,7 +481,6 @@ class DomainOrderService:
         epp_code: str = ""
     ) -> tuple[bool, DomainOrderItem | str]:
         """🛒 Create domain order item"""
-        from .models import DomainOrderItem
         
         # Validate domain name
         is_valid, error_msg = DomainValidationService.validate_domain_name(domain_name)
@@ -502,7 +491,7 @@ class DomainOrderService:
         tld_extension = DomainValidationService.extract_tld_from_domain(domain_name)
         tld = TLDService.get_tld_pricing(tld_extension)
         if not tld:
-            return False, _(f"TLD '.{tld_extension}' is not supported")
+            return False, cast(str, _(f"TLD '.{tld_extension}' is not supported"))
         
         # Calculate pricing based on action
         if action == 'register':
@@ -512,7 +501,7 @@ class DomainOrderService:
         elif action == 'transfer':
             unit_price_cents = tld.transfer_price_cents
         else:
-            return False, _("Invalid domain action")
+            return False, cast(str, _("Invalid domain action"))
         
         # Add WHOIS privacy cost
         if whois_privacy and tld.whois_privacy_available:
@@ -537,12 +526,11 @@ class DomainOrderService:
             
         except Exception as e:
             logger.error(f"🔥 [Domain] Failed to create order item: {e}")
-            return False, _("Failed to create domain order item")
+            return False, cast(str, _("Failed to create domain order item"))
 
     @staticmethod
     def process_domain_order_items(order: Order) -> list[Domain]:
         """⚡ Process all domain order items for paid order"""
-        from .models import DomainOrderItem
         
         processed_domains = []
         
@@ -639,7 +627,6 @@ class DomainRegistrarGateway:
         
         # TODO: Implement actual availability check
         # For now, assume domain is available if not in our database
-        from .models import Domain
         is_available = not Domain.objects.filter(name=domain_name.lower()).exists()
         
         return True, is_available

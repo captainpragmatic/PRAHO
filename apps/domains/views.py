@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import Any, cast
 
@@ -13,6 +14,7 @@ from django.core.paginator import Paginator
 from django.db.models import Q, QuerySet
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_http_methods
 
@@ -20,8 +22,8 @@ from apps.common.decorators import staff_required
 from apps.customers.models import Customer
 from apps.users.models import User
 
-from .models import TLD, Domain, DomainOrderItem, Registrar
 from .forms import RegistrarForm, TLDForm
+from .models import TLD, Domain, DomainOrderItem, Registrar
 from .services import (
     DomainLifecycleService,
     DomainRepository,
@@ -31,6 +33,10 @@ from .services import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Domain expiry warning thresholds (in days)
+DOMAIN_EXPIRY_CRITICAL_DAYS = 7  # Show danger alert when expiring within 7 days
+DOMAIN_EXPIRY_WARNING_DAYS = 30  # Show warning alert when expiring within 30 days
 
 
 # ===============================================================================
@@ -43,13 +49,13 @@ def _get_accessible_customer_ids(user: User) -> list[int]:
     
     if hasattr(accessible_customers, 'values_list'):
         return list(accessible_customers.values_list('id', flat=True))
-    elif isinstance(accessible_customers, (list, tuple)):
+    elif isinstance(accessible_customers, list | tuple):
         return [c.id for c in accessible_customers]
     else:
         return []
 
 
-def _build_domain_table_data(domains: QuerySet[Domain], user: User) -> dict[str, Any]:
+def _build_domain_table_data(domains: QuerySet[Domain] | list[Domain], user: User) -> dict[str, Any]:
     """🏗️ Build table data structure for domain templates"""
     columns = [
         {'label': 'Domain', 'width': 'w-1/3', 'sortable': True},
@@ -83,10 +89,10 @@ def _build_domain_table_data(domains: QuerySet[Domain], user: User) -> dict[str,
                 if days_left < 0:
                     expiry_variant = 'danger'
                     expiry_title = 'Domain has expired'
-                elif days_left <= 7:
+                elif days_left <= DOMAIN_EXPIRY_CRITICAL_DAYS:
                     expiry_variant = 'danger' 
                     expiry_title = f'Expires in {days_left} days'
-                elif days_left <= 30:
+                elif days_left <= DOMAIN_EXPIRY_WARNING_DAYS:
                     expiry_variant = 'warning'
                     expiry_title = f'Expires in {days_left} days'
                 else:
@@ -236,7 +242,7 @@ def domain_list(request: HttpRequest) -> HttpResponse:
     ).values_list('extension', flat=True).distinct()
     
     # Build table data
-    table_data = _build_domain_table_data(domains_page, user)
+    table_data = _build_domain_table_data(cast(list[Domain], domains_page.object_list), user)
     
     context = {
         'domains': domains_page,
@@ -272,19 +278,18 @@ def domain_detail(request: HttpRequest, domain_id: str) -> HttpResponse:
     expiry_status = 'ok'
     expiry_message = ''
     
-    if domain.expires_at:
-        if days_until_expiry is not None:
-            if days_until_expiry < 0:
-                expiry_status = 'expired'
-                expiry_message = f'Domain expired {abs(days_until_expiry)} days ago'
-            elif days_until_expiry <= 7:
-                expiry_status = 'critical'
-                expiry_message = f'Domain expires in {days_until_expiry} days'
-            elif days_until_expiry <= 30:
-                expiry_status = 'warning'
-                expiry_message = f'Domain expires in {days_until_expiry} days'
-            else:
-                expiry_message = f'Domain expires in {days_until_expiry} days'
+    if domain.expires_at and days_until_expiry is not None:
+        if days_until_expiry < 0:
+            expiry_status = 'expired'
+            expiry_message = f'Domain expired {abs(days_until_expiry)} days ago'
+        elif days_until_expiry <= DOMAIN_EXPIRY_CRITICAL_DAYS:
+            expiry_status = 'critical'
+            expiry_message = f'Domain expires in {days_until_expiry} days'
+        elif days_until_expiry <= DOMAIN_EXPIRY_WARNING_DAYS:
+            expiry_status = 'warning'
+            expiry_message = f'Domain expires in {days_until_expiry} days'
+        else:
+            expiry_message = f'Domain expires in {days_until_expiry} days'
     
     # Check user permissions for management actions
     can_manage = user.is_staff or getattr(user, 'staff_role', None)
@@ -314,7 +319,7 @@ def domain_detail(request: HttpRequest, domain_id: str) -> HttpResponse:
 
 
 @login_required
-def domain_register(request: HttpRequest) -> HttpResponse:
+def domain_register(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912 # Domain registration flow requires multiple validation branches
     """🆕 Domain registration form and availability check"""
     # Type guard: @login_required ensures authenticated user
     user = cast(User, request.user)
@@ -323,7 +328,7 @@ def domain_register(request: HttpRequest) -> HttpResponse:
     accessible_customers = user.get_accessible_customers()
     if hasattr(accessible_customers, 'all'):
         customers = accessible_customers.all()
-    elif isinstance(accessible_customers, (list, tuple)):
+    elif isinstance(accessible_customers, list | tuple):
         customers = Customer.objects.filter(id__in=[c.id for c in accessible_customers])
     else:
         customers = Customer.objects.none()
@@ -363,8 +368,11 @@ def domain_register(request: HttpRequest) -> HttpResponse:
                     
                     if success:
                         messages.success(request, _(f"✅ Domain {domain_name} registered successfully!"))
-                        return redirect('domains:detail', domain_id=result.id)
+                        # result is a Domain object when success is True
+                        domain: Domain = result
+                        return redirect('domains:detail', domain_id=domain.id)
                     else:
+                        # result is a string error message when success is False
                         messages.error(request, _(f"❌ Registration failed: {result}"))
             
             except Customer.DoesNotExist:
@@ -513,7 +521,7 @@ def domain_renew(request: HttpRequest, domain_id: str) -> HttpResponse:
 def tld_list(request: HttpRequest) -> HttpResponse:
     """🌐 Staff view - Manage TLDs and pricing"""
     # Type guard: @staff_required ensures authenticated staff user
-    user = cast(User, request.user)
+    cast(User, request.user)
     
     tlds = TLD.objects.all().prefetch_related(
         'registrar_assignments__registrar'
@@ -595,7 +603,7 @@ def tld_edit(request: HttpRequest, pk: int) -> HttpResponse:
 def registrar_list(request: HttpRequest) -> HttpResponse:
     """🏢 Staff view - Manage registrars and API configurations"""
     # Type guard: @staff_required ensures authenticated staff user
-    user = cast(User, request.user)
+    cast(User, request.user)
     
     registrars = Registrar.objects.all().prefetch_related(
         'tld_assignments__tld'
@@ -661,11 +669,8 @@ def registrar_sync_all(request: HttpRequest) -> HttpResponse:
     messages.success(request, _(f"✅ Synced {count} registrar(s)"))
     # Support HTMX redirects if applicable
     response = redirect('domains:registrar_list')
-    try:
-        from django.urls import reverse
+    with contextlib.suppress(Exception):
         response["HX-Redirect"] = reverse('domains:registrar_list')
-    except Exception:
-        pass
     return response
 
 
@@ -747,7 +752,7 @@ def domain_admin_list(request: HttpRequest) -> HttpResponse:
     registrars = Registrar.objects.filter(status='active').order_by('display_name')
     
     # Build table data
-    table_data = _build_domain_table_data(domains_page, user)
+    table_data = _build_domain_table_data(cast(list[Domain], domains_page.object_list), user)
     
     context = {
         'domains': domains_page,

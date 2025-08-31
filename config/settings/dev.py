@@ -167,3 +167,19 @@ ROMANIAN_BUSINESS_CONTEXT.update({  # noqa: F405
     'company_cui': 'RO99999999',
     'email': 'dev@pragmatichost.com',
 })
+
+# ===============================================================================
+# SECURE IP DETECTION - DEVELOPMENT CONFIGURATION 🔒
+# ===============================================================================
+
+# Development: Don't trust any proxy headers - use REMOTE_ADDR only
+# This prevents IP spoofing during local development
+IPWARE_TRUSTED_PROXY_LIST = []
+
+# CSRF trusted origins for development
+CSRF_TRUSTED_ORIGINS = [
+    'http://localhost:8000',
+    'http://127.0.0.1:8000',
+    'http://localhost:8001',
+    'http://127.0.0.1:8001',
+]

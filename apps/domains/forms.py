@@ -1,12 +1,14 @@
+from typing import ClassVar
+
 from django import forms
 
-from .models import Registrar, TLD
+from .models import TLD, Registrar
 
 
 class RegistrarForm(forms.ModelForm):
     class Meta:
         model = Registrar
-        fields = [
+        fields: ClassVar = [
             "display_name",
             "name",
             "website_url",
@@ -21,7 +23,7 @@ class RegistrarForm(forms.ModelForm):
             "currency",
             "monthly_fee_cents",
         ]
-        widgets = {
+        widgets: ClassVar = {
             "default_nameservers": forms.Textarea(attrs={
                 "rows": 3,
                 "placeholder": '["ns1.example.com", "ns2.example.com"]',
@@ -32,7 +34,7 @@ class RegistrarForm(forms.ModelForm):
 class TLDForm(forms.ModelForm):
     class Meta:
         model = TLD
-        fields = [
+        fields: ClassVar = [
             # Core
             "extension",
             "description",
@@ -55,6 +57,6 @@ class TLDForm(forms.ModelForm):
             "is_active",
             "is_featured",
         ]
-        widgets = {
+        widgets: ClassVar = {
             "special_requirements": forms.Textarea(attrs={"rows": 3}),
         }

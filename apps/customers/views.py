@@ -16,7 +16,7 @@ from apps.common.constants import SEARCH_QUERY_MIN_LENGTH
 from apps.common.decorators import staff_required
 from apps.common.types import Err
 from apps.users.models import User
-from apps.users.services import CustomerUserService
+from apps.users.services import CustomerUserService, UserCreationRequest, UserLinkingRequest
 
 from .forms import (
     CustomerAddressForm,
@@ -120,16 +120,17 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
 def _handle_user_creation_for_customer(request: HttpRequest, customer: Customer, form_data: dict, result: dict) -> None:
     """Handle user creation for a new customer."""
     created_by_user = cast(User, request.user)  # Safe in authenticated contexts
-    user_result = CustomerUserService.create_user_for_customer(
+    user_creation_request = UserCreationRequest(
         customer=customer,
         first_name=form_data.get('first_name', ''),
         last_name=form_data.get('last_name', ''),
         send_welcome=result['send_welcome_email'],
         created_by=created_by_user
     )
+    user_result = CustomerUserService.create_user_for_customer(user_creation_request)
 
     if user_result.is_ok():
-        user, email_sent = user_result.value
+        user, email_sent = user_result.unwrap()
         _show_user_creation_success_message(request, customer, user, email_sent)
     else:
         messages.success(
@@ -138,7 +139,7 @@ def _handle_user_creation_for_customer(request: HttpRequest, customer: Customer,
         )
         messages.error(
             request,
-            _('❌ Failed to create user account: {error}').format(error=user_result.error)
+            _('❌ Failed to create user account: {error}').format(error=user_result.unwrap_err())
         )
 
 
@@ -149,13 +150,14 @@ def _handle_user_linking_for_customer(request: HttpRequest, customer: Customer, 
         return
         
     created_by_user = cast(User, request.user)  # Safe in authenticated contexts
-    link_result = CustomerUserService.link_existing_user(
+    user_linking_request = UserLinkingRequest(
         user=existing_user,
         customer=customer,
         role='owner',
         is_primary=True,
         created_by=created_by_user
     )
+    link_result = CustomerUserService.link_existing_user(user_linking_request)
 
     if link_result.is_ok():
         messages.success(
@@ -172,7 +174,7 @@ def _handle_user_linking_for_customer(request: HttpRequest, customer: Customer, 
         )
         messages.error(
             request,
-            _('❌ Failed to link user: {error}').format(error=link_result.error)
+            _('❌ Failed to link user: {error}').format(error=link_result.unwrap_err())
         )
 
 
@@ -516,13 +518,14 @@ def _handle_user_creation_action(request: HttpRequest, customer: Customer, assig
     """Handle the 'create' action for user assignment."""
     send_welcome = bool(assignment_data.get('send_welcome_email', True))
     created_by_user = cast(User, request.user)  # Safe in authenticated contexts
-    user_result = CustomerUserService.create_user_for_customer(
+    user_creation_request = UserCreationRequest(
         customer=customer,
         first_name=assignment_data['first_name'],
         last_name=assignment_data['last_name'],
         send_welcome=send_welcome,
         created_by=created_by_user
     )
+    user_result = CustomerUserService.create_user_for_customer(user_creation_request)
 
     if user_result.is_ok():
         user, email_sent = user_result.unwrap()
@@ -573,13 +576,14 @@ def _handle_user_linking_action(request: HttpRequest, customer: Customer, assign
         return
 
     created_by_user = cast(User, request.user)  # Safe in authenticated contexts
-    link_result = CustomerUserService.link_existing_user(
+    user_linking_request = UserLinkingRequest(
         user=existing_user,
         customer=customer,
         role=role,
         is_primary=False,  # Existing customers might already have primary users
         created_by=created_by_user
     )
+    link_result = CustomerUserService.link_existing_user(user_linking_request)
 
     if link_result.is_ok():
         messages.success(

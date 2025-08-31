@@ -29,6 +29,7 @@ from django.utils.translation import gettext as _
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_POST
 
+from apps.common.request_ip import get_safe_client_ip
 from apps.common.types import Err, Ok
 
 from .models import (
@@ -79,12 +80,6 @@ def staff_required(view_func: Any) -> Any:
     return _wrapped_view
 
 
-def _get_client_ip(request: HttpRequest) -> str | None:
-    """Get client IP address"""
-    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-    if x_forwarded_for:
-        return x_forwarded_for.split(',')[0]
-    return request.META.get('REMOTE_ADDR')
 
 
 def _parse_date_filters(filters: dict) -> dict:
@@ -181,7 +176,7 @@ def request_data_export(request: HttpRequest) -> HttpResponse:
         logger.info("🔍 [GDPR Export] Creating export request...")
         result = gdpr_export_service.create_data_export_request(
             user=user,
-            request_ip=_get_client_ip(request),
+            request_ip=get_safe_client_ip(request),
             export_scope=export_scope
         )
         logger.info(f"🔍 [GDPR Export] Export request creation result type: {type(result)}")
@@ -243,7 +238,7 @@ def request_data_export(request: HttpRequest) -> HttpResponse:
                                             'immediate_download': True
                                         },
                                         metadata={
-                                            'ip_address': _get_client_ip(request),
+                                            'ip_address': get_safe_client_ip(request),
                                             'user_agent': request.META.get('HTTP_USER_AGENT', 'Unknown')
                                         }
                                     )
@@ -324,7 +319,7 @@ def download_data_export(request: HttpRequest, export_id: uuid.UUID) -> HttpResp
                 'download_count': export_request.download_count,
                 'file_size': export_request.file_size
             },
-            metadata={'ip_address': _get_client_ip(request)}
+            metadata={'ip_address': get_safe_client_ip(request)}
         )
 
         # Serve file
@@ -367,7 +362,7 @@ def request_data_deletion(request: HttpRequest) -> HttpResponse:
         result = gdpr_deletion_service.create_deletion_request(
             user=user,
             deletion_type=deletion_type,
-            request_ip=_get_client_ip(request),
+            request_ip=get_safe_client_ip(request),
             reason=reason
         )
 
@@ -433,7 +428,7 @@ def withdraw_consent(request: HttpRequest) -> HttpResponse:
         result = gdpr_consent_service.withdraw_consent(
             user=user,
             consent_types=consent_types,
-            request_ip=_get_client_ip(request)
+            request_ip=get_safe_client_ip(request)
         )
 
         match result:
@@ -527,7 +522,7 @@ def update_consent(request: HttpRequest) -> HttpResponse:
                     'new_values': new_values,
                     'update_date': timezone.now().isoformat()
                 },
-                metadata={'ip_address': _get_client_ip(request)}
+                metadata={'ip_address': get_safe_client_ip(request)}
             )
             AuditService.log_compliance_event(compliance_request)
             logger.info("✅ [GDPR Consent] Compliance event logged")
@@ -563,7 +558,7 @@ def audit_management_dashboard(request: HttpRequest) -> HttpResponse:
     """Enterprise audit management dashboard with real-time metrics and alerts."""
     
     # Log staff access
-    logger.info(f"🔒 [Audit Management] Dashboard accessed by {getattr(request.user, 'email', 'anonymous')} from {_get_client_ip(request)}")
+    logger.info(f"🔒 [Audit Management] Dashboard accessed by {getattr(request.user, 'email', 'anonymous')} from {get_safe_client_ip(request)}")
     
     # Get dashboard metrics
     now = timezone.now()
@@ -742,7 +737,7 @@ def export_logs(request: HttpRequest) -> HttpResponse:
         event_type='export',
         user=request.user,
         description=f'Audit logs exported in {export_format} format ({queryset.count()} records)',
-        ip_address=_get_client_ip(request),
+        ip_address=get_safe_client_ip(request),
         metadata={'export_format': export_format, 'record_count': queryset.count()}
     )
     
@@ -870,7 +865,7 @@ def gdpr_management_dashboard(request: HttpRequest) -> HttpResponse:
     """Staff-only GDPR management dashboard for processing all user requests"""
     
     # Log staff access for security audit
-    logger.info(f"🔒 [Staff GDPR] Dashboard accessed by {getattr(request.user, 'email', 'anonymous')} from {_get_client_ip(request)}")
+    logger.info(f"🔒 [Staff GDPR] Dashboard accessed by {getattr(request.user, 'email', 'anonymous')} from {get_safe_client_ip(request)}")
     
     # Get summary statistics
     export_stats = {
@@ -968,7 +963,7 @@ def process_export_request(request: HttpRequest, export_id: uuid.UUID) -> HttpRe
                         user=request.user,
                         content_object=export_request,
                         description=f'Staff processed GDPR export request for {export_request.requested_by.email}',
-                        ip_address=_get_client_ip(request)
+                        ip_address=get_safe_client_ip(request)
                     )
                     messages.success(request, _('Export request processed successfully.'))
                 case Err(error_msg):
@@ -989,7 +984,7 @@ def process_export_request(request: HttpRequest, export_id: uuid.UUID) -> HttpRe
                     user=request.user,
                     content_object=export_request,
                     description=f'Staff marked GDPR export as failed for {export_request.requested_by.email}: {error_message}',
-                    ip_address=_get_client_ip(request)
+                    ip_address=get_safe_client_ip(request)
                 )
                 messages.warning(request, _('Export request marked as failed.'))
         
@@ -1005,7 +1000,7 @@ def process_export_request(request: HttpRequest, export_id: uuid.UUID) -> HttpRe
                     user=request.user,
                     content_object=export_request,
                     description=f'Staff deleted expired GDPR export for {export_request.requested_by.email}',
-                    ip_address=_get_client_ip(request)
+                    ip_address=get_safe_client_ip(request)
                 )
                 
                 export_request.delete()
@@ -1065,7 +1060,7 @@ def download_user_export(request: HttpRequest, export_id: uuid.UUID) -> HttpResp
             user=request.user,
             content_object=export_request,
             description=f'Staff downloaded GDPR export for compliance review (user: {export_request.requested_by.email})',
-            ip_address=_get_client_ip(request)
+            ip_address=get_safe_client_ip(request)
         )
         
         # Serve file
@@ -1464,7 +1459,7 @@ def update_alert_status(request: HttpRequest, alert_id: uuid.UUID) -> HttpRespon
             user=request.user,
             content_object=alert,
             description=f'Alert status updated: {action}',
-            ip_address=_get_client_ip(request)
+            ip_address=get_safe_client_ip(request)
         )
         
     except Exception as e:

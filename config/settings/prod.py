@@ -231,6 +231,37 @@ RATELIMIT_ENABLE = True
 RATELIMIT_USE_CACHE = 'default'
 
 # ===============================================================================
+# SECURE IP DETECTION - PRODUCTION CONFIGURATION 🔒
+# ===============================================================================
+
+# Production: Configure trusted proxy CIDRs for your load balancer/reverse proxy
+# These should be the EXACT IP ranges of your production load balancer
+# Example: If using AWS ALB, use ALB subnets
+# Example: If using Cloudflare, use CF edge ranges
+# Replace empty list with actual production proxy/LB CIDR blocks
+IPWARE_TRUSTED_PROXY_LIST = [
+    # Production proxy/LB IP ranges will be configured here
+    # Common patterns:
+    # - AWS ALB: Private subnet ranges (10.0.0.0/8, 172.16.0.0/12)  
+    # - Cloudflare: CF edge IP ranges
+    # - Internal LB: Private network ranges (192.168.0.0/16)
+]
+
+# Production security settings for HTTPS
+DEBUG = False
+ALLOWED_HOSTS = ['app.pragmatichost.com']
+CSRF_TRUSTED_ORIGINS = ['https://app.pragmatichost.com']
+
+# HTTPS security (enable after confirming LB/proxy setup)
+# Enable these after verifying X-Forwarded-Proto is correctly set by load balancer
+# Production HTTPS enforcement will be configured here:
+# - SESSION_COOKIE_SECURE = True
+# - CSRF_COOKIE_SECURE = True  
+# - SECURE_HSTS_SECONDS = 31536000  (1 year)
+# - SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+# - SECURE_SSL_REDIRECT = True
+
+# ===============================================================================
 # MONITORING & HEALTH CHECKS
 # ===============================================================================
 
