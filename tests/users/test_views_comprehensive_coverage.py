@@ -14,15 +14,35 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pyotp
 from django.contrib.auth import get_user_model
+
+from apps.common.request_ip import get_safe_client_ip
 from django.contrib.auth.tokens import default_token_generator
+
+from apps.common.request_ip import get_safe_client_ip
 from django.contrib.messages import get_messages
+
+from apps.common.request_ip import get_safe_client_ip
 from django.core.cache import cache
+
+from apps.common.request_ip import get_safe_client_ip
 from django.core.exceptions import ValidationError
+
+from apps.common.request_ip import get_safe_client_ip
 from django.test import Client, RequestFactory, TestCase
+
+from apps.common.request_ip import get_safe_client_ip
 from django.urls import reverse
+
+from apps.common.request_ip import get_safe_client_ip
 from django.utils import timezone
+
+from apps.common.request_ip import get_safe_client_ip
 from django.utils.encoding import force_bytes
+
+from apps.common.request_ip import get_safe_client_ip
 from django.utils.http import urlsafe_base64_encode
+
+from apps.common.request_ip import get_safe_client_ip
 
 from apps.customers.models import Customer
 from apps.users.forms import (
@@ -35,7 +55,7 @@ from apps.users.forms import (
 from apps.users.models import CustomerMembership, UserLoginLog, UserProfile
 from apps.users.views import (
     TWO_FACTOR_STEPS,
-    _get_client_ip,
+    get_safe_client_ip,
     _log_user_login,
 )
 
@@ -1166,22 +1186,23 @@ class HelperFunctionTests(TestCase):
         self.factory = RequestFactory()
         self.user = User.objects.create_user('test@example.com', 'pass123')
 
-    def test_get_client_ip_with_forwarded_header(self) -> None:
-        """Test _get_client_ip with X-Forwarded-For header"""
-        request = self.factory.get('/', HTTP_X_FORWARDED_FOR='192.168.1.1,10.0.0.1')
-        ip = _get_client_ip(request)
-        self.assertEqual(ip, '192.168.1.1')
-
-    def test_get_client_ip_with_remote_addr(self) -> None:
-        """Test _get_client_ip with REMOTE_ADDR"""
-        request = self.factory.get('/', REMOTE_ADDR='127.0.0.1')
-        ip = _get_client_ip(request)
+    def testget_safe_client_ip_with_forwarded_header(self) -> None:
+        """Test get_safe_client_ip with X-Forwarded-For header"""
+        request = self.factory.get('/', HTTP_X_FORWARDED_FOR='192.168.1.1,10.0.0.1', REMOTE_ADDR='127.0.0.1')
+        ip = get_safe_client_ip(request)
+        # In development mode, X-Forwarded-For is ignored for security
         self.assertEqual(ip, '127.0.0.1')
 
-    def test_get_client_ip_no_headers(self) -> None:
-        """Test _get_client_ip with no IP headers"""
+    def testget_safe_client_ip_with_remote_addr(self) -> None:
+        """Test get_safe_client_ip with REMOTE_ADDR"""
+        request = self.factory.get('/', REMOTE_ADDR='127.0.0.1')
+        ip = get_safe_client_ip(request)
+        self.assertEqual(ip, '127.0.0.1')
+
+    def testget_safe_client_ip_no_headers(self) -> None:
+        """Test get_safe_client_ip with no IP headers"""
         request = self.factory.get('/')
-        ip = _get_client_ip(request)
+        ip = get_safe_client_ip(request)
         # RequestFactory sets REMOTE_ADDR to '127.0.0.1' by default
         self.assertEqual(ip, '127.0.0.1')
 

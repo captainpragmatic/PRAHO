@@ -19,10 +19,12 @@ from django.contrib.messages import get_messages
 from django.core import mail
 from django.core.exceptions import ValidationError
 from django.test import Client, RequestFactory, TestCase, override_settings
+
 from django.urls import reverse
 from django.utils import timezone
 from django_ratelimit.exceptions import Ratelimited  # type: ignore[import-untyped]
 
+from apps.common.request_ip import get_safe_client_ip
 from apps.customers.models import Customer
 from apps.users.forms import (
     CustomerOnboardingRegistrationForm,
@@ -36,7 +38,7 @@ from apps.users.models import (
     UserProfile,
 )
 from apps.users.views import (
-    _get_client_ip,
+    get_safe_client_ip,
     _log_user_login,
 )
 
@@ -245,7 +247,7 @@ class LoginViewTest(BaseViewTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn('HX-Redirect', response)
         
-    @patch('apps.users.views._get_client_ip')
+    @patch('apps.users.views.get_safe_client_ip')
     def test_login_ip_tracking(self, mock_get_ip: Mock) -> None:
         """Test IP address tracking during login"""
         mock_get_ip.return_value = '192.168.1.1'
@@ -462,8 +464,11 @@ class PasswordResetViewsTest(BaseViewTestCase):
     def test_password_reset_confirm_post_valid(self) -> None:
         """Test password reset confirm with valid data"""
         from django.contrib.auth.tokens import default_token_generator
+
         from django.utils.encoding import force_bytes
+
         from django.utils.http import urlsafe_base64_encode
+
         
         uidb64 = urlsafe_base64_encode(force_bytes(self.user.pk))
         token = default_token_generator.make_token(self.user)
@@ -812,35 +817,39 @@ class APIEndpointsTest(BaseViewTestCase):
 class UtilityFunctionsTest(BaseViewTestCase):
     """Test utility functions"""
     
-    def test_get_client_ip_x_forwarded_for(self) -> None:
-        """Test _get_client_ip with X-Forwarded-For header"""
+    def testget_safe_client_ip_x_forwarded_for(self) -> None:
+        """Test get_safe_client_ip with X-Forwarded-For header"""
         request = self.factory.get('/')
         request.META['HTTP_X_FORWARDED_FOR'] = '192.168.1.1, 10.0.0.1'
+        request.META['REMOTE_ADDR'] = '127.0.0.1'
         
-        ip = _get_client_ip(request)
-        self.assertEqual(ip, '192.168.1.1')
+        ip = get_safe_client_ip(request)
+        # In development mode, X-Forwarded-For is ignored for security
+        self.assertEqual(ip, '127.0.0.1')
         
-    def test_get_client_ip_x_real_ip(self) -> None:
-        """Test _get_client_ip with X-Real-IP header"""
+    def testget_safe_client_ip_x_real_ip(self) -> None:
+        """Test get_safe_client_ip with X-Real-IP header"""
         request = self.factory.get('/')
         request.META['HTTP_X_REAL_IP'] = '192.168.1.1'
+        request.META['REMOTE_ADDR'] = '127.0.0.1'
         
-        ip = _get_client_ip(request)
-        self.assertEqual(ip, '192.168.1.1')
+        ip = get_safe_client_ip(request)
+        # In development mode, X-Real-IP is ignored for security
+        self.assertEqual(ip, '127.0.0.1')
         
-    def test_get_client_ip_remote_addr(self) -> None:
-        """Test _get_client_ip with REMOTE_ADDR"""
+    def testget_safe_client_ip_remote_addr(self) -> None:
+        """Test get_safe_client_ip with REMOTE_ADDR"""
         request = self.factory.get('/')
         request.META['REMOTE_ADDR'] = '192.168.1.1'
         
-        ip = _get_client_ip(request)
+        ip = get_safe_client_ip(request)
         self.assertEqual(ip, '192.168.1.1')
         
-    def test_get_client_ip_unknown(self) -> None:
-        """Test _get_client_ip when IP cannot be determined"""
+    def testget_safe_client_ip_unknown(self) -> None:
+        """Test get_safe_client_ip when IP cannot be determined"""
         request = self.factory.get('/')
         
-        ip = _get_client_ip(request)
+        ip = get_safe_client_ip(request)
         self.assertEqual(ip, '127.0.0.1')
         
     @patch('apps.users.views.UserLoginLog.objects.create')
@@ -993,8 +1002,11 @@ class IntegrationTest(BaseViewTestCase):
         
         # Step 2: Use reset link (simulate email link)
         from django.contrib.auth.tokens import default_token_generator
+
         from django.utils.encoding import force_bytes
+
         from django.utils.http import urlsafe_base64_encode
+
         
         uidb64 = urlsafe_base64_encode(force_bytes(self.user.pk))
         token = default_token_generator.make_token(self.user)

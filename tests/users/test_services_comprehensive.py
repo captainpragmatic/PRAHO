@@ -19,6 +19,7 @@ from django.http import HttpRequest
 from django.test import Client, RequestFactory, TestCase, override_settings
 from django.utils import timezone
 
+from apps.common.request_ip import get_safe_client_ip
 from apps.common.types import (
     Err,
     Ok,
@@ -583,29 +584,29 @@ class SessionSecurityServiceTest(BaseServiceTestCase):
             
             mock_clear.assert_called_once_with(request)
     
-    def test_get_client_ip_x_forwarded_for(self) -> None:
+    def testget_safe_client_ip_x_forwarded_for(self) -> None:
         """Test client IP extraction from X-Forwarded-For"""
         request = self.create_http_request()
         request.META['HTTP_X_FORWARDED_FOR'] = '192.168.1.1, 10.0.0.1'
+        request.META['REMOTE_ADDR'] = '127.0.0.1'
         
-        with patch('apps.users.services.SessionSecurityService._get_client_ip') as mock_ip:
-            mock_ip.return_value = '192.168.1.1'
-            
-            ip = SessionSecurityService._get_client_ip(request)
-            
-            self.assertEqual(ip, '192.168.1.1')
+        # SessionSecurityService uses get_safe_client_ip from apps.common.request_ip
+        from apps.common.request_ip import get_safe_client_ip
+        ip = get_safe_client_ip(request)
+        
+        # In development mode, X-Forwarded-For is ignored for security
+        self.assertEqual(ip, '127.0.0.1')
     
-    def test_get_client_ip_remote_addr(self) -> None:
+    def testget_safe_client_ip_remote_addr(self) -> None:
         """Test client IP extraction from REMOTE_ADDR"""
         request = self.create_http_request()
         request.META['REMOTE_ADDR'] = '192.168.1.1'
         
-        with patch('apps.users.services.SessionSecurityService._get_client_ip') as mock_ip:
-            mock_ip.return_value = '192.168.1.1'
-            
-            ip = SessionSecurityService._get_client_ip(request)
-            
-            self.assertEqual(ip, '192.168.1.1')
+        # SessionSecurityService uses get_safe_client_ip from apps.common.request_ip
+        from apps.common.request_ip import get_safe_client_ip
+        ip = get_safe_client_ip(request)
+        
+        self.assertEqual(ip, '192.168.1.1')
     
     def test_get_timeout_policy_name(self) -> None:
         """Test timeout policy name generation"""

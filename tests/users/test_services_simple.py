@@ -4,6 +4,8 @@ Simple working test for users services
 
 from django.test import RequestFactory, TestCase
 
+from apps.common.request_ip import get_safe_client_ip
+
 from apps.users.models import User
 from apps.users.services import SessionSecurityService
 
@@ -38,8 +40,9 @@ class SimpleServicesTest(TestCase):
         
         # Test that methods can be called without errors
         try:
-            # Test get_client_ip method
-            ip = SessionSecurityService._get_client_ip(request)
+            # Test get_client_ip method (using the actual function from common module)
+            from apps.common.request_ip import get_safe_client_ip
+            ip = get_safe_client_ip(request)
             self.assertIsNotNone(ip)
             
             # Test get_appropriate_timeout

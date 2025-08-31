@@ -14,6 +14,7 @@ from django.test import Client, RequestFactory, TestCase
 from django.utils import timezone
 
 from apps.common.middleware import SessionSecurityMiddleware
+from apps.common.request_ip import get_safe_client_ip
 from apps.users.services import SessionSecurityService
 
 User = get_user_model()
@@ -138,7 +139,7 @@ class SessionSecurityServiceTestCase(TestCase):
         request = self._get_authenticated_request()
 
         # Simulate multiple IP addresses in quick succession
-        with patch.object(SessionSecurityService, '_get_client_ip') as mock_ip:
+        with patch('apps.common.request_ip.get_safe_client_ip') as mock_ip:
             # First IP
             mock_ip.return_value = '192.168.1.1'
             is_suspicious = SessionSecurityService.detect_suspicious_activity(request)
@@ -250,20 +251,26 @@ class SessionSecurityServiceTestCase(TestCase):
         self.assertEqual(activity_data['request_path'], '/users/profile/')
         self.assertEqual(activity_data['extra_data'], 'test')
 
-    def test_get_client_ip_x_forwarded_for(self):
+    def testget_safe_client_ip_x_forwarded_for(self):
         """Test IP extraction from X-Forwarded-For header"""
         request = self.factory.get('/')
         request.META['HTTP_X_FORWARDED_FOR'] = '192.168.1.1, 10.0.0.1'
+        request.META['REMOTE_ADDR'] = '127.0.0.1'
 
-        ip = SessionSecurityService._get_client_ip(request)
-        self.assertEqual(ip, '192.168.1.1')
+        # SessionSecurityService uses get_safe_client_ip from apps.common.request_ip
+        from apps.common.request_ip import get_safe_client_ip
+        ip = get_safe_client_ip(request)
+        # In development mode, X-Forwarded-For is ignored for security
+        self.assertEqual(ip, '127.0.0.1')
 
-    def test_get_client_ip_remote_addr(self):
+    def testget_safe_client_ip_remote_addr(self):
         """Test IP extraction from REMOTE_ADDR"""
         request = self.factory.get('/')
         request.META['REMOTE_ADDR'] = '192.168.1.1'
 
-        ip = SessionSecurityService._get_client_ip(request)
+        # SessionSecurityService uses get_safe_client_ip from apps.common.request_ip
+        from apps.common.request_ip import get_safe_client_ip
+        ip = get_safe_client_ip(request)
         self.assertEqual(ip, '192.168.1.1')
 
     def test_invalidate_other_user_sessions(self):

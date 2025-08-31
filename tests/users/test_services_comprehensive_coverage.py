@@ -21,12 +21,14 @@ from django.db import IntegrityError
 from django.test import RequestFactory, TestCase
 from django.utils import timezone
 
+from apps.common.request_ip import get_safe_client_ip
 from apps.common.constants import (
     MAX_CUSTOMER_LOOKUPS_PER_HOUR,
     MAX_JOIN_NOTIFICATIONS_PER_HOUR,
     MIN_RESPONSE_TIME_SECONDS,
 )
 from apps.common.types import Err, Ok
+from apps.common.request_ip import get_safe_client_ip
 from apps.customers.models import Customer, CustomerTaxProfile
 from apps.users.models import CustomerMembership
 from apps.users.services import (
@@ -1295,28 +1297,39 @@ class SessionSecurityServiceTests(TestCase):
             self.assertNotIn(key, request.session)
         self.assertIn('user_preference', request.session)
 
-    def test_get_client_ip_forwarded(self) -> None:
+    def testget_safe_client_ip_forwarded(self) -> None:
         """Test getting client IP with forwarded header"""
         request = self.factory.get('/')
         request.META['HTTP_X_FORWARDED_FOR'] = '192.168.1.1, 10.0.0.1'
+        request.META['REMOTE_ADDR'] = '127.0.0.1'
         
-        ip = SessionSecurityService._get_client_ip(request)
-        self.assertEqual(ip, '192.168.1.1')
+        # SessionSecurityService uses get_safe_client_ip from apps.common.request_ip
+        from apps.common.request_ip import get_safe_client_ip
+        ip = get_safe_client_ip(request)
+        
+        # In development mode, X-Forwarded-For is ignored for security
+        self.assertEqual(ip, '127.0.0.1')
 
-    def test_get_client_ip_remote_addr(self) -> None:
+    def testget_safe_client_ip_remote_addr(self) -> None:
         """Test getting client IP from remote addr"""
         request = self.factory.get('/')
         request.META['REMOTE_ADDR'] = '127.0.0.1'
         
-        ip = SessionSecurityService._get_client_ip(request)
+        # SessionSecurityService uses get_safe_client_ip from apps.common.request_ip
+        from apps.common.request_ip import get_safe_client_ip
+        ip = get_safe_client_ip(request)
+        
         self.assertEqual(ip, '127.0.0.1')
 
-    def test_get_client_ip_no_headers(self) -> None:
+    def testget_safe_client_ip_no_headers(self) -> None:
         """Test getting client IP with no headers"""
         request = self.factory.get('/')
         # RequestFactory automatically sets REMOTE_ADDR to 127.0.0.1
         
-        ip = SessionSecurityService._get_client_ip(request)
+        # SessionSecurityService uses get_safe_client_ip from apps.common.request_ip
+        from apps.common.request_ip import get_safe_client_ip
+        ip = get_safe_client_ip(request)
+        
         self.assertEqual(ip, '127.0.0.1')
 
     def test_get_timeout_policy_name(self) -> None:
