@@ -12,8 +12,14 @@ from __future__ import annotations
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
+
+from apps.common.request_ip import get_safe_client_ip
 from django.core.exceptions import ValidationError
+
+from apps.common.request_ip import get_safe_client_ip
 from django.test import TestCase
+
+from apps.common.request_ip import get_safe_client_ip
 
 from apps.customers.models import Customer
 from apps.users.forms import (

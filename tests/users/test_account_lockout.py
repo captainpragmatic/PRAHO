@@ -5,10 +5,20 @@ Tests progressive lockout delays, security measures, and integration with existi
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
+
+from apps.common.request_ip import get_safe_client_ip
 from django.core.cache import cache
+
+from apps.common.request_ip import get_safe_client_ip
 from django.test import Client, TestCase
+
+from apps.common.request_ip import get_safe_client_ip
 from django.urls import reverse
+
+from apps.common.request_ip import get_safe_client_ip
 from django.utils import timezone
+
+from apps.common.request_ip import get_safe_client_ip
 
 from apps.users.models import UserLoginLog
 

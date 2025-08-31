@@ -16,7 +16,7 @@ from rq import Connection, Queue, Worker
 from rq.job import Job
 
 # Setup Django environment
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.dev')
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.dev")
 django.setup()
 
 from django.conf import settings  # noqa: E402
@@ -24,11 +24,8 @@ from django.conf import settings  # noqa: E402
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('logs/worker.log'),
-        logging.StreamHandler(sys.stdout)
-    ]
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler("logs/worker.log"), logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
 
@@ -36,7 +33,7 @@ logger = logging.getLogger(__name__)
 class PragmaticHostWorker:
     """
     Romanian hosting provider background worker
-    
+
     Handles:
     - Invoice generation and email sending
     - Server provisioning automation
@@ -49,22 +46,21 @@ class PragmaticHostWorker:
     def __init__(self, queues: list[str] | None = None):
         """
         Initialize worker with Redis connection and queues
-        
+
         Args:
             queues: List of queue names to process (defaults to all)
         """
         self.redis_conn = Redis.from_url(
-            settings.REDIS_URL if hasattr(settings, 'REDIS_URL')
-            else 'redis://localhost:6379/0'
+            settings.REDIS_URL if hasattr(settings, "REDIS_URL") else "redis://localhost:6379/0"
         )
 
         # Default queue configuration for Romanian hosting operations
         self.default_queues = [
-            'high',      # Critical: payment processing, security alerts
-            'default',   # Standard: invoice generation, provisioning
-            'low',       # Background: backups, cleanup, monitoring
-            'email',     # Email notifications and marketing
-            'reports',   # Analytics and business intelligence
+            "high",  # Critical: payment processing, security alerts
+            "default",  # Standard: invoice generation, provisioning
+            "low",  # Background: backups, cleanup, monitoring
+            "email",  # Email notifications and marketing
+            "reports",  # Analytics and business intelligence
         ]
 
         self.queue_names = queues or self.default_queues
@@ -80,8 +76,8 @@ class PragmaticHostWorker:
             with Connection(self.redis_conn):
                 worker = Worker(
                     self.queues,
-                    name=f'pragmatichost-worker-{os.getpid()}',
-                    exception_handlers=[self._handle_job_exception]
+                    name=f"pragmatichost-worker-{os.getpid()}",
+                    exception_handlers=[self._handle_job_exception],
                 )
 
                 # Register shutdown handlers
@@ -96,10 +92,12 @@ class PragmaticHostWorker:
             logger.error(f"Worker failed to start: {e}")
             raise
 
-    def _handle_job_exception(self, job: Job, exc_type: type[BaseException], exc_value: BaseException, traceback: TracebackType) -> None:
+    def _handle_job_exception(
+        self, job: Job, exc_type: type[BaseException], exc_value: BaseException, traceback: TracebackType
+    ) -> None:
         """
         Handle job exceptions with Romanian business context
-        
+
         Args:
             job: Failed RQ job
             exc_type: Exception type
@@ -109,16 +107,16 @@ class PragmaticHostWorker:
         logger.error(
             f"Job {job.id} failed: {exc_type.__name__}: {exc_value}",
             extra={
-                'job_id': job.id,
-                'job_func': job.func_name,
-                'job_args': job.args,
-                'job_kwargs': job.kwargs,
-                'queue': job.origin,
-            }
+                "job_id": job.id,
+                "job_func": job.func_name,
+                "job_args": job.args,
+                "job_kwargs": job.kwargs,
+                "queue": job.origin,
+            },
         )
 
         # Send alert to admin for critical failures
-        if job.origin == 'high':
+        if job.origin == "high":
             try:
                 # TODO: Implement send_admin_alert in apps.common.utils
                 logger.critical(f"ADMIN ALERT: Critical job failed - {job.func_name}")
@@ -130,10 +128,10 @@ class PragmaticHostWorker:
         stats = {}
         for queue in self.queues:
             stats[queue.name] = {
-                'pending': len(queue),
-                'failed': queue.failed_job_registry.count,
-                'finished': queue.finished_job_registry.count,
-                'started': queue.started_job_registry.count,
+                "pending": len(queue),
+                "failed": queue.failed_job_registry.count,
+                "finished": queue.finished_job_registry.count,
+                "started": queue.started_job_registry.count,
             }
         return stats
 
@@ -158,28 +156,11 @@ class PragmaticHostWorker:
 
 def main() -> None:
     """Main worker entry point"""
-    parser = argparse.ArgumentParser(description='PragmaticHost Background Worker')
-    parser.add_argument(
-        '--queues',
-        nargs='+',
-        help='Specific queues to process',
-        default=None
-    )
-    parser.add_argument(
-        '--verbose',
-        action='store_true',
-        help='Enable verbose logging'
-    )
-    parser.add_argument(
-        '--stats',
-        action='store_true',
-        help='Show queue statistics and exit'
-    )
-    parser.add_argument(
-        '--clear-failed',
-        action='store_true',
-        help='Clear failed jobs and exit'
-    )
+    parser = argparse.ArgumentParser(description="PragmaticHost Background Worker")
+    parser.add_argument("--queues", nargs="+", help="Specific queues to process", default=None)
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
+    parser.add_argument("--stats", action="store_true", help="Show queue statistics and exit")
+    parser.add_argument("--clear-failed", action="store_true", help="Clear failed jobs and exit")
 
     args = parser.parse_args()
 
@@ -207,5 +188,5 @@ def main() -> None:
     worker.start()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

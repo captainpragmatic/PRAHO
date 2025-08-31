@@ -4,6 +4,8 @@ Simple working test for users URLs
 
 from django.test import TestCase
 
+from apps.common.request_ip import get_safe_client_ip
+
 
 class SimpleURLTest(TestCase):
     """Simple URL import test"""

@@ -18,6 +18,7 @@ from django.test import RequestFactory, TestCase
 from django.utils import timezone
 
 from apps.common.constants import MAX_LOGIN_ATTEMPTS
+from apps.common.request_ip import get_safe_client_ip
 from apps.users.mfa import (
     BackupCodeService,
     MFAService,

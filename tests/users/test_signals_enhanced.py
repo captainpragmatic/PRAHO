@@ -10,13 +10,16 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+
 from django.db import IntegrityError, transaction
 from django.db.models.signals import post_save
 from django.test import RequestFactory, TestCase
 
+from apps.common.request_ip import get_safe_client_ip
+
+
 from apps.users.models import UserProfile
 from apps.users.signals import (
-    _get_client_ip,
     create_user_profile,
     log_failed_login,
     log_user_login,
@@ -185,71 +188,71 @@ class UtilityFunctionsTest(TestCase):
         """Set up test data"""
         self.factory = RequestFactory()
     
-    def test_get_client_ip_x_forwarded_for_single(self) -> None:
-        """Test _get_client_ip with single X-Forwarded-For IP"""
+    def testget_safe_client_ip_x_forwarded_for_single(self) -> None:
+        """Test get_safe_client_ip with single X-Forwarded-For IP (ignored in development)"""
         request = self.factory.get('/')
         request.META['HTTP_X_FORWARDED_FOR'] = '192.168.1.100'
         
-        ip = _get_client_ip(request)
-        self.assertEqual(ip, '192.168.1.100')
+        ip = get_safe_client_ip(request)
+        self.assertEqual(ip, '127.0.0.1')  # Should use default (secure behavior)
     
-    def test_get_client_ip_x_forwarded_for_multiple(self) -> None:
-        """Test _get_client_ip with multiple X-Forwarded-For IPs"""
+    def testget_safe_client_ip_x_forwarded_for_multiple(self) -> None:
+        """Test get_safe_client_ip with multiple X-Forwarded-For IPs (ignored in development)"""
         request = self.factory.get('/')
         request.META['HTTP_X_FORWARDED_FOR'] = '192.168.1.100, 10.0.0.1, 172.16.0.1'
         
-        ip = _get_client_ip(request)
-        self.assertEqual(ip, '192.168.1.100')  # Should return first IP
+        ip = get_safe_client_ip(request)
+        self.assertEqual(ip, '127.0.0.1')  # Should use default (secure behavior)
     
-    def test_get_client_ip_x_forwarded_for_with_spaces(self) -> None:
-        """Test _get_client_ip with X-Forwarded-For IPs containing spaces"""
+    def testget_safe_client_ip_x_forwarded_for_with_spaces(self) -> None:
+        """Test get_safe_client_ip with X-Forwarded-For IPs containing spaces (ignored in development)"""
         request = self.factory.get('/')
         request.META['HTTP_X_FORWARDED_FOR'] = '  192.168.1.100  , 10.0.0.1'
         
-        ip = _get_client_ip(request)
-        self.assertEqual(ip, '192.168.1.100')  # Should strip spaces
+        ip = get_safe_client_ip(request)
+        self.assertEqual(ip, '127.0.0.1')  # Should use default (secure behavior)
     
-    def test_get_client_ip_remote_addr_fallback(self) -> None:
-        """Test _get_client_ip falls back to REMOTE_ADDR"""
+    def testget_safe_client_ip_remote_addr_fallback(self) -> None:
+        """Test get_safe_client_ip falls back to REMOTE_ADDR"""
         request = self.factory.get('/')
         request.META['REMOTE_ADDR'] = '192.168.1.200'
         # No X-Forwarded-For header
         
-        ip = _get_client_ip(request)
+        ip = get_safe_client_ip(request)
         self.assertEqual(ip, '192.168.1.200')
     
-    def test_get_client_ip_no_ip_headers(self) -> None:
-        """Test _get_client_ip with no IP headers"""
+    def testget_safe_client_ip_no_ip_headers(self) -> None:
+        """Test get_safe_client_ip with no IP headers"""
         request = self.factory.get('/')
         # No IP headers at all
         
-        ip = _get_client_ip(request)
+        ip = get_safe_client_ip(request)
         self.assertEqual(ip, '127.0.0.1')  # Should return default
     
-    def test_get_client_ip_empty_x_forwarded_for(self) -> None:
-        """Test _get_client_ip with empty X-Forwarded-For"""
+    def testget_safe_client_ip_empty_x_forwarded_for(self) -> None:
+        """Test get_safe_client_ip with empty X-Forwarded-For"""
         request = self.factory.get('/')
         request.META['HTTP_X_FORWARDED_FOR'] = ''
         request.META['REMOTE_ADDR'] = '192.168.1.300'
         
-        ip = _get_client_ip(request)
+        ip = get_safe_client_ip(request)
         self.assertEqual(ip, '192.168.1.300')  # Should fall back to REMOTE_ADDR
     
-    def test_get_client_ip_empty_remote_addr(self) -> None:
-        """Test _get_client_ip with empty REMOTE_ADDR"""
+    def testget_safe_client_ip_empty_remote_addr(self) -> None:
+        """Test get_safe_client_ip with empty REMOTE_ADDR"""
         request = self.factory.get('/')
         request.META['REMOTE_ADDR'] = ''
         
-        ip = _get_client_ip(request)
+        ip = get_safe_client_ip(request)
         self.assertEqual(ip, '127.0.0.1')  # Should return default
     
-    def test_get_client_ip_none_values(self) -> None:
-        """Test _get_client_ip with None values"""
+    def testget_safe_client_ip_none_values(self) -> None:
+        """Test get_safe_client_ip with None values"""
         request = self.factory.get('/')
         request.META['HTTP_X_FORWARDED_FOR'] = None
         request.META['REMOTE_ADDR'] = None
         
-        ip = _get_client_ip(request)
+        ip = get_safe_client_ip(request)
         self.assertEqual(ip, '127.0.0.1')  # Should return default
 
 

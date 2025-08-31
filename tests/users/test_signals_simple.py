@@ -4,8 +4,9 @@ Simple working test for users signals
 
 from django.test import RequestFactory, TestCase
 
+from apps.common.request_ip import get_safe_client_ip
+
 from apps.users.models import User
-from apps.users.signals import _get_client_ip
 
 
 class SimpleSignalsTest(TestCase):
@@ -23,24 +24,24 @@ class SimpleSignalsTest(TestCase):
         except Exception as e:
             self.fail(f"Failed to import signals: {e}")
     
-    def test_get_client_ip_function(self) -> None:
-        """Test _get_client_ip utility function"""
+    def testget_safe_client_ip_function(self) -> None:
+        """Test get_safe_client_ip utility function"""
         request = self.factory.get('/')
         
         # Test with REMOTE_ADDR
         request.META['REMOTE_ADDR'] = '192.168.1.1'
-        ip = _get_client_ip(request)
+        ip = get_safe_client_ip(request)
         self.assertEqual(ip, '192.168.1.1')
         
-        # Test with X-Forwarded-For
+        # Test with X-Forwarded-For (should be ignored in development)
         request.META['HTTP_X_FORWARDED_FOR'] = '10.0.0.1, 192.168.1.1'
-        ip = _get_client_ip(request)
-        self.assertEqual(ip, '10.0.0.1')  # Should return first IP
+        ip = get_safe_client_ip(request)
+        self.assertEqual(ip, '192.168.1.1')  # Should return REMOTE_ADDR (secure)
         
         # Test with no IP
         del request.META['REMOTE_ADDR']
         del request.META['HTTP_X_FORWARDED_FOR']
-        ip = _get_client_ip(request)
+        ip = get_safe_client_ip(request)
         self.assertEqual(ip, '127.0.0.1')  # Should return default
     
     def test_user_profile_auto_creation(self) -> None:

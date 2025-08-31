@@ -5,6 +5,8 @@ Handles the actual model structure properly.
 
 from django.test import TestCase
 
+from apps.common.request_ip import get_safe_client_ip
+
 from apps.customers.models import Customer
 from apps.users.mfa import WebAuthnCredential
 from apps.users.models import CustomerMembership, User, UserLoginLog, UserProfile

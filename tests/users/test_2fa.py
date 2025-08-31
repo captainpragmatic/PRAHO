@@ -17,10 +17,20 @@ from unittest.mock import patch
 
 import pyotp
 from django.contrib.auth import get_user_model
+
+from apps.common.request_ip import get_safe_client_ip
 from django.contrib.sessions.backends.db import SessionStore
+
+from apps.common.request_ip import get_safe_client_ip
 from django.core.cache import cache
+
+from apps.common.request_ip import get_safe_client_ip
 from django.test import RequestFactory, TestCase
+
+from apps.common.request_ip import get_safe_client_ip
 from django.utils import timezone
+
+from apps.common.request_ip import get_safe_client_ip
 
 from apps.audit.models import AuditEvent
 from apps.users.mfa import (

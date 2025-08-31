@@ -5,6 +5,8 @@ Handles the actual form structure properly.
 
 from django.test import TestCase
 
+from apps.common.request_ip import get_safe_client_ip
+
 from apps.users.forms import (
     CustomerOnboardingRegistrationForm,
     LoginForm,

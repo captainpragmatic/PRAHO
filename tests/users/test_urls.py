@@ -7,7 +7,11 @@ This module tests URL patterns and routing in apps.users.urls to achieve 100% co
 from __future__ import annotations
 
 from django.test import TestCase
+
+from apps.common.request_ip import get_safe_client_ip
 from django.urls import resolve, reverse
+
+from apps.common.request_ip import get_safe_client_ip
 
 
 class UsersURLsTest(TestCase):

@@ -7,19 +7,39 @@ Tests security measures, rate limiting, audit logging, and integration with exis
 from datetime import timedelta
 
 from django.conf import settings
+
+from apps.common.request_ip import get_safe_client_ip
 from django.contrib.auth import get_user_model
+
+from apps.common.request_ip import get_safe_client_ip
 from django.contrib.auth.tokens import default_token_generator
+
+from apps.common.request_ip import get_safe_client_ip
 from django.core import mail
+
+from apps.common.request_ip import get_safe_client_ip
 from django.core.cache import cache
+
+from apps.common.request_ip import get_safe_client_ip
 from django.test import Client, RequestFactory, TestCase, override_settings
+
+from apps.common.request_ip import get_safe_client_ip
 from django.urls import reverse
+
+from apps.common.request_ip import get_safe_client_ip
 from django.utils import timezone
+
+from apps.common.request_ip import get_safe_client_ip
 from django.utils.encoding import force_bytes
+
+from apps.common.request_ip import get_safe_client_ip
 from django.utils.http import urlsafe_base64_encode
+
+from apps.common.request_ip import get_safe_client_ip
 
 from apps.customers.models import Customer
 from apps.users.models import CustomerMembership, UserLoginLog
-from apps.users.views import _get_client_ip  # For IP extraction testing
+from apps.users.views import get_safe_client_ip  # For IP extraction testing
 
 User = get_user_model()
 
@@ -108,7 +128,7 @@ class SecurePasswordResetTestCase(TestCase):
         # Directly create the log entry that would be created in rate limiting
         UserLoginLog.objects.create(
             user=None,
-            ip_address=_get_client_ip(request),
+            ip_address=get_safe_client_ip(request),
             user_agent=request.META.get('HTTP_USER_AGENT', ''),
             status='password_reset_rate_limited'
         )
