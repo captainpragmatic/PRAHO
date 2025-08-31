@@ -6,7 +6,7 @@ to ensure proper IP trust and middleware setup.
 """
 
 from django.core.checks import Error
-from django.core.checks import DjangoWarning as DjangoDjangoWarning
+from django.core.checks import Warning as DjangoWarning
 from django.test import TestCase, override_settings
 
 from apps.common.checks import (

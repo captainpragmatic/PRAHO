@@ -157,7 +157,7 @@ class ServicePlanModelTestCase(TestCase):
 
     def test_service_plan_string_representation(self):
         """Test ServicePlan __str__ method"""
-        expected = "Test Hosting Plan (Găzduire web partajată)"
+        expected = "Test Hosting Plan (Shared Web Hosting)"
         self.assertEqual(str(self.plan), expected)
 
     def test_get_effective_price_monthly(self):
