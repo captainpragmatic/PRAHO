@@ -375,7 +375,9 @@ class SecureUserRegistrationService:
             }
 
             # Render email templates (XSS-safe)
-            subject = _("Welcome to PRAHO - Account Created for {customer_name}").format(customer_name=customer.company_name)
+            subject = _("Welcome to PRAHO - Account Created for {customer_name}").format(
+                customer_name=customer.company_name
+            )
             text_message = render_to_string("customers/emails/welcome_email.txt", context)
             html_message = render_to_string("customers/emails/welcome_email.html", context)
 
@@ -398,7 +400,7 @@ class SecureUserRegistrationService:
             logger.error(f"📧 [Secure Email] Failed to send welcome email: {e!s}")
             log_security_event("welcome_email_failed", {"user_id": user.id, "error": str(e)[:200]}, request_ip)
             return False
-    
+
     @classmethod
     def _find_customer_by_identifier_secure(
         cls, identifier: str, identification_type: str, request_ip: str | None = None
@@ -454,7 +456,7 @@ class SecureUserRegistrationService:
             elapsed = time.time() - start_time
             if elapsed < MIN_RESPONSE_TIME_SECONDS:  # Minimum response time
                 time.sleep(MIN_RESPONSE_TIME_SECONDS - elapsed)
-    
+
     @classmethod
     def _notify_owners_of_join_request_secure(
         cls, customer: Customer, requesting_user: User, request_ip: str | None = None
@@ -579,7 +581,9 @@ class SecureCustomerUserService:
                 request.request_ip,
             )
 
-            logger.info(f"✅ [Secure User Creation] Created user {user.email} for customer {request.customer.company_name}")
+            logger.info(
+                f"✅ [Secure User Creation] Created user {user.email} for customer {request.customer.company_name}"
+            )
             return Ok((user, email_sent))
 
         except Exception as e:
@@ -873,7 +877,9 @@ class SecureCustomerUserService:
             }
 
             # Render email templates (XSS-safe)
-            subject = _("Welcome to PRAHO - Account Created for {customer_name}").format(customer_name=customer.company_name)
+            subject = _("Welcome to PRAHO - Account Created for {customer_name}").format(
+                customer_name=customer.company_name
+            )
             text_message = render_to_string("customers/emails/welcome_email.txt", context)
             html_message = render_to_string("customers/emails/welcome_email.html", context)
 
@@ -1014,7 +1020,7 @@ class SessionSecurityService:
         new_session_key = request.session.session_key
 
         # Invalidate all other sessions for this user
-        if hasattr(target_user, 'id') and target_user.id and new_session_key:
+        if hasattr(target_user, "id") and target_user.id and new_session_key:
             cls._invalidate_other_user_sessions(target_user.id, new_session_key)
 
         # Clear sensitive session data
@@ -1032,7 +1038,7 @@ class SessionSecurityService:
         )
 
         # Type guard: target_user could be AnonymousUser from request.user
-        if hasattr(target_user, 'email') and target_user.is_authenticated:
+        if hasattr(target_user, "email") and target_user.is_authenticated:
             logger.warning(f"🔄 [SessionSecurity] Session rotated for {target_user.email} after password change")
         else:
             logger.warning("🔄 [SessionSecurity] Session rotated after password change")
@@ -1274,7 +1280,6 @@ class SessionSecurityService:
         for key in sensitive_keys:
             if key in request.session:
                 del request.session[key]
-
 
     @classmethod
     def _get_timeout_policy_name(cls, timeout_seconds: int) -> str:

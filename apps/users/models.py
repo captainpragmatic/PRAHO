@@ -29,28 +29,28 @@ from apps.common.encryption import (  # Core encryption needed for user model
 from apps.customers.models import Customer  # Cross-app relationship
 
 
-class UserManager(BaseUserManager['User']):
+class UserManager(BaseUserManager["User"]):
     """Custom user manager for email-based authentication"""
 
     def create_user(self, email: str, password: str | None = None, **extra_fields: Any) -> User:
         """Create and return a regular user with email and password"""
         if not email:
-            raise ValueError('The Email field must be set')
+            raise ValueError("The Email field must be set")
         email = self.normalize_email(email)
-        user = cast('User', self.model(email=email, **extra_fields))
+        user = cast("User", self.model(email=email, **extra_fields))
         user.set_password(password)
         user.save(using=self._db)
         return user
 
     def create_superuser(self, email: str, password: str | None = None, **extra_fields: Any) -> User:
         """Create and return a superuser with email and password"""
-        extra_fields.setdefault('is_staff', True)
-        extra_fields.setdefault('is_superuser', True)
+        extra_fields.setdefault("is_staff", True)
+        extra_fields.setdefault("is_superuser", True)
 
-        if extra_fields.get('is_staff') is not True:
-            raise ValueError('Superuser must have is_staff=True.')
-        if extra_fields.get('is_superuser') is not True:
-            raise ValueError('Superuser must have is_superuser=True.')
+        if extra_fields.get("is_staff") is not True:
+            raise ValueError("Superuser must have is_staff=True.")
+        if extra_fields.get("is_superuser") is not True:
+            raise ValueError("Superuser must have is_superuser=True.")
 
         return self.create_user(email, password, **extra_fields)
 
@@ -63,28 +63,24 @@ class User(AbstractUser):
 
     # Staff roles for internal staff (nullable for customer users)
     STAFF_ROLE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
-        ('admin', _('System Administrator')),
-        ('support', _('Support Agent')),
-        ('billing', _('Billing Staff')),
-        ('manager', _('Manager')),
+        ("admin", _("System Administrator")),
+        ("support", _("Support Agent")),
+        ("billing", _("Billing Staff")),
+        ("manager", _("Manager")),
     )
 
     # Basic information
     username = None  # Remove username field, using email instead
-    email = models.EmailField(_('email address'), unique=True)
-    phone = models.CharField(
-        max_length=20,
-        blank=True,
-        help_text=_('Romanian phone number format: +40 721 123 456')
-    )
+    email = models.EmailField(_("email address"), unique=True)
+    phone = models.CharField(max_length=20, blank=True, help_text=_("Romanian phone number format: +40 721 123 456"))
 
     # Staff role for internal staff users (null for customer users)
     staff_role = models.CharField(
         max_length=20,
         choices=STAFF_ROLE_CHOICES,
         blank=True,
-        default='',
-        help_text=_('Staff role for internal staff. Leave empty for customer users.')
+        default="",
+        help_text=_("Staff role for internal staff. Leave empty for customer users."),
     )
 
     # Two-factor authentication
@@ -94,11 +90,11 @@ class User(AbstractUser):
 
     # Customer relationships (replaces primary_customer + additional_customers)
     customers: models.ManyToManyField = models.ManyToManyField(
-        'customers.Customer',
-        through='CustomerMembership',
-        through_fields=('user', 'customer'),
-        related_name='members',
-        blank=True
+        "customers.Customer",
+        through="CustomerMembership",
+        through_fields=("user", "customer"),
+        related_name="members",
+        blank=True,
     )
 
     # Romanian compliance
@@ -115,30 +111,26 @@ class User(AbstractUser):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     created_by = models.ForeignKey(
-        'self',
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='created_users'
+        "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="created_users"
     )
 
     # Custom manager with explicit typing to avoid MyPy override warnings
     objects: UserManager = UserManager()  # type: ignore[misc]
 
-    USERNAME_FIELD = 'email'
+    USERNAME_FIELD = "email"
     REQUIRED_FIELDS: ClassVar[list[str]] = []
 
     class Meta:
-        db_table = 'users'
-        verbose_name = _('User')
-        verbose_name_plural = _('Users')
+        db_table = "users"
+        verbose_name = _("User")
+        verbose_name_plural = _("Users")
         indexes: ClassVar[tuple[models.Index, ...]] = (
-            models.Index(fields=['email']),
-            models.Index(fields=['staff_role']),
-            models.Index(fields=['is_staff']),
+            models.Index(fields=["email"]),
+            models.Index(fields=["staff_role"]),
+            models.Index(fields=["is_staff"]),
             # 2FA performance indexes with consistent naming
-            models.Index(fields=['two_factor_enabled'], name='idx_users_2fa_enabled'),
-            models.Index(fields=['two_factor_enabled', 'is_staff'], name='idx_users_2fa_enabled_staff'),
+            models.Index(fields=["two_factor_enabled"], name="idx_users_2fa_enabled"),
+            models.Index(fields=["two_factor_enabled", "is_staff"], name="idx_users_2fa_enabled_staff"),
         )
 
     def __str__(self) -> str:
@@ -162,9 +154,9 @@ class User(AbstractUser):
         falls back to database query if not prefetched.
         """
         # Try to use prefetched data first (O(1) if prefetched)
-        prefetched_cache = getattr(self, '_prefetched_objects_cache', {})
-        if 'customer_memberships' in prefetched_cache:
-            return len(prefetched_cache['customer_memberships']) > 0
+        prefetched_cache = getattr(self, "_prefetched_objects_cache", {})
+        if "customer_memberships" in prefetched_cache:
+            return len(prefetched_cache["customer_memberships"]) > 0
 
         # Fallback to database query (O(1) due to exists())
         return CustomerMembership.objects.filter(user=self).exists()
@@ -177,20 +169,16 @@ class User(AbstractUser):
         falls back to optimized database query if not prefetched.
         """
         # Try to use prefetched data first (O(N) where N = user's memberships, typically small)
-        prefetched_cache = getattr(self, '_prefetched_objects_cache', {})
-        if 'customer_memberships' in prefetched_cache:
-            for membership in prefetched_cache['customer_memberships']:
+        prefetched_cache = getattr(self, "_prefetched_objects_cache", {})
+        if "customer_memberships" in prefetched_cache:
+            for membership in prefetched_cache["customer_memberships"]:
                 if membership.is_primary:
                     return membership.customer
             return None
 
         # Fallback to optimized database query (O(1) due to index + select_related)
-        membership = CustomerMembership.objects.filter(
-            user=self,
-            is_primary=True
-        ).select_related('customer').first()
+        membership = CustomerMembership.objects.filter(user=self, is_primary=True).select_related("customer").first()
         return membership.customer if membership else None
-
 
     def get_accessible_customers(self) -> QuerySet[Customer] | list[Customer]:
         """Get all customers this user can access
@@ -203,14 +191,12 @@ class User(AbstractUser):
             return Customer.objects.all()
 
         # Try to use prefetched data first (O(N) where N = user's memberships)
-        prefetched_cache = getattr(self, '_prefetched_objects_cache', {})
-        if 'customer_memberships' in prefetched_cache:
-            return [membership.customer for membership in prefetched_cache['customer_memberships']]
+        prefetched_cache = getattr(self, "_prefetched_objects_cache", {})
+        if "customer_memberships" in prefetched_cache:
+            return [membership.customer for membership in prefetched_cache["customer_memberships"]]
 
         # Fallback to optimized database query (O(M) where M = user's customers)
-        return Customer.objects.filter(
-            memberships__user=self
-        ).distinct()
+        return Customer.objects.filter(memberships__user=self).distinct()
 
     def can_access_customer(self, customer: Customer) -> bool:
         """Check if user can access specific customer"""
@@ -227,9 +213,9 @@ class User(AbstractUser):
     def is_account_locked(self) -> bool:
         """Check if account is currently locked"""
         # Allow disabling lockout for development/testing
-        if getattr(settings, 'DISABLE_ACCOUNT_LOCKOUT', False):
+        if getattr(settings, "DISABLE_ACCOUNT_LOCKOUT", False):
             return False
-            
+
         if not self.account_locked_until:
             return False
 
@@ -238,7 +224,7 @@ class User(AbstractUser):
     def increment_failed_login_attempts(self) -> None:
         """Increment failed login attempts and apply progressive lockout"""
         # Allow disabling lockout for development/testing
-        if getattr(settings, 'DISABLE_ACCOUNT_LOCKOUT', False):
+        if getattr(settings, "DISABLE_ACCOUNT_LOCKOUT", False):
             return  # Skip lockout logic completely when disabled
 
         self.failed_login_attempts += 1
@@ -253,13 +239,13 @@ class User(AbstractUser):
             lockout_minutes = lockout_delays[self.failed_login_attempts - 1]
 
         self.account_locked_until = timezone.now() + timedelta(minutes=lockout_minutes)
-        self.save(update_fields=['failed_login_attempts', 'account_locked_until'])
+        self.save(update_fields=["failed_login_attempts", "account_locked_until"])
 
     def reset_failed_login_attempts(self) -> None:
         """Reset failed login attempts and unlock account"""
         self.failed_login_attempts = 0
         self.account_locked_until = None
-        self.save(update_fields=['failed_login_attempts', 'account_locked_until'])
+        self.save(update_fields=["failed_login_attempts", "account_locked_until"])
 
     def get_lockout_remaining_time(self) -> int:
         """Get remaining lockout time in minutes, 0 if not locked"""
@@ -276,13 +262,13 @@ class User(AbstractUser):
     def get_staff_role_display_name(self) -> str:
         """Get display name for staff role (custom implementation)"""
         if not self.staff_role:
-            return str(_('Customer User'))
+            return str(_("Customer User"))
 
         role_map = {
-            'admin': _('System Administrator'),
-            'support': _('Support Agent'),
-            'billing': _('Billing Staff'),
-            'manager': _('Manager'),
+            "admin": _("System Administrator"),
+            "support": _("Support Agent"),
+            "billing": _("Billing Staff"),
+            "manager": _("Manager"),
         }
 
         return str(role_map.get(self.staff_role, self.staff_role))
@@ -292,7 +278,7 @@ class User(AbstractUser):
     def two_factor_secret(self) -> str:
         """Get decrypted 2FA secret"""
         if not self._two_factor_secret:
-            return ''
+            return ""
 
         return decrypt_sensitive_data(self._two_factor_secret)
 
@@ -302,7 +288,7 @@ class User(AbstractUser):
         if value:
             self._two_factor_secret = encrypt_sensitive_data(value)
         else:
-            self._two_factor_secret = ''  # nosec B105
+            self._two_factor_secret = ""  # nosec B105
 
     def generate_backup_codes(self) -> list[str]:
         """Generate new backup codes and store hashed versions"""
@@ -312,7 +298,7 @@ class User(AbstractUser):
         # Store hashed versions
         hashed_codes = [hash_backup_code(code) for code in codes]
         self.backup_tokens = hashed_codes
-        self.save(update_fields=['backup_tokens'])
+        self.save(update_fields=["backup_tokens"])
 
         # Return plain text codes for user to save (only time they see them)
         return codes
@@ -323,7 +309,7 @@ class User(AbstractUser):
             if verify_backup_code(code, hashed_code):
                 # Remove used backup code
                 self.backup_tokens.pop(i)
-                self.save(update_fields=['backup_tokens'])
+                self.save(update_fields=["backup_tokens"])
                 return True
 
         return False
@@ -341,34 +327,27 @@ class CustomerMembership(models.Model):
 
     # PostgreSQL-aligned role choices
     CUSTOMER_ROLE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
-        ('owner', _('Owner')),         # Full control of customer organization
-        ('billing', _('Billing')),     # Invoices, payments, billing info
-        ('tech', _('Technical')),      # Service management, support tickets
-        ('viewer', _('Viewer')),       # Read-only access
+        ("owner", _("Owner")),  # Full control of customer organization
+        ("billing", _("Billing")),  # Invoices, payments, billing info
+        ("tech", _("Technical")),  # Service management, support tickets
+        ("viewer", _("Viewer")),  # Read-only access
     )
 
-    customer = models.ForeignKey(
-        'customers.Customer',
-        on_delete=models.CASCADE,
-        related_name='memberships'
-    )
+    customer = models.ForeignKey("customers.Customer", on_delete=models.CASCADE, related_name="memberships")
     user = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
-        related_name='customer_memberships'  # Use consistent related name
+        related_name="customer_memberships",  # Use consistent related name
     )
 
     # Role within this customer organization
     role = models.CharField(
-        max_length=20,
-        choices=CUSTOMER_ROLE_CHOICES,
-        help_text=_('User role within this customer organization')
+        max_length=20, choices=CUSTOMER_ROLE_CHOICES, help_text=_("User role within this customer organization")
     )
 
     # Primary customer flag (replaces User.primary_customer)
     is_primary = models.BooleanField(
-        default=False,
-        help_text=_('Primary customer for this user (used for default context)')
+        default=False, help_text=_("Primary customer for this user (used for default context)")
     )
 
     # ===============================================================================
@@ -376,58 +355,44 @@ class CustomerMembership(models.Model):
     # ===============================================================================
 
     # Email Notifications
-    email_billing = models.BooleanField(
-        default=True,
-        verbose_name=_('Email billing notifications')
-    )
-    email_technical = models.BooleanField(
-        default=True,
-        verbose_name=_('Email technical notifications')
-    )
-    email_marketing = models.BooleanField(
-        default=False,
-        verbose_name=_('Email marketing notifications')
-    )
+    email_billing = models.BooleanField(default=True, verbose_name=_("Email billing notifications"))
+    email_technical = models.BooleanField(default=True, verbose_name=_("Email technical notifications"))
+    email_marketing = models.BooleanField(default=False, verbose_name=_("Email marketing notifications"))
 
     # Notification Language
     notification_language = models.CharField(
         max_length=5,
-        choices=[('ro', 'Română'), ('en', 'English')],
-        default='ro',
-        verbose_name=_('Notification language')
+        choices=[("ro", "Română"), ("en", "English")],
+        default="ro",
+        verbose_name=_("Notification language"),
     )
 
     # Contact preferences
     preferred_contact_method = models.CharField(
         max_length=20,
         choices=[
-            ('email', _('Email')),
-            ('phone', _('Phone')),
-            ('both', _('Email and phone')),
+            ("email", _("Email")),
+            ("phone", _("Phone")),
+            ("both", _("Email and phone")),
         ],
-        default='email',
-        verbose_name=_('Preferred contact method')
+        default="email",
+        verbose_name=_("Preferred contact method"),
     )
 
     # Audit
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    created_by = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        related_name='granted_memberships'
-    )
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="granted_memberships")
 
     class Meta:
-        db_table = 'customer_membership'  # Match PostgreSQL schema
-        unique_together: ClassVar[tuple[tuple[str, ...], ...]] = (('customer', 'user'),)
-        verbose_name = _('Customer Membership')
-        verbose_name_plural = _('Customer Memberships')
+        db_table = "customer_membership"  # Match PostgreSQL schema
+        unique_together: ClassVar[tuple[tuple[str, ...], ...]] = (("customer", "user"),)
+        verbose_name = _("Customer Membership")
+        verbose_name_plural = _("Customer Memberships")
         indexes: ClassVar[tuple[models.Index, ...]] = (
-            models.Index(fields=['user', 'is_primary']),      # Fast primary lookup
-            models.Index(fields=['customer', 'role']),        # Role-based queries
-            models.Index(fields=['user', 'created_at']),      # User history
+            models.Index(fields=["user", "is_primary"]),  # Fast primary lookup
+            models.Index(fields=["customer", "role"]),  # Role-based queries
+            models.Index(fields=["user", "created_at"]),  # User history
         )
 
     def __str__(self) -> str:
@@ -437,10 +402,10 @@ class CustomerMembership(models.Model):
     def get_role_display_name(self) -> str:
         """Get role display (custom implementation)"""
         role_map = {
-            'owner': _('Owner'),
-            'billing': _('Billing'),
-            'tech': _('Technical'),
-            'viewer': _('Viewer'),
+            "owner": _("Owner"),
+            "billing": _("Billing"),
+            "tech": _("Technical"),
+            "viewer": _("Viewer"),
         }
         return str(role_map.get(self.role, self.role))
 
@@ -452,28 +417,22 @@ class CustomerMembership(models.Model):
 class UserProfile(models.Model):
     """Extended user profile information"""
 
-    user = models.OneToOneField(
-        User,
-        on_delete=models.CASCADE,
-        related_name='profile'
-    )
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile")
 
     # Language specific
     preferred_language = models.CharField(
-        max_length=5,
-        choices=[('en', _('English')), ('ro', _('Romanian'))],
-        default='en'
+        max_length=5, choices=[("en", _("English")), ("ro", _("Romanian"))], default="en"
     )
 
     # Preferences
-    timezone = models.CharField(max_length=50, default='Europe/Bucharest')
+    timezone = models.CharField(max_length=50, default="Europe/Bucharest")
     date_format = models.CharField(
         max_length=20,
         choices=[
-            ('%d.%m.%Y', 'DD.MM.YYYY'),
-            ('%Y-%m-%d', 'YYYY-MM-DD'),
+            ("%d.%m.%Y", "DD.MM.YYYY"),
+            ("%Y-%m-%d", "YYYY-MM-DD"),
         ],
-        default='%d.%m.%Y'
+        default="%d.%m.%Y",
     )
 
     # Notifications
@@ -489,9 +448,9 @@ class UserProfile(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'user_profiles'
-        verbose_name = _('User Profile')
-        verbose_name_plural = _('User Profiles')
+        db_table = "user_profiles"
+        verbose_name = _("User Profile")
+        verbose_name_plural = _("User Profiles")
 
     def __str__(self) -> str:
         return f"Profile for {self.user.email}"
@@ -501,22 +460,22 @@ class UserLoginLog(models.Model):
     """Track user login attempts for security"""
 
     LOGIN_STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
-        ('success', _('Success')),
-        ('failed_password', _('Failed Password')),
-        ('failed_2fa', _('Failed 2FA')),
-        ('failed_user_not_found', _('Failed User Not Found')),
-        ('account_locked', _('Account Locked')),
-        ('account_disabled', _('Account Disabled')),
-        ('password_reset_completed', _('Password Reset Completed')),
-        ('account_lockout_reset', _('Account Lockout Reset')),
-        ('password_reset_failed', _('Password Reset Failed')),
+        ("success", _("Success")),
+        ("failed_password", _("Failed Password")),
+        ("failed_2fa", _("Failed 2FA")),
+        ("failed_user_not_found", _("Failed User Not Found")),
+        ("account_locked", _("Account Locked")),
+        ("account_disabled", _("Account Disabled")),
+        ("password_reset_completed", _("Password Reset Completed")),
+        ("account_lockout_reset", _("Account Lockout Reset")),
+        ("password_reset_failed", _("Password Reset Failed")),
     )
 
     user = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
-        related_name='login_logs',
-        null=True # Allow null for failed logins of non-existent users
+        related_name="login_logs",
+        null=True,  # Allow null for failed logins of non-existent users
     )
 
     # Login details
@@ -530,13 +489,13 @@ class UserLoginLog(models.Model):
     city = models.CharField(max_length=100, blank=True)
 
     class Meta:
-        db_table = 'user_login_logs'
-        verbose_name = _('User Login Log')
-        verbose_name_plural = _('User Login Logs')
+        db_table = "user_login_logs"
+        verbose_name = _("User Login Log")
+        verbose_name_plural = _("User Login Logs")
         indexes: ClassVar[tuple[models.Index, ...]] = (
-            models.Index(fields=['user', 'timestamp']),
-            models.Index(fields=['ip_address', 'timestamp']),
-            models.Index(fields=['status', 'timestamp']),
+            models.Index(fields=["user", "timestamp"]),
+            models.Index(fields=["ip_address", "timestamp"]),
+            models.Index(fields=["status", "timestamp"]),
         )
 
     def __str__(self) -> str:
