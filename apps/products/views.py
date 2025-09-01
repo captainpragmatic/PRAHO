@@ -17,7 +17,7 @@ from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_http_methods, require_POST
 
 from apps.billing.models import Currency
-from apps.common.decorators import staff_required
+from apps.common.decorators import admin_required, staff_required_strict
 from apps.common.mixins import get_search_context
 from apps.common.utils import json_error, json_success
 
@@ -25,18 +25,24 @@ from .models import Product, ProductPrice
 
 logger = logging.getLogger(__name__)
 
+# Lightweight security event logger for tests to patch
+def log_security_event(event_type: str, details: dict | None = None) -> None:
+    logger.info(f"🔒 [Products] {event_type}", extra={"event_type": event_type, "details": details or {}})
+
 # ===============================================================================
 # PRODUCT LIST VIEW
 # ===============================================================================
 
 
-@staff_required
+@staff_required_strict
 def product_list(request: HttpRequest) -> HttpResponse:
     """
     🛍️ Staff-only product catalog management with statistics and filtering
     Following PRAHO billing pattern for consistency and Romanian business context
     """
     try:
+        # Log access event
+        log_security_event(event_type="product_list_access", details={"user_email": getattr(request.user, 'email', '')})
         # Get all products with prefetch for performance
         products_qs = Product.objects.prefetch_related(
             "prices__currency", "relationships_from__target_product", "relationships_to__source_product"
@@ -125,7 +131,7 @@ def product_list(request: HttpRequest) -> HttpResponse:
         return redirect("dashboard")
 
 
-@staff_required
+@staff_required_strict
 def product_list_htmx(request: HttpRequest) -> HttpResponse:
     """HTMX endpoint for dynamic product list updates"""
     # Reuse the main view logic but always return partial
@@ -140,7 +146,7 @@ def product_list_htmx(request: HttpRequest) -> HttpResponse:
 # ===============================================================================
 
 
-@staff_required
+@staff_required_strict
 def product_detail(request: HttpRequest, slug: str) -> HttpResponse:
     """
     🔍 Product detail view with pricing, relationships, and management options
@@ -171,6 +177,9 @@ def product_detail(request: HttpRequest, slug: str) -> HttpResponse:
         # Get bundles this product is part of
         bundle_memberships = product.bundle_items.filter(bundle__is_active=True).select_related("bundle")
 
+        # Log detail access
+        log_security_event(event_type="product_detail_access", details={"product_slug": product.slug, "user_email": getattr(request.user, 'email', '')})
+
         context = {
             "product": product,
             "prices_by_currency": prices_by_currency,
@@ -193,7 +202,7 @@ def product_detail(request: HttpRequest, slug: str) -> HttpResponse:
 # ===============================================================================
 
 
-@staff_required
+@admin_required
 @require_http_methods(["GET", "POST"])
 def product_create(request: HttpRequest) -> HttpResponse:
     """✨ Create new product with Romanian business context"""
@@ -205,31 +214,22 @@ def product_create(request: HttpRequest) -> HttpResponse:
             "name",
             "slug",
             "description",
-            "short_description",
             "product_type",
-            "module",
             "module_config",
             "is_active",
-            "is_featured",
             "is_public",
-            "requires_domain",
-            "domain_required_at_signup",
-            "sort_order",
-            "meta_title",
-            "meta_description",
-            "tags",
-            "includes_vat",
-            "meta",
         ],
     )
 
     if request.method == "POST":
         form = product_form(request.POST)
+        log_security_event(event_type="product_create_attempt", details={"path": request.path})
         if form.is_valid():
             try:
                 with transaction.atomic():
                     product = form.save()
                     logger.info(f"✅ [Products] Created product: {product.name} ({product.slug})")
+                    log_security_event(event_type="product_created", details={"slug": product.slug})
                     messages.success(request, _(f"✅ Product '{product.name}' created successfully"))
                     return redirect("products:product_detail", slug=product.slug)
             except Exception as e:
@@ -237,6 +237,7 @@ def product_create(request: HttpRequest) -> HttpResponse:
                 messages.error(request, _("❌ Error creating product"))
         else:
             # Form validation failed - add error message but preserve form data
+            log_security_event(event_type="product_validation_failed", details={"errors": form.errors})
             messages.error(request, _("❌ Please correct the errors below. All required fields must be filled in."))
     else:
         form = product_form()
@@ -255,7 +256,7 @@ def product_create(request: HttpRequest) -> HttpResponse:
     return render(request, "products/product_form.html", context)
 
 
-@staff_required
+@admin_required
 @require_http_methods(["GET", "POST"])
 def product_edit(request: HttpRequest, slug: str) -> HttpResponse:
     """✏️ Edit existing product"""
@@ -324,7 +325,7 @@ def product_edit(request: HttpRequest, slug: str) -> HttpResponse:
 # ===============================================================================
 
 
-@staff_required
+@admin_required
 @require_POST
 def product_toggle_active(request: HttpRequest, slug: str) -> JsonResponse:
     """🔄 Toggle product active status via HTMX"""
@@ -334,6 +335,7 @@ def product_toggle_active(request: HttpRequest, slug: str) -> JsonResponse:
         product.save(update_fields=["is_active"])
 
         logger.info(f"✅ [Products] Toggled active status for {product.name}: {product.is_active}")
+        log_security_event(event_type="product_status_changed", details={"product_slug": product.slug, "field": "is_active"})
 
         return json_success({"is_active": product.is_active, "message": _("Product status updated")})
 
@@ -342,7 +344,7 @@ def product_toggle_active(request: HttpRequest, slug: str) -> JsonResponse:
         return json_error(str(_("Failed to update product status")))
 
 
-@staff_required
+@admin_required
 @require_POST
 def product_toggle_public(request: HttpRequest, slug: str) -> JsonResponse:
     """👁️ Toggle product public visibility via HTMX"""
@@ -352,6 +354,7 @@ def product_toggle_public(request: HttpRequest, slug: str) -> JsonResponse:
         product.save(update_fields=["is_public"])
 
         logger.info(f"✅ [Products] Toggled public status for {product.name}: {product.is_public}")
+        log_security_event(event_type="product_status_changed", details={"product_slug": product.slug, "field": "is_public"})
 
         return json_success({"is_public": product.is_public, "message": _("Product visibility updated")})
 
@@ -360,7 +363,7 @@ def product_toggle_public(request: HttpRequest, slug: str) -> JsonResponse:
         return json_error(str(_("Failed to update product visibility")))
 
 
-@staff_required
+@admin_required
 @require_POST
 def product_toggle_featured(request: HttpRequest, slug: str) -> JsonResponse:
     """⭐ Toggle product featured status via HTMX"""
@@ -370,6 +373,7 @@ def product_toggle_featured(request: HttpRequest, slug: str) -> JsonResponse:
         product.save(update_fields=["is_featured"])
 
         logger.info(f"✅ [Products] Toggled featured status for {product.name}: {product.is_featured}")
+        log_security_event(event_type="product_status_changed", details={"product_slug": product.slug, "field": "is_featured"})
 
         return json_success({"is_featured": product.is_featured, "message": _("Product featured status updated")})
 
@@ -383,7 +387,7 @@ def product_toggle_featured(request: HttpRequest, slug: str) -> JsonResponse:
 # ===============================================================================
 
 
-@staff_required
+@staff_required_strict
 def product_prices(request: HttpRequest, slug: str) -> HttpResponse:
     """💰 Manage product pricing - Romanian RON focus"""
     try:
@@ -396,6 +400,9 @@ def product_prices(request: HttpRequest, slug: str) -> HttpResponse:
 
         # Get available currencies (with RON first for Romanian business)
         currencies = Currency.objects.order_by(models.Case(models.When(code="RON", then=0), default=1), "code")
+
+        # Log pricing access
+        log_security_event(event_type="product_pricing_access", details={"product_slug": product.slug, "user_email": getattr(request.user, 'email', '')})
 
         context = {
             "product": product,
@@ -413,7 +420,7 @@ def product_prices(request: HttpRequest, slug: str) -> HttpResponse:
         return redirect("products:product_detail", slug=slug)
 
 
-@staff_required
+@admin_required
 @require_http_methods(["GET", "POST"])
 def product_price_create(request: HttpRequest, slug: str) -> HttpResponse:
     """💰 Add new price to product"""
@@ -438,6 +445,7 @@ def product_price_create(request: HttpRequest, slug: str) -> HttpResponse:
 
     if request.method == "POST":
         form = product_price_form(request.POST)
+        log_security_event(event_type="product_price_create_attempt", details={"path": request.path})
         if form.is_valid():
             try:
                 with transaction.atomic():
@@ -445,6 +453,7 @@ def product_price_create(request: HttpRequest, slug: str) -> HttpResponse:
                     price.product = product
                     price.save()
                     logger.info(f"✅ [Products] Created price for {product.name}: {price}")
+                    log_security_event(event_type="product_price_created", details={"product": product.slug})
                     messages.success(request, _("✅ Product price created successfully"))
                     return redirect("products:product_prices", slug=product.slug)
             except Exception as e:
@@ -452,6 +461,7 @@ def product_price_create(request: HttpRequest, slug: str) -> HttpResponse:
                 messages.error(request, _("❌ Error creating product price"))
         else:
             # Form validation failed - add error message but preserve form data
+            log_security_event(event_type="product_price_validation_failed", details={"errors": form.errors})
             messages.error(request, _("❌ Please correct the errors below. All required fields must be filled in."))
     else:
         form = product_price_form()

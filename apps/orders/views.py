@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -27,7 +28,7 @@ from django.views.decorators.http import require_POST
 
 from apps.billing.models import Currency
 from apps.billing.services import RefundData, RefundReason, RefundService, RefundType
-from apps.common.decorators import staff_required
+from apps.common.decorators import staff_required_strict
 from apps.common.mixins import get_search_context
 from apps.common.utils import json_error, json_success
 from apps.customers.models import Customer
@@ -42,6 +43,93 @@ from .services import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ===============================================================================
+# SECURITY VALIDATION FUNCTIONS
+# ===============================================================================
+
+def _sanitize_search_query(query: str) -> str:
+    """🔒 Sanitize search query to prevent injection attacks"""
+    if not query:
+        return ""
+    
+    original_query = query
+    original_length = len(query)
+    
+    # Check for dangerous patterns first
+    dangerous_patterns = [
+        r"[';\"\\]",  # Quotes and backslashes
+        r"\b(DROP|DELETE|INSERT|UPDATE|ALTER|CREATE)\b",  # SQL injection
+        r"\{\$\w+:",  # NoSQL injection patterns like {$where:
+        r"[{}$]",  # MongoDB-style injection chars
+        r"<script",  # XSS patterns
+        r"javascript:",  # Javascript injection
+        r"alert\(",  # Alert calls
+    ]
+    
+    # Check if query contains any dangerous patterns
+    has_dangerous_pattern = False
+    for pattern in dangerous_patterns:
+        if re.search(pattern, query, flags=re.IGNORECASE):
+            has_dangerous_pattern = True
+            break
+    
+    if has_dangerous_pattern:
+        logger.warning(f"🚨 [Orders] Search Security: Blocked search with suspicious characters: {original_query[:50]}...")
+        return ""
+    
+    # Remove dangerous patterns (defensive measure)
+    query = re.sub(r"[';\"\\]", "", query)  # Remove quotes and backslashes
+    query = re.sub(r"\b(DROP|DELETE|INSERT|UPDATE|ALTER|CREATE)\b", "", query, flags=re.IGNORECASE)
+    query = re.sub(r"\{\$\w+:", "", query)  # Remove NoSQL injection patterns like {$where:
+    query = re.sub(r"[{}$]", "", query)  # Remove MongoDB-style injection chars
+    
+    # Limit length
+    if len(query) > 100:
+        logger.warning(f"⚠️ [Orders] Truncated overly long search query from {original_length} to 100 characters")
+        query = query[:100]
+    
+    return query.strip()
+
+
+def _validate_manual_price_override(
+    manual_price_cents: int, product_price_cents: int, user: User, context: str = ""
+) -> tuple[bool, str]:
+    """🔒 Validate manual price override for security"""
+    if not hasattr(user, 'is_staff') or not user.is_staff:
+        logger.warning(
+            f"⛔ [Orders] Price Security: Unauthorized price override attempt by user {getattr(user, 'id', 'Unknown')} ({getattr(user, 'email', 'Unknown')}) in context: {context}"
+        )
+        return False, "Insufficient permissions for price override"
+    
+    # Check for specific financial permissions (staff role required)
+    if not (user.is_superuser or (hasattr(user, 'staff_role') and user.staff_role in ['admin', 'billing'])):
+        logger.warning(
+            f"⛔ [Orders] Price Security: Staff user {getattr(user, 'id', 'Unknown')} ({getattr(user, 'email', 'Unknown')}) lacks financial permissions for price override in context: {context}"
+        )
+        return False, "Insufficient permissions for price override"
+    
+    # Check minimum price
+    if manual_price_cents < 1:
+        logger.warning(f"⚠️ [Orders] Invalid price override attempt (too low): {manual_price_cents} by {user.email} in context: {context}")
+        return False, "Price must be at least 1 cents"
+    
+    # Check absolute maximum price limit
+    if manual_price_cents > 100000000:  # 1 million EUR in cents
+        logger.warning(f"⚠️ [Orders] Blocked extremely high price override: {manual_price_cents} by {user.email} in context: {context}")
+        return False, "Price cannot exceed 100000000 cents"
+    
+    # Check if override is within reasonable bounds (10x original)
+    if manual_price_cents > product_price_cents * 10:
+        logger.warning(
+            f"🚨 [Orders] Price Security: Excessive price override {manual_price_cents} (max {product_price_cents * 10}) by user {user.id} ({user.email}) in context: {context}"
+        )
+        return False, "Price override cannot exceed 10x original price"
+    
+    # Log successful validation
+    logger.info(f"✅ [Orders] Price Override: {manual_price_cents} cents (original: {product_price_cents} cents) by user {user.id} ({user.email}) in context: {context}")
+    return True, ""
 
 
 # ===============================================================================
@@ -112,9 +200,11 @@ def order_list(request: HttpRequest) -> HttpResponse:
     # Get accessible customers
     customer_ids = _get_accessible_customer_ids(request.user)
 
-    # Get search context for template
+    # Get search context for template and sanitize query
     search_context = get_search_context(request, "search")
-    search_query = search_context["search_query"]
+    search_query = _sanitize_search_query(search_context["search_query"]) if search_context.get("search_query") else ""
+    # Keep sanitized value in context for template rendering
+    search_context["search_query"] = search_query
 
     # Build base queryset
     queryset = Order.objects.filter(customer_id__in=customer_ids).select_related("customer").prefetch_related("items")
@@ -153,7 +243,8 @@ def order_list(request: HttpRequest) -> HttpResponse:
         "orders": orders,
         "status_counts": status_counts,
         "current_status": status_filter,
-        "is_staff": request.user.is_staff or bool(getattr(request.user, "staff_role", "")),
+        # Only superusers or users with a staff_role are considered staff for UI permissions
+        "is_staff": getattr(request.user, "is_superuser", False) or bool(getattr(request.user, "staff_role", "")),
         **search_context,
     }
 
@@ -173,9 +264,10 @@ def order_list_htmx(request: HttpRequest) -> HttpResponse:
     # Get accessible customers
     customer_ids = _get_accessible_customer_ids(request.user)
 
-    # Get search context
+    # Get search context and sanitize query
     search_context = get_search_context(request, "search")
-    search_query = search_context["search_query"]
+    search_query = _sanitize_search_query(search_context["search_query"]) if search_context.get("search_query") else ""
+    search_context["search_query"] = search_query
 
     # Build base queryset
     queryset = Order.objects.filter(customer_id__in=customer_ids).select_related("customer").prefetch_related("items")
@@ -212,7 +304,7 @@ def order_list_htmx(request: HttpRequest) -> HttpResponse:
         "page_obj": orders,
         "extra_params": extra_params,
         "current_status": status_filter,
-        "is_staff": request.user.is_staff or bool(getattr(request.user, "staff_role", "")),
+        "is_staff": getattr(request.user, "is_superuser", False) or bool(getattr(request.user, "staff_role", "")),
     }
 
     return render(request, "orders/partials/order_list.html", context)
@@ -239,7 +331,8 @@ def order_detail(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     if access_denied := _validate_order_access(request, order):
         return access_denied
 
-    is_staff = request.user.is_staff or bool(getattr(request.user, "staff_role", ""))
+    # Basic staff access for viewing and general management (UI-level)
+    is_staff = getattr(request.user, "is_superuser", False) or bool(getattr(request.user, "staff_role", ""))
     editable_fields = order.get_editable_fields()
 
     # Determine if order can be edited based on status and user permissions
@@ -260,7 +353,7 @@ def order_detail(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     return render(request, "orders/order_detail.html", context)
 
 
-@staff_required
+@staff_required_strict
 def order_create(request: HttpRequest) -> HttpResponse:
     """
     ✨ Create new order (staff only) with Romanian business compliance
@@ -375,7 +468,7 @@ def order_create(request: HttpRequest) -> HttpResponse:
     return render(request, "orders/order_form.html", context)
 
 
-@staff_required
+@staff_required_strict
 def order_edit(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     """
     ✏️ Edit existing order (staff only, limited to draft/pending orders)
@@ -406,7 +499,7 @@ def order_edit(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     return render(request, "orders/order_form.html", context)
 
 
-@staff_required
+@staff_required_strict
 @require_POST
 def order_change_status(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
     """
@@ -445,7 +538,7 @@ def order_change_status(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
         return json_error("Unknown error occurred")
 
 
-@staff_required
+@staff_required_strict
 @require_POST
 def order_cancel(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     """
@@ -464,7 +557,7 @@ def order_cancel(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
 
     notes = request.POST.get("cancellation_reason", "Order cancelled by staff")
 
-    # Type guard: request.user is always User due to @staff_required decorator
+    # Type guard: request.user is always User due to @staff_required_strict decorator
     user = request.user if request.user.is_authenticated else None
 
     status_data = StatusChangeData(new_status="cancelled", notes=notes, changed_by=user)
@@ -482,7 +575,7 @@ def order_cancel(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     return redirect("orders:order_detail", pk=pk)
 
 
-@staff_required
+@staff_required_strict
 @require_POST
 def order_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:  # noqa: PLR0911
     """
@@ -669,28 +762,28 @@ This ticket was automatically created from a customer refund request.
 # ===============================================================================
 
 
-@staff_required
+@staff_required_strict
 def order_pdf(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     """📄 Generate order PDF (to be implemented)"""
     messages.info(request, _("PDF generation will be implemented next."))
     return redirect("orders:order_detail", pk=pk)
 
 
-@staff_required
+@staff_required_strict
 def order_send(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     """📧 Send order by email (to be implemented)"""
     messages.info(request, _("Email sending will be implemented next."))
     return redirect("orders:order_detail", pk=pk)
 
 
-@staff_required
+@staff_required_strict
 def order_provision(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     """⚙️ Provision order services (to be implemented)"""
     messages.info(request, _("Service provisioning will be implemented next."))
     return redirect("orders:order_detail", pk=pk)
 
 
-@staff_required
+@staff_required_strict
 def order_items_list(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     """
     📋 HTMX-powered order items list with real-time updates
@@ -714,6 +807,7 @@ def order_items_list(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     # Calculate totals for display
     order.calculate_totals()
 
+    # Basic staff access for viewing and general management
     is_staff = request.user.is_staff or bool(getattr(request.user, "staff_role", ""))
     editable_fields = order.get_editable_fields()
 
@@ -801,15 +895,17 @@ def _process_order_item_creation(form: ModelForm, order: Order, pk: uuid.UUID, r
                 f"✅ [Orders] Added item {product.name} to order {order.order_number} with final pricing: {item.unit_price_cents}¢ + {item.setup_cents}¢ setup"
             )
 
-            # Return updated items list for HTMX
-            return order_items_list(request, pk)
+            # Return updated items list for HTMX, redirect otherwise
+            if request.headers.get("HX-Request"):
+                return order_items_list(request, pk)
+            return redirect("orders:order_detail", pk=order.id)
 
     except Exception as e:
         logger.error(f"🔥 [Orders] Error adding item to order {order.order_number}: {e}")
         return json_error("Failed to add item to order")
 
 
-@staff_required
+@staff_required_strict
 def order_item_create(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     """
     ✨ Add new order item with VAT calculation and Romanian compliance
@@ -945,6 +1041,14 @@ def _process_order_item_update(form: ModelForm, order: Order, pk: uuid.UUID, req
 
             # Handle unit price logic
             if manual_unit_price_changed:
+                # Security check: Validate price override limits
+                if product_price and updated_item.unit_price_cents > 0:
+                    base_price = product_price.amount_cents
+                    if base_price > 0:  # Avoid division by zero
+                        price_ratio = updated_item.unit_price_cents / base_price
+                        if price_ratio > 10.0:  # More than 10x the base price
+                            return json_error("Price override cannot exceed 10x the base product price")
+                
                 # User explicitly changed unit price - use their value (MANUAL OVERRIDE)
                 logger.info(f"💰 [Orders] Using manual override unit price: {updated_item.unit_price_cents} cents")
             elif product_changed or billing_period_changed:
@@ -997,7 +1101,7 @@ def _process_order_item_update(form: ModelForm, order: Order, pk: uuid.UUID, req
         return json_error("Failed to update order item")
 
 
-@staff_required
+@staff_required_strict
 def order_item_edit(request: HttpRequest, pk: uuid.UUID, item_pk: uuid.UUID) -> HttpResponse:
     """
     ✏️ Edit existing order item with inline editing capabilities
@@ -1041,7 +1145,7 @@ def order_item_edit(request: HttpRequest, pk: uuid.UUID, item_pk: uuid.UUID) -> 
     return _render_order_item_form(request, form, order, item=item, action="edit")
 
 
-@staff_required
+@staff_required_strict
 @require_POST
 def order_item_delete(request: HttpRequest, pk: uuid.UUID, item_pk: uuid.UUID) -> JsonResponse:
     """
@@ -1089,28 +1193,28 @@ def order_item_delete(request: HttpRequest, pk: uuid.UUID, item_pk: uuid.UUID) -
         return json_error("Failed to delete order item")
 
 
-@staff_required
+@staff_required_strict
 def order_duplicate(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     """📋 Duplicate order (to be implemented)"""
     messages.info(request, _("Order duplication will be implemented next."))
     return redirect("orders:order_detail", pk=pk)
 
 
-@staff_required
+@staff_required_strict
 def order_to_invoice(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     """🧾 Convert order to invoice (to be implemented)"""
     messages.info(request, _("Order to invoice conversion will be implemented next."))
     return redirect("orders:order_detail", pk=pk)
 
 
-@staff_required
+@staff_required_strict
 def order_reports(request: HttpRequest) -> HttpResponse:
     """📊 Order reports and analytics (to be implemented)"""
     messages.info(request, _("Order reports will be implemented next."))
     return redirect("orders:order_list")
 
 
-@staff_required
+@staff_required_strict
 def order_export(request: HttpRequest) -> HttpResponse:
     """📤 Export orders (to be implemented)"""
     messages.info(request, _("Order export will be implemented next."))

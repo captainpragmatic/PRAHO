@@ -482,18 +482,18 @@ def settings_health_check(request: HttpRequest) -> JsonResponse:
 # ===============================================================================
 
 
-@user_passes_test(is_staff_user)
-@login_required
-@login_required
+@admin_required
 @require_http_methods(["GET"])
 def export_settings(request: HttpRequest) -> HttpResponse:
     """
-    📥 Export all settings as JSON (for backup/migration)
+    📥 Export non-sensitive settings as JSON (for backup/migration)
 
     GET /api/settings/export/
     """
     try:
-        settings = SystemSetting.objects.filter(is_active=True).select_related("category")
+        # Get only non-sensitive settings
+        settings = SystemSetting.objects.filter(is_active=True, is_sensitive=False).select_related("category")
+        sensitive_count = SystemSetting.objects.filter(is_active=True, is_sensitive=True).count()
 
         user_email = (
             request.user.email
@@ -505,6 +505,9 @@ def export_settings(request: HttpRequest) -> HttpResponse:
                 "exported_at": timezone.now().isoformat(),
                 "exported_by": user_email,
                 "total_settings": settings.count(),
+                "export_type": "standard",
+                "sensitive_settings_excluded": sensitive_count,
+                "note": f"Sensitive settings excluded for security ({sensitive_count} settings hidden)",
             },
             "categories": {},
             "settings": [],

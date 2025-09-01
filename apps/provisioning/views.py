@@ -14,7 +14,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
 
-from apps.common.decorators import staff_required
+from apps.common.decorators import staff_required_strict
 from apps.customers.models import Customer
 from apps.users.models import User
 
@@ -90,10 +90,10 @@ def service_detail(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, "provisioning/service_detail.html", context)
 
 
-@staff_required
+@staff_required_strict
 def service_create(request: HttpRequest) -> HttpResponse:
     """+ Create new hosting service"""
-    # Type guard: @staff_required ensures authenticated user
+    # Type guard: @staff_required_strict ensures authenticated user
     user = cast(User, request.user)
     # Get user's customers for dropdown
     accessible_customers = user.get_accessible_customers()
@@ -151,10 +151,10 @@ def service_create(request: HttpRequest) -> HttpResponse:
     return render(request, "provisioning/service_form.html", context)
 
 
-@staff_required
+@staff_required_strict
 def service_edit(request: HttpRequest, pk: int) -> HttpResponse:
     """✏️ Edit existing hosting service"""
-    # Type guard: @staff_required ensures authenticated user
+    # Type guard: @staff_required_strict ensures authenticated user
     user = cast(User, request.user)
     service = get_object_or_404(Service, pk=pk)
 
@@ -210,10 +210,10 @@ def service_edit(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, "provisioning/service_form.html", context)
 
 
-@staff_required
+@staff_required_strict
 def service_suspend(request: HttpRequest, pk: int) -> HttpResponse:
     """⏸️ Suspend hosting service"""
-    # Type guard: @staff_required ensures authenticated user
+    # Type guard: @staff_required_strict ensures authenticated user
     user = cast(User, request.user)
     service = get_object_or_404(Service, pk=pk)
 
@@ -232,10 +232,10 @@ def service_suspend(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, "provisioning/service_suspend.html", {"service": service})
 
 
-@staff_required
+@staff_required_strict
 def service_activate(request: HttpRequest, pk: int) -> HttpResponse:
     """▶️ Activate suspended service"""
-    # Type guard: @staff_required ensures authenticated user
+    # Type guard: @staff_required_strict ensures authenticated user
     user = cast(User, request.user)
     service = get_object_or_404(Service, pk=pk)
 
@@ -263,7 +263,7 @@ def plan_list(request: HttpRequest) -> HttpResponse:
     return render(request, "provisioning/plan_list.html", context)
 
 
-@staff_required
+@staff_required_strict
 def server_list(request: HttpRequest) -> HttpResponse:
     """🖥️ Display server infrastructure"""
     servers = Server.objects.all().order_by("name")

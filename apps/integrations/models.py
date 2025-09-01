@@ -1,10 +1,13 @@
 import hashlib
+import ipaddress
 import json
 import secrets
 import uuid
 from datetime import timedelta
 from typing import Any, ClassVar
+from urllib.parse import urlparse
 
+from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
 from django.db.models.query import QuerySet
@@ -192,7 +195,7 @@ class WebhookEvent(models.Model):
         if save:
             self.save(update_fields=["status", "error_message", "processed_at", "updated_at"])
 
-    def save(self, *args, **kwargs) -> None:
+    def save(self, *args: Any, **kwargs: Any) -> None:
         """Ensure non-null signature_hash value for NOT NULL DB constraint."""
         if self.signature_hash is None:
             self.signature_hash = ""
@@ -288,16 +291,11 @@ class WebhookDelivery(models.Model):
     def clean(self) -> None:
         """🔒 Validate webhook delivery for SSRF protection"""
         # Skip the default URL validation to implement our own security checks
-        from django.core.exceptions import ValidationError
         
         # Don't call super().clean() as it would validate the URL field normally
         # Instead, we implement our own comprehensive validation
         
         if self.endpoint_url:
-            import ipaddress
-            from urllib.parse import urlparse
-
-            from django.core.exceptions import ValidationError
             
             try:
                 parsed = urlparse(self.endpoint_url)
@@ -333,11 +331,11 @@ class WebhookDelivery(models.Model):
             except ValidationError:
                 # Re-raise ValidationError as-is
                 raise
-            except Exception:
+            except Exception as e:
                 # Only catch non-ValidationError exceptions
-                raise ValidationError("Invalid webhook URL format")
+                raise ValidationError("Invalid webhook URL format") from e
 
-    def save(self, *args, **kwargs) -> None:
+    def save(self, *args: Any, **kwargs: Any) -> None:
         """Override save to call clean() for validation"""
         self.clean()
         super().save(*args, **kwargs)

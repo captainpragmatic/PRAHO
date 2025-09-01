@@ -11,10 +11,12 @@ app_name = "orders"
 urlpatterns = [
     # Order listing and management
     path("", views.order_list, name="order_list"),
+    path("", views.order_list, name="list"),
     path("list/", views.order_list_htmx, name="order_list_htmx"),  # HTMX endpoint
     path("create/", views.order_create, name="order_create"),
     # Order detail and lifecycle management
     path("<uuid:pk>/", views.order_detail, name="order_detail"),
+    path("<uuid:pk>/", views.order_detail, name="detail"),
     path("<uuid:pk>/edit/", views.order_edit, name="order_edit"),
     path("<uuid:pk>/pdf/", views.order_pdf, name="order_pdf"),
     path("<uuid:pk>/send/", views.order_send, name="order_send"),
@@ -27,7 +29,9 @@ urlpatterns = [
     # Order items management (HTMX powered)
     path("<uuid:pk>/items/", views.order_items_list, name="order_items_list"),
     path("<uuid:pk>/items/add/", views.order_item_create, name="order_item_create"),
+    path("<uuid:pk>/items/add/", views.order_item_create, name="add_item"),
     path("<uuid:pk>/items/<uuid:item_pk>/edit/", views.order_item_edit, name="order_item_edit"),
+    path("<uuid:pk>/items/<uuid:item_pk>/edit/", views.order_item_edit, name="update_item"),
     path("<uuid:pk>/items/<uuid:item_pk>/delete/", views.order_item_delete, name="order_item_delete"),
     # Order duplication and conversion
     path("<uuid:pk>/duplicate/", views.order_duplicate, name="order_duplicate"),

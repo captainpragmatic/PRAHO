@@ -5,6 +5,7 @@ from typing import Any, ClassVar
 from django import forms
 
 from apps.settings.encryption import settings_encryption
+
 from .models import TLD, Registrar
 
 

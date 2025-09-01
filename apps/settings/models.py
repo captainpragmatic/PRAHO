@@ -262,7 +262,8 @@ class SystemSetting(models.Model):
     @property
     def category_display(self) -> str:
         """Get human-readable category name"""
-        return dict(self.CATEGORY_CHOICES).get(self.category, self.category)
+        # Simple capitalization of category name since CATEGORY_CHOICES doesn't exist
+        return self.category.replace('_', ' ').title()
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Save setting with automatic encryption for sensitive values"""

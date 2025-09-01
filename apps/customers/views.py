@@ -3,10 +3,12 @@
 # ===============================================================================
 
 import logging
+from contextlib import suppress
 from typing import cast
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.contrib.messages.api import MessageFailure
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db import IntegrityError
@@ -44,8 +46,6 @@ security_logger = logging.getLogger("security")
 
 def _handle_secure_error(request: HttpRequest, error: Exception, operation: str, user_id: int | None = None) -> None:
     """🔒 Handle errors securely without leaking sensitive information"""
-    from contextlib import suppress
-    from django.contrib.messages.api import MessageFailure
     
     def _safe_add_message(request: HttpRequest, message: str) -> None:
         """Safely add a message, handling cases where MessageMiddleware is not installed"""

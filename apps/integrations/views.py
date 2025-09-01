@@ -1,10 +1,12 @@
 import json
 import logging
+import re
 import uuid
 from typing import Any
 
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils.decorators import method_decorator
+from django.utils.html import escape
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -255,9 +257,6 @@ def webhook_status(request: HttpRequest) -> JsonResponse:
     # Recent activity
     recent_webhooks = WebhookEvent.objects.order_by("-received_at")[:10]
     # ⚡ PERFORMANCE: Use list comprehension for better performance
-    import re
-
-    from django.utils.html import escape
     
     def sanitize_webhook_data(data: str) -> str:
         """Sanitize webhook data for API output"""
