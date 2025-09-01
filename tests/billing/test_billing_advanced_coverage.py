@@ -54,7 +54,7 @@ from apps.billing.services import (
 from apps.billing.views import (
     _get_accessible_customer_ids,
     _validate_customer_assignment,
-    _validate_pdf_access,
+    _validate_financial_document_access,
     _process_valid_until_date,
     _process_proforma_line_items,
     invoice_refund,
@@ -286,20 +286,20 @@ class BillingAdvancedCoverageTestCase(TestCase):
         self.assertIn(self.customer.id, customer_ids)
 
     def test_pdf_access_validation_comprehensive(self) -> None:
-        """Test #25: _validate_pdf_access function comprehensive testing."""
+        """Test #25: _validate_financial_document_access function comprehensive testing."""
         request = self.factory.get('/test/')
         request.user = self.staff_user
 
         # Test with valid access
-        response = _validate_pdf_access(request, self.invoice)
+        response = _validate_financial_document_access(request, self.invoice)
         self.assertIsNone(response)  # No redirect means access granted
 
         # Test with None request (edge case)
-        response = _validate_pdf_access(None, self.invoice)  # type: ignore[arg-type]
+        response = _validate_financial_document_access(None, self.invoice)  # type: ignore[arg-type]
         self.assertIsNotNone(response)
 
         # Test with None document (edge case)
-        response = _validate_pdf_access(request, None)  # type: ignore[arg-type]
+        response = _validate_financial_document_access(request, None)  # type: ignore[arg-type]
         self.assertIsNotNone(response)
 
         # Test with unauthorized user - need messages middleware
@@ -313,7 +313,7 @@ class BillingAdvancedCoverageTestCase(TestCase):
         
         # Mock can_access_customer to return False
         with patch.object(self.regular_user, 'can_access_customer', return_value=False):
-            response = _validate_pdf_access(request, self.invoice)
+            response = _validate_financial_document_access(request, self.invoice)
             # Should return redirect response for unauthorized access
             self.assertIsNotNone(response)
 
@@ -682,7 +682,7 @@ class BillingAdvancedCoverageTestCase(TestCase):
 
         # Mock can_access_customer to return False for unauthorized access
         with patch.object(self.regular_user, 'can_access_customer', return_value=False):
-            response = _validate_pdf_access(request, unauthorized_invoice)
+            response = _validate_financial_document_access(request, unauthorized_invoice)
             self.assertIsNotNone(response)  # Should return redirect
 
         # Test RefundService with unauthorized access

@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.contenttypes.models import ContentType
+from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Count, Q, QuerySet, Sum
@@ -27,7 +28,7 @@ from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_POST
 
 from apps.billing.pdf_generators import RomanianInvoicePDFGenerator, RomanianProformaPDFGenerator
-from apps.common.decorators import billing_staff_required, can_edit_proforma, staff_required
+from apps.common.decorators import billing_staff_required, can_edit_proforma, rate_limit, staff_required
 from apps.common.mixins import get_search_context
 from apps.common.utils import json_error, json_success
 from apps.customers.models import Customer
@@ -44,6 +45,7 @@ from .models import (
     ProformaInvoice,
     ProformaLine,
     ProformaSequence,
+    log_security_event,
 )
 from .services import RefundData, RefundReason, RefundService, RefundType
 
@@ -65,27 +67,92 @@ def _get_accessible_customer_ids(user: User | None) -> list[int]:
         return [c.id for c in accessible_customers] if accessible_customers else []
 
 
+def _validate_financial_document_access(request: HttpRequest, document: Invoice | ProformaInvoice, action: str = 'view') -> None:
+    """
+    🔒 Validate user access to financial documents with comprehensive security logging.
+    Raises PermissionDenied if access denied.
+    """
+    # Handle None objects
+    if request is None or document is None:
+        log_security_event(
+            event_type='financial_document_access_denied',
+            details={
+                'reason': 'invalid_request_or_document',
+                'action': action,
+                'document_type': type(document).__name__ if document else 'None'
+            },
+            request_ip=getattr(request, 'META', {}).get('REMOTE_ADDR') if request else None
+        )
+        raise PermissionDenied("Invalid request or document")
+
+    # Validate authenticated user
+    if not isinstance(request.user, User) or not request.user.is_authenticated:
+        log_security_event(
+            event_type='financial_document_access_denied',
+            details={
+                'reason': 'unauthenticated_access_attempt',
+                'action': action,
+                'document_id': document.id if hasattr(document, 'id') else None,
+                'document_type': type(document).__name__
+            },
+            request_ip=request.META.get('REMOTE_ADDR')
+        )
+        raise PermissionDenied("Authentication required")
+    
+    # Validate customer access
+    if not request.user.can_access_customer(document.customer):
+        log_security_event(
+            event_type='financial_document_access_denied',
+            details={
+                'reason': 'insufficient_permissions',
+                'user_email': request.user.email,
+                'action': action,
+                'document_id': document.id if hasattr(document, 'id') else None,
+                'document_type': type(document).__name__,
+                'customer_id': document.customer.id if document.customer else None,
+                'attempted_unauthorized_access': True
+            },
+            request_ip=request.META.get('REMOTE_ADDR'),
+            user_email=request.user.email
+        )
+        raise PermissionDenied("You do not have permission to access this document")
+    
+    # Log successful access for audit trail
+    log_security_event(
+        event_type='financial_document_accessed',
+        details={
+            'user_email': request.user.email,
+            'action': action,
+            'document_id': document.id if hasattr(document, 'id') else None,
+            'document_type': type(document).__name__,
+            'customer_id': document.customer.id if document.customer else None,
+            'access_granted': True
+        },
+        request_ip=request.META.get('REMOTE_ADDR'),
+        user_email=request.user.email
+    )
+
+
 def _validate_pdf_access(request: HttpRequest, document: Invoice | ProformaInvoice) -> HttpResponse | None:
-    """
-    Validate user access to PDF document.
-    Returns redirect response if access denied, None if access granted.
-    """
-    # Handle None request objects (for testing)
-    if request is None:
-        return redirect("billing:invoice_list")
-
-    # Handle None document objects (for testing)
-    if document is None:
-        return redirect("billing:invoice_list")
-
-    # Type guard for authenticated user
-    if not isinstance(request.user, User) or not request.user.can_access_customer(document.customer):
+    """Validate access for PDF download; return redirect on denial, None on success."""
+    try:
+        _validate_financial_document_access(request, document, action="download_pdf")
+        return None
+    except PermissionDenied:
+        # Provide a friendly message and redirect to a safe page
         messages.error(request, _("❌ You do not have permission to access this document."))
+        try:
+            if isinstance(document, ProformaInvoice):
+                return redirect("billing:proforma_detail", pk=document.pk)  # type: ignore[arg-type]
+            if isinstance(document, Invoice):
+                return redirect("billing:invoice_detail", pk=document.pk)  # type: ignore[arg-type]
+        except Exception as err:
+            logging.getLogger(__name__).debug("PDF access redirect fallback: %s", err)
         return redirect("billing:invoice_list")
-    return None
 
 
 @login_required
+@rate_limit(requests_per_minute=60, per_user=True)
 def billing_list(request: HttpRequest) -> HttpResponse:
     """
     🧾 Display combined list of proformas and invoices (Romanian business practice)

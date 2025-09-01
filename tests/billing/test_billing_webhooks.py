@@ -30,10 +30,10 @@ class StripeWebhookProcessorTests(TestCase):
         self.assertEqual(event_type, 'payment_intent.succeeded')
 
     @override_settings(STRIPE_WEBHOOK_SECRET=None)
-    def test_verify_signature_skipped_in_dev_when_secret_missing(self) -> None:
-        """Test that signature verification is skipped when secret is missing"""
+    def test_verify_signature_fails_secure_when_secret_missing(self) -> None:
+        """Test that signature verification fails secure when secret is missing"""
         result = self.processor.verify_signature(self.payload, signature='', headers={})
-        self.assertTrue(result)
+        self.assertFalse(result)  # Should fail secure
 
     @override_settings(STRIPE_WEBHOOK_SECRET='test_secret')
     def test_verify_signature_with_secret_configured(self) -> None:

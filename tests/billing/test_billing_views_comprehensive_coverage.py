@@ -50,7 +50,7 @@ from apps.billing.views import (
     _process_valid_until_date,
     _update_proforma_basic_info,
     _validate_customer_assignment,
-    _validate_pdf_access,
+    _validate_financial_document_access,
     _validate_proforma_edit_access,
     billing_list,
     billing_reports,
@@ -216,19 +216,19 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
             
             self.assertEqual(result, [])
 
-    def test_validate_pdf_access_unauthorized_user_type(self) -> None:
-        """Test _validate_pdf_access with wrong user type (Line 63)."""
+    def test_validate_financial_document_access_unauthorized_user_type(self) -> None:
+        """Test _validate_financial_document_access with wrong user type (Line 63)."""
         request = self.factory.get('/')
         request.user = AnonymousUser()  # Proper anonymous user
         self._add_session_and_messages(request)
         
-        response = _validate_pdf_access(request, self.invoice)
+        response = _validate_financial_document_access(request, self.invoice)
         
         self.assertIsNotNone(response)
         self.assertEqual(response.status_code, 302)
 
-    def test_validate_pdf_access_no_permission(self) -> None:
-        """Test _validate_pdf_access with no access to customer (Line 63-65)."""
+    def test_validate_financial_document_access_no_permission(self) -> None:
+        """Test _validate_financial_document_access with no access to customer (Line 63-65)."""
         # Create user with no access to customer
         unauthorized_user = User.objects.create_user(
             email='unauthorized@example.com',
@@ -240,19 +240,19 @@ class BillingViewsComprehensiveCoverageTestCase(TestCase):
         self._add_session_and_messages(request)
         
         with patch.object(unauthorized_user, 'can_access_customer', return_value=False):
-            response = _validate_pdf_access(request, self.invoice)
+            response = _validate_financial_document_access(request, self.invoice)
             
             self.assertIsNotNone(response)
             self.assertEqual(response.status_code, 302)
 
-    def test_validate_pdf_access_granted(self) -> None:
-        """Test _validate_pdf_access with valid access (Line 66)."""
+    def test_validate_financial_document_access_granted(self) -> None:
+        """Test _validate_financial_document_access with valid access (Line 66)."""
         request = self.factory.get('/')
         request.user = self.staff_user
         self._add_session_and_messages(request)
         
         with patch.object(self.staff_user, 'can_access_customer', return_value=True):
-            response = _validate_pdf_access(request, self.invoice)
+            response = _validate_financial_document_access(request, self.invoice)
             
             self.assertIsNone(response)
 

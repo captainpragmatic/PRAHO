@@ -161,24 +161,24 @@ class FinalBillingViewsCoverageTestCase(TestCase):
             result = _get_accessible_customer_ids(self.regular_user)
             self.assertEqual(result, [])
 
-    def test_validate_pdf_access_with_none_user(self):
-        """Test _validate_pdf_access with None user"""
-        from apps.billing.views import _validate_pdf_access
+    def test_validate_financial_document_access_with_none_user(self):
+        """Test _validate_financial_document_access with None user"""
+        from apps.billing.views import _validate_financial_document_access
         from django.http import HttpResponseRedirect
         
-        result = _validate_pdf_access(None, self.invoice)
+        result = _validate_financial_document_access(None, self.invoice)
         self.assertIsInstance(result, HttpResponseRedirect)
 
-    def test_validate_pdf_access_with_valid_user(self):
-        """Test _validate_pdf_access with valid user"""
-        from apps.billing.views import _validate_pdf_access
+    def test_validate_financial_document_access_with_valid_user(self):
+        """Test _validate_financial_document_access with valid user"""
+        from apps.billing.views import _validate_financial_document_access
         from django.test import RequestFactory
         
         factory = RequestFactory()
         request = factory.get('/test/')
         request.user = self.staff_user
         
-        result = _validate_pdf_access(request, self.invoice)
+        result = _validate_financial_document_access(request, self.invoice)
         # This will test the internal logic
         self.assertIsNone(result)  # Should return None for valid access
 
@@ -392,7 +392,7 @@ class FinalBillingViewsCoverageTestCase(TestCase):
     
     def test_edge_cases_and_error_paths(self):
         """Test various edge cases to hit additional lines"""
-        from apps.billing.views import _get_accessible_customer_ids, _validate_pdf_access
+        from apps.billing.views import _get_accessible_customer_ids, _validate_financial_document_access
         
         # Test with mock user that has different return types
         mock_user = Mock()
@@ -406,9 +406,9 @@ class FinalBillingViewsCoverageTestCase(TestCase):
         request = factory.get('/test/')
         request.user = self.staff_user
         
-        result = _validate_pdf_access(request, None)
-        # Test different access patterns
-        self.assertIsNotNone(result)  # Should handle None invoice
+        from django.core.exceptions import PermissionDenied
+        with self.assertRaises(PermissionDenied):  # Should raise exception for None invoice
+            _validate_financial_document_access(request, None)
 
     def test_additional_helper_function_branches(self):
         """Test additional branches in helper functions"""

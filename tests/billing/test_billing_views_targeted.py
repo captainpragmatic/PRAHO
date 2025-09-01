@@ -448,16 +448,17 @@ class BillingViewsHelperFunctionsTestCase(TestCase):
 
     def test_helper_function_edge_cases(self):
         """Test helper functions with edge cases"""
-        from apps.billing.views import _get_accessible_customer_ids, _validate_pdf_access
+        from apps.billing.views import _get_accessible_customer_ids, _validate_financial_document_access
         from django.http import HttpResponseRedirect
         
         # Test _get_accessible_customer_ids with None user
         result = _get_accessible_customer_ids(None)
         self.assertEqual(result, [])
         
-        # Test _validate_pdf_access with invalid parameters
-        result = _validate_pdf_access(None, None)
-        self.assertIsInstance(result, HttpResponseRedirect)
+        # Test _validate_financial_document_access with invalid parameters
+        from django.core.exceptions import PermissionDenied
+        with self.assertRaises(PermissionDenied):
+            _validate_financial_document_access(None, None)
         
         # Test with authenticated user
         result = _get_accessible_customer_ids(self.staff_user)

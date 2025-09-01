@@ -6,7 +6,9 @@ Aligned with PostgreSQL hosting panel schema v1 with separate proforma handling.
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 import uuid
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -15,17 +17,181 @@ from typing import TYPE_CHECKING, Any, ClassVar
 if TYPE_CHECKING:
     pass
 
+from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
 from django.db.models import F
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+logger = logging.getLogger(__name__)
+
 # Date constants for tax rate validation
 JANUARY = 1  # First month of year
 DECEMBER = 12  # Last month of year
 FIRST_DAY_OF_MONTH = 1  # First day of month
 LAST_DAY_OF_DECEMBER = 31  # Last day of December
+
+# ===============================================================================
+# SECURITY VALIDATION FUNCTIONS
+# ===============================================================================
+
+# Security constants for financial data
+MAX_JSON_SIZE_BYTES = 5120  # 5KB limit for financial JSON fields (smaller than products)
+MAX_JSON_DEPTH = 5  # Maximum nesting depth for financial data
+MAX_FINANCIAL_AMOUNT_CENTS = 10000000000  # 100 million in major currency (reasonable business limit)
+MIN_FINANCIAL_AMOUNT_CENTS = -10000000000  # Allow negative for refunds/credits
+MAX_DESCRIPTION_LENGTH = 1000  # Maximum for financial descriptions
+MAX_ADDRESS_FIELD_LENGTH = 500  # Maximum for address fields
+
+# Dangerous patterns in financial metadata
+DANGEROUS_FINANCIAL_PATTERNS = [
+    r'eval\s*\(',
+    r'exec\s*\(',
+    r'__import__',
+    r'subprocess',
+    r'<script',
+    r'javascript:',
+    r'data:text/html',
+    r'\$\{.*\}',  # Template injection
+    r'<%.*%>',    # Template injection
+]
+
+# Sensitive keys that shouldn't be in financial metadata
+SENSITIVE_FINANCIAL_KEYS = [
+    'password', 'secret', 'key', 'token', 'credential', 'api_key',
+    'card_number', 'cvv', 'pin', 'account_number', 'routing_number',
+    'ssn', 'social_security', 'tax_id_internal', 'bank_account'
+]
+
+
+def validate_financial_json(data: Any, field_name: str = "Financial JSON field") -> None:
+    """🔒 Validate JSON field for financial data security"""
+    if not data:
+        return
+        
+    # Convert to JSON string to check size
+    try:
+        json_str = json.dumps(data)
+    except (TypeError, ValueError) as e:
+        raise ValidationError(f"{field_name} contains invalid JSON: {e}") from e
+    
+    # Check size limit (smaller for financial data)
+    if len(json_str.encode('utf-8')) > MAX_JSON_SIZE_BYTES:
+        raise ValidationError(
+            f"{field_name} too large. Maximum size: {MAX_JSON_SIZE_BYTES} bytes for financial data"
+        )
+    
+    # Check depth
+    if _get_financial_json_depth(data) > MAX_JSON_DEPTH:
+        raise ValidationError(
+            f"{field_name} too deep. Maximum nesting depth: {MAX_JSON_DEPTH} for financial data"
+        )
+    
+    # Check for dangerous patterns and sensitive data
+    _check_financial_json_security(data, field_name)
+
+
+def validate_financial_amount(amount_cents: int, field_name: str = "Amount") -> None:
+    """🔒 Validate financial amounts to prevent overflow/underflow"""
+    if amount_cents is None:
+        return
+        
+    if amount_cents > MAX_FINANCIAL_AMOUNT_CENTS:
+        raise ValidationError(
+            f"{field_name} too large. Maximum: {MAX_FINANCIAL_AMOUNT_CENTS/100:,.2f} in major currency units"
+        )
+    
+    if amount_cents < MIN_FINANCIAL_AMOUNT_CENTS:
+        raise ValidationError(
+            f"{field_name} too small. Minimum: {MIN_FINANCIAL_AMOUNT_CENTS/100:,.2f} in major currency units"
+        )
+
+
+def validate_invoice_sequence_increment() -> None:
+    """🔒 Log critical invoice sequence operations for audit trail"""
+    log_security_event(
+        event_type='invoice_sequence_increment',
+        details={
+            'operation': 'sequence_number_generated',
+            'timestamp': timezone.now().isoformat(),
+            'critical_financial_operation': True
+        }
+    )
+
+
+def validate_financial_text_field(text: str, field_name: str, max_length: int | None = None) -> None:
+    """🔒 Validate text fields in financial documents"""
+    if not text:
+        return
+        
+    max_len = max_length or MAX_DESCRIPTION_LENGTH
+    if len(text) > max_len:
+        raise ValidationError(
+            f"{field_name} too long. Maximum length: {max_len} characters"
+        )
+    
+    # Check for dangerous patterns in financial descriptions
+    for pattern in DANGEROUS_FINANCIAL_PATTERNS:
+        if re.search(pattern, text, re.IGNORECASE):
+            raise ValidationError(
+                f"{field_name} contains potentially dangerous pattern"
+            )
+
+
+def _get_financial_json_depth(data: Any, current_depth: int = 0) -> int:
+    """Calculate the maximum depth of financial JSON data"""
+    if current_depth > MAX_JSON_DEPTH:
+        return current_depth
+        
+    if isinstance(data, dict):
+        return max([_get_financial_json_depth(v, current_depth + 1) for v in data.values()], default=current_depth)
+    elif isinstance(data, list):
+        return max([_get_financial_json_depth(item, current_depth + 1) for item in data], default=current_depth)
+    else:
+        return current_depth
+
+
+def _check_financial_json_security(data: Any, field_name: str) -> None:
+    """Recursively check financial JSON data for security issues"""
+    if isinstance(data, dict):
+        # Check for sensitive keys
+        for key in data:
+            if any(sensitive in key.lower() for sensitive in SENSITIVE_FINANCIAL_KEYS):
+                raise ValidationError(
+                    f"{field_name} contains sensitive financial information in key '{key}'"
+                )
+        
+        # Check for dangerous patterns in values
+        for key, value in data.items():
+            if isinstance(value, str):
+                for pattern in DANGEROUS_FINANCIAL_PATTERNS:
+                    if re.search(pattern, value, re.IGNORECASE):
+                        raise ValidationError(
+                            f"{field_name} contains potentially dangerous pattern in '{key}'"
+                        )
+            _check_financial_json_security(value, field_name)
+    elif isinstance(data, list):
+        for item in data:
+            _check_financial_json_security(item, field_name)
+
+
+def log_security_event(event_type: str, details: dict[str, Any], request_ip: str | None = None, user_email: str | None = None) -> None:
+    """🔒 Log security events for financial operations monitoring and auditing"""
+    log_data = {
+        'event_type': event_type,
+        'timestamp': timezone.now().isoformat(),
+        'details': details,
+        'financial_operation': True,
+        'compliance_audit': True
+    }
+    
+    if request_ip:
+        log_data['request_ip'] = request_ip
+    if user_email:
+        log_data['user_email'] = user_email
+    
+    logger.info(f"🔒 [Billing Security] {event_type}: {log_data}")
 
 # ===============================================================================
 # CURRENCY & FX MODELS
@@ -81,14 +247,33 @@ class InvoiceSequence(models.Model):
         verbose_name = _("Invoice Sequence")
         verbose_name_plural = _("Invoice Sequences")
 
-    def get_next_number(self, prefix: str = "INV") -> str:
-        """Get next invoice number and increment sequence atomically"""
+    def get_next_number(self, prefix: str = "INV", user_email: str | None = None) -> str:
+        """Get next invoice number and increment sequence atomically with security logging"""
         with transaction.atomic():
+            # Log critical financial operation
+            old_value = self.last_value
+            
             # Atomic increment using F() expression to prevent race conditions
             InvoiceSequence.objects.filter(pk=self.pk).update(last_value=F("last_value") + 1)
             # Refresh the instance to get the updated value
             self.refresh_from_db()
-            return f"{prefix}-{self.last_value:06d}"
+            new_number = f"{prefix}-{self.last_value:06d}"
+            
+            # Comprehensive security logging for audit trail
+            log_security_event(
+                event_type='invoice_number_generated',
+                details={
+                    'sequence_scope': self.scope,
+                    'old_value': old_value,
+                    'new_value': self.last_value,
+                    'generated_number': new_number,
+                    'prefix': prefix,
+                    'critical_financial_operation': True
+                },
+                user_email=user_email
+            )
+            
+            return new_number
 
 
 class ProformaSequence(models.Model):
@@ -102,10 +287,8 @@ class ProformaSequence(models.Model):
         verbose_name = _("Proforma Sequence")
         verbose_name_plural = _("Proforma Sequences")
 
-    def get_next_number(self, prefix: str = "PRO") -> str:
-        """Get next proforma number and increment sequence atomically"""
-        logger = logging.getLogger(__name__)
-
+    def get_next_number(self, prefix: str = "PRO", user_email: str | None = None) -> str:
+        """Get next proforma number and increment sequence atomically with security logging"""
         with transaction.atomic():
             # Atomic increment using F() expression to prevent race conditions
             old_value = self.last_value
@@ -113,7 +296,21 @@ class ProformaSequence(models.Model):
             # Refresh the instance to get the updated value
             self.refresh_from_db()
             new_number = f"{prefix}-{self.last_value:06d}"
-
+            
+            # Enhanced security logging for audit trail
+            log_security_event(
+                event_type='proforma_number_generated',
+                details={
+                    'sequence_scope': self.scope,
+                    'old_value': old_value,
+                    'new_value': self.last_value,
+                    'generated_number': new_number,
+                    'prefix': prefix,
+                    'critical_financial_operation': True
+                },
+                user_email=user_email
+            )
+            
             logger.info(f"🔢 Generated proforma number {new_number} (was {old_value}, now {self.last_value})")
             return new_number
 
@@ -188,6 +385,45 @@ class ProformaInvoice(models.Model):
     @property
     def total(self) -> Decimal:
         return Decimal(self.total_cents) / 100
+
+    def clean(self) -> None:
+        """🔒 Validate proforma invoice data for security issues"""
+        super().clean()
+        
+        # Validate financial amounts
+        validate_financial_amount(self.subtotal_cents, "Subtotal")
+        validate_financial_amount(self.tax_cents, "Tax amount")
+        validate_financial_amount(self.total_cents, "Total amount")
+        
+        # Validate JSON metadata
+        validate_financial_json(self.meta, "Proforma metadata")
+        
+        # Validate text fields
+        validate_financial_text_field(self.bill_to_name, "Bill to name", MAX_ADDRESS_FIELD_LENGTH)
+        validate_financial_text_field(self.bill_to_address1, "Address line 1", MAX_ADDRESS_FIELD_LENGTH)
+        validate_financial_text_field(self.bill_to_address2, "Address line 2", MAX_ADDRESS_FIELD_LENGTH)
+        validate_financial_text_field(self.bill_to_city, "City", MAX_ADDRESS_FIELD_LENGTH)
+        validate_financial_text_field(self.bill_to_region, "Region", MAX_ADDRESS_FIELD_LENGTH)
+        
+        # Validate total calculation integrity
+        if self.subtotal_cents + self.tax_cents != self.total_cents and self.total_cents != 0:
+            raise ValidationError("Financial calculation error: subtotal + tax must equal total")
+        
+        # Validate expiration date
+        if self.valid_until and self.valid_until <= timezone.now():
+            raise ValidationError("Proforma valid until date must be in the future")
+        
+        # Log security validation
+        log_security_event(
+            event_type='proforma_validation',
+            details={
+                'proforma_number': self.number,
+                'customer_id': self.customer.id if self.customer else None,
+                'total_cents': self.total_cents,
+                'has_metadata': bool(self.meta),
+                'validation_passed': True
+            }
+        )
 
     def convert_to_invoice(self) -> None:
         """Convert this proforma to an actual invoice"""
@@ -329,10 +565,59 @@ class Invoice(models.Model):
         return f"{self.number} - {self.customer}"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        """Calculate subtotal from total and tax on save"""
+        """Calculate subtotal from total and tax on save with validation"""
+        # Call clean to trigger validation
+        self.clean()
+        
         if self.total_cents and self.tax_cents:
             self.subtotal_cents = self.total_cents - self.tax_cents
         super().save(*args, **kwargs)
+
+    def clean(self) -> None:
+        """🔒 Validate invoice data for security issues"""
+        super().clean()
+        
+        # Validate financial amounts
+        validate_financial_amount(self.subtotal_cents, "Subtotal")
+        validate_financial_amount(self.tax_cents, "Tax amount")
+        validate_financial_amount(self.total_cents, "Total amount")
+        
+        # Validate JSON fields
+        validate_financial_json(self.meta, "Invoice metadata")
+        validate_financial_json(self.efactura_response, "e-Factura response")
+        
+        # Validate text fields
+        validate_financial_text_field(self.bill_to_name, "Bill to name", MAX_ADDRESS_FIELD_LENGTH)
+        validate_financial_text_field(self.bill_to_address1, "Address line 1", MAX_ADDRESS_FIELD_LENGTH)
+        validate_financial_text_field(self.bill_to_address2, "Address line 2", MAX_ADDRESS_FIELD_LENGTH)
+        validate_financial_text_field(self.bill_to_city, "City", MAX_ADDRESS_FIELD_LENGTH)
+        validate_financial_text_field(self.bill_to_region, "Region", MAX_ADDRESS_FIELD_LENGTH)
+        
+        # Validate financial calculation integrity
+        if self.subtotal_cents + self.tax_cents != self.total_cents and self.total_cents != 0:
+            raise ValidationError("Financial calculation error: subtotal + tax must equal total")
+        
+        # Validate invoice immutability rules
+        if self.locked_at and self.status not in ['draft']:
+            raise ValidationError("Cannot modify locked invoice")
+            
+        # Validate date consistency
+        if self.issued_at and self.due_at and self.due_at <= self.issued_at:
+            raise ValidationError("Due date must be after issue date")
+        
+        # Log security validation
+        log_security_event(
+            event_type='invoice_validation',
+            details={
+                'invoice_number': self.number,
+                'customer_id': self.customer.id if self.customer else None,
+                'status': self.status,
+                'total_cents': self.total_cents,
+                'is_locked': bool(self.locked_at),
+                'has_metadata': bool(self.meta),
+                'validation_passed': True
+            }
+        )
 
     @property
     def subtotal(self) -> Decimal:

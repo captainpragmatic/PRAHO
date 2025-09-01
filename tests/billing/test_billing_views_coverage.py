@@ -393,11 +393,11 @@ class BillingViewsCoverageTestCase(TestCase):
 
     def test_pdf_access_validation_edge_cases(self):
         """Test PDF access validation (line 237)"""
-        from apps.billing.views import _validate_pdf_access
+        from apps.billing.views import _validate_financial_document_access
         from django.http import HttpResponseRedirect
         
         # Test with None user
-        result = _validate_pdf_access(None, self.invoice)
+        result = _validate_financial_document_access(None, self.invoice)
         self.assertIsInstance(result, HttpResponseRedirect)
 
     def test_customer_access_check_edge_cases(self):
@@ -413,9 +413,11 @@ class BillingViewsCoverageTestCase(TestCase):
             customer=other_customer,
             number='INV-OTHER-001',
             currency=self.currency,
-            total_cents=100000,
-            tax_cents=19000,
-            due_at='2024-12-31'
+            subtotal_cents=81000,  # 810.00 RON
+            tax_cents=19000,       # 190.00 RON VAT (81000 * 0.19 rounded)
+            total_cents=100000,    # 1000.00 RON total
+            issued_at=timezone.now(),
+            due_at=timezone.now() + timezone.timedelta(days=30)
         )
         
         # Test access with user not having permission

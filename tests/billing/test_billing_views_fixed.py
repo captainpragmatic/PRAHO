@@ -33,7 +33,7 @@ from apps.billing.views import (
     _process_valid_until_date,
     _update_proforma_basic_info,
     _validate_customer_assignment,
-    _validate_pdf_access,
+    _validate_financial_document_access,
     _validate_proforma_edit_access,
     billing_list,
     invoice_pdf,
@@ -199,31 +199,31 @@ class BillingViewsTestCase(TestCase):
             customer_ids = _get_accessible_customer_ids(self.user)
             self.assertEqual(customer_ids, [])
 
-    def test_validate_pdf_access_success(self) -> None:
-        """Test _validate_pdf_access with authorized user"""
+    def test_validate_financial_document_access_success(self) -> None:
+        """Test _validate_financial_document_access with authorized user"""
         request = self.factory.get('/test/')
         request.user = self.user
         
-        result = _validate_pdf_access(request, self.invoice)
+        result = _validate_financial_document_access(request, self.invoice)
         self.assertIsNone(result)
 
-    def test_validate_pdf_access_denied(self) -> None:
-        """Test _validate_pdf_access with unauthorized user"""
+    def test_validate_financial_document_access_denied(self) -> None:
+        """Test _validate_financial_document_access with unauthorized user"""
         request = self.factory.get('/test/')
         request.user = self.no_access_user
         request = self.add_middleware_to_request(request)
         
-        result = _validate_pdf_access(request, self.invoice)
+        result = _validate_financial_document_access(request, self.invoice)
         self.assertIsNotNone(result)
         self.assertEqual(result.status_code, 302)
 
-    def test_validate_pdf_access_anonymous_user(self) -> None:
-        """Test _validate_pdf_access with anonymous user"""
+    def test_validate_financial_document_access_anonymous_user(self) -> None:
+        """Test _validate_financial_document_access with anonymous user"""
         request = self.factory.get('/test/')
         request.user = AnonymousUser()
         request = self.add_middleware_to_request(request)
         
-        result = _validate_pdf_access(request, self.invoice)
+        result = _validate_financial_document_access(request, self.invoice)
         self.assertIsNotNone(result)
         self.assertEqual(result.status_code, 302)
 

@@ -603,8 +603,8 @@ class HelperFunctionsCoverageTestCase(TestCase):
             
             self.assertEqual(result, [self.customer.id])
 
-    def test_validate_pdf_access_unauthorized_user(self) -> None:
-        """Test _validate_pdf_access with user who can't access document"""
+    def test_validate_financial_document_access_unauthorized_user(self) -> None:
+        """Test _validate_financial_document_access with user who can't access document"""
         factory = RequestFactory()
         request = factory.get('/test/')
         request.user = self.user
@@ -628,13 +628,13 @@ class HelperFunctionsCoverageTestCase(TestCase):
             mock_document = Mock()
             mock_document.customer = self.customer
             
-            response = views._validate_pdf_access(request, mock_document)
+            response = views._validate_financial_document_access(request, mock_document)
             
             self.assertIsNotNone(response)
             self.assertEqual(response.status_code, 302)
 
-    def test_validate_pdf_access_authorized_user(self) -> None:
-        """Test _validate_pdf_access with authorized user"""
+    def test_validate_financial_document_access_authorized_user(self) -> None:
+        """Test _validate_financial_document_access with authorized user"""
         factory = RequestFactory()
         request = factory.get('/test/')
         request.user = self.user
@@ -646,6 +646,6 @@ class HelperFunctionsCoverageTestCase(TestCase):
             mock_document = Mock()
             mock_document.customer = self.customer
             
-            response = views._validate_pdf_access(request, mock_document)
+            response = views._validate_financial_document_access(request, mock_document)
             
             self.assertIsNone(response)  # No redirect, access granted

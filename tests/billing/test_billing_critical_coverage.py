@@ -33,7 +33,7 @@ from apps.billing.pdf_generators import (
 from apps.billing.services import RefundData, RefundReason, RefundService, RefundType
 from apps.billing.views import (
     _get_accessible_customer_ids,
-    _validate_pdf_access,
+    _validate_financial_document_access,
     billing_list,
     invoice_pdf,
     proforma_pdf,
@@ -132,33 +132,33 @@ class TestBillingViewsCriticalPaths(BillingCriticalCoverageTestCase):
         result = _get_accessible_customer_ids(mock_user)
         self.assertEqual(result, [])
 
-    def test_validate_pdf_access_none_request(self):
-        """TEST #3: Test _validate_pdf_access with None request"""
-        response = _validate_pdf_access(None, self.invoice)
-        self.assertIsNotNone(response)
-        self.assertEqual(response.status_code, 302)  # Redirect response
+    def test_validate_financial_document_access_none_request(self):
+        """TEST #3: Test _validate_financial_document_access with None request"""
+        from django.core.exceptions import PermissionDenied
+        with self.assertRaises(PermissionDenied):
+            _validate_financial_document_access(None, self.invoice)
 
-    def test_validate_pdf_access_none_document(self):
-        """TEST #4: Test _validate_pdf_access with None document"""
+    def test_validate_financial_document_access_none_document(self):
+        """TEST #4: Test _validate_financial_document_access with None document"""
         request = self.factory.get('/test/')
         request.user = self.staff_user
         request = self.add_session_middleware(request)
         
-        response = _validate_pdf_access(request, None)
-        self.assertIsNotNone(response)
-        self.assertEqual(response.status_code, 302)
+        from django.core.exceptions import PermissionDenied
+        with self.assertRaises(PermissionDenied):
+            _validate_financial_document_access(request, None)
 
-    def test_validate_pdf_access_unauthorized_user(self):
-        """TEST #5: Test _validate_pdf_access with unauthorized user"""
+    def test_validate_financial_document_access_unauthorized_user(self):
+        """TEST #5: Test _validate_financial_document_access with unauthorized user"""
         request = self.factory.get('/test/')
         request.user = self.regular_user
         request = self.add_session_middleware(request)
         
         # Mock the can_access_customer method to return False
+        from django.core.exceptions import PermissionDenied
         with patch.object(self.regular_user, 'can_access_customer', return_value=False):
-            response = _validate_pdf_access(request, self.invoice)
-            self.assertIsNotNone(response)
-            self.assertEqual(response.status_code, 302)
+            with self.assertRaises(PermissionDenied):
+                _validate_financial_document_access(request, self.invoice)
 
     def test_billing_list_database_error_handling(self):
         """TEST #6: Test billing_list view error handling for database exceptions"""
@@ -197,7 +197,11 @@ class TestBillingViewsCriticalPaths(BillingCriticalCoverageTestCase):
             number='INV-FROM-PRO',
             currency=self.ron_currency,
             status='issued',
-            total_cents=11900,
+            subtotal_cents=10000,  # 100.00 RON
+            tax_cents=1900,        # 19.00 RON VAT  
+            total_cents=11900,     # 119.00 RON total
+            issued_at=timezone.now(),
+            due_at=timezone.now() + timezone.timedelta(days=30),
             converted_from_proforma=self.proforma
         )
         

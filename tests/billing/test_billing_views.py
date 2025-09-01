@@ -32,7 +32,7 @@ from apps.billing.views import (
     _process_valid_until_date,
     _update_proforma_basic_info,
     _validate_customer_assignment,
-    _validate_pdf_access,
+    _validate_financial_document_access,
     _validate_proforma_edit_access,
     billing_list,
     invoice_detail,
@@ -112,8 +112,8 @@ class BillingViewsTestCase(TestCase):
         customer_ids = _get_accessible_customer_ids(self.no_access_user)
         self.assertEqual(customer_ids, [])
 
-    def test_validate_pdf_access_success(self):
-        """Test _validate_pdf_access with authorized user"""
+    def test_validate_financial_document_access_success(self):
+        """Test _validate_financial_document_access with authorized user"""
         invoice = Invoice.objects.create(
             customer=self.customer,
             currency=self.currency,
@@ -123,11 +123,11 @@ class BillingViewsTestCase(TestCase):
         request = self.factory.get('/test/')
         request.user = self.user
         
-        result = _validate_pdf_access(request, invoice)
+        result = _validate_financial_document_access(request, invoice)
         self.assertIsNone(result)
 
-    def test_validate_pdf_access_denied(self):
-        """Test _validate_pdf_access with unauthorized user"""
+    def test_validate_financial_document_access_denied(self):
+        """Test _validate_financial_document_access with unauthorized user"""
         invoice = Invoice.objects.create(
             customer=self.customer,
             currency=self.currency,
@@ -138,10 +138,9 @@ class BillingViewsTestCase(TestCase):
         request.user = self.no_access_user
         request = self.add_middleware_to_request(request)
         
-        result = _validate_pdf_access(request, invoice)
-        
-        self.assertIsNotNone(result)
-        self.assertEqual(result.status_code, 302)
+        from django.core.exceptions import PermissionDenied
+        with self.assertRaises(PermissionDenied):
+            _validate_financial_document_access(request, invoice)
 
 
 class BillingListViewTestCase(TestCase):
