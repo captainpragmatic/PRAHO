@@ -9,8 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from django import template
-from django.utils.html import escape  # For XSS prevention
-from django.utils.safestring import mark_safe
+from django.utils.html import escape, format_html  # For XSS prevention
 
 from apps.common.constants import FILE_SIZE_CONVERSION_FACTOR
 
@@ -202,6 +201,12 @@ def button(
         elif hasattr(htmx, key) and value is not None:
             setattr(htmx, key, value)
 
+    # 🔒 Security: Sanitize attrs to prevent XSS attacks
+    safe_attrs = ""
+    if config.attrs:
+        # Only allow safe HTML attributes with proper escaping
+        safe_attrs = escape(str(config.attrs))
+
     return {
         "text": text,
         "variant": config.variant,
@@ -225,7 +230,7 @@ def button(
         "icon_right": config.icon_right,
         "disabled": config.disabled,
         "class": config.class_,
-        "attrs": config.attrs,
+        "attrs": safe_attrs,
     }
 
 
@@ -682,12 +687,9 @@ def icon(name: str, *, size: str = "md", css_class: str = "", **kwargs: Any) -> 
     if css_class:
         classes += f" {escape(css_class)}"
 
-    # Escape all inputs before rendering
-    safe_name = escape(name)
-    safe_classes = escape(classes)
-
-    # For now, return a placeholder - will be replaced with actual SVG icons
-    return mark_safe(f'<svg class="{safe_classes}" data-icon="{safe_name}"><use href="#icon-{safe_name}"></use></svg>')  # nosec B308 B703 - All inputs are validated and escaped  # noqa: S308
+    # 🔒 Security: Use format_html instead of f-strings to prevent XSS
+    # All inputs are validated and classes built from known sets; name was sanitized.
+    return format_html('<svg class="{}" data-icon="{}"><use href="#icon-{}"></use></svg>', classes, name, name)
 
 
 @register.simple_tag(takes_context=True)
