@@ -44,27 +44,37 @@ security_logger = logging.getLogger("security")
 
 def _handle_secure_error(request: HttpRequest, error: Exception, operation: str, user_id: int | None = None) -> None:
     """🔒 Handle errors securely without leaking sensitive information"""
+    from django.contrib.messages.api import MessageFailure
+    
+    def _safe_add_message(request: HttpRequest, message: str) -> None:
+        """Safely add a message, handling cases where MessageMiddleware is not installed"""
+        try:
+            messages.error(request, message)
+        except MessageFailure:
+            # MessageMiddleware not installed (typically in tests)
+            pass
+    
     if isinstance(error, ValidationError):
-        messages.error(request, _("❌ Please check your input: Invalid data provided"))
+        _safe_add_message(request, _("❌ Please check your input: Invalid data provided"))
         security_logger.warning(
             f"⚡ [CustomerSecurity] Validation error during {operation}",
             extra={"user_id": user_id, "operation": operation, "error_type": "validation"},
         )
     elif isinstance(error, IntegrityError):
-        messages.error(request, _("❌ This operation conflicts with existing data"))
+        _safe_add_message(request, _("❌ This operation conflicts with existing data"))
         security_logger.error(
             f"⚡ [CustomerSecurity] Integrity error during {operation}",
             extra={"user_id": user_id, "operation": operation, "error_type": "integrity"},
         )
     elif isinstance(error, PermissionDenied):
-        messages.error(request, _("❌ You don't have permission to perform this action"))
+        _safe_add_message(request, _("❌ You don't have permission to perform this action"))
         security_logger.warning(
             f"⚡ [CustomerSecurity] Permission denied during {operation}",
             extra={"user_id": user_id, "operation": operation, "error_type": "permission"},
         )
     else:
         # Unexpected errors - completely generic message
-        messages.error(request, _("❌ Operation failed. Please contact support if this continues"))
+        _safe_add_message(request, _("❌ Operation failed. Please contact support if this continues"))
         security_logger.exception(
             f"⚡ [CustomerSecurity] Unexpected error during {operation}",
             extra={"user_id": user_id, "operation": operation, "error_type": "unexpected"},

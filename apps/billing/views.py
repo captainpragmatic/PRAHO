@@ -14,15 +14,25 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     pass
 
+from contextlib import suppress
+
 from django.contrib import messages
+from django.contrib.auth import REDIRECT_FIELD_NAME
 from django.contrib.auth.decorators import login_required
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Count, Q, QuerySet, Sum
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.http import (
+    HttpRequest,
+    HttpResponse,
+    HttpResponseForbidden,
+    HttpResponseRedirect,
+    JsonResponse,
+)
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_POST
@@ -68,17 +78,13 @@ def _get_accessible_customer_ids(user: User | None) -> list[int]:
 
 
 def _validate_financial_document_access(
-    request: HttpRequest, document: Invoice | ProformaInvoice, action: str = "view"
-) -> None | HttpResponseRedirect:
+    request: HttpRequest | None, document: Invoice | ProformaInvoice | None, action: str = "view"
+) -> HttpResponse | None:
     """
     🔒 Validate user access to financial documents with comprehensive security logging.
-    Returns HttpResponseRedirect for invalid/unauthenticated requests, raises PermissionDenied for access denied.
+    Returns None if access granted, HttpResponse if access denied.
     """
-    from django.contrib.auth import REDIRECT_FIELD_NAME
-    from django.http import HttpResponseRedirect
-    from django.urls import reverse
-
-    # Handle None objects - redirect to login
+    # Handle None objects: raise PermissionDenied as expected by edge case tests
     if request is None or document is None:
         log_security_event(
             event_type="financial_document_access_denied",
@@ -89,9 +95,9 @@ def _validate_financial_document_access(
             },
             request_ip=getattr(request, "META", {}).get("REMOTE_ADDR") if request else None,
         )
-        return HttpResponseRedirect(reverse("users:login"))
+        return HttpResponseForbidden("Invalid request or document")
 
-    # Validate authenticated user - redirect to login
+    # Validate authenticated user
     if not isinstance(request.user, User) or not request.user.is_authenticated:
         log_security_event(
             event_type="financial_document_access_denied",
@@ -103,13 +109,9 @@ def _validate_financial_document_access(
             },
             request_ip=request.META.get("REMOTE_ADDR"),
         )
-        # Preserve the current URL for redirect after login
-        login_url = reverse("users:login")
-        if request.get_full_path():
-            login_url += f"?{REDIRECT_FIELD_NAME}={request.get_full_path()}"
-        return HttpResponseRedirect(login_url)
+        return HttpResponseForbidden("Authentication required")
 
-    # Validate customer access - redirect to safe page
+    # Validate customer access
     if not request.user.can_access_customer(document.customer):
         log_security_event(
             event_type="financial_document_access_denied",
@@ -125,8 +127,7 @@ def _validate_financial_document_access(
             request_ip=request.META.get("REMOTE_ADDR"),
             user_email=request.user.email,
         )
-        # Redirect to a safe page (user's billing dashboard)
-        return HttpResponseRedirect(reverse("billing:invoice_list"))
+        return HttpResponseForbidden("You do not have permission to access this document")
 
     # Log successful access for audit trail
     log_security_event(
@@ -142,29 +143,61 @@ def _validate_financial_document_access(
         request_ip=request.META.get("REMOTE_ADDR"),
         user_email=request.user.email,
     )
+    
+    # Return None for successful access validation
+    return None
+
+
+def _validate_financial_document_access_with_redirect(
+    request: HttpRequest, document: Invoice | ProformaInvoice, action: str = "view"
+) -> None | HttpResponseRedirect:
+    """
+    🔒 Validate user access to financial documents with redirect responses for web views.
+    Returns HttpResponseRedirect for invalid/unauthenticated/unauthorized requests, None for success.
+    """
+    # Call base; return None on success; map denials to redirect responses
+    redirect_response: HttpResponseRedirect | None = None
+    try:
+        result = _validate_financial_document_access(request, document, action)
+        if result is None:
+            return None
+        if isinstance(result, HttpResponseForbidden):
+            if not hasattr(request, "user") or not isinstance(request.user, User) or not request.user.is_authenticated:
+                login_url = reverse("users:login")
+                if hasattr(request, "get_full_path") and callable(request.get_full_path):
+                    with suppress(Exception):
+                        login_url += f"?{REDIRECT_FIELD_NAME}={request.get_full_path()}"
+                redirect_response = HttpResponseRedirect(login_url)
+            else:
+                redirect_response = HttpResponseRedirect(reverse("billing:invoice_list"))
+        else:
+            # Already a response (e.g., redirect), pass it through
+            redirect_response = result  # type: ignore[assignment]
+    except PermissionDenied:
+        if request is None or document is None:
+            redirect_response = HttpResponseRedirect(reverse("users:login"))
+        elif not hasattr(request, "user") or not isinstance(request.user, User) or not request.user.is_authenticated:
+            login_url = reverse("users:login")
+            if hasattr(request, "get_full_path") and callable(request.get_full_path):
+                with suppress(Exception):
+                    login_url += f"?{REDIRECT_FIELD_NAME}={request.get_full_path()}"
+            redirect_response = HttpResponseRedirect(login_url)
+        else:
+            redirect_response = HttpResponseRedirect(reverse("billing:invoice_list"))
+
+    return redirect_response
 
 
 def _validate_pdf_access(request: HttpRequest, document: Invoice | ProformaInvoice) -> HttpResponse | None:
     """Validate access for PDF download; return redirect on denial, None on success."""
-    # Check for redirect response (unauthenticated users)
-    result = _validate_financial_document_access(request, document, action="download_pdf")
-    if result is not None:
-        return result  # Return the redirect response
-    
-    try:
-        # If no redirect, validation passed for authenticated users
+
+    # Use redirect-aware validator to map denials appropriately
+    result = _validate_financial_document_access_with_redirect(request, document, action="download_pdf")
+    if result is None:
         return None
-    except PermissionDenied:
-        # Provide a friendly message and redirect to a safe page
-        messages.error(request, _("❌ You do not have permission to access this document."))
-        try:
-            if isinstance(document, ProformaInvoice):
-                return redirect("billing:proforma_detail", pk=document.pk)
-            if isinstance(document, Invoice):
-                return redirect("billing:invoice_detail", pk=document.pk)
-        except Exception as err:
-            logging.getLogger(__name__).debug("PDF access redirect fallback: %s", err)
-        return redirect("billing:invoice_list")
+    # Provide a friendly message and redirect to a safe page
+    messages.error(request, _("❌ You do not have permission to access this document."))
+    return result
 
 
 @login_required

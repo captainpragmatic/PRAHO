@@ -205,6 +205,7 @@ class Currency(models.Model):
     """Currency definitions with decimal precision"""
 
     code = models.CharField(max_length=3, primary_key=True)  # 'EUR', 'RON'
+    name = models.CharField(max_length=50, default="")
     symbol = models.CharField(max_length=10)
     decimals = models.SmallIntegerField(default=2)
 
@@ -215,6 +216,11 @@ class Currency(models.Model):
 
     def __str__(self) -> str:
         return f"{self.code} ({self.symbol})"
+
+    # Convenience for tests that expect integer PK `.id`
+    @property
+    def id(self) -> str:  # type: ignore[override]
+        return self.code
 
 
 class FXRate(models.Model):

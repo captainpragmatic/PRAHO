@@ -5,13 +5,14 @@ Provides role-based access control decorators for views.
 
 import logging
 from collections.abc import Callable
+from contextlib import suppress
 from functools import wraps
 from typing import Any
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, HttpResponseForbidden, HttpResponseRedirect
 from django.shortcuts import redirect
 from django.utils.translation import gettext_lazy as _
 
@@ -27,12 +28,17 @@ def staff_required(view_func: Callable[..., HttpResponse]) -> Callable[..., Http
     """
 
     @wraps(view_func)
-    @login_required  # Ensure user is logged in first
     def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
-        user = request.user
+        # Unauthenticated -> login redirect
+        if not request.user.is_authenticated:
+            login_url = "/users/login/"
+            with suppress(Exception):
+                login_url += f"?next={request.get_full_path()}"
+            return HttpResponseRedirect(login_url)
 
-        # Check if user is staff (either Django is_staff or has staff_role)
-        if not (user.is_staff or bool(getattr(user, "staff_role", ""))):
+        user = request.user
+        # Authenticated but non-staff -> redirect to dashboard with message (orders tests)
+        if not (user.is_staff or bool(getattr(user, "staff_role", "")) or getattr(user, "is_superuser", False)):
             messages.error(request, _("❌ Access denied. Staff privileges required."))
             return redirect("dashboard")
 
@@ -48,14 +54,37 @@ def admin_required(view_func: Callable[..., HttpResponse]) -> Callable[..., Http
     """
 
     @wraps(view_func)
-    @login_required
     def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
-        user = request.user
+        if not request.user.is_authenticated:
+            login_url = "/users/login/"
+            with suppress(Exception):
+                login_url += f"?next={request.get_full_path()}"
+            return HttpResponseRedirect(login_url)
 
+        user = request.user
         # Check if user is admin
         if not (user.is_superuser or getattr(user, "staff_role", "") == "admin"):
-            messages.error(request, _("❌ Access denied. Administrator privileges required."))
-            return redirect("dashboard")
+            return HttpResponseForbidden("Administrator privileges required")
+
+        return view_func(request, *args, **kwargs)
+
+    return wrapper
+
+
+def staff_required_strict(view_func: Callable[..., HttpResponse]) -> Callable[..., HttpResponse]:
+    """Strict staff-only: unauthenticated -> login; non-staff -> 403."""
+
+    @wraps(view_func)
+    def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        if not request.user.is_authenticated:
+            login_url = "/users/login/"
+            with suppress(Exception):
+                login_url += f"?next={request.get_full_path()}"
+            return HttpResponseRedirect(login_url)
+
+        user = request.user
+        if not (user.is_staff or bool(getattr(user, "staff_role", "")) or getattr(user, "is_superuser", False)):
+            return HttpResponseForbidden("Staff privileges required")
 
         return view_func(request, *args, **kwargs)
 
@@ -167,9 +196,16 @@ def can_manage_financial_data(user: User) -> bool:
     """
     Business logic check for managing financial data (payments, pricing, etc.).
     Only billing staff and admins can manage financial data.
+    Must be staff AND have appropriate role (or be superuser).
     """
+    if user.is_superuser:
+        return True
+        
+    if not user.is_staff:
+        return False
+        
     allowed_roles = ["admin", "billing", "manager"]
-    return user.is_superuser or getattr(user, "staff_role", "") in allowed_roles
+    return getattr(user, "staff_role", "") in allowed_roles
 
 
 def can_access_admin_functions(user: User) -> bool:

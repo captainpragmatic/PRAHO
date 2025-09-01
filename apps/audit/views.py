@@ -29,6 +29,7 @@ from django.utils.translation import gettext as _
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_POST
 
+from apps.common.decorators import staff_required_strict
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.types import Err, Ok
 
@@ -61,26 +62,6 @@ else:
 logger = logging.getLogger(__name__)
 
 
-# ===============================================================================
-# CUSTOM DECORATORS
-# ===============================================================================
-
-
-def staff_required(view_func: Any) -> Any:
-    """
-    Custom decorator to check if user is staff (instead of Django admin staff_member_required).
-    This prevents NoReverseMatch errors since we don't use Django admin.
-    """
-
-    @wraps(view_func)
-    @login_required
-    def _wrapped_view(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
-        if not request.user.is_staff:
-            messages.error(request, _("You don't have permission to access this page."))
-            return redirect("dashboard")
-        return view_func(request, *args, **kwargs)
-
-    return _wrapped_view
 
 
 def _parse_date_filters(filters: dict) -> dict:
@@ -535,7 +516,7 @@ def update_consent(request: HttpRequest) -> HttpResponse:
 # ===============================================================================
 
 
-@staff_required
+@staff_required_strict
 def audit_management_dashboard(request: HttpRequest) -> HttpResponse:
     """Enterprise audit management dashboard with real-time metrics and alerts."""
 
@@ -585,7 +566,7 @@ def audit_management_dashboard(request: HttpRequest) -> HttpResponse:
     return render(request, "audit/management_dashboard.html", context)
 
 
-@staff_required
+@staff_required_strict
 def audit_log(request: HttpRequest) -> HttpResponse:
     """Enhanced audit logs view with advanced search capabilities."""
 
@@ -603,7 +584,7 @@ def audit_log(request: HttpRequest) -> HttpResponse:
     return render(request, "audit/logs.html", context)
 
 
-@staff_required
+@staff_required_strict
 def logs_list(request: HttpRequest) -> HttpResponse:
     """Enhanced HTMX endpoint for filtered audit logs with advanced search."""
 
@@ -661,7 +642,7 @@ def logs_list(request: HttpRequest) -> HttpResponse:
     return render(request, "audit/partials/logs_list.html", context)
 
 
-@staff_required
+@staff_required_strict
 def export_logs(request: HttpRequest) -> HttpResponse:
     """Export filtered audit logs in multiple formats (CSV, JSON)."""
 
@@ -840,7 +821,7 @@ def _export_logs_json(queryset: models.QuerySet[AuditEvent], timestamp: str) -> 
 # ===============================================================================
 
 
-@staff_required
+@staff_required_strict
 def gdpr_management_dashboard(request: HttpRequest) -> HttpResponse:
     """Staff-only GDPR management dashboard for processing all user requests"""
 
@@ -870,7 +851,7 @@ def gdpr_management_dashboard(request: HttpRequest) -> HttpResponse:
     return render(request, "audit/gdpr_management_dashboard.html", context)
 
 
-@staff_required
+@staff_required_strict
 def gdpr_export_requests_list(request: HttpRequest) -> HttpResponse:
     """HTMX endpoint for filtered GDPR export requests list"""
 
@@ -918,7 +899,7 @@ def gdpr_export_requests_list(request: HttpRequest) -> HttpResponse:
     return render(request, "audit/partials/gdpr_export_requests_list.html", context)
 
 
-@staff_required
+@staff_required_strict
 @require_POST
 @csrf_protect
 def process_export_request(request: HttpRequest, export_id: uuid.UUID) -> HttpResponse:
@@ -995,7 +976,7 @@ def process_export_request(request: HttpRequest, export_id: uuid.UUID) -> HttpRe
     return redirect("audit:gdpr_management_dashboard")
 
 
-@staff_required
+@staff_required_strict
 def gdpr_export_detail(request: HttpRequest, export_id: uuid.UUID) -> HttpResponse:
     """HTMX endpoint for detailed export request view"""
     export_request = get_object_or_404(DataExport, id=export_id)
@@ -1015,7 +996,7 @@ def gdpr_export_detail(request: HttpRequest, export_id: uuid.UUID) -> HttpRespon
     return render(request, "audit/partials/gdpr_export_detail.html", context)
 
 
-@staff_required
+@staff_required_strict
 def download_user_export(request: HttpRequest, export_id: uuid.UUID) -> HttpResponse:
     """Staff download of user's GDPR export for review/compliance purposes"""
 
@@ -1057,7 +1038,7 @@ def download_user_export(request: HttpRequest, export_id: uuid.UUID) -> HttpResp
 # ===============================================================================
 
 
-@staff_required
+@staff_required_strict
 def audit_search_suggestions(request: HttpRequest) -> HttpResponse:
     """HTMX endpoint for search auto-completion suggestions."""
 
@@ -1072,7 +1053,7 @@ def audit_search_suggestions(request: HttpRequest) -> HttpResponse:
     return render(request, "audit/partials/search_suggestions.html", context)
 
 
-@staff_required
+@staff_required_strict
 @require_POST
 @csrf_protect
 def save_search_query(request: HttpRequest) -> HttpResponse:
@@ -1116,7 +1097,7 @@ def save_search_query(request: HttpRequest) -> HttpResponse:
     return redirect("audit:logs")
 
 
-@staff_required
+@staff_required_strict
 def load_saved_search(request: HttpRequest, query_id: uuid.UUID) -> HttpResponse:
     """Load a saved search query."""
 
@@ -1148,7 +1129,7 @@ def load_saved_search(request: HttpRequest, query_id: uuid.UUID) -> HttpResponse
         return redirect("audit:logs")
 
 
-@staff_required
+@staff_required_strict
 def integrity_dashboard(request: HttpRequest) -> HttpResponse:
     """Audit data integrity monitoring dashboard."""
 
@@ -1181,7 +1162,7 @@ def integrity_dashboard(request: HttpRequest) -> HttpResponse:
     return render(request, "audit/integrity_dashboard.html", context)
 
 
-@staff_required
+@staff_required_strict
 @require_POST
 @csrf_protect
 def run_integrity_check(request: HttpRequest) -> HttpResponse:
@@ -1225,7 +1206,7 @@ def run_integrity_check(request: HttpRequest) -> HttpResponse:
     return redirect("audit:integrity_dashboard")
 
 
-@staff_required
+@staff_required_strict
 def retention_dashboard(request: HttpRequest) -> HttpResponse:
     """Audit retention policy management dashboard."""
 
@@ -1260,7 +1241,7 @@ def retention_dashboard(request: HttpRequest) -> HttpResponse:
     return render(request, "audit/retention_dashboard.html", context)
 
 
-@staff_required
+@staff_required_strict
 @require_POST
 @csrf_protect
 def apply_retention_policies(request: HttpRequest) -> HttpResponse:
@@ -1300,7 +1281,7 @@ def apply_retention_policies(request: HttpRequest) -> HttpResponse:
     return redirect("audit:retention_dashboard")
 
 
-@staff_required
+@staff_required_strict
 def alerts_dashboard(request: HttpRequest) -> HttpResponse:
     """Security and compliance alerts dashboard."""
 
@@ -1360,7 +1341,7 @@ def alerts_dashboard(request: HttpRequest) -> HttpResponse:
     return render(request, "audit/alerts_dashboard.html", context)
 
 
-@staff_required
+@staff_required_strict
 @require_POST
 @csrf_protect
 def update_alert_status(request: HttpRequest, alert_id: uuid.UUID) -> HttpResponse:
@@ -1412,7 +1393,7 @@ def update_alert_status(request: HttpRequest, alert_id: uuid.UUID) -> HttpRespon
     return redirect("audit:alerts_dashboard")
 
 
-@staff_required
+@staff_required_strict
 def event_detail(request: HttpRequest, event_id: uuid.UUID) -> HttpResponse:
     """Enhanced HTMX endpoint for detailed event view with correlation analysis."""
 
