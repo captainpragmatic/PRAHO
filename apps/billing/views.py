@@ -717,7 +717,6 @@ def proforma_to_invoice(request: HttpRequest, pk: int) -> HttpResponse:
             total_cents=proforma.total_cents,
             issued_at=timezone.now(),
             due_at=timezone.now() + timezone.timedelta(days=30),
-            locked_at=timezone.now(),  # Invoices are immutable
             # Copy billing address from proforma
             bill_to_name=proforma.bill_to_name,
             bill_to_tax_id=proforma.bill_to_tax_id,
@@ -744,6 +743,10 @@ def proforma_to_invoice(request: HttpRequest, pk: int) -> HttpResponse:
                 tax_rate=proforma_line.tax_rate,
                 line_total_cents=proforma_line.line_total_cents,
             )
+
+        # Lock the invoice after it has been created and lines copied.
+        # Use queryset update to avoid triggering immutability validation during creation.
+        Invoice.objects.filter(pk=invoice.pk).update(locked_at=timezone.now())
 
         messages.success(
             request,

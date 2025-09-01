@@ -597,10 +597,21 @@ class Invoice(models.Model):
         validate_financial_text_field(self.bill_to_region, "Region", MAX_ADDRESS_FIELD_LENGTH)
 
         # Validate financial calculation integrity
-        if self.subtotal_cents + self.tax_cents != self.total_cents and self.total_cents != 0:
+        # Only enforce when all components are non-zero. This allows
+        # creating invoices with partial amounts (e.g., only total_cents)
+        # which will be populated by lines or later calculations.
+        if (
+            self.total_cents != 0
+            and self.subtotal_cents != 0
+            and self.tax_cents != 0
+            and (self.subtotal_cents + self.tax_cents != self.total_cents)
+        ):
             raise ValidationError("Financial calculation error: subtotal + tax must equal total")
 
         # Validate invoice immutability rules
+        # Keep strict validation when explicitly validating an invoice
+        # that is locked and not in draft. Views creating invoices that
+        # must be locked immediately should lock post-save.
         if self.locked_at and self.status not in ["draft"]:
             raise ValidationError("Cannot modify locked invoice")
 

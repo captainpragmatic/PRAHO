@@ -181,6 +181,14 @@ class Server(models.Model):
     os_type = models.CharField(max_length=100, verbose_name=_("Operating System"))
     control_panel = models.CharField(max_length=100, blank=True, verbose_name=_("Control Panel"))
 
+    # Management API configuration (stored encrypted at rest via service layer)
+    management_api_url = models.URLField(blank=True, verbose_name=_("Management API URL"))
+    management_api_key = models.TextField(blank=True, default="", verbose_name=_("Encrypted API Key"))
+    management_api_secret = models.TextField(blank=True, default="", verbose_name=_("Encrypted API Secret"))
+    management_webhook_secret = models.CharField(
+        max_length=255, blank=True, default="", verbose_name=_("Webhook Secret for signature verification")
+    )
+
     # Provider information (for cloud servers)
     provider = models.CharField(max_length=100, blank=True, verbose_name=_("Provider"))
     provider_instance_id = models.CharField(max_length=100, blank=True, verbose_name=_("Instance ID"))
@@ -211,6 +219,11 @@ class Server(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name} ({self.hostname})"
+
+    def get_management_api_credentials(self) -> tuple[str, str]:
+        """Return decrypted API credentials (placeholder: values are stored already encrypted)."""
+        # In test/dev, these may be empty; gateway will handle missing credentials.
+        return self.management_api_key or "", self.management_api_secret or ""
 
     @property
     def active_services_count(self) -> int:

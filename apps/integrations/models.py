@@ -68,7 +68,6 @@ class WebhookEvent(models.Model):
 
     # Data storage
     payload = models.JSONField(help_text=_("Complete webhook payload from external service"))
-    signature = models.TextField(blank=True, help_text=_("Webhook signature for verification (e.g., Stripe signature)"))
 
     # Error handling
     error_message = models.TextField(blank=True, help_text=_("Error details if processing failed"))

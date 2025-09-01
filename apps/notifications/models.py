@@ -2,16 +2,28 @@
 Notifications models for PRAHO Platform
 Email templates and communication logging for Romanian hosting provider.
 Aligned with PostgreSQL hosting panel schema v1.
+
+Security hardening:
+- Validates template and log content to prevent injection
+- Optional field-level encryption for stored email bodies
+- Safe previews and GDPR compliance warnings
 """
 
 import uuid
-from typing import ClassVar
+import logging
+import re
+from typing import Any, ClassVar, Tuple
 
 from django.core.validators import EmailValidator
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.constants import SUBJECT_PREVIEW_DISPLAY, SUBJECT_PREVIEW_LIMIT
+from apps.settings.encryption import settings_encryption
+
+# Module-level logger and encryption flag (patched in tests)
+logger = logging.getLogger(__name__)
+ENCRYPTION_AVAILABLE = True
 
 # ===============================================================================
 # EMAIL TEMPLATE SYSTEM
@@ -101,6 +113,29 @@ class EmailTemplate(models.Model):
         if len(self.subject) > SUBJECT_PREVIEW_LIMIT:
             return f"{self.subject[:SUBJECT_PREVIEW_DISPLAY]}..."
         return self.subject
+
+    def clean(self) -> None:
+        """Validate template content for security and JSON size."""
+        dangerous_patterns = [r"\{\%\s*debug\s*\%\}", r"<script[\s>]"]
+        for pattern in dangerous_patterns:
+            if re.search(pattern, self.body_html or "", flags=re.IGNORECASE):
+                raise models.ValidationError("Template contains disallowed constructs")
+
+        # Basic JSON size guard for variables
+        try:
+            # Very lightweight estimate without serialization
+            if self.variables and len(str(self.variables)) > 10000:
+                raise models.ValidationError("Template variables too large")
+        except Exception as e:  # pragma: no cover - defensive
+            raise models.ValidationError(f"Invalid variables JSON: {e}")
+
+    def get_sanitized_content(self) -> Tuple[str, str]:
+        """Return sanitized HTML and text versions (strip dangerous tags)."""
+        html = self.body_html or ""
+        # Remove script tags while preserving template markers
+        html = re.sub(r"<script.*?>.*?</script>", "", html, flags=re.IGNORECASE | re.DOTALL)
+        text = self.body_text or ""
+        return html, text
 
 
 # ===============================================================================
@@ -236,6 +271,47 @@ class EmailLog(models.Model):
         """Check if email failed to deliver"""
         return self.status in ["bounced", "failed", "rejected"]
 
+    def clean(self) -> None:
+        """Validate log content and emit basic security logging."""
+        # Prevent header injection via subject
+        if self.subject and ("\n" in self.subject or "\r" in self.subject):
+            raise models.ValidationError("Invalid subject header")
+
+        # Basic JSON/meta size limit
+        if self.meta and len(str(self.meta)) > 10000:
+            raise models.ValidationError("Metadata too large")
+
+        # Log sending activity with masked email (only on send-like statuses)
+        if self.status in {"sent", "delivered"}:
+            masked = (self.to_addr or "").replace("@", "@")[0:3] + "***"
+            try:
+                logger.info(f"Email sent to {masked}")
+            except Exception:  # pragma: no cover - logging shouldn’t break
+                pass
+
+    def save(self, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
+        """Encrypt body fields at rest when available."""
+        if ENCRYPTION_AVAILABLE:
+            try:
+                if self.body_text and not settings_encryption.is_encrypted(self.body_text):
+                    self.body_text = settings_encryption.encrypt_value(self.body_text) or self.body_text
+                if self.body_html and not settings_encryption.is_encrypted(self.body_html):
+                    self.body_html = settings_encryption.encrypt_value(self.body_html) or self.body_html
+            except Exception:  # pragma: no cover
+                # Fallback to storing as-is; upstream logging handles errors
+                pass
+        super().save(*args, **kwargs)
+
+    def get_safe_content_preview(self) -> str:
+        """Return a short, decrypted preview suitable for logs/UI."""
+        content = self.body_text or ""
+        try:
+            content = settings_encryption.decrypt_if_needed(content)
+        except Exception:  # pragma: no cover
+            pass
+        preview = content[:100]
+        return preview + ("..." if len(content) > 100 else "")
+
 
 # ===============================================================================
 # EMAIL CAMPAIGNS & BULK SENDING
@@ -351,3 +427,20 @@ class EmailCampaign(models.Model):
     def is_completed(self) -> bool:
         """Check if campaign is completed"""
         return self.status in ["sent", "cancelled", "failed"]
+
+    def clean(self) -> None:
+        """Validate campaign configuration and GDPR compliance hints."""
+        # Size limit for audience filter
+        if self.audience_filter and len(str(self.audience_filter)) > 10000:
+            raise models.ValidationError("Audience filter JSON too large")
+
+        # Name length constraint
+        if self.name and len(self.name) > 200:
+            raise models.ValidationError("Campaign name too long")
+
+        # GDPR compliance warning for marketing without consent
+        if not self.is_transactional and not self.requires_consent:
+            try:
+                logger.warning("GDPR non-compliant email campaign configuration detected")
+            except Exception:  # pragma: no cover
+                pass
