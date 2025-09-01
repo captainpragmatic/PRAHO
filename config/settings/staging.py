@@ -2,6 +2,7 @@
 Staging settings for PRAHO Platform
 Staging environment configuration for pre-production testing.
 """
+
 from pathlib import Path
 
 from .base import *  # noqa: F403

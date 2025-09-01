@@ -141,13 +141,14 @@ LOGGING = {
 # HTTPS SECURITY SETTINGS - DEVELOPMENT/LOCAL 🔒
 # ===============================================================================
 
-# Development security - HTTP only (localhost)
-ALLOWED_HOSTS = ["localhost", "127.0.0.1", "0.0.0.0"]
+# Development security - HTTP only (localhost + Tailscale)
+ALLOWED_HOSTS = ["*"]  # Allow all hosts in development for Tailscale compatibility
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:8000",
     "http://127.0.0.1:8000",
     "http://localhost:8001",
     "http://127.0.0.1:8001",
+    "http://100.73.13.8:8001",  # Tailscale IP
 ]
 
 # ===============================================================================

@@ -37,6 +37,9 @@ class UserManager(BaseUserManager["User"]):
         if not email:
             raise ValueError("The Email field must be set")
         email = self.normalize_email(email)
+        # Ensure safe defaults for nullable-but-not-null-constrained fields
+        if "staff_role" not in extra_fields or extra_fields.get("staff_role") is None:
+            extra_fields["staff_role"] = ""
         user = cast("User", self.model(email=email, **extra_fields))
         user.set_password(password)
         user.save(using=self._db)
@@ -79,7 +82,8 @@ class User(AbstractUser):
         max_length=20,
         choices=STAFF_ROLE_CHOICES,
         blank=True,
-        default="",
+        null=True,
+        default=None,
         help_text=_("Staff role for internal staff. Leave empty for customer users."),
     )
 

@@ -141,11 +141,30 @@ class UserRegistrationForm(UserCreationForm):
 
     def clean_email(self) -> str:
         email: str | None = self.cleaned_data.get("email")
-        if email:
-            email = email.lower()  # Normalize email to lowercase
-            if User.objects.filter(email=email).exists():
-                raise ValidationError(_("An account with this email address already exists."))
-        return cast(str, email)
+        # Normalize email to lowercase but do NOT check existence here to avoid enumeration via form errors
+        return cast(str, (email or "").lower())
+
+    def is_valid(self) -> bool:
+        """Suppress model-level unique email errors to prevent enumeration.
+
+        If the only validation error is the unique constraint on email,
+        treat the form as valid so the view can apply neutral handling.
+        """
+        valid = super().is_valid()
+        if valid:
+            return True
+
+        # Check if the only error is unique email
+        errors = self.errors
+        if (
+            errors
+            and set(errors.keys()) == {"email"}
+            and all(getattr(err, "code", None) in {"unique", None} for err in errors.as_data().get("email", []))
+        ):
+            # Remove email error and proceed as valid
+            self.errors.pop("email", None)
+            return True
+        return False
 
     def clean_phone(self) -> str:
         """Validate Romanian phone number format"""
@@ -535,6 +554,25 @@ class CustomerOnboardingRegistrationForm(UserCreationForm):
     class Meta:
         model = User
         fields: ClassVar[list[str]] = ("email", "first_name", "last_name", "phone", "password1", "password2")
+
+    def clean_email(self) -> str:
+        email: str | None = self.cleaned_data.get("email")
+        return cast(str, (email or "").lower())
+
+    def is_valid(self) -> bool:
+        """Suppress unique email errors for neutral, enumeration-safe flow."""
+        valid = super().is_valid()
+        if valid:
+            return True
+        errors = self.errors
+        if (
+            errors
+            and set(errors.keys()) == {"email"}
+            and all(getattr(err, "code", None) in {"unique", None} for err in errors.as_data().get("email", []))
+        ):
+            self.errors.pop("email", None)
+            return True
+        return False
 
     def clean_vat_number(self) -> str:
         """Validate VAT number format"""

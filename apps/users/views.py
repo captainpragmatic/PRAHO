@@ -3,10 +3,12 @@ User management views for PRAHO Platform
 Romanian-localized authentication and profile forms.
 """
 
+import hashlib
 import logging
 import secrets
 import time
 from typing import Any, cast
+from uuid import uuid4
 
 import pyotp
 from django.conf import settings
@@ -14,6 +16,7 @@ from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.auth.tokens import default_token_generator
 from django.contrib.auth.views import (
     PasswordChangeView,
     PasswordResetCompleteView,
@@ -22,14 +25,18 @@ from django.contrib.auth.views import (
     PasswordResetView,
 )
 from django.core.exceptions import ValidationError
+from django.core.mail import EmailMultiAlternatives
 from django.db import models
 from django.db.models import QuerySet
 from django.forms import Form
 from django.http import HttpRequest, HttpResponse, HttpResponseBase, JsonResponse
 from django.shortcuts import redirect, render, resolve_url
+from django.template.loader import render_to_string
 from django.urls import reverse, reverse_lazy
+from django.utils import timezone
 from django.utils.decorators import method_decorator
-from django.utils.http import url_has_allowed_host_and_scheme
+from django.utils.encoding import force_bytes
+from django.utils.http import url_has_allowed_host_and_scheme, urlsafe_base64_encode
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods
 from django.views.generic import DetailView, ListView
@@ -128,6 +135,17 @@ def login_view(request: HttpRequest) -> HttpResponse:
                 )
 
                 login(request, user_obj)
+
+                # Remember me handling and secure session timeout
+                remember = bool(form.cleaned_data.get("remember_me"))
+                if remember:
+                    request.session["remember_me"] = True
+                else:
+                    request.session.pop("remember_me", None)
+
+                # Update timeout policy based on context
+                SessionSecurityService.update_session_timeout(request)
+
                 messages.success(
                     request, _("Welcome, {user_full_name}!").format(user_full_name=user_obj.get_full_name())
                 )
@@ -195,17 +213,55 @@ def register_view(request: HttpRequest) -> HttpResponse:
                 request, "users/register.html", {"form": CustomerOnboardingRegistrationForm(request.POST)}, status=429
             )
         form = CustomerOnboardingRegistrationForm(request.POST)
+        # Normalize email early and handle existing users with a neutral flow (prevents enumeration)
+        raw_email = (request.POST.get("email") or "").lower()
+        if raw_email and User.objects.filter(email=raw_email).exists():
+            _audit_registration_attempt(request, "existing_user", raw_email)
+            try:
+                user = User.objects.get(email=raw_email)
+                _send_password_reset_for_existing_user(user, request)
+            except User.DoesNotExist:
+                # Race condition: treat uniformly without leaking info
+                pass
+            _sleep_uniform()
+            return redirect("users:registration_submitted")
+        
         if form.is_valid():
+            email = form.cleaned_data.get("email", "").lower()
+            # Existing user path handled above; proceed with new user creation
+
+            # New user path
             try:
                 form.save()
-                messages.success(request, _("Account created successfully! Please check your email for next steps."))
-                return redirect("users:login")
-            except ValidationError as e:
-                messages.error(request, str(e))
+                _audit_registration_attempt(request, "new_user", email)
+                _sleep_uniform()
+                return redirect("users:registration_submitted")
+            except ValidationError:
+                # Treat as validation failure
+                _audit_registration_attempt(request, "form_validation_error", email)
+            except Exception:
+                # Likely integrity or unexpected issue; treat as existing for uniformity
+                _audit_registration_attempt(request, "existing_user", email)
+                try:
+                    user = User.objects.get(email=email)
+                    _send_password_reset_for_existing_user(user, request)
+                except User.DoesNotExist:
+                    pass
+                _sleep_uniform()
+                return redirect("users:registration_submitted")
+        else:
+            # Form validation errors path (keep user on page, but audit attempt)
+            email = (request.POST.get("email") or "").lower()
+            _audit_registration_attempt(request, "form_validation_error", email)
     else:
         form = CustomerOnboardingRegistrationForm()
 
     return render(request, "users/register.html", {"form": form})
+
+
+def registration_submitted_view(request: HttpRequest) -> HttpResponse:
+    """Neutral page shown after registration submission (prevents enumeration)."""
+    return render(request, "users/registration_submitted.html")
 
 
 def logout_view(request: HttpRequest) -> HttpResponse:
@@ -862,7 +918,7 @@ class UserDetailView(LoginRequiredMixin, DetailView):
 
 # Uniform response timing to prevent side-channel analysis
 UNIFORM_MIN_DELAY = 0.08  # 80ms base delay
-UNIFORM_JITTER = 0.05     # +0..50ms random jitter
+UNIFORM_JITTER = 0.05  # +0..50ms random jitter
 
 
 def _sleep_uniform() -> None:
@@ -874,14 +930,17 @@ def _sleep_uniform() -> None:
 def _uniform_response() -> JsonResponse:
     """
     Return identical response regardless of email existence.
-    
+
     SECURITY: Never reveals whether email exists in database.
     Always returns same payload structure and HTTP status code.
     """
-    return JsonResponse({
-        "message": _("Please complete registration to continue"),
-        "success": True,
-    }, status=200)
+    return JsonResponse(
+        {
+            "message": _("Please complete registration to continue"),
+            "success": True,
+        },
+        status=200,
+    )
 
 
 @require_http_methods(["POST"])
@@ -891,35 +950,35 @@ def _uniform_response() -> JsonResponse:
 def api_check_email(request: HttpRequest) -> JsonResponse:
     """
     🔒 HARDENED EMAIL VALIDATION ENDPOINT
-    
+
     SECURITY FEATURES:
     - Uniform responses prevent email enumeration attacks
-    - Soft rate limiting with user-aware keys  
+    - Soft rate limiting with user-aware keys
     - Consistent timing to prevent side-channel analysis
     - No database queries - zero information disclosure
     - Same HTTP status code regardless of input
-    
+
     NOTE: Actual email uniqueness is enforced server-side during registration.
     This endpoint provides UX feedback without revealing account existence.
     """
     # Check if user hit rate limits (soft limiting - no 429 errors)
     was_limited = getattr(request, "limited", False)
-    
+
     if was_limited:
         # Log security event for monitoring
         log_security_event(
-            "email_check_rate_limited", 
+            "email_check_rate_limited",
             {
                 "rate_limited": True,
                 "ip_address": get_safe_client_ip(request),
                 "user_authenticated": request.user.is_authenticated,
             },
-            get_safe_client_ip(request)
+            get_safe_client_ip(request),
         )
-    
+
     # Uniform timing delay prevents timing-based enumeration
     _sleep_uniform()
-    
+
     # SECURITY: Always return identical response - never reveal email existence
     # Uniqueness will be enforced during actual registration submission
     return _uniform_response()
@@ -945,6 +1004,49 @@ def _log_user_login(request: HttpRequest, user: User, status: str) -> None:
         user.failed_login_attempts = 0  # Reset failed attempts
         user.account_locked_until = None
         user.save(update_fields=["last_login_ip", "failed_login_attempts", "account_locked_until"])
+
+
+def _audit_registration_attempt(request: HttpRequest, result_type: str, email: str) -> dict[str, Any]:
+    """Audit a registration attempt with correlation and privacy-preserving details."""
+    # Ensure session key exists without forcing side effects
+    session_key = request.session.session_key
+    if not session_key:
+        # Touch session to ensure key creation if needed
+        request.session.modified = True
+        request.session.save()
+        session_key = request.session.session_key
+
+    details: dict[str, Any] = {
+        "correlation_id": str(uuid4()),
+        "timestamp": timezone.now().isoformat(),
+        "email_hash": hashlib.sha256(email.lower().encode()).hexdigest()[:16],
+        "result_type": result_type,
+        "session_key": session_key,
+    }
+    log_security_event(event_type="registration_attempt", details=details, request_ip=get_safe_client_ip(request))
+    return details
+
+
+def _send_password_reset_for_existing_user(user: User, request: HttpRequest) -> None:
+    """Send a neutral password-reset style email for existing users who re-register."""
+    uid = urlsafe_base64_encode(force_bytes(user.pk))
+    token = default_token_generator.make_token(user)
+
+    context = {
+        "user": user,
+        "uid": uid,
+        "token": token,
+        "protocol": "https" if getattr(settings, "USE_HTTPS", False) else "http",
+        "domain": getattr(settings, "DOMAIN_NAME", request.get_host() or "localhost"),
+    }
+
+    subject = str(_("Account Access - PRAHO Platform"))
+    text_body = render_to_string("users/emails/existing_user_registration.txt", context)
+    html_body = render_to_string("users/emails/existing_user_registration.html", context)
+
+    email = EmailMultiAlternatives(subject=subject, body=text_body, to=[user.email])
+    email.attach_alternative(html_body, "text/html")
+    email.send(fail_silently=False)
 
 
 def _get_safe_redirect_target(request: HttpRequest, fallback: str = "dashboard") -> str:
