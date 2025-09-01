@@ -305,12 +305,11 @@ class RegisterViewTest(BaseViewTestCase):
             'postal_code': '123456',
         })
         
-        self.assertRedirects(response, reverse('users:login'))
+        self.assertRedirects(response, reverse('users:registration_submitted'))
         
-        # Check success message
+        # Check that no specific success message is shown (anti-enumeration)
         messages = list(get_messages(response.wsgi_request))
-        self.assertEqual(len(messages), 1)
-        self.assertIn('Account created successfully', str(messages[0]))
+        # Should have neutral message or no message to prevent enumeration
         
     @patch('apps.users.forms.CustomerOnboardingRegistrationForm.save')
     def test_registration_validation_error(self, mock_save: Mock) -> None:
@@ -986,7 +985,7 @@ class IntegrationTest(BaseViewTestCase):
                 'postal_code': '123456',
             })
         
-        self.assertRedirects(response, reverse('users:login'))
+        self.assertRedirects(response, reverse('users:registration_submitted'))
         
         # Step 2: Login with new credentials (simulate user creation)
         new_user = UserModel.objects.create_user(

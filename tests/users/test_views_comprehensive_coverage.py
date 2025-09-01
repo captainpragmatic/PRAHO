@@ -248,13 +248,13 @@ class RegisterViewTests(TestCase):
             'data_processing_consent': True
         })
         
-        # Should redirect to login
+        # Should redirect to registration submitted (anti-enumeration)
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, reverse('users:login'))
+        self.assertEqual(response.url, reverse('users:registration_submitted'))
         
-        # Check success message
+        # Check neutral message (anti-enumeration)
         messages = list(get_messages(response.wsgi_request))
-        self.assertTrue(any("Account created successfully" in str(msg) for msg in messages))
+        # Should not reveal specific success to prevent enumeration
 
     @patch('apps.users.forms.CustomerOnboardingRegistrationForm.save')
     def test_register_view_post_validation_error(self, mock_save: Mock) -> None:

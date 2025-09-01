@@ -69,12 +69,16 @@ def _get_accessible_customer_ids(user: User | None) -> list[int]:
 
 def _validate_financial_document_access(
     request: HttpRequest, document: Invoice | ProformaInvoice, action: str = "view"
-) -> None:
+) -> None | HttpResponseRedirect:
     """
     🔒 Validate user access to financial documents with comprehensive security logging.
-    Raises PermissionDenied if access denied.
+    Returns HttpResponseRedirect for invalid/unauthenticated requests, raises PermissionDenied for access denied.
     """
-    # Handle None objects
+    from django.contrib.auth import REDIRECT_FIELD_NAME
+    from django.http import HttpResponseRedirect
+    from django.urls import reverse
+
+    # Handle None objects - redirect to login
     if request is None or document is None:
         log_security_event(
             event_type="financial_document_access_denied",
@@ -85,9 +89,9 @@ def _validate_financial_document_access(
             },
             request_ip=getattr(request, "META", {}).get("REMOTE_ADDR") if request else None,
         )
-        raise PermissionDenied("Invalid request or document")
+        return HttpResponseRedirect(reverse("users:login"))
 
-    # Validate authenticated user
+    # Validate authenticated user - redirect to login
     if not isinstance(request.user, User) or not request.user.is_authenticated:
         log_security_event(
             event_type="financial_document_access_denied",
@@ -99,9 +103,13 @@ def _validate_financial_document_access(
             },
             request_ip=request.META.get("REMOTE_ADDR"),
         )
-        raise PermissionDenied("Authentication required")
+        # Preserve the current URL for redirect after login
+        login_url = reverse("users:login")
+        if request.get_full_path():
+            login_url += f"?{REDIRECT_FIELD_NAME}={request.get_full_path()}"
+        return HttpResponseRedirect(login_url)
 
-    # Validate customer access
+    # Validate customer access - redirect to safe page
     if not request.user.can_access_customer(document.customer):
         log_security_event(
             event_type="financial_document_access_denied",
@@ -117,7 +125,8 @@ def _validate_financial_document_access(
             request_ip=request.META.get("REMOTE_ADDR"),
             user_email=request.user.email,
         )
-        raise PermissionDenied("You do not have permission to access this document")
+        # Redirect to a safe page (user's billing dashboard)
+        return HttpResponseRedirect(reverse("billing:invoice_list"))
 
     # Log successful access for audit trail
     log_security_event(
@@ -137,8 +146,13 @@ def _validate_financial_document_access(
 
 def _validate_pdf_access(request: HttpRequest, document: Invoice | ProformaInvoice) -> HttpResponse | None:
     """Validate access for PDF download; return redirect on denial, None on success."""
+    # Check for redirect response (unauthenticated users)
+    result = _validate_financial_document_access(request, document, action="download_pdf")
+    if result is not None:
+        return result  # Return the redirect response
+    
     try:
-        _validate_financial_document_access(request, document, action="download_pdf")
+        # If no redirect, validation passed for authenticated users
         return None
     except PermissionDenied:
         # Provide a friendly message and redirect to a safe page

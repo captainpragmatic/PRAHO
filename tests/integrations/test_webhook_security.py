@@ -240,8 +240,8 @@ class HashCollisionSecurityTests(WebhookSecurityTestCase):
         
         hash_value = webhook_event.payload_hash
         
-        # Should be 32 characters (was 16 before fix)
-        self.assertEqual(len(hash_value), 32, "Hash should be 32 characters to reduce collision risk")
+        # Should be 64 characters (SHA256 hexadecimal hash)
+        self.assertEqual(len(hash_value), 64, "Hash should be 64 characters for SHA256 to reduce collision risk")
         
         # Should be valid hexadecimal
         try:

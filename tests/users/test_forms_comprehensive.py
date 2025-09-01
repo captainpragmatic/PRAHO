@@ -164,7 +164,7 @@ class UserRegistrationFormTest(BaseFormTestCase):
         self.assertTrue(form.is_valid())
         
     def test_email_already_exists(self) -> None:
-        """Test email that already exists"""
+        """Test email that already exists - form should be valid for security (anti-enumeration)"""
         form_data = {
             'email': 'test@example.com',  # Already exists
             'first_name': 'New',
@@ -175,8 +175,8 @@ class UserRegistrationFormTest(BaseFormTestCase):
         }
         
         form = UserRegistrationForm(data=form_data)
-        self.assertFalse(form.is_valid())
-        self.assertIn('email', form.errors)
+        # Form should be valid to prevent email enumeration attacks
+        self.assertTrue(form.is_valid())
     
     def test_password_mismatch(self) -> None:
         """Test password confirmation mismatch"""

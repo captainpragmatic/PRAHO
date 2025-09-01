@@ -134,13 +134,12 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
         accessible_qs = Customer.objects.filter(id__in=[c.id for c in accessible_customers])
     else:
         accessible_qs = Customer.objects.none()
-    customer = get_object_or_404(accessible_qs, id=customer_id)
-
+    
     # Expected queries: 4 (customer + tax + billing + addresses)
-    customer = (
-        Customer.objects.select_related("tax_profile", "billing_profile")
-        .prefetch_related("addresses", "notes")
-        .get(id=customer_id)
+    customer = get_object_or_404(
+        accessible_qs.select_related("tax_profile", "billing_profile")
+        .prefetch_related("addresses", "notes"), 
+        id=customer_id
     )
 
     # Get recent notes

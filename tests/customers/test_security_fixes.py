@@ -48,7 +48,7 @@ class AccessControlSecurityTests(TestCase):
         self.client.force_login(self.user)
         
         # Mock get_accessible_customers to return empty queryset
-        with patch.object(self.user, 'get_accessible_customers') as mock_accessible:
+        with patch('apps.users.models.User.get_accessible_customers') as mock_accessible:
             mock_accessible.return_value = Customer.objects.none()
             
             response = self.client.get(
@@ -63,7 +63,7 @@ class AccessControlSecurityTests(TestCase):
         """Test that edit view checks access before retrieval"""
         self.client.force_login(self.staff_user)
         
-        with patch.object(self.staff_user, 'get_accessible_customers') as mock_accessible:
+        with patch('apps.users.models.User.get_accessible_customers') as mock_accessible:
             mock_accessible.return_value = Customer.objects.none()
             
             response = self.client.get(
@@ -77,7 +77,7 @@ class AccessControlSecurityTests(TestCase):
         """Test that delete view checks access before retrieval"""
         self.client.force_login(self.staff_user)
         
-        with patch.object(self.staff_user, 'get_accessible_customers') as mock_accessible:
+        with patch('apps.users.models.User.get_accessible_customers') as mock_accessible:
             mock_accessible.return_value = Customer.objects.none()
             
             response = self.client.post(
@@ -92,7 +92,7 @@ class AccessControlSecurityTests(TestCase):
         self.client.force_login(self.staff_user)
         
         # Mock to return the customer
-        with patch.object(self.staff_user, 'get_accessible_customers') as mock_accessible:
+        with patch('apps.users.models.User.get_accessible_customers') as mock_accessible:
             mock_accessible.return_value = Customer.objects.filter(id=self.customer.id)
             
             response = self.client.get(
@@ -225,7 +225,6 @@ class BankDetailsSecurityTests(TestCase):
         )
         self.currency = Currency.objects.create(
             code='RON',
-            name='Romanian Leu',
             symbol='lei'
         )
 

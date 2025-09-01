@@ -236,8 +236,9 @@ def register_view(request: HttpRequest) -> HttpResponse:
                 _audit_registration_attempt(request, email, "new_user")
                 _sleep_uniform()
                 return redirect("users:registration_submitted")
-            except ValidationError:
+            except ValidationError as e:
                 # Treat as validation failure
+                messages.error(request, str(e))
                 _audit_registration_attempt(request, email, "form_validation_error")
             except Exception:
                 # Likely integrity or unexpected issue; treat as existing for uniformity

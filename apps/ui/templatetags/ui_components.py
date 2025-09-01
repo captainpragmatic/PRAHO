@@ -202,20 +202,32 @@ def button(
         elif hasattr(htmx, key) and value is not None:
             setattr(htmx, key, value)
 
-    # 🔒 Security: Sanitize attrs to prevent XSS attacks
-    def _sanitize_attrs(raw: Any) -> str:
+    # 🔒 Security: Sanitize and escape attrs to prevent XSS attacks  
+    def _sanitize_and_escape_attrs(raw: Any) -> str:
         s = str(raw or "")
+        
+        # First, remove dangerous patterns entirely
         # Remove event handler attributes like onload=, onclick= etc.
-        s = re.sub(r"\son[a-zA-Z]+\s*=\s*\"[^\"]*\"", "", s, flags=re.IGNORECASE)
-        s = re.sub(r"\son[a-zA-Z]+\s*=\s*'[^']*'", "", s, flags=re.IGNORECASE)
-        s = re.sub(r"\son[a-zA-Z]+\s*=\s*[^\s>]+", "", s, flags=re.IGNORECASE)
-        # Neutralize javascript: URLs
-        s = re.sub(r"javascript:\s*", "#", s, flags=re.IGNORECASE)
-        # Strip script tags entirely
-        s = re.sub(r"<\s*script.*?>.*?<\s*/\s*script\s*>", "", s, flags=re.IGNORECASE | re.DOTALL)
-        return s
+        s = re.sub(r'\bon[a-zA-Z]+\s*=\s*"[^"]*"', "", s, flags=re.IGNORECASE)
+        s = re.sub(r"\bon[a-zA-Z]+\s*=\s*'[^']*'", "", s, flags=re.IGNORECASE)
+        s = re.sub(r"\bon[a-zA-Z]+\s*=\s*[^\s>]+", "", s, flags=re.IGNORECASE)
+        
+        # Remove javascript: URLs entirely  
+        s = re.sub(r"javascript:[^'\"]*", "", s, flags=re.IGNORECASE)
+        
+        # Remove script tags and their content entirely (before escaping)
+        s = re.sub(r"<\s*script[^>]*>.*?<\s*/\s*script\s*>", "", s, flags=re.IGNORECASE | re.DOTALL)
+        
+        # Clean up any extra spaces left by removals
+        s = re.sub(r'\s+', ' ', s).strip()
+        
+        # Then escape remaining HTML entities
+        # Force conversion to regular string (not SafeString) for test compatibility
+        escaped = escape(s)
+        return str(escaped)
 
-    safe_attrs = _sanitize_attrs(config.attrs)
+    # Return sanitized and escaped attrs
+    clean_attrs = _sanitize_and_escape_attrs(config.attrs)
 
     return {
         "text": text,
@@ -240,7 +252,7 @@ def button(
         "icon_right": config.icon_right,
         "disabled": config.disabled,
         "class": config.class_,
-        "attrs": safe_attrs,
+        "attrs": clean_attrs,
     }
 
 
