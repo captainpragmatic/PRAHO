@@ -667,7 +667,11 @@ class PDFContentValidationTestCase(TestCase):
             customer=self.customer,
             currency=self.currency,
             number='INV-ROMÂNĂ-001',
-            total_cents=5000,
+            subtotal_cents=4200,  # 42.00 RON
+            tax_cents=798,        # 7.98 RON VAT (4200 * 0.19)
+            total_cents=4998,     # 49.98 RON (close to 5000, rounded for validation)
+            issued_at=timezone.now(),
+            due_at=timezone.now() + timezone.timedelta(days=30),
             status='issued',
             bill_to_name='Compania Română SRL',
             bill_to_city='București',

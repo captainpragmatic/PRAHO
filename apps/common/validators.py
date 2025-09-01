@@ -4,13 +4,16 @@ Addresses critical security vulnerabilities and Romanian compliance requirements
 """
 
 import hashlib
+import ipaddress
 import logging
 import re
 import time
 from collections.abc import Callable
 from datetime import datetime
 from functools import wraps
+import socket
 from typing import Any, TypeVar, cast
+from urllib.parse import urlparse
 
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -49,6 +52,8 @@ MAX_PHONE_LENGTH = 20
 MAX_VAT_NUMBER_LENGTH = 15
 MAX_CUI_LENGTH = 10
 MAX_DESCRIPTION_LENGTH = 1000
+MAX_URL_LENGTH = 2048  # Standard URL length limit
+MAX_BANK_DETAIL_LENGTH = 100  # Bank detail field length limit
 
 # Romanian specific patterns
 ROMANIAN_VAT_PATTERN = r"^RO[0-9]{2,10}$"
@@ -163,15 +168,22 @@ class SecureInputValidator:
     """Comprehensive input validation with security focus"""
 
     @staticmethod
+    @timing_safe_validator
     def validate_email_secure(email: str, context: str = "general") -> EmailAddress:
         """
-        Secure email validation preventing enumeration attacks
+        🔒 Secure email validation preventing enumeration attacks with consistent timing
         """
+        # Security: Add consistent delay to prevent timing analysis
+        start_time = time.time()
+        
         if not email or not isinstance(email, str):
+            # Security: Ensure consistent timing even for invalid inputs
+            time.sleep(max(0, 0.1 - (time.time() - start_time)))
             raise ValidationError(_("Invalid input format"))
 
         # Length check (DoS prevention)
         if len(email) > MAX_EMAIL_LENGTH:
+            time.sleep(max(0, 0.1 - (time.time() - start_time)))
             raise ValidationError(_("Input too long"))
 
         # XSS/injection check
@@ -184,13 +196,16 @@ class SecureInputValidator:
         try:
             validate_email(email)
         except ValidationError:
-            # Generic error message (no enumeration)
+            # Security: Generic error message with consistent timing
+            time.sleep(max(0, 0.1 - (time.time() - start_time)))
             raise ValidationError(_("Invalid input format")) from None
 
-        # Log suspicious attempts
+        # Log suspicious attempts (after timing normalization)
         if "@" not in email or email.count("@") > 1:
             logger.warning(f"🚨 [Security] Suspicious email format: {email[:20]}...")
 
+        # Security: Ensure consistent timing for all successful validations
+        time.sleep(max(0, 0.1 - (time.time() - start_time)))
         return EmailAddress(email)
 
     @staticmethod
@@ -293,6 +308,108 @@ class SecureInputValidator:
         return company_name.strip()
 
     @staticmethod
+    def validate_safe_url(url: str) -> str:
+        """
+        Validate URL destination to prevent SSRF attacks
+        A10 - Server-Side Request Forgery prevention
+        """
+        if not url or not isinstance(url, str):
+            raise ValidationError(_("Invalid URL format"))
+
+        # Length check (DoS prevention)
+        if len(url) > MAX_URL_LENGTH:
+            raise ValidationError(_("URL too long"))
+
+        # XSS/injection check
+        SecureInputValidator._check_malicious_patterns(url)
+
+        url = url.strip()
+
+        try:
+            parsed = urlparse(url)
+            SecureInputValidator._validate_url_scheme(parsed)
+            SecureInputValidator._validate_url_hostname(parsed)
+            SecureInputValidator._validate_url_port(parsed)
+
+            logger.info(f"✅ [Security] Safe URL validated: {parsed.hostname}")
+            return url
+
+        except ValidationError:
+            # Re-raise our validation errors
+            raise
+        except Exception as e:
+            logger.warning(f"⚠️ [Security] URL validation error: {e}")
+            raise ValidationError(_("Invalid URL format")) from None
+
+    @staticmethod
+    def _validate_url_scheme(parsed: Any) -> None:
+        """Validate URL scheme is safe"""
+        allowed_schemes = ["http", "https"]
+        if parsed.scheme.lower() not in allowed_schemes:
+            raise ValidationError(_("Only HTTP and HTTPS URLs are allowed"))
+
+    @staticmethod
+    def _validate_url_hostname(parsed: Any) -> None:
+        """🔒 Enhanced hostname validation with DNS rebinding protection"""
+        if not parsed.hostname:
+            raise ValidationError(_("Invalid URL format"))
+
+        hostname = parsed.hostname.lower()
+
+        # Security: Enhanced DNS rebinding protection
+        try:
+            # Resolve hostname to IP to prevent DNS rebinding attacks
+            resolved_ips = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+            for ip_info in resolved_ips:
+                ip_str = ip_info[4][0]
+                try:
+                    ip = ipaddress.ip_address(ip_str)
+                    # Security: Block any resolved IP that points to private/internal ranges
+                    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved:
+                        raise ValidationError(_("URL destination resolves to blocked IP range"))
+                except ValueError:
+                    continue
+        except (TimeoutError, socket.gaierror):
+            # DNS resolution failed - could be suspicious
+            logger.warning(f"⚡ [Security] DNS resolution failed for hostname: {hostname}")
+            raise ValidationError(_("Unable to verify URL destination")) from None
+
+        # Block dangerous domains
+        dangerous_domains = [
+            "localhost",
+            "127.0.0.1",
+            "metadata.google.internal",
+            "metadata.google.com",
+            "metadata",
+            "link-local",
+            "instance-data",
+            "::1",
+            # Additional DNS rebinding protection patterns
+            "10.", "172.", "192.168.", "169.254.",  # Common private IP prefixes in hostnames
+        ]
+
+        for dangerous in dangerous_domains:
+            if dangerous in hostname:
+                raise ValidationError(_("URL destination not allowed"))
+
+        # Check for direct IP addresses and block private/internal ranges
+        try:
+            ip = ipaddress.ip_address(hostname)
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved:
+                raise ValidationError(_("URL destination not allowed"))
+        except ValueError:
+            # Not an IP address, hostname validation completed above
+            pass
+
+    @staticmethod
+    def _validate_url_port(parsed: Any) -> None:
+        """Validate URL port is not dangerous"""
+        if parsed.port:
+            dangerous_ports = [22, 23, 25, 53, 135, 445, 993, 995, 1433, 1521, 3306, 5432, 6379, 9200, 11211]
+            if parsed.port in dangerous_ports:
+                raise ValidationError(_("URL destination not allowed"))
+
+    @staticmethod
     def validate_customer_role(role: str) -> str:
         """Customer role validation"""
         if not role or not isinstance(role, str):
@@ -305,6 +422,72 @@ class SecureInputValidator:
             raise ValidationError(_("Invalid role specified"))
 
         return role
+
+    @staticmethod
+    def validate_bank_details_schema(bank_details: dict[str, Any]) -> dict[str, Any]:
+        """
+        Validate bank details JSON schema to prevent data integrity issues
+        A08 - Software and Data Integrity Failures prevention
+        """
+        if not bank_details or not isinstance(bank_details, dict):
+            return {}
+
+        # Define expected schema
+        valid_keys = {
+            "account_number",
+            "bank_name",
+            "routing_number",
+            "iban",
+            "swift_code",
+            "account_holder",
+            "bank_address",
+            "currency",
+        }
+
+        validated_details: dict[str, Any] = {}
+
+        for key, value in bank_details.items():
+            # Only allow known keys
+            if key not in valid_keys:
+                logger.warning(f"🚨 [Security] Invalid bank details key: {key}")
+                continue
+
+            # Type validation
+            if not isinstance(value, str | int | float):
+                logger.warning(f"🚨 [Security] Invalid bank details value type for {key}: {type(value)}")
+                continue
+
+            # Convert to string and validate
+            str_value = str(value).strip()
+
+            # Length limits (prevent DoS)
+            if len(str_value) > MAX_BANK_DETAIL_LENGTH:
+                raise ValidationError(_("Bank detail field too long"))
+
+            # XSS/injection check
+            SecureInputValidator._check_malicious_patterns(str_value)
+
+            # Specific field validation
+            if key == "account_number" and str_value:
+                # Allow only alphanumeric and common separators
+                if not re.match(r"^[A-Za-z0-9\-\s]+$", str_value):
+                    raise ValidationError(_("Invalid account number format"))
+            elif key == "iban" and str_value:
+                # Basic IBAN format check
+                if not re.match(r"^[A-Za-z0-9]{15,34}$", str_value.replace(" ", "")):
+                    raise ValidationError(_("Invalid IBAN format"))
+            elif (
+                key == "swift_code"
+                and str_value
+                and not re.match(r"^[A-Za-z]{4}[A-Za-z]{2}[A-Za-z0-9]{2}([A-Za-z0-9]{3})?$", str_value)
+            ):
+                # SWIFT code format check
+                raise ValidationError(_("Invalid SWIFT code format"))
+
+            validated_details[key] = str_value
+
+        logger.info("✅ [Security] Bank details schema validated successfully")
+        return validated_details
 
     @staticmethod
     def _validate_restricted_fields(user_data: dict[str, Any]) -> None:

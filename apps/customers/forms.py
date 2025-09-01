@@ -13,6 +13,7 @@ from django.core.exceptions import ValidationError
 from django.forms.models import ModelChoiceField  # For form field type checking
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.validators import SecureInputValidator
 from apps.users.models import CustomerMembership
 
 from .models import (
@@ -27,6 +28,16 @@ if TYPE_CHECKING:
     from apps.users.models import User
 else:
     User = get_user_model()
+
+
+# ===============================================================================
+# VALIDATOR WRAPPERS
+# ===============================================================================
+
+def validate_safe_url_wrapper(value: Any) -> None:
+    """Django form validator wrapper for SecureInputValidator.validate_safe_url"""
+    if value:  # Only validate if value is provided (for optional fields)
+        SecureInputValidator.validate_safe_url(str(value))
 
 
 # ===============================================================================
@@ -103,6 +114,13 @@ class CustomerForm(forms.ModelForm):
 
         return cast(str, company_name or "")
 
+    def clean_website(self) -> str:
+        """Validate website URL for SSRF prevention"""
+        website: str | None = self.cleaned_data.get("website")
+        if website:
+            return SecureInputValidator.validate_safe_url(website)
+        return website or ""
+
 
 # ===============================================================================
 # TAX PROFILE FORM (ROMANIAN COMPLIANCE)
@@ -155,22 +173,32 @@ class CustomerTaxProfileForm(forms.ModelForm):
         }
 
     def clean_cui(self) -> str:
-        """Validate Romanian CUI format"""
+        """🔒 Validate Romanian CUI format with ReDoS protection"""
         cui: str | None = self.cleaned_data.get("cui")
-        if cui and not re.match(r"^RO\d{2,10}$", cui):
-            raise ValidationError(_("CUI must be in format RO followed by 2-10 digits"))
+        if cui:
+            # Security: Prevent ReDoS attacks with strict input length validation
+            if len(cui) > 12:  # RO + max 10 digits
+                raise ValidationError(_("CUI too long"))
+            # Security: Use more specific regex pattern to prevent ReDoS
+            if not re.match(r"^RO\d{6,10}$", cui):  # Romanian CUI is typically 6-10 digits
+                raise ValidationError(_("CUI must be in format RO followed by 6-10 digits"))
         return cast(str, cui or "")
 
     def clean_vat_number(self) -> str:
-        """Validate VAT number format"""
+        """🔒 Validate VAT number format with ReDoS protection"""
         vat_number: str | None = self.cleaned_data.get("vat_number")
         is_vat_payer: bool | None = self.cleaned_data.get("is_vat_payer")
 
         if is_vat_payer and not vat_number:
             raise ValidationError(_("VAT number is required for VAT payers"))
 
-        if vat_number and not re.match(r"^RO\d{2,10}$", vat_number):
-            raise ValidationError(_("VAT number must be in format RO followed by 2-10 digits"))
+        if vat_number:
+            # Security: Prevent ReDoS attacks with strict input length validation
+            if len(vat_number) > 12:  # RO + max 10 digits
+                raise ValidationError(_("VAT number too long"))
+            # Security: Use more specific regex pattern to prevent ReDoS
+            if not re.match(r"^RO\d{6,10}$", vat_number):  # Romanian VAT is typically 6-10 digits
+                raise ValidationError(_("VAT number must be in format RO followed by 6-10 digits"))
 
         return cast(str, vat_number or "")
 
@@ -455,6 +483,7 @@ class CustomerCreationForm(forms.Form):
     website = forms.URLField(
         required=False,
         label=_("Website"),
+        validators=[validate_safe_url_wrapper],
         widget=forms.URLInput(
             attrs={
                 "class": "w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500",

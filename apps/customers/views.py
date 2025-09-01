@@ -14,6 +14,7 @@ from django.db.models import Q, QuerySet
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
+from django_ratelimit.decorators import ratelimit  # type: ignore[import-untyped]
 
 from apps.common.constants import SEARCH_QUERY_MIN_LENGTH
 from apps.common.decorators import staff_required
@@ -38,6 +39,36 @@ from .models import (
 )
 
 logger = logging.getLogger(__name__)
+security_logger = logging.getLogger('security')
+
+
+def _handle_secure_error(request: HttpRequest, error: Exception, operation: str, user_id: int | None = None) -> None:
+    """🔒 Handle errors securely without leaking sensitive information"""
+    if isinstance(error, ValidationError):
+        messages.error(request, _("❌ Please check your input: Invalid data provided"))
+        security_logger.warning(
+            f"⚡ [CustomerSecurity] Validation error during {operation}",
+            extra={'user_id': user_id, 'operation': operation, 'error_type': 'validation'}
+        )
+    elif isinstance(error, IntegrityError):
+        messages.error(request, _("❌ This operation conflicts with existing data"))
+        security_logger.error(
+            f"⚡ [CustomerSecurity] Integrity error during {operation}",
+            extra={'user_id': user_id, 'operation': operation, 'error_type': 'integrity'}
+        )
+    elif isinstance(error, PermissionDenied):
+        messages.error(request, _("❌ You don't have permission to perform this action"))
+        security_logger.warning(
+            f"⚡ [CustomerSecurity] Permission denied during {operation}",
+            extra={'user_id': user_id, 'operation': operation, 'error_type': 'permission'}
+        )
+    else:
+        # Unexpected errors - completely generic message
+        messages.error(request, _("❌ Operation failed. Please contact support if this continues"))
+        security_logger.exception(
+            f"⚡ [CustomerSecurity] Unexpected error during {operation}",
+            extra={'user_id': user_id, 'operation': operation, 'error_type': 'unexpected'}
+        )
 
 
 @login_required
@@ -94,13 +125,10 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
     🔍 Customer detail view with all related information
     Shows normalized data from separate profile models
     """
-    customer = get_object_or_404(Customer, id=customer_id)
-
-    # Check access permissions
+    # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
     user = cast(User, request.user)  # Safe due to @login_required
-    if not user.can_access_customer(customer):
-        messages.error(request, _("Access denied to this customer"))
-        return redirect("customers:list")
+    accessible_customers = user.get_accessible_customers()
+    customer = get_object_or_404(accessible_customers, id=customer_id)
 
     # Expected queries: 4 (customer + tax + billing + addresses)
     customer = (
@@ -209,17 +237,17 @@ def _handle_customer_create_post(request: HttpRequest) -> HttpResponse:
         # Known validation issues - safe to show some details
         messages.error(request, _("❌ Please check your input: Invalid data provided"))
         logger.warning(f"Customer creation validation error for user {request.user.id}: {e}")
-        
+
     except IntegrityError as e:
         # Database constraint violations - generic message
         messages.error(request, _("❌ This customer information conflicts with existing data"))
         logger.error(f"Customer creation integrity error for user {request.user.id}: {e}")
-        
+
     except PermissionDenied as e:
         # Authorization issues
         messages.error(request, _("❌ You don't have permission to create customers"))
         logger.warning(f"Unauthorized customer creation attempt by user {request.user.id}: {e}")
-        
+
     except Exception as e:
         # Unexpected errors - completely generic message
         messages.error(request, _("❌ Unable to create customer. Please contact support if this continues"))
@@ -258,13 +286,10 @@ def customer_edit(request: HttpRequest, customer_id: int) -> HttpResponse:
     ✏️ Edit customer core information
     Separate views for tax/billing/address profiles
     """
-    customer = get_object_or_404(Customer, id=customer_id)
-
-    # Check access permissions
+    # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
     user = cast(User, request.user)  # Safe due to @staff_required
-    if not user.can_access_customer(customer):
-        messages.error(request, _("Access denied to this customer"))
-        return redirect("customers:list")
+    accessible_customers = user.get_accessible_customers()
+    customer = get_object_or_404(accessible_customers, id=customer_id)
 
     if request.method == "POST":
         form = CustomerForm(request.POST, instance=customer)
@@ -293,13 +318,10 @@ def customer_tax_profile(request: HttpRequest, customer_id: int) -> HttpResponse
     """
     🧾 Edit customer tax profile (CUI, VAT, compliance)
     """
-    customer = get_object_or_404(Customer, id=customer_id)
-
-    # Check access permissions
+    # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
     user = cast(User, request.user)  # Safe due to @staff_required
-    if not user.can_access_customer(customer):
-        messages.error(request, _("Access denied to this customer"))
-        return redirect("customers:list")
+    accessible_customers = user.get_accessible_customers()
+    customer = get_object_or_404(accessible_customers, id=customer_id)
 
     # Get or create tax profile
     tax_profile, created = CustomerTaxProfile.objects.get_or_create(customer=customer)
@@ -330,13 +352,10 @@ def customer_billing_profile(request: HttpRequest, customer_id: int) -> HttpResp
     """
     💰 Edit customer billing profile (payment terms, credit)
     """
-    customer = get_object_or_404(Customer, id=customer_id)
-
-    # Check access permissions
+    # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
     user = cast(User, request.user)  # Safe due to @staff_required
-    if not user.can_access_customer(customer):
-        messages.error(request, _("Access denied to this customer"))
-        return redirect("customers:list")
+    accessible_customers = user.get_accessible_customers()
+    customer = get_object_or_404(accessible_customers, id=customer_id)
 
     # Get or create billing profile
     billing_profile, created = CustomerBillingProfile.objects.get_or_create(customer=customer)
@@ -367,13 +386,10 @@ def customer_address_add(request: HttpRequest, customer_id: int) -> HttpResponse
     """
     🏠 Add new address for customer
     """
-    customer = get_object_or_404(Customer, id=customer_id)
-
-    # Check access permissions
+    # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
     user = cast(User, request.user)  # Safe due to @staff_required
-    if not user.can_access_customer(customer):
-        messages.error(request, _("Access denied to this customer"))
-        return redirect("customers:list")
+    accessible_customers = user.get_accessible_customers()
+    customer = get_object_or_404(accessible_customers, id=customer_id)
 
     if request.method == "POST":
         form = CustomerAddressForm(request.POST)
@@ -416,13 +432,10 @@ def customer_note_add(request: HttpRequest, customer_id: int) -> HttpResponse:
     """
     📝 Add customer interaction note
     """
-    customer = get_object_or_404(Customer, id=customer_id)
-
-    # Check access permissions
+    # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
     user = cast(User, request.user)  # Safe due to @staff_required
-    if not user.can_access_customer(customer):
-        messages.error(request, _("Access denied to this customer"))
-        return redirect("customers:list")
+    accessible_customers = user.get_accessible_customers()
+    customer = get_object_or_404(accessible_customers, id=customer_id)
 
     if request.method == "POST":
         form = CustomerNoteForm(request.POST)
@@ -453,13 +466,10 @@ def customer_delete(request: HttpRequest, customer_id: int) -> HttpResponse:
     """
     🗑️ Soft delete customer (preserves audit trail)
     """
-    customer = get_object_or_404(Customer, id=customer_id)
-
-    # Check access permissions
+    # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
     user = cast(User, request.user)  # Safe due to @staff_required
-    if not user.can_access_customer(customer):
-        messages.error(request, _("Access denied to this customer"))
-        return redirect("customers:list")
+    accessible_customers = user.get_accessible_customers()
+    customer = get_object_or_404(accessible_customers, id=customer_id)
 
     if request.method == "POST":
         # Soft delete preserves all related data
@@ -479,10 +489,16 @@ def customer_delete(request: HttpRequest, customer_id: int) -> HttpResponse:
 
 
 @login_required
+@ratelimit(key="user", rate="30/m", method="GET", block=False)  # type: ignore[misc]
 def customer_search_api(request: HttpRequest) -> JsonResponse:
     """
-    🔍 AJAX customer search for dropdowns
+    🔍 AJAX customer search for dropdowns with rate limiting
     """
+    # Check if rate limited
+    if getattr(request, "limited", False):
+        logger.warning(f"🚨 [Security] Rate limit exceeded for customer search by user {request.user.id}")
+        return JsonResponse({"error": "Too many requests. Please slow down."}, status=429)
+
     query = request.GET.get("q", "")
     if len(query) < SEARCH_QUERY_MIN_LENGTH:
         return JsonResponse({"results": []})
@@ -633,17 +649,19 @@ def _handle_user_assignment_post(request: HttpRequest, customer: Customer) -> Ht
         # Known validation issues - safe to show some details
         messages.error(request, _("❌ Please check your input: Invalid user assignment data"))
         logger.warning(f"User assignment validation error for customer {customer.id} by user {request.user.id}: {e}")
-        
+
     except IntegrityError as e:
         # Database constraint violations - generic message
         messages.error(request, _("❌ This user assignment conflicts with existing data"))
         logger.error(f"User assignment integrity error for customer {customer.id} by user {request.user.id}: {e}")
-        
+
     except PermissionDenied as e:
         # Authorization issues
         messages.error(request, _("❌ You don't have permission to assign users to this customer"))
-        logger.warning(f"Unauthorized user assignment attempt for customer {customer.id} by user {request.user.id}: {e}")
-        
+        logger.warning(
+            f"Unauthorized user assignment attempt for customer {customer.id} by user {request.user.id}: {e}"
+        )
+
     except Exception as e:
         # Unexpected errors - completely generic message
         messages.error(request, _("❌ Unable to assign user. Please contact support if this continues"))
@@ -673,13 +691,10 @@ def customer_assign_user(request: HttpRequest, customer_id: int) -> HttpResponse
     🔗 Assign user to existing customer (for orphaned customers)
     Provides same three-option workflow as customer creation
     """
-    customer = get_object_or_404(Customer, id=customer_id)
-
-    # Guard clause for access validation
+    # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
     user = cast(User, request.user)  # Safe due to @staff_required
-    error_response = _validate_customer_assign_access(request, user, customer)
-    if error_response:
-        return error_response
+    accessible_customers = user.get_accessible_customers()
+    customer = get_object_or_404(accessible_customers, id=customer_id)
 
     if request.method == "POST":
         return _handle_user_assignment_post(request, customer)
@@ -693,11 +708,17 @@ def customer_assign_user(request: HttpRequest, customer_id: int) -> HttpResponse
 
 
 @login_required
+@ratelimit(key="user", rate="60/m", method="GET", block=False)  # type: ignore[misc]
 def customer_services_api(request: HttpRequest, customer_id: int) -> JsonResponse:
     """
-    🔗 API endpoint for customer services (for ticket form)
+    🔗 API endpoint for customer services (for ticket form) with rate limiting
     Returns empty list for now - placeholder for future service management
     """
+    # Check if rate limited
+    if getattr(request, "limited", False):
+        logger.warning(f"🚨 [Security] Rate limit exceeded for services API by user {request.user.id}")
+        return JsonResponse({"error": "Too many requests. Please slow down."}, status=429)
+
     # Verify user has access to this customer
     user = cast(User, request.user)
     accessible_customers_list = user.get_accessible_customers()
