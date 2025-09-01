@@ -351,7 +351,7 @@ class SecureServerGateway:
         server_name: str,
         attempt: int,
         max_retries: int,
-    ) -> tuple[bool, dict[str, Any], bool]:  # noqa: PLR0912
+    ) -> tuple[bool, dict[str, Any], bool]:
         """Perform a single HTTP request attempt with unified error handling.
         Returns (success, payload, should_continue).
         """

@@ -10,6 +10,7 @@ from typing import Any
 
 from django import template
 from django.utils.html import escape, format_html  # For XSS prevention
+from django.utils.safestring import SafeString
 
 from apps.common.constants import FILE_SIZE_CONVERSION_FACTOR
 
@@ -202,10 +203,19 @@ def button(
             setattr(htmx, key, value)
 
     # 🔒 Security: Sanitize attrs to prevent XSS attacks
-    safe_attrs = ""
-    if config.attrs:
-        # Only allow safe HTML attributes with proper escaping
-        safe_attrs = escape(str(config.attrs))
+    def _sanitize_attrs(raw: Any) -> str:
+        s = str(raw or "")
+        # Remove event handler attributes like onload=, onclick= etc.
+        s = re.sub(r"\son[a-zA-Z]+\s*=\s*\"[^\"]*\"", "", s, flags=re.IGNORECASE)
+        s = re.sub(r"\son[a-zA-Z]+\s*=\s*'[^']*'", "", s, flags=re.IGNORECASE)
+        s = re.sub(r"\son[a-zA-Z]+\s*=\s*[^\s>]+", "", s, flags=re.IGNORECASE)
+        # Neutralize javascript: URLs
+        s = re.sub(r"javascript:\s*", "#", s, flags=re.IGNORECASE)
+        # Strip script tags entirely
+        s = re.sub(r"<\s*script.*?>.*?<\s*/\s*script\s*>", "", s, flags=re.IGNORECASE | re.DOTALL)
+        return s
+
+    safe_attrs = _sanitize_attrs(config.attrs)
 
     return {
         "text": text,
@@ -685,7 +695,8 @@ def icon(name: str, *, size: str = "md", css_class: str = "", **kwargs: Any) -> 
     # Build CSS classes with escaped input
     classes = f"inline-block {size_classes.get(size, size_classes['md'])}"
     if css_class:
-        classes += f" {escape(css_class)}"
+        # Let format_html escape; avoid pre-escaping to prevent double-escape
+        classes += f" {css_class}"
 
     # 🔒 Security: Use format_html instead of f-strings to prevent XSS
     # All inputs are validated and classes built from known sets; name was sanitized.

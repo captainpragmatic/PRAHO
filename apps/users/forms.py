@@ -140,9 +140,11 @@ class UserRegistrationForm(UserCreationForm):
             del self.fields["username"]
 
     def clean_email(self) -> str:
-        email: str | None = self.cleaned_data.get("email")
-        # Normalize email to lowercase but do NOT check existence here to avoid enumeration via form errors
-        return cast(str, (email or "").lower())
+        # Normalize email to lowercase; use raw data as fallback to avoid dependency on cleaned_data population
+        raw = self.data.get("email") if hasattr(self, "data") else None  # type: ignore[attr-defined]
+        email: str | None = self.cleaned_data.get("email") if hasattr(self, "cleaned_data") else None
+        normalized = (email or raw or "").lower()
+        return cast(str, normalized)
 
     def is_valid(self) -> bool:
         """Suppress model-level unique email errors to prevent enumeration.
@@ -182,6 +184,9 @@ class UserRegistrationForm(UserCreationForm):
         user.username = self.cleaned_data["email"]  # Use email as username
         user.email = self.cleaned_data["email"]
         user.accepts_marketing = self.cleaned_data["accepts_marketing"]
+        # Ensure staff_role is never NULL at DB level
+        if user.staff_role is None:
+            user.staff_role = ""
 
         if commit:
             user.save()
@@ -556,8 +561,10 @@ class CustomerOnboardingRegistrationForm(UserCreationForm):
         fields: ClassVar[list[str]] = ("email", "first_name", "last_name", "phone", "password1", "password2")
 
     def clean_email(self) -> str:
-        email: str | None = self.cleaned_data.get("email")
-        return cast(str, (email or "").lower())
+        raw = self.data.get("email") if hasattr(self, "data") else None  # type: ignore[attr-defined]
+        email: str | None = self.cleaned_data.get("email") if hasattr(self, "cleaned_data") else None
+        normalized = (email or raw or "").lower()
+        return cast(str, normalized)
 
     def is_valid(self) -> bool:
         """Suppress unique email errors for neutral, enumeration-safe flow."""

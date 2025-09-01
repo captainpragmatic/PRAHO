@@ -9,11 +9,12 @@ Security hardening:
 - Safe previews and GDPR compliance warnings
 """
 
-import uuid
 import logging
 import re
-from typing import Any, ClassVar, Tuple
+import uuid
+from typing import Any, ClassVar
 
+from django.core.exceptions import ValidationError
 from django.core.validators import EmailValidator
 from django.db import models
 from django.utils.translation import gettext_lazy as _
@@ -119,17 +120,17 @@ class EmailTemplate(models.Model):
         dangerous_patterns = [r"\{\%\s*debug\s*\%\}", r"<script[\s>]"]
         for pattern in dangerous_patterns:
             if re.search(pattern, self.body_html or "", flags=re.IGNORECASE):
-                raise models.ValidationError("Template contains disallowed constructs")
+                raise ValidationError("Template contains disallowed constructs")
 
         # Basic JSON size guard for variables
         try:
             # Very lightweight estimate without serialization
             if self.variables and len(str(self.variables)) > 10000:
-                raise models.ValidationError("Template variables too large")
+                raise ValidationError("Template variables too large")
         except Exception as e:  # pragma: no cover - defensive
-            raise models.ValidationError(f"Invalid variables JSON: {e}")
+            raise ValidationError(f"Invalid variables JSON: {e}")
 
-    def get_sanitized_content(self) -> Tuple[str, str]:
+    def get_sanitized_content(self) -> tuple[str, str]:
         """Return sanitized HTML and text versions (strip dangerous tags)."""
         html = self.body_html or ""
         # Remove script tags while preserving template markers
@@ -275,11 +276,11 @@ class EmailLog(models.Model):
         """Validate log content and emit basic security logging."""
         # Prevent header injection via subject
         if self.subject and ("\n" in self.subject or "\r" in self.subject):
-            raise models.ValidationError("Invalid subject header")
+            raise ValidationError("Invalid subject header")
 
         # Basic JSON/meta size limit
         if self.meta and len(str(self.meta)) > 10000:
-            raise models.ValidationError("Metadata too large")
+            raise ValidationError("Metadata too large")
 
         # Log sending activity with masked email (only on send-like statuses)
         if self.status in {"sent", "delivered"}:
@@ -432,15 +433,15 @@ class EmailCampaign(models.Model):
         """Validate campaign configuration and GDPR compliance hints."""
         # Size limit for audience filter
         if self.audience_filter and len(str(self.audience_filter)) > 10000:
-            raise models.ValidationError("Audience filter JSON too large")
+            raise ValidationError("Audience filter JSON too large")
 
         # Name length constraint
         if self.name and len(self.name) > 200:
-            raise models.ValidationError("Campaign name too long")
+            raise ValidationError("Campaign name too long")
 
         # GDPR compliance warning for marketing without consent
         if not self.is_transactional and not self.requires_consent:
             try:
-                logger.warning("GDPR non-compliant email campaign configuration detected")
+                logger.warning("GDPR non-compliant email campaign configuration detected - GDPR warning")
             except Exception:  # pragma: no cover
                 pass

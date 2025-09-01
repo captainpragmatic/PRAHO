@@ -68,6 +68,12 @@ class WebhookEvent(models.Model):
 
     # Data storage
     payload = models.JSONField(help_text=_("Complete webhook payload from external service"))
+    signature_hash = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text=_("SHA-256 hash of webhook signature for verification tracking"),
+    )
 
     # Error handling
     error_message = models.TextField(blank=True, help_text=_("Error details if processing failed"))
@@ -118,9 +124,12 @@ class WebhookEvent(models.Model):
 
     @property
     def payload_hash(self) -> str:
-        """📋 Generate hash of payload for deduplication by content"""
+        """📋 Generate hash of payload for deduplication by content
+
+        Keep at least 32 characters to satisfy regression tests and maintain entropy.
+        """
         payload_str = json.dumps(self.payload, sort_keys=True)
-        return hashlib.sha256(payload_str.encode()).hexdigest()[:16]
+        return hashlib.sha256(payload_str.encode()).hexdigest()
 
     @property
     def processing_duration(self) -> Any | None:

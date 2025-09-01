@@ -54,8 +54,10 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         webhook_secret = getattr(settings, "STRIPE_WEBHOOK_SECRET", None)
 
         if not webhook_secret:
-            logger.warning("⚠️ STRIPE_WEBHOOK_SECRET not configured - skipping signature verification")
-            return True  # Allow in development
+            # Fail secure when secret is not configured
+            logger = logging.getLogger("apps.integrations.webhooks.stripe")
+            logger.error("STRIPE_WEBHOOK_SECRET not configured - failing secure")
+            return False
 
         # Get raw payload for signature verification
         payload_body = json.dumps(payload, separators=(",", ":")).encode("utf-8")

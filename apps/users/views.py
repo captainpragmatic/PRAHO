@@ -216,7 +216,7 @@ def register_view(request: HttpRequest) -> HttpResponse:
         # Normalize email early and handle existing users with a neutral flow (prevents enumeration)
         raw_email = (request.POST.get("email") or "").lower()
         if raw_email and User.objects.filter(email=raw_email).exists():
-            _audit_registration_attempt(request, "existing_user", raw_email)
+            _audit_registration_attempt(request, raw_email, "existing_user")
             try:
                 user = User.objects.get(email=raw_email)
                 _send_password_reset_for_existing_user(user, request)
@@ -233,15 +233,15 @@ def register_view(request: HttpRequest) -> HttpResponse:
             # New user path
             try:
                 form.save()
-                _audit_registration_attempt(request, "new_user", email)
+                _audit_registration_attempt(request, email, "new_user")
                 _sleep_uniform()
                 return redirect("users:registration_submitted")
             except ValidationError:
                 # Treat as validation failure
-                _audit_registration_attempt(request, "form_validation_error", email)
+                _audit_registration_attempt(request, email, "form_validation_error")
             except Exception:
                 # Likely integrity or unexpected issue; treat as existing for uniformity
-                _audit_registration_attempt(request, "existing_user", email)
+                _audit_registration_attempt(request, email, "existing_user")
                 try:
                     user = User.objects.get(email=email)
                     _send_password_reset_for_existing_user(user, request)
@@ -252,7 +252,7 @@ def register_view(request: HttpRequest) -> HttpResponse:
         else:
             # Form validation errors path (keep user on page, but audit attempt)
             email = (request.POST.get("email") or "").lower()
-            _audit_registration_attempt(request, "form_validation_error", email)
+            _audit_registration_attempt(request, email, "form_validation_error")
     else:
         form = CustomerOnboardingRegistrationForm()
 
@@ -1006,15 +1006,20 @@ def _log_user_login(request: HttpRequest, user: User, status: str) -> None:
         user.save(update_fields=["last_login_ip", "failed_login_attempts", "account_locked_until"])
 
 
-def _audit_registration_attempt(request: HttpRequest, result_type: str, email: str) -> dict[str, Any]:
+def _audit_registration_attempt(request: HttpRequest, email: str, result_type: str) -> dict[str, Any]:
     """Audit a registration attempt with correlation and privacy-preserving details."""
-    # Ensure session key exists without forcing side effects
-    session_key = request.session.session_key
-    if not session_key:
-        # Touch session to ensure key creation if needed
-        request.session.modified = True
-        request.session.save()
-        session_key = request.session.session_key
+    # Ensure session key exists without assuming session middleware
+    session_key = None
+    try:
+        session = getattr(request, "session", None)
+        if session is not None:
+            session_key = session.session_key
+            if not session_key:
+                session.modified = True
+                session.save()
+                session_key = session.session_key
+    except Exception:  # pragma: no cover
+        session_key = None
 
     details: dict[str, Any] = {
         "correlation_id": str(uuid4()),

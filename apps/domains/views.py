@@ -18,7 +18,7 @@ from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_http_methods
 
-from apps.common.decorators import staff_required
+from apps.common.decorators import admin_required, staff_required
 from apps.customers.models import Customer
 from apps.users.models import User
 
@@ -625,7 +625,7 @@ def registrar_list(request: HttpRequest) -> HttpResponse:
     return render(request, "domains/staff/registrar_list.html", context)
 
 
-@staff_required
+@admin_required
 def registrar_create(request: HttpRequest) -> HttpResponse:
     """🏢 Staff view - Create a new registrar"""
     # Build status options for UI component select

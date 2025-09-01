@@ -314,7 +314,10 @@ class ProformaSequence(models.Model):
                 user_email=user_email,
             )
 
-            logger.info(f"🔢 Generated proforma number {new_number} (was {old_value}, now {self.last_value})")
+            # Use dynamic logger to support tests that patch logging.getLogger
+            logging.getLogger(__name__).info(
+                f"🔢 Generated proforma number {new_number} (was {old_value}, now {self.last_value})"
+            )
             return new_number
 
 

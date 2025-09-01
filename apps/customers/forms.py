@@ -136,6 +136,10 @@ class CustomerTaxProfileForm(forms.ModelForm):
     Romanian tax compliance form - CUI, VAT, registration.
     """
 
+    # Override fields to avoid default max_length errors masking our security messages
+    cui = forms.CharField(required=False)
+    vat_number = forms.CharField(required=False)
+
     class Meta:
         model = CustomerTaxProfile
         fields: ClassVar[list[str]] = (

@@ -200,7 +200,7 @@ class BaseWebhookProcessor:
                 event_id=event_id,
                 event_type=event_type,
                 payload=context.payload,
-                signature=context.signature,
+                signature_hash=(hashlib.sha256(context.signature.encode()).hexdigest() if context.signature else ""),
                 ip_address=context.ip_address,
                 user_agent=context.user_agent or "",  # Convert None to empty string for TextField
                 headers=context.headers,
@@ -234,10 +234,16 @@ class BaseWebhookProcessor:
         return payload.get("type")
 
     def verify_signature(self, payload: dict[str, Any], signature: str, headers: dict[str, str]) -> bool:
-        """🔐 Verify webhook signature - override in subclasses"""
-        # Base implementation always returns True
-        # Subclasses should implement proper signature verification
-        return True
+        """🔐 Verify webhook signature - secure default is to fail and log an error.
+
+        Subclasses should implement proper verification. This base method provides
+        a safe default that cannot be bypassed.
+        """
+        try:
+            logger.error("Signature verification not implemented for this processor")
+        except Exception:  # pragma: no cover
+            pass
+        return False
 
     def handle_event(self, webhook_event: WebhookEvent) -> tuple[bool, str]:
         """

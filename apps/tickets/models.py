@@ -3,6 +3,7 @@ Support ticket models for PRAHO Platform
 Romanian hosting provider customer support system.
 """
 
+import secrets
 from datetime import timedelta
 from typing import Any, ClassVar
 
@@ -190,19 +191,23 @@ class Ticket(models.Model):
         super().save(*args, **kwargs)
 
     def _generate_ticket_number(self) -> str:
-        """Generate unique ticket number"""
+        """Generate cryptographically random, unique ticket number.
+
+        Format: TK{YEAR}-{8_RANDOM_CHARS} where chars are A-Z0-9.
+        Handles collisions by retrying with a new random suffix.
+        """
         year = timezone.now().year
+        prefix = f"TK{year}-"
+        alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
-        # Get last ticket number for this year
-        last_ticket = Ticket.objects.filter(ticket_number__startswith=f"TK{year}").order_by("ticket_number").last()
+        for _ in range(10):  # Bounded retries to avoid infinite loops
+            suffix = "".join(secrets.choice(alphabet) for _ in range(8))
+            candidate = f"{prefix}{suffix}"
+            if not Ticket.objects.filter(ticket_number=candidate).exists():
+                return candidate
 
-        if last_ticket:
-            last_num = int(last_ticket.ticket_number.split("-")[1])
-            next_num = last_num + 1
-        else:
-            next_num = 1
-
-        return f"TK{year}-{next_num:05d}"
+        # Fallback: return last generated candidate even if rare collision persists
+        return candidate
 
     @property
     def is_sla_breach_response(self) -> bool:
