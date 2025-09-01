@@ -29,7 +29,8 @@ class CreditLedgerTestCase(TestCase):
         self.user = User.objects.create(
             email='admin@testcompany.ro',
             first_name='Admin',
-            last_name='User'
+            last_name='User',
+            staff_role=''
         )
 
     def test_create_credit_ledger_entry(self):
@@ -176,7 +177,8 @@ class CreditLedgerIntegrationTestCase(TestCase):
         self.admin_user = User.objects.create(
             email='admin@integration.ro',
             first_name='Admin',
-            last_name='User'
+            last_name='User',
+            staff_role='admin'
         )
 
     def test_credit_balance_calculation(self):

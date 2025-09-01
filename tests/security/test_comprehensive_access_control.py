@@ -238,20 +238,17 @@ class ComprehensiveAccessControlTestCase(TestCase):
         # Try to create service
         url = reverse('provisioning:service_create')
         response = self.client.get(url)
-        self.assertEqual(response.status_code, 302)
-        self.assertIn('/app/', response.url)
+        self.assertEqual(response.status_code, 403)
         
         # Try to edit service
         url = reverse('provisioning:service_edit', args=[self.service.pk])
         response = self.client.get(url)
-        self.assertEqual(response.status_code, 302)
-        self.assertIn('/app/', response.url)
+        self.assertEqual(response.status_code, 403)
         
         # Try to suspend service
         url = reverse('provisioning:service_suspend', args=[self.service.pk])
         response = self.client.get(url)
-        self.assertEqual(response.status_code, 302)
-        self.assertIn('/app/', response.url)
+        self.assertEqual(response.status_code, 403)
 
     def test_server_infrastructure_restricted_to_staff(self):
         """Test that customers cannot view server infrastructure"""
@@ -262,9 +259,8 @@ class ComprehensiveAccessControlTestCase(TestCase):
         url = reverse('provisioning:servers')
         response = self.client.get(url)
         
-        # Should be redirected to dashboard with error message
-        self.assertEqual(response.status_code, 302)
-        self.assertIn('/app/', response.url)
+        # Should return 403 due to staff_required decorator
+        self.assertEqual(response.status_code, 403)
 
     def test_financial_reports_restricted_to_staff(self):
         """Test that customers cannot access financial reports"""
@@ -314,8 +310,8 @@ class ComprehensiveAccessControlTestCase(TestCase):
         url = reverse('customers:detail', args=[self.other_customer.id])
         response = self.client.get(url)
         
-        # Should be redirected with access denied message
-        self.assertEqual(response.status_code, 302)
+        # Should get 404 to prevent enumeration attacks
+        self.assertEqual(response.status_code, 404)
 
     def test_staff_has_access_to_restricted_functions(self):
         """Test that staff users can access all restricted functions"""

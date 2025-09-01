@@ -258,9 +258,18 @@ class InputSanitizationSecurityTests(TestCase):
             payload={'test': 'data'}
         )
         
-        # Mock permission check to pass
-        with patch.object(self.user, 'has_perm', return_value=True):
-            response = self.client.get(reverse('integrations:webhook_status'))
+        # Grant the required permission to test the data sanitization
+        from django.contrib.contenttypes.models import ContentType
+        from django.contrib.auth.models import Permission
+        content_type = ContentType.objects.get_for_model(WebhookEvent)
+        permission, _ = Permission.objects.get_or_create(
+            content_type=content_type, 
+            codename="view_webhook_stats",
+            defaults={"name": "Can view webhook statistics"}
+        )
+        self.user.user_permissions.add(permission)
+        
+        response = self.client.get(reverse('integrations:webhook_status'))
         
         self.assertEqual(response.status_code, 200)
         
@@ -299,9 +308,18 @@ class InputSanitizationSecurityTests(TestCase):
                 status='processed'
             )
         
-        # Mock permission to pass authorization
-        with patch.object(self.user, 'has_perm', return_value=True):
-            response = self.client.get(reverse('integrations:webhook_status'))
+        # Grant the required permission to test the data escaping
+        from django.contrib.contenttypes.models import ContentType
+        from django.contrib.auth.models import Permission
+        content_type = ContentType.objects.get_for_model(WebhookEvent)
+        permission, _ = Permission.objects.get_or_create(
+            content_type=content_type, 
+            codename="view_webhook_stats",
+            defaults={"name": "Can view webhook statistics"}
+        )
+        self.user.user_permissions.add(permission)
+        
+        response = self.client.get(reverse('integrations:webhook_status'))
         
         self.assertEqual(response.status_code, 200)
         
@@ -382,11 +400,9 @@ class AbstractWebhookProcessorSecurityTests(TestCase):
             def verify_signature(self, payload, signature, headers):
                 return True  # Always accept - DANGEROUS!
         
-        processor = PermissiveProcessor()
-        
-        # Should detect overly permissive implementation
+        # Should detect overly permissive implementation during creation
         with self.assertRaises(SecurityError):
-            processor._validate_signature_implementation()
+            PermissiveProcessor()
 
     def test_security_error_class_exists(self):
         """Test that SecurityError class is properly defined"""
@@ -494,6 +510,17 @@ class AccessControlSecurityTests(TestCase):
 
     def test_webhook_not_found_handling(self):
         """Test proper handling of non-existent webhooks"""
+        # Grant the required permission to test the not-found handling
+        from django.contrib.contenttypes.models import ContentType
+        from django.contrib.auth.models import Permission
+        content_type = ContentType.objects.get_for_model(WebhookEvent)
+        permission, _ = Permission.objects.get_or_create(
+            content_type=content_type, 
+            codename="retry_webhook",
+            defaults={"name": "Can retry failed webhooks"}
+        )
+        self.staff_user.user_permissions.add(permission)
+        
         self.client.force_login(self.staff_user)
         
         non_existent_id = uuid.uuid4()

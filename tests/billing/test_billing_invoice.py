@@ -65,8 +65,9 @@ class InvoiceTestCase(TestCase):
             total_cents=11900
         )
         # Manually set the other fields since factory doesn't support them
-        invoice.tax_cents = 1900
-        invoice.save()
+        invoice.subtotal_cents = 10000  # 100.00
+        invoice.tax_cents = 1900        # 19.00
+        invoice.save()                  # total is 119.00
 
         self.assertEqual(invoice.subtotal, Decimal('100.00'))
         self.assertEqual(invoice.tax_amount, Decimal('19.00'))

@@ -364,8 +364,8 @@ class ServiceCreateViewTestCase(TestCase):
         self.client.force_login(self.customer_user)
         response = self.client.get(reverse('provisioning:service_create'))
         
-        # Should redirect due to staff_required decorator
-        self.assertEqual(response.status_code, 302)
+        # Should return 403 due to staff_required decorator
+        self.assertEqual(response.status_code, 403)
 
     def test_service_create_get_admin_access(self):
         """Test service create GET view for admin user"""
@@ -483,8 +483,8 @@ class ServiceSuspendActivateViewTestCase(TestCase):
         self.client.force_login(self.customer_user)
         response = self.client.get(reverse('provisioning:service_suspend', args=[self.active_service.pk]))
         
-        # Should redirect due to staff_required decorator
-        self.assertEqual(response.status_code, 302)
+        # Should return 403 due to staff_required decorator
+        self.assertEqual(response.status_code, 403)
 
     def test_service_suspend_get(self):
         """Test service suspend GET view"""
@@ -598,8 +598,8 @@ class ServerListViewTestCase(TestCase):
         self.client.force_login(self.customer_user)
         response = self.client.get(reverse('provisioning:servers'))
         
-        # Should redirect due to staff_required decorator
-        self.assertEqual(response.status_code, 302)
+        # Should return 403 due to staff_required decorator
+        self.assertEqual(response.status_code, 403)
 
     def test_server_list_admin_access(self):
         """Test server list view for admin user"""

@@ -332,8 +332,9 @@ class BillingAccessControlTests(TestCase):
         # Mock the can_access_customer method to deny access
         self.unauthorized_user.can_access_customer = lambda customer: False
         
-        with self.assertRaises(PermissionDenied):
-            _validate_financial_document_access(self.unauthorized_request, self.invoice, 'download')
+        result = _validate_financial_document_access(self.unauthorized_request, self.invoice, 'download')
+        from django.http import HttpResponseForbidden
+        self.assertIsInstance(result, HttpResponseForbidden)
         
         # Should log access denial
         mock_log.assert_called()
@@ -351,8 +352,9 @@ class BillingAccessControlTests(TestCase):
         
         unauthenticated_request = MockUnauthenticatedRequest()
         
-        with self.assertRaises(PermissionDenied):
-            _validate_financial_document_access(unauthenticated_request, self.invoice, 'view')
+        result = _validate_financial_document_access(unauthenticated_request, self.invoice, 'view')
+        from django.http import HttpResponseForbidden
+        self.assertIsInstance(result, HttpResponseForbidden)
         
         # Should log unauthenticated access attempt
         mock_log.assert_called()

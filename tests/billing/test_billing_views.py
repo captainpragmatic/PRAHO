@@ -138,9 +138,9 @@ class BillingViewsTestCase(TestCase):
         request.user = self.no_access_user
         request = self.add_middleware_to_request(request)
         
-        from django.core.exceptions import PermissionDenied
-        with self.assertRaises(PermissionDenied):
-            _validate_financial_document_access(request, invoice)
+        from django.http import HttpResponseForbidden
+        result = _validate_financial_document_access(request, invoice)
+        self.assertIsInstance(result, HttpResponseForbidden)
 
 
 class BillingListViewTestCase(TestCase):

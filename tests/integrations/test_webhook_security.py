@@ -10,6 +10,7 @@ Tests the 3 critical security vulnerabilities that were fixed:
 import hashlib
 import json
 import time
+from typing import Any
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
@@ -53,41 +54,28 @@ class SignatureVerificationSecurityTests(WebhookSecurityTestCase):
     """
 
     def test_base_webhook_processor_fails_secure(self) -> None:
-        """🚨 Test that BaseWebhookProcessor fails secure for signature verification"""
+        """🚨 Test that BaseWebhookProcessor requires signature verification implementation"""
         
-        class TestProcessor(BaseWebhookProcessor):
-            source_name = "test"
+        # Test that abstract class cannot be instantiated without verify_signature
+        with self.assertRaises(TypeError):
+            class TestProcessor(BaseWebhookProcessor):
+                source_name = "test"
+                # Intentionally missing verify_signature implementation
+                pass
             
-        processor = TestProcessor()
-        payload = {"test": "data"}
-        signature = "fake_signature"
-        headers = {}
-
-        # Should fail secure and return False
-        with self.assertLogs('apps.integrations.webhooks.base', level='ERROR') as log:
-            result = processor.verify_signature(payload, signature, headers)
-            
-        self.assertFalse(result)
-        self.assertIn("Signature verification not implemented", log.output[0])
-        self.assertIn("TestProcessor", log.output[0])
+            TestProcessor()  # Should raise TypeError
 
     def test_custom_processor_must_implement_verification(self) -> None:
         """🔧 Test that custom processors must implement proper signature verification"""
         
-        class CustomProcessor(BaseWebhookProcessor):
-            source_name = "custom"
-            # Intentionally doesn't override verify_signature
-            pass
-            
-        processor = CustomProcessor()
-        payload = {"event": "test"}
-        
-        # Should fail secure since verification isn't implemented
-        with self.assertLogs('apps.integrations.webhooks.base', level='ERROR') as log:
-            result = processor.verify_signature(payload, "sig", {})
-            
-        self.assertFalse(result)
-        self.assertIn("CustomProcessor", log.output[0])
+        # Test that abstract method must be implemented
+        with self.assertRaises(TypeError):
+            class CustomProcessor(BaseWebhookProcessor):
+                source_name = "custom"
+                # Intentionally doesn't override verify_signature
+                pass
+                
+            CustomProcessor()  # Should raise TypeError due to abstract method
 
     @override_settings(STRIPE_WEBHOOK_SECRET=None)
     def test_stripe_processor_fails_secure_without_secret(self) -> None:
@@ -175,6 +163,17 @@ class RateLimitingSecurityTests(WebhookSecurityTestCase):
         
     def test_webhook_status_endpoint_rate_limiting(self) -> None:
         """📊 Test rate limiting on webhook status endpoint"""
+        # Grant the required permission for webhook status
+        from django.contrib.contenttypes.models import ContentType
+        from django.contrib.auth.models import Permission
+        content_type = ContentType.objects.get_for_model(WebhookEvent)
+        permission, _ = Permission.objects.get_or_create(
+            content_type=content_type, 
+            codename="view_webhook_stats",
+            defaults={"name": "Can view webhook statistics"}
+        )
+        self.user.user_permissions.add(permission)
+        
         self.client.login(email="test@example.com", password="testpass123")
         status_url = reverse('integrations:webhook_status')
         
@@ -192,6 +191,17 @@ class RateLimitingSecurityTests(WebhookSecurityTestCase):
 
     def test_webhook_retry_endpoint_rate_limiting(self) -> None:
         """🔄 Test rate limiting on webhook retry endpoint"""
+        # Grant the required permission for webhook retry
+        from django.contrib.contenttypes.models import ContentType
+        from django.contrib.auth.models import Permission
+        content_type = ContentType.objects.get_for_model(WebhookEvent)
+        permission, _ = Permission.objects.get_or_create(
+            content_type=content_type, 
+            codename="retry_webhook",
+            defaults={"name": "Can retry failed webhooks"}
+        )
+        self.user.user_permissions.add(permission)
+        
         # Create a webhook event to retry
         webhook_event = WebhookEvent.objects.create(
             source="stripe",
@@ -379,9 +389,13 @@ class IntegratedSecurityTests(WebhookSecurityTestCase):
         class TestProcessor(BaseWebhookProcessor):
             source_name = "test"
             
-        with self.assertLogs('apps.integrations.webhooks.base', level='ERROR'):
-            processor = TestProcessor()
-            processor.verify_signature({}, "sig", {})
+            def verify_signature(self, payload: dict[str, Any], signature: str, headers: dict[str, str]) -> bool:
+                return False  # Always reject for testing
+            
+        # Test that processor can be created and called
+        processor = TestProcessor()
+        result = processor.verify_signature({}, "sig", {})
+        self.assertFalse(result)
             
         # Test Stripe processor logging when no secret is configured
         with override_settings(STRIPE_WEBHOOK_SECRET=None):
@@ -402,6 +416,9 @@ class SecurityRegressionTests(WebhookSecurityTestCase):
         
         class TestProcessor(BaseWebhookProcessor):
             source_name = "test"
+            
+            def verify_signature(self, payload: dict[str, Any], signature: str, headers: dict[str, str]) -> bool:
+                return False  # Always reject for testing
             
         # Test various processor types
         processors = [

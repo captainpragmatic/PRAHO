@@ -106,9 +106,8 @@ class DomainRegistrationRaceConditionTests(TestCase):
         from apps.customers.models import Customer
 
         self.customer = Customer.objects.create(
-            email="cust@example.com",
-            first_name="John",
-            last_name="Doe",
+            name="John Doe",
+            primary_email="cust@example.com",
             company_name="ACME",
             customer_type="individual",
         )
@@ -152,8 +151,8 @@ class RegistrarAdminAuthorizationTests(TestCase):
     def test_staff_cannot_access_registrar_create(self) -> None:
         self.client.login(email="staff@example.com", password="x")
         resp = self.client.get(reverse("domains:registrar_create"))
-        # Expect redirect due to admin_required
-        self.assertEqual(resp.status_code, 302)
+        # Expect 403 due to admin_required
+        self.assertEqual(resp.status_code, 403)
 
     def test_admin_can_access_registrar_create(self) -> None:
         self.client.login(email="admin@example.com", password="x")

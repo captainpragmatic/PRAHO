@@ -134,9 +134,9 @@ class TestBillingViewsCriticalPaths(BillingCriticalCoverageTestCase):
 
     def test_validate_financial_document_access_none_request(self):
         """TEST #3: Test _validate_financial_document_access with None request"""
-        from django.core.exceptions import PermissionDenied
-        with self.assertRaises(PermissionDenied):
-            _validate_financial_document_access(None, self.invoice)
+        from django.http import HttpResponseForbidden
+        result = _validate_financial_document_access(None, self.invoice)
+        self.assertIsInstance(result, HttpResponseForbidden)
 
     def test_validate_financial_document_access_none_document(self):
         """TEST #4: Test _validate_financial_document_access with None document"""
@@ -144,9 +144,9 @@ class TestBillingViewsCriticalPaths(BillingCriticalCoverageTestCase):
         request.user = self.staff_user
         request = self.add_session_middleware(request)
         
-        from django.core.exceptions import PermissionDenied
-        with self.assertRaises(PermissionDenied):
-            _validate_financial_document_access(request, None)
+        from django.http import HttpResponseForbidden
+        result = _validate_financial_document_access(request, None)
+        self.assertIsInstance(result, HttpResponseForbidden)
 
     def test_validate_financial_document_access_unauthorized_user(self):
         """TEST #5: Test _validate_financial_document_access with unauthorized user"""
@@ -155,10 +155,10 @@ class TestBillingViewsCriticalPaths(BillingCriticalCoverageTestCase):
         request = self.add_session_middleware(request)
         
         # Mock the can_access_customer method to return False
-        from django.core.exceptions import PermissionDenied
+        from django.http import HttpResponseForbidden
         with patch.object(self.regular_user, 'can_access_customer', return_value=False):
-            with self.assertRaises(PermissionDenied):
-                _validate_financial_document_access(request, self.invoice)
+            result = _validate_financial_document_access(request, self.invoice)
+            self.assertIsInstance(result, HttpResponseForbidden)
 
     def test_billing_list_database_error_handling(self):
         """TEST #6: Test billing_list view error handling for database exceptions"""

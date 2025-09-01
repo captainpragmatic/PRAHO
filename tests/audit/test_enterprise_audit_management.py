@@ -40,7 +40,8 @@ class EnterpriseAuditManagementTestCase(TestCase):
         self.staff_user = User.objects.create_user(
             email='staff@example.com',
             password='testpass123',
-            is_staff=True
+            is_staff=True,
+            staff_role="admin"
         )
         
         self.admin_user = User.objects.create_user(
@@ -130,7 +131,7 @@ class AuditManagementDashboardTests(EnterpriseAuditManagementTestCase):
         # Test regular user access denied
         self.client.login(email='user@example.com', password='testpass123')
         response = self.client.get(reverse('audit:management_dashboard'))
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 403)
         
         # Test staff user access allowed
         self.client.login(email='staff@example.com', password='testpass123')
@@ -668,7 +669,7 @@ class SecurityAndPerformanceTests(EnterpriseAuditManagementTestCase):
         for url_name in protected_urls:
             with self.settings(LOGIN_URL='/admin/login/'):
                 response = self.client.get(reverse(url_name))
-                self.assertEqual(response.status_code, 302, f"{url_name} should require staff access")
+                self.assertEqual(response.status_code, 403, f"{url_name} should require staff access")
     
     def test_search_query_permissions(self):
         """Test that users can only access appropriate saved searches."""

@@ -99,7 +99,8 @@ class OrderListViewTestCase(TestCase):
         self.staff_user = User.objects.create_user(
             email="staff@pragmatichost.com",
             password="testpass123",
-            is_staff=True
+            is_staff=True,
+            staff_role="admin"
         )
         
         # Create customer user
@@ -240,7 +241,8 @@ class OrderDetailViewTestCase(TestCase):
         self.staff_user = User.objects.create_user(
             email="staff@pragmatichost.com",
             password="testpass123",
-            is_staff=True
+            is_staff=True,
+            staff_role="admin"
         )
         
         self.customer_user = User.objects.create_user(
@@ -420,7 +422,8 @@ class OrderStatusChangeViewTestCase(TestCase):
         self.staff_user = User.objects.create_user(
             email="staff@pragmatichost.com",
             password="testpass123",
-            is_staff=True
+            is_staff=True,
+            staff_role="admin"
         )
         
         self.customer = Customer.objects.create(
@@ -512,8 +515,8 @@ class OrderStatusChangeViewTestCase(TestCase):
             'notes': 'Customer trying to change status'
         })
         
-        # Should redirect due to staff_required decorator
-        self.assertEqual(response.status_code, 302)
+        # Should return 403 due to staff_required decorator
+        self.assertEqual(response.status_code, 403)
 
     def test_status_change_missing_parameters(self):
         """Test status change with missing required parameters"""
@@ -548,7 +551,8 @@ class OrderCancelViewTestCase(TestCase):
         self.staff_user = User.objects.create_user(
             email="staff@pragmatichost.com",
             password="testpass123",
-            is_staff=True
+            is_staff=True,
+            staff_role="admin"
         )
         
         self.customer = Customer.objects.create(

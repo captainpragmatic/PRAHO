@@ -33,7 +33,8 @@ class AccessControlSecurityTests(TestCase):
         self.staff_user = User.objects.create_user(
             email='staff@example.com',
             password='staffpass123',
-            is_staff=True
+            is_staff=True,
+            staff_role="admin"
         )
         self.customer = Customer.objects.create(
             name='Test Customer',

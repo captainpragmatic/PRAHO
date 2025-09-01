@@ -22,7 +22,7 @@ from apps.common.decorators import can_manage_financial_data
 from apps.customers.models import Customer
 from apps.orders.models import Order, OrderItem
 from apps.orders.views import _sanitize_search_query, _validate_manual_price_override
-from apps.products.models import Product
+from apps.products.models import Product, ProductPrice
 
 User = get_user_model()
 
@@ -84,6 +84,16 @@ class OrderSecurityTestCase(TestCase):
             slug="test-security-product",
             name="Test Security Product",
             product_type="hosting",
+            is_active=True
+        )
+        
+        # Create product price for testing
+        self.product_price = ProductPrice.objects.create(
+            product=self.product,
+            currency=self.currency,
+            billing_period="monthly",
+            amount_cents=1000,  # 10 RON
+            setup_cents=0,
             is_active=True
         )
         
@@ -279,7 +289,7 @@ class PriceTamperingSecurityTests(OrderSecurityTestCase):
             
         self.assertFalse(is_valid)
         self.assertEqual(error_msg, "Insufficient permissions for price override")
-        self.assertIn("Unauthorized price override attempt", log.output[0])
+        self.assertIn("lacks financial permissions", log.output[0])
 
     def test_price_override_integration_order_creation(self) -> None:
         """🔗 Integration test: Price override in actual order item creation"""
@@ -292,6 +302,7 @@ class PriceTamperingSecurityTests(OrderSecurityTestCase):
             'billing_period': 'monthly',
             'quantity': 1,
             'unit_price_cents': 5000,  # Manual override
+            'setup_cents': 0,  # Required field
         }
         
         # Should succeed with valid override
@@ -324,6 +335,7 @@ class PriceTamperingSecurityTests(OrderSecurityTestCase):
             'billing_period': 'monthly', 
             'quantity': 1,
             'unit_price_cents': excessive_price,
+            'setup_cents': 0,  # Add required field
         }
         
         response = self.client.post(url, data)
@@ -331,7 +343,7 @@ class PriceTamperingSecurityTests(OrderSecurityTestCase):
         self.assertEqual(response.status_code, 400)
         response_data = response.json()
         self.assertEqual(response_data['success'], False)
-        self.assertIn("Price override cannot exceed 10x", response_data['error'])
+        self.assertIn("Price override cannot exceed 10x", response_data['message'])
 
 
 class AccessControlSecurityTests(OrderSecurityTestCase):

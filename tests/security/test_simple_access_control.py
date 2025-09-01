@@ -15,6 +15,7 @@ from apps.common.decorators import (
     can_manage_financial_data,
     can_view_internal_notes,
     staff_required,
+    staff_required_strict,
 )
 
 User = get_user_model()
@@ -72,7 +73,7 @@ class SimpleAccessControlTestCase(TestCase):
     def test_staff_required_decorator_blocks_customers(self):
         """Test that staff_required decorator blocks customer users"""
         
-        @staff_required
+        @staff_required_strict
         def test_view(request):
             return HttpResponse('success')
         
@@ -85,8 +86,7 @@ class SimpleAccessControlTestCase(TestCase):
         request._messages = FallbackStorage(request)
         
         response = test_view(request)
-        self.assertEqual(response.status_code, 302)  # Redirect
-        self.assertIn('/app/', response.url)
+        self.assertEqual(response.status_code, 403)  # Forbidden
 
     def test_staff_required_decorator_allows_staff(self):
         """Test that staff_required decorator allows staff users"""

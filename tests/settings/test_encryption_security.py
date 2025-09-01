@@ -26,7 +26,6 @@ class EncryptionSecurityTests(TestCase):
             email="admin@test.com",
             password="testpass123",
             is_staff=True,
-            is_superuser=True,
             is_superuser=True
         )
         
@@ -127,7 +126,6 @@ class ExportSecurityTests(TestCase):
             email="admin@test.com",
             password="testpass123",
             is_staff=True,
-            is_superuser=True,
             is_superuser=True
         )
         
@@ -268,7 +266,6 @@ class CachingSecurityTests(TestCase):
             email="admin@test.com",
             password="testpass123",
             is_staff=True,
-            is_superuser=True,
             is_superuser=True
         )
         
@@ -337,7 +334,6 @@ class InputValidationSecurityTests(TestCase):
             email="admin@test.com",
             password="testpass123",
             is_staff=True,
-            is_superuser=True,
             is_superuser=True
         )
         
