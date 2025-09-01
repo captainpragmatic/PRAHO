@@ -7,11 +7,11 @@ import hashlib
 import ipaddress
 import logging
 import re
+import socket
 import time
 from collections.abc import Callable
 from datetime import datetime
 from functools import wraps
-import socket
 from typing import Any, TypeVar, cast
 from urllib.parse import urlparse
 
@@ -175,7 +175,7 @@ class SecureInputValidator:
         """
         # Security: Add consistent delay to prevent timing analysis
         start_time = time.time()
-        
+
         if not email or not isinstance(email, str):
             # Security: Ensure consistent timing even for invalid inputs
             time.sleep(max(0, 0.1 - (time.time() - start_time)))
@@ -385,7 +385,10 @@ class SecureInputValidator:
             "instance-data",
             "::1",
             # Additional DNS rebinding protection patterns
-            "10.", "172.", "192.168.", "169.254.",  # Common private IP prefixes in hostnames
+            "10.",
+            "172.",
+            "192.168.",
+            "169.254.",  # Common private IP prefixes in hostnames
         ]
 
         for dangerous in dangerous_domains:

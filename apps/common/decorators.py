@@ -181,24 +181,27 @@ def can_access_admin_functions(user: User) -> bool:
     return user.is_superuser or getattr(user, "staff_role", "") in allowed_roles
 
 
-def rate_limit(requests_per_minute: int = 10, per_user: bool = True, block_anonymous: bool = True) -> Callable[[Callable[..., HttpResponse]], Callable[..., HttpResponse]]:
+def rate_limit(
+    requests_per_minute: int = 10, per_user: bool = True, block_anonymous: bool = True
+) -> Callable[[Callable[..., HttpResponse]], Callable[..., HttpResponse]]:
     """
     🔒 Rate limiting decorator to prevent abuse of sensitive operations
-    
+
     Protects against:
     - DoS attacks through rapid requests
     - Brute force attempts on form submissions
     - Resource exhaustion from file uploads
-    
+
     Args:
         requests_per_minute: Maximum requests allowed per minute (default: 10)
         per_user: If True, limits per authenticated user; if False, limits per IP
         block_anonymous: If True, blocks all anonymous users (default: True)
-    
+
     Usage:
         @rate_limit(5, per_user=True)  # 5 requests/minute per user
         @rate_limit(20, per_user=False)  # 20 requests/minute per IP
     """
+
     def decorator(view_func: Callable[..., HttpResponse]) -> Callable[..., HttpResponse]:
         @wraps(view_func)
         def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
@@ -206,9 +209,9 @@ def rate_limit(requests_per_minute: int = 10, per_user: bool = True, block_anony
             if block_anonymous and not request.user.is_authenticated:
                 logger.warning(f"🚨 [Rate Limit] Anonymous user blocked from {request.path}")
                 response = HttpResponse("Authentication required", status=429)
-                response['Retry-After'] = '60'
+                response["Retry-After"] = "60"
                 return response
-            
+
             # Determine rate limit key
             if per_user and request.user.is_authenticated:
                 # Rate limit per authenticated user
@@ -216,41 +219,41 @@ def rate_limit(requests_per_minute: int = 10, per_user: bool = True, block_anony
                 identifier = f"user {request.user.email}"
             else:
                 # Rate limit per IP address
-                client_ip = request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip()
+                client_ip = request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0].strip()
                 if not client_ip:
-                    client_ip = request.META.get('REMOTE_ADDR', 'unknown')
+                    client_ip = request.META.get("REMOTE_ADDR", "unknown")
                 rate_key = f"rate_limit_ip_{client_ip}_{view_func.__name__}"
                 identifier = f"IP {client_ip}"
-            
+
             # Get current request count
             current_requests = cache.get(rate_key, 0)
-            
+
             # Check if rate limit exceeded
             if current_requests >= requests_per_minute:
                 logger.warning(
                     f"🚨 [Rate Limit] {identifier} exceeded limit "
                     f"({current_requests}/{requests_per_minute} req/min) for {view_func.__name__}"
                 )
-                
+
                 # Return rate limit response
                 response = HttpResponse(
-                    f"Rate limit exceeded. Maximum {requests_per_minute} requests per minute allowed.",
-                    status=429
+                    f"Rate limit exceeded. Maximum {requests_per_minute} requests per minute allowed.", status=429
                 )
-                response['Retry-After'] = '60'  # Suggest retry after 60 seconds
+                response["Retry-After"] = "60"  # Suggest retry after 60 seconds
                 return response
-            
+
             # Increment request count (expire after 60 seconds)
             cache.set(rate_key, current_requests + 1, 60)
-            
+
             # Log rate limit usage for monitoring
             if current_requests + 1 >= requests_per_minute * 0.8:  # Warn at 80% threshold
                 logger.info(
                     f"⚠️ [Rate Limit] {identifier} approaching limit "
                     f"({current_requests + 1}/{requests_per_minute}) for {view_func.__name__}"
                 )
-            
+
             return view_func(request, *args, **kwargs)
-        
+
         return wrapper
+
     return decorator

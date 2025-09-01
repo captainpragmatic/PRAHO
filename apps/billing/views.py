@@ -67,7 +67,9 @@ def _get_accessible_customer_ids(user: User | None) -> list[int]:
         return [c.id for c in accessible_customers] if accessible_customers else []
 
 
-def _validate_financial_document_access(request: HttpRequest, document: Invoice | ProformaInvoice, action: str = 'view') -> None:
+def _validate_financial_document_access(
+    request: HttpRequest, document: Invoice | ProformaInvoice, action: str = "view"
+) -> None:
     """
     🔒 Validate user access to financial documents with comprehensive security logging.
     Raises PermissionDenied if access denied.
@@ -75,61 +77,61 @@ def _validate_financial_document_access(request: HttpRequest, document: Invoice 
     # Handle None objects
     if request is None or document is None:
         log_security_event(
-            event_type='financial_document_access_denied',
+            event_type="financial_document_access_denied",
             details={
-                'reason': 'invalid_request_or_document',
-                'action': action,
-                'document_type': type(document).__name__ if document else 'None'
+                "reason": "invalid_request_or_document",
+                "action": action,
+                "document_type": type(document).__name__ if document else "None",
             },
-            request_ip=getattr(request, 'META', {}).get('REMOTE_ADDR') if request else None
+            request_ip=getattr(request, "META", {}).get("REMOTE_ADDR") if request else None,
         )
         raise PermissionDenied("Invalid request or document")
 
     # Validate authenticated user
     if not isinstance(request.user, User) or not request.user.is_authenticated:
         log_security_event(
-            event_type='financial_document_access_denied',
+            event_type="financial_document_access_denied",
             details={
-                'reason': 'unauthenticated_access_attempt',
-                'action': action,
-                'document_id': document.id if hasattr(document, 'id') else None,
-                'document_type': type(document).__name__
+                "reason": "unauthenticated_access_attempt",
+                "action": action,
+                "document_id": document.id if hasattr(document, "id") else None,
+                "document_type": type(document).__name__,
             },
-            request_ip=request.META.get('REMOTE_ADDR')
+            request_ip=request.META.get("REMOTE_ADDR"),
         )
         raise PermissionDenied("Authentication required")
-    
+
     # Validate customer access
     if not request.user.can_access_customer(document.customer):
         log_security_event(
-            event_type='financial_document_access_denied',
+            event_type="financial_document_access_denied",
             details={
-                'reason': 'insufficient_permissions',
-                'user_email': request.user.email,
-                'action': action,
-                'document_id': document.id if hasattr(document, 'id') else None,
-                'document_type': type(document).__name__,
-                'customer_id': document.customer.id if document.customer else None,
-                'attempted_unauthorized_access': True
+                "reason": "insufficient_permissions",
+                "user_email": request.user.email,
+                "action": action,
+                "document_id": document.id if hasattr(document, "id") else None,
+                "document_type": type(document).__name__,
+                "customer_id": document.customer.id if document.customer else None,
+                "attempted_unauthorized_access": True,
             },
-            request_ip=request.META.get('REMOTE_ADDR'),
-            user_email=request.user.email
+            request_ip=request.META.get("REMOTE_ADDR"),
+            user_email=request.user.email,
         )
         raise PermissionDenied("You do not have permission to access this document")
-    
+
     # Log successful access for audit trail
     log_security_event(
-        event_type='financial_document_accessed',
+        event_type="financial_document_accessed",
         details={
-            'user_email': request.user.email,
-            'action': action,
-            'document_id': document.id if hasattr(document, 'id') else None,
-            'document_type': type(document).__name__,
-            'customer_id': document.customer.id if document.customer else None,
-            'access_granted': True
+            "user_email": request.user.email,
+            "action": action,
+            "document_id": document.id if hasattr(document, "id") else None,
+            "document_type": type(document).__name__,
+            "customer_id": document.customer.id if document.customer else None,
+            "access_granted": True,
         },
-        request_ip=request.META.get('REMOTE_ADDR'),
-        user_email=request.user.email
+        request_ip=request.META.get("REMOTE_ADDR"),
+        user_email=request.user.email,
     )
 
 

@@ -71,7 +71,7 @@ class SecurityHeadersMiddleware:
                 "default-src 'self'; "
                 "style-src 'self' 'unsafe-inline' fonts.googleapis.com cdn.tailwindcss.com; "
                 "font-src 'self' fonts.gstatic.com; "
-                "script-src 'self' 'unsafe-inline' unpkg.com cdn.tailwindcss.com; "  # Allow trusted CDNs
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval' unpkg.com cdn.tailwindcss.com; "  # Allow trusted CDNs + Alpine.js
                 "img-src 'self' data: https:; "
                 "connect-src 'self'; "
                 "object-src 'none'; "  # Prevent Flash/Java execution
@@ -85,6 +85,7 @@ class SecurityHeadersMiddleware:
         response["X-Frame-Options"] = "DENY"
         response["X-XSS-Protection"] = "1; mode=block"
         response["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response["Cross-Origin-Opener-Policy"] = "same-origin"
 
         # Romanian privacy compliance
         response["X-Powered-By"] = "PragmaticHost Romania"
