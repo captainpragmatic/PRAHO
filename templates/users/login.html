@@ -54,7 +54,8 @@
 
         <!-- Remember Me -->
         <div class="flex items-center justify-between">
-          {% checkbox_field name="remember-me" label="Keep me logged in" variant="primary" container_class="flex items-center" %}
+          {# Use underscore to match form field name and tests #}
+          {% checkbox_field name="remember_me" label="Keep me logged in" variant="primary" container_class="flex items-center" %}
 
           <div class="text-sm">
             <a href="{% url 'users:password_reset' %}" class="text-blue-400 hover:text-blue-300">

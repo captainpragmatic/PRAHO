@@ -9,10 +9,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}PRAHO Platform{% endblock %}</title>
 
-  <!-- Security Headers -->
+  <!-- Security Headers (X-Frame-Options and X-XSS-Protection set in middleware) -->
   <meta http-equiv="X-Content-Type-Options" content="nosniff">
-  <meta http-equiv="X-Frame-Options" content="DENY">
-  <meta http-equiv="X-XSS-Protection" content="1; mode=block">
 
   <!-- Romanian Branding -->
   <meta name="description" content="{% trans 'PRAHO Platform System for Romanian Hosting Providers' %}">
@@ -23,7 +21,8 @@
   <link rel="icon" type="image/svg+xml" href="{% static 'img/favicon_simple.svg' %}">
   <link rel="alternate icon" href="{% static 'img/favicon.svg' %}">
 
-  <!-- Styles -->
+  <!-- Styles & Scripts - DEVELOPMENT ONLY -->
+  <!-- NOTE: Tailwind CDN is for development only. Production should use PostCSS/Tailwind CLI -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
   <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>

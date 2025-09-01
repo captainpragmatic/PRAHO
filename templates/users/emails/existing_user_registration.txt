@@ -1,0 +1,14 @@
+{% load i18n %}{% trans "Account Access - PRAHO Platform" %}
+
+{% trans "Hello" %} {{ user.first_name|default:user.email }},
+
+{% trans "We received a registration request for your email address, but you already have an account with us." %}
+
+{% trans "If you forgot your password, you can reset it using the link below:" %}
+
+{{ protocol }}://{{ domain }}{% url 'users:password_reset_confirm' uidb64=uid token=token %}
+
+{% trans "If you didn't request this, you can safely ignore this email." %}
+
+{% trans "Best regards," %}
+{% trans "The PRAHO Platform Team" %}

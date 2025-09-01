@@ -1,0 +1,71 @@
+{% load i18n %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% trans "Account Access - PRAHO Platform" %}</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            line-height: 1.6; 
+            color: #333; 
+            max-width: 600px; 
+            margin: 0 auto; 
+            padding: 20px;
+        }
+        .header { 
+            background: #1e293b; 
+            color: white; 
+            padding: 20px; 
+            text-align: center; 
+            border-radius: 8px 8px 0 0;
+        }
+        .content { 
+            background: #f8fafc; 
+            padding: 30px; 
+            border-radius: 0 0 8px 8px;
+        }
+        .button { 
+            display: inline-block; 
+            background: #3b82f6; 
+            color: white; 
+            padding: 12px 24px; 
+            text-decoration: none; 
+            border-radius: 6px; 
+            margin: 20px 0;
+        }
+        .footer { 
+            margin-top: 20px; 
+            font-size: 14px; 
+            color: #64748b;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>{% trans "PRAHO Platform" %}</h1>
+    </div>
+    
+    <div class="content">
+        <h2>{% trans "Account Access" %}</h2>
+        
+        <p>{% trans "Hello" %} {{ user.first_name|default:user.email }},</p>
+        
+        <p>{% trans "We received a registration request for your email address, but you already have an account with us." %}</p>
+        
+        <p>{% trans "If you forgot your password, you can reset it using the button below:" %}</p>
+        
+        <a href="{{ protocol }}://{{ domain }}{% url 'users:password_reset_confirm' uidb64=uid token=token %}" class="button">
+            {% trans "Reset Password" %}
+        </a>
+        
+        <p>{% trans "If you didn't request this, you can safely ignore this email." %}</p>
+        
+        <div class="footer">
+            <p>{% trans "Best regards," %}<br>
+            {% trans "The PRAHO Platform Team" %}</p>
+        </div>
+    </div>
+</body>
+</html>
