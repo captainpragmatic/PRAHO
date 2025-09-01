@@ -33,6 +33,8 @@ urlpatterns = [
     path("app/", dashboard_view, name="dashboard"),
     # Authentication URLs
     path("auth/", include("apps.users.urls")),
+    # Backward-compatible alias expected by some tests
+    path("users/", include("apps.users.urls")),
     # Django i18n for language switching
     path("i18n/", include("django.conf.urls.i18n")),
     # Core business apps
@@ -43,6 +45,8 @@ urlpatterns = [
     path("app/tickets/", include("apps.tickets.urls")),
     path("app/provisioning/", include("apps.provisioning.urls")),
     path("app/domains/", include("apps.domains.urls")),
+    # Notifications (admin/staff tools)
+    path("app/notifications/", include("apps.notifications.urls")),
     # External integrations & webhooks
     path("integrations/", include("apps.integrations.urls")),
     # GDPR compliance and audit

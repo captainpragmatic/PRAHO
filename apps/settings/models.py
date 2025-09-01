@@ -216,10 +216,18 @@ class SystemSetting(models.Model):
         if self.value is None:
             return self.get_typed_default_value()
 
-        if self.data_type == "decimal" and self.value is not None:
-            return Decimal(str(self.value))
+        # Handle decryption for sensitive settings
+        raw_value = self.value
+        if self.is_sensitive and raw_value is not None:
+            from .encryption import SettingsEncryption  # noqa: PLC0415
+            encryption = SettingsEncryption()
+            if encryption.is_encrypted(str(raw_value)):
+                raw_value = encryption.decrypt_value(str(raw_value))
 
-        return self.value
+        if self.data_type == "decimal" and raw_value is not None:
+            return Decimal(str(raw_value))
+
+        return raw_value
 
     def get_typed_default_value(self) -> str | int | bool | Decimal | list | dict | None:
         """Get the default value converted to its proper Python type"""
@@ -255,6 +263,18 @@ class SystemSetting(models.Model):
     def category_display(self) -> str:
         """Get human-readable category name"""
         return dict(self.CATEGORY_CHOICES).get(self.category, self.category)
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Save setting with automatic encryption for sensitive values"""
+        # Handle encryption for sensitive settings
+        if self.is_sensitive and self.value is not None:
+            from .encryption import SettingsEncryption  # noqa: PLC0415
+            encryption = SettingsEncryption()
+            # Only encrypt if not already encrypted
+            if not encryption.is_encrypted(str(self.value)):
+                self.value = encryption.encrypt_value(str(self.value))
+        
+        super().save(*args, **kwargs)
 
     def reset_to_default(self) -> None:
         """Reset setting to its default value"""

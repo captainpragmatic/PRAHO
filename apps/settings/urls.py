@@ -45,5 +45,7 @@ urlpatterns = [
     # ===============================================================================
     # Export settings for backup
     path("api/export/", views.export_settings, name="export_settings"),
+    # Export ALL settings including sensitive ones (Admin-only)
+    path("api/export/full/", views.export_settings_full, name="export_settings_full"),
     # TODO: Add import settings endpoint
 ]

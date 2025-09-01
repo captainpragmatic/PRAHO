@@ -16,6 +16,7 @@ from django.core.paginator import Paginator
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
+from django_ratelimit.decorators import ratelimit
 
 from apps.users.models import User
 
@@ -75,9 +76,15 @@ def ticket_detail(request: HttpRequest, pk: int) -> HttpResponse:
 
 
 @login_required
+@ratelimit(key="user", rate="5/m", method="POST", block=False)
 def ticket_create(request: HttpRequest) -> HttpResponse:
     """+ Create new support ticket"""
     user = cast(User, request.user)  # Safe after @login_required
+    
+    # Check rate limit
+    if getattr(request, "limited", False):
+        return HttpResponse("Rate limited", status=429)
+        
     customers = user.get_accessible_customers()
 
     if request.method == "POST":
@@ -358,12 +365,17 @@ def ticket_reopen(request: HttpRequest, pk: int) -> HttpResponse:
 
 
 @login_required
+@ratelimit(key="user", rate="30/m", method="GET", block=False)
 def download_attachment(request: HttpRequest, attachment_id: int) -> HttpResponse:
     """📎 Download ticket attachment"""
     user = cast(User, request.user)  # Safe after @login_required
+    
+    # Check rate limit
+    if getattr(request, "limited", False):
+        return HttpResponse("Rate limited", status=429)
 
     try:
-        attachment = TicketAttachment.objects.select_related("ticket__customer").get(id=attachment_id)
+        attachment = TicketAttachment.objects.select_related("ticket__customer", "comment").get(id=attachment_id)
     except TicketAttachment.DoesNotExist:
         raise Http404("Attachment not found") from None
 
@@ -372,6 +384,17 @@ def download_attachment(request: HttpRequest, attachment_id: int) -> HttpRespons
     accessible_customer_ids = [customer.id for customer in accessible_customers]
     if attachment.ticket.customer.id not in accessible_customer_ids:
         raise PermissionDenied("You do not have permission to access this attachment.")
+    
+    # Check if attachment is safe
+    if hasattr(attachment, 'is_safe') and not attachment.is_safe:
+        raise PermissionDenied("Access to this attachment is blocked for security reasons.")
+    
+    # Check internal attachment access (only staff can access internal attachments)
+    if (attachment.comment and 
+        hasattr(attachment.comment, 'comment_type') and 
+        attachment.comment.comment_type == "internal" and 
+        not user.is_staff):
+        raise PermissionDenied("Access denied to internal attachments.")
 
     # Check if file exists
     if not attachment.file or not attachment.file.name:

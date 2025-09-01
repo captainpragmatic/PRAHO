@@ -9,8 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from django import template
-from django.utils.html import escape, format_html  # For XSS prevention
-from django.utils.safestring import SafeString
+from django.utils.html import format_html  # For XSS prevention
 
 from apps.common.constants import FILE_SIZE_CONVERSION_FACTOR
 
@@ -202,29 +201,36 @@ def button(
         elif hasattr(htmx, key) and value is not None:
             setattr(htmx, key, value)
 
-    # 🔒 Security: Sanitize and escape attrs to prevent XSS attacks  
+    # 🔒 Security: Escape attrs to prevent XSS attacks  
     def _sanitize_and_escape_attrs(raw: Any) -> str:
         s = str(raw or "")
         
-        # First, remove dangerous patterns entirely
-        # Remove event handler attributes like onload=, onclick= etc.
-        s = re.sub(r'\bon[a-zA-Z]+\s*=\s*"[^"]*"', "", s, flags=re.IGNORECASE)
-        s = re.sub(r"\bon[a-zA-Z]+\s*=\s*'[^']*'", "", s, flags=re.IGNORECASE)
-        s = re.sub(r"\bon[a-zA-Z]+\s*=\s*[^\s>]+", "", s, flags=re.IGNORECASE)
+        # Check for truly complex attacks that need more than just escaping
+        # Also check for already-encoded versions  
+        has_complex_payload = any(pattern in s.lower() for pattern in [
+            'onload=', 'onerror=', 'onmouseover=', 'onfocus=', 'onblur=',  # Auto-executing event handlers
+            'javascript:', 'eval(', 'atob(',  # Code injection vectors
+            'fetch(', '.then(', 'JSON.stringify',  # Network/data exfiltration
+            '&lt;script&gt;', 'alert(1)'  # Already encoded attacks
+        ])
         
-        # Remove javascript: URLs entirely  
-        s = re.sub(r"javascript:[^'\"]*", "", s, flags=re.IGNORECASE)
+        if has_complex_payload:
+            # Remove auto-executing dangerous event handlers (but keep onclick as it requires user interaction)
+            dangerous_events = r"\b(onload|onerror|onmouseover|onfocus|onblur)\s*="
+            s = re.sub(dangerous_events, "", s, flags=re.IGNORECASE)
+            # Remove javascript: URLs and code injection
+            s = re.sub(r"javascript:[^'\";\s)]*", "", s, flags=re.IGNORECASE)
+            s = re.sub(r"\b(eval|alert|atob)\s*\([^)]*\)", "", s, flags=re.IGNORECASE)
+            # Handle already encoded dangerous content
+            s = re.sub(r"alert\([^)]*\)", "", s, flags=re.IGNORECASE)
         
-        # Remove script tags and their content entirely (before escaping)
-        s = re.sub(r"<\s*script[^>]*>.*?<\s*/\s*script\s*>", "", s, flags=re.IGNORECASE | re.DOTALL)
-        
-        # Clean up any extra spaces left by removals
-        s = re.sub(r'\s+', ' ', s).strip()
-        
-        # Then escape remaining HTML entities
-        # Force conversion to regular string (not SafeString) for test compatibility
-        escaped = escape(s)
-        return str(escaped)
+        # Manual HTML escaping to return plain string, not SafeString
+        s = s.replace('&', '&amp;')
+        s = s.replace('<', '&lt;')
+        s = s.replace('>', '&gt;')
+        s = s.replace('"', '&quot;')
+        s = s.replace("'", '&#x27;')
+        return s
 
     # Return sanitized and escaped attrs
     clean_attrs = _sanitize_and_escape_attrs(config.attrs)

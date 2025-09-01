@@ -24,6 +24,7 @@ from django.views.decorators.cache import cache_page
 from django.views.decorators.http import require_http_methods
 from django.views.generic import TemplateView
 
+from apps.common.decorators import admin_required
 from apps.common.security_decorators import log_security_event
 from apps.common.types import Ok
 
@@ -548,4 +549,77 @@ def export_settings(request: HttpRequest) -> HttpResponse:
 
     except Exception as e:
         logger.error(f"💥 Error exporting settings: {e}")
+        return JsonResponse({"success": False, "error": "Failed to export settings"}, status=500)
+
+
+@admin_required
+def export_settings_full(request: HttpRequest) -> HttpResponse:
+    """
+    📥 Export ALL settings including sensitive ones (Admin-only)
+
+    GET /api/settings/export/full/
+    """
+    try:
+        # Get all settings including sensitive ones
+        settings = SystemSetting.objects.filter(is_active=True).select_related("category")
+        sensitive_count = settings.filter(is_sensitive=True).count()
+
+        user_email = (
+            request.user.email
+            if hasattr(request.user, "email") and not isinstance(request.user, AnonymousUser)
+            else "anonymous"
+        )
+        export_data: dict[str, Any] = {
+            "export_info": {
+                "exported_at": timezone.now().isoformat(),
+                "exported_by": user_email,
+                "total_settings": settings.count(),
+                "export_type": "full",
+                "sensitive_settings_included": sensitive_count,
+                "security_warning": "This export contains sensitive encrypted data - handle with care",
+            },
+            "categories": {},
+            "settings": [],
+        }
+
+        for setting in settings:
+            category_key = setting.category.key if setting.category else "uncategorized"
+
+            if category_key not in export_data["categories"]:
+                export_data["categories"][category_key] = {
+                    "name": setting.category.name if setting.category else "Uncategorized",
+                    "description": setting.category.description if setting.category else "",
+                }
+
+            export_data["settings"].append(
+                {
+                    "key": setting.key,
+                    "category": category_key,
+                    "name": setting.name,
+                    "description": setting.description,
+                    "value": setting.value,  # Includes encrypted sensitive values
+                    "default_value": setting.default_value,
+                    "data_type": setting.data_type,
+                    "validation_rules": setting.validation_rules,
+                    "is_required": setting.is_required,
+                    "is_public": setting.is_public,
+                    "is_sensitive": setting.is_sensitive,
+                    "requires_restart": setting.requires_restart,
+                }
+            )
+
+        # Log export event
+        log_security_event(
+            event_type="settings_export_full",
+            details={"settings_count": len(export_data["settings"]), "sensitive_count": sensitive_count, "resource_type": "SystemSetting"},
+            request_ip=request.META.get("REMOTE_ADDR"),
+        )
+
+        response = HttpResponse(json.dumps(export_data, indent=2, ensure_ascii=False), content_type="application/json")
+        response["Content-Disposition"] = 'attachment; filename="praho_settings_full_export.json"'
+
+        return response
+
+    except Exception as e:
+        logger.error(f"💥 Error exporting full settings: {e}")
         return JsonResponse({"success": False, "error": "Failed to export settings"}, status=500)
