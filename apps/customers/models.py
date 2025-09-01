@@ -269,7 +269,7 @@ class Customer(SoftDeleteModel):
     def __str__(self) -> str:
         return self.get_display_name()
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         """Accept legacy kwargs without requiring DB columns in tests."""
         # Swallow non-model identity kwargs that some tests pass
         kwargs.pop("email", None)

@@ -1,14 +1,15 @@
-from typing import ClassVar
 import json
 import re
+from typing import Any, ClassVar
 
 from django import forms
 
+from apps.settings.encryption import settings_encryption
 from .models import TLD, Registrar
 
 
 class RegistrarForm(forms.ModelForm):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         # Do not prefill sensitive fields
         for secret_field in ("api_key", "api_secret", "webhook_secret"):
@@ -41,14 +42,14 @@ class RegistrarForm(forms.ModelForm):
             ),
         }
 
-    def clean_default_nameservers(self):
+    def clean_default_nameservers(self) -> list[str]:
         value = self.cleaned_data.get("default_nameservers")
         # Accept JSON string or list
         if isinstance(value, str):
             try:
                 value = json.loads(value)
-            except Exception:
-                raise forms.ValidationError("Invalid JSON for nameservers")
+            except Exception as e:
+                raise forms.ValidationError("Invalid JSON for nameservers") from e
 
         if not isinstance(value, list):
             raise forms.ValidationError("Nameservers must be a list of hostnames")
@@ -61,8 +62,7 @@ class RegistrarForm(forms.ModelForm):
             cleaned.append(ns.rstrip('.'))
         return cleaned
 
-    def save(self, commit=True):
-        from apps.settings.encryption import settings_encryption
+    def save(self, commit: bool = True) -> Registrar:
         instance = super().save(commit=False)
         # Encrypt secrets at rest
         if self.cleaned_data.get("api_key"):

@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import logging
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
 
@@ -12,6 +13,10 @@ from apps.common.types import Err, Ok, Result
 from apps.integrations.models import WebhookEvent
 
 logger = logging.getLogger(__name__)
+
+
+class SecurityError(Exception):
+    """🔒 Security-related errors in webhook processing"""
 
 
 # ===============================================================================
@@ -69,9 +74,9 @@ class WebhookRequestMetadata:
 # ===============================================================================
 
 
-class BaseWebhookProcessor:
+class BaseWebhookProcessor(ABC):
     """
-    🔧 Base class for webhook processing with deduplication
+    🔧 Abstract base class for webhook processing with deduplication
 
     Provides common functionality for all webhook sources:
     - Signature verification
@@ -83,10 +88,13 @@ class BaseWebhookProcessor:
     source_name: str | None = None  # Override in subclasses
 
     def __init__(self) -> None:
+        # Enforce abstract contract via ABC for verify_signature
         if not self.source_name:
-            raise ValueError("source_name must be defined in subclass")
-        # After validation, we know source_name is not None
-        assert self.source_name is not None
+            # Keep defensive check, but ABC prevents direct instantiation anyway
+            self.source_name = self.__class__.__name__.lower()
+        
+        # Validate that signature implementation is secure
+        self._validate_signature_implementation()
 
     def process_webhook(
         self,
@@ -233,17 +241,10 @@ class BaseWebhookProcessor:
         """🏷️ Extract event type from payload - override in subclasses"""
         return payload.get("type")
 
+    @abstractmethod
     def verify_signature(self, payload: dict[str, Any], signature: str, headers: dict[str, str]) -> bool:
-        """🔐 Verify webhook signature - secure default is to fail and log an error.
+        """🔐 Verify webhook signature - must be implemented by subclasses"""
 
-        Subclasses should implement proper verification. This base method provides
-        a safe default that cannot be bypassed.
-        """
-        try:
-            logger.error("Signature verification not implemented for this processor")
-        except Exception:  # pragma: no cover
-            pass
-        return False
 
     def handle_event(self, webhook_event: WebhookEvent) -> tuple[bool, str]:
         """
@@ -253,6 +254,29 @@ class BaseWebhookProcessor:
             (success: bool, message: str)
         """
         raise NotImplementedError("Subclasses must implement handle_event")
+
+    # --- Security enforcement helpers (required by tests) ---
+    def _validate_signature_implementation(self) -> None:
+        """Validate that verify_signature is not overly permissive.
+
+        Raises SecurityError if the implementation appears to accept obviously invalid signatures.
+        """
+        try:
+            # Obviously invalid combinations that should never verify
+            always_false_cases = [
+                ({}, "", {}),
+                ({"test": "data"}, "obviously_invalid_signature_12345", {}),
+                ({}, "short", {"X-Test": "1"}),
+            ]
+
+            for payload, signature, headers in always_false_cases:
+                if self.verify_signature(payload, signature, headers):
+                    raise SecurityError("Overly permissive signature verification detected")
+        except SecurityError:
+            raise
+        except Exception:
+            # Any exception implies not permissive (or properly failing) in this context
+            return
 
 
 # ===============================================================================

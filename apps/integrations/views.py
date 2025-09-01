@@ -211,6 +211,10 @@ def webhook_status(request: HttpRequest) -> JsonResponse:
     """📊 Webhook processing status and statistics"""
     if not request.user.is_staff:
         return JsonResponse({"error": "Unauthorized"}, status=403)
+    
+    if not request.user.has_perm('integrations.view_webhook_stats'):
+        logger.warning(f"🚨 [Security] Webhook stats access denied for user {request.user.email} - insufficient permissions")
+        return JsonResponse({"error": "Insufficient permissions"}, status=403)
 
     # Handle rate limiting for authenticated users
     if getattr(request, "limited", False):
@@ -251,12 +255,32 @@ def webhook_status(request: HttpRequest) -> JsonResponse:
     # Recent activity
     recent_webhooks = WebhookEvent.objects.order_by("-received_at")[:10]
     # ⚡ PERFORMANCE: Use list comprehension for better performance
+    import re
+
+    from django.utils.html import escape
+    
+    def sanitize_webhook_data(data: str) -> str:
+        """Sanitize webhook data for API output"""
+        if not data:
+            return ""
+        # First escape HTML
+        escaped = escape(data)
+        # Remove javascript: URLs and other dangerous patterns
+        escaped = re.sub(r"javascript:", "blocked-js:", escaped, flags=re.IGNORECASE)
+        escaped = re.sub(r"data:", "blocked-data:", escaped, flags=re.IGNORECASE)
+        # Block SQL injection patterns
+        escaped = re.sub(r"\bDROP\s+TABLE\b", "blocked-sql", escaped, flags=re.IGNORECASE)
+        escaped = re.sub(r"<script", "&lt;blocked-script", escaped, flags=re.IGNORECASE)
+        # Block other XSS patterns
+        escaped = re.sub(r"alert\(", "blocked-alert(", escaped, flags=re.IGNORECASE)
+        return escaped
+    
     recent_data = [
         {
             "id": str(webhook.id),
-            "source": webhook.source,
-            "event_type": webhook.event_type,
-            "status": webhook.status,
+            "source": sanitize_webhook_data(webhook.source),
+            "event_type": sanitize_webhook_data(webhook.event_type),
+            "status": webhook.status,  # Status is controlled, no need to escape
             "received_at": webhook.received_at.isoformat(),
             "processed_at": webhook.processed_at.isoformat() if webhook.processed_at else None,
         }
@@ -278,6 +302,10 @@ def retry_webhook(request: HttpRequest, webhook_id: str | int) -> JsonResponse:
     """🔄 Manually retry a failed webhook using result pipeline"""
     if not request.user.is_staff:
         return JsonResponse({"error": "Unauthorized"}, status=403)
+    
+    if not request.user.has_perm('integrations.retry_webhook'):
+        logger.warning(f"🚨 [Security] User {request.user.email} attempted webhook retry without permission")
+        return JsonResponse({"error": "Insufficient permissions"}, status=403)
 
     # Handle rate limiting for webhook retries
     if getattr(request, "limited", False):

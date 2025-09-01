@@ -44,15 +44,13 @@ security_logger = logging.getLogger("security")
 
 def _handle_secure_error(request: HttpRequest, error: Exception, operation: str, user_id: int | None = None) -> None:
     """🔒 Handle errors securely without leaking sensitive information"""
+    from contextlib import suppress
     from django.contrib.messages.api import MessageFailure
     
     def _safe_add_message(request: HttpRequest, message: str) -> None:
         """Safely add a message, handling cases where MessageMiddleware is not installed"""
-        try:
+        with suppress(MessageFailure):
             messages.error(request, message)
-        except MessageFailure:
-            # MessageMiddleware not installed (typically in tests)
-            pass
     
     if isinstance(error, ValidationError):
         _safe_add_message(request, _("❌ Please check your input: Invalid data provided"))

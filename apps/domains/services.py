@@ -321,6 +321,10 @@ class DomainLifecycleService:
         if not is_valid:
             return False, error_msg
 
+        # Validate registration period
+        if years < 1 or years > 10:
+            return False, cast(str, _("Registration period must be between 1 and 10 years"))
+
         # Extract and validate TLD
         tld_extension = DomainValidationService.extract_tld_from_domain(domain_name)
         tld = TLDService.get_tld_pricing(tld_extension)
