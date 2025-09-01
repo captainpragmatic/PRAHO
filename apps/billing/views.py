@@ -145,9 +145,9 @@ def _validate_pdf_access(request: HttpRequest, document: Invoice | ProformaInvoi
         messages.error(request, _("❌ You do not have permission to access this document."))
         try:
             if isinstance(document, ProformaInvoice):
-                return redirect("billing:proforma_detail", pk=document.pk)  # type: ignore[arg-type]
+                return redirect("billing:proforma_detail", pk=document.pk)
             if isinstance(document, Invoice):
-                return redirect("billing:invoice_detail", pk=document.pk)  # type: ignore[arg-type]
+                return redirect("billing:invoice_detail", pk=document.pk)
         except Exception as err:
             logging.getLogger(__name__).debug("PDF access redirect fallback: %s", err)
         return redirect("billing:invoice_list")

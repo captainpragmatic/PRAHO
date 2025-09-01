@@ -39,7 +39,7 @@ from .models import (
 )
 
 logger = logging.getLogger(__name__)
-security_logger = logging.getLogger('security')
+security_logger = logging.getLogger("security")
 
 
 def _handle_secure_error(request: HttpRequest, error: Exception, operation: str, user_id: int | None = None) -> None:
@@ -48,26 +48,26 @@ def _handle_secure_error(request: HttpRequest, error: Exception, operation: str,
         messages.error(request, _("❌ Please check your input: Invalid data provided"))
         security_logger.warning(
             f"⚡ [CustomerSecurity] Validation error during {operation}",
-            extra={'user_id': user_id, 'operation': operation, 'error_type': 'validation'}
+            extra={"user_id": user_id, "operation": operation, "error_type": "validation"},
         )
     elif isinstance(error, IntegrityError):
         messages.error(request, _("❌ This operation conflicts with existing data"))
         security_logger.error(
             f"⚡ [CustomerSecurity] Integrity error during {operation}",
-            extra={'user_id': user_id, 'operation': operation, 'error_type': 'integrity'}
+            extra={"user_id": user_id, "operation": operation, "error_type": "integrity"},
         )
     elif isinstance(error, PermissionDenied):
         messages.error(request, _("❌ You don't have permission to perform this action"))
         security_logger.warning(
             f"⚡ [CustomerSecurity] Permission denied during {operation}",
-            extra={'user_id': user_id, 'operation': operation, 'error_type': 'permission'}
+            extra={"user_id": user_id, "operation": operation, "error_type": "permission"},
         )
     else:
         # Unexpected errors - completely generic message
         messages.error(request, _("❌ Operation failed. Please contact support if this continues"))
         security_logger.exception(
             f"⚡ [CustomerSecurity] Unexpected error during {operation}",
-            extra={'user_id': user_id, 'operation': operation, 'error_type': 'unexpected'}
+            extra={"user_id": user_id, "operation": operation, "error_type": "unexpected"},
         )
 
 
@@ -128,7 +128,13 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
     # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
     user = cast(User, request.user)  # Safe due to @login_required
     accessible_customers = user.get_accessible_customers()
-    customer = get_object_or_404(accessible_customers, id=customer_id)
+    if isinstance(accessible_customers, QuerySet):
+        accessible_qs: QuerySet[Customer] = accessible_customers
+    elif accessible_customers:
+        accessible_qs = Customer.objects.filter(id__in=[c.id for c in accessible_customers])
+    else:
+        accessible_qs = Customer.objects.none()
+    customer = get_object_or_404(accessible_qs, id=customer_id)
 
     # Expected queries: 4 (customer + tax + billing + addresses)
     customer = (
@@ -289,7 +295,11 @@ def customer_edit(request: HttpRequest, customer_id: int) -> HttpResponse:
     # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
     user = cast(User, request.user)  # Safe due to @staff_required
     accessible_customers = user.get_accessible_customers()
-    customer = get_object_or_404(accessible_customers, id=customer_id)
+    accessible_qs = (
+        accessible_customers if isinstance(accessible_customers, QuerySet)
+        else Customer.objects.filter(id__in=[c.id for c in accessible_customers]) if accessible_customers else Customer.objects.none()
+    )
+    customer = get_object_or_404(accessible_qs, id=customer_id)
 
     if request.method == "POST":
         form = CustomerForm(request.POST, instance=customer)
@@ -321,7 +331,11 @@ def customer_tax_profile(request: HttpRequest, customer_id: int) -> HttpResponse
     # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
     user = cast(User, request.user)  # Safe due to @staff_required
     accessible_customers = user.get_accessible_customers()
-    customer = get_object_or_404(accessible_customers, id=customer_id)
+    accessible_qs = (
+        accessible_customers if isinstance(accessible_customers, QuerySet)
+        else Customer.objects.filter(id__in=[c.id for c in accessible_customers]) if accessible_customers else Customer.objects.none()
+    )
+    customer = get_object_or_404(accessible_qs, id=customer_id)
 
     # Get or create tax profile
     tax_profile, created = CustomerTaxProfile.objects.get_or_create(customer=customer)
@@ -355,7 +369,11 @@ def customer_billing_profile(request: HttpRequest, customer_id: int) -> HttpResp
     # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
     user = cast(User, request.user)  # Safe due to @staff_required
     accessible_customers = user.get_accessible_customers()
-    customer = get_object_or_404(accessible_customers, id=customer_id)
+    accessible_qs = (
+        accessible_customers if isinstance(accessible_customers, QuerySet)
+        else Customer.objects.filter(id__in=[c.id for c in accessible_customers]) if accessible_customers else Customer.objects.none()
+    )
+    customer = get_object_or_404(accessible_qs, id=customer_id)
 
     # Get or create billing profile
     billing_profile, created = CustomerBillingProfile.objects.get_or_create(customer=customer)
@@ -389,7 +407,11 @@ def customer_address_add(request: HttpRequest, customer_id: int) -> HttpResponse
     # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
     user = cast(User, request.user)  # Safe due to @staff_required
     accessible_customers = user.get_accessible_customers()
-    customer = get_object_or_404(accessible_customers, id=customer_id)
+    accessible_qs = (
+        accessible_customers if isinstance(accessible_customers, QuerySet)
+        else Customer.objects.filter(id__in=[c.id for c in accessible_customers]) if accessible_customers else Customer.objects.none()
+    )
+    customer = get_object_or_404(accessible_qs, id=customer_id)
 
     if request.method == "POST":
         form = CustomerAddressForm(request.POST)
@@ -435,7 +457,11 @@ def customer_note_add(request: HttpRequest, customer_id: int) -> HttpResponse:
     # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
     user = cast(User, request.user)  # Safe due to @staff_required
     accessible_customers = user.get_accessible_customers()
-    customer = get_object_or_404(accessible_customers, id=customer_id)
+    accessible_qs = (
+        accessible_customers if isinstance(accessible_customers, QuerySet)
+        else Customer.objects.filter(id__in=[c.id for c in accessible_customers]) if accessible_customers else Customer.objects.none()
+    )
+    customer = get_object_or_404(accessible_qs, id=customer_id)
 
     if request.method == "POST":
         form = CustomerNoteForm(request.POST)
@@ -469,7 +495,11 @@ def customer_delete(request: HttpRequest, customer_id: int) -> HttpResponse:
     # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
     user = cast(User, request.user)  # Safe due to @staff_required
     accessible_customers = user.get_accessible_customers()
-    customer = get_object_or_404(accessible_customers, id=customer_id)
+    accessible_qs = (
+        accessible_customers if isinstance(accessible_customers, QuerySet)
+        else Customer.objects.filter(id__in=[c.id for c in accessible_customers]) if accessible_customers else Customer.objects.none()
+    )
+    customer = get_object_or_404(accessible_qs, id=customer_id)
 
     if request.method == "POST":
         # Soft delete preserves all related data
@@ -694,7 +724,11 @@ def customer_assign_user(request: HttpRequest, customer_id: int) -> HttpResponse
     # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
     user = cast(User, request.user)  # Safe due to @staff_required
     accessible_customers = user.get_accessible_customers()
-    customer = get_object_or_404(accessible_customers, id=customer_id)
+    accessible_qs = (
+        accessible_customers if isinstance(accessible_customers, QuerySet)
+        else Customer.objects.filter(id__in=[c.id for c in accessible_customers]) if accessible_customers else Customer.objects.none()
+    )
+    customer = get_object_or_404(accessible_qs, id=customer_id)
 
     if request.method == "POST":
         return _handle_user_assignment_post(request, customer)

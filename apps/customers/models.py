@@ -31,44 +31,50 @@ from django.utils.translation import gettext_lazy as _
 from apps.common.types import validate_romanian_cui
 
 # Security logging
-security_logger = logging.getLogger('security')
+security_logger = logging.getLogger("security")
 
 
 def validate_bank_details(bank_details: dict[str, Any]) -> None:
     """🔒 Validate bank details for security and compliance"""
     if not isinstance(bank_details, dict):
         raise ValidationError("Bank details must be a dictionary")
-    
+
     # Security: Validate bank details structure and content
     allowed_fields = {
-        'bank_name', 'account_number', 'routing_number', 'swift_code',
-        'iban', 'account_holder', 'bank_address', 'currency'
+        "bank_name",
+        "account_number",
+        "routing_number",
+        "swift_code",
+        "iban",
+        "account_holder",
+        "bank_address",
+        "currency",
     }
-    
+
     for field in bank_details:
         if field not in allowed_fields:
             raise ValidationError(f"Invalid bank details field: {field}")
-    
+
     # Security: Validate sensitive field lengths to prevent data exfiltration
     field_limits = {
-        'bank_name': 100,
-        'account_number': 50,
-        'routing_number': 20,
-        'swift_code': 11,  # Standard SWIFT code length
-        'iban': 34,  # Max IBAN length
-        'account_holder': 100,
-        'bank_address': 200,
-        'currency': 3  # ISO currency codes
+        "bank_name": 100,
+        "account_number": 50,
+        "routing_number": 20,
+        "swift_code": 11,  # Standard SWIFT code length
+        "iban": 34,  # Max IBAN length
+        "account_holder": 100,
+        "bank_address": 200,
+        "currency": 3,  # ISO currency codes
     }
-    
+
     for field, value in bank_details.items():
         if field in field_limits and isinstance(value, str) and len(value) > field_limits[field]:
             raise ValidationError(f"{field} exceeds maximum length of {field_limits[field]}")
-    
+
     # Security: Log sensitive data access for audit
     security_logger.info(
         "⚡ [CustomerSecurity] Bank details validation completed",
-        extra={'sensitive_operation': True, 'operation': 'bank_details_validation'}
+        extra={"sensitive_operation": True, "operation": "bank_details_validation"},
     )
 
 
@@ -118,19 +124,19 @@ class SoftDeleteModel(models.Model):
             security_logger.warning(
                 f"⚡ [Security] Soft delete initiated: {self.__class__.__name__} ID {self.pk}",
                 extra={
-                    'user_id': user.id if user else None,
-                    'model': self.__class__.__name__,
-                    'record_id': self.pk,
-                    'operation': 'soft_delete'
-                }
+                    "user_id": user.id if user else None,
+                    "model": self.__class__.__name__,
+                    "record_id": self.pk,
+                    "operation": "soft_delete",
+                },
             )
-            
+
             # Validate deletion is allowed
             self._validate_deletion_allowed()
-            
+
             # Perform cascading soft delete for related objects
             self._cascade_soft_delete(user)
-            
+
             self.deleted_at = timezone.now()
             self.deleted_by = user
             self.save(update_fields=["deleted_at", "deleted_by"])
@@ -141,28 +147,24 @@ class SoftDeleteModel(models.Model):
             # Security: Log restoration for audit purposes
             security_logger.info(
                 f"⚡ [Security] Soft restore initiated: {self.__class__.__name__} ID {self.pk}",
-                extra={
-                    'model': self.__class__.__name__,
-                    'record_id': self.pk,
-                    'operation': 'restore'
-                }
+                extra={"model": self.__class__.__name__, "record_id": self.pk, "operation": "restore"},
             )
-            
+
             # Validate restoration is allowed
             self._validate_restoration_allowed()
-            
+
             self.deleted_at = None
             self.deleted_by = None
             self.save(update_fields=["deleted_at", "deleted_by"])
-    
+
     def _validate_deletion_allowed(self) -> None:
         """🔒 Validate if this record can be safely deleted"""
         # Override in subclasses for model-specific validation
-    
+
     def _validate_restoration_allowed(self) -> None:
         """🔒 Validate if this record can be safely restored"""
         # Override in subclasses for model-specific validation
-    
+
     def _cascade_soft_delete(self, user: User | None = None) -> None:
         """🔒 Handle cascading soft delete for related objects"""
         # Override in subclasses for model-specific cascading
@@ -555,9 +557,10 @@ class CustomerPaymentMethod(SoftDeleteModel):
         if self.bank_details:
             # Security: Enhanced validation with our new secure function
             validate_bank_details(self.bank_details)
-            
+
             # Additional validation with existing secure input validator
             from apps.common.validators import SecureInputValidator  # Avoid circular import  # noqa: PLC0415
+
             self.bank_details = SecureInputValidator.validate_bank_details_schema(self.bank_details)
 
 

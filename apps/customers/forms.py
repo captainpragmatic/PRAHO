@@ -29,10 +29,14 @@ if TYPE_CHECKING:
 else:
     User = get_user_model()
 
+# Constants
+MAX_RO_PREFIXED_ID_LENGTH = 12  # 'RO' + up to 10 digits
+
 
 # ===============================================================================
 # VALIDATOR WRAPPERS
 # ===============================================================================
+
 
 def validate_safe_url_wrapper(value: Any) -> None:
     """Django form validator wrapper for SecureInputValidator.validate_safe_url"""
@@ -177,7 +181,7 @@ class CustomerTaxProfileForm(forms.ModelForm):
         cui: str | None = self.cleaned_data.get("cui")
         if cui:
             # Security: Prevent ReDoS attacks with strict input length validation
-            if len(cui) > 12:  # RO + max 10 digits
+            if len(cui) > MAX_RO_PREFIXED_ID_LENGTH:  # RO + max 10 digits
                 raise ValidationError(_("CUI too long"))
             # Security: Use more specific regex pattern to prevent ReDoS
             if not re.match(r"^RO\d{6,10}$", cui):  # Romanian CUI is typically 6-10 digits
@@ -194,7 +198,7 @@ class CustomerTaxProfileForm(forms.ModelForm):
 
         if vat_number:
             # Security: Prevent ReDoS attacks with strict input length validation
-            if len(vat_number) > 12:  # RO + max 10 digits
+            if len(vat_number) > MAX_RO_PREFIXED_ID_LENGTH:  # RO + max 10 digits
                 raise ValidationError(_("VAT number too long"))
             # Security: Use more specific regex pattern to prevent ReDoS
             if not re.match(r"^RO\d{6,10}$", vat_number):  # Romanian VAT is typically 6-10 digits
