@@ -1,9 +1,19 @@
-"""Customer management service layer.
-
-This module provides business logic for customer operations including
-account management, billing information, and customer relationships.
+"""
+Customer services re-export hub for PRAHO Platform.
+Maintains backward compatibility after ADR-0012 feature-based reorganization.
 """
 
+# Core customer service
+# Contact service
+from .contact_service import ContactService
+from .customer_service import CustomerService
 
-def placeholder_function() -> None:
-    """Placeholder function to satisfy imports until customer services are implemented."""
+# Profile service
+from .profile_service import ProfileService
+
+# Backward compatibility: Re-export all services
+__all__ = [
+    "ContactService",
+    "CustomerService",
+    "ProfileService",
+]
