@@ -4,17 +4,21 @@
 # ===============================================================================
 
 # Import from feature view files
-from .service_views import service_list, service_detail, service_create, service_edit, service_suspend, service_activate
 from .plan_views import plan_list
 from .server_views import server_list
+from .service_views import service_activate, service_create, service_detail, service_edit, service_list, service_suspend
 
 # Re-export for URL patterns and external imports
 __all__ = [
-    # Service views
-    'service_list', 'service_detail', 'service_create', 'service_edit', 
-    'service_suspend', 'service_activate',
-    # Plan views
+    # Plan views (alphabetical)
     'plan_list',
-    # Server views  
+    # Server views (alphabetical)
     'server_list',
+    # Service views (alphabetical)
+    'service_activate',
+    'service_create',
+    'service_detail',
+    'service_edit',
+    'service_list',
+    'service_suspend',
 ]

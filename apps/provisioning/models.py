@@ -4,13 +4,17 @@ Imports all feature models for migrations and admin.
 """
 
 # Import all models from feature files
-from .service_models import ServicePlan, Server, Service, ProvisioningTask
-from .relationship_models import ServiceRelationship, ServiceDomain, ServiceGroup, ServiceGroupMember
+from .relationship_models import ServiceDomain, ServiceGroup, ServiceGroupMember, ServiceRelationship
+from .service_models import ProvisioningTask, Server, Service, ServicePlan
 
 # Re-export for external imports
 __all__ = [
-    # Core service models
-    'ServicePlan', 'Server', 'Service', 'ProvisioningTask',
-    # Relationship models  
-    'ServiceRelationship', 'ServiceDomain', 'ServiceGroup', 'ServiceGroupMember',
+    'ProvisioningTask',
+    'Server',
+    'Service',
+    'ServiceDomain',
+    'ServiceGroup',
+    'ServiceGroupMember',
+    'ServicePlan',
+    'ServiceRelationship',
 ]
