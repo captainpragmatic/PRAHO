@@ -75,11 +75,10 @@ class OrderViewsAuthenticationTestCase(TestCase):
         # Test create view requires staff
         url = reverse('orders:order_create')
         response = self.client.get(url)
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 403)  # Forbidden, not redirect
         
-        # Should redirect to dashboard with error message
-        messages = list(get_messages(response.wsgi_request))
-        self.assertTrue(any("Staff privileges required" in str(msg) for msg in messages))
+        # Should return 403 with error message for non-staff users
+        self.assertEqual(response.content.decode(), "Staff privileges required")
 
 
 class OrderListViewTestCase(TestCase):

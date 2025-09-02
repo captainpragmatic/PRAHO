@@ -429,7 +429,13 @@ class SecurityRegressionTests(WebhookSecurityTestCase):
         for processor in processors:
             with self.subTest(processor=processor.__class__.__name__):
                 # Should never return True for unimplemented or missing secrets
-                with self.assertLogs(level='ERROR'):  # Suppress expected error logs
+                if isinstance(processor, StripeWebhookProcessor):
+                    # StripeWebhookProcessor logs errors when secret is missing
+                    with override_settings(STRIPE_WEBHOOK_SECRET=None):
+                        with self.assertLogs('apps.integrations.webhooks.stripe', level='ERROR'):
+                            result = processor.verify_signature({"test": "data"}, "fake_sig", {})
+                else:
+                    # TestProcessor doesn't log errors, just returns False
                     result = processor.verify_signature({"test": "data"}, "fake_sig", {})
                 self.assertFalse(result, f"{processor.__class__.__name__} should not bypass signature verification")
 

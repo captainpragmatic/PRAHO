@@ -367,8 +367,8 @@ class InputValidationSecurityTests(TestCase):
         # This would test the _safe_json_loads function with oversized JSON
         from apps.settings.services import _safe_json_loads
         
-        # Test oversized JSON
-        large_json = '{"data": "' + 'x' * 100000 + '"}'  # 100KB+ JSON
+        # Test oversized JSON (exceed 1MB limit)
+        large_json = '{"data": "' + 'x' * 1200000 + '"}'  # 1.2MB+ JSON
         
         with self.assertRaises(ValidationError) as cm:
             _safe_json_loads(large_json)

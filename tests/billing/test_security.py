@@ -18,7 +18,7 @@ from apps.billing.models import (
     log_security_event
 )
 from apps.billing.security import validate_efactura_url, validate_external_api_url, sanitize_financial_input
-from apps.billing.views import _validate_financial_document_access
+from apps.billing.invoice_views import _validate_financial_document_access_with_redirect as _validate_financial_document_access
 from apps.customers.models import Customer
 
 User = get_user_model()

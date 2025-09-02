@@ -37,10 +37,7 @@ from apps.users.models import (
     UserLoginLog,
     UserProfile,
 )
-from apps.users.views import (
-    get_safe_client_ip,
-    _log_user_login,
-)
+from apps.users.views import _log_user_login
 
 UserModel = get_user_model()
 

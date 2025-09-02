@@ -1,9 +1,9 @@
 # ===============================================================================
-# 🧪 CUSTOMER MODELS TESTS
+# 🏢 CUSTOMER MODELS TESTS - Core Customer Model
 # ===============================================================================
 """
-Basic tests for Customer models focusing on business logic and validation.
-This complements the comprehensive integration tests.
+Tests for core Customer model focusing on business logic and validation.
+This covers the main Customer model - profiles, addresses, etc. are in separate files.
 
 🚨 Coverage Target: ≥90% for customer model methods
 📊 Query Budget: Tests include performance validation
