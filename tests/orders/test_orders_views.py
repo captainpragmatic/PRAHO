@@ -42,7 +42,7 @@ class OrderViewsAuthenticationTestCase(TestCase):
         
         # Should redirect to login
         self.assertEqual(response.status_code, 302)
-        self.assertIn('/auth/login/', response.url)
+        self.assertIn('/users/login/', response.url)
 
     def test_order_detail_requires_authentication(self):
         """Test that order detail requires authentication"""
@@ -57,7 +57,7 @@ class OrderViewsAuthenticationTestCase(TestCase):
         
         # Should redirect to login
         self.assertEqual(response.status_code, 302)
-        self.assertIn('/auth/login/', response.url)
+        self.assertIn('/users/login/', response.url)
 
     def test_staff_only_views_require_staff(self):
         """Test that staff-only views require staff privileges"""

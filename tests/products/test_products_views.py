@@ -64,7 +64,7 @@ class ProductViewAccessControlTests(TestCase):
         
         # Test unauthenticated access
         response = self.client.get(url)
-        self.assertRedirects(response, f"/auth/login/?next={url}")
+        self.assertRedirects(response, f"/users/login/?next={url}")
         
         # Test regular user access - staff_required_strict returns 403 for non-staff
         self.client.login(email="user@test.com", password="testpass123")

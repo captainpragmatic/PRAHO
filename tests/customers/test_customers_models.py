@@ -46,6 +46,7 @@ def create_test_user(email: str, **kwargs) -> User:
 def create_test_customer(name: str, admin_user: User, **kwargs) -> Customer:
     """Helper to create test customers"""
     defaults = {
+        'name': name,
         'customer_type': 'company',
         'company_name': name,
         'primary_email': f'contact@{name.lower().replace(" ", "")}.ro',
@@ -366,7 +367,7 @@ class CustomerPaymentMethodTestCase(TestCase):
             is_active=True
         )
         
-        expected = f"{self.customer.name} - Transfer bancar ING"
+        expected = f"{self.customer.get_display_name()} - Transfer bancar ING"
         self.assertEqual(str(payment_method), expected)
 
 

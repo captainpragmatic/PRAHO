@@ -118,7 +118,7 @@ class ServiceActivationServiceTestCase(TestCase):
         self.mock_invoice.total_amount = Decimal('59.50')  # 50.00 + 19% VAT
         self.mock_invoice.is_paid = True
 
-    @patch('apps.provisioning.services.logger')
+    @patch('apps.provisioning.provisioning_service.logger')
     def test_activate_services_for_invoice_logs_message(self, mock_logger):
         """Test that activate_services_for_invoice logs appropriate message"""
         ServiceActivationService.activate_services_for_invoice(self.mock_invoice)
@@ -128,7 +128,7 @@ class ServiceActivationServiceTestCase(TestCase):
             f"⚙️ [Provisioning] Would activate services for paid invoice {self.mock_invoice.number}"
         )
 
-    @patch('apps.provisioning.services.logger')
+    @patch('apps.provisioning.provisioning_service.logger')
     def test_suspend_services_for_customer_logs_message(self, mock_logger):
         """Test that suspend_services_for_customer logs appropriate message"""
         customer_id = self.customer.id
@@ -141,7 +141,7 @@ class ServiceActivationServiceTestCase(TestCase):
             f"⚙️ [Provisioning] Would suspend services for customer {customer_id} - {reason}"
         )
 
-    @patch('apps.provisioning.services.logger')
+    @patch('apps.provisioning.provisioning_service.logger')
     def test_suspend_services_for_customer_default_reason(self, mock_logger):
         """Test that suspend_services_for_customer uses default reason"""
         customer_id = self.customer.id
@@ -153,7 +153,7 @@ class ServiceActivationServiceTestCase(TestCase):
             f"⚙️ [Provisioning] Would suspend services for customer {customer_id} - payment_overdue"
         )
 
-    @patch('apps.provisioning.services.logger')
+    @patch('apps.provisioning.provisioning_service.logger')
     def test_reactivate_services_for_customer_logs_message(self, mock_logger):
         """Test that reactivate_services_for_customer logs appropriate message"""
         customer_id = self.customer.id
@@ -166,7 +166,7 @@ class ServiceActivationServiceTestCase(TestCase):
             f"⚙️ [Provisioning] Would reactivate services for customer {customer_id} - {reason}"
         )
 
-    @patch('apps.provisioning.services.logger')
+    @patch('apps.provisioning.provisioning_service.logger')
     def test_reactivate_services_for_customer_default_reason(self, mock_logger):
         """Test that reactivate_services_for_customer uses default reason"""
         customer_id = self.customer.id
@@ -231,7 +231,7 @@ class ServiceActivationServiceTestCase(TestCase):
         except Exception as e:
             self.fail(f"Service methods failed with special characters: {e}")
 
-    @patch('apps.provisioning.services.logger')
+    @patch('apps.provisioning.provisioning_service.logger')
     def test_service_activation_service_logging_format(self, mock_logger):
         """Test that logging follows PRAHO Platform format standards"""
         customer_id = self.customer.id
@@ -365,7 +365,7 @@ class ServiceActivationIntegrationTestCase(TestCase):
         except Exception as e:
             self.fail(f"Service activation failed with empty customer: {e}")
 
-    @patch('apps.provisioning.services.logger')
+    @patch('apps.provisioning.provisioning_service.logger')
     def test_service_activation_logging_with_real_data(self, mock_logger):
         """Test logging works correctly with real customer data"""
         customer_id = self.customer.id

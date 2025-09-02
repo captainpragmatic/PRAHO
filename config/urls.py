@@ -23,7 +23,7 @@ def root_redirect(request: HttpRequest) -> HttpResponseBase:
     if request.user.is_authenticated:
         return RedirectView.as_view(url="/app/", permanent=False)(request)
     else:
-        return RedirectView.as_view(url="/auth/login/", permanent=False)(request)
+        return RedirectView.as_view(url="/users/login/", permanent=False)(request)
 
 
 urlpatterns = [
