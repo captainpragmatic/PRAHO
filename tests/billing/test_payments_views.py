@@ -18,7 +18,7 @@ from apps.billing.models import (
     InvoiceLine,
     Payment,
 )
-from apps.billing.payment_views import (
+from apps.billing.views import (
     process_payment,
 )
 from apps.customers.models import Customer
@@ -33,7 +33,10 @@ class PaymentProcessingViewsTestCase(TestCase):
     def setUp(self):
         """Setup test data"""
         self.factory = RequestFactory()
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(
+            code='RON', 
+            defaults={'symbol': 'lei', 'decimals': 2}
+        )
         
         self.customer = Customer.objects.create(
             customer_type='company',
@@ -45,6 +48,8 @@ class PaymentProcessingViewsTestCase(TestCase):
             email='payment@test.ro',
             password='testpass'
         )
+        self.user.staff_role = 'billing'  # Give billing staff privileges
+        self.user.save()
         CustomerMembership.objects.create(
             user=self.user,
             customer=self.customer,
@@ -79,17 +84,9 @@ class PaymentProcessingViewsTestCase(TestCase):
         middleware.process_request(request)
         return request
 
-    @patch('apps.billing.views.stripe.PaymentIntent.create')
-    def test_process_payment_success(self, mock_payment_create):
+    def test_process_payment_success(self):
         """Test successful payment processing"""
-        mock_payment_create.return_value = Mock(
-            id='pi_test_123',
-            client_secret='pi_test_123_secret',
-            status='requires_payment_method'
-        )
-        
         post_data = {
-            'invoice_id': str(self.invoice.pk),
             'amount': '150.00',
             'payment_method': 'stripe'
         }
@@ -98,9 +95,9 @@ class PaymentProcessingViewsTestCase(TestCase):
         request.user = self.user
         request = self.add_middleware_to_request(request)
         
-        response = process_payment(request)
+        response = process_payment(request, pk=self.invoice.pk)
         
-        # Should return JSON response with payment intent
+        # Should return JSON response with success
         self.assertEqual(response.status_code, 200)
         self.assertIsInstance(response, JsonResponse)
 
@@ -129,7 +126,6 @@ class PaymentProcessingViewsTestCase(TestCase):
     def test_process_payment_invalid_amount(self):
         """Test payment processing with invalid amount"""
         post_data = {
-            'invoice_id': str(self.invoice.pk),
             'amount': 'invalid_amount',
             'payment_method': 'stripe'
         }
@@ -138,7 +134,7 @@ class PaymentProcessingViewsTestCase(TestCase):
         request.user = self.user
         request = self.add_middleware_to_request(request)
         
-        response = process_payment(request)
+        response = process_payment(request, pk=self.invoice.pk)
         
         # Should return error response
         self.assertIn(response.status_code, [400, 422])
@@ -146,7 +142,6 @@ class PaymentProcessingViewsTestCase(TestCase):
     def test_process_payment_missing_invoice(self):
         """Test payment processing with missing invoice"""
         post_data = {
-            'invoice_id': '99999',
             'amount': '150.00',
             'payment_method': 'stripe'
         }
@@ -155,7 +150,8 @@ class PaymentProcessingViewsTestCase(TestCase):
         request.user = self.user
         request = self.add_middleware_to_request(request)
         
-        response = process_payment(request)
+        # Call with non-existent invoice ID
+        response = process_payment(request, pk=99999)
         
         # Should return 404 or error response
         self.assertIn(response.status_code, [404, 400])
@@ -167,7 +163,10 @@ class PaymentListViewsTestCase(TestCase):
     def setUp(self):
         """Setup test data"""
         self.factory = RequestFactory()
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(
+            code='RON', 
+            defaults={'symbol': 'lei', 'decimals': 2}
+        )
         
         self.customer = Customer.objects.create(
             customer_type='company',
@@ -179,6 +178,8 @@ class PaymentListViewsTestCase(TestCase):
             email='payment_list@test.ro',
             password='testpass'
         )
+        self.user.staff_role = 'billing'  # Give billing staff privileges  
+        self.user.save()
         CustomerMembership.objects.create(
             user=self.user,
             customer=self.customer,
@@ -302,21 +303,28 @@ class PaymentListViewsTestCase(TestCase):
     def test_payment_list_pagination(self):
         """Test payment list pagination"""
         # Create many payments to test pagination
+        additional_payments = []
         for i in range(25):
-            Payment.objects.create(
+            payment = Payment.objects.create(
                 customer=self.customer,
                 invoice=self.invoice,
                 amount_cents=1000 + i,
                 currency=self.currency,
                 status='succeeded'
             )
+            additional_payments.append(payment)
         
-        self.client.force_login(self.user)
-        response = self.client.get('/app/billing/payments/')
-        
-        self.assertEqual(response.status_code, 200)
-        
-        # Should show paginated results
-        payments = response.context['payments']
-        # Assuming 20 per page pagination
-        self.assertLessEqual(len(payments), 20)
+        try:
+            self.client.force_login(self.user)
+            response = self.client.get('/app/billing/payments/')
+            
+            self.assertEqual(response.status_code, 200)
+            
+            # Should show paginated results
+            payments = response.context['payments']
+            # Pagination is set to 25 per page, we created 25 + 3 original = 28 total
+            self.assertLessEqual(len(payments), 25)
+        finally:
+            # Clean up additional payments to not affect other tests
+            for payment in additional_payments:
+                payment.delete()

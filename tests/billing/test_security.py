@@ -18,7 +18,7 @@ from apps.billing.models import (
     log_security_event
 )
 from apps.billing.security import validate_efactura_url, validate_external_api_url, sanitize_financial_input
-from apps.billing.invoice_views import _validate_financial_document_access_with_redirect as _validate_financial_document_access
+from apps.billing.views import _validate_financial_document_access
 from apps.customers.models import Customer
 
 User = get_user_model()
@@ -230,7 +230,7 @@ class BillingModelSecurityTests(TestCase):
         
         self.assertIn("Due date must be after issue date", str(cm.exception))
     
-    @patch('apps.billing.models.log_security_event')
+    @patch('apps.billing.invoice_models.log_security_event')
     def test_sequence_security_logging(self, mock_log):
         """🔒 Test that sequence operations are logged"""
         sequence = InvoiceSequence.objects.create(scope="test", last_value=0)
@@ -484,7 +484,7 @@ class BillingSecurityLoggingTests(TestCase):
         self.assertIn('test_financial_operation', call_args)
         self.assertIn('financial_operation', call_args)
     
-    @patch('apps.billing.models.log_security_event')
+    @patch('apps.billing.proforma_models.log_security_event')
     def test_model_validation_triggers_logging(self, mock_log):
         """🔒 Test that model validation triggers security logging"""
         currency = Currency.objects.create(code="RON", symbol="RON", decimals=2)

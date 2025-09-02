@@ -226,7 +226,7 @@ class GDPRViewsBasicTestCase(TestCase):
             # Should redirect (302) to login
             self.assertEqual(response.status_code, 302)
             # Should redirect to auth/login
-            self.assertIn('/auth/login/', response.url)
+            self.assertIn('/users/login/', response.url)
 
 
 class GDPRComplianceBasicTestCase(TestCase):

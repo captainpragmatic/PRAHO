@@ -261,7 +261,7 @@ class RefundServiceComprehensiveCoverageTestCase(TransactionTestCase):
                     }
                     mock_process.return_value = Ok(refund_result)
                     
-                    with patch('apps.billing.services.log_security_event') as mock_log:
+                    with patch('apps.billing.refund_service.log_security_event') as mock_log:
                         refund_data = self._create_refund_data()
                         result = RefundService.refund_order(mock_order.id, refund_data)
                         
@@ -295,7 +295,7 @@ class RefundServiceComprehensiveCoverageTestCase(TransactionTestCase):
                     }
                     mock_process.return_value = Ok(refund_result)
                     
-                    with patch('apps.billing.services.log_security_event') as mock_log:
+                    with patch('apps.billing.refund_service.log_security_event') as mock_log:
                         refund_data = self._create_refund_data(
                             refund_type=RefundType.PARTIAL,
                             amount_cents=5000
@@ -419,7 +419,7 @@ class RefundServiceComprehensiveCoverageTestCase(TransactionTestCase):
                     }
                     mock_process.return_value = Ok(refund_result)
                     
-                    with patch('apps.billing.services.log_security_event') as mock_log:
+                    with patch('apps.billing.refund_service.log_security_event') as mock_log:
                         refund_data = self._create_refund_data()
                         result = RefundService.refund_invoice(self.invoice.id, refund_data)
                         
@@ -456,7 +456,7 @@ class RefundServiceComprehensiveCoverageTestCase(TransactionTestCase):
                     }
                     mock_process.return_value = Ok(refund_result)
                     
-                    with patch('apps.billing.services.log_security_event') as mock_log:
+                    with patch('apps.billing.refund_service.log_security_event') as mock_log:
                         refund_data = self._create_refund_data(
                             refund_type=RefundType.PARTIAL,
                             amount_cents=5000
@@ -717,7 +717,7 @@ class RefundServiceComprehensiveCoverageTestCase(TransactionTestCase):
     def test_update_invoice_refund_status_full_refund(self) -> None:
         """Test _update_invoice_refund_status with full refund (Line 469-470)."""
         with patch.object(RefundService, '_get_invoice_refunded_amount', return_value=0):
-            with patch('apps.billing.services.log_security_event') as mock_log:
+            with patch('apps.billing.refund_service.log_security_event') as mock_log:
                 refund_data = self._create_refund_data()
                 result = RefundService._update_invoice_refund_status(
                     self.invoice, 11900, refund_data
@@ -731,7 +731,7 @@ class RefundServiceComprehensiveCoverageTestCase(TransactionTestCase):
     def test_update_invoice_refund_status_partial_refund(self) -> None:
         """Test _update_invoice_refund_status with partial refund (Line 474)."""
         with patch.object(RefundService, '_get_invoice_refunded_amount', return_value=5000):
-            with patch('apps.billing.services.log_security_event') as mock_log:
+            with patch('apps.billing.refund_service.log_security_event') as mock_log:
                 refund_data = self._create_refund_data()
                 result = RefundService._update_invoice_refund_status(
                     self.invoice, 5000, refund_data  # Total: 10000, less than 11900

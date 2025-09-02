@@ -18,7 +18,7 @@ from apps.billing.models import (
     ProformaInvoice,
     ProformaLine,
 )
-from apps.billing.proforma_views import (
+from apps.billing.views import (
     _create_proforma_with_sequence,
     _get_accessible_customer_ids,
     _get_customers_for_edit_form,
@@ -255,7 +255,7 @@ class ProformaEditViewsTestCase(TestCase):
             currency=self.currency,
             number='PRO-EDIT-001',
             total_cents=10000,
-            valid_until=timezone.now().date()
+            valid_until=timezone.now() + timezone.timedelta(days=30)  # Future date
         )
 
     def add_middleware_to_request(self, request):
@@ -296,8 +296,10 @@ class ProformaEditViewsTestCase(TestCase):
         request.user = self.user
         request = self.add_middleware_to_request(request)
         
-        with self.assertRaises(PermissionDenied):
-            _validate_proforma_edit_access(self.user, other_proforma, request)
+        # Should return error response, not None
+        error_response = _validate_proforma_edit_access(self.user, other_proforma, request)
+        self.assertIsNotNone(error_response)
+        self.assertEqual(error_response.status_code, 302)  # Redirect response
 
     def test_update_proforma_basic_info(self):
         """Test updating proforma basic information"""
@@ -397,7 +399,8 @@ class ProformaPaymentProcessingTestCase(TestCase):
             currency=self.currency,
             number='PRO-PAYMENT-001',
             total_cents=20000,
-            valid_until=timezone.now().date()
+            valid_until=timezone.now().date(),
+            status='sent'  # Set to sent for payment processing tests
         )
 
     def test_proforma_payment_processing_setup(self):

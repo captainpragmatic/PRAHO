@@ -309,7 +309,7 @@ class RefundServiceComprehensiveTestCase(TestCase):
         self.assertFalse(refund_result['order_status_updated'])
         self.assertTrue(refund_result['invoice_status_updated'])
 
-    @patch('apps.billing.services.log_security_event')
+    @patch('apps.billing.refund_service.log_security_event')
     def test_create_audit_entry(self, mock_log_security: Mock) -> None:
         """Test audit entry creation"""
         mock_order = Mock()

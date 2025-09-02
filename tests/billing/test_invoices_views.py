@@ -18,13 +18,13 @@ from apps.billing.models import (
     InvoiceLine,
     Payment,
 )
-from apps.billing.billing_views import billing_list
-from apps.billing.invoice_views import (
+from apps.billing.views import (
+    billing_list,
     _validate_financial_document_access_with_redirect as _validate_financial_document_access,
     invoice_detail,
     invoice_pdf,
+    proforma_to_invoice,
 )
-from apps.billing.proforma_views import proforma_to_invoice
 from apps.customers.models import Customer
 from apps.users.models import CustomerMembership, User
 
@@ -154,6 +154,9 @@ class ProformaToInvoiceViewTestCase(TestCase):
             email='proforma_convert@test.ro',
             password='testpass'
         )
+        # Give user billing staff privileges
+        self.user.staff_role = 'billing'
+        self.user.save()
         CustomerMembership.objects.create(
             user=self.user,
             customer=self.customer,
@@ -166,7 +169,7 @@ class ProformaToInvoiceViewTestCase(TestCase):
             number='PRO-CONVERT-001',
             total_cents=15000,
             status='sent',
-            valid_until=timezone.now().date()
+            valid_until=timezone.now() + timezone.timedelta(days=30)  # Future date
         )
         
         # Add proforma line
@@ -176,7 +179,8 @@ class ProformaToInvoiceViewTestCase(TestCase):
             description='Convertible Service',
             quantity=1,
             unit_price_cents=12605,  # 105.88 lei including 19% VAT
-            tax_rate=Decimal('0.19')
+            tax_rate=Decimal('0.19'),
+            line_total_cents=12605  # Same as unit price for quantity 1
         )
 
     def add_middleware_to_request(self, request):
@@ -196,6 +200,7 @@ class ProformaToInvoiceViewTestCase(TestCase):
         request = self.add_middleware_to_request(request)
         
         response = proforma_to_invoice(request, self.proforma.pk)
+        
         
         # Should redirect to the new invoice
         self.assertEqual(response.status_code, 302)
@@ -282,8 +287,12 @@ class InvoiceEditViewsTestCase(TestCase):
         )
         
         # Test access validation function
-        result = _validate_financial_document_access(self.user, invoice)
-        self.assertTrue(result)
+        request = self.factory.get('/billing/invoices/')
+        request.user = self.user
+        self.add_middleware_to_request(request)
+        
+        result = _validate_financial_document_access(request, invoice)
+        self.assertIsNone(result)  # None means access is allowed
 
     def test_invoice_edit_access_unauthorized(self):
         """Test that unauthorized users cannot access invoice edit"""
@@ -302,8 +311,12 @@ class InvoiceEditViewsTestCase(TestCase):
         )
         
         # Test access validation function
-        result = _validate_financial_document_access(self.user, invoice)
-        self.assertFalse(result)
+        request = self.factory.get('/billing/invoices/')
+        request.user = self.user
+        self.add_middleware_to_request(request)
+        
+        result = _validate_financial_document_access(request, invoice)
+        self.assertIsNotNone(result)  # Should return an HttpResponse indicating access denied
 
 
 class InvoiceSendViewsTestCase(TestCase):
