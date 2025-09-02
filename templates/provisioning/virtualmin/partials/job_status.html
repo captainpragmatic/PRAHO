@@ -1,0 +1,104 @@
+{% load ui_components %}
+{% load i18n %}
+
+<!-- Job Status Header -->
+<div class="bg-slate-800 rounded-lg border border-slate-700 p-6 mb-6">
+    <div class="flex items-center justify-between">
+        <div class="flex items-center">
+            {% if live_status.status == "completed" %}
+                <div class="w-10 h-10 bg-green-600 rounded-full flex items-center justify-center mr-4">
+                    <span class="text-white text-lg">✓</span>
+                </div>
+            {% elif live_status.status == "failed" %}
+                <div class="w-10 h-10 bg-red-600 rounded-full flex items-center justify-center mr-4">
+                    <span class="text-white text-lg">✕</span>
+                </div>
+            {% elif live_status.status == "running" %}
+                <div class="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center mr-4">
+                    <div class="animate-spin w-6 h-6 border-2 border-white border-t-transparent rounded-full"></div>
+                </div>
+            {% else %}
+                <div class="w-10 h-10 bg-slate-600 rounded-full flex items-center justify-center mr-4">
+                    <span class="text-slate-400 text-lg">○</span>
+                </div>
+            {% endif %}
+            
+            <div>
+                <h2 class="text-xl font-semibold text-slate-100">
+                    {% if live_status.status == "completed" %}
+                        {% trans "Operation Completed" %}
+                    {% elif live_status.status == "failed" %}
+                        {% trans "Operation Failed" %}
+                    {% elif live_status.status == "running" %}
+                        {% trans "Operation In Progress" %}
+                    {% else %}
+                        {% trans "Operation Queued" %}
+                    {% endif %}
+                </h2>
+                <p class="text-sm text-slate-400">
+                    {{ live_status.current_step|default:"Initializing..." }}
+                </p>
+            </div>
+        </div>
+        
+        <div class="text-right">
+            {% if live_status.status == "completed" %}
+                {% badge "Complete" variant="success" %}
+            {% elif live_status.status == "failed" %}
+                {% badge "Failed" variant="danger" %}
+            {% elif live_status.status == "running" %}
+                {% badge "Running" variant="warning" %}
+            {% else %}
+                {% badge "Queued" variant="secondary" %}
+            {% endif %}
+        </div>
+    </div>
+    
+    <!-- Progress Bar -->
+    {% if live_status.progress is not None %}
+    <div class="mt-4">
+        <div class="flex items-center justify-between text-sm text-slate-400 mb-2">
+            <span>{% trans "Progress" %}</span>
+            <span>{{ live_status.progress }}%</span>
+        </div>
+        <div class="w-full bg-slate-700 rounded-full h-2">
+            <div class="{% if live_status.status == 'failed' %}bg-red-600{% elif live_status.status == 'completed' %}bg-green-600{% else %}bg-blue-600{% endif %} h-2 rounded-full transition-all duration-300" 
+                 style="width: {{ live_status.progress }}%"></div>
+        </div>
+    </div>
+    {% endif %}
+    
+    <!-- Error Message -->
+    {% if live_status.status == "failed" and live_status.error_message %}
+    <div class="mt-4 bg-red-900/20 border border-red-700 rounded-lg p-4">
+        <div class="flex">
+            <div class="flex-shrink-0">
+                <span class="text-red-400 text-xl">❌</span>
+            </div>
+            <div class="ml-3">
+                <h3 class="text-sm font-medium text-red-400">
+                    {% trans "Error Details" %}
+                </h3>
+                <div class="mt-2 text-sm text-red-300">
+                    <p>{{ live_status.error_message }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Real-time Logs (if available) -->
+{% if live_status.logs %}
+<div class="bg-slate-800 rounded-lg border border-slate-700">
+    <div class="px-6 py-4 border-b border-slate-700">
+        <h3 class="text-lg font-semibold text-slate-100">{% trans "Operation Logs" %}</h3>
+    </div>
+    <div class="px-6 py-4">
+        <div class="bg-slate-900 rounded-md p-4 max-h-96 overflow-y-auto">
+            <pre class="text-xs text-slate-300 whitespace-pre-wrap">{% for log_line in live_status.logs %}{{ log_line }}
+{% endfor %}</pre>
+        </div>
+    </div>
+</div>
+{% endif %}

@@ -81,15 +81,17 @@ def handle_invoice_created_or_updated(sender: type[Invoice], instance: Invoice, 
 
         if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
             # Use specialized billing audit service for richer metadata
-            BillingAuditService.log_invoice_event(  # type: ignore[call-arg]
+            from apps.audit.services import BusinessEventData  # noqa: PLC0415
+            event_data = BusinessEventData(
                 event_type=event_type,
-                invoice=instance,
+                business_object=instance,
                 user=None,  # System event
                 context=AuditContext(actor_type="system"),
                 old_values=old_values,
                 new_values=new_values,
                 description=f"Invoice {instance.number} {'created' if created else 'updated'}",
             )
+            BillingAuditService.log_invoice_event(event_data)
 
         if created:
             # New invoice created
@@ -836,6 +838,9 @@ def _handle_payment_success(payment: Payment) -> None:
                 payment.invoice.status = "paid"
                 payment.invoice.paid_at = timezone.now()
                 payment.invoice.save(update_fields=["status", "paid_at"])
+                
+                # 🚀 CROSS-APP INTEGRATION: Trigger Virtualmin provisioning on invoice payment
+                _trigger_virtualmin_provisioning_on_payment(payment.invoice)
 
         _send_payment_success_email(payment)
         _update_customer_payment_history(payment.customer, "positive")
@@ -1457,3 +1462,54 @@ def _revert_customer_credit_score(customer: Any, event_type: str) -> None:
 
     except Exception as e:
         logger.exception(f"🔥 [Customer] Credit score reversion failed: {e}")
+
+
+# ===============================================================================
+# CROSS-APP INTEGRATION: VIRTUALMIN PROVISIONING
+# ===============================================================================
+
+
+def _trigger_virtualmin_provisioning_on_payment(invoice: Invoice) -> None:
+    """
+    Trigger Virtualmin provisioning when invoice is fully paid.
+    
+    Cross-app integration point: billing → provisioning
+    """
+    try:
+        # Import here to avoid circular imports
+        from apps.orders.models import OrderItem  # noqa: PLC0415
+        from apps.provisioning.virtualmin_tasks import provision_virtualmin_account  # noqa: PLC0415
+        
+        # Find hosting services in the paid invoice
+        order_items = OrderItem.objects.filter(order__invoice=invoice).select_related('service')
+        
+        hosting_services = [item.service for item in order_items if item.service and item.service.requires_hosting_account()]
+        
+        if hosting_services:
+            logger.info(f"🚀 [CrossApp] Triggering Virtualmin provisioning for {len(hosting_services)} services on invoice {invoice.number}")
+            
+            # Queue provisioning tasks for each hosting service
+            for service in hosting_services:
+                try:
+                    # Get primary domain for the service
+                    primary_domain = service.get_primary_domain()
+                    if primary_domain:
+                        # Queue async provisioning task
+                        provision_virtualmin_account.delay(
+                            service_id=str(service.id),
+                            domain=primary_domain,
+                            template="Default"  # Use default template, can be customized per service plan
+                        )
+                        
+                        logger.info(f"🔄 [CrossApp] Queued Virtualmin provisioning for {primary_domain} (service: {service.id})")
+                    else:
+                        logger.warning(f"⚠️ [CrossApp] No primary domain found for service {service.id}, skipping Virtualmin provisioning")
+                        
+                except Exception as e:
+                    logger.error(f"🔥 [CrossApp] Failed to queue Virtualmin provisioning for service {service.id}: {e}")
+                    
+        else:
+            logger.debug(f"📋 [CrossApp] No hosting services found in invoice {invoice.number}, skipping Virtualmin provisioning")
+            
+    except Exception as e:
+        logger.error(f"🔥 [CrossApp] Failed to trigger Virtualmin provisioning on payment: {e}")

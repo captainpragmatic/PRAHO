@@ -1,0 +1,297 @@
+{% extends     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+        <div>
+            <nav class="text-sm text-slate-400 mb-2">
+                Virtualmin > Accounts > {{ account.domain }} > Restore
+            </nav>
+            <h1 class="text-2xl font-bold text-slate-100">{{ page_title }}</h1>
+            <p class="mt-2 text-sm text-slate-400">
+                {% trans "Restore domain from backup" %}
+            </p>
+        </div>ml" %}
+{% load ui_components %}
+{% load i18n %}
+
+{% block title %}{{ page_title }} - {% trans "Restore Backup" %}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- =============================================================================== -->
+    <!-- PAGE HEADER -->
+    <!-- =============================================================================== -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+        <div>
+            {% breadcrumb steps="Virtualmin,Accounts,"|add:account.domain|add:",Restore" %}
+            <h1 class="text-2xl font-bold text-slate-100 mt-2">{{ page_title }}</h1>
+            <p class="mt-2 text-sm text-slate-400">
+                {% trans "Restore domain from backup" %}
+            </p>
+        </div>
+        <div class="mt-4 sm:mt-0">
+            {% button "Cancel" href=cancel_url variant="secondary" %}
+        </div>
+    </div>
+
+    <!-- =============================================================================== -->
+    <!-- RESTORE WARNING -->
+    <!-- =============================================================================== -->
+    <div class="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4">
+        <div class="flex">
+            <div class="flex-shrink-0">
+                <span class="text-yellow-400 text-xl">⚠️</span>
+            </div>
+            <div class="ml-3">
+                <h3 class="text-sm font-medium text-yellow-400">
+                    {% trans "Restore Operation Warning" %}
+                </h3>
+                <div class="mt-2 text-sm text-yellow-300">
+                    <p>{% trans "This operation will overwrite the current domain data with the backup version. This action cannot be undone." %}</p>
+                    <ul class="mt-2 list-disc list-inside space-y-1">
+                        <li>{% trans "Current files will be replaced" %}</li>
+                        <li>{% trans "Databases will be restored" %}</li>
+                        <li>{% trans "Email accounts may be affected" %}</li>
+                        <li>{% trans "Domain configuration will be updated" %}</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- =============================================================================== -->
+    <!-- RESTORE FORM -->
+    <!-- =============================================================================== -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Main Form -->
+        <div class="lg:col-span-2">
+            <div class="bg-slate-800 rounded-lg border border-slate-700">
+                <div class="px-6 py-4 border-b border-slate-700">
+                    <h2 class="text-lg font-semibold text-slate-100">{% trans "Restore Configuration" %}</h2>
+                </div>
+                <div class="px-6 py-6">
+                    {% if form.errors %}
+                    <div class="mb-6 bg-red-900/20 border border-red-700 rounded-lg p-4">
+                        <div class="flex">
+                            <div class="flex-shrink-0">
+                                <span class="text-red-400 text-xl">❌</span>
+                            </div>
+                            <div class="ml-3">
+                                <h3 class="text-sm font-medium text-red-400">
+                                    {% trans "Validation Errors" %}
+                                </h3>
+                                <div class="mt-2 text-sm text-red-300">
+                                    {% for field, errors in form.errors.items %}
+                                        {% for error in errors %}
+                                            <p>• {{ error }}</p>
+                                        {% endfor %}
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <form method="post" hx-post="{{ request.get_full_path }}" hx-target="#restore-form-container" hx-swap="outerHTML">
+                        {% csrf_token %}
+                        <div id="restore-form-container">
+                            <div class="space-y-6">
+                                <!-- Backup Selection -->
+                                <div>
+                                    <label for="{{ form.backup_id.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                        {{ form.backup_id.label }}
+                                    </label>
+                                    {{ form.backup_id }}
+                                    {% if form.backup_id.help_text %}
+                                    <p class="mt-1 text-sm text-slate-400">{{ form.backup_id.help_text }}</p>
+                                    {% endif %}
+                                </div>
+
+                                <!-- Restore Options -->
+                                <div>
+                                    <label class="block text-sm font-medium text-slate-300 mb-3">
+                                        {% trans "Restore Options" %}
+                                    </label>
+                                    <div class="space-y-3">
+                                        <div class="flex items-center">
+                                            {{ form.restore_files }}
+                                            <label for="{{ form.restore_files.id_for_label }}" class="ml-2 text-sm text-slate-300">
+                                                {{ form.restore_files.label }}
+                                            </label>
+                                        </div>
+                                        <div class="flex items-center">
+                                            {{ form.restore_databases }}
+                                            <label for="{{ form.restore_databases.id_for_label }}" class="ml-2 text-sm text-slate-300">
+                                                {{ form.restore_databases.label }}
+                                            </label>
+                                        </div>
+                                        <div class="flex items-center">
+                                            {{ form.restore_mail }}
+                                            <label for="{{ form.restore_mail.id_for_label }}" class="ml-2 text-sm text-slate-300">
+                                                {{ form.restore_mail.label }}
+                                            </label>
+                                        </div>
+                                        <div class="flex items-center">
+                                            {{ form.restore_config }}
+                                            <label for="{{ form.restore_config.id_for_label }}" class="ml-2 text-sm text-slate-300">
+                                                {{ form.restore_config.label }}
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Advanced Options -->
+                                <div x-data="{ showAdvanced: false }">
+                                    <button type="button" 
+                                            class="flex items-center text-sm text-blue-400 hover:text-blue-300 transition-colors"
+                                            @click="showAdvanced = !showAdvanced">
+                                        <span x-show="!showAdvanced">{% trans "Show Advanced Options" %}</span>
+                                        <span x-show="showAdvanced">{% trans "Hide Advanced Options" %}</span>
+                                        <svg class="ml-1 w-4 h-4 transition-transform" 
+                                             :class="{ 'rotate-180': showAdvanced }"
+                                             fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                        </svg>
+                                    </button>
+                                    
+                                    <div x-show="showAdvanced" x-transition class="mt-4 space-y-4 border-t border-slate-700 pt-4">
+                                        <div class="flex items-center">
+                                            {{ form.force_restore }}
+                                            <label for="{{ form.force_restore.id_for_label }}" class="ml-2 text-sm text-slate-300">
+                                                {{ form.force_restore.label }}
+                                            </label>
+                                        </div>
+                                        <div class="flex items-center">
+                                            {{ form.skip_verification }}
+                                            <label for="{{ form.skip_verification.id_for_label }}" class="ml-2 text-sm text-slate-300">
+                                                {{ form.skip_verification.label }}
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Confirmation -->
+                                <div class="border-t border-slate-700 pt-6">
+                                    <div class="flex items-center">
+                                        {{ form.confirm_restore }}
+                                        <label for="{{ form.confirm_restore.id_for_label }}" class="ml-2 text-sm text-slate-300 font-medium">
+                                            {{ form.confirm_restore.label }}
+                                        </label>
+                                    </div>
+                                    <p class="mt-1 text-xs text-slate-400">
+                                        {% trans "You must confirm that you understand this operation will overwrite existing data" %}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <!-- Form Actions -->
+                            <div class="mt-8 flex items-center justify-end space-x-3">
+                                {% button "Cancel" href=cancel_url variant="secondary" %}
+                                {% button "Start Restore" type="submit" variant="danger" hx_confirm="Are you sure you want to restore this backup? This will overwrite existing data." %}
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Information Sidebar -->
+        <div class="space-y-6">
+            <!-- Backup Information -->
+            <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+                <h3 class="text-lg font-semibold text-slate-100 mb-4">
+                    {% trans "Account Information" %}
+                </h3>
+                <div class="space-y-3">
+                    <div>
+                        <dt class="text-sm font-medium text-slate-400">{% trans "Domain" %}</dt>
+                        <dd class="mt-1 text-sm text-slate-100">{{ account.domain }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-sm font-medium text-slate-400">{% trans "Server" %}</dt>
+                        <dd class="mt-1 text-sm text-slate-100">{{ account.server.name }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-sm font-medium text-slate-400">{% trans "Status" %}</dt>
+                        <dd class="mt-1">
+                            {% if account.is_active %}
+                                {% badge "Active" variant="success" %}
+                            {% else %}
+                                {% badge "Inactive" variant="secondary" %}
+                            {% endif %}
+                        </dd>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Available Backups -->
+            <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+                <h3 class="text-lg font-semibold text-slate-100 mb-4">
+                    {% trans "Available Backups" %}
+                </h3>
+                {% if available_backups %}
+                <div class="space-y-2">
+                    {% for backup in available_backups %}
+                    <div class="p-3 bg-slate-900 rounded-md">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-sm font-medium text-slate-100">
+                                    {{ backup.created_at|date:"M d, Y" }}
+                                </p>
+                                <p class="text-xs text-slate-400">
+                                    {{ backup.created_at|date:"H:i:s" }}
+                                </p>
+                            </div>
+                            {% if backup.is_completed %}
+                                {% badge "Ready" variant="success" size="sm" %}
+                            {% else %}
+                                {% badge "In Progress" variant="warning" size="sm" %}
+                            {% endif %}
+                        </div>
+                        {% if backup.size_bytes %}
+                        <p class="mt-1 text-xs text-slate-400">
+                            Size: {{ backup.size_bytes|filesizeformat }}
+                        </p>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="text-center">
+                    <span class="text-slate-400 text-4xl">📦</span>
+                    <p class="mt-2 text-sm text-slate-400">
+                        {% trans "No backups available for this account" %}
+                    </p>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Restore Process -->
+            <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+                <h3 class="text-lg font-semibold text-slate-100 mb-4">
+                    {% trans "Restore Process" %}
+                </h3>
+                <div class="space-y-3 text-sm">
+                    <div class="flex items-start">
+                        <span class="text-blue-400 mr-2">1.</span>
+                        <p class="text-slate-300">{% trans "Download backup from S3 storage" %}</p>
+                    </div>
+                    <div class="flex items-start">
+                        <span class="text-blue-400 mr-2">2.</span>
+                        <p class="text-slate-300">{% trans "Verify backup integrity" %}</p>
+                    </div>
+                    <div class="flex items-start">
+                        <span class="text-blue-400 mr-2">3.</span>
+                        <p class="text-slate-300">{% trans "Restore selected components" %}</p>
+                    </div>
+                    <div class="flex items-start">
+                        <span class="text-blue-400 mr-2">4.</span>
+                        <p class="text-slate-300">{% trans "Update domain configuration" %}</p>
+                    </div>
+                    <div class="flex items-start">
+                        <span class="text-blue-400 mr-2">5.</span>
+                        <p class="text-slate-300">{% trans "Verify restore completion" %}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

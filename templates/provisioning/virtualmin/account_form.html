@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% load ui_components %}
+{% load i18n %}
+
+{% block title %}{{ page_title }} - {% trans "Virtualmin Management" %}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- =============================================================================== -->
+    <!-- PAGE HEADER -->
+    <!-- =============================================================================== -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+        <div>
+            <nav class="text-sm text-slate-400 mb-2">
+                Management > Virtualmin > Accounts > New
+            </nav>
+            <h1 class="text-2xl font-bold text-slate-100 mt-2">{{ page_title }}</h1>
+            <p class="mt-2 text-sm text-slate-400">
+                {% trans "Create a new Virtualmin hosting account" %}
+            </p>
+        </div>
+        <div class="mt-4 sm:mt-0">
+            {% button "← Back to Accounts" href="{% url 'provisioning:virtualmin_accounts' %}" variant="secondary" %}
+        </div>
+    </div>
+
+    <!-- =============================================================================== -->
+    <!-- ACCOUNT CREATION FORM -->
+    <!-- =============================================================================== -->
+    <div class="max-w-2xl">
+        <div class="bg-slate-800 rounded-lg border border-slate-700">
+            <div class="px-6 py-4 border-b border-slate-700">
+                <h2 class="text-lg font-semibold text-slate-100">{% trans "Account Details" %}</h2>
+            </div>
+            <div class="p-6">
+                <form method="post" action="{{ action_url }}" class="space-y-6">
+                    {% csrf_token %}
+                    
+                    <!-- Domain -->
+                    <div>
+                        <label for="{{ form.domain.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                            {% trans "Domain" %} <span class="text-red-400">*</span>
+                        </label>
+                        {{ form.domain }}
+                        {% if form.domain.errors %}
+                            <div class="mt-1 text-sm text-red-400">
+                                {{ form.domain.errors.0 }}
+                            </div>
+                        {% endif %}
+                        <p class="mt-1 text-sm text-slate-400">
+                            {% trans "Primary domain for this hosting account" %}
+                        </p>
+                    </div>
+
+                    <!-- Server -->
+                    <div>
+                        <label for="{{ form.server.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                            {% trans "Server" %} <span class="text-red-400">*</span>
+                        </label>
+                        {{ form.server }}
+                        {% if form.server.errors %}
+                            <div class="mt-1 text-sm text-red-400">
+                                {{ form.server.errors.0 }}
+                            </div>
+                        {% endif %}
+                    </div>
+
+                    <!-- Service -->
+                    <div>
+                        <label for="{{ form.service.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                            {% trans "Service" %}
+                        </label>
+                        {{ form.service }}
+                        {% if form.service.errors %}
+                            <div class="mt-1 text-sm text-red-400">
+                                {{ form.service.errors.0 }}
+                            </div>
+                        {% endif %}
+                        <p class="mt-1 text-sm text-slate-400">
+                            {% trans "Associated hosting service (optional)" %}
+                        </p>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <!-- Username -->
+                        <div>
+                            <label for="{{ form.virtualmin_username.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                {% trans "Username" %} <span class="text-red-400">*</span>
+                            </label>
+                            {{ form.virtualmin_username }}
+                            {% if form.virtualmin_username.errors %}
+                                <div class="mt-1 text-sm text-red-400">
+                                    {{ form.virtualmin_username.errors.0 }}
+                                </div>
+                            {% endif %}
+                        </div>
+
+                        <!-- Placeholder for additional field -->
+                        <div>
+                            <!-- Space for future field -->
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <!-- Disk Quota -->
+                        <div>
+                            <label for="{{ form.disk_quota_mb.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                {% trans "Disk Quota (MB)" %}
+                            </label>
+                            {{ form.disk_quota_mb }}
+                            {% if form.disk_quota_mb.errors %}
+                                <div class="mt-1 text-sm text-red-400">
+                                    {{ form.disk_quota_mb.errors.0 }}
+                                </div>
+                            {% endif %}
+                        </div>
+
+                        <!-- Bandwidth Quota -->
+                        <div>
+                            <label for="{{ form.bandwidth_quota_mb.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                {% trans "Bandwidth Quota (MB)" %}
+                            </label>
+                            {{ form.bandwidth_quota_mb }}
+                            {% if form.bandwidth_quota_mb.errors %}
+                                <div class="mt-1 text-sm text-red-400">
+                                    {{ form.bandwidth_quota_mb.errors.0 }}
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <!-- Status -->
+                    <div>
+                        <label for="{{ form.status.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                            {% trans "Status" %}
+                        </label>
+                        {{ form.status }}
+                        {% if form.status.errors %}
+                            <div class="mt-1 text-sm text-red-400">
+                                {{ form.status.errors.0 }}
+                            </div>
+                        {% endif %}
+                    </div>
+
+                    <!-- Form Actions -->
+                    <div class="flex justify-end space-x-3 pt-6 border-t border-slate-700">
+                        {% button "Cancel" href="{% url 'provisioning:virtualmin_accounts' %}" variant="secondary" %}
+                        {% button "Create Account" type="submit" variant="primary" %}
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

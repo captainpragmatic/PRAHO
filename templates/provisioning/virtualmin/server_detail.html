@@ -1,0 +1,458 @@
+{% extends "base.html" %}
+{% load ui_components %}
+{% load i18n %}
+
+{% block title %}{{ page_title }} - {% trans "Virtualmin Management" %}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- =============================================================================== -->
+    <!-- PAGE HEADER WITH BREADCRUMB -->
+    <!-- =============================================================================== -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+        <div>
+            <nav class="text-sm text-slate-400 mb-2">
+                Management > Virtualmin > Servers > {{ server.name }}
+            </nav>
+            <h1 class="text-2xl font-bold text-slate-100 mt-2">{{ page_title }}</h1>
+            <p class="mt-2 text-sm text-slate-400">
+                {% trans "Server details and management options" %}
+            </p>
+        </div>
+        <div class="mt-4 sm:mt-0 flex space-x-3">
+            {% button "✏️ Edit" href="edit/" variant="secondary" %}
+            <form method="post" action="health/" class="inline">
+                {% csrf_token %}
+                {% button "🏥 Health Check" type="submit" variant="primary" hx_post="health/" hx_target="#health-status" hx_indicator="#health-loading" hx_include="[name='csrfmiddlewaretoken']" %}
+            </form>
+        </div>
+    </div>
+
+    <!-- =============================================================================== -->
+    <!-- SERVER OVERVIEW CARDS -->
+    <!-- =============================================================================== -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <!-- Server Status -->
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <div class="w-10 h-10 {% if server.is_healthy %}bg-green-600{% else %}bg-red-600{% endif %} rounded-lg flex items-center justify-center">
+                        <span class="text-white text-lg">
+                            {% if server.is_healthy %}✅{% else %}❌{% endif %}
+                        </span>
+                    </div>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm font-medium text-slate-400">{% trans "Status" %}</p>
+                    <p class="text-lg font-bold text-slate-100">
+                        {{ server.get_status_display }}
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Domain Capacity -->
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
+                        <span class="text-white text-lg">🌐</span>
+                    </div>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm font-medium text-slate-400">{% trans "Domains" %}</p>
+                    <p class="text-lg font-bold text-slate-100">
+                        {{ capacity_stats.domains_used }}/{{ capacity_stats.domains_total }}
+                    </p>
+                    <div class="w-full bg-slate-700 rounded-full h-2 mt-2">
+                        <div class="bg-blue-600 h-2 rounded-full" style="width: {{ capacity_stats.domains_percentage }}%"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Disk Usage -->
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <div class="w-10 h-10 bg-yellow-600 rounded-lg flex items-center justify-center">
+                        <span class="text-white text-lg">💾</span>
+                    </div>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm font-medium text-slate-400">{% trans "Disk Usage" %}</p>
+                    <p class="text-lg font-bold text-slate-100">
+                        {{ capacity_stats.disk_used }} GB
+                    </p>
+                    {% if capacity_stats.disk_total %}
+                    <p class="text-xs text-slate-400">of {{ capacity_stats.disk_total }} GB</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Health Check -->
+        <div id="health-status" class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <div class="w-10 h-10 {% if health_status.is_healthy %}bg-green-600{% else %}bg-orange-600{% endif %} rounded-lg flex items-center justify-center">
+                        <span class="text-white text-lg">🏥</span>
+                    </div>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm font-medium text-slate-400">{% trans "Last Check" %}</p>
+                    <p class="text-lg font-bold text-slate-100">
+                        {% if health_status.last_check %}
+                            {{ health_status.last_check|timesince }} ago
+                        {% else %}
+                            {% trans "Never" %}
+                        {% endif %}
+                    </p>
+                </div>
+            </div>
+        </div>
+    
+    <!-- Loading indicator for health checks (positioned outside the health-status div) -->
+    <div id="health-loading" class="htmx-indicator fixed top-4 right-4 z-50 bg-slate-800 border border-slate-600 rounded-lg p-3 shadow-lg">
+        <div class="flex items-center text-slate-300 text-sm">
+            <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-400 mr-2"></div>
+            {% trans "Running health check..." %}
+        </div>
+    </div>
+    </div>
+
+    <!-- =============================================================================== -->
+    <!-- SERVER DETAILS -->
+    <!-- =============================================================================== -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Server Information -->
+        <div class="lg:col-span-2">
+            <div class="bg-slate-800 rounded-lg border border-slate-700">
+                <div class="px-6 py-4 border-b border-slate-700">
+                    <h2 class="text-lg font-semibold text-slate-100">{% trans "Server Information" %}</h2>
+                </div>
+                <div class="px-6 py-4">
+                    <dl class="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2">
+                        <div>
+                            <dt class="text-sm font-medium text-slate-400">{% trans "Server Name" %}</dt>
+                            <dd class="mt-1 text-sm text-slate-100">{{ server.name }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-sm font-medium text-slate-400">{% trans "Hostname" %}</dt>
+                            <dd class="mt-1 text-sm text-slate-100">{{ server.hostname }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-sm font-medium text-slate-400">{% trans "API Port" %}</dt>
+                            <dd class="mt-1 text-sm text-slate-100">{{ server.api_port }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-sm font-medium text-slate-400">{% trans "SSL Enabled" %}</dt>
+                            <dd class="mt-1 text-sm text-slate-100">
+                                {% if server.use_ssl %}
+                                    <span class="text-green-400">🔒 {% trans "Yes" %}</span>
+                                {% else %}
+                                    <span class="text-yellow-400">⚠️ {% trans "No" %}</span>
+                                {% endif %}
+                            </dd>
+                        </div>
+                        <div>
+                            <dt class="text-sm font-medium text-slate-400">{% trans "API Username" %}</dt>
+                            <dd class="mt-1 text-sm text-slate-100">{{ server.api_username }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-sm font-medium text-slate-400">{% trans "Max Domains" %}</dt>
+                            <dd class="mt-1 text-sm text-slate-100">{{ server.max_domains }}</dd>
+                        </div>
+                        {% if server.notes %}
+                        <div class="sm:col-span-2">
+                            <dt class="text-sm font-medium text-slate-400">{% trans "Notes" %}</dt>
+                            <dd class="mt-1 text-sm text-slate-100">{{ server.notes }}</dd>
+                        </div>
+                        {% endif %}
+                    </dl>
+                </div>
+            </div>
+        </div>
+
+        <!-- Health Status -->
+        <div class="space-y-6">
+            <div class="bg-slate-800 rounded-lg border border-slate-700">
+                <div class="px-6 py-4 border-b border-slate-700">
+                    <h2 class="text-lg font-semibold text-slate-100">{% trans "Health Status" %}</h2>
+                </div>
+                <div class="px-6 py-4">
+                    <div class="space-y-4">
+                        <div class="flex items-center">
+                            <div class="flex-shrink-0">
+                                {% if health_status.is_healthy %}
+                                    <div class="w-8 h-8 bg-green-600 rounded-full flex items-center justify-center">
+                                        <span class="text-white text-sm">✓</span>
+                                    </div>
+                                {% else %}
+                                    <div class="w-8 h-8 bg-red-600 rounded-full flex items-center justify-center">
+                                        <span class="text-white text-sm">✗</span>
+                                    </div>
+                                {% endif %}
+                            </div>
+                            <div class="ml-3">
+                                <p class="text-sm font-medium text-slate-100">
+                                    {% if health_status.is_healthy %}
+                                        {% trans "Healthy" %}
+                                    {% else %}
+                                        {% trans "Unhealthy" %}
+                                    {% endif %}
+                                </p>
+                                <p class="text-sm text-slate-400">{{ health_status.status_message }}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- =============================================================================== -->
+    <!-- RECENT ACTIVITY TABS -->
+    <!-- =============================================================================== -->
+    <div class="bg-slate-800 rounded-lg border border-slate-700">
+        <div class="px-6 py-4 border-b border-slate-700">
+            <nav class="flex space-x-8">
+                <button class="text-blue-400 border-b-2 border-blue-400 pb-2 text-sm font-medium" 
+                        onclick="showTab('live-domains')">
+                    🌐 {% trans "Live Domains" %} ({{ actual_domains|length }})
+                </button>
+                <button class="text-slate-400 hover:text-slate-100 pb-2 text-sm font-medium" 
+                        onclick="showTab('accounts')">
+                    📊 {% trans "PRAHO Accounts" %} ({{ recent_accounts|length }})
+                </button>
+                <button class="text-slate-400 hover:text-slate-100 pb-2 text-sm font-medium" 
+                        onclick="showTab('jobs')">
+                    ⚙️ {% trans "Recent Jobs" %} ({{ recent_jobs|length }})
+                </button>
+            </nav>
+        </div>
+
+        <!-- Live Domains Tab (Read-Only View) -->
+        <div id="live-domains-tab" class="tab-content">
+            {% if actual_domains %}
+                <div class="p-4 bg-blue-500/10 border-b border-blue-500/20">
+                    <div class="flex items-start space-x-2">
+                        <span class="text-blue-400 text-lg">ℹ️</span>
+                        <div>
+                            <p class="text-sm text-blue-300 font-medium">Live Server Data</p>
+                            <p class="text-xs text-blue-200 mt-1">
+                                These domains are currently active on the Virtualmin server. 
+                                <strong>Read-only view</strong> - no deletion or modification possible through this interface.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-slate-700">
+                        <thead class="bg-slate-750">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+                                    {% trans "Domain Name" %}
+                                </th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+                                    {% trans "Username" %}
+                                </th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+                                    {% trans "Description" %}
+                                </th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+                                    {% trans "PRAHO Status" %}
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-slate-800 divide-y divide-slate-700">
+                            {% for domain in actual_domains %}
+                            <tr class="hover:bg-slate-700">
+                                <td class="px-6 py-4 whitespace-nowrap">
+                                    <div class="flex items-center">
+                                        <span class="text-green-400 mr-2">🌐</span>
+                                        <span class="text-sm font-medium text-slate-100">{{ domain.domain }}</span>
+                                    </div>
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-300">
+                                    {{ domain.username }}
+                                </td>
+                                <td class="px-6 py-4 text-sm text-slate-400">
+                                    {{ domain.description|default:"No description" }}
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap">
+                                    {% if domain.is_tracked_in_praho %}
+                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                            ✅ Tracked by PRAHO
+                                        </span>
+                                    {% else %}
+                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                            ⚠️ Not in PRAHO
+                                        </span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% elif domains_error %}
+                <div class="p-6">
+                    <div class="bg-red-500/10 border border-red-500/20 rounded-lg p-4">
+                        <div class="flex items-start space-x-2">
+                            <span class="text-red-400 text-lg">❌</span>
+                            <div>
+                                <p class="text-sm text-red-300 font-medium">Failed to fetch domains</p>
+                                <p class="text-xs text-red-200 mt-1">{{ domains_error }}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            {% else %}
+                <div class="p-6 text-center">
+                    <span class="text-slate-400 text-4xl">🌐</span>
+                    <p class="mt-2 text-slate-400">No domains found on server</p>
+                    <p class="text-xs text-slate-500 mt-1">This server has no active domains or is not accessible</p>
+                </div>
+            {% endif %}
+        </div>
+
+        <!-- Recent Accounts Tab -->
+        <div id="accounts-tab" class="tab-content hidden">
+            {% if recent_accounts %}
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-slate-700">
+                        <thead class="bg-slate-750">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+                                    {% trans "Domain" %}
+                                </th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+                                    {% trans "Username" %}
+                                </th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+                                    {% trans "Status" %}
+                                </th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+                                    {% trans "Created" %}
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-slate-800 divide-y divide-slate-700">
+                            {% for account in recent_accounts %}
+                            <tr>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-100">
+                                    <a href="{% url 'provisioning:virtualmin_account_detail' account.pk %}" 
+                                       class="text-blue-400 hover:text-blue-300">
+                                        {{ account.domain }}
+                                    </a>
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-300">
+                                    {{ account.username }}
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap">
+                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+                                        {% if account.is_active %}bg-green-100 text-green-800{% else %}bg-red-100 text-red-800{% endif %}">
+                                        {{ account.get_status_display }}
+                                    </span>
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
+                                    {{ account.created_at|date:"M d, Y" }}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="p-6 text-center">
+                    <span class="text-slate-400 text-4xl">📊</span>
+                    <p class="mt-2 text-slate-400">No accounts found</p>
+                    <p class="text-xs text-slate-500 mt-1">No hosting accounts have been created for this server yet</p>
+                </div>
+            {% endif %}
+        </div>        <!-- Recent Jobs Tab -->
+        <div id="jobs-tab" class="tab-content hidden">
+            {% if recent_jobs %}
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-slate-700">
+                    <thead class="bg-slate-750">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+                                {% trans "Operation" %}
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+                                {% trans "Domain" %}
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+                                {% trans "Status" %}
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+                                {% trans "Started" %}
+                            </th>
+                            <th class="px-6 py-3 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">
+                                {% trans "Actions" %}
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-slate-800 divide-y divide-slate-700">
+                        {% for job in recent_jobs %}
+                        <tr class="hover:bg-slate-750 transition-colors">
+                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-100">
+                                {{ job.get_operation_display }}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-300">
+                                {{ job.account.domain }}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                {% badge job.get_status_display variant="info" %}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-300">
+                                {{ job.started_at|date:"M d, Y H:i" }}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                {% button "View" href=job.get_absolute_url variant="primary" size="sm" %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="px-6 py-8 text-center">
+                <p class="text-slate-400">{% trans "No recent jobs" %}</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+    <script>
+        function showTab(tabName) {
+            // Hide all tabs
+            const tabs = ['live-domains', 'accounts', 'jobs'];
+            tabs.forEach(tab => {
+                const tabElement = document.getElementById(tab + '-tab');
+                if (tabElement) {
+                    tabElement.classList.add('hidden');
+                }
+            });
+            
+            // Show selected tab
+            const selectedTab = document.getElementById(tabName + '-tab');
+            if (selectedTab) {
+                selectedTab.classList.remove('hidden');
+            }
+            
+            // Update button styles
+            document.querySelectorAll('nav button').forEach(button => {
+                button.classList.remove('text-blue-400', 'border-b-2', 'border-blue-400');
+                button.classList.add('text-slate-400', 'hover:text-slate-100');
+            });
+            
+            // Highlight active button
+            event.target.classList.remove('text-slate-400', 'hover:text-slate-100');
+            event.target.classList.add('text-blue-400', 'border-b-2', 'border-blue-400');
+        }
+    </script>
+{% endblock %}

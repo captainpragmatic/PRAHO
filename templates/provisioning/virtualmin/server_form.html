@@ -1,0 +1,319 @@
+{% extends "base.html" %}
+{% load ui_components %}
+{% load i18n %}
+
+{% block title %}
+    {% if server %}
+        {% trans "Edit Server" %} - {{ server.name }}
+    {% else %}
+        {% trans "Add Virtualmin Server" %}
+    {% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- =============================================================================== -->
+    <!-- PAGE HEADER -->
+    <!-- =============================================================================== -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+        <div>
+            {% if server %}
+                <nav class="text-sm text-slate-400 mb-2">
+                    Management > Virtualmin > Servers > {{ server.name }} > Edit
+                </nav>
+                <h1 class="text-2xl font-bold text-slate-100">{% trans "Edit Server" %}</h1>
+                <p class="mt-2 text-sm text-slate-400">
+                    {% trans "Update Virtualmin server configuration" %}
+                </p>
+            {% else %}
+                <nav class="text-sm text-slate-400 mb-2">
+                    Management > Virtualmin > Servers > Add Server
+                </nav>
+                <h1 class="text-2xl font-bold text-slate-100">{% trans "Add Virtualmin Server" %}</h1>
+                <p class="mt-2 text-sm text-slate-400">
+                    {% trans "Connect a new Virtualmin server to PRAHO Platform" %}
+                </p>
+            {% endif %}
+        </div>
+        <div class="mt-4 sm:mt-0">
+            {% button "Cancel" href=cancel_url variant="secondary" %}
+        </div>
+    </div>
+
+    <!-- =============================================================================== -->
+    <!-- SERVER FORM -->
+    <!-- =============================================================================== -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Main Form -->
+        <div class="lg:col-span-2">
+            <div class="bg-slate-800 border border-slate-700 rounded-lg">
+                <div class="px-6 py-4 border-b border-slate-700">
+                    <h3 class="text-lg font-medium text-slate-100">{% trans "Server Configuration" %}</h3>
+                    <p class="mt-1 text-sm text-slate-400">{% trans "Enter your Virtualmin server details" %}</p>
+                </div>
+                <div class="p-6">
+                    {% if form.errors %}
+                    <div class="mb-6">
+                        {% alert "Please correct the errors below." variant="danger" dismissible=True %}
+                    </div>
+                    {% endif %}
+
+                    <form method="post" hx-post="{{ request.get_full_path }}" hx-target="#server-form-container" hx-swap="outerHTML">
+                        {% csrf_token %}
+                        <div id="server-form-container">
+                            <div class="space-y-6">
+                                <!-- Basic Information -->
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div>
+                                        <label for="{{ form.name.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                            {{ form.name.label }}
+                                        </label>
+                                        {{ form.name }}
+                                        {% if form.name.help_text %}
+                                        <p class="mt-1 text-sm text-slate-400">{{ form.name.help_text }}</p>
+                                        {% endif %}
+                                        {% if form.name.errors %}
+                                        <p class="mt-1 text-sm text-red-400">{{ form.name.errors.0 }}</p>
+                                        {% endif %}
+                                    </div>
+
+                                    <div>
+                                        <label for="{{ form.hostname.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                            {{ form.hostname.label }}
+                                        </label>
+                                        {{ form.hostname }}
+                                        {% if form.hostname.help_text %}
+                                        <p class="mt-1 text-sm text-slate-400">{{ form.hostname.help_text }}</p>
+                                        {% endif %}
+                                        {% if form.hostname.errors %}
+                                        <p class="mt-1 text-sm text-red-400">{{ form.hostname.errors.0 }}</p>
+                                        {% endif %}
+                                    </div>
+                                </div>
+
+                                <!-- Connection Details -->
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div>
+                                        <label for="{{ form.api_port.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                            {{ form.api_port.label }}
+                                        </label>
+                                        {{ form.api_port }}
+                                        {% if form.api_port.help_text %}
+                                        <p class="mt-1 text-sm text-slate-400">{{ form.api_port.help_text }}</p>
+                                        {% endif %}
+                                        {% if form.api_port.errors %}
+                                        <p class="mt-1 text-sm text-red-400">{{ form.api_port.errors.0 }}</p>
+                                        {% endif %}
+                                    </div>
+
+                                    <div class="flex items-center mt-6">
+                                        {{ form.use_ssl }}
+                                        <label for="{{ form.use_ssl.id_for_label }}" class="ml-2 text-sm text-slate-300">
+                                            {{ form.use_ssl.label }}
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <!-- Authentication -->
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div>
+                                        <label for="{{ form.api_username.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                            {{ form.api_username.label }}
+                                        </label>
+                                        {{ form.api_username }}
+                                        {% if form.api_username.help_text %}
+                                        <p class="mt-1 text-sm text-slate-400">{{ form.api_username.help_text }}</p>
+                                        {% endif %}
+                                        {% if form.api_username.errors %}
+                                        <p class="mt-1 text-sm text-red-400">{{ form.api_username.errors.0 }}</p>
+                                        {% endif %}
+                                    </div>
+
+                                    <div>
+                                        <label for="{{ form.api_password.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                            {{ form.api_password.label }}
+                                        </label>
+                                        {{ form.api_password }}
+                                        {% if form.api_password.help_text %}
+                                        <p class="mt-1 text-sm text-slate-400">{{ form.api_password.help_text }}</p>
+                                        {% endif %}
+                                        {% if form.api_password.errors %}
+                                        <p class="mt-1 text-sm text-red-400">{{ form.api_password.errors.0 }}</p>
+                                        {% endif %}
+                                    </div>
+                                </div>
+
+                                <!-- Advanced Options -->
+                                <div x-data="{ showAdvanced: false }">
+                                    <button type="button" 
+                                            class="flex items-center text-sm text-blue-400 hover:text-blue-300 transition-colors"
+                                            @click="showAdvanced = !showAdvanced">
+                                        <span x-show="!showAdvanced">{% trans "Show Advanced Options" %}</span>
+                                        <span x-show="showAdvanced">{% trans "Hide Advanced Options" %}</span>
+                                        <svg class="ml-1 w-4 h-4 transition-transform" 
+                                             :class="{ 'rotate-180': showAdvanced }"
+                                             fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                        </svg>
+                                    </button>
+                                    
+                                    <div x-show="showAdvanced" x-transition class="mt-4 space-y-4 border-t border-slate-700 pt-4">
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            <div>
+                                                <label for="{{ form.status.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                                    {{ form.status.label }}
+                                                </label>
+                                                {{ form.status }}
+                                                {% if form.status.help_text %}
+                                                <p class="mt-1 text-sm text-slate-400">{{ form.status.help_text }}</p>
+                                                {% endif %}
+                                            </div>
+
+                                            <div>
+                                                <label for="{{ form.max_domains.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                                    {{ form.max_domains.label }}
+                                                </label>
+                                                {{ form.max_domains }}
+                                                {% if form.max_domains.help_text %}
+                                                <p class="mt-1 text-sm text-slate-400">{{ form.max_domains.help_text }}</p>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            <div>
+                                                <label for="{{ form.max_disk_gb.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                                    {{ form.max_disk_gb.label }}
+                                                </label>
+                                                {{ form.max_disk_gb }}
+                                                {% if form.max_disk_gb.help_text %}
+                                                <p class="mt-1 text-sm text-slate-400">{{ form.max_disk_gb.help_text }}</p>
+                                                {% endif %}
+                                            </div>
+
+                                            <div>
+                                                <label for="{{ form.max_bandwidth_gb.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                                    {{ form.max_bandwidth_gb.label }}
+                                                </label>
+                                                {{ form.max_bandwidth_gb }}
+                                                {% if form.max_bandwidth_gb.help_text %}
+                                                <p class="mt-1 text-sm text-slate-400">{{ form.max_bandwidth_gb.help_text }}</p>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+
+                                        <div class="flex items-center">
+                                            {{ form.ssl_verify }}
+                                            <label for="{{ form.ssl_verify.id_for_label }}" class="ml-2 text-sm text-slate-300">
+                                                {{ form.ssl_verify.label }}
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Form Actions -->
+                            <div class="mt-8 flex items-center justify-end space-x-3">
+                                {% button "Cancel" href=cancel_url variant="secondary" %}
+                                {% if server %}
+                                    {% button "Test Connection" type="button" variant="info" hx_post=test_connection_url hx_target="#connection-test-result" hx_include="form" %}
+                                    {% button "Update Server" type="submit" variant="primary" %}
+                                {% else %}
+                                    {% button "Test Connection" type="button" variant="info" hx_post=test_connection_url hx_target="#connection-test-result" hx_include="form" %}
+                                    {% button "Add Server" type="submit" variant="primary" %}
+                                {% endif %}
+                            </div>
+
+                            <!-- Connection Test Result -->
+                            <div id="connection-test-result" class="mt-4"></div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Information Sidebar -->
+        <div class="space-y-6">
+            <!-- Connection Help -->
+            <div class="bg-slate-800 border border-slate-700 rounded-lg">
+                <div class="px-6 py-4 border-b border-slate-700">
+                    <h3 class="text-lg font-medium text-slate-100">{% trans "Connection Requirements" %}</h3>
+                    <p class="mt-1 text-sm text-slate-400">{% trans "What you need to connect" %}</p>
+                </div>
+                <div class="p-6">
+                    <div class="space-y-3 text-sm">
+                        <div class="flex items-start">
+                            <span class="text-green-400 mr-2">✓</span>
+                            <p class="text-slate-300">{% trans "Virtualmin Pro or GPL installed" %}</p>
+                        </div>
+                        <div class="flex items-start">
+                            <span class="text-green-400 mr-2">✓</span>
+                            <p class="text-slate-300">{% trans "Admin user access" %}</p>
+                        </div>
+                        <div class="flex items-start">
+                            <span class="text-green-400 mr-2">✓</span>
+                            <p class="text-slate-300">{% trans "API access enabled" %}</p>
+                        </div>
+                        <div class="flex items-start">
+                            <span class="text-green-400 mr-2">✓</span>
+                            <p class="text-slate-300">{% trans "SSL certificate (recommended)" %}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Default Settings -->
+            <div class="bg-slate-800 border border-slate-700 rounded-lg">
+                <div class="px-6 py-4 border-b border-slate-700">
+                    <h3 class="text-lg font-medium text-slate-100">{% trans "Default Configuration" %}</h3>
+                    <p class="mt-1 text-sm text-slate-400">{% trans "Standard settings" %}</p>
+                </div>
+                <div class="p-6">
+                    <div class="space-y-2 text-sm">
+                        <div class="flex justify-between">
+                            <span class="text-slate-400">{% trans "Port" %}:</span>
+                            <span class="text-slate-100">10000</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-slate-400">{% trans "SSL" %}:</span>
+                            <span class="text-slate-100">{% trans "Enabled" %}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-slate-400">{% trans "API Path" %}:</span>
+                            <span class="text-slate-100">/virtual-server/</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-slate-400">{% trans "Timeout" %}:</span>
+                            <span class="text-slate-100">30s</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Security Notice -->
+            <div class="bg-slate-800 border border-slate-700 rounded-lg">
+                <div class="px-6 py-4 border-b border-slate-700">
+                    <h3 class="text-lg font-medium text-slate-100">{% trans "Security Notice" %}</h3>
+                    <p class="mt-1 text-sm text-slate-400">{% trans "Important information" %}</p>
+                </div>
+                <div class="p-6">
+                    <div class="space-y-3 text-sm">
+                        <div class="flex items-start">
+                            <span class="text-blue-400 mr-2">🔒</span>
+                            <p class="text-slate-300">{% trans "Credentials are encrypted and stored securely" %}</p>
+                        </div>
+                        <div class="flex items-start">
+                            <span class="text-blue-400 mr-2">🔑</span>
+                            <p class="text-slate-300">{% trans "Use dedicated API user for better security" %}</p>
+                        </div>
+                        <div class="flex items-start">
+                            <span class="text-blue-400 mr-2">📊</span>
+                            <p class="text-slate-300">{% trans "Connection is tested before saving" %}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

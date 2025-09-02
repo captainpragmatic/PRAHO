@@ -1,0 +1,345 @@
+{% extends "base.html" %}
+{% load ui_components %}
+{% load i18n %}
+
+{% block title %}{{ page_title }} - {{ account.domain }}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- =============================================================================== -->
+    <!-- PAGE HEADER WITH ACTIONS -->
+    <!-- =============================================================================== -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+        <div>
+            <nav class="text-sm text-slate-400 mb-2">
+                Virtualmin > {{ account.server.name }} > Accounts > {{ account.domain }}
+            </nav>
+            <div class="flex items-center mt-2">
+                <h1 class="text-2xl font-bold text-slate-100">{{ account.domain }}</h1>
+                <div class="ml-3">
+                    {% if account.is_active %}
+                        {% badge "Active" variant="success" %}
+                    {% elif account.is_suspended %}
+                        {% badge "Suspended" variant="warning" %}
+                    {% else %}
+                        {% badge "Disabled" variant="secondary" %}
+                    {% endif %}
+                </div>
+            </div>
+            <p class="mt-2 text-sm text-slate-400">
+                {% trans "Account details and management options" %}
+            </p>
+        </div>
+        <div class="mt-4 sm:mt-0 flex items-center space-x-3">
+            {% if account.is_active %}
+                {% button "Suspend" href=suspend_url variant="warning" hx_post=suspend_url hx_confirm="Are you sure you want to suspend this account?" %}
+            {% else %}
+                {% button "Activate" href=activate_url variant="success" hx_post=activate_url hx_confirm="Are you sure you want to activate this account?" %}
+            {% endif %}
+            {% button "Backup Now" href=backup_url variant="primary" %}
+        </div>
+    </div>
+
+    <!-- =============================================================================== -->
+    <!-- ACCOUNT OVERVIEW CARDS -->
+    <!-- =============================================================================== -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <!-- Usage Stats -->
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <span class="text-2xl">💾</span>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm font-medium text-slate-400">{% trans "Disk Usage" %}</p>
+                    <p class="text-2xl font-bold text-slate-100">{{ account.disk_usage|filesizeformat }}</p>
+                    {% if account.disk_quota %}
+                    <p class="text-xs text-slate-400">of {{ account.disk_quota|filesizeformat }}</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Bandwidth -->
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <span class="text-2xl">📊</span>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm font-medium text-slate-400">{% trans "Bandwidth" %}</p>
+                    <p class="text-2xl font-bold text-slate-100">{{ account.bandwidth_usage|filesizeformat }}</p>
+                    {% if account.bandwidth_quota %}
+                    <p class="text-xs text-slate-400">of {{ account.bandwidth_quota|filesizeformat }}</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Domains -->
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <span class="text-2xl">🌐</span>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm font-medium text-slate-400">{% trans "Domains" %}</p>
+                    <p class="text-2xl font-bold text-slate-100">{{ account.domain_count|default:"1" }}</p>
+                    <p class="text-xs text-slate-400">{% trans "total domains" %}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Email Accounts -->
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <span class="text-2xl">📧</span>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm font-medium text-slate-400">{% trans "Email Accounts" %}</p>
+                    <p class="text-2xl font-bold text-slate-100">{{ account.email_count|default:"0" }}</p>
+                    <p class="text-xs text-slate-400">{% trans "total accounts" %}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- =============================================================================== -->
+    <!-- TABBED INTERFACE -->
+    <!-- =============================================================================== -->
+    <div x-data="{ activeTab: 'overview' }" class="bg-slate-800 rounded-lg border border-slate-700">
+        <!-- Tab Navigation -->
+        <div class="border-b border-slate-700">
+            <nav class="flex space-x-8 px-6" aria-label="Tabs">
+                <button @click="activeTab = 'overview'" 
+                        :class="{ 'border-blue-500 text-blue-400': activeTab === 'overview', 'border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-300': activeTab !== 'overview' }"
+                        class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors">
+                    {% trans "Overview" %}
+                </button>
+                <button @click="activeTab = 'backups'" 
+                        :class="{ 'border-blue-500 text-blue-400': activeTab === 'backups', 'border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-300': activeTab !== 'backups' }"
+                        class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors">
+                    {% trans "Backups" %}
+                </button>
+                <button @click="activeTab = 'logs'" 
+                        :class="{ 'border-blue-500 text-blue-400': activeTab === 'logs', 'border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-300': activeTab !== 'logs' }"
+                        class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors">
+                    {% trans "Logs" %}
+                </button>
+                <button @click="activeTab = 'settings'" 
+                        :class="{ 'border-blue-500 text-blue-400': activeTab === 'settings', 'border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-300': activeTab !== 'settings' }"
+                        class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors">
+                    {% trans "Settings" %}
+                </button>
+            </nav>
+        </div>
+
+        <!-- Tab Content -->
+        <div class="p-6">
+            <!-- Overview Tab -->
+            <div x-show="activeTab === 'overview'" x-transition>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- Account Details -->
+                    <div>
+                        <h3 class="text-lg font-semibold text-slate-100 mb-4">{% trans "Account Details" %}</h3>
+                        <dl class="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2">
+                            <div>
+                                <dt class="text-sm font-medium text-slate-400">{% trans "Username" %}</dt>
+                                <dd class="mt-1 text-sm text-slate-100">{{ account.username }}</dd>
+                            </div>
+                            <div>
+                                <dt class="text-sm font-medium text-slate-400">{% trans "Plan" %}</dt>
+                                <dd class="mt-1 text-sm text-slate-100">{{ account.plan|default:"Default" }}</dd>
+                            </div>
+                            <div>
+                                <dt class="text-sm font-medium text-slate-400">{% trans "Created" %}</dt>
+                                <dd class="mt-1 text-sm text-slate-100">{{ account.created_at|date:"M d, Y" }}</dd>
+                            </div>
+                            <div>
+                                <dt class="text-sm font-medium text-slate-400">{% trans "Server" %}</dt>
+                                <dd class="mt-1 text-sm text-slate-100">{{ account.server.name }}</dd>
+                            </div>
+                            {% if account.ip_address %}
+                            <div>
+                                <dt class="text-sm font-medium text-slate-400">{% trans "IP Address" %}</dt>
+                                <dd class="mt-1 text-sm text-slate-100 font-mono">{{ account.ip_address }}</dd>
+                            </div>
+                            {% endif %}
+                            {% if account.contact_email %}
+                            <div>
+                                <dt class="text-sm font-medium text-slate-400">{% trans "Contact Email" %}</dt>
+                                <dd class="mt-1 text-sm text-slate-100">{{ account.contact_email }}</dd>
+                            </div>
+                            {% endif %}
+                        </dl>
+                    </div>
+
+                    <!-- Quick Actions -->
+                    <div>
+                        <h3 class="text-lg font-semibold text-slate-100 mb-4">{% trans "Quick Actions" %}</h3>
+                        <div class="space-y-3">
+                            {% button "Access Control Panel" href="#" variant="primary" icon="external-link" %}
+                            {% button "Reset Password" href="#" variant="secondary" icon="key" %}
+                            {% button "Change Plan" href="#" variant="secondary" icon="upgrade" %}
+                            {% button "Transfer Account" href="#" variant="secondary" icon="transfer" %}
+                            {% if account.is_active %}
+                                {% button "Disable Account" href="#" variant="danger" icon="pause" %}
+                            {% else %}
+                                {% button "Enable Account" href="#" variant="success" icon="play" %}
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Backups Tab -->
+            <div x-show="activeTab === 'backups'" x-transition>
+                <div class="space-y-4">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-lg font-semibold text-slate-100">{% trans "Backup History" %}</h3>
+                        {% button "Create Backup" href=backup_url variant="primary" %}
+                    </div>
+                    
+                    {% if backups %}
+                    <div class="space-y-3">
+                        {% for backup in backups %}
+                        <div class="bg-slate-900 rounded-lg p-4 border border-slate-700">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <p class="text-sm font-medium text-slate-100">
+                                        {{ backup.created_at|date:"M d, Y H:i:s" }}
+                                    </p>
+                                    {% if backup.size_bytes %}
+                                    <p class="text-xs text-slate-400">
+                                        Size: {{ backup.size_bytes|filesizeformat }}
+                                    </p>
+                                    {% endif %}
+                                </div>
+                                <div class="flex items-center space-x-2">
+                                    {% if backup.is_completed %}
+                                        {% badge "Completed" variant="success" size="sm" %}
+                                        {% button "Restore" href=backup.restore_url variant="secondary" size="sm" %}
+                                        {% button "Download" href=backup.download_url variant="secondary" size="sm" %}
+                                    {% elif backup.is_failed %}
+                                        {% badge "Failed" variant="danger" size="sm" %}
+                                    {% else %}
+                                        {% badge "In Progress" variant="warning" size="sm" %}
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="text-center py-8">
+                        <span class="text-slate-400 text-4xl">📦</span>
+                        <p class="mt-2 text-sm text-slate-400">
+                            {% trans "No backups found for this account" %}
+                        </p>
+                        {% button "Create First Backup" href=backup_url variant="primary" class="mt-4" %}
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Logs Tab -->
+            <div x-show="activeTab === 'logs'" x-transition>
+                <div class="space-y-4">
+                    <h3 class="text-lg font-semibold text-slate-100">{% trans "Recent Activity" %}</h3>
+                    
+                    {% if logs %}
+                    <div class="space-y-2">
+                        {% for log in logs %}
+                        <div class="bg-slate-900 rounded-md p-3 border border-slate-700">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <p class="text-sm text-slate-100">{{ log.message }}</p>
+                                    <p class="text-xs text-slate-400">{{ log.created_at|date:"M d, Y H:i:s" }}</p>
+                                </div>
+                                <div>
+                                    {% if log.level == "ERROR" %}
+                                        {% badge "Error" variant="danger" size="sm" %}
+                                    {% elif log.level == "WARNING" %}
+                                        {% badge "Warning" variant="warning" size="sm" %}
+                                    {% else %}
+                                        {% badge "Info" variant="info" size="sm" %}
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="text-center py-8">
+                        <span class="text-slate-400 text-4xl">📋</span>
+                        <p class="mt-2 text-sm text-slate-400">
+                            {% trans "No recent activity logs" %}
+                        </p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Settings Tab -->
+            <div x-show="activeTab === 'settings'" x-transition>
+                <div class="space-y-6">
+                    <h3 class="text-lg font-semibold text-slate-100">{% trans "Account Settings" %}</h3>
+                    
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <!-- Basic Settings -->
+                        <div class="space-y-4">
+                            <h4 class="text-md font-medium text-slate-200">{% trans "Basic Settings" %}</h4>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-slate-300 mb-1">
+                                    {% trans "Contact Email" %}
+                                </label>
+                                <input type="email" value="{{ account.contact_email|default:'' }}" 
+                                       class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-slate-300 mb-1">
+                                    {% trans "PHP Version" %}
+                                </label>
+                                <select class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                    <option>PHP 8.1</option>
+                                    <option>PHP 8.2</option>
+                                    <option>PHP 8.3</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Resource Limits -->
+                        <div class="space-y-4">
+                            <h4 class="text-md font-medium text-slate-200">{% trans "Resource Limits" %}</h4>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-slate-300 mb-1">
+                                    {% trans "Disk Quota" %} (GB)
+                                </label>
+                                <input type="number" value="{{ account.disk_quota_gb|default:'' }}" 
+                                       class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-slate-300 mb-1">
+                                    {% trans "Bandwidth Quota" %} (GB)
+                                </label>
+                                <input type="number" value="{{ account.bandwidth_quota_gb|default:'' }}" 
+                                       class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="pt-6 border-t border-slate-700">
+                        {% button "Save Changes" variant="primary" %}
+                        {% button "Cancel" variant="secondary" %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

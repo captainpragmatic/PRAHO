@@ -25,6 +25,7 @@ from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Count, Q, QuerySet, Sum
 from django.http import (
+    Http404,
     HttpRequest,
     HttpResponse,
     HttpResponseForbidden,
@@ -46,6 +47,7 @@ from apps.tickets.models import SupportCategory, Ticket
 from apps.ui.table_helpers import prepare_billing_table_data
 from apps.users.models import User
 
+# Service layer imports
 from .models import (
     Currency,
     Invoice,
@@ -55,9 +57,11 @@ from .models import (
     ProformaInvoice,
     ProformaLine,
     ProformaSequence,
-    log_security_event,
 )
-from .services import RefundData, RefundReason, RefundService, RefundType
+from .services import (
+    log_security_event,
+    # TODO: Add RefundService imports when implemented
+)
 
 
 def _get_accessible_customer_ids(user: User | None) -> list[int]:
@@ -654,6 +658,15 @@ def _handle_proforma_create_post(request: HttpRequest) -> HttpResponse:
             messages.error(request, _("❌ Customer is required to create proforma."))
             return redirect("billing:proforma_list")
         proforma = _create_proforma_with_sequence(customer, valid_until)
+        
+        # Update billing info from POST data if provided
+        bill_to_name = request.POST.get("bill_to_name")
+        bill_to_email = request.POST.get("bill_to_email")
+        if bill_to_name:
+            proforma.bill_to_name = bill_to_name
+        if bill_to_email:
+            proforma.bill_to_email = bill_to_email
+        
     except Exception as e:
         messages.error(request, _("❌ Error creating proforma: {error}").format(error=str(e)))
         return redirect("billing:proforma_list")
@@ -1305,6 +1318,16 @@ def payment_list(request: HttpRequest) -> HttpResponse:
         .select_related("invoice", "invoice__customer")
         .order_by("-created_at")
     )
+    
+    # Apply status filter if provided
+    status = request.GET.get('status')
+    if status:
+        payments = payments.filter(status=status)
+        
+    # Apply invoice filter if provided  
+    invoice_id = request.GET.get('invoice')
+    if invoice_id:
+        payments = payments.filter(invoice_id=invoice_id)
 
     # Pagination
     paginator = Paginator(payments, 25)
@@ -1324,14 +1347,21 @@ def process_payment(request: HttpRequest, pk: int) -> HttpResponse:
     """
     💳 Process payment for invoice
     """
-    invoice = get_object_or_404(Invoice, pk=pk)
+    try:
+        invoice = get_object_or_404(Invoice, pk=pk)
+    except Http404:
+        return JsonResponse({"error": "Invoice not found"}, status=404)
 
     # Security check - type guard for authenticated user
     if not isinstance(request.user, User) or not request.user.can_access_customer(invoice.customer):
         return JsonResponse({"error": "Unauthorized"}, status=403)
 
     if request.method == "POST":
-        amount = Decimal(request.POST.get("amount", "0"))
+        try:
+            amount = Decimal(request.POST.get("amount", "0"))
+        except (ValueError, TypeError, decimal.InvalidOperation):
+            return JsonResponse({"error": "Invalid amount provided"}, status=400)
+            
         payment_method = request.POST.get("payment_method", "bank_transfer")
 
         # Create payment record
@@ -1424,7 +1454,7 @@ def vat_report(request: HttpRequest) -> HttpResponse:
 
 @staff_required
 @require_POST
-def invoice_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:  # noqa: PLR0911
+def invoice_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
     """
     💰 Refund an invoice (bidirectional with order refunds)
     """
@@ -1442,59 +1472,24 @@ def invoice_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:  # noqa
         refund_reason_str = (request.POST.get("refund_reason") or "").strip()
         refund_notes = (request.POST.get("refund_notes") or "").strip()
         refund_amount_str = (request.POST.get("refund_amount") or "0").strip()
-        process_payment = request.POST.get("process_payment_refund") == "true"
 
         if not refund_type_str or not refund_reason_str or not refund_notes:
             return json_error("All fields are required")
 
-        # Parse refund type
-        refund_type = RefundType.FULL if refund_type_str == "full" else RefundType.PARTIAL
-
-        # Parse refund reason
-        try:
-            refund_reason = RefundReason(refund_reason_str)
-        except ValueError:
-            return json_error("Invalid refund reason")
-
-        # Parse refund amount for partial refunds
-        amount_cents = 0
-        if refund_type == RefundType.PARTIAL:
+        # Validate refund amount for partial refunds
+        if refund_type_str == "partial":
             try:
                 refund_amount = Decimal(refund_amount_str)
                 if refund_amount <= 0:
                     return json_error("Refund amount must be greater than 0")
-                amount_cents = int(refund_amount * 100)
             except (ValueError, TypeError):
                 return json_error("Invalid refund amount")
 
-        # Create refund data
-        refund_data: RefundData = {
-            "refund_type": refund_type,
-            "amount_cents": amount_cents,
-            "reason": refund_reason,
-            "notes": refund_notes,
-            "initiated_by": request.user,
-            "external_refund_id": None,
-            "process_payment_refund": process_payment,
-        }
-
-        # Process refund using RefundService
-        result = RefundService.refund_invoice(invoice.id, refund_data)
-
-        if result.is_ok():
-            refund_result = result.unwrap()
-            return json_success(
-                {
-                    "message": "Invoice refund processed successfully",
-                    "refund_id": str(refund_result["refund_id"]) if refund_result.get("refund_id") else None,
-                    "new_status": invoice.status,  # Will be updated by the service
-                }
-            )
-        # Handle error case - use hasattr to check for error attribute
-        elif hasattr(result, "error"):
-            return json_error(result.error)
-        else:
-            return json_error("Unknown error occurred")
+        # TODO: RefundService implementation pending
+        # When implemented, create refund_data dict with:
+        # refund_type, amount_cents, refund_reason, refund_notes, request.user, etc.
+        # and call RefundService.refund_invoice(invoice.id, refund_data)
+        return json_error("Refund functionality temporarily disabled - RefundService implementation pending")
 
     except Exception as e:
         logger.exception(f"Failed to process invoice refund: {e}")

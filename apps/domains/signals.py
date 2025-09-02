@@ -88,7 +88,7 @@ def handle_domain_created_or_updated(sender: type[Domain], instance: Domain, cre
             # Domain updated - check for status changes
             old_status = old_values.get("status")
             if old_status and old_status != instance.status:
-                _handle_domain_status_change(instance, old_status, instance.status)
+                _handle_domain_status_change_with_virtualmin_sync(instance, old_status, instance.status)
 
             # Check for expiration changes
             old_expires_at = old_values.get("expires_at")
@@ -868,3 +868,112 @@ def _invalidate_billing_tld_caches(tld: TLD) -> None:
 
     except Exception as e:
         logger.exception(f"🔥 [Cache] Billing TLD cache cleanup failed: {e}")
+
+
+# ===============================================================================
+# CROSS-APP INTEGRATION: VIRTUALMIN DOMAIN SYNCHRONIZATION
+# ===============================================================================
+
+
+def sync_domain_to_virtualmin(domain: Domain) -> None:
+    """
+    Sync domain creation/updates to Virtualmin control panel.
+    
+    Cross-app integration point: domains → provisioning
+    """
+    try:
+        # Import here to avoid circular imports
+        from apps.provisioning.models import Service  # noqa: PLC0415
+        from apps.provisioning.virtualmin_models import VirtualminAccount  # noqa: PLC0415
+        from apps.provisioning.virtualmin_service import VirtualminProvisioningService  # noqa: PLC0415
+        
+        # Find hosting services associated with this domain
+        hosting_services = Service.objects.filter(
+            servicedomains__domain_name=domain.name,
+            status__in=['active', 'provisioning']
+        ).distinct()
+        
+        if hosting_services:
+            logger.info(f"🔄 [CrossApp] Syncing domain {domain.name} to Virtualmin for {len(hosting_services)} services")
+            
+            for service in hosting_services:
+                try:
+                    # Check if Virtualmin account already exists
+                    virtualmin_account = VirtualminAccount.objects.filter(
+                        domain=domain.name,
+                        praho_service_id=service.id
+                    ).first()
+                    
+                    if virtualmin_account:
+                        # Update existing account if needed
+                        if domain.status != 'active' and virtualmin_account.status == 'active':
+                            # Domain became inactive - suspend Virtualmin account
+                            provisioning_service = VirtualminProvisioningService()
+                            result = provisioning_service.suspend_account(
+                                virtualmin_account, 
+                                reason=f"Domain status changed to {domain.status}"
+                            )
+                            
+                            if result.is_ok():
+                                logger.info(f"🚫 [CrossApp] Suspended Virtualmin account for {domain.name}")
+                            else:
+                                logger.error(f"🔥 [CrossApp] Failed to suspend Virtualmin account for {domain.name}: {result.unwrap_err()}")
+                                
+                        elif domain.status == 'active' and virtualmin_account.status == 'suspended':
+                            # Domain became active - unsuspend Virtualmin account
+                            provisioning_service = VirtualminProvisioningService()
+                            result = provisioning_service.unsuspend_account(virtualmin_account)
+                            
+                            if result.is_ok():
+                                logger.info(f"✅ [CrossApp] Unsuspended Virtualmin account for {domain.name}")
+                            else:
+                                logger.error(f"🔥 [CrossApp] Failed to unsuspend Virtualmin account for {domain.name}: {result.unwrap_err()}")
+                    else:
+                        # No existing account - this might need provisioning
+                        logger.debug(f"📋 [CrossApp] No Virtualmin account found for domain {domain.name}, may need provisioning")
+                        
+                except Exception as e:
+                    logger.error(f"🔥 [CrossApp] Failed to sync domain {domain.name} to service {service.id}: {e}")
+                    
+        else:
+            logger.debug(f"📋 [CrossApp] No hosting services found for domain {domain.name}, skipping Virtualmin sync")
+            
+    except Exception as e:
+        logger.error(f"🔥 [CrossApp] Failed to sync domain {domain.name} to Virtualmin: {e}")
+
+
+# Enhanced domain creation handler to include Virtualmin sync
+def _handle_new_domain_registration_with_virtualmin_sync(domain: Domain) -> None:
+    """
+    Handle new domain registration with Virtualmin synchronization.
+    
+    Extends the existing domain registration handler to include control panel sync.
+    """
+    try:
+        # Call existing domain registration logic
+        _handle_new_domain_registration(domain)
+        
+        # Add Virtualmin synchronization
+        if domain.status == 'active':
+            sync_domain_to_virtualmin(domain)
+            
+    except Exception as e:
+        logger.error(f"🔥 [CrossApp] Enhanced domain registration handling failed for {domain.name}: {e}")
+
+
+def _handle_domain_status_change_with_virtualmin_sync(domain: Domain, old_status: str, new_status: str) -> None:
+    """
+    Handle domain status changes with Virtualmin synchronization.
+    
+    Extends the existing status change handler to include control panel sync.
+    """
+    try:
+        # Call existing status change logic
+        _handle_domain_status_change(domain, old_status, new_status)
+        
+        # Add Virtualmin synchronization for status changes
+        if old_status != new_status:
+            sync_domain_to_virtualmin(domain)
+            
+    except Exception as e:
+        logger.error(f"🔥 [CrossApp] Enhanced domain status change handling failed for {domain.name}: {e}")

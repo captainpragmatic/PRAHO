@@ -380,6 +380,11 @@ class OrderItem(models.Model):
     def unit_price(self) -> Decimal:
         """Return unit price in currency units"""
         return Decimal(self.unit_price_cents) / 100
+    
+    @unit_price.setter
+    def unit_price(self, value: Decimal) -> None:
+        """Set unit price from currency units"""
+        self.unit_price_cents = int(value * 100)
 
     @property
     def setup_fee(self) -> Decimal:

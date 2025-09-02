@@ -27,7 +27,8 @@ from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_POST
 
 from apps.billing.models import Currency
-from apps.billing.services import RefundData, RefundReason, RefundService, RefundType
+
+# TODO: RefundService implementation pending
 from apps.common.decorators import staff_required_strict
 from apps.common.mixins import get_search_context
 from apps.common.utils import json_error, json_success
@@ -44,6 +45,10 @@ from .services import (
 
 logger = logging.getLogger(__name__)
 
+# Constants for validation and limits
+MAX_SEARCH_QUERY_LENGTH = 100
+MAX_PRICE_OVERRIDE_CENTS = 100_000_000  # 1 million EUR in cents  
+MAX_PRICE_OVERRIDE_MULTIPLIER = 10
 
 # ===============================================================================
 # SECURITY VALIDATION FUNCTIONS
@@ -86,9 +91,9 @@ def _sanitize_search_query(query: str) -> str:
     query = re.sub(r"[{}$]", "", query)  # Remove MongoDB-style injection chars
     
     # Limit length
-    if len(query) > 100:
-        logger.warning(f"⚠️ [Orders] Truncated overly long search query from {original_length} to 100 characters")
-        query = query[:100]
+    if len(query) > MAX_SEARCH_QUERY_LENGTH:
+        logger.warning(f"⚠️ [Orders] Truncated overly long search query from {original_length} to {MAX_SEARCH_QUERY_LENGTH} characters")
+        query = query[:MAX_SEARCH_QUERY_LENGTH]
     
     return query.strip()
 
@@ -116,12 +121,12 @@ def _validate_manual_price_override(
         return False, "Price must be at least 1 cents"
     
     # Check absolute maximum price limit
-    if manual_price_cents > 100000000:  # 1 million EUR in cents
+    if manual_price_cents > MAX_PRICE_OVERRIDE_CENTS:
         logger.warning(f"⚠️ [Orders] Blocked extremely high price override: {manual_price_cents} by {user.email} in context: {context}")
-        return False, "Price cannot exceed 100000000 cents"
+        return False, f"Price cannot exceed {MAX_PRICE_OVERRIDE_CENTS} cents"
     
     # Check if override is within reasonable bounds (10x original)
-    if manual_price_cents > product_price_cents * 10:
+    if manual_price_cents > product_price_cents * MAX_PRICE_OVERRIDE_MULTIPLIER:
         logger.warning(
             f"🚨 [Orders] Price Security: Excessive price override {manual_price_cents} (max {product_price_cents * 10}) by user {user.id} ({user.email}) in context: {context}"
         )
@@ -575,82 +580,14 @@ def order_cancel(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     return redirect("orders:order_detail", pk=pk)
 
 
+# TODO: RefundService implementation pending - temporarily comment out refund functionality
 @staff_required_strict
 @require_POST
-def order_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:  # noqa: PLR0911
+def order_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
     """
-    💰 Refund an order (bidirectional with invoice refunds)
+    💰 Refund an order (bidirectional with invoice refunds) - TEMPORARILY DISABLED
     """
-
-    order = get_object_or_404(Order, id=pk)
-
-    # Validate access
-    if not isinstance(request.user, User) or not request.user.can_access_customer(order.customer):
-        return json_error("You do not have permission to refund this order")
-
-    # Parse form data
-    try:
-        refund_type_str = request.POST.get("refund_type", "").strip()
-        refund_reason_str = request.POST.get("refund_reason", "").strip()
-        refund_notes = request.POST.get("refund_notes", "").strip()
-        refund_amount_str = request.POST.get("refund_amount", "0").strip()
-        process_payment = request.POST.get("process_payment_refund") == "true"
-
-        if not refund_type_str or not refund_reason_str or not refund_notes:
-            return json_error("All fields are required")
-
-        # Parse refund type
-        refund_type = RefundType.FULL if refund_type_str == "full" else RefundType.PARTIAL
-
-        # Parse refund reason
-        try:
-            refund_reason = RefundReason(refund_reason_str)
-        except ValueError:
-            return json_error("Invalid refund reason")
-
-        # Parse refund amount for partial refunds
-        amount_cents = 0
-        if refund_type == RefundType.PARTIAL:
-            try:
-                refund_amount = Decimal(refund_amount_str)
-                if refund_amount <= 0:
-                    return json_error("Refund amount must be greater than 0")
-                amount_cents = int(refund_amount * 100)
-            except (ValueError, TypeError):
-                return json_error("Invalid refund amount")
-
-        # Create refund data
-        refund_data: RefundData = {
-            "refund_type": refund_type,
-            "amount_cents": amount_cents,
-            "reason": refund_reason,
-            "notes": refund_notes,
-            "initiated_by": request.user,
-            "external_refund_id": None,
-            "process_payment_refund": process_payment,
-        }
-
-        # Process refund using RefundService
-        result = RefundService.refund_order(order.id, refund_data)
-
-        if result.is_ok():
-            refund_result = result.unwrap()
-            return json_success(
-                {
-                    "message": "Order refund processed successfully",
-                    "refund_id": str(refund_result["refund_id"]) if refund_result.get("refund_id") else None,
-                    "new_status": order.status,  # Will be updated by the service
-                }
-            )
-        # Handle error case - use hasattr to check for error attribute
-        elif hasattr(result, "error"):
-            return json_error(result.error)
-        else:
-            return json_error("Unknown error occurred")
-
-    except Exception as e:
-        logger.exception(f"Failed to process order refund: {e}")
-        return json_error("An unexpected error occurred while processing the refund")
+    return json_error("Refund functionality temporarily disabled - RefundService implementation pending")
 
 
 @login_required
@@ -1046,8 +983,8 @@ def _process_order_item_update(form: ModelForm, order: Order, pk: uuid.UUID, req
                     base_price = product_price.amount_cents
                     if base_price > 0:  # Avoid division by zero
                         price_ratio = updated_item.unit_price_cents / base_price
-                        if price_ratio > 10.0:  # More than 10x the base price
-                            return json_error("Price override cannot exceed 10x the base product price")
+                        if price_ratio > MAX_PRICE_OVERRIDE_MULTIPLIER:  # More than 10x the base price
+                            return json_error(f"Price override cannot exceed {MAX_PRICE_OVERRIDE_MULTIPLIER}x the base product price")
                 
                 # User explicitly changed unit price - use their value (MANUAL OVERRIDE)
                 logger.info(f"💰 [Orders] Using manual override unit price: {updated_item.unit_price_cents} cents")

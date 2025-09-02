@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+{% load ui_components %}
+{% load i18n %}
+
+{% block title %}{{ page_title }} - {% trans "Virtualmin Management" %}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- =============================================================================== -->
+    <!-- PAGE HEADER -->
+    <!-- =============================================================================== -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+        <div>
+            <nav class="text-sm text-slate-400 mb-2">
+                Management > Virtualmin > Servers
+            </nav>
+            <h1 class="text-2xl font-bold text-slate-100">{{ page_title }}</h1>
+            <p class="mt-2 text-sm text-slate-400">
+                {% trans "Manage Virtualmin servers for hosting services" %}
+            </p>
+        </div>
+        {% if can_add_server %}
+        <div class="mt-4 sm:mt-0">
+            {% button "➕ Add Server" href=add_server_url variant="primary" %}
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- =============================================================================== -->
+    <!-- OVERVIEW CARDS -->
+    <!-- =============================================================================== -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <!-- Active Servers Card -->
+        <div class="bg-slate-800 border border-slate-700 rounded-lg p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h3 class="text-lg font-medium text-slate-100">{% trans "Active Servers" %}</h3>
+                    <p class="mt-1 text-sm text-slate-400">{{ servers|length|add:" servers configured" }}</p>
+                </div>
+            </div>
+            <div class="mt-4 flex items-center">
+                <div class="w-10 h-10 bg-green-600 rounded-lg flex items-center justify-center mr-4">
+                    <span class="text-white text-lg">✅</span>
+                </div>
+                <div>
+                    <p class="text-2xl font-bold text-slate-100">{{ servers|length|default:"0" }}</p>
+                    <p class="text-sm text-slate-400">{% trans "Currently online" %}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Total Domains Card -->
+        <div class="bg-slate-800 border border-slate-700 rounded-lg p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h3 class="text-lg font-medium text-slate-100">{% trans "Total Domains" %}</h3>
+                    <p class="mt-1 text-sm text-slate-400">{% trans "Hosted across all servers" %}</p>
+                </div>
+            </div>
+            <div class="mt-4 flex items-center">
+                <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center mr-4">
+                    <span class="text-white text-lg">🌐</span>
+                </div>
+                <div>
+                    <p class="text-2xl font-bold text-slate-100">{{ total_domains|default:"0" }}</p>
+                    <p class="text-sm text-slate-400">{% trans "Hosting accounts" %}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Health Status Card -->
+        <div class="bg-slate-800 border border-slate-700 rounded-lg p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h3 class="text-lg font-medium text-slate-100">{% trans "Health Status" %}</h3>
+                    <p class="mt-1 text-sm text-slate-400">{% trans "System monitoring" %}</p>
+                </div>
+            </div>
+            <div class="mt-4 flex items-center">
+                <div class="w-10 h-10 bg-yellow-600 rounded-lg flex items-center justify-center mr-4">
+                    <span class="text-white text-lg">🏥</span>
+                </div>
+                <div>
+                    <p class="text-2xl font-bold text-slate-100">{% trans "Monitoring" %}</p>
+                    <p class="text-sm text-slate-400">{% trans "Real-time checks" %}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- =============================================================================== -->
+    <!-- SERVERS TABLE -->
+    <!-- =============================================================================== -->
+    {% if servers %}
+        <div class="bg-slate-800 border border-slate-700 rounded-lg">
+            <div class="px-6 py-4 border-b border-slate-700">
+                <h3 class="text-lg font-medium text-slate-100">{% trans "Virtualmin Servers" %}</h3>
+                <p class="mt-1 text-sm text-slate-400">{{ servers|length }} {% trans "servers configured" %}</p>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-slate-700">
+                    <thead class="bg-slate-800">
+                        <tr>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+                                {% trans "Server Name" %}
+                            </th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+                                {% trans "Hostname" %}
+                            </th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+                                {% trans "Status" %}
+                            </th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+                                {% trans "Domains" %}
+                            </th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+                                {% trans "Disk Usage" %}
+                            </th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+                                {% trans "Last Health Check" %}
+                            </th>
+                            <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-slate-300 uppercase tracking-wider">
+                                {% trans "Actions" %}
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-slate-800 divide-y divide-slate-700">
+                        {% for server in servers %}
+                        <tr class="hover:bg-slate-700">
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <div class="text-sm font-medium text-slate-100">{{ server.name }}</div>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <div class="text-sm text-slate-300">{{ server.hostname }}</div>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                {% if server.status == 'active' %}
+                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                        ✅ {{ server.get_status_display }}
+                                    </span>
+                                {% elif server.status == 'maintenance' %}
+                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                        🔧 {{ server.get_status_display }}
+                                    </span>
+                                {% else %}
+                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                        ❌ {{ server.get_status_display }}
+                                    </span>
+                                {% endif %}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <div class="text-sm text-slate-300">
+                                    {{ server.current_domains }}/{{ server.max_domains }}
+                                    <div class="text-xs text-slate-400">{{ server.capacity_percentage|floatformat:1 }}% used</div>
+                                </div>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <div class="text-sm text-slate-300">{{ server.current_disk_usage_gb }} GB</div>
+                                {% if server.max_disk_gb %}
+                                    <div class="text-xs text-slate-400">of {{ server.max_disk_gb }} GB</div>
+                                {% endif %}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <div class="text-sm text-slate-300">
+                                    {% if server.last_health_check %}
+                                        {{ server.last_health_check|timesince }} ago
+                                    {% else %}
+                                        <span class="text-slate-500">Never</span>
+                                    {% endif %}
+                                </div>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                <div class="flex justify-end space-x-2">
+                                    <a href="{% url 'provisioning:virtualmin_server_detail' server.id %}" 
+                                       class="text-blue-400 hover:text-blue-300">
+                                        {% trans "View" %}
+                                    </a>
+                                    <a href="{% url 'provisioning:virtualmin_server_edit' server.id %}" 
+                                       class="text-slate-400 hover:text-slate-300">
+                                        {% trans "Edit" %}
+                                    </a>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% else %}
+        <div class="bg-slate-800 border border-slate-700 rounded-lg text-center py-12">
+            <div class="px-6 py-4 border-b border-slate-700">
+                <h3 class="text-lg font-medium text-slate-100">{% trans "No Virtualmin Servers" %}</h3>
+                <p class="mt-1 text-sm text-slate-400">{% trans "Get started by adding your first server" %}</p>
+            </div>
+            <div class="p-6">
+                <div class="text-center">
+                    <span class="text-slate-400 text-6xl">🖥️</span>
+                    <h3 class="mt-4 text-lg font-medium text-slate-100">{% trans "No Virtualmin Servers" %}</h3>
+                    <p class="mt-2 text-sm text-slate-400">
+                        {% trans "Get started by adding your first Virtualmin server." %}
+                    </p>
+                    {% if can_add_server %}
+                    <div class="mt-6">
+                        {% button "Add First Server" href=add_server_url variant="primary" %}
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}

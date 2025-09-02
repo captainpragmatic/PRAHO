@@ -355,7 +355,7 @@ class ProformaSendViewsTestCase(TestCase):
             valid_until=timezone.now().date()
         )
 
-    @patch('apps.billing.views.send_proforma_email')
+    @patch('apps.billing.services.send_proforma_email')
     def test_proforma_send_success(self, mock_send_email):
         """Test successful proforma sending"""
         mock_send_email.return_value = True

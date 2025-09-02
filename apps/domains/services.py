@@ -36,6 +36,10 @@ logger = logging.getLogger(__name__)
 MIN_DOMAIN_NAME_LENGTH = 3  # Minimum length for domain names
 MAX_DOMAIN_NAME_LENGTH = 253  # Maximum length per RFC 1035
 
+# Domain registration constants  
+MIN_REGISTRATION_YEARS = 1  # Minimum registration period
+MAX_REGISTRATION_YEARS = 10  # Maximum registration period
+
 
 # ===============================================================================
 # DOMAIN REPOSITORY PATTERN
@@ -322,8 +326,9 @@ class DomainLifecycleService:
             return False, error_msg
 
         # Validate registration period
-        if years < 1 or years > 10:
-            return False, cast(str, _("Registration period must be between 1 and 10 years"))
+        if years < MIN_REGISTRATION_YEARS or years > MAX_REGISTRATION_YEARS:
+            return False, cast(str, _("Registration period must be between {min} and {max} years").format(
+                min=MIN_REGISTRATION_YEARS, max=MAX_REGISTRATION_YEARS))
 
         # Extract and validate TLD
         tld_extension = DomainValidationService.extract_tld_from_domain(domain_name)

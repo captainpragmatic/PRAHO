@@ -285,6 +285,7 @@ class Customer(SoftDeleteModel):
         kwargs.pop("email", None)
         kwargs.pop("first_name", None)
         kwargs.pop("last_name", None)
+        kwargs.pop("fiscal_code", None)  # Legacy field from old Customer structure
         super().__init__(*args, **kwargs)
 
     def get_display_name(self) -> str:

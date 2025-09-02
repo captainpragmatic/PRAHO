@@ -241,8 +241,8 @@ class EmailTemplate(models.Model):
         # Log template modification for security audit
         try:
             logger.info(f"Template modified: {self.key} ({self.locale})")
-        except Exception:  # pragma: no cover - logging shouldn't break validation
-            pass
+        except Exception as e:  # pragma: no cover - logging shouldn't break validation
+            logger.debug(f"Failed to log template modification: {e}")
 
     def get_sanitized_content(self) -> tuple[str, str]:
         """Return sanitized HTML and text versions (strip dangerous tags)."""
@@ -363,6 +363,19 @@ class EmailLog(models.Model):
     def __str__(self) -> str:
         return f"{self.subject} → {self.to_addr} ({self.status})"
 
+    def save(self, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
+        """Encrypt body fields at rest when available."""
+        if ENCRYPTION_AVAILABLE:
+            try:
+                if self.body_text and not settings_encryption.is_encrypted(self.body_text):
+                    self.body_text = settings_encryption.encrypt_value(self.body_text) or self.body_text
+                if self.body_html and not settings_encryption.is_encrypted(self.body_html):
+                    self.body_html = settings_encryption.encrypt_value(self.body_html) or self.body_html
+            except Exception as e:  # pragma: no cover
+                # Fallback to storing as-is; upstream logging handles errors
+                logger.debug(f"Encryption failed, storing as-is: {e}")
+        super().save(*args, **kwargs)
+
     def get_status_display_color(self) -> str:
         """Get color for status display in admin"""
         status_colors = {
@@ -401,29 +414,16 @@ class EmailLog(models.Model):
             masked = (self.to_addr or "").replace("@", "@")[0:3] + "***"
             try:
                 logger.info(f"Email sent to {masked}")
-            except Exception:  # pragma: no cover - logging shouldn’t break
-                pass
-
-    def save(self, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
-        """Encrypt body fields at rest when available."""
-        if ENCRYPTION_AVAILABLE:
-            try:
-                if self.body_text and not settings_encryption.is_encrypted(self.body_text):
-                    self.body_text = settings_encryption.encrypt_value(self.body_text) or self.body_text
-                if self.body_html and not settings_encryption.is_encrypted(self.body_html):
-                    self.body_html = settings_encryption.encrypt_value(self.body_html) or self.body_html
-            except Exception:  # pragma: no cover
-                # Fallback to storing as-is; upstream logging handles errors
-                pass
-        super().save(*args, **kwargs)
+            except Exception as e:  # pragma: no cover - logging shouldn't break
+                logger.debug(f"Failed to log email sent: {e}")
 
     def get_safe_content_preview(self) -> str:
         """Return a short, decrypted preview suitable for logs/UI."""
         content = self.body_text or ""
         try:
             content = settings_encryption.decrypt_if_needed(content)
-        except Exception:  # pragma: no cover
-            pass
+        except Exception as e:  # pragma: no cover
+            logger.debug(f"Decryption failed, using original content: {e}")
         preview = content[:CONTENT_PREVIEW_LENGTH]
         return preview + ("..." if len(content) > CONTENT_PREVIEW_LENGTH else "")
 
@@ -573,5 +573,5 @@ class EmailCampaign(models.Model):
         if not self.is_transactional and not self.requires_consent:
             try:
                 logger.warning("GDPR compliance issue: Marketing campaign without consent configured")
-            except Exception:  # pragma: no cover
-                pass
+            except Exception as e:  # pragma: no cover
+                logger.debug(f"Failed to log GDPR warning: {e}")

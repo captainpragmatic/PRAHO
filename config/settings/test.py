@@ -138,6 +138,9 @@ ALLOWED_HOSTS = ["testserver", "localhost", "127.0.0.1"]
 # Explicit test flag so views can soften behaviors (e.g., rate limits)
 TESTING = True
 
+# Ensure rate limiting is disabled in test environment to prevent race conditions
+RATELIMIT_ENABLE = False
+
 # ===============================================================================
 # ENCRYPTION (Test encryption key)
 # ===============================================================================

@@ -1,6 +1,5 @@
 """
-Django settings for PRAHO Platform - Base Configuration
-Romanian hosting provider with security-first approach.
+Django settings for PRAHO Platform - Base Configuration with security-first approach.
 """
 
 import os
@@ -150,14 +149,14 @@ PASSWORD_RESET_TIMEOUT = 7200  # 2 hours in seconds
 # INTERNATIONALIZATION & LOCALIZATION
 # ===============================================================================
 
-LANGUAGE_CODE = "ro"  # Romanian primary for hosting provider
+LANGUAGE_CODE = "en"  # English default, with Romanian support
 TIME_ZONE = "Europe/Bucharest"
 USE_I18N = True
 USE_TZ = True
 
 LANGUAGES = [
-    ("ro", "Română"),
     ("en", "English"),
+    ("ro", "Română"),
 ]
 
 # Romanian locale formatting
@@ -280,10 +279,9 @@ STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY")
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
 
-# Virtualmin settings
-VIRTUALMIN_URL = os.environ.get("VIRTUALMIN_URL")
-VIRTUALMIN_USERNAME = os.environ.get("VIRTUALMIN_USERNAME")
-VIRTUALMIN_PASSWORD = os.environ.get("VIRTUALMIN_PASSWORD")
+# ✅ Virtualmin settings migrated to Settings UI!
+# Visit: /app/settings/dashboard/ → Provisioning & Infrastructure
+# Credentials are stored in the encrypted credential vault.
 
 # e-Factura API settings
 EFACTURA_API_URL = os.environ.get("EFACTURA_API_URL")
@@ -353,6 +351,35 @@ IPWARE_TRUSTED_PROXY_LIST: list[str] = []
 # Always configure proxy SSL header (used by load balancers)
 # Only meaningful when behind a load balancer/reverse proxy
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# ===============================================================================
+# ✅ VIRTUALMIN AUTHENTICATION - MIGRATED TO SETTINGS UI! 🎉
+# ===============================================================================
+
+# All Virtualmin settings have been migrated to the Settings UI:
+# 🌐 Visit: /app/settings/dashboard/ → "Provisioning & Infrastructure"
+# 🔐 Credentials are stored securely in the encrypted credential vault
+# � Use: python manage.py setup_credential_vault to manage credentials
+# 
+# Benefits:
+# ✅ Runtime configuration changes (no restart needed)
+# ✅ Encrypted credential storage
+# ✅ Audit trail for all changes
+# ✅ Type validation and defaults
+# ✅ Centralized management interface
+
+# ===============================================================================
+# CREDENTIAL VAULT CONFIGURATION 🔐
+# ===============================================================================
+
+# Master encryption key for credential vault
+# Generate with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
+CREDENTIAL_VAULT_MASTER_KEY = os.environ.get("CREDENTIAL_VAULT_MASTER_KEY")
+
+# Vault configuration
+CREDENTIAL_VAULT_ENABLED = os.environ.get("CREDENTIAL_VAULT_ENABLED", "true").lower() == "true"
+CREDENTIAL_VAULT_DEFAULT_EXPIRY_DAYS = int(os.environ.get("CREDENTIAL_VAULT_DEFAULT_EXPIRY_DAYS", "30"))
+CREDENTIAL_VAULT_MAX_AGE_DAYS = int(os.environ.get("CREDENTIAL_VAULT_MAX_AGE_DAYS", "90"))
 
 # ===============================================================================
 # RATE LIMITING CONFIGURATION 🔒

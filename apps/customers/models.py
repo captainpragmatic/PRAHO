@@ -28,15 +28,15 @@ from .profile_models import (
 __all__ = [
     # Core models
     "Customer",
-    "SoftDeleteManager",
-    "SoftDeleteModel", 
-    "security_logger",
-    "validate_bank_details",
-    # Profile models
-    "CustomerBillingProfile",
-    "CustomerTaxProfile",
     # Contact models
     "CustomerAddress",
-    "CustomerNote", 
+    # Profile models
+    "CustomerBillingProfile",
+    "CustomerNote",
     "CustomerPaymentMethod",
+    "CustomerTaxProfile",
+    "SoftDeleteManager",
+    "SoftDeleteModel",
+    "security_logger",
+    "validate_bank_details",
 ]

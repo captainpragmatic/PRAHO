@@ -14,6 +14,9 @@ from apps.integrations.models import WebhookEvent
 
 logger = logging.getLogger(__name__)
 
+# Webhook signature parsing constants
+EXPECTED_KEY_VALUE_PARTS = 2  # Expected parts when splitting key=value format
+
 
 class SecurityError(Exception):
     """🔒 Security-related errors in webhook processing"""
@@ -324,7 +327,12 @@ def verify_stripe_signature(
         signature = None
 
         for element in elements:
-            key, value = element.split("=", 1)
+            if "=" not in element:
+                continue  # Skip malformed elements
+            parts = element.split("=", 1)
+            if len(parts) != EXPECTED_KEY_VALUE_PARTS:
+                continue  # Skip malformed elements
+            key, value = parts
             if key == "t":
                 timestamp = int(value)
             elif key == "v1":

@@ -244,6 +244,21 @@ class TicketNumberSecurityTest(TestCase):
 class RateLimitingSecurityTest(TestCase):
     """🔒 Test rate limiting security on ticket operations"""
 
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        # Enable rate limiting for these specific security tests
+        from django.conf import settings
+        cls._original_ratelimit_enable = getattr(settings, 'RATELIMIT_ENABLE', False)
+        settings.RATELIMIT_ENABLE = True
+    
+    @classmethod 
+    def tearDownClass(cls):
+        super().tearDownClass()
+        # Restore original rate limiting setting after tests
+        from django.conf import settings
+        settings.RATELIMIT_ENABLE = cls._original_ratelimit_enable
+
     def setUp(self):
         self.customer = Customer.objects.create(
             name="Test Customer",

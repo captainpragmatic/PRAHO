@@ -69,6 +69,111 @@ CustomUser = User
 # ===============================================================================
 
 
+def _handle_rate_limit(request: HttpRequest, form: LoginForm) -> HttpResponse | None:
+    """Handle rate limit logic, return response if rate limited, None otherwise"""
+    if getattr(request, "limited", False) and not getattr(settings, "TESTING", False):
+        # Log rate limit event to audit system
+        rate_limit_data = RateLimitEventData(
+            endpoint="users:login",
+            ip_address=get_safe_client_ip(request),
+            user_agent=request.META.get("HTTP_USER_AGENT", ""),
+            rate_limit_key="ip,email",
+            rate_limit_rate="10/m,5/m",
+        )
+        SecurityAuditService.log_rate_limit_event(
+            event_data=rate_limit_data,
+            user=None,  # User not authenticated yet
+        )
+        messages.error(request, _("Too many login attempts. Please wait and try again."))
+        return render(request, "users/login.html", {"form": form}, status=429)
+    return None
+
+
+def _handle_account_lockout(request: HttpRequest, form: LoginForm, email: str) -> tuple[User | None, HttpResponse | None]:
+    """Check account lockout, return (user, response). Response is not None if locked."""
+    try:
+        user = User.objects.get(email=email)
+        if user.is_account_locked():
+            remaining_minutes = user.get_lockout_remaining_time()
+            messages.error(
+                request,
+                _("Account temporarily locked for security reasons. Try again in {minutes} minutes.").format(
+                    minutes=remaining_minutes
+                ),
+            )
+            return user, render(request, "users/login.html", {"form": form})
+        return user, None
+    except User.DoesNotExist:
+        # Don't reveal that user doesn't exist
+        return None, None
+
+
+def _handle_successful_login(request: HttpRequest, user: User, form: LoginForm) -> HttpResponse:
+    """Handle successful login logic"""
+    # Successful login - reset failed attempts and log success
+    user.reset_failed_login_attempts()
+
+    # Update login tracking
+    user.last_login_ip = get_safe_client_ip(request)
+    user.save(update_fields=["last_login_ip"])
+
+    # Log successful login
+    UserLoginLog.objects.create(
+        user=user,
+        ip_address=get_safe_client_ip(request),
+        user_agent=request.META.get("HTTP_USER_AGENT", ""),
+        status="success",
+    )
+
+    login(request, user)
+
+    # Remember me handling and secure session timeout
+    remember = bool(form.cleaned_data.get("remember_me"))
+    if remember:
+        request.session["remember_me"] = True
+    else:
+        request.session.pop("remember_me", None)
+
+    # Update timeout policy based on context
+    SessionSecurityService.update_session_timeout(request)
+
+    messages.success(
+        request, _("Welcome, {user_full_name}!").format(user_full_name=user.get_full_name())
+    )
+
+    next_url = _get_safe_redirect_target(request, fallback="dashboard")
+
+    # Handle HTMX requests with full page reload
+    if request.headers.get("HX-Request"):
+        response = HttpResponse()
+        response["HX-Redirect"] = next_url
+        return response
+
+    return redirect(next_url)
+
+
+def _handle_failed_login(request: HttpRequest, user: User | None) -> None:
+    """Handle failed login logic"""
+    if user:
+        user.increment_failed_login_attempts()
+
+        # Log failed login attempt
+        UserLoginLog.objects.create(
+            user=user,
+            ip_address=get_safe_client_ip(request),
+            user_agent=request.META.get("HTTP_USER_AGENT", ""),
+            status="failed_password",
+        )
+    else:
+        # Log failed login for non-existent user (no user object)
+        UserLoginLog.objects.create(
+            user=None,
+            ip_address=get_safe_client_ip(request),
+            user_agent=request.META.get("HTTP_USER_AGENT", ""),
+            status="failed_user_not_found",
+        )
+
+
 @ratelimit(key="ip", rate="10/m", method="POST", block=False)  # type: ignore[misc]
 @ratelimit(key="post:email", rate="5/m", method="POST", block=False)  # type: ignore[misc]
 def login_view(request: HttpRequest) -> HttpResponse:
@@ -77,109 +182,28 @@ def login_view(request: HttpRequest) -> HttpResponse:
         return redirect("dashboard")
 
     if request.method == "POST":
-        # If rate-limited and not in test mode, show friendly error
-        if getattr(request, "limited", False) and not getattr(settings, "TESTING", False):
-            # Log rate limit event to audit system
-            rate_limit_data = RateLimitEventData(
-                endpoint="users:login",
-                ip_address=get_safe_client_ip(request),
-                user_agent=request.META.get("HTTP_USER_AGENT", ""),
-                rate_limit_key="ip,email",
-                rate_limit_rate="10/m,5/m",
-            )
-            SecurityAuditService.log_rate_limit_event(
-                event_data=rate_limit_data,
-                user=None,  # User not authenticated yet
-            )
-            messages.error(request, _("Too many login attempts. Please wait and try again."))
-            return render(request, "users/login.html", {"form": LoginForm(request.POST)}, status=429)
         form = LoginForm(request.POST)
+        
+        # Check rate limiting
+        if rate_limit_response := _handle_rate_limit(request, form):
+            return rate_limit_response
+            
         if form.is_valid():
             email = form.cleaned_data["email"]
             password = form.cleaned_data["password"]
 
-            # Check if user exists and account is not locked
-            try:
-                user = User.objects.get(email=email)
-                if user.is_account_locked():
-                    remaining_minutes = user.get_lockout_remaining_time()
-                    messages.error(
-                        request,
-                        _("Account temporarily locked for security reasons. Try again in {minutes} minutes.").format(
-                            minutes=remaining_minutes
-                        ),
-                    )
-                    return render(request, "users/login.html", {"form": form})
-            except User.DoesNotExist:
-                # Don't reveal that user doesn't exist
-                user = None
+            # Check account lockout
+            user, lockout_response = _handle_account_lockout(request, form, email)
+            if lockout_response:
+                return lockout_response
 
             # Authenticate user
             authenticated_user = authenticate(request, username=email, password=password)
 
             if authenticated_user:
-                # Successful login - reset failed attempts and log success
-                user_obj = cast(User, authenticated_user)
-                user_obj.reset_failed_login_attempts()
-
-                # Update login tracking
-                user_obj.last_login_ip = get_safe_client_ip(request)
-                user_obj.save(update_fields=["last_login_ip"])
-
-                # Log successful login
-                UserLoginLog.objects.create(
-                    user=user_obj,
-                    ip_address=get_safe_client_ip(request),
-                    user_agent=request.META.get("HTTP_USER_AGENT", ""),
-                    status="success",
-                )
-
-                login(request, user_obj)
-
-                # Remember me handling and secure session timeout
-                remember = bool(form.cleaned_data.get("remember_me"))
-                if remember:
-                    request.session["remember_me"] = True
-                else:
-                    request.session.pop("remember_me", None)
-
-                # Update timeout policy based on context
-                SessionSecurityService.update_session_timeout(request)
-
-                messages.success(
-                    request, _("Welcome, {user_full_name}!").format(user_full_name=user_obj.get_full_name())
-                )
-
-                next_url = _get_safe_redirect_target(request, fallback="dashboard")
-
-                # Handle HTMX requests with full page reload
-                if request.headers.get("HX-Request"):
-                    response = HttpResponse()
-                    response["HX-Redirect"] = next_url
-                    return response
-
-                return redirect(next_url)
+                return _handle_successful_login(request, cast(User, authenticated_user), form)
             else:
-                # Failed login - increment failed attempts if user exists
-                if user:
-                    user.increment_failed_login_attempts()
-
-                    # Log failed login attempt
-                    UserLoginLog.objects.create(
-                        user=user,
-                        ip_address=get_safe_client_ip(request),
-                        user_agent=request.META.get("HTTP_USER_AGENT", ""),
-                        status="failed_password",
-                    )
-                else:
-                    # Log failed login for non-existent user (no user object)
-                    UserLoginLog.objects.create(
-                        user=None,
-                        ip_address=get_safe_client_ip(request),
-                        user_agent=request.META.get("HTTP_USER_AGENT", ""),
-                        status="failed_user_not_found",
-                    )
-
+                _handle_failed_login(request, user)
                 messages.error(request, _("Incorrect email or password."))
     else:
         form = LoginForm()

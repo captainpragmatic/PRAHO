@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils.html import strip_tags
 
+from apps.common import validators
 from apps.notifications.models import validate_template_content
 
 if TYPE_CHECKING:
@@ -79,7 +80,7 @@ def render_template_safely(template_content: str, context: dict[str, Any]) -> st
     value_truncated = False
     original_context = dict(context)
     sanitized_context = validate_template_context(context)
-    for _k, v in original_context.items():
+    for v in original_context.values():
         if isinstance(v, str) and len(v) > MAX_CONTEXT_VALUE_LENGTH:
             value_truncated = True
     
@@ -142,8 +143,6 @@ class EmailService:
 
         # Security monitoring hook
         try:
-            from apps.common import validators
-
             recipient_domain = recipient.split("@")[-1] if "@" in recipient else ""
             validators.log_security_event(
                 event_type="template_email_send",
@@ -154,8 +153,8 @@ class EmailService:
                 },
                 request_ip=kwargs.get("request_ip"),
             )
-        except Exception:  # pragma: no cover
-            pass
+        except Exception as e:  # pragma: no cover
+            logger.debug(f"Failed to log email attempt: {e}")
 
         # TODO: Implement template-based email sending
         return True

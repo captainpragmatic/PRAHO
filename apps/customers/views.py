@@ -32,19 +32,19 @@ from .profile_views import (
 __all__ = [
     # Core customer views
     "_handle_secure_error",
+    # Contact views
+    "customer_address_add",
     "customer_assign_user",
-    "customer_create", 
+    # Profile views
+    "customer_billing_profile",
+    "customer_create",
     "customer_delete",
     "customer_detail",
     "customer_edit",
     "customer_list",
+    "customer_note_add",
     "customer_search_api",
     "customer_services_api",
+    "customer_tax_profile",
     "security_logger",
-    # Profile views
-    "customer_billing_profile",
-    "customer_tax_profile", 
-    # Contact views
-    "customer_address_add",
-    "customer_note_add",
 ]

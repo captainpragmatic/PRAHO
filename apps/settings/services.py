@@ -79,6 +79,31 @@ class SettingsService:
         "domains.renewal_notice_days": 30,
         "provisioning.auto_setup_enabled": True,
         "provisioning.setup_timeout_minutes": 30,
+        # Virtualmin operational settings
+        "virtualmin.hostname": "localhost",
+        "virtualmin.port": 10000,
+        "virtualmin.ssl_verify": True,
+        "virtualmin.request_timeout_seconds": 30,
+        "virtualmin.max_retries": 3,
+        "virtualmin.rate_limit_qps": 10,
+        "virtualmin.connection_pool_size": 10,
+        "virtualmin.rate_limit_max_calls_per_hour": 100,
+        "virtualmin.auth_health_check_interval_seconds": 3600,
+        "virtualmin.auth_fallback_enabled": True,
+        "virtualmin.backup_retention_days": 7,
+        "virtualmin.backup_compression_enabled": True,
+        "virtualmin.domain_quota_default_mb": 1000,
+        "virtualmin.bandwidth_quota_default_mb": 10000,
+        "virtualmin.mysql_enabled": True,
+        "virtualmin.postgresql_enabled": False,
+        "virtualmin.php_version_default": "8.1",
+        "virtualmin.ssl_auto_renewal_enabled": True,
+        "virtualmin.monitoring_enabled": True,
+        "virtualmin.log_retention_days": 30,
+        # Advanced authentication settings
+        "virtualmin.ssh_username": "virtualmin-praho",
+        "virtualmin.api_endpoint_path": "/virtual-server/remote.cgi",
+        "virtualmin.use_ssl": True,
         "security.rate_limit_per_hour": 1000,
         "security.require_2fa_for_admin": True,
         "notifications.email_enabled": True,
@@ -105,6 +130,9 @@ class SettingsService:
         Returns:
             Setting value or default
         """
+        # Generate cache key first (needed for both paths)
+        cache_key = cls._get_cache_key(key)
+        
         # Get from database first to check if sensitive
         try:
             setting = SystemSetting.objects.get(key=key)
@@ -116,7 +144,6 @@ class SettingsService:
                 return value
             
             # For non-sensitive settings, use cache
-            cache_key = cls._get_cache_key(key)
             cached_value = cache.get(cache_key, version=cls.CACHE_VERSION)
 
             if cached_value is not None:

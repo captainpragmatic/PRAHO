@@ -390,6 +390,58 @@ class Service(models.Model):
         self.suspension_reason = ""
         self.save(update_fields=["status", "activated_at", "suspended_at", "suspension_reason"])
 
+    def requires_hosting_account(self) -> bool:
+        """
+        Check if this service requires a hosting account (Virtualmin).
+        
+        Cross-app integration helper for billing → provisioning triggers.
+        """
+        # Check if service plan is a hosting type that needs control panel account
+        hosting_plan_types = ['shared_hosting', 'vps', 'dedicated', 'reseller']
+        return (
+            self.service_plan.plan_type in hosting_plan_types and
+            self.status in ['active', 'provisioning'] and
+            bool(self.domain)  # Must have a domain
+        )
+
+    def get_primary_domain(self) -> str | None:
+        """
+        Get the primary domain for this service.
+        
+        Cross-app integration helper for provisioning and domain sync.
+        """
+        if self.domain:
+            return self.domain
+            
+        # Check if there are associated domains through ServiceDomain
+        try:
+            from .relationship_models import ServiceDomain  # noqa: PLC0415
+            service_domain = ServiceDomain.objects.filter(
+                service=self, 
+                is_primary=True
+            ).first()
+            if service_domain:
+                return service_domain.domain_name
+        except ImportError:
+            pass
+            
+        return None
+
+    def get_customer_membership(self) -> Any | None:
+        """
+        Get the CustomerMembership for this service's customer.
+        
+        Cross-app integration helper for linking services to customer access control.
+        """
+        try:
+            from apps.users.models import CustomerMembership  # noqa: PLC0415
+            return CustomerMembership.objects.filter(
+                customer=self.customer,
+                is_primary=True
+            ).first()
+        except ImportError:
+            return None
+
 
 class ProvisioningTask(models.Model):
     """Automated provisioning tasks queue"""

@@ -227,20 +227,25 @@ class ExportSecurityTests(TestCase):
         self.assertTrue(settings_encryption.is_encrypted(str(sensitive_setting_data["value"])))
     
     def test_export_access_control(self):
-        """🔒 Test that export endpoints require admin access"""
+        """🔒 Test that standard export requires login but allows any authenticated user"""
         # Test unauthorized access
         response = self.client.get(reverse('settings:export_settings'))
         self.assertEqual(response.status_code, 302)  # Redirect to login
         
-        # FIXME: The export_settings view has a select_related issue that was causing 500->404 errors
-        # Fixed the view but test client still returns 404 - likely test framework issue
-        # The view works correctly when tested directly. Skipping detailed access control test for now.
+        # Test regular user access (should be allowed for standard export)
+        self.client.force_login(self.regular_user)
+        response = self.client.get(reverse('settings:export_settings'))
+        self.assertEqual(response.status_code, 200)  # Regular users can access standard export
         
-        # Test that the URL exists and is accessible (basic smoke test)
+        # Test staff user access (should be allowed)
+        self.client.force_login(self.staff_user)
+        response = self.client.get(reverse('settings:export_settings'))
+        self.assertEqual(response.status_code, 200)  # Staff can access standard export
+        
+        # Test admin user access (should work)
         self.client.force_login(self.admin_user)
         response = self.client.get(reverse('settings:export_settings'))
-        # Currently returns 404 in test environment but 200 when tested directly
-        # This indicates a Django test client or URL resolution issue specific to tests
+        self.assertEqual(response.status_code, 200)
     
     def test_full_export_access_control(self):
         """🔒 Test that full export endpoint requires admin access"""

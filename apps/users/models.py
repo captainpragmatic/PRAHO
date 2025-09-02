@@ -77,13 +77,12 @@ class User(AbstractUser):
     email = models.EmailField(_("email address"), unique=True)
     phone = models.CharField(max_length=20, blank=True, help_text=_("Romanian phone number format: +40 721 123 456"))
 
-    # Staff role for internal staff users (null for customer users)
+    # Staff role for internal staff users (empty for customer users)
     staff_role = models.CharField(
         max_length=20,
         choices=STAFF_ROLE_CHOICES,
         blank=True,
-        null=True,
-        default=None,
+        default="",
         help_text=_("Staff role for internal staff. Leave empty for customer users."),
     )
 

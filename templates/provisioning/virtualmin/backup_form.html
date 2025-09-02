@@ -1,0 +1,253 @@
+{% extends     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+        <div>
+            <nav class="text-sm text-slate-400 mb-2">
+                Virtualmin > Accounts > {{ account.domain }} > Backup
+            </nav>
+            <h1 class="text-2xl font-bold text-slate-100">{{ page_title }}</h1>
+            <p class="mt-2 text-sm text-slate-400">
+                {% trans "Create backup of domain and hosting data" %}
+            </p>
+        </div>ml" %}
+{% load ui_components %}
+{% load i18n %}
+
+{% block title %}{{ page_title }} - {% trans "Virtualmin Backup" %}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- =============================================================================== -->
+    <!-- PAGE HEADER -->
+    <!-- =============================================================================== -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+        <div>
+            {% breadcrumb steps="Virtualmin,Accounts,"|add:account.domain|add:",Backup" %}
+            <h1 class="text-2xl font-bold text-slate-100 mt-2">{{ page_title }}</h1>
+            <p class="mt-2 text-sm text-slate-400">
+                {% trans "Create a backup of the domain and its data" %}
+            </p>
+        </div>
+    </div>
+
+    <!-- =============================================================================== -->
+    <!-- ACCOUNT OVERVIEW -->
+    <!-- =============================================================================== -->
+    <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+        <div class="flex items-center">
+            <div class="flex-shrink-0">
+                <div class="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center">
+                    <span class="text-white text-xl">🌐</span>
+                </div>
+            </div>
+            <div class="ml-4">
+                <h2 class="text-lg font-bold text-slate-100">{{ account.domain }}</h2>
+                <p class="text-sm text-slate-400">
+                    {% trans "Server:" %} {{ account.server.name }} | 
+                    {% trans "Status:" %} {% badge account.get_status_display variant="success" %}
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- =============================================================================== -->
+    <!-- BACKUP FORM -->
+    <!-- =============================================================================== -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Main Form -->
+        <div class="lg:col-span-2">
+            <form method="post" action="{{ form_action }}" class="bg-slate-800 rounded-lg border border-slate-700">
+                {% csrf_token %}
+                
+                <div class="px-6 py-4 border-b border-slate-700">
+                    <h2 class="text-lg font-semibold text-slate-100">{% trans "Backup Configuration" %}</h2>
+                </div>
+                
+                <div class="px-6 py-6 space-y-6">
+                    <!-- Backup Type Selection -->
+                    <div>
+                        <label for="{{ form.backup_type.id_for_label }}" class="block text-sm font-medium text-slate-100 mb-2">
+                            {{ form.backup_type.label }}
+                        </label>
+                        {{ form.backup_type }}
+                        {% if form.backup_type.help_text %}
+                        <p class="mt-1 text-sm text-slate-400">{{ form.backup_type.help_text }}</p>
+                        {% endif %}
+                        {% if form.backup_type.errors %}
+                        <div class="mt-1">
+                            {% for error in form.backup_type.errors %}
+                            {% alert error variant="danger" %}
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <!-- Feature Selection -->
+                    <div>
+                        <fieldset>
+                            <legend class="text-sm font-medium text-slate-100 mb-4">{% trans "Include in Backup" %}</legend>
+                            <div class="space-y-4">
+                                <!-- Email Data -->
+                                <div class="flex items-start">
+                                    <div class="flex items-center h-5">
+                                        {{ form.include_email }}
+                                    </div>
+                                    <div class="ml-3">
+                                        <label for="{{ form.include_email.id_for_label }}" class="text-sm font-medium text-slate-100">
+                                            {{ form.include_email.label }}
+                                        </label>
+                                        {% if form.include_email.help_text %}
+                                        <p class="text-sm text-slate-400">{{ form.include_email.help_text }}</p>
+                                        {% endif %}
+                                    </div>
+                                </div>
+
+                                <!-- Databases -->
+                                <div class="flex items-start">
+                                    <div class="flex items-center h-5">
+                                        {{ form.include_databases }}
+                                    </div>
+                                    <div class="ml-3">
+                                        <label for="{{ form.include_databases.id_for_label }}" class="text-sm font-medium text-slate-100">
+                                            {{ form.include_databases.label }}
+                                        </label>
+                                        {% if form.include_databases.help_text %}
+                                        <p class="text-sm text-slate-400">{{ form.include_databases.help_text }}</p>
+                                        {% endif %}
+                                    </div>
+                                </div>
+
+                                <!-- Files -->
+                                <div class="flex items-start">
+                                    <div class="flex items-center h-5">
+                                        {{ form.include_files }}
+                                    </div>
+                                    <div class="ml-3">
+                                        <label for="{{ form.include_files.id_for_label }}" class="text-sm font-medium text-slate-100">
+                                            {{ form.include_files.label }}
+                                        </label>
+                                        {% if form.include_files.help_text %}
+                                        <p class="text-sm text-slate-400">{{ form.include_files.help_text }}</p>
+                                        {% endif %}
+                                    </div>
+                                </div>
+
+                                <!-- SSL Certificates -->
+                                <div class="flex items-start">
+                                    <div class="flex items-center h-5">
+                                        {{ form.include_ssl }}
+                                    </div>
+                                    <div class="ml-3">
+                                        <label for="{{ form.include_ssl.id_for_label }}" class="text-sm font-medium text-slate-100">
+                                            {{ form.include_ssl.label }}
+                                        </label>
+                                        {% if form.include_ssl.help_text %}
+                                        <p class="text-sm text-slate-400">{{ form.include_ssl.help_text }}</p>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                        </fieldset>
+                    </div>
+
+                    <!-- Form Errors -->
+                    {% if form.non_field_errors %}
+                    <div class="space-y-2">
+                        {% for error in form.non_field_errors %}
+                        {% alert error variant="danger" %}
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- Form Actions -->
+                <div class="px-6 py-4 bg-slate-750 border-t border-slate-700 flex justify-end space-x-3">
+                    {% button "Cancel" href=cancel_url variant="secondary" %}
+                    {% button "💾 Create Backup" type="submit" variant="primary" %}
+                </div>
+            </form>
+        </div>
+
+        <!-- Backup Information Sidebar -->
+        <div class="space-y-6">
+            <!-- Backup Types Info -->
+            <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+                <h3 class="text-lg font-semibold text-slate-100 mb-4">{% trans "Backup Types" %}</h3>
+                <div class="space-y-4">
+                    <div>
+                        <h4 class="text-sm font-medium text-slate-100">🔄 {% trans "Full Backup" %}</h4>
+                        <p class="text-sm text-slate-400 mt-1">
+                            {% trans "Complete backup including all data, settings, and configurations. Recommended for disaster recovery." %}
+                        </p>
+                    </div>
+                    <div>
+                        <h4 class="text-sm font-medium text-slate-100">📈 {% trans "Incremental Backup" %}</h4>
+                        <p class="text-sm text-slate-400 mt-1">
+                            {% trans "Only backs up changes since the last full backup. Faster but requires a previous full backup." %}
+                        </p>
+                    </div>
+                    <div>
+                        <h4 class="text-sm font-medium text-slate-100">⚙️ {% trans "Configuration Only" %}</h4>
+                        <p class="text-sm text-slate-400 mt-1">
+                            {% trans "Backs up settings and structure only, without user data. Quick backup for configuration changes." %}
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Backup Features Info -->
+            <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+                <h3 class="text-lg font-semibold text-slate-100 mb-4">{% trans "What's Included" %}</h3>
+                <div class="space-y-3">
+                    <div class="flex items-center">
+                        <span class="text-blue-400 text-lg mr-3">📧</span>
+                        <div>
+                            <p class="text-sm font-medium text-slate-100">{% trans "Email Data" %}</p>
+                            <p class="text-xs text-slate-400">{% trans "Mailboxes, messages, filters" %}</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center">
+                        <span class="text-green-400 text-lg mr-3">🗄️</span>
+                        <div>
+                            <p class="text-sm font-medium text-slate-100">{% trans "Databases" %}</p>
+                            <p class="text-xs text-slate-400">{% trans "MySQL, PostgreSQL" %}</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center">
+                        <span class="text-yellow-400 text-lg mr-3">📁</span>
+                        <div>
+                            <p class="text-sm font-medium text-slate-100">{% trans "Web Files" %}</p>
+                            <p class="text-xs text-slate-400">{% trans "HTML, uploads, logs" %}</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center">
+                        <span class="text-red-400 text-lg mr-3">🔒</span>
+                        <div>
+                            <p class="text-sm font-medium text-slate-100">{% trans "SSL Certificates" %}</p>
+                            <p class="text-xs text-slate-400">{% trans "Certificates, private keys" %}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Important Notes -->
+            <div class="bg-yellow-900 border border-yellow-700 rounded-lg p-4">
+                <div class="flex">
+                    <div class="flex-shrink-0">
+                        <span class="text-yellow-400 text-lg">⚠️</span>
+                    </div>
+                    <div class="ml-3">
+                        <h3 class="text-sm font-medium text-yellow-100">{% trans "Important Notes" %}</h3>
+                        <div class="mt-2 text-sm text-yellow-200">
+                            <ul class="list-disc pl-5 space-y-1">
+                                <li>{% trans "Backups are stored securely in encrypted S3 storage" %}</li>
+                                <li>{% trans "Large sites may take several minutes to backup" %}</li>
+                                <li>{% trans "The site will remain online during backup" %}</li>
+                                <li>{% trans "You can monitor progress after starting the backup" %}</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

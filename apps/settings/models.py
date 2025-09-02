@@ -162,6 +162,18 @@ class SystemSetting(models.Model):
     def __str__(self) -> str:
         return f"⚙️ {self.key}: {self.get_display_value()}"
 
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Save setting with automatic encryption for sensitive values"""
+        # Handle encryption for sensitive settings
+        if self.is_sensitive and self.value is not None:
+            from .encryption import SettingsEncryption  # noqa: PLC0415
+            encryption = SettingsEncryption()
+            # Only encrypt if not already encrypted
+            if not encryption.is_encrypted(str(self.value)):
+                self.value = encryption.encrypt_value(str(self.value))
+        
+        super().save(*args, **kwargs)
+
     def clean(self) -> None:
         """Validate setting data"""
         super().clean()
@@ -264,18 +276,6 @@ class SystemSetting(models.Model):
         """Get human-readable category name"""
         # Simple capitalization of category name since CATEGORY_CHOICES doesn't exist
         return self.category.replace('_', ' ').title()
-
-    def save(self, *args: Any, **kwargs: Any) -> None:
-        """Save setting with automatic encryption for sensitive values"""
-        # Handle encryption for sensitive settings
-        if self.is_sensitive and self.value is not None:
-            from .encryption import SettingsEncryption  # noqa: PLC0415
-            encryption = SettingsEncryption()
-            # Only encrypt if not already encrypted
-            if not encryption.is_encrypted(str(self.value)):
-                self.value = encryption.encrypt_value(str(self.value))
-        
-        super().save(*args, **kwargs)
 
     def reset_to_default(self) -> None:
         """Reset setting to its default value"""

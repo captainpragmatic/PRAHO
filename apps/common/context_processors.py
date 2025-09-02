@@ -179,6 +179,9 @@ def navigation_dropdowns(request: HttpRequest) -> dict[str, Any]:
             {"text": "Services", "url": "/app/provisioning/services/", "icon": "🚀"},
             {"text": "Domains", "url": "/app/domains/", "icon": "🌐"},
             {"divider": True},
+            {"text": "Virtualmin Servers", "url": "/app/provisioning/virtualmin/servers/", "icon": "🖥️"},
+            {"text": "Hosting Accounts", "url": "/app/provisioning/virtualmin/accounts/", "icon": "🏠"},
+            {"divider": True},
             {"text": "Registrars", "url": "/app/domains/admin/registrars/", "icon": "🏢"},
             {"text": "TLD Management", "url": "/app/domains/admin/tlds/", "icon": "🌍"},
         ]

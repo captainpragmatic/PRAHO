@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% load ui_components %}
+{% load i18n %}
+
+{% block title %}{{ page_title }} - {% trans "Virtualmin Accounts" %}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- =============================================================================== -->
+    <!-- PAGE HEADER WITH ACTIONS -->
+    <!-- =============================================================================== -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+        <div>
+            <nav class="text-sm text-slate-400 mb-2">
+                Management > Virtualmin > Accounts
+            </nav>
+            <h1 class="text-2xl font-bold text-slate-100 mt-2">{{ page_title }}</h1>
+            <p class="mt-2 text-sm text-slate-400">
+                {% trans "Manage hosting accounts on this server" %}
+            </p>
+        </div>
+        <div class="mt-4 sm:mt-0 flex items-center space-x-3">
+            <button class="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-500" 
+                    hx-get="{% url 'provisioning:virtualmin_accounts' %}" 
+                    hx-swap="innerHTML" 
+                    hx-target="#accounts-container">
+                🔄 Refresh Accounts
+            </button>
+            {% button "New Account" href="#" variant="primary" disabled=True %}
+        </div>
+    </div>
+
+    <!-- =============================================================================== -->
+    <!-- FILTERS AND SEARCH -->
+    <!-- =============================================================================== -->
+    <div class="bg-slate-800 rounded-lg border border-slate-700 p-4">
+        <form method="get" class="flex flex-col sm:flex-row gap-4" hx-get="{{ request.path }}" hx-target="#accounts-container" hx-trigger="submit, change delay:500ms">
+            <div class="flex-1">
+                <input type="search" name="search" value="{{ request.GET.search }}" 
+                       placeholder="{% trans 'Search accounts by domain...' %}"
+                       class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+            </div>
+            <div class="sm:w-48">
+                <select name="status" class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                    <option value="">{% trans "All Status" %}</option>
+                    <option value="active" {% if request.GET.status == "active" %}selected{% endif %}>{% trans "Active" %}</option>
+                    <option value="disabled" {% if request.GET.status == "disabled" %}selected{% endif %}>{% trans "Disabled" %}</option>
+                    <option value="suspended" {% if request.GET.status == "suspended" %}selected{% endif %}>{% trans "Suspended" %}</option>
+                </select>
+            </div>
+            <div class="sm:w-48">
+                <select name="plan" class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                    <option value="">{% trans "All Plans" %}</option>
+                    {% for plan in available_plans %}
+                    <option value="{{ plan.id }}" {% if request.GET.plan == plan.id|stringformat:"s" %}selected{% endif %}>{{ plan.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </form>
+    </div>
+
+    <!-- =============================================================================== -->
+    <!-- ACCOUNTS CONTAINER (HTMX Target) -->
+    <!-- =============================================================================== -->
+    <div id="accounts-container">
+        {% include "provisioning/virtualmin/partials/accounts_table.html" %}
+    </div>
+</div>
+{% endblock %}

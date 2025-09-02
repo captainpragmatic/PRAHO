@@ -126,6 +126,12 @@ class WebhookEvent(models.Model):
     def __str__(self) -> str:
         return f"🔄 {self.get_source_display()} | {self.event_type} | {self.status}"
 
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Ensure non-null signature_hash value for NOT NULL DB constraint."""
+        if self.signature_hash is None:
+            self.signature_hash = ""
+        super().save(*args, **kwargs)
+
     @property
     def payload_hash(self) -> str:
         """📋 Generate hash of payload for deduplication by content
@@ -194,12 +200,6 @@ class WebhookEvent(models.Model):
         self.processed_at = timezone.now()
         if save:
             self.save(update_fields=["status", "error_message", "processed_at", "updated_at"])
-
-    def save(self, *args: Any, **kwargs: Any) -> None:
-        """Ensure non-null signature_hash value for NOT NULL DB constraint."""
-        if self.signature_hash is None:
-            self.signature_hash = ""
-        super().save(*args, **kwargs)
 
     @classmethod
     def is_duplicate(cls, source: str, event_id: str) -> bool:
@@ -288,6 +288,14 @@ class WebhookDelivery(models.Model):
             models.Index(fields=["customer", "event_type", "scheduled_at"], name="delivery_customer_idx"),
         )
 
+    def __str__(self) -> str:
+        return f"📤 {self.customer} | {self.event_type} | {self.status}"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Override save to call clean() for validation"""
+        self.clean()
+        super().save(*args, **kwargs)
+
     def clean(self) -> None:
         """🔒 Validate webhook delivery for SSRF protection"""
         # Skip the default URL validation to implement our own security checks
@@ -334,11 +342,3 @@ class WebhookDelivery(models.Model):
             except Exception as e:
                 # Only catch non-ValidationError exceptions
                 raise ValidationError("Invalid webhook URL format") from e
-
-    def save(self, *args: Any, **kwargs: Any) -> None:
-        """Override save to call clean() for validation"""
-        self.clean()
-        super().save(*args, **kwargs)
-
-    def __str__(self) -> str:
-        return f"📤 {self.customer} | {self.event_type} | {self.status}"

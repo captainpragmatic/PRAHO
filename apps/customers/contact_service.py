@@ -24,6 +24,9 @@ from .contact_models import CustomerAddress, CustomerNote, CustomerPaymentMethod
 
 logger = logging.getLogger(__name__)
 
+# Constants
+ROMANIAN_POSTAL_CODE_LENGTH = 6
+
 
 @dataclass
 class AddressData:
@@ -205,7 +208,7 @@ class ContactService:
                 validation_result["missing_fields"].append(field)
         
         # Validate postal code format for Romania
-        if address.country == "România" and address.postal_code and (not address.postal_code.isdigit() or len(address.postal_code) != 6):
-            validation_result["warnings"].append("Romanian postal codes should be 6 digits")
+        if address.country == "România" and address.postal_code and (not address.postal_code.isdigit() or len(address.postal_code) != ROMANIAN_POSTAL_CODE_LENGTH):
+            validation_result["warnings"].append(f"Romanian postal codes should be {ROMANIAN_POSTAL_CODE_LENGTH} digits")
         
         return validation_result

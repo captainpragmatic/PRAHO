@@ -1,0 +1,256 @@
+{% extends "base.html" %}
+{% load ui_components %}
+{% load i18n %}
+
+{% block title %}{{ page_title }} - {% trans "Backup Status" %}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- =============================================================================== -->
+    <!-- PAGE HEADER -->
+    <!-- =============================================================================== -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+        <div>
+            <nav class="text-sm text-slate-400 mb-2">
+                Virtualmin > Jobs > {{ job.operation }}
+            </nav>
+            <h1 class="text-2xl font-bold text-slate-100">{{ page_title }}</h1>
+            <p class="mt-2 text-sm text-slate-400">
+                {% trans "Monitor backup/restore operation progress" %}
+            </p>
+        </div>
+        <div class="mt-4 sm:mt-0">
+            {% if is_complete %}
+                {% button "Back to Account" href=account_url variant="primary" %}
+            {% else %}
+                {% button "Refresh" href=refresh_url variant="secondary" hx_get=refresh_url hx_swap="innerHTML" hx_target="#job-status-container" %}
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- =============================================================================== -->
+    <!-- JOB STATUS CONTAINER (HTMX Target) -->
+    <!-- =============================================================================== -->
+    <div id="job-status-container" 
+         {% if not is_complete %}
+         hx-get="{{ refresh_url }}" 
+         hx-trigger="every 3s" 
+         hx-swap="innerHTML"
+         {% endif %}>
+        {% include "provisioning/virtualmin/partials/job_status.html" %}
+    </div>
+
+    <!-- =============================================================================== -->
+    <!-- JOB DETAILS -->
+    <!-- =============================================================================== -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Job Information -->
+        <div class="lg:col-span-2">
+            <div class="bg-slate-800 rounded-lg border border-slate-700">
+                <div class="px-6 py-4 border-b border-slate-700">
+                    <h2 class="text-lg font-semibold text-slate-100">{% trans "Job Details" %}</h2>
+                </div>
+                <div class="px-6 py-4">
+                    <dl class="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2">
+                        <div>
+                            <dt class="text-sm font-medium text-slate-400">{% trans "Job ID" %}</dt>
+                            <dd class="mt-1 text-sm text-slate-100 font-mono">{{ job.id }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-sm font-medium text-slate-400">{% trans "Operation" %}</dt>
+                            <dd class="mt-1 text-sm text-slate-100">{{ job.get_operation_display }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-sm font-medium text-slate-400">{% trans "Domain" %}</dt>
+                            <dd class="mt-1 text-sm text-slate-100">{{ job.account.domain }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-sm font-medium text-slate-400">{% trans "Server" %}</dt>
+                            <dd class="mt-1 text-sm text-slate-100">{{ job.server.name }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-sm font-medium text-slate-400">{% trans "Started" %}</dt>
+                            <dd class="mt-1 text-sm text-slate-100">{{ job.started_at|date:"M d, Y H:i:s" }}</dd>
+                        </div>
+                        {% if job.completed_at %}
+                        <div>
+                            <dt class="text-sm font-medium text-slate-400">{% trans "Completed" %}</dt>
+                            <dd class="mt-1 text-sm text-slate-100">{{ job.completed_at|date:"M d, Y H:i:s" }}</dd>
+                        </div>
+                        {% endif %}
+                        {% if job.parameters %}
+                        <div class="sm:col-span-2">
+                            <dt class="text-sm font-medium text-slate-400">{% trans "Parameters" %}</dt>
+                            <dd class="mt-1">
+                                <div class="bg-slate-900 rounded-md p-3">
+                                    <pre class="text-xs text-slate-300">{{ job.parameters|pprint }}</pre>
+                                </div>
+                            </dd>
+                        </div>
+                        {% endif %}
+                    </dl>
+                </div>
+            </div>
+        </div>
+
+        <!-- Status Timeline -->
+        <div class="space-y-6">
+            <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+                <h3 class="text-lg font-semibold text-slate-100 mb-4">{% trans "Status Timeline" %}</h3>
+                <div class="space-y-4">
+                    {% if job.operation == "backup_domain" %}
+                    <!-- Backup Timeline -->
+                    <div class="flex items-center">
+                        <div class="flex-shrink-0">
+                            <div class="w-8 h-8 bg-green-600 rounded-full flex items-center justify-center">
+                                <span class="text-white text-xs">✓</span>
+                            </div>
+                        </div>
+                        <div class="ml-3">
+                            <p class="text-sm font-medium text-slate-100">{% trans "Job Created" %}</p>
+                            <p class="text-xs text-slate-400">{{ job.started_at|date:"H:i:s" }}</p>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center">
+                        <div class="flex-shrink-0">
+                            {% if live_status.progress >= 30 %}
+                            <div class="w-8 h-8 bg-green-600 rounded-full flex items-center justify-center">
+                                <span class="text-white text-xs">✓</span>
+                            </div>
+                            {% else %}
+                            <div class="w-8 h-8 bg-slate-600 rounded-full flex items-center justify-center">
+                                <span class="text-slate-400 text-xs">○</span>
+                            </div>
+                            {% endif %}
+                        </div>
+                        <div class="ml-3">
+                            <p class="text-sm font-medium text-slate-100">{% trans "Backup Started" %}</p>
+                            <p class="text-xs text-slate-400">{% trans "Creating domain backup" %}</p>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center">
+                        <div class="flex-shrink-0">
+                            {% if live_status.progress >= 85 %}
+                            <div class="w-8 h-8 bg-green-600 rounded-full flex items-center justify-center">
+                                <span class="text-white text-xs">✓</span>
+                            </div>
+                            {% else %}
+                            <div class="w-8 h-8 bg-slate-600 rounded-full flex items-center justify-center">
+                                <span class="text-slate-400 text-xs">○</span>
+                            </div>
+                            {% endif %}
+                        </div>
+                        <div class="ml-3">
+                            <p class="text-sm font-medium text-slate-100">{% trans "Verification" %}</p>
+                            <p class="text-xs text-slate-400">{% trans "Verifying backup integrity" %}</p>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center">
+                        <div class="flex-shrink-0">
+                            {% if live_status.progress >= 100 %}
+                            <div class="w-8 h-8 bg-green-600 rounded-full flex items-center justify-center">
+                                <span class="text-white text-xs">✓</span>
+                            </div>
+                            {% else %}
+                            <div class="w-8 h-8 bg-slate-600 rounded-full flex items-center justify-center">
+                                <span class="text-slate-400 text-xs">○</span>
+                            </div>
+                            {% endif %}
+                        </div>
+                        <div class="ml-3">
+                            <p class="text-sm font-medium text-slate-100">{% trans "Upload Complete" %}</p>
+                            <p class="text-xs text-slate-400">{% trans "Backup stored in S3" %}</p>
+                        </div>
+                    </div>
+                    {% else %}
+                    <!-- Restore Timeline -->
+                    <div class="flex items-center">
+                        <div class="flex-shrink-0">
+                            <div class="w-8 h-8 bg-green-600 rounded-full flex items-center justify-center">
+                                <span class="text-white text-xs">✓</span>
+                            </div>
+                        </div>
+                        <div class="ml-3">
+                            <p class="text-sm font-medium text-slate-100">{% trans "Job Created" %}</p>
+                            <p class="text-xs text-slate-400">{{ job.started_at|date:"H:i:s" }}</p>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center">
+                        <div class="flex-shrink-0">
+                            {% if live_status.progress >= 20 %}
+                            <div class="w-8 h-8 bg-green-600 rounded-full flex items-center justify-center">
+                                <span class="text-white text-xs">✓</span>
+                            </div>
+                            {% else %}
+                            <div class="w-8 h-8 bg-slate-600 rounded-full flex items-center justify-center">
+                                <span class="text-slate-400 text-xs">○</span>
+                            </div>
+                            {% endif %}
+                        </div>
+                        <div class="ml-3">
+                            <p class="text-sm font-medium text-slate-100">{% trans "Download" %}</p>
+                            <p class="text-xs text-slate-400">{% trans "Downloading backup from S3" %}</p>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center">
+                        <div class="flex-shrink-0">
+                            {% if live_status.progress >= 50 %}
+                            <div class="w-8 h-8 bg-green-600 rounded-full flex items-center justify-center">
+                                <span class="text-white text-xs">✓</span>
+                            </div>
+                            {% else %}
+                            <div class="w-8 h-8 bg-slate-600 rounded-full flex items-center justify-center">
+                                <span class="text-slate-400 text-xs">○</span>
+                            </div>
+                            {% endif %}
+                        </div>
+                        <div class="ml-3">
+                            <p class="text-sm font-medium text-slate-100">{% trans "Restore Data" %}</p>
+                            <p class="text-xs text-slate-400">{% trans "Restoring files and databases" %}</p>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center">
+                        <div class="flex-shrink-0">
+                            {% if live_status.progress >= 100 %}
+                            <div class="w-8 h-8 bg-green-600 rounded-full flex items-center justify-center">
+                                <span class="text-white text-xs">✓</span>
+                            </div>
+                            {% else %}
+                            <div class="w-8 h-8 bg-slate-600 rounded-full flex items-center justify-center">
+                                <span class="text-slate-400 text-xs">○</span>
+                            </div>
+                            {% endif %}
+                        </div>
+                        <div class="ml-3">
+                            <p class="text-sm font-medium text-slate-100">{% trans "Verification" %}</p>
+                            <p class="text-xs text-slate-400">{% trans "Verifying restore integrity" %}</p>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Job Statistics -->
+            {% if job.response_data %}
+            <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+                <h3 class="text-lg font-semibold text-slate-100 mb-4">{% trans "Job Results" %}</h3>
+                <div class="space-y-2">
+                    {% for key, value in job.response_data.items %}
+                    <div class="flex justify-between">
+                        <span class="text-sm text-slate-400">{{ key|title }}:</span>
+                        <span class="text-sm text-slate-100">{{ value }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
