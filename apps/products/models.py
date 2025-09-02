@@ -20,6 +20,11 @@ from django.utils.translation import gettext_lazy as _
 
 logger = logging.getLogger(__name__)
 
+# Security constants
+MAX_JSON_CONTENT_SIZE = 10000  # Maximum size for JSON content
+MAX_JSON_DEPTH = 10  # Maximum JSON nesting depth
+MAX_PRICE_CENTS = 100_000_000  # Maximum price in cents (1M major units)
+
 
 # ===============================================================================
 # SECURITY VALIDATION FUNCTIONS
@@ -36,12 +41,11 @@ def validate_json_field(data: Any, field_name: str = "JSON field") -> None:
     # Apply only to simple "single large value" payloads to allow legitimate nested structures
     if isinstance(data, dict) and len(data) == 1:
         only_value = next(iter(data.values()))
-        if isinstance(only_value, str) and len(only_value) > 10000:
+        if isinstance(only_value, str) and len(only_value) > MAX_JSON_CONTENT_SIZE:
             raise ValidationError("JSON content too large")
     # Apply tighter limit for known model-bound fields to prevent bloat
     model_bound_fields = {"tags", "meta", "module_config"}
-    if field_name in model_bound_fields:
-        if len(data_str) > 10000:
+    if field_name in model_bound_fields and len(data_str) > MAX_JSON_CONTENT_SIZE:
             raise ValidationError(f"{field_name} too large")
     
     # Depth check
@@ -51,14 +55,13 @@ def validate_json_field(data: Any, field_name: str = "JSON field") -> None:
     if isinstance(data, dict):
         # Check for dangerous keys
         dangerous_keys = ['eval', 'import', 'subprocess', 'exec', '__import__']
-        for key in data.keys():
+        for key in data:
             if key in dangerous_keys:
                 raise ValidationError(f"Dangerous key '{key}' in JSON data")
         
         # Check for dangerous patterns in values
         for key, value in data.items():
-            if isinstance(value, str):
-                if any(pattern in value.lower() for pattern in ['<script', 'javascript:', "eval('", 'alert(', '__import__', 'subprocess.']):
+            if isinstance(value, str) and any(pattern in value.lower() for pattern in ['<script', 'javascript:', "eval('", 'alert(', '__import__', 'subprocess.']):
                     raise ValidationError(f"Dangerous pattern in JSON value for key '{key}'")
 
     # Also run recursive security checks to cover nested structures
@@ -66,7 +69,7 @@ def validate_json_field(data: Any, field_name: str = "JSON field") -> None:
 
 def _get_json_depth(obj: Any, depth: int = 0) -> int:
     """Helper function to calculate JSON depth"""
-    if depth > 10:  # Max depth of 10 levels
+    if depth > MAX_JSON_DEPTH:
         raise ValidationError("JSON data too deep")
     
     max_depth = depth
@@ -100,7 +103,7 @@ def _check_json_security(data: Any, field_name: str = "JSON field") -> None:
             _check_json_security(item, field_name)
 
 
-def validate_product_config(config) -> None:
+def validate_product_config(config: Any) -> None:
     """🔒 Validate product configuration"""
     if config is None:
         return
@@ -239,7 +242,7 @@ class Product(models.Model):
     def __str__(self) -> str:
         return self.name
 
-    def clean(self):
+    def clean(self) -> None:
         """🔒 Validate model fields for security"""
         super().clean()
         
@@ -380,7 +383,6 @@ class ProductPrice(models.Model):
             raise ValidationError("Amount cannot be negative")
 
         # Reject unrealistic prices (> 1,000,000.00 in major units)
-        MAX_PRICE_CENTS = 100_000_000
         if int(self.amount_cents) > MAX_PRICE_CENTS:
             raise ValidationError("Amount too large")
 
@@ -388,16 +390,16 @@ class ProductPrice(models.Model):
         if self.discount_percent is not None:
             try:
                 dp = Decimal(self.discount_percent)
-            except Exception:
-                raise ValidationError("Invalid discount percent")
+            except Exception as e:
+                raise ValidationError("Invalid discount percent") from e
             if dp < Decimal("0") or dp > Decimal("100"):
                 raise ValidationError("Invalid discount percent")
 
         # Quantity limits
         if self.minimum_quantity is not None and int(self.minimum_quantity) < 1:
             raise ValidationError("Minimum quantity must be at least 1")
-        if self.maximum_quantity is not None and self.minimum_quantity is not None:
-            if int(self.maximum_quantity) < int(self.minimum_quantity):
+        if (self.maximum_quantity is not None and self.minimum_quantity is not None and 
+            int(self.maximum_quantity) < int(self.minimum_quantity)):
                 raise ValidationError("Maximum quantity cannot be less than minimum quantity")
 
         # Promo pricing requirements

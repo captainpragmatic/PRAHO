@@ -74,8 +74,6 @@ def template_api(request: HttpRequest) -> JsonResponse:
 def email_stats_api(request: HttpRequest) -> JsonResponse:
     # Staff or admin may access basic stats
     if not (request.user.is_staff or request.user.is_superuser):
-        from django.http import HttpResponseForbidden
-
         return HttpResponseForbidden()
 
     total = EmailLog.objects.count()
@@ -88,8 +86,6 @@ def email_stats_api(request: HttpRequest) -> JsonResponse:
 def security_monitoring_api(request: HttpRequest) -> JsonResponse:
     # Admin-only
     if not request.user.is_superuser:
-        from django.http import HttpResponseForbidden
-
         return HttpResponseForbidden()
 
     # Minimal payload for tests

@@ -19,6 +19,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Security constants
+MAX_CONTEXT_VALUE_LENGTH = 1000  # Maximum length for template context values
+
 
 # ===============================================================================
 # VALIDATION FUNCTIONS
@@ -56,9 +59,9 @@ def validate_template_context(context: dict[str, Any]) -> dict[str, Any]:
                 cleaned_value = re.sub(pattern, "", cleaned_value, flags=re.IGNORECASE)
             # Remove alert('...') payloads entirely
             cleaned_value = re.sub(r"alert\s*\([^)]*\)", "", cleaned_value, flags=re.IGNORECASE)
-            # Enforce per-value size limit of 1000 characters
-            if len(cleaned_value) > 1000:
-                cleaned_value = cleaned_value[:1000]
+            # Enforce per-value size limit
+            if len(cleaned_value) > MAX_CONTEXT_VALUE_LENGTH:
+                cleaned_value = cleaned_value[:MAX_CONTEXT_VALUE_LENGTH]
             sanitized_context[key] = cleaned_value
         else:
             sanitized_context[key] = value
@@ -77,7 +80,7 @@ def render_template_safely(template_content: str, context: dict[str, Any]) -> st
     original_context = dict(context)
     sanitized_context = validate_template_context(context)
     for _k, v in original_context.items():
-        if isinstance(v, str) and len(v) > 1000:
+        if isinstance(v, str) and len(v) > MAX_CONTEXT_VALUE_LENGTH:
             value_truncated = True
     
     # Simple template rendering (placeholder implementation)

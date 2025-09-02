@@ -26,6 +26,14 @@ from apps.settings.encryption import settings_encryption
 logger = logging.getLogger(__name__)
 ENCRYPTION_AVAILABLE = True
 
+# Security constants
+MAX_TEMPLATE_SIZE = 100_000  # 100KB limit for templates
+MAX_JSON_SIZE = 10_000  # 10KB limit for JSON data
+MAX_JSON_DEPTH = 10  # Maximum JSON nesting depth
+MAX_SUBJECT_LENGTH = 200  # Maximum subject line length
+MAX_NAME_LENGTH = 200  # Maximum campaign name length
+CONTENT_PREVIEW_LENGTH = 100  # Length for content preview
+
 
 # ===============================================================================
 # SECURITY VALIDATION FUNCTIONS
@@ -37,7 +45,7 @@ def validate_template_content(content: str) -> None:
         return
     
     # Size limit check - templates over 100KB are rejected
-    if len(content) > 100000:
+    if len(content) > MAX_TEMPLATE_SIZE:
         raise ValidationError("Template content too large")
     
     # Disallowed tags that should be explicitly blocked
@@ -69,12 +77,12 @@ def validate_json_field(data: Any) -> None:
         return
     
     # Check size limit
-    if len(str(data)) > 10000:
+    if len(str(data)) > MAX_JSON_SIZE:
         raise ValidationError("JSON content too large")
     
     # Check depth limit to prevent stack overflow
-    def check_depth(obj, depth=0):
-        if depth > 10:  # Max depth of 10 levels
+    def check_depth(obj: Any, depth: int = 0) -> None:
+        if depth > MAX_JSON_DEPTH:
             raise ValidationError("JSON nesting too deep")
         
         if isinstance(obj, dict):
@@ -92,7 +100,7 @@ def validate_email_subject(subject: str) -> None:
     if not subject:
         return
     
-    if len(subject) > 200:
+    if len(subject) > MAX_SUBJECT_LENGTH:
         raise ValidationError("Subject too long")
     
     # Check for email header injection attempts (newlines, carriage returns, null bytes)
@@ -225,10 +233,10 @@ class EmailTemplate(models.Model):
         # Basic JSON size guard for variables
         try:
             # Very lightweight estimate without serialization
-            if self.variables and len(str(self.variables)) > 10000:
+            if self.variables and len(str(self.variables)) > MAX_JSON_SIZE:
                 raise ValidationError("Template variables too large")
         except Exception as e:  # pragma: no cover - defensive
-            raise ValidationError(f"Invalid variables JSON: {e}")
+            raise ValidationError(f"Invalid variables JSON: {e}") from e
         
         # Log template modification for security audit
         try:
@@ -385,7 +393,7 @@ class EmailLog(models.Model):
             raise ValidationError("Invalid subject header")
 
         # Basic JSON/meta size limit
-        if self.meta and len(str(self.meta)) > 10000:
+        if self.meta and len(str(self.meta)) > MAX_JSON_SIZE:
             raise ValidationError("Metadata too large")
 
         # Log sending activity with masked email (only on send-like statuses)
@@ -416,8 +424,8 @@ class EmailLog(models.Model):
             content = settings_encryption.decrypt_if_needed(content)
         except Exception:  # pragma: no cover
             pass
-        preview = content[:100]
-        return preview + ("..." if len(content) > 100 else "")
+        preview = content[:CONTENT_PREVIEW_LENGTH]
+        return preview + ("..." if len(content) > CONTENT_PREVIEW_LENGTH else "")
 
     def get_decrypted_body_html(self) -> str:
         """Return decrypted HTML body, handling missing encryption gracefully."""
@@ -554,11 +562,11 @@ class EmailCampaign(models.Model):
     def clean(self) -> None:
         """Validate campaign configuration and GDPR compliance hints."""
         # Size limit for audience filter
-        if self.audience_filter and len(str(self.audience_filter)) > 10000:
+        if self.audience_filter and len(str(self.audience_filter)) > MAX_JSON_SIZE:
             raise ValidationError("Audience filter JSON too large")
 
         # Name length constraint
-        if self.name and len(self.name) > 200:
+        if self.name and len(self.name) > MAX_NAME_LENGTH:
             raise ValidationError("Campaign name too long")
 
         # GDPR compliance warning for marketing without consent
