@@ -482,8 +482,8 @@ def settings_health_check(request: HttpRequest) -> JsonResponse:
 # ===============================================================================
 
 
-@admin_required
 @require_http_methods(["GET"])
+@login_required
 def export_settings(request: HttpRequest) -> HttpResponse:
     """
     📥 Export non-sensitive settings as JSON (for backup/migration)
@@ -492,7 +492,7 @@ def export_settings(request: HttpRequest) -> HttpResponse:
     """
     try:
         # Get only non-sensitive settings
-        settings = SystemSetting.objects.filter(is_active=True, is_sensitive=False).select_related("category")
+        settings = SystemSetting.objects.filter(is_active=True, is_sensitive=False)
         sensitive_count = SystemSetting.objects.filter(is_active=True, is_sensitive=True).count()
 
         user_email = (
@@ -514,13 +514,21 @@ def export_settings(request: HttpRequest) -> HttpResponse:
         }
 
         for setting in settings:
-            category_key = setting.category.key if setting.category else "uncategorized"
+            category_key = setting.category if setting.category else "uncategorized"
 
             if category_key not in export_data["categories"]:
-                export_data["categories"][category_key] = {
-                    "name": setting.category.name if setting.category else "Uncategorized",
-                    "description": setting.category.description if setting.category else "",
-                }
+                # Try to get the category object if it exists
+                try:
+                    category_obj = SettingCategory.objects.get(key=category_key)
+                    export_data["categories"][category_key] = {
+                        "name": category_obj.name,
+                        "description": category_obj.description,
+                    }
+                except SettingCategory.DoesNotExist:
+                    export_data["categories"][category_key] = {
+                        "name": category_key.title(),
+                        "description": f"Settings for {category_key}",
+                    }
 
             export_data["settings"].append(
                 {
@@ -564,7 +572,7 @@ def export_settings_full(request: HttpRequest) -> HttpResponse:
     """
     try:
         # Get all settings including sensitive ones
-        settings = SystemSetting.objects.filter(is_active=True).select_related("category")
+        settings = SystemSetting.objects.filter(is_active=True)
         sensitive_count = settings.filter(is_sensitive=True).count()
 
         user_email = (
@@ -586,13 +594,21 @@ def export_settings_full(request: HttpRequest) -> HttpResponse:
         }
 
         for setting in settings:
-            category_key = setting.category.key if setting.category else "uncategorized"
+            category_key = setting.category if setting.category else "uncategorized"
 
             if category_key not in export_data["categories"]:
-                export_data["categories"][category_key] = {
-                    "name": setting.category.name if setting.category else "Uncategorized",
-                    "description": setting.category.description if setting.category else "",
-                }
+                # Try to get the category object if it exists
+                try:
+                    category_obj = SettingCategory.objects.get(key=category_key)
+                    export_data["categories"][category_key] = {
+                        "name": category_obj.name,
+                        "description": category_obj.description,
+                    }
+                except SettingCategory.DoesNotExist:
+                    export_data["categories"][category_key] = {
+                        "name": category_key.title(),
+                        "description": f"Settings for {category_key}",
+                    }
 
             export_data["settings"].append(
                 {
@@ -626,3 +642,8 @@ def export_settings_full(request: HttpRequest) -> HttpResponse:
     except Exception as e:
         logger.error(f"💥 Error exporting full settings: {e}")
         return JsonResponse({"success": False, "error": "Failed to export settings"}, status=500)
+
+
+def test_export(request: HttpRequest) -> HttpResponse:
+    """Test view to debug URL routing issues"""
+    return JsonResponse({"message": "Test view works", "user": str(request.user)})

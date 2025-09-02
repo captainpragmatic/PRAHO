@@ -200,7 +200,7 @@ class Ticket(models.Model):
         prefix = f"TK{year}-"
         alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
-        for _ in range(10):  # Bounded retries to avoid infinite loops
+        for _attempt in range(10):  # Bounded retries to avoid infinite loops
             suffix = "".join(secrets.choice(alphabet) for _ in range(8))
             candidate = f"{prefix}{suffix}"
             if not Ticket.objects.filter(ticket_number=candidate).exists():
