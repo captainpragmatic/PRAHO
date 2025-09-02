@@ -1214,6 +1214,10 @@ def main():
                     break
                 except Customer.DoesNotExist:
                     continue
+                except Customer.MultipleObjectsReturned:
+                    # If multiple customers exist with this name, get the first one
+                    customer = Customer.objects.filter(name=name).first()
+                    break
 
             if not customer:
                 customer = Customer.objects.first()
