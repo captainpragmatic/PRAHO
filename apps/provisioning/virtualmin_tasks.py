@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypedDict
 
 from django.core.cache import cache
 from django.db import models
@@ -49,24 +49,22 @@ class VirtualminProvisioningConfig:
     server_id: str | None = None
 
 
-def provision_virtualmin_account(
-    service_id: str,
-    domain: str,
-    username: str | None = None,
-    password: str | None = None,
-    template: str = "Default",
-    server_id: str | None = None
-) -> dict[str, Any]:
+class VirtualminProvisioningParams(TypedDict, total=False):
+    """Parameters for Virtualmin account provisioning"""
+    service_id: str
+    domain: str
+    username: str | None
+    password: str | None
+    template: str
+    server_id: str | None
+
+
+def provision_virtualmin_account(params: VirtualminProvisioningParams) -> dict[str, Any]:
     """
     Sync task to provision Virtualmin account.
     
     Args:
-        service_id: PRAHO service UUID
-        domain: Primary domain name
-        username: Virtualmin username (auto-generated if None)
-        password: Account password (auto-generated if None)
-        template: Virtualmin template name
-        server_id: Target server UUID (auto-selected if None)
+        params: VirtualminProvisioningParams containing all provisioning parameters
         
     Returns:
         Dictionary with provisioning result
@@ -74,6 +72,8 @@ def provision_virtualmin_account(
     Raises:
         Exception: On provisioning failure (triggers retry)
     """
+    service_id = params['service_id']
+    domain = params['domain']
     correlation_id = f"provision_{service_id}_{domain}"
     
     logger.info(
@@ -92,6 +92,7 @@ def provision_virtualmin_account(
             
         # Get server if specified
         server = None
+        server_id = params.get('server_id')
         if server_id:
             try:
                 server = VirtualminServer.objects.get(id=server_id)
@@ -107,9 +108,9 @@ def provision_virtualmin_account(
         creation_data = VirtualminAccountCreationData(
             service=service,
             domain=domain,
-            username=username,
-            password=password,
-            template=template,
+            username=params.get('username'),
+            password=params.get('password'),
+            template=params.get('template', 'Default'),
             server=server
         )
         result = provisioning_service.create_virtualmin_account(creation_data)
@@ -555,18 +556,11 @@ def _is_retryable_error(error_message: str) -> bool:
 # TASK QUEUE WRAPPER FUNCTIONS
 # ===============================================================================
 
-def provision_virtualmin_account_async(
-    service_id: str,
-    domain: str,
-    username: str | None = None,
-    password: str | None = None,
-    template: str = "Default",
-    server_id: str | None = None
-) -> str:
+def provision_virtualmin_account_async(params: VirtualminProvisioningParams) -> str:
     """Queue Virtualmin account provisioning task."""
     return async_task(
         'apps.provisioning.virtualmin_tasks.provision_virtualmin_account',
-        service_id, domain, username, password, template, server_id,
+        params,
         timeout=TASK_TIME_LIMIT
     )
 

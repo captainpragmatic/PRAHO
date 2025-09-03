@@ -319,48 +319,78 @@ class DomainLifecycleService:
         customer: Customer, domain_name: str, years: int = 1, whois_privacy: bool = False, auto_renew: bool = True
     ) -> tuple[bool, Domain | str]:
         """🆕 Create new domain registration"""
-
-        # Validate domain name
+        
+        # Run all validation checks
+        validation_result = DomainLifecycleService._validate_registration_preconditions(domain_name, years)
+        if validation_result is not None:
+            return False, validation_result
+        
+        # Get validated components
+        components_result = DomainLifecycleService._get_registration_components(domain_name)
+        if isinstance(components_result, str):
+            return False, components_result
+        
+        tld, registrar = components_result
+        
+        # Execute registration
+        return DomainLifecycleService._execute_domain_registration(
+            customer, domain_name, tld, registrar, whois_privacy, auto_renew
+        )
+    
+    @staticmethod
+    def _validate_registration_preconditions(domain_name: str, years: int) -> str | None:
+        """Validate all preconditions for domain registration"""
+        # Validate domain name format
         is_valid, error_msg = DomainValidationService.validate_domain_name(domain_name)
         if not is_valid:
-            return False, error_msg
+            return error_msg
 
         # Validate registration period
         if years < MIN_REGISTRATION_YEARS or years > MAX_REGISTRATION_YEARS:
-            return False, cast(str, _("Registration period must be between {min} and {max} years").format(
+            return cast(str, _("Registration period must be between {min} and {max} years").format(
                 min=MIN_REGISTRATION_YEARS, max=MAX_REGISTRATION_YEARS))
 
+        # Check if domain already exists
+        if Domain.objects.filter(name=domain_name.lower()).exists():
+            return cast(str, _("Domain is already registered in the system"))
+        
+        return None
+    
+    @staticmethod
+    def _get_registration_components(domain_name: str) -> tuple[Any, Any] | str:
+        """Get TLD and registrar for domain registration"""
         # Extract and validate TLD
         tld_extension = DomainValidationService.extract_tld_from_domain(domain_name)
         tld = TLDService.get_tld_pricing(tld_extension)
         if not tld:
-            return False, cast(str, _(f"TLD '.{tld_extension}' is not supported"))
+            return cast(str, _(f"TLD '.{tld_extension}' is not supported"))
 
         # Select registrar
         registrar = RegistrarService.select_best_registrar_for_tld(tld)
         if not registrar:
-            return False, cast(str, _("No available registrar for this TLD"))
-
-        # Check if domain already exists
-        if Domain.objects.filter(name=domain_name.lower()).exists():
-            return False, cast(str, _("Domain is already registered in the system"))
-
+            return cast(str, _("No available registrar for this TLD"))
+        
+        return tld, registrar
+    
+    @staticmethod
+    def _execute_domain_registration(
+        customer: Customer, domain_name: str, tld: Any, registrar: Any, 
+        whois_privacy: bool, auto_renew: bool
+    ) -> tuple[bool, Domain | str]:
+        """Execute the actual domain registration"""
         try:
             with transaction.atomic():
-                # Create domain record
                 domain = Domain.objects.create(
                     name=domain_name.lower(),
                     tld=tld,
                     registrar=registrar,
                     customer=customer,
-                    status="pending",  # Will be updated when actually registered
+                    status="pending",
                     whois_privacy=whois_privacy,
                     auto_renew=auto_renew,
-                    # Expiration will be set when registration completes
                 )
 
                 logger.info(f"🆕 [Domain] Created domain registration record: {domain_name} for customer {customer.id}")
-
                 return True, domain
 
         except Exception as e:

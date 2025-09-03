@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import uuid
 from decimal import Decimal
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from django.core.validators import MinValueValidator
 from django.db import models
@@ -140,6 +140,17 @@ class Refund(models.Model):
         entity = f"Order {self.order.id}" if self.order else f"Invoice {self.invoice.id}"
         return f"Refund {self.reference_number} - {entity} - {self.amount} {self.currency.code}"
 
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        # Auto-generate reference number if not provided
+        if not self.reference_number:
+            self.reference_number = f"REF-{timezone.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:8].upper()}"
+
+        # Set processed_at when status changes to completed
+        if self.status == "completed" and not self.processed_at:
+            self.processed_at = timezone.now()
+
+        super().save(*args, **kwargs)
+
     def clean(self) -> None:
         """Validate refund data"""
         super().clean()
@@ -155,17 +166,6 @@ class Refund(models.Model):
 
         # Validate metadata
         validate_financial_json(self.metadata, "Refund metadata")
-
-    def save(self, *args: Any, **kwargs: Any) -> None:
-        # Auto-generate reference number if not provided
-        if not self.reference_number:
-            self.reference_number = f"REF-{timezone.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:8].upper()}"
-
-        # Set processed_at when status changes to completed
-        if self.status == "completed" and not self.processed_at:
-            self.processed_at = timezone.now()
-
-        super().save(*args, **kwargs)
 
     @property
     def amount(self) -> Decimal:

@@ -19,7 +19,7 @@ import logging
 import tempfile
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from django.core.cache import cache
 from django.utils import timezone
@@ -57,6 +57,16 @@ class RestoreConfig:
     restore_files: bool = True
     restore_ssl: bool = True
     force_restore: bool = False
+
+
+class RestoreOperationParams(TypedDict):
+    """Parameters for restore operation finalization"""
+    gateway: Any
+    account: Any
+    backup_metadata: dict[str, Any]
+    restore_id: str
+    config: RestoreConfig
+    rollback_data: dict[str, Any]
 
 
 logger = logging.getLogger(__name__)
@@ -183,31 +193,23 @@ class VirtualminBackupService:
                 
         return errors
 
-    def _finalize_restore_operation(
-        self, 
-        gateway: Any, 
-        account: VirtualminAccount, 
-        backup_metadata: dict[str, Any], 
-        restore_id: str, 
-        config: RestoreConfig, 
-        rollback_data: dict[str, Any]
-    ) -> Result[dict[str, Any], str]:
+    def _finalize_restore_operation(self, params: RestoreOperationParams) -> Result[dict[str, Any], str]:
         """Verify restore integrity and finalize the operation."""
         # Verify restore integrity
-        self._update_restore_progress(restore_id, "verifying_restore", 90)
-        integrity_result = self._verify_restore_integrity(gateway, account, backup_metadata)
+        self._update_restore_progress(params['restore_id'], "verifying_restore", 90)
+        integrity_result = self._verify_restore_integrity(params['gateway'], params['account'], params['backup_metadata'])
         if integrity_result.is_err():
             # Attempt rollback on verification failure
-            self._execute_restore_rollback(account, rollback_data)
+            self._execute_restore_rollback(params['account'], params['rollback_data'])
             return integrity_result
             
         # Finalize restore
-        self._update_restore_progress(restore_id, "completed", 100)
+        self._update_restore_progress(params['restore_id'], "completed", 100)
         restore_summary = self._finalize_restore_summary(
-            account, config.backup_id, restore_id, backup_metadata
+            params['account'], params['config'].backup_id, params['restore_id'], params['backup_metadata']
         )
         
-        logger.info(f"Restore completed successfully: {restore_id}")
+        logger.info(f"Restore completed successfully: {params['restore_id']}")
         return Ok(restore_summary)
 
     @audit_service_call("backup_domain")
@@ -339,9 +341,14 @@ class VirtualminBackupService:
                 errors = self._execute_restore_components(gateway, account, backup_path, config, restore_id)
                 
                 # Finalize restore operation
-                return self._finalize_restore_operation(
-                    gateway, account, backup_metadata, restore_id, config, rollback_data
-                )
+                return self._finalize_restore_operation(RestoreOperationParams(
+                    gateway=gateway,
+                    account=account,
+                    backup_metadata=backup_metadata,
+                    restore_id=restore_id,
+                    config=config,
+                    rollback_data=rollback_data
+                ))
                 
             except Exception as e:
                 # Execute rollback on any failure

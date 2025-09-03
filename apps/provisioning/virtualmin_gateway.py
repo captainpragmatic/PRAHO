@@ -609,75 +609,10 @@ class VirtualminGateway:
             VirtualminAPIError: On API-specific errors
         """
         try:
-            # Prepare URL
-            url = self.server.api_url
-            
-            # Make request
-            response = self._session.get(
-                url,
-                params=params,
-                timeout=self.config.timeout,
-                verify=self.config.verify_ssl,
-                stream=True  # For response size checking
-            )
-            
-            # Check response size
-            content_length = response.headers.get('content-length')
-            if content_length and int(content_length) > MAX_RESPONSE_SIZE_BYTES:
-                raise VirtualminAPIError(
-                    f"Response too large: {content_length} bytes",
-                    self.server.hostname
-                )
-                
-            # Read response with size limit
-            content = b""
-            for chunk in response.iter_content(chunk_size=8192):
-                content += chunk
-                if len(content) > MAX_RESPONSE_SIZE_BYTES:
-                    raise VirtualminAPIError(
-                        f"Response exceeds size limit: {MAX_RESPONSE_SIZE_MB}MB",
-                        self.server.hostname
-                    )
-                    
-            # Replace response content
-            response._content = content
-            
-            # Validate SSL certificate if configured
-            if self.server.use_ssl and self.config.cert_fingerprint and not self._validate_ssl_certificate(response):
-                    raise VirtualminAPIError(
-                        "SSL certificate validation failed",
-                        self.server.hostname
-                    )
-                    
-            # Check HTTP status
-            if response.status_code == HTTP_UNAUTHORIZED:
-                raise VirtualminAuthError(
-                    "Authentication failed - check API credentials",
-                    self.server.hostname
-                )
-            elif response.status_code == HTTP_FORBIDDEN:
-                raise VirtualminAuthError(
-                    "Access forbidden - check ACL permissions",
-                    self.server.hostname
-                )
-            elif response.status_code == HTTP_TOO_MANY_REQUESTS:
-                raise VirtualminRateLimitedError(
-                    "Server rate limit exceeded",
-                    self.server.hostname
-                )
-            elif response.status_code >= HTTP_INTERNAL_SERVER_ERROR:
-                raise VirtualminTransientError(
-                    f"Server error: HTTP {response.status_code}",
-                    self.server.hostname,
-                    http_status=response.status_code
-                )
-            elif response.status_code >= HTTP_BAD_REQUEST:
-                raise VirtualminAPIError(
-                    f"Client error: HTTP {response.status_code}",
-                    self.server.hostname,
-                    http_status=response.status_code
-                )
-                
+            response = self._execute_http_request(params)
+            self._validate_response_size(response)
+            self._validate_ssl_if_configured(response)
+            self._validate_http_status(response)
             return response
             
         except requests.exceptions.ConnectTimeout as e:
@@ -700,6 +635,78 @@ class VirtualminGateway:
                 f"SSL error connecting to {self.server.hostname}: {e}",
                 self.server.hostname
             ) from e
+    
+    def _execute_http_request(self, params: dict[str, Any]) -> requests.Response:
+        """Execute the HTTP request and return response."""
+        return self._session.get(
+            self.server.api_url,
+            params=params,
+            timeout=self.config.timeout,
+            verify=self.config.verify_ssl,
+            stream=True  # For response size checking
+        )
+    
+    def _validate_response_size(self, response: requests.Response) -> None:
+        """Validate response size and read content with size limits."""
+        # Check response size
+        content_length = response.headers.get('content-length')
+        if content_length and int(content_length) > MAX_RESPONSE_SIZE_BYTES:
+            raise VirtualminAPIError(
+                f"Response too large: {content_length} bytes",
+                self.server.hostname
+            )
+            
+        # Read response with size limit
+        content = b""
+        for chunk in response.iter_content(chunk_size=8192):
+            content += chunk
+            if len(content) > MAX_RESPONSE_SIZE_BYTES:
+                raise VirtualminAPIError(
+                    f"Response exceeds size limit: {MAX_RESPONSE_SIZE_MB}MB",
+                    self.server.hostname
+                )
+                
+        # Replace response content
+        response._content = content
+    
+    def _validate_ssl_if_configured(self, response: requests.Response) -> None:
+        """Validate SSL certificate if configured."""
+        if (self.server.use_ssl and self.config.cert_fingerprint and 
+            not self._validate_ssl_certificate(response)):
+            raise VirtualminAPIError(
+                "SSL certificate validation failed",
+                self.server.hostname
+            )
+    
+    def _validate_http_status(self, response: requests.Response) -> None:
+        """Validate HTTP status codes and raise appropriate errors."""
+        if response.status_code == HTTP_UNAUTHORIZED:
+            raise VirtualminAuthError(
+                "Authentication failed - check API credentials",
+                self.server.hostname
+            )
+        elif response.status_code == HTTP_FORBIDDEN:
+            raise VirtualminAuthError(
+                "Access forbidden - check ACL permissions",
+                self.server.hostname
+            )
+        elif response.status_code == HTTP_TOO_MANY_REQUESTS:
+            raise VirtualminRateLimitedError(
+                "Server rate limit exceeded",
+                self.server.hostname
+            )
+        elif response.status_code >= HTTP_INTERNAL_SERVER_ERROR:
+            raise VirtualminTransientError(
+                f"Server error: HTTP {response.status_code}",
+                self.server.hostname,
+                http_status=response.status_code
+            )
+        elif response.status_code >= HTTP_BAD_REQUEST:
+            raise VirtualminAPIError(
+                f"Client error: HTTP {response.status_code}",
+                self.server.hostname,
+                http_status=response.status_code
+            )
             
     def test_connection(self) -> Result[dict[str, Any], str]:
         """
@@ -755,56 +762,65 @@ class VirtualminGateway:
         if result.is_ok():
             response = result.unwrap()
             if response.success:
-                # Extract domains from response
-                domains = []
-                if isinstance(response.data, dict):
-                    # Handle different response formats
-                    if 'domains' in response.data:
-                        domains = response.data['domains']
-                    elif 'data' in response.data:
-                        # Parse Virtualmin's table-like response format
-                        data_items = response.data['data']
-                        for item in data_items:
-                            if isinstance(item, dict) and 'name' in item:
-                                domain_line = item['name'].strip()
-                                # Skip header and separator lines
-                                if (domain_line.startswith(('Domain', '---')) or 
-                                    not domain_line):
-                                    continue
-                                
-                                # Parse domain info from the formatted line
-                                # Format: "domain.com    username    description"  # noqa: ERA001
-                                parts = domain_line.split()
-                                if parts and len(parts) >= DOMAIN_PARTS_MIN:
-                                    domain_name = parts[0]
-                                    username = parts[DOMAIN_USERNAME_INDEX] if len(parts) > DOMAIN_USERNAME_INDEX else ""
-                                    description = " ".join(parts[DOMAIN_DESCRIPTION_INDEX:]) if len(parts) > DOMAIN_DESCRIPTION_INDEX else ""
-                                    
-                                    if name_only:
-                                        domains.append(domain_name)
-                                    else:
-                                        domains.append({
-                                            'domain': domain_name,
-                                            'username': username, 
-                                            'description': description
-                                        })
-                    elif 'items' in response.data:
-                        domains = response.data['items']
-                    else:
-                        # Parse raw response for domain names
-                        raw_response = response.data.get('raw_response', '')
-                        if raw_response:
-                            domains = [
-                                line.strip() 
-                                for line in raw_response.split('\n') 
-                                if line.strip()
-                            ]
-                            
+                domains = self._parse_domains_response(response.data, name_only)
                 return Ok(domains)
             else:
                 return Err(f"Failed to list domains: {response.data.get('error', 'Unknown error')}")
         else:
             return Err(f"API call failed: {result.unwrap_err()}")
+    
+    def _parse_domains_response(self, data: dict[str, Any], name_only: bool) -> list[dict[str, Any]]:
+        """Parse domains response based on different formats"""
+        if not isinstance(data, dict):
+            return []
+        
+        # Handle different response formats
+        if 'domains' in data:
+            return data['domains']
+        elif 'data' in data:
+            return self._parse_table_format_domains(data['data'], name_only)
+        elif 'items' in data:
+            return data['items']
+        else:
+            return self._parse_raw_response_domains(data)
+    
+    def _parse_table_format_domains(self, data_items: list[dict[str, Any]], name_only: bool) -> list[dict[str, Any]]:
+        """Parse Virtualmin's table-like response format"""
+        domains = []
+        for item in data_items:
+            if isinstance(item, dict) and 'name' in item:
+                domain_line = item['name'].strip()
+                # Skip header and separator lines
+                if (domain_line.startswith(('Domain', '---')) or not domain_line):
+                    continue
+                
+                # Parse domain info from the formatted line
+                parts = domain_line.split()
+                if parts and len(parts) >= DOMAIN_PARTS_MIN:
+                    domain_name = parts[0]
+                    username = parts[DOMAIN_USERNAME_INDEX] if len(parts) > DOMAIN_USERNAME_INDEX else ""
+                    description = " ".join(parts[DOMAIN_DESCRIPTION_INDEX:]) if len(parts) > DOMAIN_DESCRIPTION_INDEX else ""
+                    
+                    if name_only:
+                        domains.append(domain_name)
+                    else:
+                        domains.append({
+                            'domain': domain_name,
+                            'username': username, 
+                            'description': description
+                        })
+        return domains
+    
+    def _parse_raw_response_domains(self, data: dict[str, Any]) -> list[str]:
+        """Parse raw response for domain names"""
+        raw_response = data.get('raw_response', '')
+        if raw_response:
+            return [
+                line.strip() 
+                for line in raw_response.split('\n') 
+                if line.strip()
+            ]
+        return []
             
     def close(self) -> None:
         """Close the gateway and clean up resources"""

@@ -875,6 +875,34 @@ def _invalidate_billing_tld_caches(tld: TLD) -> None:
 # ===============================================================================
 
 
+def _handle_existing_virtualmin_account(domain: Domain, virtualmin_account: Any) -> None:
+    """Handle updates to existing Virtualmin account based on domain status changes"""
+    from apps.provisioning.virtualmin_service import VirtualminProvisioningService  # noqa: PLC0415
+    
+    if domain.status != 'active' and virtualmin_account.status == 'active':
+        # Domain became inactive - suspend Virtualmin account
+        provisioning_service = VirtualminProvisioningService()
+        result = provisioning_service.suspend_account(
+            virtualmin_account, 
+            reason=f"Domain status changed to {domain.status}"
+        )
+        
+        if result.is_ok():
+            logger.info(f"🚫 [CrossApp] Suspended Virtualmin account for {domain.name}")
+        else:
+            logger.error(f"🔥 [CrossApp] Failed to suspend Virtualmin account for {domain.name}: {result.unwrap_err()}")
+            
+    elif domain.status == 'active' and virtualmin_account.status == 'suspended':
+        # Domain became active - unsuspend Virtualmin account
+        provisioning_service = VirtualminProvisioningService()
+        result = provisioning_service.unsuspend_account(virtualmin_account)
+        
+        if result.is_ok():
+            logger.info(f"✅ [CrossApp] Unsuspended Virtualmin account for {domain.name}")
+        else:
+            logger.error(f"🔥 [CrossApp] Failed to unsuspend Virtualmin account for {domain.name}: {result.unwrap_err()}")
+
+
 def sync_domain_to_virtualmin(domain: Domain) -> None:
     """
     Sync domain creation/updates to Virtualmin control panel.
@@ -885,7 +913,6 @@ def sync_domain_to_virtualmin(domain: Domain) -> None:
         # Import here to avoid circular imports
         from apps.provisioning.models import Service  # noqa: PLC0415
         from apps.provisioning.virtualmin_models import VirtualminAccount  # noqa: PLC0415
-        from apps.provisioning.virtualmin_service import VirtualminProvisioningService  # noqa: PLC0415
         
         # Find hosting services associated with this domain
         hosting_services = Service.objects.filter(
@@ -906,28 +933,7 @@ def sync_domain_to_virtualmin(domain: Domain) -> None:
                     
                     if virtualmin_account:
                         # Update existing account if needed
-                        if domain.status != 'active' and virtualmin_account.status == 'active':
-                            # Domain became inactive - suspend Virtualmin account
-                            provisioning_service = VirtualminProvisioningService()
-                            result = provisioning_service.suspend_account(
-                                virtualmin_account, 
-                                reason=f"Domain status changed to {domain.status}"
-                            )
-                            
-                            if result.is_ok():
-                                logger.info(f"🚫 [CrossApp] Suspended Virtualmin account for {domain.name}")
-                            else:
-                                logger.error(f"🔥 [CrossApp] Failed to suspend Virtualmin account for {domain.name}: {result.unwrap_err()}")
-                                
-                        elif domain.status == 'active' and virtualmin_account.status == 'suspended':
-                            # Domain became active - unsuspend Virtualmin account
-                            provisioning_service = VirtualminProvisioningService()
-                            result = provisioning_service.unsuspend_account(virtualmin_account)
-                            
-                            if result.is_ok():
-                                logger.info(f"✅ [CrossApp] Unsuspended Virtualmin account for {domain.name}")
-                            else:
-                                logger.error(f"🔥 [CrossApp] Failed to unsuspend Virtualmin account for {domain.name}: {result.unwrap_err()}")
+                        _handle_existing_virtualmin_account(domain, virtualmin_account)
                     else:
                         # No existing account - this might need provisioning
                         logger.debug(f"📋 [CrossApp] No Virtualmin account found for domain {domain.name}, may need provisioning")
