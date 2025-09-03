@@ -17,6 +17,7 @@ django-allauth>=0.57.0
 pyotp>=2.9.0  # Two-factor authentication
 qrcode[pil]>=7.4.0  # QR code generation
 argon2-cffi>=23.1.0  # Password hashing
+django-ipware>=7.0.0  # IP address detection for audit logging
 
 # API & REST
 djangorestframework>=3.14.0
@@ -56,6 +57,7 @@ django-ses>=3.5.0  # AWS SES
 
 # Background task processing
 django-q2>=1.8.0  # Async task queue with database backend
+croniter>=6.0.0  # Cron expression parser for scheduled tasks
 
 # Server provisioning & SSH
 paramiko>=4.0.0  # SSH client for Virtualmin fallback authentication
