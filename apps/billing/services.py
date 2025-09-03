@@ -67,6 +67,12 @@ class Result(Generic[T, E]):
             return self._value  # type: ignore
         raise RuntimeError(f"Called unwrap on error result: {self._value}")
     
+    def unwrap_err(self) -> E:
+        """Get the error value (raises if success)"""
+        if not self._is_success:
+            return self._value  # type: ignore
+        raise RuntimeError("Called unwrap_err on success result")
+    
     @property
     def error(self) -> E:
         """Get the error value"""
@@ -558,9 +564,100 @@ class RefundQueryService:
         except Exception as e:
             return Result.err(f"Error getting entity refunds: {e!s}")
 
+
+# ===============================================================================
+# INVOICE SERVICE IMPLEMENTATION
+# ===============================================================================
+
+
+class InvoiceService:
+    """Service for creating and managing invoices from orders"""
+    
+    def create_from_order(self, order: Any) -> Result[Any, str]:
+        """Create an invoice from an order"""
+        try:
+            from decimal import Decimal
+            from django.utils import timezone
+            
+            # Import models here to avoid circular imports
+            from apps.billing.models import Currency, Invoice, InvoiceSequence
+            
+            # Get default currency (RON)
+            try:
+                currency = Currency.objects.get(code="RON")
+            except Currency.DoesNotExist:
+                # Create default RON currency if it doesn't exist
+                currency = Currency.objects.create(
+                    code="RON",
+                    name="Romanian Leu",
+                    symbol="lei",
+                    is_active=True
+                )
+            
+            # Get invoice sequence
+            sequence, created = InvoiceSequence.objects.get_or_create(scope="default")
+            
+            # Calculate totals (assuming 19% VAT for Romania)
+            vat_rate = Decimal("0.19")
+            subtotal_amount = Decimal(order.total_cents) / 100
+            tax_amount = subtotal_amount * vat_rate
+            total_amount = subtotal_amount + tax_amount
+            
+            # Create invoice
+            invoice = Invoice.objects.create(
+                customer=order.customer,
+                number=sequence.get_next_number("INV"),
+                currency=currency,
+                subtotal_cents=int(subtotal_amount * 100),
+                tax_cents=int(tax_amount * 100),
+                total_cents=int(total_amount * 100),
+                status="draft",
+                # Copy billing address from customer
+                bill_to_name=order.customer.company_name or order.customer.full_name or "",
+                bill_to_tax_id=getattr(order.customer, 'cui', '') or "",
+                bill_to_email=order.customer.primary_email or "",
+                bill_to_address1=getattr(order.customer, 'address', '') or "",
+                bill_to_city=getattr(order.customer, 'city', '') or "",
+                bill_to_country="RO",  # Default to Romania
+                meta={"order_id": str(order.id)}
+            )
+            
+            # Create invoice lines from order items
+            from apps.billing.models import InvoiceLine
+            for item in order.items.all():
+                InvoiceLine.objects.create(
+                    invoice=invoice,
+                    description=item.name or f"Order item {item.id}",
+                    quantity=item.quantity,
+                    unit_price_cents=item.unit_price_cents,
+                    total_cents=item.total_cents,
+                    tax_rate_percent=19,  # Romanian VAT rate
+                    meta={"order_item_id": str(item.id)}
+                )
+            
+            # Log invoice creation
+            log_security_event(
+                event_type="invoice_created_from_order",
+                details={
+                    "invoice_id": str(invoice.id),
+                    "invoice_number": invoice.number,
+                    "order_id": str(order.id),
+                    "order_number": getattr(order, 'order_number', ''),
+                    "customer_id": str(order.customer.id),
+                    "total_cents": invoice.total_cents,
+                    "critical_financial_operation": True
+                }
+            )
+            
+            return Result.ok(invoice)
+            
+        except Exception as e:
+            return Result.err(f"Failed to create invoice from order: {e!s}")
+
 # Expose all services in __all__ for explicit imports
 __all__ = [
     "BillingAnalyticsService",
+    "InvoiceService",
     "ProformaService",
     "RefundData",
     "RefundEligibility",
