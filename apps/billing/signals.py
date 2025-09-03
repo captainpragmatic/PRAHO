@@ -12,6 +12,7 @@ Includes:
 """
 
 import logging
+from datetime import datetime
 from typing import Any
 
 from django.conf import settings
@@ -40,6 +41,26 @@ from .models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _serialize_values_for_audit(values: dict[str, Any]) -> dict[str, Any]:
+    """
+    Serialize values for audit logging, handling datetime objects.
+    
+    Args:
+        values: Dictionary that may contain datetime objects
+        
+    Returns:
+        Dictionary with datetime objects converted to ISO strings
+    """
+    serialized = {}
+    for key, value in values.items():
+        if isinstance(value, datetime):
+            # Convert datetime to ISO format string
+            serialized[key] = value.isoformat()
+        else:
+            serialized[key] = value
+    return serialized
 
 # ===============================================================================
 # BUSINESS CONSTANTS
@@ -71,13 +92,13 @@ def handle_invoice_created_or_updated(sender: type[Invoice], instance: Invoice, 
         # Enhanced audit logging using BillingAuditService
         event_type = "invoice_created" if created else "invoice_status_changed"
 
-        old_values = getattr(instance, "_original_invoice_values", {}) if not created else {}
-        new_values = {
+        old_values = _serialize_values_for_audit(getattr(instance, "_original_invoice_values", {})) if not created else {}
+        new_values = _serialize_values_for_audit({
             "number": instance.number,
             "status": instance.status,
             "total_cents": instance.total_cents,
             "customer_id": str(instance.customer.id),
-        }
+        })
 
         if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
             # Use specialized billing audit service for richer metadata
@@ -227,28 +248,30 @@ def handle_payment_created_or_updated(sender: type[Payment], instance: Payment, 
     - Service activation
     """
     try:
-        old_values = getattr(instance, "_original_payment_values", {}) if not created else {}
-        new_values = {
+        old_values = _serialize_values_for_audit(getattr(instance, "_original_payment_values", {})) if not created else {}
+        new_values = _serialize_values_for_audit({
             "status": instance.status,
             "amount_cents": instance.amount_cents,
             "payment_method": instance.payment_method,
             "customer_id": str(instance.customer.id),
-        }
+        })
 
         # Enhanced payment audit logging
         if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
             # Determine specific event type based on status change
             audit_event_type = "payment_initiated" if created else f"payment_{instance.status}"
 
-            BillingAuditService.log_payment_event(  # type: ignore[call-arg]
+            from apps.audit.services import BusinessEventData  # noqa: PLC0415
+            event_data = BusinessEventData(
                 event_type=audit_event_type,
-                payment=instance,
+                business_object=instance,
                 user=None,  # System event
                 context=AuditContext(actor_type="system"),
                 old_values=old_values,
                 new_values=new_values,
                 description=f"Payment {instance.amount} {instance.currency.code} - {instance.status}",
             )
+            BillingAuditService.log_payment_event(event_data)
 
         if created:
             logger.info(f"💳 [Payment] Created payment {instance.id} for {instance.customer}")
@@ -330,25 +353,27 @@ def handle_proforma_invoice_conversion(
         # Enhanced proforma audit logging
         event_type = "proforma_created" if created else "proforma_updated"
 
-        old_values = getattr(instance, "_original_proforma_values", {}) if not created else {}
-        new_values = {
+        old_values = _serialize_values_for_audit(getattr(instance, "_original_proforma_values", {})) if not created else {}
+        new_values = _serialize_values_for_audit({
             "number": instance.number,
             "total_cents": instance.total_cents,
             "customer_id": str(instance.customer.id),
-        }
+        })
 
         if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
-            BillingAuditService.log_proforma_event(  # type: ignore[call-arg]
+            from apps.audit.services import BusinessEventData  # noqa: PLC0415
+            event_data = BusinessEventData(
                 event_type=event_type,
-                proforma=instance,
+                business_object=instance,
                 user=None,  # System event
                 context=AuditContext(actor_type="system"),
                 old_values=old_values,
                 new_values=new_values,
                 description=f"Proforma {instance.number} {'created' if created else 'updated'}",
             )
+            BillingAuditService.log_proforma_event(event_data)
         if not created:
-            old_values = getattr(instance, "_original_proforma_values", {})
+            old_values = _serialize_values_for_audit(getattr(instance, "_original_proforma_values", {}))
             old_status = old_values.get("status")
 
             # Auto-convert proforma to invoice when paid
@@ -1145,7 +1170,7 @@ def _trigger_efactura_submission(invoice: Invoice) -> None:
         submit_efactura.delay(str(invoice.id))
         logger.info(f"🏛️ [e-Factura] Queued submission for {invoice.number}")
     except ImportError:
-        logger.warning("⚠️ [e-Factura] Celery not available - implement sync submission")
+        logger.warning("⚠️ [e-Factura] Django-Q2 not available - implement sync submission")
 
 
 def _schedule_payment_reminders(invoice: Invoice) -> None:

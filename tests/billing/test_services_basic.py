@@ -7,7 +7,7 @@ from __future__ import annotations
 import uuid
 from unittest.mock import Mock, patch
 
-import pytest
+import unittest
 from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
@@ -16,21 +16,19 @@ from apps.billing.models import (
     InvoiceSequence,
     ProformaSequence,
 )
-# TODO: RefundService implementation pending - temporarily comment out  
-# from apps.billing.services import (
-#     RefundData,
-#     RefundQueryService,
-#     RefundReason,
-#     RefundService,
-#     RefundStatus,
-#     RefundType,
+from apps.billing.services import (
+    RefundData,
+    RefundQueryService,
+    RefundReason,
+    RefundService,
+    RefundStatus,
+    RefundType,
 )
 from apps.customers.models import Customer
 from apps.users.models import User
 from apps.common.types import Ok, Err
 
 
-@pytest.mark.skip(reason="RefundService implementation pending")
 class RefundServiceComprehensiveTestCase(TestCase):
     """
     Comprehensive test suite for RefundService.
@@ -312,7 +310,7 @@ class RefundServiceComprehensiveTestCase(TestCase):
         self.assertFalse(refund_result['order_status_updated'])
         self.assertTrue(refund_result['invoice_status_updated'])
 
-    @patch('apps.billing.refund_service.log_security_event')
+    @patch('apps.billing.services.log_security_event')
     def test_create_audit_entry(self, mock_log_security: Mock) -> None:
         """Test audit entry creation"""
         mock_order = Mock()
@@ -350,7 +348,6 @@ class RefundServiceComprehensiveTestCase(TestCase):
         self.assertEqual(audit_data['refund_amount_cents'], 10000)
 
 
-@pytest.mark.skip(reason="RefundService implementation pending")
 class RefundQueryServiceTestCase(TestCase):
     """Test suite for RefundQueryService"""
 
@@ -454,7 +451,6 @@ class RefundQueryServiceTestCase(TestCase):
         self.assertIn("Invalid entity type", eligibility['reason'])
 
 
-@pytest.mark.skip(reason="RefundService implementation pending")
 class RefundServiceErrorHandlingTestCase(TransactionTestCase):
     """Test suite for RefundService error handling and edge cases"""
 

@@ -3,18 +3,17 @@ Comprehensive tests for RefundService
 Tests the critical financial refund system with bidirectional synchronization.
 """
 
+import pytest
 import uuid
 
-import pytest
+import unittest
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
-# TODO: RefundService implementation pending - temporarily comment out
-# from apps.billing.services import RefundData, RefundQueryService, RefundReason, RefundService, RefundType
+from apps.billing.services import RefundData, RefundQueryService, RefundReason, RefundService, RefundType
 
 User = get_user_model()
 
-@pytest.mark.skip(reason="RefundService implementation pending")
 class RefundServiceTestCase(TestCase):
     """Test cases for the RefundService"""
 
@@ -554,7 +553,7 @@ class RefundEdgeCasesTestCase(TestCase):
         self.assertFalse(refund_result['payment_refund_processed'])
 
 
-@pytest.mark.django_db
+import unittest
 class TestRefundServiceWithFixtures:
     """Pytest-style tests with fixtures for more complex scenarios"""
     

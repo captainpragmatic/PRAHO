@@ -8,42 +8,54 @@ from decimal import Decimal
 from unittest.mock import Mock, patch
 
 import pytest
+import unittest
+from django.test import TestCase
 from django.utils import timezone
 
 from apps.audit.models import AuditEvent
-from apps.audit.services import AuditContext, BillingAuditService, OrdersAuditService
+# Conditional imports - some services may not exist yet
+try:
+    from apps.audit.services import AuditContext, BillingAuditService, OrdersAuditService
+except ImportError:
+    AuditContext = BillingAuditService = OrdersAuditService = None
+
 from apps.billing.models import Currency, Invoice, Payment, ProformaInvoice
-from apps.orders.models import Order, OrderItem
+# Handle missing orders app
+try:
+    from apps.orders.models import Order, OrderItem
+except ImportError:
+    Order = OrderItem = None
 
 
-@pytest.mark.django_db
-class TestBillingAuditService:
+class TestBillingAuditService(TestCase):
     """Test suite for BillingAuditService"""
 
-    @pytest.fixture
-    def currency(self):
-        """Create test currency"""
-        return Currency.objects.create(code='RON', symbol='RON', decimals=2)
-
-    @pytest.fixture
-    def customer(self):
-        """Create test customer"""
-        from apps.customers.models import Customer
-        return Customer.objects.create(
+    def setUp(self):
+        """Set up test fixtures"""
+        # Create test currency
+        self.currency = Currency.objects.create(code='RON', symbol='RON', decimals=2)
+        
+        # Create test customer
+        from apps.customers.models import Customer, CustomerTaxProfile
+        self.customer = Customer.objects.create(
             company_name='Test Company SRL',
             customer_type='business',
-            cui='RO12345678',
-            vat_id='RO12345678',
             status='active'
         )
-
-    @pytest.fixture
-    def invoice(self, customer, currency):
-        """Create test invoice"""
-        return Invoice.objects.create(
-            customer=customer,
+        
+        # Create tax profile with Romanian business details
+        CustomerTaxProfile.objects.create(
+            customer=self.customer,
+            cui='RO12345678',
+            vat_number='RO12345678',
+            is_vat_payer=True
+        )
+        
+        # Create test invoice
+        self.invoice = Invoice.objects.create(
+            customer=self.customer,
             number='INV-000001',
-            currency=currency,
+            currency=self.currency,
             status='draft',
             total_cents=100000,  # 1000 RON
             tax_cents=19000,     # 190 RON VAT
@@ -52,27 +64,23 @@ class TestBillingAuditService:
             bill_to_tax_id='RO12345678',
             bill_to_country='RO'
         )
-
-    @pytest.fixture
-    def payment(self, customer, currency, invoice):
-        """Create test payment"""
-        return Payment.objects.create(
-            customer=customer,
-            invoice=invoice,
-            currency=currency,
+        
+        # Create test payment
+        self.payment = Payment.objects.create(
+            customer=self.customer,
+            invoice=self.invoice,
+            currency=self.currency,
             amount_cents=100000,
             status='pending',
             payment_method='stripe',
             gateway_txn_id='txn_123456789'
         )
-
-    @pytest.fixture
-    def proforma(self, customer, currency):
-        """Create test proforma"""
-        return ProformaInvoice.objects.create(
-            customer=customer,
+        
+        # Create test proforma
+        self.proforma = ProformaInvoice.objects.create(
+            customer=self.customer,
             number='PRO-000001',
-            currency=currency,
+            currency=self.currency,
             total_cents=100000,
             tax_cents=19000,
             subtotal_cents=81000,
@@ -80,12 +88,12 @@ class TestBillingAuditService:
             bill_to_name='Test Company SRL'
         )
 
-    def test_log_invoice_event_creates_audit_entry(self, invoice):
+    def test_log_invoice_event_creates_audit_entry(self):
         """Test that invoice events create proper audit entries with rich metadata"""
         # Act
         audit_event = BillingAuditService.log_invoice_event(
             event_type='invoice_created',
-            invoice=invoice,
+            invoice=self.invoice,
             user=None,
             context=AuditContext(
                 actor_type='system',
@@ -96,25 +104,25 @@ class TestBillingAuditService:
         )
 
         # Assert
-        assert audit_event is not None
-        assert audit_event.action == 'invoice_created'
-        assert audit_event.content_object == invoice
-        assert audit_event.category == 'business_operation'
-        assert audit_event.severity == 'medium'
-        assert audit_event.is_sensitive is True
+        self.assertIsNotNone(audit_event)
+        self.assertEqual(audit_event.action, 'invoice_created')
+        self.assertEqual(audit_event.content_object, self.invoice)
+        self.assertEqual(audit_event.category, 'business_operation')
+        self.assertEqual(audit_event.severity, 'medium')
+        self.assertTrue(audit_event.is_sensitive)
         
         # Check rich metadata
         metadata = audit_event.metadata
-        assert metadata['invoice_number'] == invoice.number
-        assert metadata['invoice_status'] == invoice.status
-        assert metadata['customer_id'] == str(invoice.customer.id)
-        assert metadata['currency'] == invoice.currency.code
-        assert metadata['total_amount'] == str(invoice.total)
-        assert metadata['vat_amount'] == str(invoice.tax_amount)
-        assert 'romanian_compliance' in metadata
-        assert metadata['source'] == 'test'
+        self.assertEqual(metadata['invoice_number'], self.invoice.number)
+        self.assertEqual(metadata['invoice_status'], self.invoice.status)
+        self.assertEqual(metadata['customer_id'], str(self.invoice.customer.id))
+        self.assertEqual(metadata['currency'], self.invoice.currency.code)
+        self.assertEqual(metadata['total_amount'], str(self.invoice.total))
+        self.assertEqual(metadata['vat_amount'], str(self.invoice.tax_amount))
+        self.assertIn('romanian_compliance', metadata)
+        self.assertEqual(metadata['source'], 'test')
 
-    def test_log_payment_event_with_transaction_context(self, payment):
+    def test_log_payment_event_with_transaction_context(self):
         """Test payment events capture transaction-specific metadata"""
         # Act
         audit_event = BillingAuditService.log_payment_event(
@@ -139,7 +147,7 @@ class TestBillingAuditService:
         assert metadata['financial_impact'] is True
         assert metadata['gateway_response_code'] == '200'
 
-    def test_log_proforma_event_captures_validity_info(self, proforma):
+    def test_log_proforma_event_captures_validity_info(self):
         """Test proforma events include expiration and validity metadata"""
         # Act
         audit_event = BillingAuditService.log_proforma_event(
@@ -157,26 +165,28 @@ class TestBillingAuditService:
         assert metadata['is_expired'] == proforma.is_expired
         assert metadata['total_amount'] == str(proforma.total)
 
-    def test_invoice_event_with_status_changes(self, invoice):
+    def test_invoice_event_with_status_changes(self):
         """Test invoice events properly track status changes"""
         # Setup
         old_values = {'status': 'draft', 'total_cents': 90000}
         new_values = {'status': 'issued', 'total_cents': 100000}
 
         # Act
-        audit_event = BillingAuditService.log_invoice_event(
+        from apps.audit.services import BusinessEventData
+        event_data = BusinessEventData(
             event_type='invoice_status_changed',
-            invoice=invoice,
+            business_object=self.invoice,
             old_values=old_values,
             new_values=new_values
         )
+        audit_event = BillingAuditService.log_invoice_event(event_data)
 
         # Assert
         assert audit_event.old_values == old_values
         assert audit_event.new_values == new_values
         assert audit_event.action == 'invoice_status_changed'
 
-    def test_payment_event_categorization(self, payment):
+    def test_payment_event_categorization(self):
         """Test payment events are properly categorized and marked sensitive"""
         # Act
         audit_event = BillingAuditService.log_payment_event(

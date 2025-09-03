@@ -1,6 +1,6 @@
 """Billing background tasks.
 
-This module contains Celery tasks for billing operations, invoice
+This module contains Django-Q2 tasks for billing operations, invoice
 generation, payment processing, and dunning workflows.
 """
 

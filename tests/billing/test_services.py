@@ -15,6 +15,8 @@ Priority Areas from Coverage Analysis:
 
 from __future__ import annotations
 
+import pytest
+import unittest
 import uuid
 from typing import Any
 from unittest.mock import Mock, patch
@@ -23,22 +25,21 @@ from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
 from apps.billing.models import Currency, Invoice, Payment
-# TODO: RefundService implementation pending - temporarily comment out
-# from apps.billing.services import (
-#     RefundData,
-#     RefundEligibility,
-#     RefundQueryService,
-#     RefundReason,
-#     RefundResult,
-#     RefundService,
-#     RefundType,
-# )
+from apps.billing.services import (
+    RefundData,
+    RefundEligibility,
+    RefundQueryService,
+    RefundReason,
+    RefundResult,
+    RefundService,
+    RefundType,
+)
+
 from apps.common.types import Err, Ok
 from apps.customers.models import Customer
 from apps.users.models import CustomerMembership, User
 
 
-@pytest.mark.skip(reason="RefundService implementation pending")
 class RefundServiceComprehensiveCoverageTestCase(TransactionTestCase):
     """
     Comprehensive test suite for RefundService targeting 85%+ coverage.

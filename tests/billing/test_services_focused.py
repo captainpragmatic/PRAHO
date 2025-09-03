@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from unittest.mock import Mock, patch
 
-import pytest
+import unittest
 from django.test import TestCase
 
 from apps.billing.models import (
@@ -143,8 +143,8 @@ class RefundServiceFocusedTestCase(TestCase):
         )
         
         self.assertTrue(result.is_err())
-        error_message = result.err() if hasattr(result, 'err') else str(result)
-        self.assertIn('Invalid entity_type', str(error_message))
+        error_message = result.error if hasattr(result, 'error') else str(result)
+        self.assertIn('Invalid entity type', str(error_message))
 
 
 class RefundServiceImportCoverageTestCase(TestCase):

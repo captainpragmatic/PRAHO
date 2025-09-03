@@ -9,7 +9,7 @@ help:
 	@echo "🚀 PRAHO Platform - Romanian Hosting Provider"
 	@echo "Available commands:"
 	@echo "  make install         - Set up development environment"
-	@echo "  make dev             - Run development server"
+	@echo "  make dev             - Run development server + Django-Q2 workers"
 	@echo "  make test            - Run all tests (Django runner) - DEFAULT"
 	@echo "  make test-e2e        - Run E2E tests with pytest-playwright"
 	@echo "  make test-with-e2e   - Run all tests including E2E"
@@ -41,13 +41,22 @@ install:
 	.venv/bin/pip install -r requirements/dev.txt
 	@echo "✅ Environment ready! Activate with: source .venv/bin/activate"
 
-# Run development server
+# Run development server with Django-Q2 workers
 dev:
-	@echo "🚀 Starting development server..."
-	@echo "�️ Running migrations..."
+	@echo "🚀 Starting development server + Django-Q2 workers..."
+	@echo "🗄️ Running migrations..."
 	.venv/bin/python manage.py migrate
-	@echo "�🔧 Setting up test data if needed..."
+	@echo "🔧 Setting up test data if needed..."
 	.venv/bin/python scripts/setup_test_data.py
+	@echo "⚙️ Setting up scheduled tasks..."
+	.venv/bin/python manage.py setup_scheduled_tasks
+	@echo "🚀 Starting Django-Q2 workers in background..."
+	@# Start qcluster in background
+	@.venv/bin/python manage.py qcluster > django_q.log 2>&1 & 
+	@QCLUSTER_PID=$$!; \
+	echo "📊 Django-Q2 workers started (PID: $$QCLUSTER_PID, Log: django_q.log)"; \
+	echo "🌐 Starting development server..."; \
+	trap 'echo "🛑 Stopping Django-Q2 workers..."; kill $$QCLUSTER_PID 2>/dev/null || true' EXIT; \
 	.venv/bin/python manage.py runserver 0.0.0.0:8001
 
 # Run tests with Django test runner (reliable and fast) - DEFAULT
