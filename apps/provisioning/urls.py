@@ -2,7 +2,7 @@
 # PROVISIONING APP URLS - GENERAL HOSTING SERVICES MANAGEMENT
 # ===============================================================================
 
-from django.urls import path, include
+from django.urls import include, path
 
 from . import views
 from .virtualmin_urls import urlpatterns as virtualmin_urlpatterns

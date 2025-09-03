@@ -22,7 +22,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
-from apps.common.credential_vault import get_credential_vault
+from apps.common.credential_vault import CredentialData, get_credential_vault
 from apps.settings.models import SettingCategory, SystemSetting
 
 
@@ -312,7 +312,7 @@ class Command(BaseCommand):
                         metadata['ssh_private_key'] = ssh_key_content
                     
                     # Store in vault
-                    result = vault.store_credential(
+                    credential_data = CredentialData(
                         service_type='virtualmin',
                         service_identifier=hostname,
                         username=username,
@@ -320,6 +320,7 @@ class Command(BaseCommand):
                         metadata=metadata,
                         reason=f"Migration: {description}"
                     )
+                    result = vault.store_credential(credential_data)
                     
                     if result.is_ok():
                         migrated_count += 1

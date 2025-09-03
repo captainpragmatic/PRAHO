@@ -1,5 +1,5 @@
 """
-Virtualmin Celery Tasks - PRAHO Platform
+Virtualmin Django-Q2 Tasks - PRAHO Platform
 Asynchronous provisioning tasks for Virtualmin operations.
 """
 
@@ -9,10 +9,12 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from celery import shared_task  # type: ignore[import-untyped]
 from django.core.cache import cache
 from django.db import models
 from django.utils import timezone
+from django_q.models import Schedule
+from django_q.models import Schedule as ScheduleModel
+from django_q.tasks import async_task, schedule
 
 from apps.provisioning.models import Service
 
@@ -22,6 +24,7 @@ from .virtualmin_models import (
     VirtualminServer,
 )
 from .virtualmin_service import (
+    VirtualminAccountCreationData,
     VirtualminProvisioningService,
     VirtualminServerManagementService,
 )
@@ -46,18 +49,7 @@ class VirtualminProvisioningConfig:
     server_id: str | None = None
 
 
-@shared_task(
-    bind=True,
-    max_retries=TASK_MAX_RETRIES,
-    default_retry_delay=TASK_RETRY_DELAY,
-    soft_time_limit=TASK_SOFT_TIME_LIMIT,
-    time_limit=TASK_TIME_LIMIT,
-    autoretry_for=(Exception,),
-    retry_backoff=True,
-    retry_jitter=True
-)
 def provision_virtualmin_account(
-    self: Any,
     service_id: str,
     domain: str,
     username: str | None = None,
@@ -66,7 +58,7 @@ def provision_virtualmin_account(
     server_id: str | None = None
 ) -> dict[str, Any]:
     """
-    Async task to provision Virtualmin account.
+    Sync task to provision Virtualmin account.
     
     Args:
         service_id: PRAHO service UUID
@@ -82,8 +74,7 @@ def provision_virtualmin_account(
     Raises:
         Exception: On provisioning failure (triggers retry)
     """
-    task_id = self.request.id
-    correlation_id = f"provision_{task_id}"
+    correlation_id = f"provision_{service_id}_{domain}"
     
     logger.info(
         f"🔄 [VirtualminTask] Starting provisioning for domain {domain} "
@@ -113,7 +104,7 @@ def provision_virtualmin_account(
         provisioning_service = VirtualminProvisioningService(server)
         
         # Execute provisioning
-        result = provisioning_service.create_virtualmin_account(
+        creation_data = VirtualminAccountCreationData(
             service=service,
             domain=domain,
             username=username,
@@ -121,6 +112,7 @@ def provision_virtualmin_account(
             template=template,
             server=server
         )
+        result = provisioning_service.create_virtualmin_account(creation_data)
         
         if result.is_ok():
             account = result.unwrap()
@@ -143,12 +135,9 @@ def provision_virtualmin_account(
             logger.error(f"❌ [VirtualminTask] Provisioning failed for {domain}: {error_msg}")
             
             # Check if this is a retryable error
-            if self.request.retries < self.max_retries and _is_retryable_error(error_msg):
-                    logger.warning(
-                        f"🔄 [VirtualminTask] Retrying provision {domain} "
-                        f"(attempt {self.request.retries + 1}/{self.max_retries})"
-                    )
-                    raise Exception(error_msg)  # Trigger retry
+            if _is_retryable_error(error_msg):
+                logger.warning(f"🔄 [VirtualminTask] Retryable error for {domain}")
+                raise Exception(error_msg)  # Trigger retry in django-q2
                     
             return {"success": False, "error": error_msg}
             
@@ -156,24 +145,13 @@ def provision_virtualmin_account(
         error_msg = str(e)
         logger.exception(f"💥 [VirtualminTask] Unexpected error provisioning {domain}: {e}")
         
-        # Don't retry on the final attempt
-        if self.request.retries >= self.max_retries:
-            return {"success": False, "error": error_msg}
-            
         # Re-raise to trigger retry
         raise
 
 
-@shared_task(
-    bind=True,
-    max_retries=TASK_MAX_RETRIES,
-    default_retry_delay=TASK_RETRY_DELAY,
-    soft_time_limit=300,  # 5 minutes for suspension
-    time_limit=600
-)
-def suspend_virtualmin_account(self: Any, account_id: str, reason: str = "") -> dict[str, Any]:
+def suspend_virtualmin_account(account_id: str, reason: str = "") -> dict[str, Any]:
     """
-    Async task to suspend Virtualmin account.
+    Sync task to suspend Virtualmin account.
     
     Args:
         account_id: VirtualminAccount UUID
@@ -182,9 +160,7 @@ def suspend_virtualmin_account(self: Any, account_id: str, reason: str = "") -> 
     Returns:
         Dictionary with suspension result
     """
-    task_id = self.request.id
-    
-    logger.info(f"🔄 [VirtualminTask] Suspending account {account_id} (task: {task_id})")
+    logger.info(f"🔄 [VirtualminTask] Suspending account {account_id}")
     
     try:
         # Get account
@@ -213,30 +189,19 @@ def suspend_virtualmin_account(self: Any, account_id: str, reason: str = "") -> 
             error_msg = result.unwrap_err()
             logger.error(f"❌ [VirtualminTask] Suspension failed for {account.domain}: {error_msg}")
             
-            if self.request.retries < self.max_retries and _is_retryable_error(error_msg):
+            if _is_retryable_error(error_msg):
                 raise Exception(error_msg)  # Trigger retry
                 
             return {"success": False, "error": error_msg}
             
     except Exception as e:
         logger.exception(f"💥 [VirtualminTask] Error suspending account {account_id}: {e}")
-        
-        if self.request.retries >= self.max_retries:
-            return {"success": False, "error": str(e)}
-            
         raise
 
 
-@shared_task(
-    bind=True,
-    max_retries=TASK_MAX_RETRIES,
-    default_retry_delay=TASK_RETRY_DELAY,
-    soft_time_limit=300,
-    time_limit=600
-)
-def unsuspend_virtualmin_account(self: Any, account_id: str) -> dict[str, Any]:
+def unsuspend_virtualmin_account(account_id: str) -> dict[str, Any]:
     """
-    Async task to unsuspend Virtualmin account.
+    Sync task to unsuspend Virtualmin account.
     
     Args:
         account_id: VirtualminAccount UUID
@@ -244,9 +209,7 @@ def unsuspend_virtualmin_account(self: Any, account_id: str) -> dict[str, Any]:
     Returns:
         Dictionary with unsuspension result
     """
-    task_id = self.request.id
-    
-    logger.info(f"🔄 [VirtualminTask] Unsuspending account {account_id} (task: {task_id})")
+    logger.info(f"🔄 [VirtualminTask] Unsuspending account {account_id}")
     
     try:
         # Get account
@@ -274,30 +237,19 @@ def unsuspend_virtualmin_account(self: Any, account_id: str) -> dict[str, Any]:
             error_msg = result.unwrap_err()
             logger.error(f"❌ [VirtualminTask] Unsuspension failed for {account.domain}: {error_msg}")
             
-            if self.request.retries < self.max_retries and _is_retryable_error(error_msg):
+            if _is_retryable_error(error_msg):
                 raise Exception(error_msg)  # Trigger retry
                 
             return {"success": False, "error": error_msg}
             
     except Exception as e:
         logger.exception(f"💥 [VirtualminTask] Error unsuspending account {account_id}: {e}")
-        
-        if self.request.retries >= self.max_retries:
-            return {"success": False, "error": str(e)}
-            
         raise
 
 
-@shared_task(
-    bind=True,
-    max_retries=TASK_MAX_RETRIES,
-    default_retry_delay=TASK_RETRY_DELAY,
-    soft_time_limit=600,  # 10 minutes for deletion
-    time_limit=900
-)
-def delete_virtualmin_account(self: Any, account_id: str) -> dict[str, Any]:
+def delete_virtualmin_account(account_id: str) -> dict[str, Any]:
     """
-    Async task to delete Virtualmin account.
+    Sync task to delete Virtualmin account.
     
     Args:
         account_id: VirtualminAccount UUID
@@ -305,9 +257,7 @@ def delete_virtualmin_account(self: Any, account_id: str) -> dict[str, Any]:
     Returns:
         Dictionary with deletion result
     """
-    task_id = self.request.id
-    
-    logger.info(f"🔄 [VirtualminTask] Deleting account {account_id} (task: {task_id})")
+    logger.info(f"🔄 [VirtualminTask] Deleting account {account_id}")
     
     try:
         # Get account
@@ -337,35 +287,24 @@ def delete_virtualmin_account(self: Any, account_id: str) -> dict[str, Any]:
             error_msg = result.unwrap_err()
             logger.error(f"❌ [VirtualminTask] Deletion failed for {domain}: {error_msg}")
             
-            if self.request.retries < self.max_retries and _is_retryable_error(error_msg):
+            if _is_retryable_error(error_msg):
                 raise Exception(error_msg)  # Trigger retry
                 
             return {"success": False, "error": error_msg}
             
     except Exception as e:
         logger.exception(f"💥 [VirtualminTask] Error deleting account {account_id}: {e}")
-        
-        if self.request.retries >= self.max_retries:
-            return {"success": False, "error": str(e)}
-            
         raise
 
 
-@shared_task(
-    bind=True,
-    soft_time_limit=1800,  # 30 minutes for health checks
-    time_limit=2400
-)
-def health_check_virtualmin_servers(self: Any) -> dict[str, Any]:
+def health_check_virtualmin_servers() -> dict[str, Any]:
     """
     Periodic task to health check all Virtualmin servers.
     
     Returns:
         Dictionary with health check results
     """
-    task_id = self.request.id
-    
-    logger.info(f"🔄 [VirtualminTask] Starting server health checks (task: {task_id})")
+    logger.info("🔄 [VirtualminTask] Starting server health checks")
     
     try:
         # Prevent concurrent health checks
@@ -424,21 +363,14 @@ def health_check_virtualmin_servers(self: Any) -> dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
-@shared_task(
-    bind=True,
-    soft_time_limit=3600,  # 1 hour for statistics update
-    time_limit=4800
-)
-def update_virtualmin_server_statistics(self: Any) -> dict[str, Any]:
+def update_virtualmin_server_statistics() -> dict[str, Any]:
     """
     Periodic task to update server statistics from Virtualmin.
     
     Returns:
         Dictionary with statistics update results
     """
-    task_id = self.request.id
-    
-    logger.info(f"🔄 [VirtualminTask] Updating server statistics (task: {task_id})")
+    logger.info("🔄 [VirtualminTask] Updating server statistics")
     
     try:
         # Prevent concurrent statistics updates
@@ -497,21 +429,14 @@ def update_virtualmin_server_statistics(self: Any) -> dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
-@shared_task(
-    bind=True,
-    max_retries=1,  # Limited retries for job processing
-    default_retry_delay=60
-)
-def process_failed_virtualmin_jobs(self: Any) -> dict[str, Any]:
+def process_failed_virtualmin_jobs() -> dict[str, Any]:
     """
     Process failed Virtualmin jobs that can be retried.
     
     Returns:
         Dictionary with job processing results
     """
-    task_id = self.request.id
-    
-    logger.info(f"🔄 [VirtualminTask] Processing failed jobs (task: {task_id})")
+    logger.info("🔄 [VirtualminTask] Processing failed jobs")
     
     try:
         # Get failed jobs that can be retried
@@ -536,21 +461,33 @@ def process_failed_virtualmin_jobs(self: Any) -> dict[str, Any]:
                 
                 # Trigger appropriate task based on operation
                 if job.operation == "create_domain" and job.account:
-                    provision_virtualmin_account.delay(
+                    async_task(
+                        'apps.provisioning.virtualmin_tasks.provision_virtualmin_account',
                         str(job.account.service.id),
                         job.account.domain,
                         job.account.virtualmin_username,
-                        server_id=str(job.server.id)
+                        server_id=str(job.server.id),
+                        timeout=TASK_TIME_LIMIT
                     )
                 elif job.operation == "suspend_domain" and job.account:
-                    suspend_virtualmin_account.delay(
+                    async_task(
+                        'apps.provisioning.virtualmin_tasks.suspend_virtualmin_account',
                         str(job.account.id),
-                        job.parameters.get("reason", "")
+                        job.parameters.get("reason", ""),
+                        timeout=TASK_TIME_LIMIT
                     )
                 elif job.operation == "unsuspend_domain" and job.account:
-                    unsuspend_virtualmin_account.delay(str(job.account.id))
+                    async_task(
+                        'apps.provisioning.virtualmin_tasks.unsuspend_virtualmin_account',
+                        str(job.account.id),
+                        timeout=TASK_TIME_LIMIT
+                    )
                 elif job.operation == "delete_domain" and job.account:
-                    delete_virtualmin_account.delay(str(job.account.id))
+                    async_task(
+                        'apps.provisioning.virtualmin_tasks.delete_virtualmin_account',
+                        str(job.account.id),
+                        timeout=TASK_TIME_LIMIT
+                    )
                     
                 results["retried_jobs"] += 1
                 results["jobs"].append({
@@ -614,21 +551,103 @@ def _is_retryable_error(error_message: str) -> bool:
     return any(pattern in error_lower for pattern in retryable_patterns)
 
 
-# Celery beat schedule for periodic tasks
-# Add to settings.py:
-"""
-CELERY_BEAT_SCHEDULE = {
-    'virtualmin-health-check': {
-        'task': 'apps.provisioning.virtualmin_tasks.health_check_virtualmin_servers',
-        'schedule': crontab(minute=0),  # Every hour
-    },
-    'virtualmin-update-statistics': {
-        'task': 'apps.provisioning.virtualmin_tasks.update_virtualmin_server_statistics',
-        'schedule': crontab(minute=30, hour='*/6'),  # Every 6 hours
-    },
-    'virtualmin-process-failed-jobs': {
-        'task': 'apps.provisioning.virtualmin_tasks.process_failed_virtualmin_jobs',
-        'schedule': crontab(minute='*/15'),  # Every 15 minutes
-    },
-}
-"""
+# ===============================================================================
+# TASK QUEUE WRAPPER FUNCTIONS
+# ===============================================================================
+
+def provision_virtualmin_account_async(
+    service_id: str,
+    domain: str,
+    username: str | None = None,
+    password: str | None = None,
+    template: str = "Default",
+    server_id: str | None = None
+) -> str:
+    """Queue Virtualmin account provisioning task."""
+    return async_task(
+        'apps.provisioning.virtualmin_tasks.provision_virtualmin_account',
+        service_id, domain, username, password, template, server_id,
+        timeout=TASK_TIME_LIMIT
+    )
+
+
+def suspend_virtualmin_account_async(account_id: str, reason: str = "") -> str:
+    """Queue Virtualmin account suspension task."""
+    return async_task(
+        'apps.provisioning.virtualmin_tasks.suspend_virtualmin_account',
+        account_id, reason,
+        timeout=TASK_SOFT_TIME_LIMIT
+    )
+
+
+def unsuspend_virtualmin_account_async(account_id: str) -> str:
+    """Queue Virtualmin account unsuspension task."""
+    return async_task(
+        'apps.provisioning.virtualmin_tasks.unsuspend_virtualmin_account',
+        account_id,
+        timeout=TASK_SOFT_TIME_LIMIT
+    )
+
+
+def delete_virtualmin_account_async(account_id: str) -> str:
+    """Queue Virtualmin account deletion task."""
+    return async_task(
+        'apps.provisioning.virtualmin_tasks.delete_virtualmin_account',
+        account_id,
+        timeout=TASK_TIME_LIMIT
+    )
+
+
+# ===============================================================================
+# SCHEDULED TASKS SETUP
+# ===============================================================================
+
+def setup_virtualmin_scheduled_tasks() -> dict[str, str]:
+    """Set up all Virtualmin scheduled tasks."""
+    tasks_created = {}
+    
+    # Check for existing tasks first
+    existing_tasks = list(ScheduleModel.objects.filter(
+        name__in=['virtualmin-health-check', 'virtualmin-statistics', 'virtualmin-retry-failed-jobs']
+    ).values_list('name', flat=True))
+    
+    # Health check every hour
+    if 'virtualmin-health-check' not in existing_tasks:
+        schedule(
+            'apps.provisioning.virtualmin_tasks.health_check_virtualmin_servers',
+            schedule_type=Schedule.HOURLY,
+            name='virtualmin-health-check',
+            cluster='praho-cluster'
+        )
+        tasks_created['health_check'] = 'created'
+    else:
+        tasks_created['health_check'] = 'already_exists'
+    
+    # Statistics update every 6 hours
+    if 'virtualmin-statistics' not in existing_tasks:
+        schedule(
+            'apps.provisioning.virtualmin_tasks.update_virtualmin_server_statistics',
+            schedule_type=Schedule.CRON,
+            cron='0 */6 * * *',
+            name='virtualmin-statistics',
+            cluster='praho-cluster'
+        )
+        tasks_created['statistics'] = 'created'
+    else:
+        tasks_created['statistics'] = 'already_exists'
+    
+    # Process failed jobs every 15 minutes
+    if 'virtualmin-retry-failed-jobs' not in existing_tasks:
+        schedule(
+            'apps.provisioning.virtualmin_tasks.process_failed_virtualmin_jobs',
+            schedule_type=Schedule.MINUTES,
+            minutes=15,
+            name='virtualmin-retry-failed-jobs',
+            cluster='praho-cluster'
+        )
+        tasks_created['retry_jobs'] = 'created'
+    else:
+        tasks_created['retry_jobs'] = 'already_exists'
+    
+    logger.info(f"✅ [VirtualminTask] Scheduled tasks setup: {tasks_created}")
+    return tasks_created

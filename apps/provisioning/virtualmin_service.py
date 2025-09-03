@@ -9,6 +9,7 @@ import logging
 import secrets
 import string
 import uuid
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from django.core.exceptions import ValidationError
@@ -28,13 +29,24 @@ from .virtualmin_models import (
 from .virtualmin_validators import VirtualminValidator
 
 if TYPE_CHECKING:
-    from apps.provisioning.models import Service
+    pass
 
 logger = logging.getLogger(__name__)
 
 # Username generation constants
 MIN_USERNAME_LENGTH = 3
 MAX_USERNAME_UNIQUENESS_ATTEMPTS = 1000
+
+
+@dataclass 
+class VirtualminAccountCreationData:
+    """Data class to encapsulate Virtualmin account creation parameters"""
+    service: Any  # Service
+    domain: str
+    username: str | None = None
+    password: str | None = None
+    template: str = "Default"
+    server: Any | None = None  # VirtualminServer
 
 
 class VirtualminProvisioningService:
@@ -74,50 +86,42 @@ class VirtualminProvisioningService:
         
     def create_virtualmin_account(
         self,
-        service: Service,
-        domain: str,
-        username: str | None = None,
-        password: str | None = None,
-        template: str = "Default",
-        server: VirtualminServer | None = None
+        creation_data: VirtualminAccountCreationData
     ) -> Result[VirtualminAccount, str]:
         """
         Create new Virtualmin account for PRAHO service.
         
         Args:
-            service: PRAHO service to link
-            domain: Primary domain name
-            username: Virtualmin username (auto-generated if None)
-            password: Account password (auto-generated if None)
-            template: Virtualmin template to use
-            server: Target server (auto-selected if None)
+            creation_data: VirtualminAccountCreationData object containing all creation parameters
             
         Returns:
             Result with created VirtualminAccount or error message
         """
         try:
             # Input validation
-            domain = VirtualminValidator.validate_domain_name(domain)
-            template = VirtualminValidator.validate_template_name(template)
+            domain = VirtualminValidator.validate_domain_name(creation_data.domain)
+            template = VirtualminValidator.validate_template_name(creation_data.template)
             
             # Auto-generate username if not provided
-            if not username:
+            if not creation_data.username:
                 username = self._generate_username_from_domain(domain)
             else:
-                username = VirtualminValidator.validate_username(username)
+                username = VirtualminValidator.validate_username(creation_data.username)
                 
             # Auto-generate password if not provided
-            if not password:
+            if not creation_data.password:
                 password = self._generate_secure_password()
             else:
-                password = VirtualminValidator.validate_password(password)
+                password = VirtualminValidator.validate_password(creation_data.password)
                 
             # Select server if not provided
-            if not server:
+            if not creation_data.server:
                 server_result = self._select_best_server()
                 if server_result.is_err():
                     return Err(f"Server selection failed: {server_result.unwrap_err()}")
                 server = server_result.unwrap()
+            else:
+                server = creation_data.server
                 
             # Check if domain already exists
             existing_account = VirtualminAccount.objects.filter(domain=domain).first()
@@ -128,13 +132,13 @@ class VirtualminProvisioningService:
             with transaction.atomic():
                 account = VirtualminAccount(
                     domain=domain,
-                    service=service,
+                    service=creation_data.service,
                     server=server,
                     virtualmin_username=username,
                     template_name=template,
                     status="provisioning",
-                    praho_customer_id=service.customer.id,
-                    praho_service_id=service.id
+                    praho_customer_id=creation_data.service.customer.id,
+                    praho_service_id=creation_data.service.id
                 )
                 account.set_password(password)
                 account.save()
@@ -159,7 +163,7 @@ class VirtualminProvisioningService:
             
             if provisioning_result.is_ok():
                 logger.info(
-                    f"✅ [VirtualminService] Created account {domain} for customer {service.customer.id}"
+                    f"✅ [VirtualminService] Created account {domain} for customer {creation_data.service.customer.id}"
                 )
                 return Ok(account)
             else:
@@ -945,7 +949,7 @@ class VirtualminBackupManagementService:
         """
         try:
             # Import here to avoid circular imports
-            from .virtualmin_backup_service import VirtualminBackupService
+            from .virtualmin_backup_service import VirtualminBackupService  # noqa: PLC0415
             
             # Create provisioning job
             job = VirtualminProvisioningJob.objects.create(
@@ -1017,7 +1021,7 @@ class VirtualminBackupManagementService:
         """
         try:
             # Import here to avoid circular imports
-            from .virtualmin_backup_service import VirtualminBackupService
+            from .virtualmin_backup_service import VirtualminBackupService  # noqa: PLC0415
             
             target_server = target_server or self.server
             

@@ -6,7 +6,6 @@ Tests for critical security vulnerabilities and Romanian compliance.
 import time
 from unittest.mock import patch
 
-import pytest
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -624,7 +623,6 @@ class TestSecureCustomerUserService(TestCase):
         self.assertTrue(result.is_ok())
 
 
-@pytest.mark.django_db
 class TestPerformanceAndMonitoring:
     """Test performance monitoring and security metrics"""
 

@@ -169,24 +169,57 @@ class Command(BaseCommand):
         self.stdout.write(f"Restore ID: {restore_info['restore_id']}")
         self.stdout.write(f"Completed: {restore_info['completed_at']}")
 
-    def _handle_list(self, options: dict[str, Any]) -> None:
-        """Handle list backups command."""
-        # Find account if domain specified
-        account = None
-        if options.get('domain'):
-            try:
-                account = VirtualminAccount.objects.get(domain=options['domain'])
-            except VirtualminAccount.DoesNotExist as e:
-                raise CommandError(f"Domain '{options['domain']}' not found") from e
-                
-        # Use any server for listing (backups are centralized in S3)
+    def _find_account_by_domain(self, domain: str) -> VirtualminAccount | None:
+        """Find VirtualminAccount by domain name."""
+        if not domain:
+            return None
+        try:
+            return VirtualminAccount.objects.get(domain=domain)
+        except VirtualminAccount.DoesNotExist as e:
+            raise CommandError(f"Domain '{domain}' not found") from e
+    
+    def _get_active_server(self) -> VirtualminServer:
+        """Get an active Virtualmin server for backup operations."""
         try:
             server = VirtualminServer.objects.filter(status='active').first()
             if not server:
                 raise CommandError("No active Virtualmin servers found")
+            return server
         except Exception as e:
             raise CommandError("No Virtualmin servers configured") from e
-            
+    
+    def _get_backup_features(self, backup: dict[str, Any]) -> list[str]:
+        """Extract enabled features from backup metadata."""
+        features = []
+        feature_map = {
+            'include_email': 'email',
+            'include_databases': 'databases', 
+            'include_files': 'files',
+            'include_ssl': 'ssl'
+        }
+        
+        for key, name in feature_map.items():
+            if backup.get(key):
+                features.append(name)
+        return features
+    
+    def _display_backup_info(self, backup: dict[str, Any]) -> None:
+        """Display information for a single backup."""
+        self.stdout.write(f"Backup ID: {backup['backup_id']}")
+        self.stdout.write(f"  Domain: {backup['domain']}")
+        self.stdout.write(f"  Type: {backup['backup_type']}")
+        self.stdout.write(f"  Created: {backup['created_at']}")
+        self.stdout.write(f"  Status: {backup['status']}")
+        
+        features = self._get_backup_features(backup)
+        if features:
+            self.stdout.write(f"  Features: {', '.join(features)}")
+        self.stdout.write("")
+
+    def _handle_list(self, options: dict[str, Any]) -> None:
+        """Handle list backups command."""
+        account = self._find_account_by_domain(options.get('domain'))
+        server = self._get_active_server()
         backup_service = VirtualminBackupService(server)
         
         # List backups
@@ -208,23 +241,7 @@ class Command(BaseCommand):
         self.stdout.write(f"\nFound {len(backups)} backup(s):\n")
         
         for backup in backups:
-            self.stdout.write(f"Backup ID: {backup['backup_id']}")
-            self.stdout.write(f"  Domain: {backup['domain']}")
-            self.stdout.write(f"  Type: {backup['backup_type']}")
-            self.stdout.write(f"  Created: {backup['created_at']}")
-            self.stdout.write(f"  Status: {backup['status']}")
-            if backup.get('include_email'):
-                features = []
-                if backup.get('include_email'):
-                    features.append('email')
-                if backup.get('include_databases'):
-                    features.append('databases')
-                if backup.get('include_files'):
-                    features.append('files')
-                if backup.get('include_ssl'):
-                    features.append('ssl')
-                self.stdout.write(f"  Features: {', '.join(features)}")
-            self.stdout.write("")
+            self._display_backup_info(backup)
 
     def _handle_delete(self, options: dict[str, Any]) -> None:
         """Handle delete backup command."""

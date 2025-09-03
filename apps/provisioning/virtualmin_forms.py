@@ -3,6 +3,7 @@ Virtualmin Management Forms - PRAHO Platform
 Django forms for Virtualmin server and account management with Romanian compliance.
 """
 
+import re
 from typing import Any, ClassVar
 
 from django import forms
@@ -16,7 +17,7 @@ from apps.ui.widgets import (
     PRAHOTextWidget,
 )
 
-from .virtualmin_models import VirtualminServer, VirtualminAccount
+from .virtualmin_models import VirtualminAccount, VirtualminServer
 from .virtualmin_validators import VirtualminValidator
 
 
@@ -404,11 +405,11 @@ class VirtualminAccountForm(forms.ModelForm):
     
     class Meta:
         model = VirtualminAccount
-        fields = [
+        fields: ClassVar = [
             'domain', 'server', 'service', 'virtualmin_username',
             'disk_quota_mb', 'bandwidth_quota_mb', 'status'
         ]
-        widgets = {
+        widgets: ClassVar = {
             'domain': PRAHOTextWidget(attrs={'placeholder': 'example.com'}),
             'virtualmin_username': PRAHOTextWidget(attrs={'placeholder': 'username'}),
             'disk_quota_mb': PRAHOTextWidget(attrs={'placeholder': '1000', 'type': 'number'}),
@@ -442,7 +443,6 @@ class VirtualminAccountForm(forms.ModelForm):
             raise ValidationError(_("Domain is required"))
             
         # Basic domain validation
-        import re
         if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]*\.[a-zA-Z]{2,}$', domain):
             raise ValidationError(_("Invalid domain format"))
             

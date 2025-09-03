@@ -111,7 +111,7 @@ def audit_virtualmin_account_changes(
                     # Server migration
                     AuditService.log_event(
                         AuditEventData(
-                            action="virtualmin_account_server_migrated",
+                            event_type="virtualmin_account_server_migrated",
                             user=None,
                             content_object=instance,
                             new_values={"server": str(instance.server.hostname) if instance.server else None},
@@ -129,7 +129,7 @@ def audit_virtualmin_account_changes(
                 # General update
                 AuditService.log_event(
                     AuditEventData(
-                        action="virtualmin_account_updated",
+                        event_type="virtualmin_account_updated",
                         user=None,
                         content_object=instance,
                         description=f"Virtualmin account updated for {instance.domain}",

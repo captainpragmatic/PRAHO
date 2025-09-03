@@ -6,7 +6,6 @@ Comprehensive security testing for Romanian hosting provider compliance.
 from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
-import pytest
 from django.contrib.auth import get_user_model
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.core.cache import cache
@@ -452,7 +451,6 @@ class SessionSecurityMiddlewareTestCase(TestCase):
         self.assertIn('X-Shared-Device-Mode', header_names)
 
 
-@pytest.mark.django_db
 class SessionSecurityIntegrationTest(TestCase):
     """Integration tests for complete session security workflow"""
 

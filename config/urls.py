@@ -5,6 +5,7 @@ Romanian hosting provider with security-first routing.
 
 from django.conf import settings
 from django.conf.urls.static import static
+from django.contrib import admin
 
 # ===============================================================================
 # MAIN URL PATTERNS
@@ -29,6 +30,8 @@ def root_redirect(request: HttpRequest) -> HttpResponseBase:
 urlpatterns = [
     # Root redirect - to dashboard if authenticated, to login if not
     path("", root_redirect, name="root"),
+    # Django admin interface
+    path("admin/", admin.site.urls),
     # Dashboard - main app after login
     path("app/", dashboard_view, name="dashboard"),
     # Authentication URLs

@@ -21,10 +21,41 @@ from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
 
-from apps.common.types import Err, Ok, Result
-
+# TODO: Replace with proper Result types when circular dependency is resolved
 from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
 from .virtualmin_models import VirtualminServer
+
+
+# Temporary Result type implementation
+class Result:
+    def __init__(self, success: bool, value: Any = None, error: str | None = None):
+        self._success = success
+        self._value = value
+        self._error = error
+    
+    def is_ok(self) -> bool:
+        return self._success
+        
+    def unwrap(self) -> Any:
+        if not self._success:
+            raise RuntimeError(self._error)
+        return self._value
+    
+    def unwrap_err(self) -> str:
+        if self._success:
+            raise RuntimeError("Cannot unwrap error from successful result")
+        return self._error or "Unknown error"
+    
+    def is_err(self) -> bool:
+        return not self._success
+
+def create_ok_result(value: Any) -> Result:
+    """Create a successful result."""
+    return Result(True, value)
+
+def create_error_result(error: str) -> Result:
+    """Create an error result."""
+    return Result(False, error=error)
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +115,8 @@ class VirtualminAuthenticationManager:
     
     def __init__(self, server: VirtualminServer):
         self.server = server
-        self._ssh_client: paramiko.SSHClient | None = None
+        # TODO: Type hint will be fixed when paramiko is added to requirements
+        self._ssh_client: Any = None
         
     def execute_virtualmin_command(
         self,
@@ -142,7 +174,7 @@ class VirtualminAuthenticationManager:
                 
         # All methods failed
         logger.error(f"🚨 [Virtualmin Auth] ALL methods failed for {program}: {last_error}")
-        return Err(f"All authentication methods failed. Last error: {last_error}")
+        return create_error_result(f"All authentication methods failed. Last error: {last_error}")
         
     def _execute_with_method(
         self,
@@ -159,7 +191,7 @@ class VirtualminAuthenticationManager:
         elif method == AuthMethod.SSH_SUDO:
             return self._execute_ssh_sudo(program, parameters)
         else:
-            return Err(f"Unknown authentication method: {method}")
+            return create_error_result(f"Unknown authentication method: {method}")
             
     def _execute_acl_auth(
         self,
@@ -183,7 +215,7 @@ class VirtualminAuthenticationManager:
             return gateway.call(program, parameters)
             
         except Exception as e:
-            return Err(f"ACL authentication failed: {e!s}")
+            return create_error_result(f"ACL authentication failed: {e!s}")
             
     def _execute_master_proxy(
         self,
@@ -197,7 +229,7 @@ class VirtualminAuthenticationManager:
             master_password = getattr(settings, 'VIRTUALMIN_MASTER_PASSWORD', None)
             
             if not master_username or not master_password:
-                return Err("Master admin credentials not configured")
+                return create_error_result("Master admin credentials not configured")
                 
             # Use master credentials with same gateway
             config = VirtualminConfig(
@@ -222,7 +254,7 @@ class VirtualminAuthenticationManager:
             return result
             
         except Exception as e:
-            return Err(f"Master proxy authentication failed: {e!s}")
+            return create_error_result(f"Master proxy authentication failed: {e!s}")
             
     def _execute_ssh_sudo(
         self,
@@ -253,14 +285,14 @@ class VirtualminAuthenticationManager:
             
             # Parse CLI output (simpler than API response)
             if "successfully" in output.lower() or "created" in output.lower():
-                return Ok({"success": True, "message": output.strip()})
+                return create_ok_result({"success": True, "message": output.strip()})
             elif "error" in output.lower() or "failed" in output.lower():
-                return Err(f"CLI command failed: {output.strip()}")
+                return create_error_result(f"CLI command failed: {output.strip()}")
             else:
-                return Ok({"success": True, "message": output.strip()})
+                return create_ok_result({"success": True, "message": output.strip()})
                 
         except Exception as e:
-            return Err(f"SSH sudo authentication failed: {e!s}")
+            return create_error_result(f"SSH sudo authentication failed: {e!s}")
             
     def _execute_ssh_command(self, command: str) -> Result[str, str]:
         """Execute command via SSH"""
@@ -269,7 +301,7 @@ class VirtualminAuthenticationManager:
                 self._connect_ssh()
                 
             if not self._ssh_client:
-                return Err("Failed to establish SSH connection")
+                return create_error_result("Failed to establish SSH connection")
                 
             stdin, stdout, stderr = self._ssh_client.exec_command(
                 command,
@@ -282,17 +314,18 @@ class VirtualminAuthenticationManager:
             exit_code = stdout.channel.recv_exit_status()
             
             if exit_code != 0:
-                return Err(f"Command failed (exit {exit_code}): {error}")
+                return create_error_result(f"Command failed (exit {exit_code}): {error}")
                 
-            return Ok(output)
+            return create_ok_result(output)
             
         except Exception as e:
             # Try to reconnect on failure
             self._disconnect_ssh()
-            return Err(f"SSH command execution failed: {e!s}")
+            return create_error_result(f"SSH command execution failed: {e!s}")
             
     def _connect_ssh(self) -> None:
         """Establish SSH connection"""
+            
         try:
             self._ssh_client = paramiko.SSHClient()
             self._ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())

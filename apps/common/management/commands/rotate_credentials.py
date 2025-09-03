@@ -22,7 +22,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import models
 from django.utils import timezone
 
-from apps.common.credential_vault import CredentialVault, EncryptedCredential, get_credential_vault
+from apps.common.credential_vault import CredentialVault, EncryptedCredential, RotationData, get_credential_vault
 
 # Expiry urgency constants
 CRITICAL_EXPIRY_DAYS = 3  # <= 3 days for critical urgency
@@ -132,11 +132,12 @@ class Command(BaseCommand):
             return
             
         # Perform actual rotation
-        result = vault.rotate_credential(
+        rotation_data = RotationData(
             service_type=service_type,
             service_identifier=identifier,
             reason='Manual rotation via management command'
         )
+        result = vault.rotate_credential(rotation_data)
         
         if result.is_ok():
             self.stdout.write(
@@ -193,11 +194,12 @@ class Command(BaseCommand):
         for cred in credentials_to_rotate:
             self.stdout.write(f'🔄 Rotating {cred}...')
             
-            result = vault.rotate_credential(
+            rotation_data = RotationData(
                 service_type=cred.service_type,
                 service_identifier=cred.service_identifier,
                 reason='Automatic rotation due to age/expiration'
             )
+            result = vault.rotate_credential(rotation_data)
             
             if result.is_ok():
                 success_count += 1

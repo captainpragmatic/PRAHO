@@ -109,6 +109,107 @@ class VirtualminBackupService:
         max_duration_seconds=300,
         alert_threshold=60
     )
+    def _prepare_restore_session(
+        self, 
+        account: VirtualminAccount, 
+        config: RestoreConfig, 
+        restore_id: str
+    ) -> Result[tuple[str, dict[str, Any], dict[str, Any]], str]:
+        """Prepare restore session: download, verify backup, create rollback point."""
+        # Download and verify backup
+        self._update_restore_progress(restore_id, "downloading", 10)
+        download_result = self._download_backup_from_s3(config.backup_id)
+        if download_result.is_err():
+            return download_result
+            
+        backup_path, backup_metadata = download_result.unwrap()
+        
+        # Verify backup integrity before restore
+        self._update_restore_progress(restore_id, "verifying", 20)
+        verification_result = self._verify_backup_before_restore(backup_path, backup_metadata)
+        if verification_result.is_err():
+            return verification_result
+            
+        # Create rollback point
+        self._update_restore_progress(restore_id, "creating_rollback", 25)
+        rollback_result = self._create_restore_rollback_point(account)
+        if rollback_result.is_err():
+            return rollback_result
+            
+        return Ok((backup_path, backup_metadata, rollback_result.unwrap()))
+
+    def _execute_restore_components(
+        self, 
+        gateway: Any, 
+        account: VirtualminAccount, 
+        backup_path: str, 
+        config: RestoreConfig, 
+        restore_id: str
+    ) -> list[str]:
+        """Execute restore operations for email, databases, files, and SSL."""
+        errors = []
+        
+        if config.restore_email:
+            self._update_restore_progress(restore_id, "restoring_email", 30)
+            email_result = self._restore_email_data(gateway, account, backup_path)
+            if email_result.is_err():
+                error_msg = f"Email restore failed: {email_result.unwrap_err()}"
+                logger.error(error_msg)
+                errors.append(error_msg)
+                
+        if config.restore_databases:
+            self._update_restore_progress(restore_id, "restoring_databases", 50)
+            db_result = self._restore_database_data(gateway, account, backup_path)
+            if db_result.is_err():
+                error_msg = f"Database restore failed: {db_result.unwrap_err()}"
+                logger.error(error_msg)
+                errors.append(error_msg)
+                
+        if config.restore_files:
+            self._update_restore_progress(restore_id, "restoring_files", 70)
+            files_result = self._restore_file_data(gateway, account, backup_path)
+            if files_result.is_err():
+                error_msg = f"Files restore failed: {files_result.unwrap_err()}"
+                logger.error(error_msg)
+                errors.append(error_msg)
+                
+        if config.restore_ssl:
+            self._update_restore_progress(restore_id, "restoring_ssl", 85)
+            ssl_result = self._restore_ssl_certificates(gateway, account, backup_path)
+            if ssl_result.is_err():
+                error_msg = f"SSL restore failed: {ssl_result.unwrap_err()}"
+                logger.error(error_msg)
+                errors.append(error_msg)
+                
+        return errors
+
+    def _finalize_restore_operation(
+        self, 
+        gateway: Any, 
+        account: VirtualminAccount, 
+        backup_metadata: dict[str, Any], 
+        restore_id: str, 
+        config: RestoreConfig, 
+        rollback_data: dict[str, Any]
+    ) -> Result[dict[str, Any], str]:
+        """Verify restore integrity and finalize the operation."""
+        # Verify restore integrity
+        self._update_restore_progress(restore_id, "verifying_restore", 90)
+        integrity_result = self._verify_restore_integrity(gateway, account, backup_metadata)
+        if integrity_result.is_err():
+            # Attempt rollback on verification failure
+            self._execute_restore_rollback(account, rollback_data)
+            return integrity_result
+            
+        # Finalize restore
+        self._update_restore_progress(restore_id, "completed", 100)
+        restore_summary = self._finalize_restore_summary(
+            account, config.backup_id, restore_id, backup_metadata
+        )
+        
+        logger.info(f"Restore completed successfully: {restore_id}")
+        return Ok(restore_summary)
+
     @audit_service_call("backup_domain")
     @atomic_with_retry(max_retries=2, delay=1.0)
     def backup_domain(
@@ -223,75 +324,29 @@ class VirtualminBackupService:
             restore_id = self._generate_restore_id(account, config.backup_id)
             self._update_restore_progress(restore_id, "initializing", 0)
             
-            # Download and verify backup
-            self._update_restore_progress(restore_id, "downloading", 10)
-            download_result = self._download_backup_from_s3(config.backup_id)
-            if download_result.is_err():
-                return download_result
+            # Prepare restore session (download, verify, create rollback)
+            prepare_result = self._prepare_restore_session(account, config, restore_id)
+            if prepare_result.is_err():
+                return prepare_result
                 
-            backup_path, backup_metadata = download_result.unwrap()
+            backup_path, backup_metadata, rollback_data = prepare_result.unwrap()
             
-            # Verify backup integrity before restore
-            self._update_restore_progress(restore_id, "verifying", 20)
-            verification_result = self._verify_backup_before_restore(backup_path, backup_metadata)
-            if verification_result.is_err():
-                return verification_result
-                
-            # Create rollback point
-            self._update_restore_progress(restore_id, "creating_rollback", 25)
-            rollback_result = self._create_restore_rollback_point(account)
-            if rollback_result.is_err():
-                return rollback_result
-                
             # Execute restore operations
             gateway = VirtualminGateway(target_server)
             
             try:
-                if config.restore_email:
-                    self._update_restore_progress(restore_id, "restoring_email", 30)
-                    email_result = self._restore_email_data(gateway, account, backup_path)
-                    if email_result.is_err():
-                        logger.error(f"Email restore failed: {email_result.unwrap_err()}")
-                        
-                if config.restore_databases:
-                    self._update_restore_progress(restore_id, "restoring_databases", 50)
-                    db_result = self._restore_database_data(gateway, account, backup_path)
-                    if db_result.is_err():
-                        logger.error(f"Database restore failed: {db_result.unwrap_err()}")
-                        
-                if config.restore_files:
-                    self._update_restore_progress(restore_id, "restoring_files", 70)
-                    files_result = self._restore_file_data(gateway, account, backup_path)
-                    if files_result.is_err():
-                        logger.error(f"Files restore failed: {files_result.unwrap_err()}")
-                        
-                if config.restore_ssl:
-                    self._update_restore_progress(restore_id, "restoring_ssl", 85)
-                    ssl_result = self._restore_ssl_certificates(gateway, account, backup_path)
-                    if ssl_result.is_err():
-                        logger.error(f"SSL restore failed: {ssl_result.unwrap_err()}")
-                        
-                # Verify restore integrity
-                self._update_restore_progress(restore_id, "verifying_restore", 90)
-                integrity_result = self._verify_restore_integrity(gateway, account, backup_metadata)
-                if integrity_result.is_err():
-                    # Attempt rollback on verification failure
-                    self._execute_restore_rollback(account, rollback_result.unwrap())
-                    return integrity_result
-                    
-                # Finalize restore
-                self._update_restore_progress(restore_id, "completed", 100)
-                restore_summary = self._finalize_restore_summary(
-                    account, config.backup_id, restore_id, backup_metadata
-                )
+                # Execute restore components
+                errors = self._execute_restore_components(gateway, account, backup_path, config, restore_id)
                 
-                logger.info(f"Restore completed successfully: {restore_id}")
-                return Ok(restore_summary)
+                # Finalize restore operation
+                return self._finalize_restore_operation(
+                    gateway, account, backup_metadata, restore_id, config, rollback_data
+                )
                 
             except Exception as e:
                 # Execute rollback on any failure
                 logger.error(f"Restore failed, executing rollback: {e}")
-                self._execute_restore_rollback(account, rollback_result.unwrap())
+                self._execute_restore_rollback(account, rollback_data)
                 raise
                 
         except Exception as e:

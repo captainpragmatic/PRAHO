@@ -3,7 +3,7 @@ Test ticket internal comments security and visibility
 """
 
 from django.contrib.auth import get_user_model
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
 from apps.customers.models import Customer, CustomerTaxProfile
@@ -13,15 +13,12 @@ from apps.users.models import CustomerMembership
 User = get_user_model()
 
 
+@override_settings(DISABLE_AUDIT_SIGNALS=True)
 class TicketInternalCommentsSecurityTest(TestCase):
     """Test security of internal comments visibility"""
 
     def setUp(self):
         """Set up test data"""
-        # Disable audit signals during testing to avoid category errors
-        from django.conf import settings
-        self.original_disable_audit = getattr(settings, 'DISABLE_AUDIT_SIGNALS', False)
-        settings.DISABLE_AUDIT_SIGNALS = True
         # Create staff user (admin)
         self.staff_user = User.objects.create_user(
             email='admin@example.com',
@@ -290,9 +287,3 @@ class TicketInternalCommentsSecurityTest(TestCase):
         self.assertContains(response, 'Customer')  # Customer badge
         self.assertContains(response, 'Support')   # Support badge
 
-    def tearDown(self):
-        """Clean up test data"""
-        # Restore original audit signal setting
-        from django.conf import settings
-        settings.DISABLE_AUDIT_SIGNALS = self.original_disable_audit
-        # Django handles cleanup automatically, but good practice

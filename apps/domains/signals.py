@@ -61,8 +61,8 @@ def handle_domain_created_or_updated(sender: type[Domain], instance: Domain, cre
             "registrar": instance.registrar.name if instance.registrar else None,
             "tld": instance.tld.extension if instance.tld else None,
             "expires_at": instance.expires_at.isoformat() if instance.expires_at else None,
-            "auto_renew": instance.auto_renew_enabled,
-            "whois_privacy": instance.whois_privacy_enabled,
+            "auto_renew": instance.auto_renew,
+            "whois_privacy": instance.whois_privacy,
             "is_locked": instance.is_locked,
             "customer_id": str(instance.customer.id) if instance.customer else None,
         }
@@ -123,8 +123,8 @@ def store_original_domain_values(sender: type[Domain], instance: Domain, **kwarg
                     "registrar": original.registrar.name if original.registrar else None,
                     "tld": original.tld.extension if original.tld else None,
                     "expires_at": original.expires_at.isoformat() if original.expires_at else None,
-                    "auto_renew": original.auto_renew_enabled,
-                    "whois_privacy": original.whois_privacy_enabled,
+                    "auto_renew": original.auto_renew,
+                    "whois_privacy": original.whois_privacy,
                     "is_locked": original.is_locked,
                 }
             except Domain.DoesNotExist:
@@ -190,7 +190,7 @@ def handle_tld_created_or_updated(sender: type[TLD], instance: TLD, created: boo
             "registration_price_cents": instance.registration_price_cents,
             "renewal_price_cents": instance.renewal_price_cents,
             "transfer_price_cents": instance.transfer_price_cents,
-            "is_active": instance.is_active,
+            "status": instance.status,
         }
 
         if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
@@ -233,7 +233,7 @@ def store_original_tld_values(sender: type[TLD], instance: TLD, **kwargs: Any) -
                     "registration_price_cents": original.registration_price_cents,
                     "renewal_price_cents": original.renewal_price_cents,
                     "transfer_price_cents": original.transfer_price_cents,
-                    "is_active": original.is_active,
+                    "status": original.status,
                 }
             except TLD.DoesNotExist:
                 instance._original_tld_values = {}
@@ -266,7 +266,7 @@ def handle_registrar_created_or_updated(
         new_values = {
             "name": instance.name,
             "api_url": "[REDACTED]",  # Never log API URLs
-            "is_active": instance.is_active,
+            "status": instance.status,
         }
 
         # Check if this is a security-sensitive update
@@ -317,7 +317,7 @@ def store_original_registrar_values(sender: type[Registrar], instance: Registrar
                 instance._original_registrar_values = {
                     "name": original.name,
                     "api_url": "[REDACTED]",  # Never log API URLs
-                    "is_active": original.is_active,
+                    "status": original.status,
                 }
             except Registrar.DoesNotExist:
                 instance._original_registrar_values = {}
@@ -889,7 +889,7 @@ def sync_domain_to_virtualmin(domain: Domain) -> None:
         
         # Find hosting services associated with this domain
         hosting_services = Service.objects.filter(
-            servicedomains__domain_name=domain.name,
+            domains__domain__name=domain.name,
             status__in=['active', 'provisioning']
         ).distinct()
         
@@ -901,7 +901,7 @@ def sync_domain_to_virtualmin(domain: Domain) -> None:
                     # Check if Virtualmin account already exists
                     virtualmin_account = VirtualminAccount.objects.filter(
                         domain=domain.name,
-                        praho_service_id=service.id
+                        service=service
                     ).first()
                     
                     if virtualmin_account:

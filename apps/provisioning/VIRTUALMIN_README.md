@@ -12,7 +12,7 @@ This implementation provides comprehensive Virtualmin API integration for the PR
 - **`virtualmin_models.py`** - Database models for Virtualmin integration
 - **`virtualmin_gateway.py`** - API gateway with error handling
 - **`virtualmin_service.py`** - Business logic service layer
-- **`virtualmin_tasks.py`** - Celery async tasks
+- **`virtualmin_tasks.py`** - Django-Q2 async tasks
 
 ### Testing
 
@@ -38,7 +38,7 @@ virtualmin_tasks.py       # Async operations
 2. **Recovery Seeds** - Minimal metadata stored in Virtualmin comments for emergency recovery
 3. **Enterprise Error Handling** - Comprehensive error taxonomy with retry logic
 4. **Security First** - Input validation, rate limiting, encrypted credentials
-5. **Async by Default** - All provisioning operations use Celery tasks
+5. **Async by Default** - All provisioning operations use Django-Q2 tasks
 
 ## 🔐 Security Features
 
@@ -155,24 +155,21 @@ server.set_api_password("secure_api_password")
 server.save()
 ```
 
-### Celery Beat Schedule
-```python
-# In settings.py
-CELERY_BEAT_SCHEDULE = {
-    'virtualmin-health-check': {
-        'task': 'apps.provisioning.virtualmin_tasks.health_check_virtualmin_servers',
-        'schedule': crontab(minute=0),  # Every hour
-    },
-    'virtualmin-update-statistics': {
-        'task': 'apps.provisioning.virtualmin_tasks.update_virtualmin_server_statistics',
-        'schedule': crontab(minute=30, hour='*/6'),  # Every 6 hours
-    },
-    'virtualmin-process-failed-jobs': {
-        'task': 'apps.provisioning.virtualmin_tasks.process_failed_virtualmin_jobs',
-        'schedule': crontab(minute='*/15'),  # Every 15 minutes
-    },
-}
+### Django-Q2 Scheduled Tasks
+```bash
+# Set up scheduled tasks
+python manage.py setup_virtualmin_tasks
+
+# Start workers
+python manage.py qcluster
+
+# Monitor at /admin/django_q/
 ```
+
+**Schedule Details:**
+- Health Check: Every hour
+- Statistics Update: Every 6 hours  
+- Retry Failed Jobs: Every 15 minutes
 
 ## 🚀 Usage Examples
 
@@ -326,7 +323,7 @@ result = recovery.rebuild_from_virtualmin_domains(server)
 
 1. **Run Migrations** - `python manage.py makemigrations provisioning`
 2. **Configure Servers** - Add VirtualminServer instances
-3. **Set Up Celery** - Configure beat schedule for periodic tasks
+3. **Set Up Django-Q2** - Configure scheduled tasks and start workers
 4. **Test Integration** - Verify with staging Virtualmin server
 5. **Monitor Operations** - Set up alerts for failed provisioning jobs
 

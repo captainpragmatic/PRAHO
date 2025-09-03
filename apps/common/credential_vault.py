@@ -17,8 +17,12 @@ import logging
 import secrets
 import string
 import uuid
+from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
+
+if TYPE_CHECKING:
+    pass
 
 from cryptography.fernet import Fernet
 from django.conf import settings
@@ -36,6 +40,41 @@ MAX_CREDENTIAL_AGE_DAYS = 90  # Maximum age before forced rotation
 ROTATION_RETRY_LIMIT = 3
 ACCESS_LOG_RETENTION_DAYS = 365  # Keep access logs for 1 year
 VAULT_CACHE_TIMEOUT = 300  # 5 minutes for credential caching
+
+
+@dataclass
+class CredentialData:
+    """Data class to encapsulate credential parameters"""
+    service_type: str
+    service_identifier: str
+    username: str
+    password: str
+    metadata: dict | None = None
+    expires_in_days: int = CREDENTIAL_EXPIRY_DAYS
+    user: Any | None = None
+    reason: str = "Credential storage"
+
+
+@dataclass
+class RotationData:
+    """Data class to encapsulate credential rotation parameters"""
+    service_type: str
+    service_identifier: str
+    new_username: str | None = None
+    new_password: str | None = None
+    user: Any | None = None
+    reason: str = "Credential rotation"
+
+
+@dataclass
+class AccessLogData:
+    """Data class to encapsulate credential access logging parameters"""
+    credential: Any  # EncryptedCredential 
+    user: Any | None
+    reason: str
+    access_method: str
+    success: bool
+    error_message: str = ""
 
 
 class CredentialVaultError(Exception):
@@ -253,27 +292,13 @@ class CredentialVault:
             
     def store_credential(
         self,
-        service_type: str,
-        service_identifier: str,
-        username: str,
-        password: str,
-        metadata: dict | None = None,
-        expires_in_days: int = CREDENTIAL_EXPIRY_DAYS,
-        user: Any | None = None,
-        reason: str = "Credential storage"
+        credential_data: CredentialData
     ) -> Result[EncryptedCredential, str]:
         """
         🔒 Store encrypted credential in vault.
         
         Args:
-            service_type: Type of service (virtualmin, stripe, etc.)
-            service_identifier: Unique identifier (hostname, account ID)
-            username: Username/API key
-            password: Password/secret
-            metadata: Additional encrypted data
-            expires_in_days: Days until expiration
-            user: User storing the credential
-            reason: Reason for storage
+            credential_data: CredentialData object containing all credential parameters
             
         Returns:
             Result with stored credential or error
@@ -281,21 +306,21 @@ class CredentialVault:
         try:
             with transaction.atomic():
                 # Encrypt credential data
-                encrypted_username = self._cipher.encrypt(username.encode())
-                encrypted_password = self._cipher.encrypt(password.encode())
+                encrypted_username = self._cipher.encrypt(credential_data.username.encode())
+                encrypted_password = self._cipher.encrypt(credential_data.password.encode())
                 encrypted_metadata = None
                 
-                if metadata:
-                    metadata_json = json.dumps(metadata)
+                if credential_data.metadata:
+                    metadata_json = json.dumps(credential_data.metadata)
                     encrypted_metadata = self._cipher.encrypt(metadata_json.encode())
                 
                 # Calculate expiration
-                expires_at = timezone.now() + timedelta(days=expires_in_days)
+                expires_at = timezone.now() + timedelta(days=credential_data.expires_in_days)
                 
                 # Store or update credential
                 credential, created = EncryptedCredential.objects.update_or_create(
-                    service_type=service_type,
-                    service_identifier=service_identifier,
+                    service_type=credential_data.service_type,
+                    service_identifier=credential_data.service_identifier,
                     defaults={
                         'encrypted_username': encrypted_username,
                         'encrypted_password': encrypted_password,
@@ -312,18 +337,19 @@ class CredentialVault:
                     credential.save()
                 
                 # Log storage event
-                self._log_credential_access(
+                access_data = AccessLogData(
                     credential=credential,
-                    user=user,
-                    reason=reason,
-                    access_method='admin' if user else 'api',
+                    user=credential_data.user,
+                    reason=credential_data.reason,
+                    access_method='admin' if credential_data.user else 'api',
                     success=True
                 )
+                self._log_credential_access(access_data)
                 
                 action = "updated" if not created else "stored"
                 logger.info(
                     f"🔐 [Credential Vault] {action.title()} credential: "
-                    f"{service_type}:{service_identifier}"
+                    f"{credential_data.service_type}:{credential_data.service_identifier}"
                 )
                 
                 return Ok(credential)
@@ -331,6 +357,30 @@ class CredentialVault:
         except Exception as e:
             logger.error(f"🚨 [Credential Vault] Storage failed: {e}")
             return Err(f"Failed to store credential: {e!s}")
+    
+    def store_credential_legacy(  # noqa: PLR0913
+        self,
+        service_type: str,
+        service_identifier: str,
+        username: str,
+        password: str,
+        metadata: dict | None = None,
+        expires_in_days: int = CREDENTIAL_EXPIRY_DAYS,
+        user: Any | None = None,
+        reason: str = "Credential storage"
+    ) -> Result[EncryptedCredential, str]:
+        """Legacy method for backward compatibility - use store_credential with CredentialData instead."""
+        credential_data = CredentialData(
+            service_type=service_type,
+            service_identifier=service_identifier,
+            username=username,
+            password=password,
+            metadata=metadata,
+            expires_in_days=expires_in_days,
+            user=user,
+            reason=reason
+        )
+        return self.store_credential(credential_data)
             
     def get_credential(
         self,
@@ -366,7 +416,7 @@ class CredentialVault:
                 
             # Check expiration
             if credential.is_expired and not allow_expired:
-                self._log_credential_access(
+                access_data = AccessLogData(
                     credential=credential,
                     user=user,
                     reason=reason,
@@ -374,11 +424,12 @@ class CredentialVault:
                     success=False,
                     error_message="Credential expired"
                 )
+                self._log_credential_access(access_data)
                 return Err(f"Credential expired {credential.days_until_expiry} days ago")
                 
             # Check permissions (implement your authorization logic here)
             if not self._check_credential_access_permission(credential, user):
-                self._log_credential_access(
+                access_data = AccessLogData(
                     credential=credential,
                     user=user,
                     reason=reason,
@@ -386,6 +437,7 @@ class CredentialVault:
                     success=False,
                     error_message="Access denied"
                 )
+                self._log_credential_access(access_data)
                 return Err("Access denied to credential")
                 
             # Decrypt credential data
@@ -403,13 +455,14 @@ class CredentialVault:
             credential.save(update_fields=['last_accessed', 'access_count'])
             
             # Log successful access
-            self._log_credential_access(
+            access_data = AccessLogData(
                 credential=credential,
                 user=user,
                 reason=reason,
                 access_method='api',
                 success=True
             )
+            self._log_credential_access(access_data)
             
             logger.debug(
                 f"🔐 [Credential Vault] Retrieved credential: "
@@ -424,23 +477,13 @@ class CredentialVault:
             
     def rotate_credential(
         self,
-        service_type: str,
-        service_identifier: str,
-        new_username: str | None = None,
-        new_password: str | None = None,
-        user: Any | None = None,
-        reason: str = "Credential rotation"
+        rotation_data: RotationData
     ) -> Result[bool, str]:
         """
         🔄 Rotate credential with new values.
         
         Args:
-            service_type: Type of service
-            service_identifier: Unique identifier
-            new_username: New username (optional)
-            new_password: New password (will generate if not provided)
-            user: User performing rotation
-            reason: Reason for rotation
+            rotation_data: RotationData object containing all rotation parameters
             
         Returns:
             Result with success status or error
@@ -449,12 +492,12 @@ class CredentialVault:
             # Find existing credential
             try:
                 credential = EncryptedCredential.objects.get(
-                    service_type=service_type,
-                    service_identifier=service_identifier,
+                    service_type=rotation_data.service_type,
+                    service_identifier=rotation_data.service_identifier,
                     is_active=True
                 )
             except EncryptedCredential.DoesNotExist:
-                return Err(f"Credential not found: {service_type}:{service_identifier}")
+                return Err(f"Credential not found: {rotation_data.service_type}:{rotation_data.service_identifier}")
                 
             # Mark rotation in progress
             credential.rotation_in_progress = True
@@ -463,16 +506,16 @@ class CredentialVault:
             
             try:
                 # Generate new password if not provided
-                if not new_password:
-                    new_password = self._generate_secure_password()
+                if not rotation_data.new_password:
+                    rotation_data.new_password = self._generate_secure_password()
                     
                 # Get current username if new one not provided
-                if not new_username:
+                if not rotation_data.new_username:
                     current_username = self._cipher.decrypt(credential.encrypted_username).decode()
-                    new_username = current_username
+                    rotation_data.new_username = current_username
                     
                 # Test new credential works (implement service-specific testing)
-                test_result = self._test_credential(service_type, service_identifier, new_username, new_password)
+                test_result = self._test_credential(rotation_data.service_type, rotation_data.service_identifier, rotation_data.new_username, rotation_data.new_password)
                 if test_result.is_err():
                     credential.rotation_failure_count += 1
                     credential.rotation_in_progress = False
@@ -480,15 +523,15 @@ class CredentialVault:
                     return Err(f"Credential test failed: {test_result.unwrap_err()}")
                     
                 # Store new credential (keeps old version for rollback)
-                store_result = self.store_credential(
-                    service_type=service_type,
-                    service_identifier=service_identifier,
-                    username=new_username,
-                    password=new_password,
-                    expires_in_days=CREDENTIAL_EXPIRY_DAYS,
-                    user=user,
-                    reason=reason
+                credential_data = CredentialData(
+                    service_type=rotation_data.service_type,
+                    service_identifier=rotation_data.service_identifier,
+                    username=rotation_data.new_username,
+                    password=rotation_data.new_password,
+                    user=rotation_data.user,
+                    reason=rotation_data.reason
                 )
+                store_result = self.store_credential(credential_data)
                 
                 if store_result.is_err():
                     credential.rotation_failure_count += 1
@@ -503,7 +546,7 @@ class CredentialVault:
                 
                 logger.info(
                     f"🔄 [Credential Vault] Rotated credential: "
-                    f"{service_type}:{service_identifier}"
+                    f"{rotation_data.service_type}:{rotation_data.service_identifier}"
                 )
                 
                 return Ok(True)
@@ -518,6 +561,26 @@ class CredentialVault:
         except Exception as e:
             logger.error(f"🚨 [Credential Vault] Rotation failed: {e}")
             return Err(f"Failed to rotate credential: {e!s}")
+    
+    def rotate_credential_legacy(  # noqa: PLR0913
+        self,
+        service_type: str,
+        service_identifier: str,
+        new_username: str | None = None,
+        new_password: str | None = None,
+        user: Any | None = None,
+        reason: str = "Credential rotation"
+    ) -> Result[bool, str]:
+        """Legacy method for backward compatibility - use rotate_credential with RotationData instead."""
+        rotation_data = RotationData(
+            service_type=service_type,
+            service_identifier=service_identifier,
+            new_username=new_username,
+            new_password=new_password,
+            user=user,
+            reason=reason
+        )
+        return self.rotate_credential(rotation_data)
             
     def _test_credential(
         self,
@@ -529,9 +592,12 @@ class CredentialVault:
         """Test if credential works (service-specific implementation)"""
         
         if service_type == 'virtualmin':
-            # Import here to avoid circular imports
-            from apps.provisioning.virtualmin_gateway import VirtualminConfig, VirtualminGateway
-            
+            # Use runtime imports to avoid circular imports during tests
+            try:
+                from apps.provisioning.virtualmin_gateway import VirtualminConfig, VirtualminGateway  # noqa: PLC0415
+            except ImportError:
+                return Err("Virtualmin gateway not available")
+                
             try:
                 config = VirtualminConfig(
                     hostname=service_identifier,
@@ -570,25 +636,20 @@ class CredentialVault:
         
     def _log_credential_access(
         self,
-        credential: EncryptedCredential,
-        user: Any | None,
-        reason: str,
-        access_method: str,
-        success: bool,
-        error_message: str = ""
+        access_data: AccessLogData
     ) -> None:
         """Log credential access for audit trail"""
         try:
-            username = user.username if user and hasattr(user, 'username') else 'system'
+            username = access_data.user.username if access_data.user and hasattr(access_data.user, 'username') else 'system'
             
             CredentialAccessLog.objects.create(
-                credential=credential,
-                user=user,
+                credential=access_data.credential,
+                user=access_data.user,
                 username=username,
-                access_reason=reason,
-                access_method=access_method,
-                success=success,
-                error_message=error_message
+                access_reason=access_data.reason,
+                access_method=access_data.access_method,
+                success=access_data.success,
+                error_message=access_data.error_message
             )
             
         except Exception as e:

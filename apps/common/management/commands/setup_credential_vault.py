@@ -13,18 +13,32 @@ Usage:
 """
 
 from argparse import ArgumentParser
+from dataclasses import dataclass
 from typing import Any
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from apps.common.credential_vault import (
+    CredentialData,
     CredentialVault,
     CredentialVaultError,
     EncryptedCredential,
     get_credential_vault,
 )
 from apps.provisioning.virtualmin_models import VirtualminServer
+
+
+@dataclass
+class MigrationCredential:
+    """Data class to encapsulate credential migration parameters"""
+    vault: Any  # CredentialVault
+    service_type: str
+    identifier: str
+    username: str
+    password: str
+    description: str
+    force: bool = False
 
 
 class Command(BaseCommand):
@@ -91,13 +105,14 @@ class Command(BaseCommand):
         test_password = 'test_password_123'
         
         # Store test credential
-        store_result = vault.store_credential(
+        credential_data = CredentialData(
             service_type=test_service,
             service_identifier=test_identifier,
             username=test_username,
             password=test_password,
             reason='Vault functionality test'
         )
+        store_result = vault.store_credential(credential_data)
         
         if store_result.is_err():
             raise CommandError(f"Store test failed: {store_result.unwrap_err()}")
@@ -138,15 +153,16 @@ class Command(BaseCommand):
         global_password = getattr(settings, 'VIRTUALMIN_PASSWORD', None)
         
         if global_username and global_password:
-            self._migrate_credential(
-                vault, 
-                'virtualmin', 
-                'global', 
-                global_username, 
-                global_password,
-                'Global Virtualmin credentials',
-                force
+            migration_cred = MigrationCredential(
+                vault=vault,
+                service_type='virtualmin',
+                identifier='global',
+                username=global_username,
+                password=global_password,
+                description='Global Virtualmin credentials',
+                force=force
             )
+            self._migrate_credential(migration_cred)
             migrated_count += 1
             
         # Migrate multi-path auth credentials
@@ -154,15 +170,16 @@ class Command(BaseCommand):
         master_password = getattr(settings, 'VIRTUALMIN_MASTER_PASSWORD', None)
         
         if master_username and master_password:
-            self._migrate_credential(
-                vault,
-                'virtualmin',
-                'master_admin',
-                master_username,
-                master_password,
-                'Virtualmin master admin credentials',
-                force
+            migration_cred = MigrationCredential(
+                vault=vault,
+                service_type='virtualmin',
+                identifier='master_admin',
+                username=master_username,
+                password=master_password,
+                description='Virtualmin master admin credentials',
+                force=force
             )
+            self._migrate_credential(migration_cred)
             migrated_count += 1
             
         # Migrate SSH credentials
@@ -170,15 +187,16 @@ class Command(BaseCommand):
         ssh_password = getattr(settings, 'VIRTUALMIN_SSH_PASSWORD', None)
         
         if ssh_username and ssh_password:
-            self._migrate_credential(
-                vault,
-                'ssh',
-                'virtualmin_servers',
-                ssh_username,
-                ssh_password,
-                'Virtualmin SSH credentials',
-                force
+            migration_cred = MigrationCredential(
+                vault=vault,
+                service_type='ssh',
+                identifier='virtualmin_servers',
+                username=ssh_username,
+                password=ssh_password,
+                description='Virtualmin SSH credentials',
+                force=force
             )
+            self._migrate_credential(migration_cred)
             migrated_count += 1
             
         # Migrate per-server credentials
@@ -187,15 +205,16 @@ class Command(BaseCommand):
                 try:
                     password = server.get_api_password()
                     if password:
-                        self._migrate_credential(
-                            vault,
-                            'virtualmin',
-                            server.hostname,
-                            server.api_username,
-                            password,
-                            f'Server {server.hostname} credentials',
-                            force
+                        migration_cred = MigrationCredential(
+                            vault=vault,
+                            service_type='virtualmin',
+                            identifier=server.hostname,
+                            username=server.api_username,
+                            password=password,
+                            description=f'Server {server.hostname} credentials',
+                            force=force
                         )
+                        self._migrate_credential(migration_cred)
                         migrated_count += 1
                 except Exception as e:
                     self.stdout.write(
@@ -213,38 +232,39 @@ class Command(BaseCommand):
                 )
             )
             
-    def _migrate_credential(self, vault: CredentialVault, service_type: str, identifier: str, username: str, password: str, description: str, force: bool) -> None:
+    def _migrate_credential(self, migration_cred: MigrationCredential) -> None:
         """Migrate a single credential to vault"""
         
         # Check if credential already exists
-        existing = vault.get_credential(
-            service_type=service_type,
-            service_identifier=identifier,
+        existing = migration_cred.vault.get_credential(
+            service_type=migration_cred.service_type,
+            service_identifier=migration_cred.identifier,
             reason='Migration check'
         )
         
-        if existing.is_ok() and not force:
+        if existing.is_ok() and not migration_cred.force:
             self.stdout.write(
-                self.style.WARNING(f'⚠️ Credential already exists: {description}')
+                self.style.WARNING(f'⚠️ Credential already exists: {migration_cred.description}')
             )
             return
             
         # Store credential in vault
-        result = vault.store_credential(
-            service_type=service_type,
-            service_identifier=identifier,
-            username=username,
-            password=password,
+        credential_data = CredentialData(
+            service_type=migration_cred.service_type,
+            service_identifier=migration_cred.identifier,
+            username=migration_cred.username,
+            password=migration_cred.password,
             reason='Environment variable migration'
         )
+        result = migration_cred.vault.store_credential(credential_data)
         
         if result.is_ok():
             self.stdout.write(
-                self.style.SUCCESS(f'✅ Migrated: {description}')
+                self.style.SUCCESS(f'✅ Migrated: {migration_cred.description}')
             )
         else:
             self.stdout.write(
-                self.style.ERROR(f'❌ Failed to migrate {description}: {result.unwrap_err()}')
+                self.style.ERROR(f'❌ Failed to migrate {migration_cred.description}: {result.unwrap_err()}')
             )
             
     def _show_vault_status(self, vault: CredentialVault) -> None:

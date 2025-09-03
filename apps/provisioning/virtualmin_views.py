@@ -22,8 +22,13 @@ from apps.common.security_decorators import (
     monitor_performance,
 )
 
-from .virtualmin_forms import VirtualminBackupForm, VirtualminBulkActionForm, VirtualminRestoreForm, VirtualminServerForm
 from .virtualmin_backup_service import VirtualminBackupService
+from .virtualmin_forms import (
+    VirtualminBackupForm,
+    VirtualminBulkActionForm,
+    VirtualminRestoreForm,
+    VirtualminServerForm,
+)
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 from .virtualmin_service import VirtualminBackupManagementService, VirtualminServerManagementService
 
@@ -132,7 +137,7 @@ def virtualmin_server_detail(request: HttpRequest, server_id: str) -> HttpRespon
     
     if server.status == "active":
         try:
-            from .virtualmin_service import VirtualminProvisioningService
+            from .virtualmin_service import VirtualminProvisioningService  # noqa: PLC0415
             service = VirtualminProvisioningService()
             gateway = service._get_gateway(server)
             
@@ -641,7 +646,7 @@ def virtualmin_server_test_connection(request: HttpRequest) -> HttpResponse:
             )
         
         # Create a temporary server instance for testing
-        from .virtualmin_models import VirtualminServer
+        from .virtualmin_models import VirtualminServer  # noqa: PLC0415
         temp_server = VirtualminServer(
             hostname=hostname,
             api_port=int(api_port),
@@ -707,7 +712,7 @@ def virtualmin_server_test_connection(request: HttpRequest) -> HttpResponse:
             '</div>'
             '<div class="ml-3">'
             '<h3 class="text-sm font-medium text-red-400">Test Failed</h3>'
-            f'<p class="text-sm text-red-300 mt-1">An error occurred during connection test: {str(e)}</p>'
+            f'<p class="text-sm text-red-300 mt-1">An error occurred during connection test: {e!s}</p>'
             '</div>'
             '</div>'
             '</div>',
@@ -1023,7 +1028,7 @@ def _format_backup_features(backup: dict[str, Any]) -> str:
 @monitor_performance(max_duration_seconds=5.0, alert_threshold=2.0)
 def virtualmin_account_new(request: HttpRequest) -> HttpResponse:
     """🆕 Create a new Virtualmin account."""
-    from .virtualmin_forms import VirtualminAccountForm
+    from .virtualmin_forms import VirtualminAccountForm  # noqa: PLC0415
     
     if request.method == 'POST':
         form = VirtualminAccountForm(request.POST)
@@ -1039,7 +1044,7 @@ def virtualmin_account_new(request: HttpRequest) -> HttpResponse:
             except Exception as e:
                 messages.error(
                     request,
-                    f"Failed to create account: {str(e)}"
+                    f"Failed to create account: {e!s}"
                 )
     else:
         form = VirtualminAccountForm()

@@ -14,6 +14,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # Application definition
 DJANGO_APPS: list[str] = [
+    "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
@@ -26,6 +27,7 @@ THIRD_PARTY_APPS: list[str] = [
     "rest_framework",
     "django_extensions",
     "ipware",
+    "django_q",  # Async task processing
 ]
 
 LOCAL_APPS: list[str] = [
@@ -393,3 +395,27 @@ RATELIMIT_USE_CACHE = "default"
 
 # Enable rate limiting (can be disabled in development)
 RATELIMIT_ENABLE = True
+
+# ===============================================================================
+# DJANGO-Q2 ASYNC TASK PROCESSING 🚀
+# ===============================================================================
+
+# Base queue cluster configuration
+Q_CLUSTER_BASE = {
+    'name': 'praho-cluster',
+    'timeout': 300,  # 5 minutes
+    'retry': 600,    # 10 minutes retry delay
+    'save_limit': 1000,  # Keep last 1000 task results
+    'catch_up': False,   # Don't run missed scheduled tasks
+    'orm': 'default',    # Use PostgreSQL database backend
+    'bulk': 10,          # Process 10 jobs at once
+    'queue_limit': 100,  # Max 100 jobs in queue
+}
+
+# Default production configuration (overridden in environment-specific settings)
+Q_CLUSTER = {
+    **Q_CLUSTER_BASE,
+    'workers': 2,        # 2 worker processes
+    'recycle': 500,      # Restart workers after 500 tasks
+    'sync': False,       # Async execution
+}

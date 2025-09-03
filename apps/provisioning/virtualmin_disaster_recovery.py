@@ -13,7 +13,7 @@ from django.utils import timezone
 from apps.common.types import Err, Ok, Result
 
 from .virtualmin_models import VirtualminAccount, VirtualminServer
-from .virtualmin_service import VirtualminProvisioningService
+from .virtualmin_service import VirtualminAccountCreationData, VirtualminProvisioningService
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,7 @@ class VirtualminDisasterRecoveryService:
             for account in praho_accounts:
                 try:
                     # Recreate account using PRAHO data as authority
-                    result = provisioning_service.create_virtualmin_account(
+                    creation_data = VirtualminAccountCreationData(
                         service=account.service,
                         domain=account.domain,
                         username=account.virtualmin_username,
@@ -111,6 +111,7 @@ class VirtualminDisasterRecoveryService:
                         template=account.template_name or "Default",
                         server=target_server
                     )
+                    result = provisioning_service.create_virtualmin_account(creation_data)
                     
                     if result.is_ok():
                         new_account = result.unwrap()

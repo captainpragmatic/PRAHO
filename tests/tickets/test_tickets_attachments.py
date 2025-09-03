@@ -6,7 +6,7 @@ import os
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
 from apps.customers.models import Customer, CustomerTaxProfile
@@ -16,15 +16,12 @@ from apps.users.models import CustomerMembership
 User = get_user_model()
 
 
+@override_settings(DISABLE_AUDIT_SIGNALS=True)
 class TicketAttachmentTest(TestCase):
     """Test ticket attachment functionality"""
 
     def setUp(self):
         """Set up test data"""
-        # Disable audit signals during testing to avoid category errors
-        from django.conf import settings
-        self.original_disable_audit = getattr(settings, 'DISABLE_AUDIT_SIGNALS', False)
-        settings.DISABLE_AUDIT_SIGNALS = True
         # Create test user
         self.user = User.objects.create_user(
             email='testuser@example.com',
@@ -220,9 +217,6 @@ class TicketAttachmentTest(TestCase):
 
     def tearDown(self):
         """Clean up test files"""
-        # Restore original audit signal setting
-        from django.conf import settings
-        settings.DISABLE_AUDIT_SIGNALS = self.original_disable_audit
         # Clean up any uploaded files
         for attachment in TicketAttachment.objects.all():
             if attachment.file and os.path.exists(attachment.file.path):

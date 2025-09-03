@@ -134,7 +134,7 @@ def _trigger_invoice_generation(order: Order) -> None:
     try:
         from apps.billing.services import InvoiceGenerationService  # noqa: PLC0415
 
-        # Generate invoice asynchronously if Celery is available
+        # Generate invoice asynchronously if Django-Q2 is available
         try:
             from apps.orders.tasks import generate_invoice_for_order  # noqa: PLC0415
 

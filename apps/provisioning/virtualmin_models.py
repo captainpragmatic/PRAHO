@@ -533,8 +533,8 @@ class VirtualminProvisioningJob(models.Model):
         blank=True
     )
     
-    # Celery task tracking
-    celery_task_id = models.CharField(max_length=255, blank=True, db_index=True)
+    # Django-Q2 task tracking
+    task_id = models.CharField(max_length=255, blank=True, db_index=True)
     
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
@@ -550,7 +550,7 @@ class VirtualminProvisioningJob(models.Model):
             models.Index(fields=['operation']),
             models.Index(fields=['server', 'status']),
             models.Index(fields=['correlation_id']),
-            models.Index(fields=['celery_task_id']),
+            models.Index(fields=['task_id']),
         ]
         
     def __str__(self) -> str:

@@ -102,8 +102,28 @@ LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+        },
         "null": {
             "class": "logging.NullHandler",
+        },
+    },
+    "loggers": {
+        "apps.provisioning.signals": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "apps.billing.signals": {
+            "handlers": ["console"],
+            "level": "INFO", 
+            "propagate": False,
+        },
+        "apps.audit.signals": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
         },
     },
     "root": {
@@ -182,10 +202,12 @@ RQ_QUEUES = {
 }
 
 # ===============================================================================
-# TEST-SPECIFIC FEATURES (Disable audit signals during testing)
+# TEST-SPECIFIC FEATURES (Allow audit signals during testing)
 # ===============================================================================
 
-DISABLE_AUDIT_SIGNALS = True
+# Enable audit signals in tests to allow testing of signal handlers
+# Individual tests can override this with @override_settings if needed
+DISABLE_AUDIT_SIGNALS = False
 
 # ===============================================================================
 # SECURITY TESTING (Enable account lockout for proper testing)

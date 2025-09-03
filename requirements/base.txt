@@ -53,7 +53,12 @@ stripe>=6.0.0
 
 # Email
 django-ses>=3.5.0  # AWS SES
-celery[redis]>=5.3.0  # Email queue processing
+
+# Background task processing
+django-q2>=1.8.0  # Async task queue with database backend
+
+# Server provisioning & SSH
+paramiko>=4.0.0  # SSH client for Virtualmin fallback authentication
 
 # Monitoring & Logging
 sentry-sdk[django]>=1.32.0

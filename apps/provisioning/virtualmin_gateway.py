@@ -31,6 +31,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# ===============================================================================
+# CONSTANTS
+# ===============================================================================
+
+# Domain parsing constants
+DOMAIN_PARTS_MIN = 2  # Minimum parts required for domain line parsing
+DOMAIN_USERNAME_INDEX = 1  # Index of username in domain parts
+DOMAIN_DESCRIPTION_INDEX = 2  # Starting index of description in domain parts
+
 def get_virtualmin_config() -> dict:
     """
     Get Virtualmin configuration from SystemSettings and credential vault.
@@ -289,14 +298,14 @@ class VirtualminGateway:
         """Lazy load authentication manager"""
         if not self._auth_manager:
             # Import here to avoid circular imports
-            from .virtualmin_auth_manager import VirtualminAuthenticationManager
+            from .virtualmin_auth_manager import VirtualminAuthenticationManager  # noqa: PLC0415
             self._auth_manager = VirtualminAuthenticationManager(self.server)
         return self._auth_manager
         
     def _get_credential_vault(self) -> CredentialVault:
         """Lazy load credential vault"""
         if not self._credential_vault:
-            from apps.common.credential_vault import get_credential_vault
+            from apps.common.credential_vault import get_credential_vault  # noqa: PLC0415
             self._credential_vault = get_credential_vault()
         return self._credential_vault
         
@@ -759,18 +768,17 @@ class VirtualminGateway:
                             if isinstance(item, dict) and 'name' in item:
                                 domain_line = item['name'].strip()
                                 # Skip header and separator lines
-                                if (domain_line.startswith('Domain') or 
-                                    domain_line.startswith('---') or 
+                                if (domain_line.startswith(('Domain', '---')) or 
                                     not domain_line):
                                     continue
                                 
                                 # Parse domain info from the formatted line
-                                # Format: "domain.com    username    description"
+                                # Format: "domain.com    username    description"  # noqa: ERA001
                                 parts = domain_line.split()
-                                if parts and len(parts) >= 2:
+                                if parts and len(parts) >= DOMAIN_PARTS_MIN:
                                     domain_name = parts[0]
-                                    username = parts[1] if len(parts) > 1 else ""
-                                    description = " ".join(parts[2:]) if len(parts) > 2 else ""
+                                    username = parts[DOMAIN_USERNAME_INDEX] if len(parts) > DOMAIN_USERNAME_INDEX else ""
+                                    description = " ".join(parts[DOMAIN_DESCRIPTION_INDEX:]) if len(parts) > DOMAIN_DESCRIPTION_INDEX else ""
                                     
                                     if name_only:
                                         domains.append(domain_name)
