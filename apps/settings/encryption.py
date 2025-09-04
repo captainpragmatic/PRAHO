@@ -128,7 +128,7 @@ class SettingsEncryption:
             logger.error(f"🔥 [Settings Encryption] Failed to decrypt value: {e}")
             raise ValueError(f"Decryption failed: {e}") from e
 
-    def is_encrypted(self, value: str) -> bool:
+    def is_encrypted(self, value: Any) -> bool:
         """
         🔍 Check if value is encrypted
 

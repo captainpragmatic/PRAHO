@@ -630,7 +630,11 @@ def export_settings_full(request: HttpRequest) -> HttpResponse:
         # Log export event
         log_security_event(
             event_type="settings_export_full",
-            details={"settings_count": len(export_data["settings"]), "sensitive_count": sensitive_count, "resource_type": "SystemSetting"},
+            details={
+                "settings_count": len(export_data["settings"]),
+                "sensitive_count": sensitive_count,
+                "resource_type": "SystemSetting",
+            },
             request_ip=request.META.get("REMOTE_ADDR"),
         )
 

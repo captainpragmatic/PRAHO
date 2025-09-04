@@ -132,29 +132,29 @@ class SettingsService:
         """
         # Generate cache key first (needed for both paths)
         cache_key = cls._get_cache_key(key)
-        
+
         # Get from database first to check if sensitive
         try:
             setting = SystemSetting.objects.get(key=key)
-            
+
             # For sensitive settings, always query database (no caching)
             if setting.is_sensitive:
                 value = setting.get_typed_value()
                 logger.debug("⚡ [Settings] Database hit for key: %s (sensitive, not cached)", key)
                 return value
-            
+
             # For non-sensitive settings, use cache
             cached_value = cache.get(cache_key, version=cls.CACHE_VERSION)
 
             if cached_value is not None:
                 logger.debug("✅ [Settings] Cache hit for key: %s", key)
-                return cached_value
+                return cached_value  # type: ignore[no-any-return]
 
             # Cache miss - get value and cache it
             value = setting.get_typed_value()
             cache.set(cache_key, value, timeout=cls.CACHE_TIMEOUT, version=cls.CACHE_VERSION)
             logger.debug("⚡ [Settings] Database hit for key: %s (cached)", key)
-            
+
             return value
 
         except SystemSetting.DoesNotExist:
@@ -170,7 +170,7 @@ class SettingsService:
             )
 
             logger.warning("⚠️ [Settings] Using default for missing key: %s", key)
-            return fallback_value
+            return fallback_value  # type: ignore[no-any-return]
 
     @classmethod
     @monitor_performance()
@@ -435,7 +435,7 @@ class SettingsService:
                 )
             )
 
-        return cls.update_setting(key=key, value=default_value, user_id=user_id, reason="Reset to default value")
+        return cls.update_setting(key=key, value=default_value, user_id=user_id, reason="Reset to default value")  # type: ignore[no-any-return]
 
     @classmethod
     @monitor_performance()
@@ -539,35 +539,35 @@ class SettingsService:
 # ===============================================================================
 
 MAX_JSON_SIZE = 1024 * 1024  # 1MB limit
-MAX_JSON_DEPTH = 10          # Prevent stack overflow
+MAX_JSON_DEPTH = 10  # Prevent stack overflow
 
 
 def _safe_json_loads(json_string: str) -> Any:
     """🔒 Safely parse JSON with size and depth limits to prevent DoS attacks"""
-    
+
     # Check size limit
-    if len(json_string.encode('utf-8')) > MAX_JSON_SIZE:
+    if len(json_string.encode("utf-8")) > MAX_JSON_SIZE:
         raise ValidationError("JSON too large - exceeds 1MB limit")
-    
+
     # Parse with depth checking
     def parse_with_depth_check(obj: Any, current_depth: int = 0) -> Any:
         if current_depth > MAX_JSON_DEPTH:
             raise ValidationError("JSON too deeply nested")
-        
+
         if isinstance(obj, dict):
             return {k: parse_with_depth_check(v, current_depth + 1) for k, v in obj.items()}
         elif isinstance(obj, list):
             return [parse_with_depth_check(item, current_depth + 1) for item in obj]
         else:
             return obj
-    
+
     try:
         # First parse the JSON normally
         parsed_data = json.loads(json_string)
-        
+
         # Then check depth recursively
         return parse_with_depth_check(parsed_data)
-        
+
     except json.JSONDecodeError as e:
         raise ValidationError(f"Invalid JSON format: {e!s}") from e
     except RecursionError as e:

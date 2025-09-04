@@ -138,6 +138,8 @@ class WebAuthnCredential(models.Model):
     last_used = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
 
+    objects = models.Manager()  # Explicit manager for mypy
+
     class Meta:
         db_table = "webauthn_credentials"  # Keep original table name from migration
         verbose_name = "WebAuthn Credential"
@@ -428,7 +430,7 @@ class WebAuthnService:
         challenge = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
         request.session["webauthn_challenge"] = challenge
 
-        existing = WebAuthnCredential.objects.filter(user=user).values_list("credential_id", flat=True)
+        existing = WebAuthnCredential.objects.filter(user=user).values_list("credential_id", flat=True)  # type: ignore[misc]
         options: dict[str, Any] = {
             "challenge": challenge,
             "rp": {
@@ -479,7 +481,7 @@ class WebAuthnService:
         """
         challenge = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
         request.session["webauthn_challenge"] = challenge
-        creds = WebAuthnCredential.objects.filter(user=user, is_active=True)
+        creds = WebAuthnCredential.objects.filter(user=user, is_active=True)  # type: ignore[misc]
         options: dict[str, Any] = {
             "challenge": challenge,
             "allowCredentials": [{"type": "public-key", "id": c.credential_id} for c in creds],
@@ -507,7 +509,7 @@ class WebAuthnService:
 
     @staticmethod
     def get_user_credentials(user: "User", *, include_inactive: bool = False) -> list["WebAuthnCredential"]:
-        qs = WebAuthnCredential.objects.filter(user=user)
+        qs = WebAuthnCredential.objects.filter(user=user)  # type: ignore[misc]
         if not include_inactive:
             qs = qs.filter(is_active=True)
         return list(qs)
@@ -516,9 +518,9 @@ class WebAuthnService:
     def delete_credential(user: "User", credential_identifier: int | str) -> bool:
         try:
             if isinstance(credential_identifier, int):
-                cred = WebAuthnCredential.objects.get(pk=credential_identifier, user=user)
+                cred = WebAuthnCredential.objects.get(pk=credential_identifier, user=user)  # type: ignore[misc]
             else:
-                cred = WebAuthnCredential.objects.get(credential_id=credential_identifier, user=user)
+                cred = WebAuthnCredential.objects.get(credential_id=credential_identifier, user=user)  # type: ignore[misc]
             cred.delete()
             return True
         except WebAuthnCredential.DoesNotExist:
@@ -553,7 +555,7 @@ class WebAuthnService:
             if isinstance(public_key_b64, bytes):
                 public_key_b64 = base64.b64encode(public_key_b64).decode()
 
-            cred = WebAuthnCredential.objects.create(
+            cred = WebAuthnCredential.objects.create(  # type: ignore[misc]
                 user=request.user,
                 credential_id=credential_id,
                 public_key=public_key_b64 or "unknown",
@@ -921,7 +923,7 @@ class MFAService:
             user.two_factor_secret = ""  # nosec B105
             user.backup_tokens = []
             user.save(update_fields=["two_factor_enabled", "_two_factor_secret", "backup_tokens"])
-            WebAuthnCredential.objects.filter(user=user).delete()
+            WebAuthnCredential.objects.filter(user=user).delete()  # type: ignore[misc]
             audit_service.log_event(
                 event_type="mfa_disabled", user=user, metadata={"by": getattr(request.user, "email", None)}
             )
@@ -960,7 +962,7 @@ class MFAService:
         if BackupCodeService.get_remaining_count(user) > 0:
             methods.append("backup_codes")
 
-        if WebAuthnService.is_supported() and WebAuthnCredential.objects.filter(user=user, is_active=True).exists():
+        if WebAuthnService.is_supported() and WebAuthnCredential.objects.filter(user=user, is_active=True).exists():  # type: ignore[misc]
             methods.append("webauthn")
 
         return methods

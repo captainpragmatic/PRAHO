@@ -62,9 +62,17 @@ This replaces the existing services.py with security-hardened implementations.
 """
 
 if TYPE_CHECKING:
+    from apps.customers.contact_models import CustomerAddress
+    from apps.customers.models import Customer
+    from apps.customers.profile_models import CustomerBillingProfile, CustomerTaxProfile
+
     from .models import User
 else:
     User = get_user_model()
+    # Import Customer models for runtime
+    from apps.customers.contact_models import CustomerAddress
+    from apps.customers.models import Customer
+    from apps.customers.profile_models import CustomerBillingProfile, CustomerTaxProfile
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +215,7 @@ class SecureUserRegistrationService:
             registration_number = customer_data.get("registration_number", "").strip()
 
             if vat_number or registration_number:
-                CustomerTaxProfile.objects.create(
+                CustomerTaxProfile.objects.create(  # type: ignore[misc]
                     customer=customer,
                     vat_number=vat_number,  # RO prefix validated
                     registration_number=registration_number,  # CUI format validated
@@ -222,7 +230,7 @@ class SecureUserRegistrationService:
                 )
 
             # Step 5: Create billing profile (secure defaults)
-            CustomerBillingProfile.objects.create(
+            CustomerBillingProfile.objects.create(  # type: ignore[misc]
                 customer=customer,
                 payment_terms=30,  # Default 30 days
                 preferred_currency="RON",  # Romanian Lei
@@ -230,7 +238,7 @@ class SecureUserRegistrationService:
             )
 
             # Step 6: Create billing address with validated data
-            CustomerAddress.objects.create(
+            CustomerAddress.objects.create(  # type: ignore[misc]
                 customer=customer,
                 address_type="billing",
                 address_line1=customer_data.get("billing_address", ""),  # Sanitized
@@ -437,7 +445,7 @@ class SecureUserRegistrationService:
                 try:
                     validated_vat = SecureInputValidator.validate_vat_number_romanian(identifier)
                     tax_profile = CustomerTaxProfile.objects.filter(vat_number=validated_vat).first()
-                    customer = tax_profile.customer if tax_profile else None
+                    customer = tax_profile.customer if tax_profile else None  # type: ignore[attr-defined]
                 except ValidationError:
                     pass
             elif identification_type == "registration_number":
@@ -445,7 +453,7 @@ class SecureUserRegistrationService:
                 try:
                     validated_cui = SecureInputValidator.validate_cui_romanian(identifier)
                     tax_profile = CustomerTaxProfile.objects.filter(registration_number=validated_cui).first()
-                    customer = tax_profile.customer if tax_profile else None
+                    customer = tax_profile.customer if tax_profile else None  # type: ignore[attr-defined]
                 except ValidationError:
                     pass
 
@@ -833,7 +841,7 @@ class SecureCustomerUserService:
                 try:
                     validated_vat = SecureInputValidator.validate_vat_number_romanian(identifier)
                     tax_profile = CustomerTaxProfile.objects.filter(vat_number=validated_vat).first()
-                    customer = tax_profile.customer if tax_profile else None
+                    customer = tax_profile.customer if tax_profile else None  # type: ignore[attr-defined]
                 except ValidationError:
                     pass
             elif identification_type == "registration_number":
@@ -841,7 +849,7 @@ class SecureCustomerUserService:
                 try:
                     validated_cui = SecureInputValidator.validate_cui_romanian(identifier)
                     tax_profile = CustomerTaxProfile.objects.filter(registration_number=validated_cui).first()
-                    customer = tax_profile.customer if tax_profile else None
+                    customer = tax_profile.customer if tax_profile else None  # type: ignore[attr-defined]
                 except ValidationError:
                     pass
 

@@ -18,7 +18,7 @@ from .services import SettingsService
 
 # Import NotificationService at top level to avoid PLC0415
 try:
-    from apps.notifications.services import NotificationService
+    from apps.notifications.services import NotificationService  # type: ignore
 except ImportError:
     NotificationService = None
 

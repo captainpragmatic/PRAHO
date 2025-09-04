@@ -201,19 +201,31 @@ def button(
         elif hasattr(htmx, key) and value is not None:
             setattr(htmx, key, value)
 
-    # 🔒 Security: Escape attrs to prevent XSS attacks  
+    # 🔒 Security: Escape attrs to prevent XSS attacks
     def _sanitize_and_escape_attrs(raw: Any) -> str:
         s = str(raw or "")
-        
+
         # Check for truly complex attacks that need more than just escaping
-        # Also check for already-encoded versions  
-        has_complex_payload = any(pattern in s.lower() for pattern in [
-            'onload=', 'onerror=', 'onmouseover=', 'onfocus=', 'onblur=',  # Auto-executing event handlers
-            'javascript:', 'eval(', 'atob(',  # Code injection vectors
-            'fetch(', '.then(', 'JSON.stringify',  # Network/data exfiltration
-            '&lt;script&gt;', 'alert(1)'  # Already encoded attacks
-        ])
-        
+        # Also check for already-encoded versions
+        has_complex_payload = any(
+            pattern in s.lower()
+            for pattern in [
+                "onload=",
+                "onerror=",
+                "onmouseover=",
+                "onfocus=",
+                "onblur=",  # Auto-executing event handlers
+                "javascript:",
+                "eval(",
+                "atob(",  # Code injection vectors
+                "fetch(",
+                ".then(",
+                "JSON.stringify",  # Network/data exfiltration
+                "&lt;script&gt;",
+                "alert(1)",  # Already encoded attacks
+            ]
+        )
+
         if has_complex_payload:
             # Remove auto-executing dangerous event handlers (but keep onclick as it requires user interaction)
             dangerous_events = r"\b(onload|onerror|onmouseover|onfocus|onblur)\s*="
@@ -223,13 +235,13 @@ def button(
             s = re.sub(r"\b(eval|alert|atob)\s*\([^)]*\)", "", s, flags=re.IGNORECASE)
             # Handle already encoded dangerous content
             s = re.sub(r"alert\([^)]*\)", "", s, flags=re.IGNORECASE)
-        
+
         # Manual HTML escaping to return plain string, not SafeString
-        s = s.replace('&', '&amp;')
-        s = s.replace('<', '&lt;')
-        s = s.replace('>', '&gt;')
-        s = s.replace('"', '&quot;')
-        s = s.replace("'", '&#x27;')
+        s = s.replace("&", "&amp;")
+        s = s.replace("<", "&lt;")
+        s = s.replace(">", "&gt;")
+        s = s.replace('"', "&quot;")
+        s = s.replace("'", "&#x27;")
         return s
 
     # Return sanitized and escaped attrs

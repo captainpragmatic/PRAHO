@@ -34,9 +34,24 @@ from apps.common.constants import (
 
 register = template.Library()
 
+# Type alias for common template filter numeric inputs
+TemplateNumeric = int | float | Decimal | None
+
+
+def validate_template_numeric(value: TemplateNumeric, default_message: str = "0,00") -> tuple[bool, str]:
+    """
+    Validate template numeric input and return appropriate default.
+    
+    Returns:
+        tuple: (is_valid, default_value_if_invalid)
+    """
+    if value is None:
+        return False, default_message
+    return True, ""
+
 
 @register.filter
-def romanian_currency(value: int | float | Decimal, currency: str = "RON") -> str:
+def romanian_currency(value: TemplateNumeric, currency: str = "RON") -> str:
     """
     Format currency in Romanian business style
 
@@ -49,8 +64,9 @@ def romanian_currency(value: int | float | Decimal, currency: str = "RON") -> st
         value: Numeric value to format
         currency: Currency code (RON, EUR, USD)
     """
-    if value is None:
-        return "0,00 RON"
+    is_valid, default_value = validate_template_numeric(value, "0,00 RON")
+    if not is_valid:
+        return default_value
 
     try:
         # Convert to Decimal for precise calculation
@@ -82,7 +98,7 @@ def romanian_currency(value: int | float | Decimal, currency: str = "RON") -> st
 
 
 @register.filter
-def romanian_vat(value: int | float | Decimal, vat_rate: float = 0.19) -> str:
+def romanian_vat(value: TemplateNumeric, vat_rate: float = 0.19) -> str:
     """
     Calculate and format VAT amount in Romanian style
 
@@ -530,7 +546,7 @@ def cents_to_currency(value: int | float | Decimal) -> Decimal:
 
 
 @register.filter
-def multiply(value: int | float | Decimal, multiplier: int | float | Decimal) -> Decimal:
+def multiply(value: TemplateNumeric, multiplier: TemplateNumeric) -> Decimal:
     """
     Multiply two numbers safely with decimal precision
 
@@ -555,7 +571,7 @@ def multiply(value: int | float | Decimal, multiplier: int | float | Decimal) ->
 
 
 @register.filter
-def divide(value: int | float | Decimal, divisor: int | float | Decimal) -> Decimal:
+def divide(value: TemplateNumeric, divisor: TemplateNumeric) -> Decimal:
     """
     Divide two numbers safely with decimal precision
 

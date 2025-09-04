@@ -362,7 +362,7 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 # 🌐 Visit: /app/settings/dashboard/ → "Provisioning & Infrastructure"
 # 🔐 Credentials are stored securely in the encrypted credential vault
 # � Use: python manage.py setup_credential_vault to manage credentials
-# 
+#
 # Benefits:
 # ✅ Runtime configuration changes (no restart needed)
 # ✅ Encrypted credential storage
@@ -402,20 +402,20 @@ RATELIMIT_ENABLE = True
 
 # Base queue cluster configuration
 Q_CLUSTER_BASE = {
-    'name': 'praho-cluster',
-    'timeout': 300,  # 5 minutes
-    'retry': 600,    # 10 minutes retry delay
-    'save_limit': 1000,  # Keep last 1000 task results
-    'catch_up': False,   # Don't run missed scheduled tasks
-    'orm': 'default',    # Use PostgreSQL database backend
-    'bulk': 10,          # Process 10 jobs at once
-    'queue_limit': 100,  # Max 100 jobs in queue
+    "name": "praho-cluster",
+    "timeout": 300,  # 5 minutes
+    "retry": 600,  # 10 minutes retry delay
+    "save_limit": 1000,  # Keep last 1000 task results
+    "catch_up": False,  # Don't run missed scheduled tasks
+    "orm": "default",  # Use PostgreSQL database backend
+    "bulk": 10,  # Process 10 jobs at once
+    "queue_limit": 100,  # Max 100 jobs in queue
 }
 
 # Default production configuration (overridden in environment-specific settings)
 Q_CLUSTER = {
     **Q_CLUSTER_BASE,
-    'workers': 2,        # 2 worker processes
-    'recycle': 500,      # Restart workers after 500 tasks
-    'sync': False,       # Async execution
+    "workers": 2,  # 2 worker processes
+    "recycle": 500,  # Restart workers after 500 tasks
+    "sync": False,  # Async execution
 }

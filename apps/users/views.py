@@ -89,7 +89,9 @@ def _handle_rate_limit(request: HttpRequest, form: LoginForm) -> HttpResponse | 
     return None
 
 
-def _handle_account_lockout(request: HttpRequest, form: LoginForm, email: str) -> tuple[User | None, HttpResponse | None]:
+def _handle_account_lockout(
+    request: HttpRequest, form: LoginForm, email: str
+) -> tuple[User | None, HttpResponse | None]:
     """Check account lockout, return (user, response). Response is not None if locked."""
     try:
         user = User.objects.get(email=email)
@@ -137,9 +139,7 @@ def _handle_successful_login(request: HttpRequest, user: User, form: LoginForm) 
     # Update timeout policy based on context
     SessionSecurityService.update_session_timeout(request)
 
-    messages.success(
-        request, _("Welcome, {user_full_name}!").format(user_full_name=user.get_full_name())
-    )
+    messages.success(request, _("Welcome, {user_full_name}!").format(user_full_name=user.get_full_name()))
 
     next_url = _get_safe_redirect_target(request, fallback="dashboard")
 
@@ -183,11 +183,11 @@ def login_view(request: HttpRequest) -> HttpResponse:
 
     if request.method == "POST":
         form = LoginForm(request.POST)
-        
+
         # Check rate limiting
         if rate_limit_response := _handle_rate_limit(request, form):
             return rate_limit_response
-            
+
         if form.is_valid():
             email = form.cleaned_data["email"]
             password = form.cleaned_data["password"]
@@ -201,7 +201,7 @@ def login_view(request: HttpRequest) -> HttpResponse:
             authenticated_user = authenticate(request, username=email, password=password)
 
             if authenticated_user:
-                return _handle_successful_login(request, cast(User, authenticated_user), form)
+                return _handle_successful_login(request, authenticated_user, form)
             else:
                 _handle_failed_login(request, user)
                 messages.error(request, _("Incorrect email or password."))
@@ -249,7 +249,7 @@ def register_view(request: HttpRequest) -> HttpResponse:
                 pass
             _sleep_uniform()
             return redirect("users:registration_submitted")
-        
+
         if form.is_valid():
             email = form.cleaned_data.get("email", "").lower()
             # Existing user path handled above; proceed with new user creation
@@ -485,7 +485,7 @@ class SecurePasswordChangeView(PasswordChangeView):
             # Log rate limit exceeded - only log if user is authenticated
             if request.user.is_authenticated:
                 UserLoginLog.objects.create(
-                    user=cast(User, request.user),
+                    user=request.user,
                     ip_address=get_safe_client_ip(request),
                     user_agent=request.META.get("HTTP_USER_AGENT", ""),
                     status="password_change_rate_limited",
@@ -871,7 +871,7 @@ class UserListView(LoginRequiredMixin, ListView):
     paginate_by = 50
 
     def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
-        if not request.user.is_authenticated or not cast(User, request.user).is_staff:
+        if not request.user.is_authenticated or not request.user.is_staff:
             messages.error(request, _("You do not have permission to access this page."))
             return redirect("dashboard")
         return cast(HttpResponse, super().dispatch(request, *args, **kwargs))
@@ -908,10 +908,11 @@ class UserDetailView(LoginRequiredMixin, DetailView):
         if queryset is None:
             queryset = self.get_queryset()
 
-        return queryset.prefetch_related("customer_memberships__customer").get(pk=self.kwargs["pk"])
+        obj: User = queryset.prefetch_related("customer_memberships__customer").get(pk=self.kwargs["pk"])
+        return obj
 
     def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
-        if not request.user.is_authenticated or not cast(User, request.user).is_staff:
+        if not request.user.is_authenticated or not request.user.is_staff:
             messages.error(request, _("You do not have permission to access this page."))
             return redirect("dashboard")
         return cast(HttpResponse, super().dispatch(request, *args, **kwargs))

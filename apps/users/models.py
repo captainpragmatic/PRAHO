@@ -40,7 +40,7 @@ class UserManager(BaseUserManager["User"]):
         # Ensure safe defaults for nullable-but-not-null-constrained fields
         if "staff_role" not in extra_fields or extra_fields.get("staff_role") is None:
             extra_fields["staff_role"] = ""
-        user = cast("User", self.model(email=email, **extra_fields))
+        user = self.model(email=email, **extra_fields)
         user.set_password(password)
         user.save(using=self._db)
         return user
@@ -65,7 +65,7 @@ class User(AbstractUser):
     """
 
     # Staff roles for internal staff (nullable for customer users)
-    STAFF_ROLE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    STAFF_ROLE_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("admin", _("System Administrator")),
         ("support", _("Support Agent")),
         ("billing", _("Billing Staff")),
@@ -73,7 +73,7 @@ class User(AbstractUser):
     )
 
     # Basic information
-    username = None  # Remove username field, using email instead
+    username = None  # type: ignore[assignment]  # Remove username field, using email instead
     email = models.EmailField(_("email address"), unique=True)
     phone = models.CharField(max_length=20, blank=True, help_text=_("Romanian phone number format: +40 721 123 456"))
 
@@ -91,8 +91,8 @@ class User(AbstractUser):
     _two_factor_secret = models.CharField(max_length=256, blank=True)  # Encrypted storage
     backup_tokens = models.JSONField(default=list, blank=True)  # Stores hashed backup codes
 
-    # Customer relationships (replaces primary_customer + additional_customers)
-    customers: models.ManyToManyField = models.ManyToManyField(
+    # Customer relationships (replaces primary_customer + additional_customers) 
+    customers: models.ManyToManyField[Customer, CustomerMembership] = models.ManyToManyField(
         "customers.Customer",
         through="CustomerMembership",
         through_fields=("user", "customer"),
@@ -117,8 +117,8 @@ class User(AbstractUser):
         "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="created_users"
     )
 
-    # Custom manager with explicit typing to avoid MyPy override warnings
-    objects: UserManager = UserManager()  # type: ignore[misc]
+    # Custom manager with explicit typing to avoid MyPy override warnings  
+    objects: UserManager = UserManager()  # type: ignore[assignment,misc]  # UserManager - Custom email-based manager
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS: ClassVar[list[str]] = []
@@ -176,7 +176,7 @@ class User(AbstractUser):
         if "customer_memberships" in prefetched_cache:
             for membership in prefetched_cache["customer_memberships"]:
                 if membership.is_primary:
-                    return membership.customer
+                    return cast("Customer", membership.customer)
             return None
 
         # Fallback to optimized database query (O(1) due to index + select_related)
@@ -329,7 +329,7 @@ class CustomerMembership(models.Model):
     """
 
     # PostgreSQL-aligned role choices
-    CUSTOMER_ROLE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    CUSTOMER_ROLE_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("owner", _("Owner")),  # Full control of customer organization
         ("billing", _("Billing")),  # Invoices, payments, billing info
         ("tech", _("Technical")),  # Service management, support tickets
@@ -462,7 +462,7 @@ class UserProfile(models.Model):
 class UserLoginLog(models.Model):
     """Track user login attempts for security"""
 
-    LOGIN_STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    LOGIN_STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("success", _("Success")),
         ("failed_password", _("Failed Password")),
         ("failed_2fa", _("Failed 2FA")),

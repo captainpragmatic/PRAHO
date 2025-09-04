@@ -4,7 +4,7 @@ Romanian-localized authentication and profile forms.
 """
 
 import re
-from typing import Any, ClassVar, TypeVar, cast
+from typing import Any, ClassVar, TypeVar
 
 import pytz
 from django import forms
@@ -104,7 +104,7 @@ class UserRegistrationForm(UserCreationForm):
 
     class Meta:
         model = User
-        fields: ClassVar[list[str]] = (
+        fields: ClassVar[tuple[str, ...]] = (
             "email",
             "first_name",
             "last_name",
@@ -141,10 +141,10 @@ class UserRegistrationForm(UserCreationForm):
 
     def clean_email(self) -> str:
         # Normalize email to lowercase; use raw data as fallback to avoid dependency on cleaned_data population
-        raw = self.data.get("email") if hasattr(self, "data") else None  # type: ignore[attr-defined]
+        raw = self.data.get("email") if hasattr(self, "data") else None
         email: str | None = self.cleaned_data.get("email") if hasattr(self, "cleaned_data") else None
         normalized = (email or raw or "").lower()
-        return cast(str, normalized)
+        return normalized or ""
 
     def is_valid(self) -> bool:
         """Suppress model-level unique email errors to prevent enumeration.
@@ -177,7 +177,7 @@ class UserRegistrationForm(UserCreationForm):
             # Allow digits with dots or spaces as separators, or plain 10-digit starting with 0
             if not re.match(r"^(\+40[\.\s]*[0-9][\.\s0-9]{8,11}[0-9]|0[0-9]{9})$", phone):
                 raise ValidationError(_("Invalid phone number format. Use Romanian format: +40.XX.XXX.XXXX"))
-        return cast(str, phone or "")
+        return phone or ""
 
     def save(self, commit: bool = True) -> User:
         user = super().save(commit=False)
@@ -195,7 +195,7 @@ class UserRegistrationForm(UserCreationForm):
             user.gdpr_consent_date = timezone.now()
             user.save(update_fields=["gdpr_consent_date"])
 
-        return user
+        return user  # type: ignore[no-any-return]
 
 
 class UserProfileForm(forms.ModelForm):
@@ -218,7 +218,7 @@ class UserProfileForm(forms.ModelForm):
 
     class Meta:
         model = UserProfile
-        fields: ClassVar[list[str]] = (
+        fields: ClassVar[tuple[str, ...]] = (
             "preferred_language",
             "timezone",
             "date_format",
@@ -267,7 +267,7 @@ class UserProfileForm(forms.ModelForm):
         timezone: str | None = self.cleaned_data.get("timezone")
         if timezone and timezone not in pytz.all_timezones:
             raise ValidationError(_("Invalid timezone selected."))
-        return cast(str, timezone)
+        return timezone or ""
 
     def clean_phone(self) -> str:
         """Validate Romanian phone number format"""
@@ -278,7 +278,7 @@ class UserProfileForm(forms.ModelForm):
             # Allow digits with dots or spaces as separators, or plain 10-digit starting with 0
             if not re.match(r"^(\+40[\.\s]*[0-9][\.\s0-9]{8,11}[0-9]|0[0-9]{9})$", phone):
                 raise ValidationError(_("Invalid phone number format. Use Romanian format: +40.XX.XXX.XXXX"))
-        return cast(str, phone or "")
+        return phone or ""
 
     def save(self, commit: bool = True) -> UserProfile:
         profile = super().save(commit=False)
@@ -294,7 +294,7 @@ class UserProfileForm(forms.ModelForm):
         if commit:
             profile.save()
 
-        return profile
+        return profile  # type: ignore[no-any-return]
 
 
 class TwoFactorSetupForm(forms.Form):
@@ -320,7 +320,7 @@ class TwoFactorSetupForm(forms.Form):
         token: str | None = self.cleaned_data.get("token")
         if token and not token.isdigit():
             raise ValidationError(_("The code must contain only digits."))
-        return cast(str, token or "")
+        return token or ""
 
 
 class TwoFactorVerifyForm(forms.Form):
@@ -347,7 +347,7 @@ class TwoFactorVerifyForm(forms.Form):
         token: str | None = self.cleaned_data.get("token")
         if token and not token.isdigit():
             raise ValidationError(_("The code must contain only digits."))
-        return cast(str, token or "")
+        return token or ""
 
 
 class PasswordResetRequestForm(forms.Form):
@@ -363,7 +363,7 @@ class PasswordResetRequestForm(forms.Form):
         email: str | None = self.cleaned_data.get("email")
         if email and not User.objects.filter(email=email).exists():
             raise ValidationError(_("There is no account with this email address."))
-        return cast(str, email)
+        return email or ""
 
 
 class CustomerMembershipForm(forms.ModelForm):
@@ -558,13 +558,13 @@ class CustomerOnboardingRegistrationForm(UserCreationForm):
 
     class Meta:
         model = User
-        fields: ClassVar[list[str]] = ("email", "first_name", "last_name", "phone", "password1", "password2")
+        fields: ClassVar[tuple[str, ...]] = ("email", "first_name", "last_name", "phone", "password1", "password2")
 
     def clean_email(self) -> str:
-        raw = self.data.get("email") if hasattr(self, "data") else None  # type: ignore[attr-defined]
+        raw = self.data.get("email") if hasattr(self, "data") else None
         email: str | None = self.cleaned_data.get("email") if hasattr(self, "cleaned_data") else None
         normalized = (email or raw or "").lower()
-        return cast(str, normalized)
+        return normalized or ""
 
     def is_valid(self) -> bool:
         """Suppress unique email errors for neutral, enumeration-safe flow."""
@@ -604,7 +604,7 @@ class CustomerOnboardingRegistrationForm(UserCreationForm):
         customer_type: str | None = self.cleaned_data.get("customer_type")
         if customer_type not in dict(UserRegistrationService.CUSTOMER_TYPES):
             raise ValidationError(_("Invalid customer type selected."))
-        return cast(str, customer_type)
+        return customer_type or ""
 
     def save(self, commit: bool = True) -> User:
         """Save user and create customer organization"""

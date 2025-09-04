@@ -117,7 +117,7 @@ LOGGING = {
         },
         "apps.billing.signals": {
             "handlers": ["console"],
-            "level": "INFO", 
+            "level": "INFO",
             "propagate": False,
         },
         "apps.audit.signals": {

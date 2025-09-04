@@ -71,26 +71,26 @@ DEBUG_TOOLBAR_CONFIG = {
 # Disable debug toolbar during tests
 # Check for both Django's test runner and pytest - comprehensive detection to avoid race conditions
 is_testing = (
-    "test" in sys.argv or 
-    "pytest" in sys.modules or 
-    os.environ.get("PYTEST_CURRENT_TEST") or
-    os.environ.get("DJANGO_SETTINGS_MODULE", "").endswith(".test") or
-    "unittest" in sys.modules or
-    hasattr(sys, "_called_from_test") or  # Django sets this during test runs
-    "TESTING" in os.environ  # Explicit override
+    "test" in sys.argv
+    or "pytest" in sys.modules
+    or os.environ.get("PYTEST_CURRENT_TEST")
+    or os.environ.get("DJANGO_SETTINGS_MODULE", "").endswith(".test")
+    or "unittest" in sys.modules
+    or hasattr(sys, "_called_from_test")  # Django sets this during test runs
+    or "TESTING" in os.environ  # Explicit override
 )
 
 if is_testing:
     # Remove debug toolbar from apps and middleware during testing
     INSTALLED_APPS = [app for app in INSTALLED_APPS if app != "debug_toolbar"]
     MIDDLEWARE = [mw for mw in MIDDLEWARE if "debug_toolbar" not in mw]
-    
+
     # Also update debug toolbar config to prevent any rendering attempts
     DEBUG_TOOLBAR_CONFIG = {
         "SHOW_TOOLBAR_CALLBACK": lambda request: False,  # Never show during tests
         "IS_RUNNING_TESTS": True,  # Explicit test flag
     }
-    
+
     # Disable rate limiting during tests to prevent 403 errors from race conditions
     RATELIMIT_ENABLE = False
 else:
