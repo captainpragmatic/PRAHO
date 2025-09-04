@@ -14,7 +14,7 @@ PRAHO Platform requires asynchronous task processing for hosting operations that
 - **System maintenance** (health checks, statistics updates)
 - **Customer notifications** (emails, SMS, webhooks)
 
-Currently, we have placeholder Celery tasks in `apps/provisioning/virtualmin_tasks.py` but need to decide on the production async architecture.
+Currently, we use Django-Q2 for asynchronous task processing as decided in the previous architecture review.
 
 ## Decision Drivers
 
@@ -155,12 +155,12 @@ Q_CLUSTER = {
 ### Risks & Mitigations
 - **Package abandonment**: Django-Q2 is actively maintained fork of django-q with strong community
 - **Performance bottlenecks**: Monitor queue performance, ready to migrate to Redis backend
-- **Feature limitations**: Evaluate Celery migration path if complex workflows needed
+- **Feature limitations**: Django-Q2 provides sufficient features for our current needs
 
 ## Future Considerations
 
-- **Volume scaling**: Monitor queue performance; migrate to Redis backend if >1000 jobs/minute
-- **Complex workflows**: Evaluate Celery for advanced orchestration needs
+- **Volume scaling**: Monitor queue performance; migrate to Redis backend if >1000 jobs/minute  
+- **Complex workflows**: Django-Q2 handles our current workflow requirements well
 - **Multi-tenant**: Django-Q2 supports multiple brokers for tenant isolation
 
 ## References

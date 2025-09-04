@@ -143,7 +143,7 @@ pragmatichost/                  # 🚀 Romanian Hosting Provider PRAHO Platform
 │  └─ e2e/                     # End-to-end user journey tests
 │
 ├─ requirements/                # 📋 Python Dependencies
-│  ├─ base.txt                 # Core dependencies: Django, Redis, Celery
+│  ├─ base.txt                 # Core dependencies: Django, Redis, Django-Q2
 │  ├─ dev.txt                  # Development: debug toolbar, pytest, mypy
 │  └─ prod.txt                 # Production: Gunicorn, Sentry, monitoring
 │
@@ -608,7 +608,7 @@ Move to layered architecture when **any 2 apply**:
 
 ### 📅 **Planned** (Future Releases)
 - **External integrations** - Stripe, e-Factura, Virtualmin APIs (webhook foundation ready)
-- **Background processing** - Celery/RQ task implementation
+- **Background processing** - Django-Q2 task implementation
 - **Advanced reporting** - Business intelligence dashboards
 - **Mobile responsiveness** - Complete mobile optimization
 - **Production deployment** - Docker compose, monitoring, backups

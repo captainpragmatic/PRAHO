@@ -42,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Planned for Version 1.0
 - External API integrations (Stripe, e-Factura, Virtualmin)  
-- Background task processing with Celery/RQ
+- Background task processing with Django-Q2
 - Complete template system with polished UI
 - Production deployment guides and Docker optimization
 - Comprehensive test coverage (>90%)

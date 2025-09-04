@@ -523,7 +523,7 @@ python manage.py shell
 
 ### Migration Considerations
 - **To Redis**: Change `orm` to `redis` in Q_CLUSTER settings
-- **To Celery**: Evaluate if complex workflows require advanced features
+- **Advanced Features**: Django-Q2 provides all needed functionality
 - **Horizontal Scaling**: Multiple worker instances with load balancing
 
 ---
