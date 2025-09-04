@@ -57,7 +57,7 @@
               </label>
               <select name="customer" required 
                       class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:ring-2 focus:ring-blue-500" 
-                      id="customer-select">
+                      id="invoice-customer-select">
                 <option value="">{% trans 'Choose a customer...' %}</option>
                 {% for customer in customers %}
                   <option value="{{ customer.id }}" 
@@ -74,23 +74,23 @@
             </div>
             
             <!-- Customer Details Preview -->
-            <div id="customer-preview" class="hidden mt-4 p-4 bg-slate-900 rounded-lg border border-slate-600">
+            <div id="invoice-customer-preview" class="hidden mt-4 p-4 bg-slate-900 rounded-lg border border-slate-600">
               <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                 <div>
                   <span class="text-slate-400">{% trans 'Company:' %}</span>
-                  <span class="text-white ml-2" id="customer-company"></span>
+                  <span class="text-white ml-2" id="invoice-customer-company"></span>
                 </div>
                 <div>
                   <span class="text-slate-400">{% trans 'VAT Number:' %}</span>
-                  <span class="text-white ml-2" id="customer-vat"></span>
+                  <span class="text-white ml-2" id="invoice-customer-vat"></span>
                 </div>
                 <div>
                   <span class="text-slate-400">{% trans 'Email:' %}</span>
-                  <span class="text-white ml-2" id="customer-email"></span>
+                  <span class="text-white ml-2" id="invoice-customer-email"></span>
                 </div>
                 <div>
                   <span class="text-slate-400">{% trans 'Payment Terms:' %}</span>
-                  <span class="text-white ml-2" id="customer-terms"></span>
+                  <span class="text-white ml-2" id="invoice-customer-terms"></span>
                 </div>
               </div>
             </div>
@@ -233,18 +233,18 @@
           <div class="space-y-3">
             <div class="flex justify-between text-slate-300">
               <span>{% trans 'Subtotal:' %}</span>
-              <span id="summary-subtotal" class="font-medium">0.00 RON</span>
+              <span id="invoice-summary-subtotal" class="font-medium">0.00 RON</span>
             </div>
             
             <div class="flex justify-between text-slate-300">
               <span>{% trans 'VAT (19%):' %}</span>
-              <span id="summary-vat" class="font-medium">0.00 RON</span>
+              <span id="invoice-summary-vat" class="font-medium">0.00 RON</span>
             </div>
             
             <div class="border-t border-slate-600 pt-3">
               <div class="flex justify-between text-lg font-bold text-white">
                 <span>{% trans 'Total:' %}</span>
-                <span id="summary-total">0.00 RON</span>
+                <span id="invoice-summary-total">0.00 RON</span>
               </div>
             </div>
 
@@ -332,9 +332,9 @@ function calculateTotals() {
     const grandTotal = subtotal + totalVat;
     
     // Update summary
-    document.getElementById('summary-subtotal').textContent = subtotal.toFixed(2) + ' RON';
-    document.getElementById('summary-vat').textContent = totalVat.toFixed(2) + ' RON';
-    document.getElementById('summary-total').textContent = grandTotal.toFixed(2) + ' RON';
+    document.getElementById('invoice-summary-subtotal').textContent = subtotal.toFixed(2) + ' RON';
+    document.getElementById('invoice-summary-vat').textContent = totalVat.toFixed(2) + ' RON';
+    document.getElementById('invoice-summary-total').textContent = grandTotal.toFixed(2) + ' RON';
     
     // Update line count
     document.getElementById('line-count').textContent = document.querySelectorAll('.invoice-line').length;
@@ -453,16 +453,16 @@ document.addEventListener('DOMContentLoaded', function() {
     document.querySelector('input[name="issued_at"]').dispatchEvent(new Event('change'));
     
     // Customer selection preview
-    document.getElementById('customer-select').addEventListener('change', function() {
-        const preview = document.getElementById('customer-preview');
+    document.getElementById('invoice-customer-select').addEventListener('change', function() {
+        const preview = document.getElementById('invoice-customer-preview');
         const selectedOption = this.options[this.selectedIndex];
         
         if (this.value && selectedOption.dataset.company) {
             // Get data from the selected option's data attributes
-            document.getElementById('customer-company').textContent = selectedOption.dataset.company;
-            document.getElementById('customer-vat').textContent = selectedOption.dataset.vat;
-            document.getElementById('customer-email').textContent = selectedOption.dataset.email;
-            document.getElementById('customer-terms').textContent = selectedOption.dataset.terms;
+            document.getElementById('invoice-customer-company').textContent = selectedOption.dataset.company;
+            document.getElementById('invoice-customer-vat').textContent = selectedOption.dataset.vat;
+            document.getElementById('invoice-customer-email').textContent = selectedOption.dataset.email;
+            document.getElementById('invoice-customer-terms').textContent = selectedOption.dataset.terms;
             preview.classList.remove('hidden');
         } else {
             preview.classList.add('hidden');
