@@ -188,9 +188,7 @@ class SecureServerGateway:
                     used_disk = (float(server.disk_usage_percent) / 100) * available_disk
                     available_disk = available_disk - used_disk
                 if required_disk > available_disk:
-                    error = (
-                        f"Insufficient disk space: required {required_disk}GB, available {available_disk:.1f}GB"
-                    )
+                    error = f"Insufficient disk space: required {required_disk}GB, available {available_disk:.1f}GB"
 
             # Check server capacity limits
             if error is None and server.max_services and server.active_services_count >= server.max_services:

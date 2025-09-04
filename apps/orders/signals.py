@@ -79,13 +79,13 @@ def store_original_order_values(sender: type[Order], instance: Order, **kwargs: 
         if instance.pk:  # Only for existing orders
             try:
                 original = Order.objects.get(pk=instance.pk)
-                instance._original_values = {
+                instance._original_values = {  # type: ignore[attr-defined]
                     "status": original.status,
                     "total_cents": original.total_cents,
                     "notes": original.notes,
                 }
             except Order.DoesNotExist:
-                instance._original_values = {}
+                instance._original_values = {}  # type: ignore[attr-defined]
     except Exception as e:
         logger.exception(f"🔥 [Order Signal] Failed to store original values: {e}")
 
@@ -132,13 +132,13 @@ def _handle_order_status_change(order: Order, old_status: str, new_status: str) 
 def _trigger_invoice_generation(order: Order) -> None:
     """Trigger automatic invoice generation for processing orders"""
     try:
-        from apps.billing.services import InvoiceGenerationService  # noqa: PLC0415
+        from apps.billing.services import InvoiceGenerationService  # noqa: PLC0415  # type: ignore[attr-defined]
 
         # Generate invoice asynchronously if Django-Q2 is available
         try:
-            from apps.orders.tasks import generate_invoice_for_order  # noqa: PLC0415
+            from django_q.tasks import async_task  # noqa: PLC0415
 
-            generate_invoice_for_order.delay(str(order.id))
+            async_task("apps.orders.tasks.generate_invoice_for_order", str(order.id))
             logger.info(f"📋 [Order] Invoice generation queued for {order.order_number}")
         except ImportError:
             # Fallback to synchronous generation
@@ -162,13 +162,13 @@ def _trigger_service_provisioning(order: Order) -> None:
         for item in order.items.all():
             if item.provisioning_status == "pending":
                 try:
-                    from apps.orders.tasks import provision_order_item  # noqa: PLC0415
+                    from django_q.tasks import async_task  # noqa: PLC0415
 
-                    provision_order_item.delay(str(item.id))
+                    async_task("apps.orders.tasks.provision_order_item", str(item.id))
                     logger.info(f"⚡ [Order] Provisioning queued for item {item.id}")
                 except ImportError:
                     # Fallback to synchronous provisioning
-                    result = ProvisioningService.provision_order_item(item)
+                    result = ProvisioningService.provision_order_item(item)  # type: ignore[attr-defined]
                     if result.is_ok():
                         logger.info(f"⚡ [Order] Item {item.id} provisioned successfully")
                     else:
@@ -205,7 +205,7 @@ def _handle_order_refund(order: Order, refund_status: str) -> None:
             services = [item.service for item in order.items.filter(service__isnull=False) if item.service]
 
             for service in services:
-                result = ServiceManagementService.suspend_service(
+                result = ServiceManagementService.suspend_service(  # type: ignore[attr-defined]
                     service, reason="Order fully refunded", suspend_immediately=True
                 )
                 if result.is_ok():
@@ -278,12 +278,12 @@ def store_original_item_values(sender: type[OrderItem], instance: OrderItem, **k
         if instance.pk:
             try:
                 original = OrderItem.objects.get(pk=instance.pk)
-                instance._original_item_values = {
+                instance._original_item_values = {  # type: ignore[attr-defined]
                     "provisioning_status": original.provisioning_status,
                     "quantity": original.quantity,
                 }
             except OrderItem.DoesNotExist:
-                instance._original_item_values = {}
+                instance._original_item_values = {}  # type: ignore[attr-defined]
     except Exception as e:
         logger.exception(f"🔥 [Order Signal] Failed to store original item values: {e}")
 

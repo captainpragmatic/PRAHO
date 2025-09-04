@@ -17,12 +17,12 @@ from .virtualmin_forms import (
 
 # Re-export for backward compatibility
 __all__ = [
-    'VirtualminAccountForm',
-    'VirtualminBackupForm', 
-    'VirtualminBulkActionForm',
-    'VirtualminHealthCheckForm',
-    'VirtualminRestoreForm',
-    'VirtualminServerForm',
+    "VirtualminAccountForm",
+    "VirtualminBackupForm",
+    "VirtualminBulkActionForm",
+    "VirtualminHealthCheckForm",
+    "VirtualminRestoreForm",
+    "VirtualminServerForm",
 ]
 
 # TODO: Add core provisioning forms here as needed

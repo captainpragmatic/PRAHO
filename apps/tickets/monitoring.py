@@ -63,7 +63,7 @@ class SecurityEventTracker:
 
         # Keep only recent failures (within monitoring window)
         cutoff_time = timezone.now() - timedelta(minutes=self.monitoring_window)
-        recent_failures = [f for f in current_failures if timezone.datetime.fromisoformat(f["timestamp"]) > cutoff_time]
+        recent_failures = [f for f in current_failures if datetime.fromisoformat(f["timestamp"]) > cutoff_time]
 
         # Update cache
         cache.set(event_key, recent_failures, 60 * self.monitoring_window)
@@ -95,7 +95,7 @@ class SecurityEventTracker:
 
         # Keep only recent uploads (within monitoring window)
         cutoff_time = timezone.now() - timedelta(minutes=self.monitoring_window)
-        recent_uploads = [u for u in current_uploads if timezone.datetime.fromisoformat(u["timestamp"]) > cutoff_time]
+        recent_uploads = [u for u in current_uploads if datetime.fromisoformat(u["timestamp"]) > cutoff_time]
 
         # Update cache
         cache.set(event_key, recent_uploads, 60 * self.monitoring_window)
@@ -206,15 +206,21 @@ class SecurityEventTracker:
 
         # Note: This is a simplified implementation
         # In production, consider using Redis SCAN or dedicated monitoring storage
-        for key in cache._cache:  # This is implementation-specific
-            if pattern.replace("*", "") in key:
-                events = cache.get(key, [])
-                recent_events = [
-                    e
-                    for e in events
-                    if timezone.datetime.fromisoformat(e.get("timestamp", "1970-01-01T00:00:00")) > cutoff_time
-                ]
-                count += len(recent_events)
+        # Using a safe approach since cache._cache is implementation-specific
+        try:
+            cache_keys = getattr(cache, '_cache', {}).keys() if hasattr(cache, '_cache') else []
+            for key in cache_keys:
+                if pattern.replace("*", "") in key:
+                    events = cache.get(key, [])
+                    recent_events = [
+                        e
+                        for e in events
+                        if datetime.fromisoformat(e.get("timestamp", "1970-01-01T00:00:00")) > cutoff_time
+                    ]
+                    count += len(recent_events)
+        except (AttributeError, TypeError):
+            # Fallback: cache doesn't support key iteration
+            return 0
 
         return count
 

@@ -102,7 +102,7 @@ def service_create(request: HttpRequest) -> HttpResponse:
     elif isinstance(accessible_customers, list | tuple):
         customers = Customer.objects.filter(id__in=[c.id for c in accessible_customers])
     else:
-        customers = accessible_customers
+        customers = accessible_customers  # type: ignore[unreachable]
     plans = ServicePlan.objects.filter(is_active=True)
 
     if request.method == "POST":
@@ -170,7 +170,7 @@ def service_edit(request: HttpRequest, pk: int) -> HttpResponse:
     elif isinstance(accessible_customers, list | tuple):
         customers = Customer.objects.filter(id__in=[c.id for c in accessible_customers])
     else:
-        customers = accessible_customers
+        customers = accessible_customers  # type: ignore[unreachable]
     plans = ServicePlan.objects.filter(is_active=True)
 
     if request.method == "POST":

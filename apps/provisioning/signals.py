@@ -89,10 +89,13 @@ def handle_service_plan_created_or_updated(
         else:
             # Handle plan updates
             update_fields = kwargs.get("update_fields")
-            
+
             if update_fields:
                 # Check for price changes
-                if any(field in update_fields for field in ["price_monthly", "price_quarterly", "price_annual", "setup_fee"]):
+                if any(
+                    field in update_fields
+                    for field in ["price_monthly", "price_quarterly", "price_annual", "setup_fee"]
+                ):
                     logger.info(f"💰 [ServicePlan] Price change detected for {instance.name}")
 
                 # Check for status changes
@@ -110,7 +113,7 @@ def handle_service_plan_created_or_updated(
                                 "source_app": "provisioning",
                                 "compliance_event": True,
                                 "status_change": True,
-                            }
+                            },
                         ),
                     )
 
@@ -124,12 +127,10 @@ def handle_service_plan_created_or_updated(
 
 
 @receiver(post_save, sender=Service)
-def audit_service_lifecycle_events(
-    sender: type[Service], instance: Service, created: bool, **kwargs: Any
-) -> None:
+def audit_service_lifecycle_events(sender: type[Service], instance: Service, created: bool, **kwargs: Any) -> None:
     """
     Audit service lifecycle events for Romanian compliance and operational tracking.
-    
+
     Logs:
     - Service creation, activation, suspension, and termination
     - Plan changes and pricing updates
@@ -144,31 +145,31 @@ def audit_service_lifecycle_events(
         if created:
             # Use helper function for modularity and testability
             _handle_new_service_creation(instance)
-            
+
         else:
             # Handle service updates
             update_fields = kwargs.get("update_fields")
-            
+
             if update_fields and "status" in update_fields:
-                    AuditService.log_event(
-                        AuditEventData(
-                            event_type="service_status_changed",
-                            content_object=instance,
-                            new_values={"status": instance.status},
-                            description=f"Service '{instance.service_name}' status changed to {instance.status}",
-                        ),
-                        context=AuditContext(
-                            actor_type="system",
-                            metadata={
-                                "source_app": "provisioning",
-                                "compliance_event": True,
-                                "service_lifecycle": True,
-                                "status_change": True,
-                                "customer_id": str(instance.customer.id),
-                                "requires_billing_update": instance.status in ["suspended", "terminated"],
-                            }
-                        ),
-                    )
+                AuditService.log_event(
+                    AuditEventData(
+                        event_type="service_status_changed",
+                        content_object=instance,
+                        new_values={"status": instance.status},
+                        description=f"Service '{instance.service_name}' status changed to {instance.status}",
+                    ),
+                    context=AuditContext(
+                        actor_type="system",
+                        metadata={
+                            "source_app": "provisioning",
+                            "compliance_event": True,
+                            "service_lifecycle": True,
+                            "status_change": True,
+                            "customer_id": str(instance.customer.id),
+                            "requires_billing_update": instance.status in ["suspended", "terminated"],
+                        },
+                    ),
+                )
 
     except Exception as e:
         logger.exception(f"🔥 [Service] Failed to audit service lifecycle: {e}")
@@ -180,12 +181,10 @@ def audit_service_lifecycle_events(
 
 
 @receiver(post_save, sender=Server)
-def audit_server_management_events(
-    sender: type[Server], instance: Server, created: bool, **kwargs: Any
-) -> None:
+def audit_server_management_events(sender: type[Server], instance: Server, created: bool, **kwargs: Any) -> None:
     """
     Audit server management events for infrastructure tracking and compliance.
-    
+
     Logs server creation, configuration changes, and capacity monitoring.
     """
     # Check if audit signals are disabled (for testing)
@@ -200,7 +199,7 @@ def audit_server_management_events(
         else:
             # Handle server updates
             update_fields = kwargs.get("update_fields")
-            
+
             # When save() is called without update_fields, we need to detect changes differently
             # For now, let's log any server update that's not creation
             if update_fields is None or (update_fields and "status" in update_fields):
@@ -221,10 +220,10 @@ def audit_server_management_events(
                             "status_change": True,
                             "server_hostname": instance.hostname,
                             "requires_monitoring_update": True,
-                        }
+                        },
                     ),
                 )
-                
+
                 logger.info(f"🖥️ [Server] Status changed: {instance.name} -> {instance.status}")
 
     except Exception as e:
@@ -242,7 +241,7 @@ def handle_service_domain_changes(
 ) -> None:
     """
     Handle service domain binding and DNS management events.
-    
+
     Triggers provisioning tasks for DNS configuration and SSL certificate management.
     """
     # Check if audit signals are disabled (for testing)
@@ -274,7 +273,7 @@ def handle_service_domain_changes(
                         "domain_binding": True,
                         "requires_dns_configuration": instance.dns_management,
                         "requires_ssl_provisioning": instance.ssl_enabled,
-                    }
+                    },
                 ),
             )
 
@@ -327,10 +326,8 @@ def _handle_new_service_plan_creation(instance: ServicePlan) -> None:
                 "compliance_event": True,
                 "pricing_event": True,
                 "high_value_plan": float(instance.price_monthly) >= HIGH_VALUE_PLAN_THRESHOLD,
-                "enterprise_plan": (
-                    instance.disk_space_gb and instance.disk_space_gb >= ENTERPRISE_DISK_THRESHOLD
-                ),
-            }
+                "enterprise_plan": (instance.disk_space_gb and instance.disk_space_gb >= ENTERPRISE_DISK_THRESHOLD),
+            },
         ),
     )
 
@@ -365,7 +362,7 @@ def _handle_new_server_creation(instance: Server) -> None:
                 "server_management": True,
                 "server_hostname": instance.hostname,
                 "server_type": instance.server_type,
-            }
+            },
         ),
     )
 
@@ -402,17 +399,17 @@ def _handle_new_service_creation(instance: Service) -> None:
                 "customer_id": str(instance.customer.id),
                 "billing_cycle": instance.billing_cycle,
                 "high_value_service": float(instance.price) >= HIGH_VALUE_PLAN_THRESHOLD,
-            }
+            },
         ),
     )
 
     logger.info(f"✅ [Service] Created: {instance.service_name} for {instance.customer.company_name}")
 
 
-def log_virtualmin_security_event(event_type: str, details: dict, ip_address: str) -> None:
+def log_virtualmin_security_event(event_type: str, details: dict[str, Any], ip_address: str) -> None:
     """
     Log security events related to Virtualmin operations.
-    
+
     Args:
         event_type: Type of security event (e.g., 'virtualmin_auth_failure', 'access_violation')
         details: Dictionary containing event details
@@ -421,24 +418,26 @@ def log_virtualmin_security_event(event_type: str, details: dict, ip_address: st
     try:
         # Enhance details with Virtualmin-specific metadata
         enhanced_details = details.copy()
-        enhanced_details.update({
-            "source_app": "provisioning",
-            "virtualmin_integration": True,
-        })
-        
+        enhanced_details.update(
+            {
+                "source_app": "provisioning",
+                "virtualmin_integration": True,
+            }
+        )
+
         # Call the log_security_event function with expected parameters
         log_security_event(event_type, enhanced_details, ip_address)
-        
+
         logger.info(f"🔒 [Security] Virtualmin {event_type}: {details}")
-        
+
     except Exception as e:
         logger.error(f"🔥 [Security] Failed to log Virtualmin security event: {e}")
 
 
-def notify_provisioning_completion(account: Any, success: bool = True, details: dict | None = None) -> None:
+def notify_provisioning_completion(account: Any, success: bool = True, details: dict[str, Any] | None = None) -> None:
     """
     Send provisioning completion notifications.
-    
+
     Args:
         account: VirtualminAccount object that was provisioned
         success: Whether the provisioning was successful
@@ -447,7 +446,7 @@ def notify_provisioning_completion(account: Any, success: bool = True, details: 
     try:
         details = details or {}
         status = "success" if success else "failed"
-        
+
         # Log provisioning completion
         AuditService.log_event(
             AuditEventData(
@@ -473,14 +472,18 @@ def notify_provisioning_completion(account: Any, success: bool = True, details: 
                     "completion_status": status,
                     "domain": account.domain,
                     "server_hostname": account.server.hostname if account.server else None,
-                }
+                },
             ),
         )
-        
-        logger.info(f"📋 [Provisioning] Virtualmin {'completed' if success else 'failed'} for domain {account.domain}: {details}")
-        
+
+        logger.info(
+            f"📋 [Provisioning] Virtualmin {'completed' if success else 'failed'} for domain {account.domain}: {details}"
+        )
+
         # Here you could add email notifications, webhook calls, etc.
         # For now, we just log the completion
-        
+
     except Exception as e:
-        logger.error(f"🔥 [Provisioning] Failed to notify completion for domain {getattr(account, 'domain', 'unknown')}: {e}")
+        logger.error(
+            f"🔥 [Provisioning] Failed to notify completion for domain {getattr(account, 'domain', 'unknown')}: {e}"
+        )

@@ -38,7 +38,7 @@ class Order(models.Model):
     customer = models.ForeignKey("customers.Customer", on_delete=models.PROTECT, related_name="orders")
 
     # Order status workflow
-    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("draft", _("Draft")),  # Cart/Quote stage - can be modified
         ("pending", _("Pending")),  # Awaiting payment
         ("confirmed", _("Confirmed")),  # Payment confirmed, ready for processing
@@ -327,7 +327,7 @@ class OrderItem(models.Model):
     )
 
     # Provisioning status
-    PROVISIONING_STATUS: ClassVar[tuple[tuple[str, str], ...]] = (
+    PROVISIONING_STATUS: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("pending", _("Pending")),
         ("in_progress", _("In Progress")),
         ("completed", _("Completed")),
@@ -380,7 +380,7 @@ class OrderItem(models.Model):
     def unit_price(self) -> Decimal:
         """Return unit price in currency units"""
         return Decimal(self.unit_price_cents) / 100
-    
+
     @unit_price.setter
     def unit_price(self, value: Decimal) -> None:
         """Set unit price from currency units"""

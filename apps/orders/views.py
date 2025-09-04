@@ -9,7 +9,7 @@ import logging
 import re
 import uuid
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     pass
@@ -47,21 +47,22 @@ logger = logging.getLogger(__name__)
 
 # Constants for validation and limits
 MAX_SEARCH_QUERY_LENGTH = 100
-MAX_PRICE_OVERRIDE_CENTS = 100_000_000  # 1 million EUR in cents  
+MAX_PRICE_OVERRIDE_CENTS = 100_000_000  # 1 million EUR in cents
 MAX_PRICE_OVERRIDE_MULTIPLIER = 10
 
 # ===============================================================================
 # SECURITY VALIDATION FUNCTIONS
 # ===============================================================================
 
+
 def _sanitize_search_query(query: str) -> str:
     """🔒 Sanitize search query to prevent injection attacks"""
     if not query:
         return ""
-    
+
     original_query = query
     original_length = len(query)
-    
+
     # Check for dangerous patterns first
     dangerous_patterns = [
         r"[';\"\\]",  # Quotes and backslashes
@@ -72,29 +73,33 @@ def _sanitize_search_query(query: str) -> str:
         r"javascript:",  # Javascript injection
         r"alert\(",  # Alert calls
     ]
-    
+
     # Check if query contains any dangerous patterns
     has_dangerous_pattern = False
     for pattern in dangerous_patterns:
         if re.search(pattern, query, flags=re.IGNORECASE):
             has_dangerous_pattern = True
             break
-    
+
     if has_dangerous_pattern:
-        logger.warning(f"🚨 [Orders] Search Security: Blocked search with suspicious characters: {original_query[:50]}...")
+        logger.warning(
+            f"🚨 [Orders] Search Security: Blocked search with suspicious characters: {original_query[:50]}..."
+        )
         return ""
-    
+
     # Remove dangerous patterns (defensive measure)
     query = re.sub(r"[';\"\\]", "", query)  # Remove quotes and backslashes
     query = re.sub(r"\b(DROP|DELETE|INSERT|UPDATE|ALTER|CREATE)\b", "", query, flags=re.IGNORECASE)
     query = re.sub(r"\{\$\w+:", "", query)  # Remove NoSQL injection patterns like {$where:
     query = re.sub(r"[{}$]", "", query)  # Remove MongoDB-style injection chars
-    
+
     # Limit length
     if len(query) > MAX_SEARCH_QUERY_LENGTH:
-        logger.warning(f"⚠️ [Orders] Truncated overly long search query from {original_length} to {MAX_SEARCH_QUERY_LENGTH} characters")
+        logger.warning(
+            f"⚠️ [Orders] Truncated overly long search query from {original_length} to {MAX_SEARCH_QUERY_LENGTH} characters"
+        )
         query = query[:MAX_SEARCH_QUERY_LENGTH]
-    
+
     return query.strip()
 
 
@@ -102,38 +107,44 @@ def _validate_manual_price_override(
     manual_price_cents: int, product_price_cents: int, user: User, context: str = ""
 ) -> tuple[bool, str]:
     """🔒 Validate manual price override for security"""
-    if not hasattr(user, 'is_staff') or not user.is_staff:
+    if not hasattr(user, "is_staff") or not user.is_staff:
         logger.warning(
             f"⛔ [Orders] Price Security: Unauthorized price override attempt by user {getattr(user, 'id', 'Unknown')} ({getattr(user, 'email', 'Unknown')}) in context: {context}"
         )
         return False, "Insufficient permissions for price override"
-    
+
     # Check for specific financial permissions (staff role required)
-    if not (user.is_superuser or (hasattr(user, 'staff_role') and user.staff_role in ['admin', 'billing'])):
+    if not (user.is_superuser or (hasattr(user, "staff_role") and user.staff_role in ["admin", "billing"])):
         logger.warning(
             f"⛔ [Orders] Price Security: Staff user {getattr(user, 'id', 'Unknown')} ({getattr(user, 'email', 'Unknown')}) lacks financial permissions for price override in context: {context}"
         )
         return False, "Insufficient permissions for price override"
-    
+
     # Check minimum price
     if manual_price_cents < 1:
-        logger.warning(f"⚠️ [Orders] Invalid price override attempt (too low): {manual_price_cents} by {user.email} in context: {context}")
+        logger.warning(
+            f"⚠️ [Orders] Invalid price override attempt (too low): {manual_price_cents} by {user.email} in context: {context}"
+        )
         return False, "Price must be at least 1 cents"
-    
+
     # Check absolute maximum price limit
     if manual_price_cents > MAX_PRICE_OVERRIDE_CENTS:
-        logger.warning(f"⚠️ [Orders] Blocked extremely high price override: {manual_price_cents} by {user.email} in context: {context}")
+        logger.warning(
+            f"⚠️ [Orders] Blocked extremely high price override: {manual_price_cents} by {user.email} in context: {context}"
+        )
         return False, f"Price cannot exceed {MAX_PRICE_OVERRIDE_CENTS} cents"
-    
+
     # Check if override is within reasonable bounds (10x original)
     if manual_price_cents > product_price_cents * MAX_PRICE_OVERRIDE_MULTIPLIER:
         logger.warning(
             f"🚨 [Orders] Price Security: Excessive price override {manual_price_cents} (max {product_price_cents * 10}) by user {user.id} ({user.email}) in context: {context}"
         )
         return False, "Price override cannot exceed 10x original price"
-    
+
     # Log successful validation
-    logger.info(f"✅ [Orders] Price Override: {manual_price_cents} cents (original: {product_price_cents} cents) by user {user.id} ({user.email}) in context: {context}")
+    logger.info(
+        f"✅ [Orders] Price Override: {manual_price_cents} cents (original: {product_price_cents} cents) by user {user.id} ({user.email}) in context: {context}"
+    )
     return True, ""
 
 
@@ -767,7 +778,7 @@ def order_items_list(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     return render(request, template, context)
 
 
-def _process_order_item_creation(form: ModelForm, order: Order, pk: uuid.UUID, request: HttpRequest) -> HttpResponse:
+def _process_order_item_creation(form: ModelForm[Any], order: Order, pk: uuid.UUID, request: HttpRequest) -> HttpResponse:
     """Process the creation of a new order item with proper price override logic"""
     try:
         with transaction.atomic():
@@ -884,7 +895,7 @@ def order_item_create(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
 
 
 def _render_order_item_form(
-    request: HttpRequest, form: ModelForm, order: Order, item: OrderItem = None, action: str = "create"
+    request: HttpRequest, form: ModelForm[Any], order: Order, item: OrderItem | None = None, action: str = "create"
 ) -> HttpResponse:
     """Render the order item form with all necessary context"""
     # Get available products
@@ -951,7 +962,60 @@ def _render_order_item_form(
     return render(request, template, context)
 
 
-def _process_order_item_update(form: ModelForm, order: Order, pk: uuid.UUID, request: HttpRequest) -> HttpResponse:
+def _handle_unit_price_update(
+    updated_item: Any, form: ModelForm[Any], product_price: Any, product_changed: bool, billing_period_changed: bool
+) -> HttpResponse | None:
+    """Handle unit price update logic with validation"""
+    manual_unit_price_changed = "unit_price_cents" in form.changed_data
+
+    if manual_unit_price_changed:
+        # Security check: Validate price override limits
+        if product_price and updated_item.unit_price_cents > 0:
+            base_price = product_price.amount_cents
+            if base_price > 0:  # Avoid division by zero
+                price_ratio = updated_item.unit_price_cents / base_price
+                if price_ratio > MAX_PRICE_OVERRIDE_MULTIPLIER:  # More than 10x the base price
+                    return json_error(
+                        f"Price override cannot exceed {MAX_PRICE_OVERRIDE_MULTIPLIER}x the base product price"
+                    )
+
+        # User explicitly changed unit price - use their value (MANUAL OVERRIDE)
+        logger.info(f"💰 [Orders] Using manual override unit price: {updated_item.unit_price_cents} cents")
+    elif product_changed or billing_period_changed:
+        # Product or billing period changed - auto-update from product if available
+        if product_price:
+            updated_item.unit_price_cents = product_price.amount_cents
+            logger.info(f"💰 [Orders] Auto-updated unit price from product: {product_price.amount_cents} cents")
+        else:
+            # No product pricing - keep existing price but warn
+            logger.warning(
+                f"⚠️ [Orders] No product pricing available for {updated_item.product.name}, keeping existing price: {updated_item.unit_price_cents} cents"
+            )
+    return None
+
+
+def _handle_setup_fee_update(
+    updated_item: Any, form: ModelForm[Any], product_price: Any, product_changed: bool, billing_period_changed: bool
+) -> None:
+    """Handle setup fee update logic"""
+    manual_setup_changed = "setup_cents" in form.changed_data
+
+    if manual_setup_changed:
+        # User explicitly changed setup fee - use their value
+        logger.info(f"🛠️ [Orders] Using manual override setup fee: {updated_item.setup_cents} cents")
+    elif product_changed or billing_period_changed:
+        # Product or billing period changed - auto-update from product if available
+        if product_price:
+            updated_item.setup_cents = product_price.setup_cents
+            logger.info(f"🛠️ [Orders] Auto-updated setup fee from product: {product_price.setup_cents} cents")
+        else:
+            # No product pricing - keep existing setup fee
+            logger.warning(
+                f"⚠️ [Orders] No product pricing available for setup fee, keeping existing: {updated_item.setup_cents} cents"
+            )
+
+
+def _process_order_item_update(form: ModelForm[Any], order: Order, pk: uuid.UUID, request: HttpRequest) -> HttpResponse:
     """Process the update of an existing order item with proper price override logic"""
     try:
         with transaction.atomic():
@@ -964,8 +1028,6 @@ def _process_order_item_update(form: ModelForm, order: Order, pk: uuid.UUID, req
             # Check what fields were changed
             product_changed = "product" in form.changed_data
             billing_period_changed = "billing_period" in form.changed_data
-            manual_unit_price_changed = "unit_price_cents" in form.changed_data
-            manual_setup_changed = "setup_cents" in form.changed_data
 
             # INDUSTRY STANDARD PRICING LOGIC FOR UPDATES:
             # 1. If user manually changed prices - use those (OVERRIDE)
@@ -976,44 +1038,15 @@ def _process_order_item_update(form: ModelForm, order: Order, pk: uuid.UUID, req
             # Get product default pricing for reference
             product_price = product.get_price_for_period(order.currency.code, updated_item.billing_period)
 
-            # Handle unit price logic
-            if manual_unit_price_changed:
-                # Security check: Validate price override limits
-                if product_price and updated_item.unit_price_cents > 0:
-                    base_price = product_price.amount_cents
-                    if base_price > 0:  # Avoid division by zero
-                        price_ratio = updated_item.unit_price_cents / base_price
-                        if price_ratio > MAX_PRICE_OVERRIDE_MULTIPLIER:  # More than 10x the base price
-                            return json_error(f"Price override cannot exceed {MAX_PRICE_OVERRIDE_MULTIPLIER}x the base product price")
-                
-                # User explicitly changed unit price - use their value (MANUAL OVERRIDE)
-                logger.info(f"💰 [Orders] Using manual override unit price: {updated_item.unit_price_cents} cents")
-            elif product_changed or billing_period_changed:
-                # Product or billing period changed - auto-update from product if available
-                if product_price:
-                    updated_item.unit_price_cents = product_price.amount_cents
-                    logger.info(f"💰 [Orders] Auto-updated unit price from product: {product_price.amount_cents} cents")
-                else:
-                    # No product pricing - keep existing price but warn
-                    logger.warning(
-                        f"⚠️ [Orders] No product pricing available for {product.name}, keeping existing price: {updated_item.unit_price_cents} cents"
-                    )
-            # If neither pricing fields nor product/billing changed, keep existing prices
+            # Handle unit price logic using helper function
+            price_error = _handle_unit_price_update(
+                updated_item, form, product_price, product_changed, billing_period_changed
+            )
+            if price_error:
+                return price_error
 
-            # Handle setup fee logic
-            if manual_setup_changed:
-                # User explicitly changed setup fee - use their value
-                logger.info(f"🛠️ [Orders] Using manual override setup fee: {updated_item.setup_cents} cents")
-            elif product_changed or billing_period_changed:
-                # Product or billing period changed - auto-update from product if available
-                if product_price:
-                    updated_item.setup_cents = product_price.setup_cents
-                    logger.info(f"🛠️ [Orders] Auto-updated setup fee from product: {product_price.setup_cents} cents")
-                else:
-                    # No product pricing - keep existing setup fee
-                    logger.warning(
-                        f"⚠️ [Orders] No product pricing available for setup fee, keeping existing: {updated_item.setup_cents} cents"
-                    )
+            # Handle setup fee logic using helper function
+            _handle_setup_fee_update(updated_item, form, product_price, product_changed, billing_period_changed)
 
             # Recalculate VAT if customer-related or product changed
             if product_changed or billing_period_changed:

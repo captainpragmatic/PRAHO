@@ -19,7 +19,6 @@ urlpatterns = [
     path("services/<int:pk>/activate/", views.service_activate, name="service_activate"),
     path("plans/", views.plan_list, name="plans"),
     path("servers/", views.server_list, name="servers"),
-    
     # Virtualmin management (from virtualmin_urls.py)
     path("virtualmin/", include(virtualmin_urlpatterns)),
 ]

@@ -4,7 +4,7 @@ Complex service hierarchies, dependencies, and domain binding.
 """
 
 from decimal import Decimal
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
@@ -22,7 +22,7 @@ class ServiceRelationship(models.Model):
     - Service dependencies and billing relationships
     """
 
-    RELATIONSHIP_TYPE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    RELATIONSHIP_TYPE_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("addon", _("🔧 Add-on Service")),  # Backup, SSL, monitoring
         ("included", _("📦 Included Service")),  # Free subdomain, basic SSL
         ("dependency", _("⚡ Required Dependency")),  # Domain for hosting
@@ -30,7 +30,7 @@ class ServiceRelationship(models.Model):
         ("bundle", _("🎁 Bundle Component")),  # Part of package deal
     )
 
-    BILLING_IMPACT_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    BILLING_IMPACT_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("separate", _("💳 Billed Separately")),  # Additional charges
         ("included", _("🆓 Included in Parent")),  # No extra cost
         ("discounted", _("💰 Discounted Rate")),  # Reduced pricing
@@ -151,7 +151,7 @@ class ServiceDomain(models.Model):
     - SSL certificate domain mapping
     """
 
-    DOMAIN_TYPE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    DOMAIN_TYPE_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("primary", _("🎯 Primary Domain")),  # Main website domain
         ("addon", _("+ Add-on Domain")),  # Additional domain on same hosting
         ("subdomain", _("🔗 Subdomain")),  # blog.example.com
@@ -161,7 +161,10 @@ class ServiceDomain(models.Model):
 
     # Core relationships
     service = models.ForeignKey(
-        "provisioning.Service", on_delete=models.CASCADE, related_name="domains", help_text=_("Hosting service for this domain")
+        "provisioning.Service",
+        on_delete=models.CASCADE,
+        related_name="domains",
+        help_text=_("Hosting service for this domain"),
     )
     domain = models.ForeignKey(
         "domains.Domain", on_delete=models.CASCADE, related_name="services", help_text=_("Domain assigned to service")
@@ -258,7 +261,7 @@ class ServiceGroup(models.Model):
     - Development/staging environments
     """
 
-    GROUP_TYPE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    GROUP_TYPE_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("package", _("📦 Hosting Package")),  # VPS + Domain + SSL
         ("cluster", _("🔗 Service Cluster")),  # Load-balanced services
         ("bundle", _("🎁 Product Bundle")),  # Marketing bundle
@@ -266,7 +269,7 @@ class ServiceGroup(models.Model):
         ("reseller", _("👥 Reseller Package")),  # Reseller hosting
     )
 
-    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("active", _("🟢 Active")),
         ("suspended", _("🟡 Suspended")),
         ("cancelled", _("🔴 Cancelled")),
@@ -344,7 +347,7 @@ class ServiceGroupMember(models.Model):
     - Custom billing rules per service
     """
 
-    MEMBER_ROLE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    MEMBER_ROLE_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("primary", _("🎯 Primary Service")),  # Main service in group
         ("dependency", _("⚡ Dependency")),  # Required for primary
         ("addon", _("🔧 Add-on")),  # Optional enhancement
@@ -356,7 +359,10 @@ class ServiceGroupMember(models.Model):
         ServiceGroup, on_delete=models.CASCADE, related_name="members", help_text=_("Service group")
     )
     service = models.ForeignKey(
-        "provisioning.Service", on_delete=models.CASCADE, related_name="group_memberships", help_text=_("Service in group")
+        "provisioning.Service",
+        on_delete=models.CASCADE,
+        related_name="group_memberships",
+        help_text=_("Service in group"),
     )
 
     # Member configuration

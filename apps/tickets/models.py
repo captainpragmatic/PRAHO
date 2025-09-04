@@ -59,7 +59,7 @@ class SupportCategory(models.Model):
 class Ticket(models.Model):
     """Customer support ticket"""
 
-    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("new", _("New")),
         ("open", _("Open")),
         ("pending", _("Pending")),
@@ -68,7 +68,7 @@ class Ticket(models.Model):
         ("cancelled", _("Cancelled")),
     )
 
-    PRIORITY_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    PRIORITY_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("low", _("Low")),
         ("normal", _("Normal")),
         ("high", _("High")),
@@ -76,7 +76,7 @@ class Ticket(models.Model):
         ("critical", _("Critical")),
     )
 
-    SOURCE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    SOURCE_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("web", _("Website")),
         ("email", _("Email")),
         ("phone", _("Phone")),
@@ -162,6 +162,9 @@ class Ticket(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("Created At"))
     updated_at = models.DateTimeField(auto_now=True, verbose_name=_("Updated At"))
     created_by = models.ForeignKey("users.User", on_delete=models.SET_NULL, null=True, related_name="created_tickets")
+    
+    # Private attributes for signal handling
+    _old_status: str | None = None
 
     class Meta:
         db_table = "tickets"
@@ -252,7 +255,7 @@ class Ticket(models.Model):
 class TicketComment(models.Model):
     """Comments/replies on support tickets"""
 
-    COMMENT_TYPE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    COMMENT_TYPE_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("customer", _("Customer")),
         ("support", _("Support")),
         ("internal", _("Internal")),

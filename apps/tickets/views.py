@@ -80,11 +80,11 @@ def ticket_detail(request: HttpRequest, pk: int) -> HttpResponse:
 def ticket_create(request: HttpRequest) -> HttpResponse:
     """+ Create new support ticket"""
     user = cast(User, request.user)  # Safe after @login_required
-    
+
     # Check rate limit
     if getattr(request, "limited", False):
         return HttpResponse("Rate limited", status=429)
-        
+
     customers = user.get_accessible_customers()
 
     if request.method == "POST":
@@ -369,7 +369,7 @@ def ticket_reopen(request: HttpRequest, pk: int) -> HttpResponse:
 def download_attachment(request: HttpRequest, attachment_id: int) -> HttpResponse:
     """📎 Download ticket attachment"""
     user = cast(User, request.user)  # Safe after @login_required
-    
+
     # Check rate limit
     if getattr(request, "limited", False):
         return HttpResponse("Rate limited", status=429)
@@ -384,16 +384,18 @@ def download_attachment(request: HttpRequest, attachment_id: int) -> HttpRespons
     accessible_customer_ids = [customer.id for customer in accessible_customers]
     if attachment.ticket.customer.id not in accessible_customer_ids:
         raise PermissionDenied("You do not have permission to access this attachment.")
-    
+
     # Check if attachment is safe
-    if hasattr(attachment, 'is_safe') and not attachment.is_safe:
+    if hasattr(attachment, "is_safe") and not attachment.is_safe:
         raise PermissionDenied("Access to this attachment is blocked for security reasons.")
-    
+
     # Check internal attachment access (only staff can access internal attachments)
-    if (attachment.comment and 
-        hasattr(attachment.comment, 'comment_type') and 
-        attachment.comment.comment_type == "internal" and 
-        not user.is_staff):
+    if (
+        attachment.comment
+        and hasattr(attachment.comment, "comment_type")
+        and attachment.comment.comment_type == "internal"
+        and not user.is_staff
+    ):
         raise PermissionDenied("Access denied to internal attachments.")
 
     # Check if file exists

@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from django.contrib import messages
 from django.core.paginator import Paginator
@@ -25,9 +26,11 @@ from .models import Product, ProductPrice
 
 logger = logging.getLogger(__name__)
 
+
 # Lightweight security event logger for tests to patch
-def log_security_event(event_type: str, details: dict | None = None) -> None:
+def log_security_event(event_type: str, details: dict[str, Any] | None = None) -> None:
     logger.info(f"🔒 [Products] {event_type}", extra={"event_type": event_type, "details": details or {}})
+
 
 # ===============================================================================
 # PRODUCT LIST VIEW
@@ -42,7 +45,7 @@ def product_list(request: HttpRequest) -> HttpResponse:
     """
     try:
         # Log access event
-        log_security_event(event_type="product_list_access", details={"user_email": getattr(request.user, 'email', '')})
+        log_security_event(event_type="product_list_access", details={"user_email": getattr(request.user, "email", "")})
         # Get all products with prefetch for performance
         products_qs = Product.objects.prefetch_related(
             "prices__currency", "relationships_from__target_product", "relationships_to__source_product"
@@ -178,7 +181,10 @@ def product_detail(request: HttpRequest, slug: str) -> HttpResponse:
         bundle_memberships = product.bundle_items.filter(bundle__is_active=True).select_related("bundle")
 
         # Log detail access
-        log_security_event(event_type="product_detail_access", details={"product_slug": product.slug, "user_email": getattr(request.user, 'email', '')})
+        log_security_event(
+            event_type="product_detail_access",
+            details={"product_slug": product.slug, "user_email": getattr(request.user, "email", "")},
+        )
 
         context = {
             "product": product,
@@ -214,8 +220,10 @@ def product_create(request: HttpRequest) -> HttpResponse:
             "name",
             "slug",
             "description",
+            "short_description",
             "product_type",
             "module_config",
+            "includes_vat",
             "is_active",
             "is_public",
         ],
@@ -335,7 +343,9 @@ def product_toggle_active(request: HttpRequest, slug: str) -> JsonResponse:
         product.save(update_fields=["is_active"])
 
         logger.info(f"✅ [Products] Toggled active status for {product.name}: {product.is_active}")
-        log_security_event(event_type="product_status_changed", details={"product_slug": product.slug, "field": "is_active"})
+        log_security_event(
+            event_type="product_status_changed", details={"product_slug": product.slug, "field": "is_active"}
+        )
 
         return json_success({"is_active": product.is_active, "message": _("Product status updated")})
 
@@ -354,7 +364,9 @@ def product_toggle_public(request: HttpRequest, slug: str) -> JsonResponse:
         product.save(update_fields=["is_public"])
 
         logger.info(f"✅ [Products] Toggled public status for {product.name}: {product.is_public}")
-        log_security_event(event_type="product_status_changed", details={"product_slug": product.slug, "field": "is_public"})
+        log_security_event(
+            event_type="product_status_changed", details={"product_slug": product.slug, "field": "is_public"}
+        )
 
         return json_success({"is_public": product.is_public, "message": _("Product visibility updated")})
 
@@ -373,7 +385,9 @@ def product_toggle_featured(request: HttpRequest, slug: str) -> JsonResponse:
         product.save(update_fields=["is_featured"])
 
         logger.info(f"✅ [Products] Toggled featured status for {product.name}: {product.is_featured}")
-        log_security_event(event_type="product_status_changed", details={"product_slug": product.slug, "field": "is_featured"})
+        log_security_event(
+            event_type="product_status_changed", details={"product_slug": product.slug, "field": "is_featured"}
+        )
 
         return json_success({"is_featured": product.is_featured, "message": _("Product featured status updated")})
 
@@ -402,7 +416,10 @@ def product_prices(request: HttpRequest, slug: str) -> HttpResponse:
         currencies = Currency.objects.order_by(models.Case(models.When(code="RON", then=0), default=1), "code")
 
         # Log pricing access
-        log_security_event(event_type="product_pricing_access", details={"product_slug": product.slug, "user_email": getattr(request.user, 'email', '')})
+        log_security_event(
+            event_type="product_pricing_access",
+            details={"product_slug": product.slug, "user_email": getattr(request.user, "email", "")},
+        )
 
         context = {
             "product": product,

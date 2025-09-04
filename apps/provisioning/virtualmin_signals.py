@@ -40,7 +40,7 @@ def audit_virtualmin_account_changes(
 ) -> None:
     """
     Audit all Virtualmin account lifecycle events for GDPR compliance.
-    
+
     Logs:
     - Account creation/modification/deletion
     - Status changes (active, suspended, disabled)
@@ -68,23 +68,23 @@ def audit_virtualmin_account_changes(
                     description=f"Virtualmin account created for domain {instance.domain}",
                 ),
                 context=AuditContext(
-                    actor_type="system", 
+                    actor_type="system",
                     metadata={
                         "source_app": "provisioning",
                         "compliance_event": True,
                         "provisioning_action": True,
                         "virtualmin_server": str(instance.server.hostname) if instance.server else None,
                         "requires_gdpr_logging": True,
-                    }
+                    },
                 ),
             )
-            
+
             logger.info(f"✅ [ProvisioningAudit] Created Virtualmin account for {instance.domain}")
-            
+
         else:
             # Log account updates
             update_fields = kwargs.get("update_fields")
-            
+
             if update_fields:
                 if "status" in update_fields:
                     # Status change is critical for compliance
@@ -96,33 +96,36 @@ def audit_virtualmin_account_changes(
                             description=f"Virtualmin account status changed to {instance.status} for {instance.domain}",
                         ),
                         context=AuditContext(
-                            actor_type="system", 
+                            actor_type="system",
                             metadata={
                                 "source_app": "provisioning",
                                 "compliance_event": True,
                                 "provisioning_action": True,
                                 "status_change": True,
                                 "virtualmin_server": str(instance.server.hostname) if instance.server else None,
-                            }
+                            },
                         ),
                     )
-                
+
                 if "server" in update_fields:
                     # Server migration
                     AuditService.log_event(
                         AuditEventData(
                             event_type="virtualmin_account_server_migrated",
-                            user=None,
                             content_object=instance,
                             new_values={"server": str(instance.server.hostname) if instance.server else None},
                             description=f"Virtualmin account migrated to server {instance.server.hostname if instance.server else 'None'} for {instance.domain}",
+                        ),
+                        context=AuditContext(
+                            user=None,
+                            actor_type="system",
                             metadata={
+                                "source_app": "provisioning",
                                 "compliance_event": True,
                                 "provisioning_action": True,
                                 "server_migration": True,
                                 "requires_infrastructure_review": True,
-                            },
-                            context=AuditContext(actor_type="system", metadata={"source_app": "provisioning"}),
+                            }
                         )
                     )
             else:
@@ -130,15 +133,18 @@ def audit_virtualmin_account_changes(
                 AuditService.log_event(
                     AuditEventData(
                         event_type="virtualmin_account_updated",
-                        user=None,
                         content_object=instance,
                         description=f"Virtualmin account updated for {instance.domain}",
+                    ),
+                    context=AuditContext(
+                        user=None,
+                        actor_type="system",
                         metadata={
+                            "source_app": "provisioning",
                             "compliance_event": True,
                             "provisioning_action": True,
                             "virtualmin_server": str(instance.server.hostname) if instance.server else None,
-                        },
-                        context=AuditContext(actor_type="system", metadata={"source_app": "provisioning"}),
+                        }
                     )
                 )
 
@@ -152,7 +158,7 @@ def audit_virtualmin_account_deletion(
 ) -> None:
     """
     Audit Virtualmin account deletion for GDPR compliance.
-    
+
     Critical for maintaining immutable audit trails of account lifecycle.
     """
     # Check if audit signals are disabled (for testing)
@@ -183,12 +189,12 @@ def audit_virtualmin_account_deletion(
                     "virtualmin_server": str(instance.server.hostname) if instance.server else None,
                     "requires_gdpr_logging": True,
                     "data_retention_trigger": True,
-                }
+                },
             ),
         )
-        
+
         logger.info(f"🗑️ [ProvisioningAudit] Deleted Virtualmin account for {instance.domain}")
-        
+
     except Exception as e:
         logger.error(f"🔥 [ProvisioningAudit] Failed to audit Virtualmin account deletion: {e}")
 
@@ -199,7 +205,7 @@ def audit_virtualmin_provisioning_jobs(
 ) -> None:
     """
     Audit Virtualmin provisioning job lifecycle for operational tracking.
-    
+
     Logs job creation, status changes, and completion for monitoring and debugging.
     """
     # Check if audit signals are disabled (for testing)
@@ -230,17 +236,17 @@ def audit_virtualmin_provisioning_jobs(
                         "provisioning_job": True,
                         "correlation_id": instance.correlation_id,
                         "virtualmin_server": str(instance.server.hostname) if instance.server else None,
-                    }
+                    },
                 ),
             )
         else:
             # Log job status changes
             update_fields = kwargs.get("update_fields")
-            
+
             if update_fields and "status" in update_fields:
                 # Job status change
                 event_action = f"virtualmin_provisioning_job_{instance.status}"
-                
+
                 AuditService.log_event(
                     AuditEventData(
                         event_type=event_action,
@@ -262,7 +268,7 @@ def audit_virtualmin_provisioning_jobs(
                             "correlation_id": instance.correlation_id,
                             "virtualmin_server": str(instance.server.hostname) if instance.server else None,
                             "requires_monitoring_alert": instance.status == "failed",
-                        }
+                        },
                     ),
                 )
 
@@ -278,7 +284,7 @@ def audit_virtualmin_provisioning_jobs(
 def log_virtualmin_security_event(event_type: str, details: dict[str, Any], ip_address: str | None = None) -> None:
     """
     Log security events related to Virtualmin operations.
-    
+
     Used by services for logging authentication failures, suspicious activity, etc.
     """
     try:
@@ -292,17 +298,19 @@ def log_virtualmin_security_event(event_type: str, details: dict[str, Any], ip_a
             },
             ip_address,
         )
-        
+
         logger.warning(f"🔒 [VirtualminSecurity] {event_type}: {details}")
-        
+
     except Exception as e:
         logger.error(f"🔥 [VirtualminSecurity] Failed to log security event: {e}")
 
 
-def notify_provisioning_completion(account: VirtualminAccount, success: bool, details: dict[str, Any] | None = None) -> None:
+def notify_provisioning_completion(
+    account: VirtualminAccount, success: bool, details: dict[str, Any] | None = None
+) -> None:
     """
     Helper function to notify other apps of provisioning completion.
-    
+
     Can be used by provisioning services to trigger cross-app workflows.
     """
     try:
@@ -327,17 +335,19 @@ def notify_provisioning_completion(account: VirtualminAccount, success: bool, de
                     "cross_app_notification": True,
                     "virtualmin_server": str(account.server.hostname) if account.server else None,
                     "success": success,
-                }
+                },
             ),
         )
-        
+
         # TODO: Add hooks for other apps (billing notifications, customer communications, etc.)
         # This can be extended to trigger:
         # - Welcome emails with control panel credentials
         # - Billing activation notifications
         # - Customer dashboard updates
-        
-        logger.info(f"🔔 [ProvisioningNotification] Notified provisioning completion for {account.domain}: {'success' if success else 'failure'}")
-        
+
+        logger.info(
+            f"🔔 [ProvisioningNotification] Notified provisioning completion for {account.domain}: {'success' if success else 'failure'}"
+        )
+
     except Exception as e:
         logger.error(f"🔥 [ProvisioningNotification] Failed to notify provisioning completion: {e}")

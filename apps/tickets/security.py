@@ -105,7 +105,7 @@ class FileSecurityScanner:
             Tuple[bool, str]: (is_safe, message)
         """
         self.scan_stats["files_scanned"] += 1
-        filename = (original_filename or uploaded_file.name or "")
+        filename = original_filename or uploaded_file.name or ""
 
         try:
             # Step 1: Basic filename validation
@@ -205,7 +205,7 @@ class FileSecurityScanner:
             if HAS_PYTHON_MAGIC and magic:
                 # Use python-magic for accurate MIME detection
                 detected_mime = magic.from_buffer(file_header, mime=True)
-                return detected_mime
+                return str(detected_mime)
             else:
                 # Fallback to mimetypes module and basic magic number detection
                 detected_mime, _ = mimetypes.guess_type(uploaded_file.name or "")

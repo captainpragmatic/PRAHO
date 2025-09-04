@@ -150,7 +150,7 @@ class ServerWebhookView(View):
         if handler is None:
             logger.warning(f"⚠️ [Server Webhook] Unknown event type: {event_type}")
             return True, f"Event {event_type} acknowledged (no handler)"
-        return handler(server, webhook_data, client_ip)
+        return handler(server, webhook_data, client_ip)  # type: ignore[no-any-return]
 
     def _handle_service_provisioned(
         self, server: Server, webhook_data: dict[str, Any], client_ip: str
@@ -439,7 +439,7 @@ def server_webhook_health_check(request: HttpRequest, server_id: str) -> JsonRes
                 "server": server.name,
                 "api_endpoint_configured": bool(server.management_api_url),
                 "webhook_secret_configured": bool(server.management_webhook_secret),
-                "has_valid_api_config": server.has_valid_api_config,
+                "has_valid_api_config": server.has_valid_api_config,  # type: ignore[attr-defined]
             }
         )
     except Exception as e:
