@@ -110,7 +110,7 @@ class TLD(models.Model):
         if self.registrar_cost_cents > 0:
             return (self.profit_margin_cents / self.registrar_cost_cents) * 100
         return 0
-    
+
     # Signal-related attributes for change tracking
     _original_tld_values: dict[str, str | None] | None = None
 
@@ -198,13 +198,13 @@ class Registrar(models.Model):
     def get_supported_tlds(self) -> QuerySet["TLD"]:
         """🌐 Get TLDs supported by this registrar"""
         return TLD.objects.filter(registrar_assignments__registrar=self)
-    
+
     def get_api_credentials(self) -> tuple[str, str]:
         """🔑 Get API credentials for this registrar"""
         # TODO: Implement secure credential retrieval
         return (self.api_username or "", self.api_key or "")
-    
-    # Signal-related attributes for change tracking  
+
+    # Signal-related attributes for change tracking
     _original_registrar_values: dict[str, str | None] | None = None
 
 
@@ -448,7 +448,7 @@ class DomainOrderItem(models.Model):
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     # Private attributes for signal handling
     _original_order_item_values: dict[str, Any] | None = None
 

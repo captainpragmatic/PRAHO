@@ -284,7 +284,7 @@ class Invoice(models.Model):
         self.status = "paid"
         self.paid_at = timezone.now()
         self.save()
-    
+
     @property
     def amount_due(self) -> int:
         """Calculate remaining amount due after payments"""
@@ -293,7 +293,7 @@ class Invoice(models.Model):
         if self.status == "paid":
             return 0
         return self.total_cents
-    
+
     def update_status_from_payments(self) -> None:
         """Update invoice status based on associated payments"""
         # TODO: Implement payment-based status update logic

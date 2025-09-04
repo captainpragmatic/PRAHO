@@ -146,7 +146,6 @@ def virtualmin_server_detail(request: HttpRequest, server_id: str) -> HttpRespon
 
     if server.status == "active":
         try:
-
             service = VirtualminProvisioningService()
             gateway = service._get_gateway(server)
 
@@ -912,9 +911,7 @@ def _execute_bulk_backup(accounts: list[VirtualminAccount], form_data: dict[str,
         try:
             backup_management = VirtualminBackupManagementService(account.server)
             config = BackupConfig(backup_type=backup_type)
-            result = backup_management.create_backup_job(
-                account=account, config=config, initiated_by="bulk_action"
-            )
+            result = backup_management.create_backup_job(account=account, config=config, initiated_by="bulk_action")
             if result.is_ok():
                 success_count += 1
         except Exception as e:

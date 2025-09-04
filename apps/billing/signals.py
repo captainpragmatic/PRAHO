@@ -405,11 +405,11 @@ def handle_proforma_invoice_conversion(
 
                     if result.is_ok():
                         invoice = result.unwrap()
-                        logger.info(f"📋 [Proforma] Auto-converted {instance.number} → {invoice.number}")
+                        logger.info(f"📋 [Proforma] Auto-converted {instance.number} → {invoice.number}")  # type: ignore[attr-defined]
 
                         # Link any related orders to the new invoice
                         if hasattr(instance, "orders") and instance.orders.exists():
-                            invoice.orders.set(instance.orders.all())
+                            invoice.orders.set(instance.orders.all())  # type: ignore[attr-defined]
 
                     else:
                         logger.error(f"🔥 [Proforma] Conversion failed: {result.error}")

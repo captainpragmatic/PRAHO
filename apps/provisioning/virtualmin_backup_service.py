@@ -276,7 +276,7 @@ class VirtualminBackupService:
         """
         if config is None:
             config = BackupConfig()
-        
+
         logger.info(f"Starting {config.backup_type} backup for account {account.domain}")
 
         try:
@@ -446,12 +446,18 @@ class VirtualminBackupService:
     def get_backup_status(self, backup_id: str) -> dict[str, Any]:
         """Get current backup operation status."""
         progress_key = f"{BACKUP_PROGRESS_CACHE_PREFIX}{backup_id}"
-        return cast(dict[str, Any], cache.get(progress_key, {"status": "unknown", "progress": 0, "message": "No status available"}))
+        return cast(
+            dict[str, Any],
+            cache.get(progress_key, {"status": "unknown", "progress": 0, "message": "No status available"}),
+        )
 
     def get_restore_status(self, restore_id: str) -> dict[str, Any]:
         """Get current restore operation status."""
         progress_key = f"virtualmin_restore_progress_{restore_id}"
-        return cast(dict[str, Any], cache.get(progress_key, {"status": "unknown", "progress": 0, "message": "No status available"}))
+        return cast(
+            dict[str, Any],
+            cache.get(progress_key, {"status": "unknown", "progress": 0, "message": "No status available"}),
+        )
 
     # Private implementation methods
 
@@ -471,10 +477,10 @@ class VirtualminBackupService:
         """Get S3 backup bucket name."""
         if self._backup_bucket is None:
             self._backup_bucket = SettingsService.get_setting("backup.s3_bucket_name")
-            
+
             if self._backup_bucket is None:
                 raise ValueError("S3 backup bucket name is not configured")
-        
+
         return self._backup_bucket  # type: ignore[unreachable]
 
     def _generate_backup_id(self, account: VirtualminAccount) -> str:

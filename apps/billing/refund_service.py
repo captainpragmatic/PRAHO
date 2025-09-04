@@ -681,7 +681,11 @@ class RefundService:
 
     @staticmethod
     def _process_bidirectional_refund(
-        order: Any = None, invoice: Any = None, refund_id: Any = None, refund_data: RefundData | None = None, **kwargs: Any
+        order: Any = None,
+        invoice: Any = None,
+        refund_id: Any = None,
+        refund_data: RefundData | None = None,
+        **kwargs: Any,
     ) -> Result[dict[str, Any], str]:
         """Process bidirectional refund for order and/or invoice"""
         try:
@@ -765,7 +769,15 @@ class RefundService:
                 currency=currency,  # Use actual currency object
                 original_amount_cents=original_cents,
                 refund_type=refund_data.get("refund_type", "full") if refund_data else "full",
-                reason=refund_data.get("reason", "customer_request").value if hasattr(refund_data.get("reason", "customer_request"), 'value') else refund_data.get("reason", "customer_request") if refund_data else "customer_request",  # type: ignore[union-attr]
+                reason=(
+                    getattr(
+                        refund_data.get("reason", "customer_request"),
+                        "value",
+                        refund_data.get("reason", "customer_request"),
+                    )
+                    if refund_data
+                    else "customer_request"
+                ),
                 reason_description=refund_data.get("reference", "") if refund_data else "",
                 reference_number=refund_data.get("reference", f"REF-{refund_id}")
                 if refund_data
@@ -1256,7 +1268,7 @@ class RefundQueryService:
 # Export all public interfaces
 __all__ = [
     "RefundData",
-    "RefundEligibility", 
+    "RefundEligibility",
     "RefundQueryService",
     "RefundReason",
     "RefundResult",

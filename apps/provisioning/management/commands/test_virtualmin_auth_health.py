@@ -11,6 +11,7 @@ Usage:
 """
 
 from typing import Any
+
 from django.core.management.base import BaseCommand, CommandError
 
 from apps.provisioning.virtualmin_auth_manager import get_virtualmin_auth_manager, test_acl_authentication_health
@@ -131,7 +132,9 @@ class Command(BaseCommand):
             self.stdout.write("   This suggests Virtualmin may have 'fixed' the ACL workaround.")
             self.stdout.write("   Consider migrating to supported authentication methods.")
 
-    def _display_server_results(self, server: VirtualminServer, health_results: dict[str, Any], options: dict[str, Any]) -> None:
+    def _display_server_results(
+        self, server: VirtualminServer, health_results: dict[str, Any], options: dict[str, Any]
+    ) -> None:
         """Display detailed results for a single server."""
 
         self.stdout.write(f"\n🖥️  Server: {server.hostname}")

@@ -23,9 +23,11 @@ logger = logging.getLogger(__name__)
 # Import validation functions - simplified placeholders to avoid circular imports
 MAX_ADDRESS_FIELD_LENGTH = 500  # Constant
 
+
 # TypedDict definitions for private tracking attributes
 class _ProformaSnapshot(TypedDict, total=False):
     """Snapshot of proforma state for change tracking"""
+
     status: str
     total_cents: int
 
@@ -145,7 +147,7 @@ class ProformaInvoice(models.Model):
 
     # Files
     pdf_file = models.FileField(upload_to="proformas/pdf/", blank=True, null=True)
-    
+
     # Private attributes for change tracking (not DB fields - annotations only)
     _original_proforma_values: _ProformaSnapshot | None = None
 

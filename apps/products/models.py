@@ -251,7 +251,7 @@ class Product(models.Model):
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     # Private attributes for signal handling
     _old_is_active: bool | None = None
     _old_is_public: bool | None = None

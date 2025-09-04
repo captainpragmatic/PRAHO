@@ -676,10 +676,10 @@ class AuditService:
     ) -> AuditEvent:
         """
         🔐 Simplified audit logging method (DRY helper)
-        
+
         This method provides a simpler interface for audit logging while maintaining
         the proper data structure requirements internally.
-        
+
         Args:
             event_type: Type of event being logged
             user: User who performed the action (None for system actions)
@@ -690,7 +690,7 @@ class AuditService:
             metadata: Additional metadata
             ip_address: IP address of the actor
             actor_type: Type of actor ("user", "system", "admin", etc.)
-        
+
         Returns:
             AuditEvent: The created audit event
         """
@@ -701,14 +701,14 @@ class AuditService:
             old_values=old_values,
             new_values=new_values,
         )
-        
+
         context = AuditContext(
             user=user,
             actor_type=actor_type,
             ip_address=ip_address,
             metadata=metadata or {},
         )
-        
+
         return AuditService.log_event(event_data, context)
 
     @staticmethod

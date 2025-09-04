@@ -21,7 +21,7 @@ from .virtualmin_models import VirtualminAccount, VirtualminServer
 from .virtualmin_validators import VirtualminValidator
 
 
-class VirtualminServerForm(forms.ModelForm):
+class VirtualminServerForm(forms.ModelForm):  # type: ignore[type-arg]
     """
     Form for creating and editing Virtualmin servers.
     Uses PRAHO UI widgets for consistent styling.
@@ -115,7 +115,7 @@ class VirtualminServerForm(forms.ModelForm):
         if commit:
             server.save()
 
-        return server
+        return server  # type: ignore[no-any-return]
 
 
 class VirtualminBackupForm(forms.Form):
@@ -375,7 +375,7 @@ class VirtualminBulkActionForm(forms.Form):
         return cleaned_data
 
 
-class VirtualminAccountForm(forms.ModelForm):
+class VirtualminAccountForm(forms.ModelForm):  # type: ignore[type-arg]
     """
     Form for creating new Virtualmin accounts.
     Includes domain validation and server selection.
@@ -406,7 +406,9 @@ class VirtualminAccountForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
 
         # Filter servers to only active ones
-        cast(forms.ModelChoiceField[VirtualminServer], self.fields["server"]).queryset = VirtualminServer.objects.filter(status="active")
+        cast(
+            forms.ModelChoiceField[VirtualminServer], self.fields["server"]
+        ).queryset = VirtualminServer.objects.filter(status="active")
 
         # Make some fields required
         self.fields["domain"].required = True

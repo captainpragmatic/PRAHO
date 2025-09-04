@@ -16,28 +16,34 @@ from django.db import models
 User = get_user_model()
 
 # ===============================================================================
-# TypedDict Definitions for JSON Fields  
+# TypedDict Definitions for JSON Fields
 # ===============================================================================
+
 
 class AuditMetadata(TypedDict, total=False):
     """Metadata for audit events and investigations"""
+
     ip_address: str
-    user_agent: str  
+    user_agent: str
     request_id: str
     session_key: str
     severity: str
     tags: list[str]
 
+
 class AuditEvidence(TypedDict, total=False):
     """Evidence collected for audit investigations"""
+
     file_paths: list[str]
-    screenshots: list[str] 
+    screenshots: list[str]
     logs: dict[str, Any]
     network_data: dict[str, Any]
     system_state: dict[str, Any]
 
+
 class RemediationAction(TypedDict):
     """Remediation action structure"""
+
     action_type: str
     description: str
     automated: bool
@@ -376,7 +382,7 @@ class AuditEvent(models.Model):
     content_object = GenericForeignKey("content_type", "object_id")
 
     # Changes
-    old_values = models.JSONField(default=dict, blank=True) 
+    old_values = models.JSONField(default=dict, blank=True)
     new_values = models.JSONField(default=dict, blank=True)
 
     # Context
@@ -567,7 +573,7 @@ class AuditSearchQuery(models.Model):
 
     # Sharing
     is_shared = models.BooleanField(default=False)  # Available to all staff
-    shared_with: models.ManyToManyField[User, User] = models.ManyToManyField(User, related_name="shared_audit_queries", blank=True)  # Python 3.13 compatibility
+    shared_with: models.ManyToManyField = models.ManyToManyField(User, related_name="shared_audit_queries", blank=True)  # type: ignore[type-arg]
 
     class Meta:
         db_table = "audit_search_query"
@@ -633,9 +639,9 @@ class AuditAlert(models.Model):
 
     # Related data
     related_events = models.ManyToManyField(AuditEvent, blank=True)  # Events that triggered this alert
-    affected_users: models.ManyToManyField[User, User] = models.ManyToManyField(
+    affected_users = models.ManyToManyField(  # type: ignore[var-annotated]
         User, blank=True, related_name="audit_alerts"
-    )  # Users affected by this alert - Python 3.13 compatibility
+    )  # Users affected by this alert
 
     # Evidence and context
     evidence = models.JSONField(default=dict, blank=True)

@@ -366,9 +366,11 @@ class DomainLifecycleService:
 
         # Validate registration period
         if years < MIN_REGISTRATION_YEARS or years > MAX_REGISTRATION_YEARS:
-            return str(_("Registration period must be between {min} and {max} years").format(
-                min=MIN_REGISTRATION_YEARS, max=MAX_REGISTRATION_YEARS
-            ))
+            return str(
+                _("Registration period must be between {min} and {max} years").format(
+                    min=MIN_REGISTRATION_YEARS, max=MAX_REGISTRATION_YEARS
+                )
+            )
 
         # Check if domain already exists
         if Domain.objects.filter(name=domain_name.lower()).exists():
@@ -658,7 +660,7 @@ class DomainRegistrarGateway:
     def verify_webhook_signature(registrar: Registrar, payload: str, signature: str) -> bool:
         """🔐 Verify webhook signature using registrar's webhook secret"""
         logger.info(f"🌐 [Gateway] Would verify webhook signature for {registrar.name}")
-        
+
         # TODO: Implement actual signature verification
         # For now, return True as placeholder (webhook verification disabled)
         return True

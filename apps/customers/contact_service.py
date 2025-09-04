@@ -24,11 +24,14 @@ from .contact_models import CustomerAddress, CustomerNote, CustomerPaymentMethod
 
 logger = logging.getLogger(__name__)
 
+
 class AddressValidationResult(TypedDict):
     """Result of address validation"""
+
     is_complete: bool
     missing_fields: list[str]
     warnings: list[str]
+
 
 # Constants
 ROMANIAN_POSTAL_CODE_LENGTH = 6

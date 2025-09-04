@@ -778,7 +778,9 @@ def order_items_list(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     return render(request, template, context)
 
 
-def _process_order_item_creation(form: ModelForm[Any], order: Order, pk: uuid.UUID, request: HttpRequest) -> HttpResponse:
+def _process_order_item_creation(
+    form: ModelForm[Any], order: Order, pk: uuid.UUID, request: HttpRequest
+) -> HttpResponse:
     """Process the creation of a new order item with proper price override logic"""
     try:
         with transaction.atomic():

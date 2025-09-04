@@ -862,7 +862,7 @@ def user_profile(request: HttpRequest) -> HttpResponse:
 # ===============================================================================
 
 
-class UserListView(LoginRequiredMixin, ListView):
+class UserListView(LoginRequiredMixin, ListView):  # type: ignore[type-arg]
     """List all users (admin only)"""
 
     model = User
@@ -896,7 +896,7 @@ class UserListView(LoginRequiredMixin, ListView):
         return queryset
 
 
-class UserDetailView(LoginRequiredMixin, DetailView):
+class UserDetailView(LoginRequiredMixin, DetailView):  # type: ignore[type-arg]
     """User detail view (admin only)"""
 
     model = User

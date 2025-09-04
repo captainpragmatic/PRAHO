@@ -208,7 +208,7 @@ class SecurityEventTracker:
         # In production, consider using Redis SCAN or dedicated monitoring storage
         # Using a safe approach since cache._cache is implementation-specific
         try:
-            cache_keys = getattr(cache, '_cache', {}).keys() if hasattr(cache, '_cache') else []
+            cache_keys = getattr(cache, "_cache", {}).keys() if hasattr(cache, "_cache") else []
             for key in cache_keys:
                 if pattern.replace("*", "") in key:
                     events = cache.get(key, [])

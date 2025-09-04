@@ -91,7 +91,7 @@ class User(AbstractUser):
     _two_factor_secret = models.CharField(max_length=256, blank=True)  # Encrypted storage
     backup_tokens = models.JSONField(default=list, blank=True)  # Stores hashed backup codes
 
-    # Customer relationships (replaces primary_customer + additional_customers) 
+    # Customer relationships (replaces primary_customer + additional_customers)
     customers: models.ManyToManyField[Customer, CustomerMembership] = models.ManyToManyField(
         "customers.Customer",
         through="CustomerMembership",
@@ -117,7 +117,7 @@ class User(AbstractUser):
         "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="created_users"
     )
 
-    # Custom manager with explicit typing to avoid MyPy override warnings  
+    # Custom manager with explicit typing to avoid MyPy override warnings
     objects: UserManager = UserManager()  # type: ignore[assignment,misc]  # UserManager - Custom email-based manager
 
     USERNAME_FIELD = "email"

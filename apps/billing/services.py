@@ -84,7 +84,7 @@ class InvoiceService:
                 currency = Currency.objects.get(code="RON")
             except Currency.DoesNotExist:
                 # Create default RON currency if it doesn't exist
-                currency = Currency.objects.create(code="RON", name="Romanian Leu", symbol="lei", is_active=True)
+                currency = Currency.objects.create(code="RON", name="Romanian Leu", symbol="lei", is_active=True)  # type: ignore[misc]
 
             # Get invoice sequence
             sequence, created = InvoiceSequence.objects.get_or_create(scope="default")
@@ -116,7 +116,7 @@ class InvoiceService:
 
             # Create invoice lines from order items
             for item in order.items.all():
-                InvoiceLine.objects.create(
+                InvoiceLine.objects.create(  # type: ignore[misc]
                     invoice=invoice,
                     description=item.name or f"Order item {item.id}",
                     quantity=item.quantity,
@@ -149,31 +149,39 @@ class InvoiceService:
 # Missing services that need to be created/imported
 class PaymentRetryService:
     """Placeholder for payment retry functionality"""
+
     @staticmethod
-    def retry_payment(payment_id: str) -> Result:
+    def retry_payment(payment_id: str) -> Result[bool, str]:
         # TODO: Implement payment retry logic
         return Result.ok(True)
 
+
 class EFacturaService:
     """Placeholder for e-Factura integration"""
+
     @staticmethod
-    def submit_invoice(invoice_id: str) -> Result:
+    def submit_invoice(invoice_id: str) -> Result[bool, str]:
         # TODO: Implement e-Factura submission
         return Result.ok(True)
 
+
 class InvoiceNumberingService:
     """Placeholder for invoice numbering"""
+
     @staticmethod
     def get_next_number() -> str:
         # TODO: Implement proper numbering
         return "INV-001"
 
+
 class ProformaConversionService:
     """Placeholder for proforma to invoice conversion"""
+
     @staticmethod
-    def convert_to_invoice(proforma_id: str) -> Result:
+    def convert_to_invoice(proforma_id: str) -> Result[bool, str]:
         # TODO: Implement conversion logic
         return Result.ok(True)
+
 
 # Expose all services in __all__ for explicit imports
 __all__ = [

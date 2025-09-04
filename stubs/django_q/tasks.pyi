@@ -5,13 +5,8 @@ from datetime import datetime
 from typing import Any
 
 def async_task(
-    func: str | Callable[..., Any],
-    *args: Any,
-    hook: str | None = None,
-    group: str | None = None,
-    **kwargs: Any
+    func: str | Callable[..., Any], *args: Any, hook: str | None = None, group: str | None = None, **kwargs: Any
 ) -> str: ...
-
 def schedule(
     func: str | Callable[..., Any],
     *args: Any,
@@ -21,11 +16,8 @@ def schedule(
     minutes: int | None = None,
     repeats: int = -1,
     next_run: datetime | None = None,
-    **kwargs: Any
+    **kwargs: Any,
 ) -> Any: ...
-
 def result(task_id: str, wait: int = 0) -> Any: ...
-
 def fetch(task_id: str, wait: int = 0) -> Any: ...
-
 def count_group(group: str) -> int: ...

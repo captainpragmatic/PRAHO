@@ -178,9 +178,7 @@ class VirtualminAuthenticationManager:
         logger.error(f"🚨 [Virtualmin Auth] ALL methods failed for {program}: {last_error}")
         return create_error_result(f"All authentication methods failed. Last error: {last_error}")
 
-    def _execute_with_method(
-        self, method: AuthMethod, program: str, parameters: dict[str, Any]
-    ) -> Result[Any, Any]:  # type: ignore[type-arg]
+    def _execute_with_method(self, method: AuthMethod, program: str, parameters: dict[str, Any]) -> Result[Any, Any]:  # type: ignore[type-arg]
         """Execute command with specific authentication method"""
 
         if method == AuthMethod.ACL:

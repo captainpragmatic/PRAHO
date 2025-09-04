@@ -307,7 +307,12 @@ def health_check_virtualmin_servers() -> dict[str, Any]:
 
         try:
             servers = VirtualminServer.objects.filter(status="active")
-            results: dict[str, Any] = {"total_servers": servers.count(), "healthy_servers": 0, "unhealthy_servers": 0, "servers": []}
+            results: dict[str, Any] = {
+                "total_servers": servers.count(),
+                "healthy_servers": 0,
+                "unhealthy_servers": 0,
+                "servers": [],
+            }
 
             management_service = VirtualminServerManagementService()
 
@@ -368,7 +373,12 @@ def update_virtualmin_server_statistics() -> dict[str, Any]:
 
         try:
             servers = VirtualminServer.objects.filter(status="active")
-            results: dict[str, Any] = {"total_servers": servers.count(), "updated_servers": 0, "failed_servers": 0, "servers": []}
+            results: dict[str, Any] = {
+                "total_servers": servers.count(),
+                "updated_servers": 0,
+                "failed_servers": 0,
+                "servers": [],
+            }
 
             management_service = VirtualminServerManagementService()
 
@@ -424,7 +434,12 @@ def process_failed_virtualmin_jobs() -> dict[str, Any]:
             status="failed", retry_count__lt=models.F("max_retries"), next_retry_at__lte=now
         ).select_related("server", "account")
 
-        results: dict[str, Any] = {"total_jobs": retryable_jobs.count(), "retried_jobs": 0, "skipped_jobs": 0, "jobs": []}
+        results: dict[str, Any] = {
+            "total_jobs": retryable_jobs.count(),
+            "retried_jobs": 0,
+            "skipped_jobs": 0,
+            "jobs": [],
+        }
 
         for job in retryable_jobs[:50]:  # Limit to 50 jobs per run
             try:

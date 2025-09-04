@@ -139,10 +139,10 @@ class VirtualminConfig:
     ) -> VirtualminConfig:
         """
         Create VirtualminConfig from individual credentials (DRY helper)
-        
+
         This factory method allows creating VirtualminConfig instances from individual
         connection parameters while maintaining the proper dataclass structure internally.
-        
+
         Args:
             hostname: Virtualmin server hostname
             username: API username
@@ -152,14 +152,14 @@ class VirtualminConfig:
             verify_ssl: Whether to verify SSL certificates (default: True)
             timeout: Request timeout in seconds
             cert_fingerprint: Expected SSL certificate fingerprint
-            
+
         Returns:
             VirtualminConfig: Configured instance
         """
         # Create a temporary VirtualminServer-like object for the config
         # We can't create a real VirtualminServer because it requires database access
         from types import SimpleNamespace  # noqa: PLC0415
-        
+
         temp_server = SimpleNamespace()
         temp_server.hostname = hostname
         temp_server.api_username = username
@@ -167,11 +167,11 @@ class VirtualminConfig:
         temp_server.use_ssl = use_ssl
         temp_server.ssl_verify = verify_ssl
         temp_server.ssl_cert_fingerprint = cert_fingerprint
-        
+
         # Store the password directly (bypass get_api_password method)
         temp_server._api_password = password
         temp_server.get_api_password = lambda: password
-        
+
         return cls(
             server=temp_server,  # type: ignore[arg-type]  # We know this works
             timeout=timeout,
@@ -815,12 +815,12 @@ class VirtualminGateway:
         # Use test_connection method as ping
         result = self.test_connection()
         return result.is_ok()
-    
+
     def call_api(self, command: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """Generic API call method"""
         # TODO: Implement generic API call
         return {"status": "ok", "command": command}
-    
+
     def get_domain_info(self, domain: str) -> dict[str, Any]:
         """Get domain information"""
         # TODO: Implement domain info retrieval

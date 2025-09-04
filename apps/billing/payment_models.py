@@ -21,8 +21,10 @@ from .currency_models import Currency
 # TypedDict definitions for private tracking attributes
 class _PaymentSnapshot(TypedDict, total=False):
     """Snapshot of payment state for change tracking"""
+
     status: str
     amount_cents: int
+
 
 # ===============================================================================
 # PAYMENT & CREDIT MODELS
@@ -77,7 +79,7 @@ class Payment(models.Model):
 
     # Audit
     created_by = models.ForeignKey("users.User", on_delete=models.SET_NULL, null=True, related_name="created_payments")
-    
+
     # Private attributes for change tracking (not DB fields - annotations only)
     _original_payment_values: _PaymentSnapshot | None = None
 
@@ -259,7 +261,7 @@ class PaymentRetryAttempt(models.Model):
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     # Private attributes for change tracking (not DB fields - annotations only)
     _original_retry_status: str | None = None
 

@@ -162,7 +162,7 @@ class Ticket(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("Created At"))
     updated_at = models.DateTimeField(auto_now=True, verbose_name=_("Updated At"))
     created_by = models.ForeignKey("users.User", on_delete=models.SET_NULL, null=True, related_name="created_tickets")
-    
+
     # Private attributes for signal handling
     _old_status: str | None = None
 

@@ -14,15 +14,15 @@ class Schedule(models.Model):
     task: str | None
     hook: str | None
     kwargs: dict[str, Any]
-    
+
     def __init__(self, **kwargs: Any) -> None: ...
     def save(self, *args: Any, **kwargs: Any) -> None: ...
-    
+
 class OrmQ(models.Model):
     key: str
     payload: bytes
     lock: float | None
-    
+
     def __init__(self, **kwargs: Any) -> None: ...
     def save(self, *args: Any, **kwargs: Any) -> None: ...
 
@@ -34,6 +34,6 @@ class Task(models.Model):
     stopped: Any
     result: Any
     success: bool
-    
+
     def __init__(self, **kwargs: Any) -> None: ...
     def save(self, *args: Any, **kwargs: Any) -> None: ...

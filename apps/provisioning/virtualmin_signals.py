@@ -125,8 +125,8 @@ def audit_virtualmin_account_changes(
                                 "provisioning_action": True,
                                 "server_migration": True,
                                 "requires_infrastructure_review": True,
-                            }
-                        )
+                            },
+                        ),
                     )
             else:
                 # General update
@@ -144,8 +144,8 @@ def audit_virtualmin_account_changes(
                             "compliance_event": True,
                             "provisioning_action": True,
                             "virtualmin_server": str(instance.server.hostname) if instance.server else None,
-                        }
-                    )
+                        },
+                    ),
                 )
 
     except Exception as e:

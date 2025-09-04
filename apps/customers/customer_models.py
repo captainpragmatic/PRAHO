@@ -315,11 +315,17 @@ class Customer(SoftDeleteModel):
         """Get primary address"""
         from .contact_models import CustomerAddress  # noqa: PLC0415
 
-        return cast(CustomerAddress | None, CustomerAddress.objects.filter(customer=self, address_type="primary", is_current=True).first())
+        return cast(
+            CustomerAddress | None,
+            CustomerAddress.objects.filter(customer=self, address_type="primary", is_current=True).first(),
+        )
 
     def get_billing_address(self) -> CustomerAddress | None:
         """Get billing address or fall back to primary"""
         from .contact_models import CustomerAddress  # noqa: PLC0415
 
-        billing_address = cast(CustomerAddress | None, CustomerAddress.objects.filter(customer=self, address_type="billing", is_current=True).first())
+        billing_address = cast(
+            CustomerAddress | None,
+            CustomerAddress.objects.filter(customer=self, address_type="billing", is_current=True).first(),
+        )
         return billing_address or self.get_primary_address()

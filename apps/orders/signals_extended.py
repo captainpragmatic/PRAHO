@@ -15,6 +15,18 @@ from apps.common.validators import log_security_event
 
 from .models import Order, OrderItem
 
+# Optional service imports - these may not exist yet
+try:
+    from apps.domains.services import DomainRegistrationService  # type: ignore[attr-defined]
+except ImportError:
+    DomainRegistrationService = None
+
+try:
+    from apps.tickets.services import TicketCreateData, TicketService  # type: ignore[attr-defined]
+except ImportError:
+    TicketCreateData = None
+    TicketService = None
+
 logger = logging.getLogger(__name__)
 
 # ===============================================================================
@@ -39,21 +51,23 @@ def handle_order_domain_provisioning(sender: type[Order], instance: Order, creat
         if domain_items.exists():
             for item in domain_items:
                 try:
-                    from apps.domains.services import (
-                        DomainRegistrationService,  # type: ignore[attr-defined]
-                    )
+                    if DomainRegistrationService is None:
+                        logger.warning("🌐 [Domain] DomainRegistrationService not available, skipping registration")
+                        continue
 
-                    # Queue domain registration  
+                    # Queue domain registration
                     result = DomainRegistrationService.queue_domain_registration(
                         domain_name=item.domain_name,
                         order_item=item,
-                        registrar_preference=getattr(item, 'meta', {}).get("registrar", "default"),
+                        registrar_preference=getattr(item, "meta", {}).get("registrar", "default"),
                     )
 
-                    if hasattr(result, 'is_ok') and result.is_ok():
+                    if hasattr(result, "is_ok") and result.is_ok():
                         logger.info(f"🌐 [Domain] Registration queued for {item.domain_name}")
                     else:
-                        logger.error(f"🔥 [Domain] Failed to queue registration: {getattr(result, 'error', 'Unknown error')}")
+                        logger.error(
+                            f"🔥 [Domain] Failed to queue registration: {getattr(result, 'error', 'Unknown error')}"
+                        )
 
                 except Exception as e:
                     logger.exception(f"🔥 [Domain] Domain registration signal failed: {e}")
@@ -114,8 +128,8 @@ def handle_service_group_management(sender: type[OrderItem], instance: OrderItem
                     primary_service=instance.service,
                 )
 
-                if hasattr(result, 'is_ok') and result.is_ok():
-                    service_group = result.unwrap() if hasattr(result, 'unwrap') else None
+                if hasattr(result, "is_ok") and result.is_ok():
+                    service_group = result.unwrap() if hasattr(result, "unwrap") else None
                     if service_group:
                         logger.info(f"🔗 [Service Group] Created/updated {service_group.name}")
 
@@ -148,42 +162,36 @@ def handle_failed_provisioning_ticket_creation(
 
         # Create ticket when provisioning fails
         if instance.provisioning_status == "failed" and old_status != "failed" and instance.service is not None:
+            if TicketCreateData is None or TicketService is None:
+                logger.warning("🎫 [Ticket] Ticket services not available, skipping ticket creation")
+                return
+
             try:
-                # Try to import and use ticket services if available
-                try:
-                    from apps.tickets.services import (  # noqa: PLC0415  # type: ignore[attr-defined]
-                        TicketCreateData,
-                        TicketService,
-                    )
+                ticket_data = TicketCreateData(
+                    customer=instance.order.customer,
+                    subject=f"Service Provisioning Failed - Order {instance.order.order_number}",
+                    description=f"""
+                    Service provisioning failed for order item:
                     
-                    ticket_data = TicketCreateData(
-                        customer=instance.order.customer,
-                        subject=f"Service Provisioning Failed - Order {instance.order.order_number}",
-                        description=f"""
-                        Service provisioning failed for order item:
-                        
-                        Order: {instance.order.order_number}
-                        Product: {instance.product_name}
-                        Service ID: {instance.service.id}
-                        Error: {instance.provisioning_notes or "No details provided"}
-                        
-                        Please investigate and resolve this issue.
-                        """,
-                        priority="high",
-                        department="technical",
-                        auto_created=True,
-                        related_order=instance.order,
-                        related_service=instance.service,
-                    )
+                    Order: {instance.order.order_number}
+                    Product: {instance.product_name}
+                    Service ID: {instance.service.id}
+                    Error: {instance.provisioning_notes or "No details provided"}
+                    
+                    Please investigate and resolve this issue.
+                    """,
+                    priority="high",
+                    department="technical",
+                    auto_created=True,
+                    related_order=instance.order,
+                    related_service=instance.service,
+                )
 
-                    result = TicketService.create_ticket(ticket_data)
-                    if hasattr(result, 'is_ok') and result.is_ok():
-                        ticket = result.unwrap() if hasattr(result, 'unwrap') else None
-                        if ticket:
-                            logger.info(f"🎫 [Ticket] Created #{ticket.id} for failed provisioning")
-                except ImportError:
-                    logger.warning("🎫 [Ticket] Ticket services not available, skipping ticket creation")
-
+                result = TicketService.create_ticket(ticket_data)
+                if hasattr(result, "is_ok") and result.is_ok():
+                    ticket = result.unwrap() if hasattr(result, "unwrap") else None
+                    if ticket:
+                        logger.info(f"🎫 [Ticket] Created #{ticket.id} for failed provisioning")
             except Exception as e:
                 logger.exception(f"🔥 [Ticket] Failed provisioning ticket creation failed: {e}")
 

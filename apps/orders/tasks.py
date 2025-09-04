@@ -34,14 +34,17 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
 class OrderProcessingResults(TypedDict):
     """Results of order processing batch"""
+
     processed_orders: list[dict[str, Any]]
     confirmed_orders: int
     timed_out_orders: int
     failed_orders: int
     provisioning_triggered: int
     errors: list[str]
+
 
 # Task configuration
 TASK_RETRY_DELAY = 300  # 5 minutes
@@ -176,7 +179,7 @@ def _process_payment_confirmation(order: Order, invoice: Any, total_paid_cents: 
                 "amount_paid_cents": total_paid_cents,
                 "invoice_total_cents": invoice.total_cents,
                 "source_app": "orders",
-            }
+            },
         )
         return True
     return False
@@ -797,35 +800,35 @@ def setup_order_scheduled_tasks() -> dict[str, str]:
 def generate_invoice_for_order(order_id: str) -> dict[str, Any]:
     """
     Generate invoice for an order asynchronously.
-    
+
     Args:
         order_id: Order UUID to generate invoice for
-        
+
     Returns:
         Dictionary with invoice generation result
     """
     logger.info(f"📋 [OrderInvoice] Generating invoice for order {order_id}")
-    
+
     try:
         order = Order.objects.get(id=order_id)
-        
+
         if order.invoice:
             logger.info(f"📋 [OrderInvoice] Order {order.order_number} already has invoice {order.invoice.number}")
             return {
                 "success": True,
                 "order_id": str(order.id),
                 "invoice_id": str(order.invoice.id),
-                "message": "Order already has invoice"
+                "message": "Order already has invoice",
             }
-        
+
         # Generate invoice using InvoiceService
         invoice_service = InvoiceService()
         result = invoice_service.create_from_order(order)
-        
+
         if result.is_ok():
             invoice = result.unwrap()
             logger.info(f"📋 [OrderInvoice] Generated invoice {invoice.number} for order {order.order_number}")
-            
+
             # Log the invoice generation
             AuditService.log_simple_event(
                 event_type="invoice_generated_from_order",
@@ -841,21 +844,21 @@ def generate_invoice_for_order(order_id: str) -> dict[str, Any]:
                     "customer_id": str(order.customer.id),
                     "amount_cents": invoice.total_cents,
                     "source_app": "orders",
-                }
+                },
             )
-            
+
             return {
                 "success": True,
                 "order_id": str(order.id),
                 "invoice_id": str(invoice.id),
                 "invoice_number": invoice.number,
-                "message": "Invoice generated successfully"
+                "message": "Invoice generated successfully",
             }
         else:
             error_msg = result.unwrap_err()
             logger.error(f"❌ [OrderInvoice] Failed to generate invoice for order {order.order_number}: {error_msg}")
             return {"success": False, "error": error_msg}
-    
+
     except Order.DoesNotExist:
         error_msg = f"Order {order_id} not found"
         logger.error(f"❌ [OrderInvoice] {error_msg}")
@@ -868,38 +871,34 @@ def generate_invoice_for_order(order_id: str) -> dict[str, Any]:
 def provision_order_item(item_id: str) -> dict[str, Any]:
     """
     Provision an individual order item asynchronously.
-    
+
     Args:
         item_id: OrderItem UUID to provision
-        
+
     Returns:
         Dictionary with provisioning result
     """
     logger.info(f"⚡ [OrderProvisioning] Provisioning order item {item_id}")
-    
+
     try:
         # Import at function level to avoid circular imports
         from apps.orders.models import OrderItem  # noqa: PLC0415
         from apps.provisioning.services import ProvisioningService  # noqa: PLC0415
-        
+
         item = OrderItem.objects.get(id=item_id)
-        
+
         if item.provisioning_status != "pending":
             logger.info(f"⚡ [OrderProvisioning] Item {item_id} status is {item.provisioning_status}, skipping")
-            return {
-                "success": True,
-                "item_id": str(item.id),
-                "message": f"Item already {item.provisioning_status}"
-            }
-        
+            return {"success": True, "item_id": str(item.id), "message": f"Item already {item.provisioning_status}"}
+
         # Provision the item using ProvisioningService
         provisioning_service = ProvisioningService()
         result = provisioning_service.provision_order_item(item)
-        
+
         if result.is_ok():
             provisioning_data = result.unwrap()
             logger.info(f"⚡ [OrderProvisioning] Provisioned item {item_id} successfully")
-            
+
             # Log the provisioning
             AuditService.log_simple_event(
                 event_type="order_item_provisioned",
@@ -915,21 +914,21 @@ def provision_order_item(item_id: str) -> dict[str, Any]:
                     "customer_id": str(item.order.customer.id),
                     "provisioning_data": provisioning_data,
                     "source_app": "orders",
-                }
+                },
             )
-            
+
             return {
                 "success": True,
                 "item_id": str(item.id),
                 "item_name": item.name,
                 "provisioning_data": provisioning_data,
-                "message": "Item provisioned successfully"
+                "message": "Item provisioned successfully",
             }
         else:
             error_msg = result.unwrap_err()
             logger.error(f"❌ [OrderProvisioning] Failed to provision item {item_id}: {error_msg}")
             return {"success": False, "error": error_msg}
-    
+
     except Exception as e:
         logger.exception(f"💥 [OrderProvisioning] Error provisioning item {item_id}: {e}")
         return {"success": False, "error": str(e)}
@@ -938,6 +937,7 @@ def provision_order_item(item_id: str) -> dict[str, Any]:
 # ===============================================================================
 # ADDITIONAL ASYNC WRAPPER FUNCTIONS
 # ===============================================================================
+
 
 def generate_invoice_for_order_async(order_id: str) -> str:
     """Queue invoice generation task for order."""

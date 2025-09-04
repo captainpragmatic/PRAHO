@@ -41,7 +41,7 @@ TemplateNumeric = int | float | Decimal | None
 def validate_template_numeric(value: TemplateNumeric, default_message: str = "0,00") -> tuple[bool, str]:
     """
     Validate template numeric input and return appropriate default.
-    
+
     Returns:
         tuple: (is_valid, default_value_if_invalid)
     """

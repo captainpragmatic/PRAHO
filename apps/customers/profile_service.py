@@ -32,14 +32,14 @@ class ProfileService:
 
         from .profile_models import CustomerTaxProfile  # noqa: PLC0415
 
-        tax_profile = CustomerTaxProfile.objects.create(customer=customer, cui=cui, **kwargs)
+        tax_profile = CustomerTaxProfile.objects.create(customer=customer, cui=cui, **kwargs)  # type: ignore[misc]
 
         logger.info(
             f"✅ [Profile] Created tax profile for customer: {customer.name}",
             extra={"customer_id": customer.id, "user_id": user.id, "operation": "tax_profile_create"},
         )
 
-        return tax_profile
+        return tax_profile  # type: ignore[return-value]
 
     @staticmethod
     def create_billing_profile(
@@ -51,14 +51,14 @@ class ProfileService:
 
         from .profile_models import CustomerBillingProfile  # noqa: PLC0415
 
-        billing_profile = CustomerBillingProfile.objects.create(customer=customer, **kwargs)
+        billing_profile = CustomerBillingProfile.objects.create(customer=customer, **kwargs)  # type: ignore[misc]
 
         logger.info(
             f"✅ [Profile] Created billing profile for customer: {customer.name}",
             extra={"customer_id": customer.id, "user_id": user.id, "operation": "billing_profile_create"},
         )
 
-        return billing_profile
+        return billing_profile  # type: ignore[return-value]
 
     @staticmethod
     def update_tax_profile(
