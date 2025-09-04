@@ -26,6 +26,7 @@ django.setup()
 from tests.e2e.utils import TestUserManager, test_users
 
 
+@pytest.mark.django_db
 def test_testusermanager_admin_creation():
     """Test that TestUserManager can create admin users correctly."""
     print("🧪 Testing TestUserManager admin user creation")
@@ -60,6 +61,7 @@ def test_testusermanager_admin_creation():
         print("  ✅ Admin user creation test completed")
 
 
+@pytest.mark.django_db
 def test_testusermanager_customer_creation():
     """Test that TestUserManager can create customer users with organizations."""
     print("🧪 Testing TestUserManager customer user creation")
@@ -94,6 +96,7 @@ def test_testusermanager_customer_creation():
     print("  ✅ Customer user creation test completed")
 
 
+@pytest.mark.django_db
 def test_testusermanager_staff_creation():
     """Test that TestUserManager can create different staff roles."""
     print("🧪 Testing TestUserManager staff user creation")
@@ -120,6 +123,7 @@ def test_testusermanager_staff_creation():
     print("  ✅ Staff user creation test completed")
 
 
+@pytest.mark.django_db
 def test_testusermanager_duplicate_prevention():
     """Test that TestUserManager prevents duplicate user creation."""
     print("🧪 Testing TestUserManager duplicate prevention")
@@ -140,6 +144,7 @@ def test_testusermanager_duplicate_prevention():
     print("  ✅ Duplicate prevention test completed")
 
 
+@pytest.mark.django_db
 def test_test_users_convenience_helper():
     """Test the convenient test_users() context manager."""
     print("🧪 Testing test_users convenience helper")
@@ -167,6 +172,7 @@ def test_test_users_convenience_helper():
     print("  ✅ Convenience helper test completed")
 
 
+@pytest.mark.django_db
 def test_user_lookup_functionality():
     """Test user lookup and information retrieval."""
     print("🧪 Testing user lookup functionality")
@@ -190,6 +196,7 @@ def test_user_lookup_functionality():
     print("  ✅ User lookup test completed")
 
 
+@pytest.mark.django_db
 def test_random_generation_uniqueness():
     """Test that random generation creates unique values."""
     print("🧪 Testing random generation uniqueness")

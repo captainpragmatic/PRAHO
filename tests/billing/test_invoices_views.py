@@ -362,7 +362,7 @@ class InvoiceSendViewsTestCase(TestCase):
         middleware.process_request(request)
         return request
 
-    @patch('apps.billing.views.send_invoice_email')
+    @patch('apps.billing.services.send_invoice_email')
     def test_invoice_send_success(self, mock_send_email):
         """Test successful invoice sending"""
         mock_send_email.return_value = True

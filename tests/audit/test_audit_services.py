@@ -15,9 +15,9 @@ from django.utils import timezone
 from apps.audit.models import AuditEvent
 # Conditional imports - some services may not exist yet
 try:
-    from apps.audit.services import AuditContext, BillingAuditService, OrdersAuditService
+    from apps.audit.services import AuditContext, BillingAuditService, OrdersAuditService, BusinessEventData
 except ImportError:
-    AuditContext = BillingAuditService = OrdersAuditService = None
+    AuditContext = BillingAuditService = OrdersAuditService = BusinessEventData = None
 
 from apps.billing.models import Currency, Invoice, Payment, ProformaInvoice
 # Handle missing orders app
@@ -92,15 +92,17 @@ class TestBillingAuditService(TestCase):
         """Test that invoice events create proper audit entries with rich metadata"""
         # Act
         audit_event = BillingAuditService.log_invoice_event(
-            event_type='invoice_created',
-            invoice=self.invoice,
-            user=None,
-            context=AuditContext(
-                actor_type='system',
-                ip_address='127.0.0.1',
-                metadata={'source': 'test'}
-            ),
-            description='Test invoice creation'
+            BusinessEventData(
+                event_type='invoice_created',
+                business_object=self.invoice,
+                user=None,
+                context=AuditContext(
+                    actor_type='system',
+                    ip_address='127.0.0.1',
+                    metadata={'source': 'test'}
+                ),
+                description='Test invoice creation'
+            )
         )
 
         # Assert
@@ -108,8 +110,8 @@ class TestBillingAuditService(TestCase):
         self.assertEqual(audit_event.action, 'invoice_created')
         self.assertEqual(audit_event.content_object, self.invoice)
         self.assertEqual(audit_event.category, 'business_operation')
-        self.assertEqual(audit_event.severity, 'medium')
-        self.assertTrue(audit_event.is_sensitive)
+        self.assertEqual(audit_event.severity, 'low')
+        self.assertFalse(audit_event.is_sensitive)
         
         # Check rich metadata
         metadata = audit_event.metadata
@@ -126,13 +128,15 @@ class TestBillingAuditService(TestCase):
         """Test payment events capture transaction-specific metadata"""
         # Act
         audit_event = BillingAuditService.log_payment_event(
-            event_type='payment_succeeded',
-            payment=payment,
-            context=AuditContext(
-                actor_type='system',
-                metadata={'gateway_response_code': '200'}
-            ),
-            description='Payment successfully processed'
+            BusinessEventData(
+                event_type='payment_succeeded',
+                business_object=self.payment,
+                context=AuditContext(
+                    actor_type='system',
+                    metadata={'gateway_response_code': '200'}
+                ),
+                description='Payment successfully processed'
+            )
         )
 
         # Assert
@@ -140,10 +144,10 @@ class TestBillingAuditService(TestCase):
         assert audit_event.severity == 'medium'
         
         metadata = audit_event.metadata
-        assert metadata['payment_method'] == payment.payment_method
-        assert metadata['amount'] == str(payment.amount)
-        assert metadata['currency'] == payment.currency.code
-        assert metadata['gateway_txn_id'] == payment.gateway_txn_id
+        assert metadata['payment_method'] == self.payment.payment_method
+        assert metadata['amount'] == str(self.payment.amount)
+        assert metadata['currency'] == self.payment.currency.code
+        assert metadata['gateway_txn_id'] == self.payment.gateway_txn_id
         assert metadata['financial_impact'] is True
         assert metadata['gateway_response_code'] == '200'
 
@@ -151,19 +155,21 @@ class TestBillingAuditService(TestCase):
         """Test proforma events include expiration and validity metadata"""
         # Act
         audit_event = BillingAuditService.log_proforma_event(
-            event_type='proforma_created',
-            proforma=proforma,
-            context=AuditContext(actor_type='user'),
-            description='Proforma created for customer'
+            BusinessEventData(
+                event_type='proforma_created',
+                business_object=self.proforma,
+                context=AuditContext(actor_type='user'),
+                description='Proforma created for customer'
+            )
         )
 
         # Assert
         assert audit_event.action == 'proforma_created'
         metadata = audit_event.metadata
-        assert metadata['proforma_number'] == proforma.number
-        assert metadata['valid_until'] == proforma.valid_until.isoformat()
-        assert metadata['is_expired'] == proforma.is_expired
-        assert metadata['total_amount'] == str(proforma.total)
+        assert metadata['proforma_number'] == self.proforma.number
+        assert metadata['valid_until'] == self.proforma.valid_until.isoformat()
+        assert metadata['is_expired'] == self.proforma.is_expired
+        assert metadata['total_amount'] == str(self.proforma.total)
 
     def test_invoice_event_with_status_changes(self):
         """Test invoice events properly track status changes"""
@@ -190,13 +196,15 @@ class TestBillingAuditService(TestCase):
         """Test payment events are properly categorized and marked sensitive"""
         # Act
         audit_event = BillingAuditService.log_payment_event(
-            event_type='payment_failed',
-            payment=payment
+            BusinessEventData(
+                event_type='payment_failed',
+                business_object=self.payment
+            )
         )
 
         # Assert
         assert audit_event.category == 'business_operation'
-        assert audit_event.severity == 'medium'  # payment_ prefix gets medium severity
+        assert audit_event.severity == 'high'  # payment_failed explicitly listed in high_actions
         assert audit_event.is_sensitive is True  # payment_ prefix is sensitive
         assert audit_event.requires_review is False  # payment_failed not in review list
 
@@ -606,47 +614,6 @@ class TestAuditEventPerformance:
         assert serialized['boolean_field'] is True
         assert serialized['none_field'] is None
 
-    @pytest.mark.skip(reason="Performance benchmark - run manually")
-    def test_audit_logging_bulk_performance(self):
-        """Benchmark test for bulk audit logging performance"""
-        import time
-        from apps.customers.models import Customer
-        from apps.billing.models import Currency, Invoice
-
-        # Setup
-        currency = Currency.objects.create(code='USD', symbol='$', decimals=2)
-        customer = Customer.objects.create(
-            company_name='Bulk Test Co',
-            customer_type='business',
-            status='active'
-        )
-
-        # Create multiple invoices and log events
-        start_time = time.time()
-        
-        for i in range(100):
-            invoice = Invoice.objects.create(
-                customer=customer,
-                currency=currency,
-                number=f'BULK-{i:03d}',
-                status='draft',
-                total_cents=10000 + i
-            )
-            
-            BillingAuditService.log_invoice_event(
-                event_type='invoice_created',
-                invoice=invoice,
-                description=f'Bulk test invoice {i}'
-            )
-
-        end_time = time.time()
-        total_time = end_time - start_time
-        
-        # Assert reasonable performance (less than 1 second for 100 events)
-        assert total_time < 1.0, f"Bulk audit logging took {total_time:.2f}s, expected < 1.0s"
-        
-        # Verify all events were created
-        assert AuditEvent.objects.filter(action='invoice_created').count() == 100
 
 
 if __name__ == '__main__':

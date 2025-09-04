@@ -1549,7 +1549,8 @@ class TestUserManager:
         try:
             with transaction.atomic():
                 User = get_user_model()
-                from apps.customers.models import Customer, CustomerMembership
+                from apps.customers.models import Customer
+                from apps.users.models import CustomerMembership
                 
                 # Check if user already exists
                 if User.objects.filter(email=email).exists():

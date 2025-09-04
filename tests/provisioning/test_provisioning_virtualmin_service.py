@@ -137,35 +137,6 @@ class VirtualminProvisioningServiceTest(TestCase):
         long_password = service._generate_secure_password(32)
         self.assertEqual(len(long_password), 32)
 
-    @unittest.skip("VirtualminProvisioningService server selection not fully implemented yet")
-    def test_server_selection(self):
-        """Test best server selection algorithm"""
-        # Create multiple servers with different loads
-        server1 = VirtualminServer.objects.create(
-            name="server1",
-            hostname="server1.example.com",
-            api_username="api_user",
-            max_domains=1000,
-            current_domains=800,  # Higher load
-            status="active"
-        )
-        
-        server2 = VirtualminServer.objects.create(
-            name="server2", 
-            hostname="server2.example.com",
-            api_username="api_user",
-            max_domains=1000,
-            current_domains=500,  # Lower load
-            status="active"
-        )
-        
-        service = VirtualminProvisioningService()
-        result = service._select_best_server()
-        
-        # Should select server with lower load
-        self.assertTrue(result.is_ok())
-        selected_server = result.unwrap()
-        self.assertEqual(selected_server, server2)  # Lower load server
 
     def test_server_selection_no_available_servers(self):
         """Test server selection when no servers available"""

@@ -463,7 +463,7 @@ class BillingInputSanitizationTests(TestCase):
 class BillingSecurityLoggingTests(TestCase):
     """🔒 Tests for security logging in billing operations"""
     
-    @patch('apps.billing.models.logger')
+    @patch('apps.billing.validators.logger')
     def test_security_event_logging_format(self, mock_logger):
         """🔒 Test that security events are logged in correct format"""
         log_security_event(

@@ -138,49 +138,7 @@ class ServicePlanSignalTestCase(TestCase):
         self.assertIsNotNone(creation_log)
         self.assertIn('Test Plan Signal', creation_log)
 
-    @unittest.skip("store_original_service_plan_values signal not implemented yet")
-    def test_store_original_service_plan_values(self):
-        """Test storing original service plan values before update"""
-        # Create plan
-        plan = ServicePlan.objects.create(
-            name='Original Plan',
-            plan_type='vps',
-            price_monthly=Decimal('100.00'),
-            is_active=True
-        )
-        
-        # Update plan (should trigger pre_save signal)
-        plan.name = 'Updated Plan'
-        plan.price_monthly = Decimal('120.00')
-        plan.save()
-        
-        # Check that original values were stored
-        self.assertTrue(hasattr(plan, '_original_plan_values'))
-        original_values = plan._original_plan_values
-        self.assertEqual(original_values['name'], 'Original Plan')
-        self.assertEqual(original_values['price_monthly'], 100.0)
 
-    @unittest.skip("price change detection signals not fully implemented yet")
-    @patch('apps.provisioning.signals.logger')
-    def test_service_plan_price_change_detection(self, mock_logger):
-        """Test service plan price change detection"""
-        # Create plan
-        plan = ServicePlan.objects.create(
-            name='Price Test Plan',
-            plan_type='shared_hosting',
-            price_monthly=Decimal('50.00'),
-            is_active=True
-        )
-        
-        # Clear any creation logs
-        mock_logger.reset_mock()
-        
-        # Update price significantly
-        plan.price_monthly = Decimal('75.00')
-        plan.save()
-        
-        # Should detect price change (tested indirectly through logging)
-        self.assertTrue(mock_logger.info.called or mock_logger.warning.called)
 
     @patch('apps.provisioning.signals.logger')
     def test_high_value_plan_security_trigger(self, mock_logger):
@@ -196,20 +154,6 @@ class ServicePlanSignalTestCase(TestCase):
         # Should trigger logging for high-value plan
         mock_logger.info.assert_called()
 
-    @override_settings(DISABLE_AUDIT_SIGNALS=True)
-    @unittest.skip("audit disabled signal handling not implemented yet")
-    @patch('apps.provisioning.signals.logger')
-    def test_service_plan_signal_with_audit_disabled(self, mock_logger):
-        """Test service plan signal when audit is disabled"""
-        plan = ServicePlan.objects.create(
-            name='No Audit Plan',
-            plan_type='shared_hosting',
-            price_monthly=Decimal('30.00'),
-            is_active=True
-        )
-        
-        # Should still log basic creation message
-        mock_logger.info.assert_called()
 
     def test_service_plan_signal_exception_handling(self):
         """Test service plan signal handles exceptions gracefully"""
@@ -267,38 +211,6 @@ class ServerSignalTestCase(TestCase):
         self.assertIn('Test Server Signal', creation_log)
         self.assertIn('shared', creation_log)
 
-    @unittest.skip("store_original_server_values signal not implemented yet")
-    def test_store_original_server_values(self):
-        """Test storing original server values before update"""
-        # Create server
-        server = Server.objects.create(
-            name='Original Server',
-            hostname='original.example.com',
-            server_type='shared',
-            primary_ip='192.168.1.100',
-            location='București',
-            datacenter='DC1',
-            cpu_model='Intel Xeon',
-            cpu_cores=8,
-            ram_gb=32,
-            disk_type='SSD',
-            disk_capacity_gb=1000,
-            status='active',
-            os_type='Ubuntu 20.04',
-            monthly_cost=Decimal('500.00'),
-            is_active=True,
-        )
-        
-        # Update server
-        server.name = 'Updated Server'
-        server.status = 'maintenance'
-        server.save()
-        
-        # Check that original values were stored
-        self.assertTrue(hasattr(server, '_original_server_values'))
-        original_values = server._original_server_values
-        self.assertEqual(original_values['name'], 'Original Server')
-        self.assertEqual(original_values['status'], 'active')
 
     @patch('apps.provisioning.signals.logger')
     def test_server_status_change_detection(self, mock_logger):
@@ -448,59 +360,7 @@ class ServiceSignalTestCase(TestCase):
         # Verify logging was called
         mock_logger.info.assert_called()
 
-    @unittest.skip("store_original_service_values signal not implemented yet")
-    def test_store_original_service_values(self):
-        """Test storing original service values before update"""
-        # Create service
-        service = Service.objects.create(
-            customer=self.customer,
-            service_plan=self.plan,
-            server=self.server,
-            service_name='Original Service',
-            domain='original.example.com',
-            username='original_user',
-            billing_cycle='monthly',
-            price=Decimal('50.00'),
-            status='pending'
-        )
-        
-        # Update service
-        service.service_name = 'Updated Service'
-        service.status = 'active'
-        service.save()
-        
-        # Check that original values were stored
-        self.assertTrue(hasattr(service, '_original_service_values'))
-        original_values = service._original_service_values
-        self.assertEqual(original_values['service_name'], 'Original Service')
-        self.assertEqual(original_values['status'], 'pending')
 
-    @unittest.skip("service status change signal handling not implemented yet")
-    @patch('apps.provisioning.signals.logger')
-    def test_service_status_change_detection(self, mock_logger):
-        """Test service status change detection"""
-        # Create service
-        service = Service.objects.create(
-            customer=self.customer,
-            service_plan=self.plan,
-            server=self.server,
-            service_name='Status Change Service',
-            domain='status-change.example.com',
-            username='status_user',
-            billing_cycle='monthly',
-            price=Decimal('50.00'),
-            status='pending'
-        )
-        
-        # Clear creation logs
-        mock_logger.reset_mock()
-        
-        # Change status
-        service.status = 'active'
-        service.save()
-        
-        # Should trigger logging for status change
-        mock_logger.info.assert_called()
 
     @patch('apps.provisioning.signals.logger')
     def test_service_provisioning_trigger(self, mock_logger):

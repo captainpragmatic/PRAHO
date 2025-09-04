@@ -11,7 +11,7 @@ from apps.billing.models import Currency, Invoice, Payment
 from apps.customers.models import Customer
 
 
-# TODO: Removed BillingProvisioningIntegrationTest class - tested Celery functionality that was removed
+# TODO: Consider adding integration tests for Django-Q2 task processing
 
 
 class BillingSignalsTest(TestCase):

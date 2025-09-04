@@ -131,11 +131,7 @@ class BillingProvisioningIntegrationTest(TestCase):
         self.order.invoice = self.invoice
         self.order.save()
 
-    # TODO: Removed test_payment_triggers_provisioning - tested Celery functionality
-
-    # TODO: Removed test_payment_skips_non_hosting_services - tested Celery functionality
-
-    # TODO: Removed test_payment_handles_service_without_domain - tested Celery functionality
+    # TODO: Consider adding integration tests for Django-Q2 task processing
 
     def test_service_requires_hosting_account_detection(self):
         """Test Service.requires_hosting_account() method"""
@@ -474,24 +470,6 @@ class ProvisioningAuditIntegrationTest(TestCase):
         self.assertEqual(call_args.new_values["operation"], "create_domain")
         self.assertTrue(context_args.metadata["provisioning_job"])
 
-    @unittest.skip("log_security_event mocking issues - helper function testing")
-    @patch('apps.common.validators.log_security_event')
-    def test_virtualmin_security_event_logging(self, mock_security_log):
-        """Test security event logging helper"""
-        # Log security event
-        log_virtualmin_security_event(
-            "virtualmin_auth_failure",
-            {"server": "vm1.example.com", "attempt_count": 3},
-            "192.168.1.100"
-        )
-        
-        # Verify security logging was called
-        mock_security_log.assert_called_once()
-        call_args = mock_security_log.call_args[0]
-        self.assertEqual(call_args[0], "virtualmin_auth_failure")
-        self.assertEqual(call_args[1]["source_app"], "provisioning")
-        self.assertTrue(call_args[1]["virtualmin_integration"])
-        self.assertEqual(call_args[2], "192.168.1.100")
 
     @patch('apps.audit.services.AuditService.log_event')
     def test_provisioning_completion_notification(self, mock_audit):
@@ -639,7 +617,7 @@ class CrossAppIntegrationPerformanceTest(TestCase):
             symbol="RON"
         )
 
-    # TODO: Removed test_payment_provisioning_trigger_query_efficiency - tested Celery functionality
+    # TODO: Consider adding query efficiency tests for Django-Q2 task processing
     def _removed_test_payment_provisioning_trigger_query_efficiency(self, mock_provision_task):
         """Test that payment-triggered provisioning is query-efficient"""
         # Create product for order items

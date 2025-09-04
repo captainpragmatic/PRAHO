@@ -164,7 +164,7 @@ class RefundServiceComprehensiveTestCase(TestCase):
         result = RefundService.get_refund_eligibility("invalid_entity", uuid.uuid4(), 1000)
         
         self.assertTrue(result.is_err())
-        self.assertIn("Invalid entity_type", result.error)
+        self.assertIn("Invalid entity type", result.error)
 
 
 

@@ -225,7 +225,7 @@ class ProformaSequenceModelAdditionalTestCase(TestCase):
             mock_log.info.assert_called_once()
             self.assertEqual(next_number, 'LOG-000001')
 
-    @patch('apps.billing.models.transaction.atomic')
+    @patch('apps.billing.proforma_models.transaction.atomic')
     def test_get_next_number_transaction_rollback(self, mock_atomic):
         """Test get_next_number transaction rollback on error"""
         sequence = ProformaSequence.objects.create(scope='rollback_test')
