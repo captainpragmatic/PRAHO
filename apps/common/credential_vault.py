@@ -659,10 +659,13 @@ class CredentialVault:
             return {"vault_healthy": False, "error": str(e), "last_check": timezone.now().isoformat()}
 
 
-# Global vault instance
-credential_vault = CredentialVault()
+# Global vault instance - lazy initialization
+_credential_vault: CredentialVault | None = None
 
 
 def get_credential_vault() -> CredentialVault:
-    """Get global credential vault instance"""
-    return credential_vault
+    """Get global credential vault instance with lazy initialization"""
+    global _credential_vault
+    if _credential_vault is None:
+        _credential_vault = CredentialVault()
+    return _credential_vault

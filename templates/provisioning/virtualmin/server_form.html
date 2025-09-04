@@ -15,20 +15,18 @@
     <!-- =============================================================================== -->
     <!-- PAGE HEADER -->
     <!-- =============================================================================== -->
+    
+    <!-- Breadcrumb Navigation -->
+    {% breadcrumb breadcrumb_items css_class="mb-6" %}
+    
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
         <div>
             {% if server %}
-                <nav class="text-sm text-slate-400 mb-2">
-                    Management > Virtualmin > Servers > {{ server.name }} > Edit
-                </nav>
                 <h1 class="text-2xl font-bold text-slate-100">{% trans "Edit Server" %}</h1>
                 <p class="mt-2 text-sm text-slate-400">
                     {% trans "Update Virtualmin server configuration" %}
                 </p>
             {% else %}
-                <nav class="text-sm text-slate-400 mb-2">
-                    Management > Virtualmin > Servers > Add Server
-                </nav>
                 <h1 class="text-2xl font-bold text-slate-100">{% trans "Add Virtualmin Server" %}</h1>
                 <p class="mt-2 text-sm text-slate-400">
                     {% trans "Connect a new Virtualmin server to PRAHO Platform" %}

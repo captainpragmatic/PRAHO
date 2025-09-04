@@ -261,6 +261,7 @@ def delete_virtualmin_account(account_id: str) -> dict[str, Any]:
             logger.error(f"❌ [VirtualminTask] {error_msg}")
             return {"success": False, "error": error_msg}
 
+        # Note: Protection check is handled in the service layer
         domain = account.domain  # Store for logging after deletion
 
         # Create provisioning service

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -205,7 +206,7 @@ class VirtualminAccount(models.Model):
 
     # Account identification
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    domain = models.CharField(max_length=255, unique=True, db_index=True, verbose_name=_("Primary Domain"))
+    domain = models.CharField(max_length=255, db_index=True, verbose_name=_("Primary Domain"))
 
     # Service linkage
     service = models.OneToOneField(
@@ -232,17 +233,36 @@ class VirtualminAccount(models.Model):
     )
 
     # Virtualmin account details
-    virtualmin_username = models.CharField(max_length=32, verbose_name=_("Virtualmin Username"))
+    virtualmin_username = models.CharField(
+        max_length=32, 
+        unique=True, 
+        db_index=True,
+        verbose_name=_("Virtualmin Username"),
+        help_text=_("Unique Virtualmin virtual server username")
+    )
     encrypted_password = models.BinaryField(verbose_name=_("Encrypted Password"))
     template_name = models.CharField(max_length=50, default="Default", verbose_name=_("Virtualmin Template"))
+    
+    # All domains managed by this account
+    domains = models.JSONField(
+        default=list,
+        help_text=_("All domains managed by this Virtualmin account")
+    )
 
     # Resource limits
     disk_quota_mb = models.PositiveIntegerField(null=True, blank=True, verbose_name=_("Disk Quota (MB)"))
-    bandwidth_quota_mb = models.PositiveIntegerField(null=True, blank=True, verbose_name=_("Bandwidth Quota (MB)"))
+    bandwidth_quota_mb = models.IntegerField(null=True, blank=True, verbose_name=_("Bandwidth Quota (MB)"), help_text=_("Use -1 for unlimited bandwidth"))
 
     # Account status
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="provisioning", verbose_name=_("Status"))
     status_message = models.TextField(blank=True)
+
+    # Deletion protection
+    protected_from_deletion = models.BooleanField(
+        default=True,
+        verbose_name=_("Protected from Deletion"),
+        help_text=_("Prevents accidental deletion of active Virtualmin accounts")
+    )
 
     # Virtualmin metadata (from PRAHO recovery seeds)
     praho_customer_id = models.PositiveIntegerField(
@@ -276,6 +296,10 @@ class VirtualminAccount(models.Model):
 
     def __str__(self) -> str:
         return f"{self.domain} ({self.get_status_display()})"
+
+    def get_absolute_url(self) -> str:
+        """Get URL for account detail view"""
+        return reverse("provisioning:virtualmin_account_detail", kwargs={"account_id": self.id})
 
     @property
     def is_active(self) -> bool:
@@ -377,6 +401,89 @@ class VirtualminAccount(models.Model):
             result["bandwidth"] = True
 
         return result
+
+    @property
+    def backup_url(self) -> str:
+        """Get URL for account backup"""
+        return reverse("provisioning:virtualmin_account_backup", kwargs={"account_id": self.id})
+
+    @property
+    def edit_url(self) -> str:
+        """Get URL for editing account"""
+        # For now, return the detail URL since we don't have an edit view yet
+        return self.get_absolute_url()
+
+    @property
+    def reset_password_url(self) -> str:
+        """Get URL for resetting account password"""
+        # Placeholder - would need to implement password reset functionality
+        return self.get_absolute_url()
+
+    @property
+    def suspend_url(self) -> str:
+        """Get URL for suspending account"""
+        return reverse("provisioning:virtualmin_account_suspend", kwargs={"account_id": self.id})
+
+    @property
+    def activate_url(self) -> str:
+        """Get URL for activating account"""
+        return reverse("provisioning:virtualmin_account_activate", kwargs={"account_id": self.id})
+
+    @property
+    def delete_url(self) -> str:
+        """Get URL for deleting account"""
+        # Return delete URL if account can be deleted, empty string otherwise
+        if self.can_be_deleted:
+            return reverse("provisioning:virtualmin_account_delete", kwargs={"account_id": self.id})
+        return ""
+
+    @property
+    def toggle_protection_url(self) -> str:
+        """Get URL for toggling deletion protection"""
+        return reverse("provisioning:virtualmin_account_toggle_protection", kwargs={"account_id": self.id})
+
+    @property
+    def can_be_deleted(self) -> bool:
+        """Check if account can be deleted"""
+        return not self.protected_from_deletion
+
+    @property
+    def is_suspended(self) -> bool:
+        """Check if account is suspended"""
+        return self.status == "suspended"
+
+    @property
+    def disk_usage(self) -> int:
+        """Get current disk usage in bytes for template display"""
+        return self.current_disk_usage_mb * 1024 * 1024 if self.current_disk_usage_mb else 0
+
+    @property
+    def disk_quota(self) -> int | None:
+        """Get disk quota in bytes for template display"""
+        return self.disk_quota_mb * 1024 * 1024 if self.disk_quota_mb else None
+
+    @property
+    def bandwidth_usage(self) -> int:
+        """Get current bandwidth usage in bytes for template display"""
+        return self.current_bandwidth_usage_mb * 1024 * 1024 if self.current_bandwidth_usage_mb else 0
+
+    @property
+    def bandwidth_quota(self) -> int | None:
+        """Get bandwidth quota in bytes for template display"""
+        if self.bandwidth_quota_mb == -1:
+            return -1  # Unlimited bandwidth
+        return self.bandwidth_quota_mb * 1024 * 1024 if self.bandwidth_quota_mb else None
+
+    @property
+    def last_backup(self) -> None:
+        """Get last backup date - placeholder for future implementation"""
+        # This would need to be implemented by checking backup records
+        return None
+
+    @property
+    def plan(self) -> str:
+        """Get service plan name"""
+        return self.service.service_plan.name if self.service and self.service.service_plan else "Default"
 
 
 class VirtualminProvisioningJob(models.Model):

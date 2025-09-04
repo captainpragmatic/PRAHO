@@ -9,18 +9,20 @@
     <!-- =============================================================================== -->
     <!-- PAGE HEADER -->
     <!-- =============================================================================== -->
+    
+    <!-- Breadcrumb Navigation -->
+    {% breadcrumb breadcrumb_items css_class="mb-6" %}
+    
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
         <div>
-            <nav class="text-sm text-slate-400 mb-2">
-                Management > Virtualmin > Accounts > New
-            </nav>
             <h1 class="text-2xl font-bold text-slate-100 mt-2">{{ page_title }}</h1>
             <p class="mt-2 text-sm text-slate-400">
                 {% trans "Create a new Virtualmin hosting account" %}
             </p>
         </div>
         <div class="mt-4 sm:mt-0">
-            {% button "← Back to Accounts" href="{% url 'provisioning:virtualmin_accounts' %}" variant="secondary" %}
+            {% url 'provisioning:virtualmin_accounts' as back_url %}
+            {% button "← Back to Accounts" href=back_url variant="secondary" %}
         </div>
     </div>
 
@@ -144,7 +146,8 @@
 
                     <!-- Form Actions -->
                     <div class="flex justify-end space-x-3 pt-6 border-t border-slate-700">
-                        {% button "Cancel" href="{% url 'provisioning:virtualmin_accounts' %}" variant="secondary" %}
+                        {% url 'provisioning:virtualmin_accounts' as cancel_url %}
+                        {% button "Cancel" href=cancel_url variant="secondary" %}
                         {% button "Create Account" type="submit" variant="primary" %}
                     </div>
                 </form>

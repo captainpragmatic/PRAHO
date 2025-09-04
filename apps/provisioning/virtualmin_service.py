@@ -554,6 +554,18 @@ class VirtualminProvisioningService:
         Returns:
             Result with success status or error message
         """
+        # ⚠️ SAFETY CHECK: Prevent deletion of protected accounts
+        if account.protected_from_deletion:
+            error_msg = f"Account {account.domain} is protected from deletion. Disable protection first."
+            logger.warning(f"🛡️ [VirtualminService] {error_msg}")
+            return Err(error_msg)
+            
+        # Additional safety check - only allow deletion of terminated/error accounts
+        if account.status not in ["terminated", "error"]:
+            error_msg = f"Account {account.domain} must be terminated before deletion (current: {account.status})"
+            logger.warning(f"🛡️ [VirtualminService] {error_msg}")
+            return Err(error_msg)
+
         try:
             gateway = self._get_gateway(account.server)
 

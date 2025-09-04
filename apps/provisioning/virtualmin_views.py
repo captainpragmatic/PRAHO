@@ -4,25 +4,27 @@ Staff interface for managing Virtualmin servers, accounts, and backups.
 """
 
 import logging
-from typing import Any, cast
+from typing import Any, TypedDict, cast
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib.auth.models import AnonymousUser
 from django.core.paginator import Paginator
 from django.db import models
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_POST, require_http_methods
 
 from apps.common.security_decorators import (
     audit_service_call,
     monitor_performance,
 )
+from apps.customers.models import Customer
 from apps.users.models import User
 
+from .service_models import Service, ServicePlan
 from .virtualmin_backup_service import BackupConfig, RestoreConfig, VirtualminBackupService
 from .virtualmin_forms import (
     VirtualminBackupForm,
@@ -41,6 +43,14 @@ from .virtualmin_service import (
 HEALTH_CHECK_STALE_SECONDS = 3600  # 1 hour in seconds
 
 logger = logging.getLogger(__name__)
+
+
+class SyncResults(TypedDict):
+    servers_checked: int
+    accounts_found: int
+    accounts_created: int
+    accounts_updated: int
+    errors: list[str]
 
 
 def is_staff_or_superuser(user: User | AnonymousUser) -> bool:
@@ -100,10 +110,19 @@ def virtualmin_servers_list(request: HttpRequest) -> HttpResponse:
         for server in servers
     ]
 
+    # Build breadcrumb navigation
+    breadcrumb_items = [
+        {"text": "🏠 Management", "url": "/app/"},
+        {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
+        {"text": "🖥️ Virtualmin", "url": "#"},
+        {"text": "Servers"},  # Current page - no URL
+    ]
+
     context = {
         "page_title": "Virtualmin Servers",
         "servers": servers,
         "table_data": table_data,
+        "breadcrumb_items": breadcrumb_items,
         "total_domains": total_domains,
         "active_servers": active_servers,
         "table_columns": [
@@ -186,9 +205,19 @@ def virtualmin_server_detail(request: HttpRequest, server_id: str) -> HttpRespon
         "status_message": _get_health_status_message(server),
     }
 
+    # Build breadcrumb navigation
+    breadcrumb_items = [
+        {"text": "🏠 Management", "url": "/app/"},
+        {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
+        {"text": "🖥️ Virtualmin", "url": "#"},
+        {"text": "Servers", "url": reverse("provisioning:virtualmin_servers")},
+        {"text": server.name},  # Current page - no URL
+    ]
+
     context = {
         "page_title": f"Server: {server.name}",
         "server": server,
+        "breadcrumb_items": breadcrumb_items,
         "recent_accounts": recent_accounts,
         "recent_jobs": recent_jobs,
         "actual_domains": actual_domains,  # Real domains from Virtualmin
@@ -281,10 +310,20 @@ def virtualmin_accounts_list(request: HttpRequest) -> HttpResponse:
     servers = VirtualminServer.objects.filter(status="active").order_by("name")
     status_choices = VirtualminAccount.STATUS_CHOICES
 
+    # Build breadcrumb navigation
+    breadcrumb_items = [
+        {"text": "🏠 Management", "url": "/app/"},
+        {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
+        {"text": "🖥️ Virtualmin", "url": "#"},
+        {"text": "Accounts"},  # Current page - no URL
+    ]
+
     context = {
         "page_title": "Virtualmin Accounts",
         "accounts_page": accounts_page,
+        "accounts": accounts_page,  # For template compatibility
         "table_data": table_data,
+        "breadcrumb_items": breadcrumb_items,
         "table_columns": [
             {"key": "domain", "label": "Domain", "sortable": True},
             {"key": "customer", "label": "Customer", "sortable": True},
@@ -324,9 +363,19 @@ def virtualmin_account_detail(request: HttpRequest, account_id: str) -> HttpResp
     backups_result = backup_service.list_backups(account=account, max_age_days=30)
     recent_backups = backups_result.unwrap() if backups_result.is_ok() else []
 
+    # Build breadcrumb navigation
+    breadcrumb_items = [
+        {"text": "🏠 Management", "url": "/app/"},
+        {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
+        {"text": "🖥️ Virtualmin", "url": "#"},
+        {"text": "Accounts", "url": reverse("provisioning:virtualmin_accounts")},
+        {"text": account.domain},  # Current page - no URL
+    ]
+
     context = {
         "page_title": f"Account: {account.domain}",
         "account": account,
+        "breadcrumb_items": breadcrumb_items,
         "recent_jobs": recent_jobs,
         "recent_backups": recent_backups,
         "account_stats": {
@@ -340,6 +389,10 @@ def virtualmin_account_detail(request: HttpRequest, account_id: str) -> HttpResp
         "can_restore": len(recent_backups) > 0,
         "backup_url": reverse("provisioning:virtualmin_account_backup", args=[account.id]),
         "restore_url": reverse("provisioning:virtualmin_account_restore", args=[account.id]),
+        "suspend_url": reverse("provisioning:virtualmin_account_suspend", args=[account.id]),
+        "activate_url": reverse("provisioning:virtualmin_account_activate", args=[account.id]),
+        "delete_url": reverse("provisioning:virtualmin_account_delete", args=[account.id]),
+        "toggle_protection_url": reverse("provisioning:virtualmin_account_toggle_protection", args=[account.id]),
     }
 
     return render(request, "provisioning/virtualmin/account_detail.html", context)
@@ -385,10 +438,21 @@ def virtualmin_account_backup(request: HttpRequest, account_id: str) -> HttpResp
     else:
         form = VirtualminBackupForm()
 
+    # Build breadcrumb navigation
+    breadcrumb_items = [
+        {"text": "🏠 Management", "url": "/app/"},
+        {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
+        {"text": "🖥️ Virtualmin", "url": "#"},
+        {"text": "Accounts", "url": reverse("provisioning:virtualmin_accounts")},
+        {"text": account.domain, "url": reverse("provisioning:virtualmin_account_detail", args=[account.id])},
+        {"text": "Backup"},  # Current page - no URL
+    ]
+
     context = {
         "page_title": f"Backup Account: {account.domain}",
         "account": account,
         "form": form,
+        "breadcrumb_items": breadcrumb_items,
         "form_action": reverse("provisioning:virtualmin_account_backup", args=[account.id]),
         "cancel_url": reverse("provisioning:virtualmin_account_detail", args=[account.id]),
     }
@@ -558,9 +622,19 @@ def virtualmin_server_create(request: HttpRequest) -> HttpResponse:
     else:
         form = VirtualminServerForm()
 
+    # Build breadcrumb navigation
+    breadcrumb_items = [
+        {"text": "🏠 Management", "url": "/app/"},
+        {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
+        {"text": "🖥️ Virtualmin", "url": "#"},
+        {"text": "Servers", "url": reverse("provisioning:virtualmin_servers")},
+        {"text": "Add Server"},  # Current page - no URL
+    ]
+
     context = {
         "page_title": "Create Virtualmin Server",
         "form": form,
+        "breadcrumb_items": breadcrumb_items,
         "form_action": reverse("provisioning:virtualmin_server_create"),
         "cancel_url": reverse("provisioning:virtualmin_servers"),
         "test_connection_url": reverse("provisioning:virtualmin_server_test_connection"),
@@ -586,10 +660,21 @@ def virtualmin_server_edit(request: HttpRequest, server_id: str) -> HttpResponse
     else:
         form = VirtualminServerForm(instance=server)
 
+    # Build breadcrumb navigation
+    breadcrumb_items = [
+        {"text": "🏠 Management", "url": "/app/"},
+        {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
+        {"text": "🖥️ Virtualmin", "url": "#"},
+        {"text": "Servers", "url": reverse("provisioning:virtualmin_servers")},
+        {"text": server.name, "url": reverse("provisioning:virtualmin_server_detail", args=[server.id])},
+        {"text": "Edit"},  # Current page - no URL
+    ]
+
     context = {
         "page_title": f"Edit Server: {server.name}",
         "server": server,
         "form": form,
+        "breadcrumb_items": breadcrumb_items,
         "form_action": reverse("provisioning:virtualmin_server_edit", args=[server.id]),
         "cancel_url": reverse("provisioning:virtualmin_server_detail", args=[server.id]),
         "test_connection_url": reverse("provisioning:virtualmin_server_test_connection"),
@@ -986,6 +1071,218 @@ def _format_backup_features(backup: dict[str, Any]) -> str:
 
 @login_required
 @user_passes_test(is_staff_or_superuser)
+@require_POST
+@audit_service_call("virtualmin_accounts_sync")
+@monitor_performance(max_duration_seconds=30.0, alert_threshold=10.0)
+def virtualmin_accounts_sync(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PLR0915
+    """🔄 Sync accounts from active Virtualmin servers to PRAHO database."""
+    
+    # Get all active servers
+    active_servers = VirtualminServer.objects.filter(status="active")
+    
+    if not active_servers.exists():
+        messages.error(request, "No active Virtualmin servers found to sync from")
+        return redirect("provisioning:virtualmin_accounts")
+    
+    sync_results: SyncResults = {
+        "servers_checked": 0,
+        "accounts_found": 0,
+        "accounts_created": 0,
+        "accounts_updated": 0,
+        "errors": []
+    }
+    
+    provisioning_service = VirtualminProvisioningService()
+    
+    for server in active_servers:
+        sync_results["servers_checked"] += 1
+        
+        try:
+            # Get gateway for this server
+            gateway = provisioning_service._get_gateway(server)
+            
+            # List domains from this server
+            domains_result = gateway.list_domains(name_only=False)
+            
+            if domains_result.is_err():
+                error_msg = f"Failed to get domains from {server.name}: {domains_result.unwrap_err()}"
+                sync_results["errors"].append(error_msg)
+                logger.warning(f"⚠️ [AccountSync] {error_msg}")
+                continue
+                
+            domains = domains_result.unwrap()
+            sync_results["accounts_found"] += len(domains)
+            
+            # Group domains by username (actual Virtualmin accounts)
+            accounts_by_username = {}
+            for domain_data in domains:
+                domain_name = domain_data.get("domain", "").strip()
+                username = domain_data.get("username", "").strip()
+                
+                if not domain_name or not username:
+                    continue
+                    
+                if username not in accounts_by_username:
+                    accounts_by_username[username] = {
+                        "domains": [],
+                        "primary_domain": domain_name,  # First domain becomes primary
+                        "username": username
+                    }
+                
+                accounts_by_username[username]["domains"].append(domain_name)
+            
+            # Process each Virtualmin account (grouped by username)
+            for username, account_data in accounts_by_username.items():
+                try:
+                    # Check if account already exists in PRAHO
+                    account = VirtualminAccount.objects.get(virtualmin_username=username)
+                    # Update existing account
+                    account.domain = account_data["primary_domain"]
+                    account.domains = account_data["domains"] 
+                    account.server = server
+                    account.last_sync_at = timezone.now()
+                    
+                    # Fetch actual usage data from Virtualmin API
+                    try:
+                        gateway = provisioning_service._get_gateway(server)
+                        domain_info_result = gateway.get_domain_info(account.domain)
+                        
+                        if domain_info_result.is_ok():
+                            domain_info = domain_info_result.unwrap()
+                            account.current_disk_usage_mb = domain_info.get("disk_usage_mb", 0)
+                            account.current_bandwidth_usage_mb = domain_info.get("bandwidth_usage_mb", 0)
+                            
+                            # Update quotas if available
+                            if domain_info.get("disk_quota_mb"):
+                                account.disk_quota_mb = domain_info["disk_quota_mb"]
+                            if domain_info.get("bandwidth_quota_mb"):
+                                account.bandwidth_quota_mb = domain_info["bandwidth_quota_mb"]
+                                
+                            logger.info(f"✅ [UsageSync] Updated usage for {username}: {domain_info['disk_usage_mb']}MB disk, {domain_info['bandwidth_usage_mb']}MB bandwidth")
+                        else:
+                            logger.warning(f"⚠️ [UsageSync] Failed to get usage for {account.domain}: {domain_info_result.unwrap_err()}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ [UsageSync] Exception getting usage for {account.domain}: {e}")
+                        # Keep existing values if API call fails
+                    
+                    account.save()
+                    sync_results["accounts_updated"] += 1
+                    
+                except VirtualminAccount.DoesNotExist:
+                    # Create new account with associated Service
+                    try:
+                        # Get default customer and service plan for synced accounts
+                        default_customer = Customer.objects.first()
+                        default_service_plan = ServicePlan.objects.first()
+                        
+                        if not default_customer or not default_service_plan:
+                            error_msg = f"Missing default customer or service plan for account {username}"
+                            sync_results["errors"].append(error_msg)
+                            continue
+                        
+                        # Get or create Service record
+                        service, created = Service.objects.get_or_create(
+                            username=username,
+                            defaults={
+                                "customer": default_customer,
+                                "service_plan": default_service_plan,
+                                "service_name": f"Virtualmin Account - {username}",
+                                "domain": account_data["primary_domain"],
+                                "status": "active",
+                                "billing_cycle": "monthly",
+                                "price": default_service_plan.price_monthly or 0.00
+                            }
+                        )
+                        
+                        # Update service if it exists
+                        if not created:
+                            service.domain = account_data["primary_domain"]
+                            service.save()
+                        
+                        # Fetch actual usage data from Virtualmin API
+                        disk_usage_mb = 0
+                        bandwidth_usage_mb = 0
+                        disk_quota_mb = 1000  # Default quota
+                        bandwidth_quota_mb = 10000  # Default quota
+                        
+                        try:
+                            gateway = provisioning_service._get_gateway(server)
+                            domain_info_result = gateway.get_domain_info(account_data["primary_domain"])
+                            
+                            if domain_info_result.is_ok():
+                                domain_info = domain_info_result.unwrap()
+                                disk_usage_mb = domain_info.get("disk_usage_mb", 0)
+                                bandwidth_usage_mb = domain_info.get("bandwidth_usage_mb", 0)
+                                
+                                # Update quotas if available
+                                if domain_info.get("disk_quota_mb"):
+                                    disk_quota_mb = domain_info["disk_quota_mb"]
+                                if domain_info.get("bandwidth_quota_mb"):
+                                    bandwidth_quota_mb = domain_info["bandwidth_quota_mb"]
+                                    
+                                logger.info(f"✅ [AccountSync] Fetched usage data for {account_data['primary_domain']}: {disk_usage_mb}MB disk, {bandwidth_usage_mb}MB bandwidth")
+                            else:
+                                logger.warning(f"⚠️ [AccountSync] Failed to fetch usage data for {account_data['primary_domain']}: {domain_info_result.unwrap_err()}")
+                        except Exception as e:
+                            logger.warning(f"⚠️ [AccountSync] Exception fetching usage data for {account_data['primary_domain']}: {e!s}")
+                        
+                        # Create VirtualminAccount linked to the Service
+                        VirtualminAccount.objects.create(
+                            service=service,
+                            domain=account_data["primary_domain"],
+                            domains=account_data["domains"],
+                            server=server,
+                            virtualmin_username=username,
+                            status="active",  # Assume active since it exists on server
+                            disk_quota_mb=disk_quota_mb,
+                            bandwidth_quota_mb=bandwidth_quota_mb,
+                            current_disk_usage_mb=disk_usage_mb,
+                            current_bandwidth_usage_mb=bandwidth_usage_mb,
+                            last_sync_at=timezone.now()
+                        )
+                        sync_results["accounts_created"] += 1
+                        
+                    except Exception as e:
+                        error_msg = f"Failed to create account for {username}: {e!s}"
+                        sync_results["errors"].append(error_msg)
+                        logger.warning(f"⚠️ [AccountSync] {error_msg}")
+                        
+        except Exception as e:
+            error_msg = f"Error syncing server {server.name}: {e!s}"
+            sync_results["errors"].append(error_msg)
+            logger.error(f"🔥 [AccountSync] {error_msg}")
+    
+    # Build success message
+    success_parts = []
+    if sync_results["accounts_created"] > 0:
+        success_parts.append(f"{sync_results['accounts_created']} created")
+    if sync_results["accounts_updated"] > 0:
+        success_parts.append(f"{sync_results['accounts_updated']} updated")
+        
+    if success_parts:
+        message = f"Sync completed: {', '.join(success_parts)} from {sync_results['servers_checked']} servers"
+        messages.success(request, message)
+    else:
+        messages.info(request, f"No new accounts found on {sync_results['servers_checked']} servers")
+    
+    # Show errors if any
+    if sync_results["errors"]:
+        error_count = len(sync_results["errors"])
+        messages.warning(request, f"{error_count} errors occurred during sync. Check logs for details.")
+    
+    logger.info(f"✅ [AccountSync] Completed: {sync_results}")
+    
+    # If HTMX request, return partial template
+    if request.headers.get("HX-Request"):
+        # Refresh the accounts data for the partial
+        accounts = VirtualminAccount.objects.select_related("server", "service", "service__customer").order_by("-created_at")
+        return render(request, "provisioning/virtualmin/partials/accounts_table.html", {"accounts": accounts})
+    
+    return redirect("provisioning:virtualmin_accounts")
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
 @monitor_performance(max_duration_seconds=5.0, alert_threshold=2.0)
 def virtualmin_account_new(request: HttpRequest) -> HttpResponse:
     """🆕 Create a new Virtualmin account."""
@@ -1004,10 +1301,258 @@ def virtualmin_account_new(request: HttpRequest) -> HttpResponse:
     else:
         form = VirtualminAccountForm()
 
+    # Build breadcrumb navigation
+    breadcrumb_items = [
+        {"text": "🏠 Management", "url": "/app/"},
+        {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
+        {"text": "🖥️ Virtualmin", "url": "#"},
+        {"text": "Accounts", "url": reverse("provisioning:virtualmin_accounts")},
+        {"text": "New Account"},  # Current page - no URL
+    ]
+
     context = {
         "page_title": "Create New Virtualmin Account",
         "form": form,
+        "breadcrumb_items": breadcrumb_items,
         "action_url": reverse("provisioning:virtualmin_account_new"),
     }
 
     return render(request, "provisioning/virtualmin/account_form.html", context)
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
+@require_POST
+@audit_service_call("virtualmin_account_suspend")
+@monitor_performance(max_duration_seconds=15.0, alert_threshold=5.0)
+def virtualmin_account_suspend(request: HttpRequest, account_id: str) -> HttpResponse:
+    """🚫 Suspend a Virtualmin account."""
+    account = get_object_or_404(VirtualminAccount, id=account_id)
+    
+    try:
+        # Call Virtualmin API to actually suspend the account
+        provisioning_service = VirtualminProvisioningService()
+        result = provisioning_service.suspend_account(account, reason=f"Suspended by {request.user.email}")
+        
+        if result.is_ok():
+            messages.success(request, f"Account {account.virtualmin_username} has been suspended on the server.")
+            logger.info(f"✅ [AccountSuspend] Account {account.virtualmin_username} suspended by {request.user.email}")
+        else:
+            error_msg = result.unwrap_err()
+            messages.error(request, f"Failed to suspend account {account.virtualmin_username}: {error_msg}")
+            logger.error(f"❌ [AccountSuspend] Failed to suspend {account.virtualmin_username}: {error_msg}")
+        
+    except Exception as e:
+        messages.error(request, f"Failed to suspend account {account.virtualmin_username}: {e!s}")
+        logger.error(f"❌ [AccountSuspend] Failed to suspend {account.virtualmin_username}: {e}")
+    
+    # If HTMX request, check where we came from
+    if request.headers.get("HX-Request"):
+        # Check if coming from accounts list or detail page based on referrer
+        referer = request.headers.get("HX-Current-URL", "")
+        if f"accounts/{account.id}/" in referer:
+            # Coming from detail page, refresh the page
+            return redirect("provisioning:virtualmin_account_detail", account_id=account.id)
+        else:
+            # Coming from accounts list, return updated table
+            accounts = VirtualminAccount.objects.select_related("server", "service", "service__customer").order_by("-created_at")
+            return render(request, "provisioning/virtualmin/partials/accounts_table.html", {"accounts": accounts})
+    
+    return redirect("provisioning:virtualmin_accounts")
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
+@require_POST
+@audit_service_call("virtualmin_account_activate")
+@monitor_performance(max_duration_seconds=15.0, alert_threshold=5.0)
+def virtualmin_account_activate(request: HttpRequest, account_id: str) -> HttpResponse:
+    """✅ Activate a Virtualmin account."""
+    account = get_object_or_404(VirtualminAccount, id=account_id)
+    
+    try:
+        # Call Virtualmin API to actually activate the account
+        provisioning_service = VirtualminProvisioningService()
+        result = provisioning_service.unsuspend_account(account)
+        
+        if result.is_ok():
+            messages.success(request, f"Account {account.virtualmin_username} has been activated on the server.")
+            logger.info(f"✅ [AccountActivate] Account {account.virtualmin_username} activated by {request.user.email}")
+        else:
+            error_msg = result.unwrap_err()
+            messages.error(request, f"Failed to activate account {account.virtualmin_username}: {error_msg}")
+            logger.error(f"❌ [AccountActivate] Failed to activate {account.virtualmin_username}: {error_msg}")
+        
+    except Exception as e:
+        messages.error(request, f"Failed to activate account {account.virtualmin_username}: {e!s}")
+        logger.error(f"❌ [AccountActivate] Failed to activate {account.virtualmin_username}: {e}")
+    
+    # If HTMX request, check where we came from
+    if request.headers.get("HX-Request"):
+        # Check if coming from accounts list or detail page based on referrer
+        referer = request.headers.get("HX-Current-URL", "")
+        if f"accounts/{account.id}/" in referer:
+            # Coming from detail page, refresh the page
+            return redirect("provisioning:virtualmin_account_detail", account_id=account.id)
+        else:
+            # Coming from accounts list, return updated table
+            accounts = VirtualminAccount.objects.select_related("server", "service", "service__customer").order_by("-created_at")
+            return render(request, "provisioning/virtualmin/partials/accounts_table.html", {"accounts": accounts})
+    
+    return redirect("provisioning:virtualmin_accounts")
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
+@require_POST
+@audit_service_call("virtualmin_account_toggle_protection")
+def virtualmin_account_toggle_protection(request: HttpRequest, account_id: str) -> HttpResponse:
+    """🛡️ Toggle deletion protection for a Virtualmin account."""
+    account = get_object_or_404(VirtualminAccount, id=account_id)
+    
+    if request.method == "POST":
+        # Toggle the protection status
+        account.protected_from_deletion = not account.protected_from_deletion
+        account.save()
+        
+        action = "enabled" if account.protected_from_deletion else "disabled"
+        icon = "🔒" if account.protected_from_deletion else "🔓"
+        
+        messages.success(
+            request, 
+            f"{icon} Deletion protection {action} for account {account.virtualmin_username}"
+        )
+        
+        logger.info(
+            f"{icon} [AccountProtection] Protection {action} for {account.virtualmin_username} by {request.user.email}"
+        )
+        
+        # If HTMX request, check where we came from
+        if request.headers.get("HX-Request"):
+            # Check if coming from accounts list or detail page based on referrer
+            referer = request.headers.get("HX-Current-URL", "")
+            if f"accounts/{account.id}/" in referer:
+                # Coming from detail page, return updated quick actions section
+                context = {
+                    "account": account,
+                    "toggle_protection_url": reverse("provisioning:virtualmin_account_toggle_protection", args=[account.id]),
+                    "delete_url": reverse("provisioning:virtualmin_account_delete", args=[account.id]),
+                }
+                return render(request, "provisioning/virtualmin/partials/quick_actions.html", context)
+            else:
+                # Coming from accounts list, return updated table
+                accounts = VirtualminAccount.objects.select_related("server", "service", "service__customer").order_by("-created_at")
+                return render(request, "provisioning/virtualmin/partials/accounts_table.html", {"accounts": accounts})
+    
+    return redirect("provisioning:virtualmin_accounts")
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
+@require_http_methods(["DELETE", "POST"])
+@audit_service_call("virtualmin_account_delete")
+def virtualmin_account_delete(request: HttpRequest, account_id: str) -> HttpResponse:
+    """🗑️ Delete a Virtualmin account permanently."""
+    account = get_object_or_404(VirtualminAccount, id=account_id)
+    
+    # Protection is handled in the service layer
+    from .virtualmin_service import VirtualminProvisioningService
+    
+    try:
+        service = VirtualminProvisioningService(account.server)
+        result = service.delete_account(account)
+        
+        if result.is_ok():
+            messages.success(request, f"✅ Account {account.domain} deleted successfully")
+            logger.info(f"🗑️ [AccountDelete] Account {account.domain} deleted by {request.user.email}")
+        else:
+            error_msg = result.unwrap_err()
+            messages.error(request, f"❌ Failed to delete account: {error_msg}")
+            logger.error(f"🗑️ [AccountDelete] Failed to delete {account.domain}: {error_msg}")
+            
+    except Exception as e:
+        messages.error(request, f"❌ Error deleting account: {e}")
+        logger.exception(f"🗑️ [AccountDelete] Exception deleting {account.domain}: {e}")
+    
+    # If HTMX request, return updated table
+    if request.headers.get("HX-Request"):
+        accounts = VirtualminAccount.objects.select_related("server", "service", "service__customer").order_by("-created_at")
+        return render(request, "provisioning/virtualmin/partials/accounts_table.html", {"accounts": accounts})
+    
+    return redirect("provisioning:virtualmin_accounts")
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
+@monitor_performance(max_duration_seconds=3.0, alert_threshold=1.0)
+def virtualmin_job_status(request: HttpRequest, job_id: str) -> HttpResponse:
+    """📊 Show Virtualmin job status and progress."""
+    job = get_object_or_404(VirtualminProvisioningJob, id=job_id)
+    
+    # Build breadcrumb navigation
+    breadcrumb_items = [
+        {"text": "🏠 Management", "url": "/app/"},
+        {"text": "🖥️ Provisioning", "url": reverse("provisioning:virtualmin_servers")},
+        {"text": "⚙️ Jobs", "url": reverse("provisioning:virtualmin_servers")},
+        {"text": f"Job {job.correlation_id[:8]}", "url": ""},
+    ]
+    
+    context = {
+        "job": job,
+        "page_title": f"Job Status - {job.operation}",
+        "breadcrumb_items": breadcrumb_items,
+        "can_retry": job.status == "failed" and job.retry_count < 3,
+    }
+    
+    return render(request, "provisioning/virtualmin/job_status.html", context)
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
+@monitor_performance(max_duration_seconds=2.0, alert_threshold=1.0)
+def virtualmin_job_logs(request: HttpRequest, job_id: str) -> HttpResponse:
+    """📋 Show Virtualmin job logs and details."""
+    job = get_object_or_404(VirtualminProvisioningJob, id=job_id)
+    
+    # Return logs as JSON for HTMX requests
+    if request.headers.get("HX-Request"):
+        logs = []
+        
+        # Add job lifecycle logs
+        logs.append({
+            "timestamp": job.created_at.isoformat(),
+            "level": "INFO", 
+            "message": f"Job created: {job.operation} for {job.account.domain if job.account else 'unknown'}"
+        })
+        
+        if job.started_at:
+            logs.append({
+                "timestamp": job.started_at.isoformat(),
+                "level": "INFO",
+                "message": "Job started"
+            })
+            
+        if job.completed_at:
+            logs.append({
+                "timestamp": job.completed_at.isoformat(), 
+                "level": "SUCCESS" if job.status == "completed" else "ERROR",
+                "message": f"Job {job.status}" + (f": {job.error_message}" if job.error_message else "")
+            })
+            
+        # Add response data as structured logs
+        if job.response_data:
+            logs.append({
+                "timestamp": (job.completed_at or job.updated_at).isoformat(),
+                "level": "DEBUG",
+                "message": f"Response: {job.response_data}"
+            })
+            
+        return JsonResponse({"logs": logs})
+    
+    # Regular template render for non-HTMX requests
+    context = {
+        "job": job,
+        "page_title": f"Job Logs - {job.operation}",
+    }
+    
+    return render(request, "provisioning/virtualmin/job_logs.html", context)

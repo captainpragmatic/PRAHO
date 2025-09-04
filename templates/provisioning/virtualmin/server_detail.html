@@ -9,11 +9,12 @@
     <!-- =============================================================================== -->
     <!-- PAGE HEADER WITH BREADCRUMB -->
     <!-- =============================================================================== -->
+    
+    <!-- Breadcrumb Navigation -->
+    {% breadcrumb breadcrumb_items css_class="mb-6" %}
+    
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
         <div>
-            <nav class="text-sm text-slate-400 mb-2">
-                Management > Virtualmin > Servers > {{ server.name }}
-            </nav>
             <h1 class="text-2xl font-bold text-slate-100 mt-2">{{ page_title }}</h1>
             <p class="mt-2 text-sm text-slate-400">
                 {% trans "Server details and management options" %}

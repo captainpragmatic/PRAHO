@@ -1,0 +1,62 @@
+{% load ui_components %}
+{% load i18n %}
+
+<div id="quick-actions-section">
+    <h3 class="text-lg font-semibold text-slate-100 mb-4">{% trans "Quick Actions" %}</h3>
+    <div class="space-y-3">
+        {% button "Access Control Panel" href="#" variant="primary" icon="external-link" %}
+        {% button "Reset Password" href="#" variant="secondary" icon="key" %}
+        {% button "Change Plan" href="#" variant="secondary" icon="upgrade" %}
+        {% button "Transfer Account" href="#" variant="secondary" icon="transfer" %}
+        {% if account.is_active %}
+            {% button "Disable Account" href="#" variant="danger" icon="pause" %}
+        {% else %}
+            {% button "Enable Account" href="#" variant="success" icon="play" %}
+        {% endif %}
+        
+        <!-- Protection Toggle -->
+        <button class="w-full px-4 py-2 text-sm font-medium rounded-lg transition-colors {% if account.protected_from_deletion %}text-orange-400 bg-orange-500/10 border border-orange-500/20 hover:bg-orange-500/20{% else %}text-blue-400 bg-blue-500/10 border border-blue-500/20 hover:bg-blue-500/20{% endif %}"
+                x-data="{}"
+                @click.prevent="$dispatch('confirm-dangerous-action', {
+                    title: '{% if account.protected_from_deletion %}Disable Protection{% else %}Enable Protection{% endif %}',
+                    message: 'Type \"I really am sure I want to do this!\" to confirm this protection change for {{ account.domain }}',
+                    confirmText: 'I really am sure I want to do this!',
+                    action: function() {
+                        htmx.ajax('POST', '{{ toggle_protection_url }}', {
+                            target: '#quick-actions-section',
+                            swap: 'outerHTML',
+                            headers: {'X-CSRFToken': '{{ csrf_token }}'}
+                        });
+                    }
+                })">
+            {% if account.protected_from_deletion %}
+                🔓 {% trans "Disable Protection" %}
+            {% else %}
+                🔒 {% trans "Enable Protection" %}
+            {% endif %}
+        </button>
+        
+        <!-- Delete Account -->
+        {% if account.can_be_deleted %}
+        <button class="w-full px-4 py-2 text-sm font-medium text-red-400 bg-red-500/10 border border-red-500/20 hover:bg-red-500/20 rounded-lg transition-colors"
+                x-data="{}"
+                @click.prevent="$dispatch('confirm-dangerous-action', {
+                    title: 'Delete Virtualmin Account',
+                    message: 'Type \"I really am sure I want to do this!\" to confirm permanent deletion of {{ account.domain }}',
+                    confirmText: 'I really am sure I want to do this!',
+                    action: function() {
+                        htmx.ajax('DELETE', '{{ delete_url }}', {
+                            target: 'body'
+                        });
+                    }
+                })">
+            🗑️ {% trans "Delete Account" %}
+        </button>
+        {% else %}
+        <button class="w-full px-4 py-2 text-sm font-medium text-slate-500 bg-slate-500/10 border border-slate-500/20 rounded-lg cursor-not-allowed" 
+                disabled>
+            🗑️ {% trans "Delete Account" %} <span class="text-xs">({% trans "Protected" %})</span>
+        </button>
+        {% endif %}
+    </div>
+</div>

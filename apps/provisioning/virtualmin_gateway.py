@@ -562,9 +562,7 @@ class VirtualminGateway:
         elif response_format == "xml":
             api_params["xml"] = "1"
 
-        # Add correlation ID if provided
-        if correlation_id:
-            api_params["correlation_id"] = correlation_id[:100]  # Limit length
+        # Note: correlation_id is used for internal tracking only, not passed to Virtualmin
 
         logger.info(
             f"🔗 [Virtualmin] Calling {program} on {self.server.hostname}"
@@ -821,10 +819,350 @@ class VirtualminGateway:
         # TODO: Implement generic API call
         return {"status": "ok", "command": command}
 
-    def get_domain_info(self, domain: str) -> dict[str, Any]:
-        """Get domain information"""
-        # TODO: Implement domain info retrieval
-        return {"domain": domain, "status": "active"}
+    def get_domain_info(self, domain: str) -> Result[dict[str, Any], str]:
+        """
+        Get detailed domain information including usage statistics.
+        
+        Uses list-domains with multiline=1 for disk usage and list-bandwidth for bandwidth usage.
+        
+        Args:
+            domain: Domain name to get information for
+            
+        Returns:
+            Result with domain information or error message
+        """
+        domain_info = {
+            "disk_usage_mb": 0,
+            "bandwidth_usage_mb": 0,
+            "disk_quota_mb": None,
+            "bandwidth_quota_mb": None,
+        }
+        
+        # Get disk usage with list-domains --multiline
+        disk_result = self.call("list-domains", {"domain": domain, "multiline": ""})
+        
+        if disk_result.is_ok():
+            response = disk_result.unwrap()
+            if response.success:
+                disk_info = self._parse_multiline_domain_response(response.data)
+                domain_info["disk_usage_mb"] = disk_info.get("disk_usage_mb", 0)
+                domain_info["disk_quota_mb"] = disk_info.get("disk_quota_mb")
+            else:
+                return Err(f"Failed to get disk usage: {response.data.get('error', 'Unknown error')}")
+        else:
+            return Err(f"Disk usage API call failed: {disk_result.unwrap_err()}")
+        
+        # Try to get bandwidth usage - multiple approaches
+        bandwidth_found = False
+        
+        # 1. Try list-bandwidth command for current month (may not be allowed)
+        if not bandwidth_found:
+            try:
+                from datetime import datetime
+                current_date = datetime.now()
+                start_date = current_date.replace(day=1).strftime("%Y-%m-%d")
+                end_date = current_date.strftime("%Y-%m-%d")
+                
+                bandwidth_result = self.call("list-bandwidth", {
+                    "domain": domain,
+                    "start": start_date,
+                    "end": end_date
+                })
+                
+                if bandwidth_result.is_ok():
+                    response = bandwidth_result.unwrap()
+                    if response.success:
+                        bandwidth_usage = self._parse_bandwidth_response(response.data)
+                        if bandwidth_usage > 0:
+                            domain_info["bandwidth_usage_mb"] = bandwidth_usage
+                            bandwidth_found = True
+            except Exception:
+                pass
+        
+        # 2. Try to extract bandwidth from domain info if available
+        if not bandwidth_found and disk_result.is_ok():
+            response = disk_result.unwrap()
+            if response.success:
+                bandwidth_info = self._extract_bandwidth_from_domain_data(response.data)
+                if bandwidth_info > 0:
+                    domain_info["bandwidth_usage_mb"] = bandwidth_info
+                    
+                # Also extract bandwidth quota information
+                bandwidth_quota = self._extract_bandwidth_quota_from_domain_data(response.data)
+                if bandwidth_quota != 0:  # Include -1 for unlimited and positive values
+                    domain_info["bandwidth_quota_mb"] = bandwidth_quota
+            
+        return Ok(domain_info)
+    
+    def _extract_bandwidth_from_domain_data(self, data: dict[str, Any]) -> int:
+        """Extract bandwidth usage from domain data if available."""
+        bandwidth_mb = 0
+        
+        if isinstance(data, dict) and 'data' in data:
+            for domain_item in data['data']:
+                if 'values' in domain_item:
+                    values = domain_item['values']
+                    
+                    # Look for bandwidth-related fields (usage and quotas)
+                    for key, value in values.items():
+                        key_lower = key.lower()
+                        value_str = value[0] if isinstance(value, list) and value else str(value)
+                        
+                        # Check for bandwidth usage fields
+                        if any(term in key_lower for term in ['bandwidth', 'traffic', 'transfer']):
+                            if 'size' in key_lower or 'usage' in key_lower or 'used' in key_lower:
+                                try:
+                                    bandwidth_mb = self._parse_size_to_mb(value_str)
+                                    if bandwidth_mb > 0:
+                                        break
+                                except ValueError:
+                                    continue
+                    
+                    if bandwidth_mb > 0:
+                        break
+                    
+        return bandwidth_mb
+
+    def _extract_bandwidth_quota_from_domain_data(self, data: dict[str, Any]) -> int:
+        """Extract bandwidth quota from domain data."""
+        quota_mb = 0
+        
+        if isinstance(data, dict) and 'data' in data:
+            for domain_item in data['data']:
+                if 'values' in domain_item:
+                    values = domain_item['values']
+                    
+                    # Look for bandwidth quota fields
+                    for key, value in values.items():
+                        key_lower = key.lower()
+                        
+                        # Check for bandwidth limit/quota fields
+                        if 'bandwidth' in key_lower and ('limit' in key_lower or 'quota' in key_lower):
+                            value_str = value[0] if isinstance(value, list) and value else str(value)
+                            try:
+                                # Handle "Unlimited" case
+                                if value_str.lower() == "unlimited":
+                                    quota_mb = -1  # Use -1 to represent unlimited
+                                    break
+                                # Handle both regular size format and byte format
+                                elif 'byte' in key_lower:
+                                    # Convert bytes to MB
+                                    quota_mb = int(value_str) // (1024 * 1024)
+                                else:
+                                    quota_mb = self._parse_size_to_mb(value_str)
+                                
+                                if quota_mb > 0:
+                                    break
+                            except (ValueError, TypeError):
+                                continue
+                    
+                    if quota_mb > 0:
+                        break
+                    
+        return quota_mb
+
+    def _extract_usage_from_domain_data(self, domain_data: dict[str, Any]) -> dict[str, Any]:
+        """Extract usage information from domain data returned by list-domains."""
+        domain_info = {
+            "disk_usage_mb": 0,
+            "bandwidth_usage_mb": 0,
+            "disk_quota_mb": None,
+            "bandwidth_quota_mb": None,
+        }
+        
+        # Extract disk usage if available
+        if "disk_usage" in domain_data:
+            domain_info["disk_usage_mb"] = self._parse_size_to_mb(domain_data["disk_usage"])
+        elif "used" in domain_data:
+            domain_info["disk_usage_mb"] = self._parse_size_to_mb(domain_data["used"])
+            
+        # Extract disk quota if available  
+        if "disk_quota" in domain_data:
+            domain_info["disk_quota_mb"] = self._parse_size_to_mb(domain_data["disk_quota"])
+        elif "quota" in domain_data:
+            domain_info["disk_quota_mb"] = self._parse_size_to_mb(domain_data["quota"])
+            
+        # Extract bandwidth usage if available
+        if "bandwidth_usage" in domain_data:
+            domain_info["bandwidth_usage_mb"] = self._parse_size_to_mb(domain_data["bandwidth_usage"])
+        elif "bw_used" in domain_data:
+            domain_info["bandwidth_usage_mb"] = self._parse_size_to_mb(domain_data["bw_used"])
+            
+        # Extract bandwidth quota if available
+        if "bandwidth_quota" in domain_data:
+            domain_info["bandwidth_quota_mb"] = self._parse_size_to_mb(domain_data["bandwidth_quota"])
+        elif "bw_limit" in domain_data:
+            domain_info["bandwidth_quota_mb"] = self._parse_size_to_mb(domain_data["bw_limit"])
+        
+        return domain_info
+
+    def _parse_multiline_domain_response(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Parse multiline domain response to extract disk usage and quota."""
+        domain_info = {
+            "disk_usage_mb": 0,
+            "disk_quota_mb": None,
+        }
+        
+        # The response comes as a nested dict structure with domain data
+        if isinstance(data, dict) and 'data' in data:
+            for domain_item in data['data']:
+                if 'values' in domain_item:
+                    values = domain_item['values']
+                    
+                    # Try multiple sources for disk usage in priority order
+                    disk_usage_found = False
+                    
+                    # 1. Look for database size first (most common indicator)
+                    if not disk_usage_found and 'databases_size' in values:
+                        size_str = values['databases_size'][0] if isinstance(values['databases_size'], list) else values['databases_size']
+                        try:
+                            usage_mb = self._parse_size_to_mb(size_str)
+                            if usage_mb > 0:  # Only use if non-zero
+                                domain_info["disk_usage_mb"] = usage_mb
+                                disk_usage_found = True
+                        except ValueError:
+                            pass
+                    
+                    # 2. Look for home directory size
+                    if not disk_usage_found and 'home_directory_size' in values:
+                        size_str = values['home_directory_size'][0] if isinstance(values['home_directory_size'], list) else values['home_directory_size']
+                        try:
+                            domain_info["disk_usage_mb"] = self._parse_size_to_mb(size_str)
+                            disk_usage_found = True
+                        except ValueError:
+                            pass
+                    
+                    # 3. Look for any disk-related fields
+                    if not disk_usage_found:
+                        for key, value in values.items():
+                            key_lower = key.lower()
+                            if 'size' in key_lower and 'byte' not in key_lower:  # Avoid byte_size duplicates
+                                value_str = value[0] if isinstance(value, list) and value else str(value)
+                                try:
+                                    usage_mb = self._parse_size_to_mb(value_str)
+                                    if usage_mb > 0:  # Only use if non-zero
+                                        domain_info["disk_usage_mb"] = usage_mb
+                                        disk_usage_found = True
+                                        break
+                                except ValueError:
+                                    continue
+                    
+                    # 4. Look for quota information
+                    for key, value in values.items():
+                        key_lower = key.lower()
+                        value_str = value[0] if isinstance(value, list) and value else str(value)
+                        
+                        if any(term in key_lower for term in ["quota", "limit"]) and 'size' in key_lower:
+                            try:
+                                domain_info["disk_quota_mb"] = self._parse_size_to_mb(value_str)
+                                break
+                            except ValueError:
+                                continue
+                    
+                    break  # Only process first domain
+        
+        return domain_info
+    
+    def _parse_bandwidth_response(self, data: dict[str, Any]) -> int:
+        """Parse bandwidth response to extract total usage in MB."""
+        # The bandwidth response is typically CSV format or structured data
+        total_mb = 0
+        
+        if isinstance(data, str):
+            # Parse CSV-like response
+            lines = data.strip().split('\n')
+            for line in lines:
+                if line and not line.startswith('#'):  # Skip comments
+                    # Try to extract bandwidth values from the line
+                    parts = line.split(',')
+                    if len(parts) > 1:
+                        # Usually the bandwidth is in the last column
+                        try:
+                            bandwidth_str = parts[-1].strip()
+                            total_mb += self._parse_size_to_mb(bandwidth_str)
+                        except (ValueError, IndexError):
+                            continue
+        elif isinstance(data, dict):
+            # Handle structured response
+            for key, value in data.items():
+                if "bandwidth" in key.lower() or "bytes" in key.lower():
+                    try:
+                        total_mb += self._parse_size_to_mb(str(value))
+                    except ValueError:
+                        continue
+        
+        return total_mb
+
+    def _parse_domain_info_response(self, data: dict[str, Any], domain: str) -> dict[str, Any]:
+        """Parse domain info response to extract usage data"""
+        domain_info = {
+            "domain": domain,
+            "disk_usage_mb": 0,
+            "bandwidth_usage_mb": 0,
+            "disk_quota_mb": None,
+            "bandwidth_quota_mb": None,
+            "status": "unknown"
+        }
+        
+        # Handle different response formats that Virtualmin might return
+        if isinstance(data, dict):
+            # Look for common fields that Virtualmin returns
+            if "data" in data and isinstance(data["data"], list):
+                for item in data["data"]:
+                    if isinstance(item, dict):
+                        name = item.get("name", "").lower()
+                        value = item.get("value", "")
+                        
+                        # Parse disk usage/quota
+                        if "disk" in name and "used" in name:
+                            domain_info["disk_usage_mb"] = self._parse_size_to_mb(value)
+                        elif "disk" in name and ("quota" in name or "limit" in name):
+                            domain_info["disk_quota_mb"] = self._parse_size_to_mb(value)
+                        
+                        # Parse bandwidth usage/quota
+                        elif "bandwidth" in name and "used" in name:
+                            domain_info["bandwidth_usage_mb"] = self._parse_size_to_mb(value)
+                        elif "bandwidth" in name and ("quota" in name or "limit" in name):
+                            domain_info["bandwidth_quota_mb"] = self._parse_size_to_mb(value)
+                        
+                        # Parse status
+                        elif "status" in name:
+                            domain_info["status"] = value.lower()
+                            
+        return domain_info
+    
+    def _parse_size_to_mb(self, size_str: str) -> int:
+        """Convert size string to MB (e.g., '500M', '1.2G', '1024K')"""
+        if not size_str or size_str == "-" or size_str.lower() == "unlimited":
+            return 0
+            
+        size_str = str(size_str).strip().upper()
+        
+        try:
+            # Extract number and unit
+            import re
+            match = re.match(r'([0-9.]+)\s*([KMGT]?)B?', size_str)
+            if match:
+                number = float(match.group(1))
+                unit = match.group(2)
+                
+                # Convert to MB
+                if unit == "K":
+                    return int(number / 1024)
+                elif unit == "M":
+                    return int(number)
+                elif unit == "G":
+                    return int(number * 1024)
+                elif unit == "T":
+                    return int(number * 1024 * 1024)
+                else:
+                    # Assume bytes if no unit
+                    return int(number / (1024 * 1024))
+            else:
+                # Try to parse as plain number (assume MB)
+                return int(float(size_str))
+        except (ValueError, AttributeError):
+            return 0
 
     def close(self) -> None:
         """Close the gateway and clean up resources"""

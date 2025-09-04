@@ -1,0 +1,245 @@
+{% extends "base.html" %}
+{% load ui_components %}
+{% load i18n %}
+
+{% block title %}{{ page_title }} - {% trans "Virtualmin Jobs" %}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- =============================================================================== -->
+    <!-- PAGE HEADER -->
+    <!-- =============================================================================== -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+        <div>
+            {% breadcrumb breadcrumb_items css_class="mb-4" %}
+            <h1 class="text-2xl font-bold text-slate-100">{{ page_title }}</h1>
+            <p class="mt-2 text-sm text-slate-400">
+                {% trans "Real-time job progress and status monitoring" %}
+            </p>
+        </div>
+        <div class="mt-4 sm:mt-0 flex items-center space-x-3">
+            {% if can_retry %}
+                {% button "🔄 Retry Job" variant="warning" href="#" %}
+            {% endif %}
+            {% button "← Back to Jobs" variant="secondary" href="/provisioning/virtualmin/servers/" %}
+        </div>
+    </div>
+
+    <!-- =============================================================================== -->
+    <!-- JOB STATUS OVERVIEW -->
+    <!-- =============================================================================== -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Main Job Details -->
+        <div class="lg:col-span-2 space-y-6">
+            <!-- Job Information -->
+            <div class="bg-slate-800 rounded-lg border border-slate-700">
+                <div class="px-6 py-4 border-b border-slate-700">
+                    <h3 class="text-lg font-medium text-slate-100">{% trans "Job Information" %}</h3>
+                </div>
+                <div class="p-6">
+                    <dl class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <dt class="text-sm font-medium text-slate-400">{% trans "Operation" %}</dt>
+                            <dd class="mt-1 text-lg font-semibold text-slate-100">{{ job.operation|capfirst }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-sm font-medium text-slate-400">{% trans "Status" %}</dt>
+                            <dd class="mt-1">
+                                {% if job.status == 'completed' %}
+                                    {% badge "✅ Completed" variant="success" %}
+                                {% elif job.status == 'failed' %}
+                                    {% badge "❌ Failed" variant="danger" %}
+                                {% elif job.status == 'running' %}
+                                    {% badge "🔄 Running" variant="warning" %}
+                                {% else %}
+                                    {% badge job.get_status_display variant="secondary" %}
+                                {% endif %}
+                            </dd>
+                        </div>
+                        <div>
+                            <dt class="text-sm font-medium text-slate-400">{% trans "Account" %}</dt>
+                            <dd class="mt-1 text-sm text-slate-100">
+                                {% if job.account %}
+                                    <a href="{{ job.account.get_absolute_url }}" class="text-blue-400 hover:text-blue-300">
+                                        {{ job.account.domain }}
+                                    </a>
+                                {% else %}
+                                    {% trans "No account associated" %}
+                                {% endif %}
+                            </dd>
+                        </div>
+                        <div>
+                            <dt class="text-sm font-medium text-slate-400">{% trans "Server" %}</dt>
+                            <dd class="mt-1 text-sm text-slate-100">
+                                {% if job.server %}
+                                    <a href="{{ job.server.get_absolute_url }}" class="text-blue-400 hover:text-blue-300">
+                                        {{ job.server.hostname }}
+                                    </a>
+                                {% else %}
+                                    {% trans "No server specified" %}
+                                {% endif %}
+                            </dd>
+                        </div>
+                        <div>
+                            <dt class="text-sm font-medium text-slate-400">{% trans "Correlation ID" %}</dt>
+                            <dd class="mt-1 text-sm font-mono text-slate-100">{{ job.correlation_id }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-sm font-medium text-slate-400">{% trans "Retry Count" %}</dt>
+                            <dd class="mt-1 text-sm text-slate-100">{{ job.retry_count }}/3</dd>
+                        </div>
+                    </dl>
+                </div>
+            </div>
+
+            <!-- Error Details (if failed) -->
+            {% if job.status == 'failed' and job.error_message %}
+            <div class="bg-red-900/20 border border-red-700 rounded-lg p-6">
+                <div class="flex items-start">
+                    <div class="flex-shrink-0">
+                        <span class="text-red-400 text-xl">❌</span>
+                    </div>
+                    <div class="ml-3">
+                        <h3 class="text-sm font-medium text-red-400">
+                            {% trans "Error Details" %}
+                        </h3>
+                        <div class="mt-2 text-sm text-red-300">
+                            <pre class="whitespace-pre-wrap font-mono text-xs">{{ job.error_message }}</pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Parameters -->
+            {% if job.parameters %}
+            <div class="bg-slate-800 rounded-lg border border-slate-700">
+                <div class="px-6 py-4 border-b border-slate-700">
+                    <h3 class="text-lg font-medium text-slate-100">{% trans "Job Parameters" %}</h3>
+                </div>
+                <div class="p-6">
+                    <pre class="text-sm font-mono text-slate-300 bg-slate-900 rounded p-4 overflow-x-auto">{{ job.parameters|pprint }}</pre>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Response Data -->
+            {% if job.response_data %}
+            <div class="bg-slate-800 rounded-lg border border-slate-700">
+                <div class="px-6 py-4 border-b border-slate-700">
+                    <h3 class="text-lg font-medium text-slate-100">{% trans "Response Data" %}</h3>
+                </div>
+                <div class="p-6">
+                    <pre class="text-sm font-mono text-slate-300 bg-slate-900 rounded p-4 overflow-x-auto">{{ job.response_data|pprint }}</pre>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Sidebar -->
+        <div class="space-y-6">
+            <!-- Timeline -->
+            <div class="bg-slate-800 rounded-lg border border-slate-700">
+                <div class="px-6 py-4 border-b border-slate-700">
+                    <h3 class="text-lg font-medium text-slate-100">{% trans "Timeline" %}</h3>
+                </div>
+                <div class="p-6">
+                    <div class="flow-root">
+                        <ul class="-mb-8">
+                            <li>
+                                <div class="relative pb-8">
+                                    <div class="absolute top-4 left-4 mt-0.5 h-full w-0.5 bg-slate-600"></div>
+                                    <div class="relative flex space-x-3">
+                                        <div class="h-8 w-8 rounded-full bg-blue-600 flex items-center justify-center">
+                                            <span class="text-white text-xs">📝</span>
+                                        </div>
+                                        <div class="min-w-0 flex-1">
+                                            <div class="text-sm text-slate-300">
+                                                <span class="font-medium">{% trans "Created" %}</span>
+                                            </div>
+                                            <div class="text-xs text-slate-500">
+                                                {{ job.created_at|date:"M d, Y H:i" }}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </li>
+                            
+                            {% if job.started_at %}
+                            <li>
+                                <div class="relative pb-8">
+                                    <div class="absolute top-4 left-4 mt-0.5 h-full w-0.5 bg-slate-600"></div>
+                                    <div class="relative flex space-x-3">
+                                        <div class="h-8 w-8 rounded-full bg-yellow-600 flex items-center justify-center">
+                                            <span class="text-white text-xs">▶️</span>
+                                        </div>
+                                        <div class="min-w-0 flex-1">
+                                            <div class="text-sm text-slate-300">
+                                                <span class="font-medium">{% trans "Started" %}</span>
+                                            </div>
+                                            <div class="text-xs text-slate-500">
+                                                {{ job.started_at|date:"M d, Y H:i" }}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </li>
+                            {% endif %}
+
+                            {% if job.completed_at %}
+                            <li>
+                                <div class="relative">
+                                    <div class="relative flex space-x-3">
+                                        <div class="h-8 w-8 rounded-full {% if job.status == 'completed' %}bg-green-600{% else %}bg-red-600{% endif %} flex items-center justify-center">
+                                            <span class="text-white text-xs">{% if job.status == 'completed' %}✅{% else %}❌{% endif %}</span>
+                                        </div>
+                                        <div class="min-w-0 flex-1">
+                                            <div class="text-sm text-slate-300">
+                                                <span class="font-medium">{{ job.get_status_display }}</span>
+                                            </div>
+                                            <div class="text-xs text-slate-500">
+                                                {{ job.completed_at|date:"M d, Y H:i" }}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </li>
+                            {% endif %}
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Live Logs -->
+            <div class="bg-slate-800 rounded-lg border border-slate-700">
+                <div class="px-6 py-4 border-b border-slate-700">
+                    <h3 class="text-lg font-medium text-slate-100 flex items-center">
+                        📋 {% trans "Live Logs" %}
+                        <button class="ml-2 text-xs bg-blue-600 px-2 py-1 rounded" 
+                                hx-get="{% url 'provisioning:virtualmin_job_logs' job.id %}"
+                                hx-target="#job-logs"
+                                hx-trigger="every 2s">
+                            🔄 Auto-refresh
+                        </button>
+                    </h3>
+                </div>
+                <div class="p-6">
+                    <div id="job-logs" class="space-y-2 max-h-96 overflow-y-auto">
+                        {% comment %}Logs will be loaded via HTMX{% endcomment %}
+                        <div class="text-sm text-slate-400 italic">{% trans "Loading logs..." %}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Initial logs load
+document.addEventListener('DOMContentLoaded', function() {
+    htmx.ajax('GET', '{% url "provisioning:virtualmin_job_logs" job.id %}', {
+        target: '#job-logs'
+    });
+});
+</script>
+{% endblock %}
