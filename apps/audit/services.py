@@ -119,7 +119,7 @@ def serialize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
         # Use our custom encoder to serialize and then deserialize
         # This ensures all objects are converted to serializable forms
         serialized_json = json.dumps(metadata, cls=AuditJSONEncoder, ensure_ascii=False)
-        return json.loads(serialized_json)
+        return json.loads(serialized_json)  # type: ignore[no-any-return]
     except (TypeError, ValueError) as e:
         logger.error(f"🔥 [Audit] Failed to serialize metadata: {e}")
         # Fallback: return a safe version with error information
@@ -660,6 +660,56 @@ class AuditService:
         except Exception as e:
             logger.error(f"🔥 [Audit] Failed to log event {event_data.event_type}: {e}")
             raise
+
+    @staticmethod
+    def log_simple_event(  # noqa: PLR0913
+        event_type: str,
+        *,
+        user: Any | None = None,
+        content_object: Any | None = None,
+        description: str = "",
+        old_values: dict[str, Any] | None = None,
+        new_values: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+        ip_address: str | None = None,
+        actor_type: str = "user",
+    ) -> AuditEvent:
+        """
+        🔐 Simplified audit logging method (DRY helper)
+        
+        This method provides a simpler interface for audit logging while maintaining
+        the proper data structure requirements internally.
+        
+        Args:
+            event_type: Type of event being logged
+            user: User who performed the action (None for system actions)
+            content_object: Django model instance being audited
+            description: Human-readable description
+            old_values: Previous values (for updates)
+            new_values: New values (for updates)
+            metadata: Additional metadata
+            ip_address: IP address of the actor
+            actor_type: Type of actor ("user", "system", "admin", etc.)
+        
+        Returns:
+            AuditEvent: The created audit event
+        """
+        event_data = AuditEventData(
+            event_type=event_type,
+            content_object=content_object,
+            description=description,
+            old_values=old_values,
+            new_values=new_values,
+        )
+        
+        context = AuditContext(
+            user=user,
+            actor_type=actor_type,
+            ip_address=ip_address,
+            metadata=metadata or {},
+        )
+        
+        return AuditService.log_event(event_data, context)
 
     @staticmethod
     def _get_action_category(action: str) -> str:
@@ -1249,7 +1299,7 @@ class GDPRExportService:
                     data["support_tickets"].append(
                         {
                             "ticket_id": ticket.id,
-                            "subject": ticket.subject,
+                            "subject": ticket.title,
                             "status": ticket.status,
                             "priority": ticket.priority,
                             "created_at": ticket.created_at.isoformat(),
@@ -3397,7 +3447,7 @@ class AuditSearchService:
     @classmethod
     def build_advanced_query(
         cls, filters: dict[str, Any], user: User
-    ) -> tuple[models.QuerySet[AuditEvent], dict[str, Any]]:
+    ) -> tuple[models.QuerySet[Any, Any], dict[str, Any]]:
         """Build advanced audit query with multiple filters and performance optimization."""
         queryset = AuditEvent.objects.select_related("user", "content_type")
         query_info = {"filters_applied": [], "performance_hints": [], "estimated_cost": "low"}
@@ -3416,8 +3466,8 @@ class AuditSearchService:
 
     @classmethod
     def _apply_basic_filters(
-        cls, queryset: models.QuerySet[AuditEvent], filters: dict[str, Any], query_info: dict[str, Any]
-    ) -> models.QuerySet[AuditEvent]:
+        cls, queryset: models.QuerySet[Any, Any], filters: dict[str, Any], query_info: dict[str, Any]
+    ) -> models.QuerySet[Any, Any]:
         """Apply basic entity filters (user, action, category, severity)."""
         filter_mappings = [
             ("user_ids", "user_id__in", "user_filter"),
@@ -3435,8 +3485,8 @@ class AuditSearchService:
 
     @classmethod
     def _apply_date_filters(
-        cls, queryset: models.QuerySet[AuditEvent], filters: dict[str, Any], query_info: dict[str, Any]
-    ) -> models.QuerySet[AuditEvent]:
+        cls, queryset: models.QuerySet[Any, Any], filters: dict[str, Any], query_info: dict[str, Any]
+    ) -> models.QuerySet[Any, Any]:
         """Apply date range filters with timezone awareness."""
         if filters.get("start_date"):
             start_date = filters["start_date"]
@@ -3460,8 +3510,8 @@ class AuditSearchService:
 
     @classmethod
     def _apply_technical_filters(
-        cls, queryset: models.QuerySet[AuditEvent], filters: dict[str, Any], query_info: dict[str, Any]
-    ) -> models.QuerySet[AuditEvent]:
+        cls, queryset: models.QuerySet[Any, Any], filters: dict[str, Any], query_info: dict[str, Any]
+    ) -> models.QuerySet[Any, Any]:
         """Apply technical filters (IP, request ID, session)."""
         list_filters = [
             ("ip_addresses", "ip_address__in", "ip_filter"),
@@ -3484,8 +3534,8 @@ class AuditSearchService:
 
     @classmethod
     def _apply_content_filters(
-        cls, queryset: models.QuerySet[AuditEvent], filters: dict[str, Any], query_info: dict[str, Any]
-    ) -> models.QuerySet[AuditEvent]:
+        cls, queryset: models.QuerySet[Any, Any], filters: dict[str, Any], query_info: dict[str, Any]
+    ) -> models.QuerySet[Any, Any]:
         """Apply content-based filters (text search, sensitivity)."""
         if filters.get("search_text"):
             search_text = filters["search_text"]
@@ -3512,8 +3562,8 @@ class AuditSearchService:
 
     @classmethod
     def _apply_advanced_filters(
-        cls, queryset: models.QuerySet[AuditEvent], filters: dict[str, Any], query_info: dict[str, Any]
-    ) -> models.QuerySet[AuditEvent]:
+        cls, queryset: models.QuerySet[Any, Any], filters: dict[str, Any], query_info: dict[str, Any]
+    ) -> models.QuerySet[Any, Any]:
         """Apply advanced value existence filters."""
         value_filters = [
             ("has_old_values", "old_values", "old_values_filter"),

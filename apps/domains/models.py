@@ -110,6 +110,9 @@ class TLD(models.Model):
         if self.registrar_cost_cents > 0:
             return (self.profit_margin_cents / self.registrar_cost_cents) * 100
         return 0
+    
+    # Signal-related attributes for change tracking
+    _original_tld_values: dict[str, str | None] | None = None
 
 
 # ===============================================================================
@@ -127,7 +130,7 @@ class Registrar(models.Model):
     - ROTLD: Romanian .ro domains
     """
 
-    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("active", _("🟢 Active")),
         ("suspended", _("🟡 Suspended")),
         ("disabled", _("🔴 Disabled")),
@@ -181,12 +184,12 @@ class Registrar(models.Model):
             # Handle legacy field names from old test files
             if "api_url" in kwargs:
                 kwargs["api_endpoint"] = kwargs.pop("api_url")
-            
+
             # Handle legacy boolean is_active to status mapping
             if "is_active" in kwargs:
                 is_active = kwargs.pop("is_active")
                 kwargs["status"] = "active" if is_active else "disabled"
-                
+
         super().__init__(*args, **kwargs)
 
     def __str__(self) -> str:
@@ -195,6 +198,14 @@ class Registrar(models.Model):
     def get_supported_tlds(self) -> QuerySet["TLD"]:
         """🌐 Get TLDs supported by this registrar"""
         return TLD.objects.filter(registrar_assignments__registrar=self)
+    
+    def get_api_credentials(self) -> tuple[str, str]:
+        """🔑 Get API credentials for this registrar"""
+        # TODO: Implement secure credential retrieval
+        return (self.api_username or "", self.api_key or "")
+    
+    # Signal-related attributes for change tracking  
+    _original_registrar_values: dict[str, str | None] | None = None
 
 
 # ===============================================================================
@@ -236,7 +247,7 @@ class TLDRegistrarAssignment(models.Model):
     class Meta:
         verbose_name = _("🔗 TLD-Registrar Assignment")
         verbose_name_plural = _("🔗 TLD-Registrar Assignments")
-        unique_together: ClassVar[list[list[str]]] = ("tld", "registrar")
+        unique_together: ClassVar[tuple[tuple[str, ...]]] = (("tld", "registrar"),)
         ordering: ClassVar[tuple[str, ...]] = ("tld__extension", "priority")
 
     def __str__(self) -> str:
@@ -260,7 +271,7 @@ class Domain(models.Model):
     - Nameserver management
     """
 
-    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("pending", _("⏳ Pending Registration")),
         ("active", _("🟢 Active")),
         ("expired", _("🔴 Expired")),
@@ -371,6 +382,9 @@ class Domain(models.Model):
                 except TLD.DoesNotExist:
                     raise ValidationError(_(f"TLD '.{domain_tld}' is not supported")) from None
 
+    # Signal-related attributes for change tracking
+    _original_domain_values: dict[str, str | None] | None = None
+
 
 # ===============================================================================
 # DOMAIN ORDER ITEMS
@@ -387,7 +401,7 @@ class DomainOrderItem(models.Model):
     - Multi-year purchases
     """
 
-    ACTION_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    ACTION_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("register", _("🆕 Register")),
         ("renew", _("🔄 Renew")),
         ("transfer", _("📥 Transfer")),
@@ -434,6 +448,9 @@ class DomainOrderItem(models.Model):
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    
+    # Private attributes for signal handling
+    _original_order_item_values: dict[str, Any] | None = None
 
     class Meta:
         verbose_name = _("🛒 Domain Order Item")

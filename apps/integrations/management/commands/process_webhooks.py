@@ -1,4 +1,5 @@
 import logging
+from datetime import timedelta
 from typing import Any
 
 from django.core.management.base import BaseCommand
@@ -92,7 +93,7 @@ class Command(BaseCommand):
         """🗑️ Clean up old processed webhooks"""
         self.stdout.write("🗑️ Cleaning up old processed webhooks (>30 days)")
 
-        cutoff_date = timezone.now() - timezone.timedelta(days=30)
+        cutoff_date = timezone.now() - timedelta(days=30)
 
         # Only delete processed/skipped webhooks, keep failed ones for analysis
         old_webhooks = WebhookEvent.objects.filter(status__in=["processed", "skipped"], processed_at__lt=cutoff_date)
@@ -166,7 +167,7 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING(f"\n⚠️ {failed_ready_for_retry} failed webhooks ready for retry"))
 
         # Old webhooks that can be cleaned up
-        cutoff_date = timezone.now() - timezone.timedelta(days=30)
+        cutoff_date = timezone.now() - timedelta(days=30)
         old_webhooks = WebhookEvent.objects.filter(
             status__in=["processed", "skipped"], processed_at__lt=cutoff_date
         ).count()

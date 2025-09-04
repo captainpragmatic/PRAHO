@@ -24,7 +24,7 @@ from apps.common.constants import (
     INVITER_ARG_POSITION,
     USER_DATA_ARG_POSITION,
 )
-from apps.common.types import Err, Result
+from apps.common.types import Err, Ok, Result
 
 from .validators import (
     RATE_LIMIT_REGISTRATION_PER_IP,
@@ -99,7 +99,7 @@ def secure_service_method(
                 # Log successful execution
                 _log_success_event(config, func.__name__, user, request_ip)
 
-                return result
+                return Ok(result)
 
             except ValidationError as e:
                 return _handle_validation_error(e, config, func.__name__, user, request_ip)

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import suppress
-from typing import cast
+from typing import Any, cast
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -38,34 +38,35 @@ def _handle_secure_error(request: HttpRequest, error: Exception, operation: str,
     """🔒 Handle errors securely without leaking sensitive information"""
     # Use logger from re-export module so patches work correctly
     from . import views as views_module  # noqa: PLC0415
+
     logger = views_module.security_logger
-    
+
     def _safe_add_message(request: HttpRequest, message: str) -> None:
         """Safely add a message, handling cases where MessageMiddleware is not installed"""
         with suppress(MessageFailure):
             messages.error(request, message)
-    
+
     if isinstance(error, ValidationError):
-        _safe_add_message(request, _("❌ Please check your input: Invalid data provided"))
+        _safe_add_message(request, str(_("❌ Please check your input: Invalid data provided")))
         logger.warning(
             f"⚡ [CustomerSecurity] Validation error during {operation}",
             extra={"user_id": user_id, "operation": operation, "error_type": "validation"},
         )
     elif isinstance(error, IntegrityError):
-        _safe_add_message(request, _("❌ This operation conflicts with existing data"))
+        _safe_add_message(request, str(_("❌ This operation conflicts with existing data")))
         logger.error(
             f"⚡ [CustomerSecurity] Integrity error during {operation}",
             extra={"user_id": user_id, "operation": operation, "error_type": "integrity"},
         )
     elif isinstance(error, PermissionDenied):
-        _safe_add_message(request, _("❌ You don't have permission to perform this action"))
+        _safe_add_message(request, str(_("❌ You don't have permission to perform this action")))
         logger.warning(
             f"⚡ [CustomerSecurity] Permission denied during {operation}",
             extra={"user_id": user_id, "operation": operation, "error_type": "permission"},
         )
     else:
         # Unexpected errors - completely generic message
-        _safe_add_message(request, _("❌ Operation failed. Please contact support if this continues"))
+        _safe_add_message(request, str(_("❌ Operation failed. Please contact support if this continues")))
         logger.exception(
             f"⚡ [CustomerSecurity] Unexpected error during {operation}",
             extra={"user_id": user_id, "operation": operation, "error_type": "unexpected"},
@@ -135,12 +136,11 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
         accessible_qs = Customer.objects.filter(id__in=[c.id for c in accessible_customers])
     else:
         accessible_qs = Customer.objects.none()
-    
+
     # Expected queries: 4 (customer + tax + billing + addresses)
     customer = get_object_or_404(
-        accessible_qs.select_related("tax_profile", "billing_profile")
-        .prefetch_related("addresses", "notes"), 
-        id=customer_id
+        accessible_qs.select_related("tax_profile", "billing_profile").prefetch_related("addresses", "notes"),
+        id=customer_id,
     )
 
     # Get recent notes
@@ -158,14 +158,16 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
     return render(request, "customers/detail.html", context)
 
 
-def _handle_user_creation_for_customer(request: HttpRequest, customer: Customer, form_data: dict, result: dict) -> None:
+def _handle_user_creation_for_customer(
+    request: HttpRequest, customer: Customer, form_data: dict[str, str], result: dict[str, str]
+) -> None:
     """Handle user creation for a new customer."""
     created_by_user = cast(User, request.user)  # Safe in authenticated contexts
     user_creation_request = UserCreationRequest(
         customer=customer,
         first_name=form_data.get("first_name", ""),
         last_name=form_data.get("last_name", ""),
-        send_welcome=result["send_welcome_email"],
+        send_welcome=bool(result["send_welcome_email"]),
         created_by=created_by_user,
     )
     user_result = CustomerUserService.create_user_for_customer(user_creation_request)
@@ -180,7 +182,7 @@ def _handle_user_creation_for_customer(request: HttpRequest, customer: Customer,
         messages.error(request, _("❌ Failed to create user account: {error}").format(error=user_result.unwrap_err()))
 
 
-def _handle_user_linking_for_customer(request: HttpRequest, customer: Customer, result: dict) -> None:
+def _handle_user_linking_for_customer(request: HttpRequest, customer: Customer, result: dict[str, Any]) -> None:
     """Handle linking existing user to a new customer."""
     existing_user = result["existing_user"]
     if not existing_user:
@@ -296,8 +298,11 @@ def customer_edit(request: HttpRequest, customer_id: int) -> HttpResponse:
     user = cast(User, request.user)  # Safe due to @staff_required
     accessible_customers = user.get_accessible_customers()
     accessible_qs = (
-        accessible_customers if isinstance(accessible_customers, QuerySet)
-        else Customer.objects.filter(id__in=[c.id for c in accessible_customers]) if accessible_customers else Customer.objects.none()
+        accessible_customers
+        if isinstance(accessible_customers, QuerySet)
+        else Customer.objects.filter(id__in=[c.id for c in accessible_customers])
+        if accessible_customers
+        else Customer.objects.none()
     )
     customer = get_object_or_404(accessible_qs, id=customer_id)
 
@@ -332,8 +337,11 @@ def customer_delete(request: HttpRequest, customer_id: int) -> HttpResponse:
     user = cast(User, request.user)  # Safe due to @staff_required
     accessible_customers = user.get_accessible_customers()
     accessible_qs = (
-        accessible_customers if isinstance(accessible_customers, QuerySet)
-        else Customer.objects.filter(id__in=[c.id for c in accessible_customers]) if accessible_customers else Customer.objects.none()
+        accessible_customers
+        if isinstance(accessible_customers, QuerySet)
+        else Customer.objects.filter(id__in=[c.id for c in accessible_customers])
+        if accessible_customers
+        else Customer.objects.none()
     )
     customer = get_object_or_404(accessible_qs, id=customer_id)
 
@@ -406,7 +414,7 @@ def _validate_customer_assign_access(request: HttpRequest, user: User, customer:
     return None
 
 
-def _handle_user_creation_action(request: HttpRequest, customer: Customer, assignment_data: dict) -> None:
+def _handle_user_creation_action(request: HttpRequest, customer: Customer, assignment_data: dict[str, str]) -> None:
     """Handle the 'create' action for user assignment."""
     send_welcome = bool(assignment_data.get("send_welcome_email", True))
     created_by_user = cast(User, request.user)  # Safe in authenticated contexts
@@ -423,13 +431,11 @@ def _handle_user_creation_action(request: HttpRequest, customer: Customer, assig
         user, email_sent = user_result.unwrap()
         _show_user_creation_success_message(request, customer, user, email_sent)
     else:
-        error_result = cast(Err, user_result)
+        error_result = cast(Err[str], user_result)
         messages.error(request, _("❌ Failed to create user account: {error}").format(error=error_result.error))
 
 
-def _show_user_creation_success_message(
-    request: HttpRequest, customer: Customer, user: User, email_sent: bool
-) -> None:
+def _show_user_creation_success_message(request: HttpRequest, customer: Customer, user: User, email_sent: bool) -> None:
     """Show appropriate success message for user creation."""
     if email_sent:
         messages.success(
@@ -448,7 +454,7 @@ def _show_user_creation_success_message(
         messages.warning(request, _("⚠️ Welcome email could not be sent. Please inform the user manually."))
 
 
-def _handle_user_linking_action(request: HttpRequest, customer: Customer, assignment_data: dict) -> None:
+def _handle_user_linking_action(request: HttpRequest, customer: Customer, assignment_data: dict[str, str]) -> None:
     """Handle the 'link' action for user assignment."""
     existing_user = assignment_data["existing_user"]
     role = assignment_data["role"]
@@ -479,7 +485,7 @@ def _handle_user_linking_action(request: HttpRequest, customer: Customer, assign
             ),
         )
     else:
-        error_result = cast(Err, link_result)
+        error_result = cast(Err[str], link_result)
         messages.error(request, _("❌ Failed to link user: {error}").format(error=error_result.error))
 
 
@@ -561,8 +567,11 @@ def customer_assign_user(request: HttpRequest, customer_id: int) -> HttpResponse
     user = cast(User, request.user)  # Safe due to @staff_required
     accessible_customers = user.get_accessible_customers()
     accessible_qs = (
-        accessible_customers if isinstance(accessible_customers, QuerySet)
-        else Customer.objects.filter(id__in=[c.id for c in accessible_customers]) if accessible_customers else Customer.objects.none()
+        accessible_customers
+        if isinstance(accessible_customers, QuerySet)
+        else Customer.objects.filter(id__in=[c.id for c in accessible_customers])
+        if accessible_customers
+        else Customer.objects.none()
     )
     customer = get_object_or_404(accessible_qs, id=customer_id)
 

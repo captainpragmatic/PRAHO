@@ -28,15 +28,12 @@ class CustomerService:
         """Get customers accessible to the user based on their permissions."""
         # Late import to avoid circular dependencies
         from .customer_models import Customer  # noqa: PLC0415
-        
+
         if user.is_staff:
             return Customer.objects.all()
-        
+
         # Regular users can only access customers they are members of
-        return Customer.objects.filter(
-            memberships__user=user,
-            memberships__is_active=True
-        ).distinct()
+        return Customer.objects.filter(memberships__user=user, memberships__is_active=True).distinct()
 
     @staticmethod
     def create_customer(
@@ -48,28 +45,19 @@ class CustomerService:
         """Create a new customer with proper validation."""
         # Late import to avoid circular dependencies
         from .customer_models import Customer  # noqa: PLC0415
-        
+
         # Basic validation
         if not name.strip():
             raise ValueError("Customer name is required")
-            
+
         # Create customer
-        customer = Customer.objects.create(
-            name=name.strip(),
-            customer_type=customer_type,
-            created_by=user,
-            **kwargs
-        )
-        
+        customer = Customer.objects.create(name=name.strip(), customer_type=customer_type, created_by=user, **kwargs)
+
         logger.info(
             f"✅ [Customer] Created customer: {customer.name} (ID: {customer.id})",
-            extra={
-                "customer_id": customer.id,
-                "user_id": user.id,
-                "operation": "customer_create"
-            }
+            extra={"customer_id": customer.id, "user_id": user.id, "operation": "customer_create"},
         )
-        
+
         return customer
 
     @staticmethod
@@ -82,14 +70,14 @@ class CustomerService:
                 "customer_id": customer.id,
                 "user_id": user.id,
                 "operation": "customer_update",
-                "fields_updated": list(updates.keys())
-            }
+                "fields_updated": list(updates.keys()),
+            },
         )
-        
+
         for field, value in updates.items():
             if hasattr(customer, field):
                 setattr(customer, field, value)
-        
+
         customer.save()
         return customer
 
@@ -97,19 +85,19 @@ class CustomerService:
     def search_customers(query: str, user: User) -> QuerySet[Customer]:
         """Search customers accessible to the user."""
         accessible_customers = CustomerService.get_accessible_customers(user)
-        
+
         if not query.strip():
             return accessible_customers
-            
+
         # Simple search across name, company_name, and email
         return accessible_customers.filter(
-            models.Q(name__icontains=query) |
-            models.Q(company_name__icontains=query) |
-            models.Q(primary_email__icontains=query)
+            models.Q(name__icontains=query)
+            | models.Q(company_name__icontains=query)
+            | models.Q(primary_email__icontains=query)
         )
 
     @staticmethod
-    def get_customer_summary(customer: Customer) -> dict:
+    def get_customer_summary(customer: Customer) -> dict[str, Any]:
         """Get customer summary information."""
         return {
             "id": customer.id,

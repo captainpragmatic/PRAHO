@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TypedDict
 
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
@@ -23,16 +23,28 @@ logger = logging.getLogger(__name__)
 # Import validation functions - simplified placeholders to avoid circular imports
 MAX_ADDRESS_FIELD_LENGTH = 500  # Constant
 
+# TypedDict definitions for private tracking attributes
+class _ProformaSnapshot(TypedDict, total=False):
+    """Snapshot of proforma state for change tracking"""
+    status: str
+    total_cents: int
+
+
 def validate_financial_amount(amount_cents: int, field_name: str = "Amount") -> None:
     """Placeholder - actual validation will be done via main models"""
+
 
 def validate_financial_json(data: Any, field_name: str = "Financial JSON field") -> None:
     """Placeholder - actual validation will be done via main models"""
 
+
 def validate_financial_text_field(text: str, field_name: str, max_length: int | None = None) -> None:
     """Placeholder - actual validation will be done via main models"""
 
-def log_security_event(event_type: str, details: dict[str, Any], request_ip: str | None = None, user_email: str | None = None) -> None:
+
+def log_security_event(
+    event_type: str, details: dict[str, Any], request_ip: str | None = None, user_email: str | None = None
+) -> None:
     """Placeholder - actual logging will be done via main models"""
     logger.info(f"🔒 [Billing Security] {event_type}: {details}")
 
@@ -107,12 +119,12 @@ class ProformaInvoice(models.Model):
 
     # Proforma-specific fields
     STATUS_CHOICES: ClassVar = [
-        ('draft', _('Draft')),
-        ('sent', _('Sent')),
-        ('accepted', _('Accepted')),
-        ('expired', _('Expired')),
+        ("draft", _("Draft")),
+        ("sent", _("Sent")),
+        ("accepted", _("Accepted")),
+        ("expired", _("Expired")),
     ]
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft")
     valid_until = models.DateTimeField(default=timezone.now, help_text=_("Proforma expires after this date"))
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -133,6 +145,9 @@ class ProformaInvoice(models.Model):
 
     # Files
     pdf_file = models.FileField(upload_to="proformas/pdf/", blank=True, null=True)
+    
+    # Private attributes for change tracking (not DB fields - annotations only)
+    _original_proforma_values: _ProformaSnapshot | None = None
 
     class Meta:
         db_table = "proforma_invoice"
@@ -147,13 +162,12 @@ class ProformaInvoice(models.Model):
     def __str__(self) -> str:
         return f"{self.number} - {self.customer}"
 
-
     @property
     def is_expired(self) -> bool:
         if not self.valid_until:
             return False
         # Handle both date and datetime objects
-        if hasattr(self.valid_until, 'time'):
+        if hasattr(self.valid_until, "time"):
             # It's a datetime object
             return timezone.now() > self.valid_until
         else:
@@ -176,12 +190,12 @@ class ProformaInvoice(models.Model):
     def clean(self) -> None:
         """🔒 Validate proforma data and log security events"""
         super().clean()
-        
+
         # Validate financial amounts
         validate_financial_amount(self.subtotal_cents, "Subtotal")
         validate_financial_amount(self.tax_cents, "Tax amount")
         validate_financial_amount(self.total_cents, "Total amount")
-        
+
         # Log security validation event
         log_security_event(
             event_type="proforma_validation",
@@ -234,7 +248,7 @@ class ProformaInvoice(models.Model):
 class ProformaLine(models.Model):
     """Proforma line items"""
 
-    KIND_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    KIND_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("service", _("Service")),
         ("setup", _("Setup Fee")),
         ("discount", _("Discount")),

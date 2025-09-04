@@ -46,10 +46,10 @@ logger = logging.getLogger(__name__)
 def _serialize_values_for_audit(values: dict[str, Any]) -> dict[str, Any]:
     """
     Serialize values for audit logging, handling datetime objects.
-    
+
     Args:
         values: Dictionary that may contain datetime objects
-        
+
     Returns:
         Dictionary with datetime objects converted to ISO strings
     """
@@ -61,6 +61,7 @@ def _serialize_values_for_audit(values: dict[str, Any]) -> dict[str, Any]:
         else:
             serialized[key] = value
     return serialized
+
 
 # ===============================================================================
 # BUSINESS CONSTANTS
@@ -92,17 +93,22 @@ def handle_invoice_created_or_updated(sender: type[Invoice], instance: Invoice, 
         # Enhanced audit logging using BillingAuditService
         event_type = "invoice_created" if created else "invoice_status_changed"
 
-        old_values = _serialize_values_for_audit(getattr(instance, "_original_invoice_values", {})) if not created else {}
-        new_values = _serialize_values_for_audit({
-            "number": instance.number,
-            "status": instance.status,
-            "total_cents": instance.total_cents,
-            "customer_id": str(instance.customer.id),
-        })
+        old_values = (
+            _serialize_values_for_audit(getattr(instance, "_original_invoice_values", {})) if not created else {}
+        )
+        new_values = _serialize_values_for_audit(
+            {
+                "number": instance.number,
+                "status": instance.status,
+                "total_cents": instance.total_cents,
+                "customer_id": str(instance.customer.id),
+            }
+        )
 
         if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
             # Use specialized billing audit service for richer metadata
             from apps.audit.services import BusinessEventData  # noqa: PLC0415
+
             event_data = BusinessEventData(
                 event_type=event_type,
                 business_object=instance,
@@ -150,14 +156,14 @@ def store_original_invoice_values(sender: type[Invoice], instance: Invoice, **kw
         if instance.pk:
             try:
                 original = Invoice.objects.get(pk=instance.pk)
-                instance._original_invoice_values = {
+                instance._original_invoice_values = {  # type: ignore[attr-defined]
                     "status": original.status,
                     "total_cents": original.total_cents,
                     "due_at": original.due_at,
                     "efactura_sent": original.efactura_sent,
                 }
             except Invoice.DoesNotExist:
-                instance._original_invoice_values = {}
+                instance._original_invoice_values = {}  # type: ignore[attr-defined]
     except Exception as e:
         logger.exception(f"🔥 [Invoice Signal] Failed to store original values: {e}")
 
@@ -173,7 +179,7 @@ def handle_invoice_number_generation(sender: type[Invoice], instance: Invoice, c
             # Generate proper invoice number
             from .services import InvoiceNumberingService  # noqa: PLC0415
 
-            sequence = InvoiceNumberingService.get_or_create_sequence("default")
+            sequence = InvoiceNumberingService.get_or_create_sequence("default")  # type: ignore[attr-defined]
             new_number = sequence.get_next_number("INV")
 
             # Update without triggering signals again
@@ -248,13 +254,17 @@ def handle_payment_created_or_updated(sender: type[Payment], instance: Payment, 
     - Service activation
     """
     try:
-        old_values = _serialize_values_for_audit(getattr(instance, "_original_payment_values", {})) if not created else {}
-        new_values = _serialize_values_for_audit({
-            "status": instance.status,
-            "amount_cents": instance.amount_cents,
-            "payment_method": instance.payment_method,
-            "customer_id": str(instance.customer.id),
-        })
+        old_values = (
+            _serialize_values_for_audit(getattr(instance, "_original_payment_values", {})) if not created else {}
+        )
+        new_values = _serialize_values_for_audit(
+            {
+                "status": instance.status,
+                "amount_cents": instance.amount_cents,
+                "payment_method": instance.payment_method,
+                "customer_id": str(instance.customer.id),
+            }
+        )
 
         # Enhanced payment audit logging
         if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
@@ -262,6 +272,7 @@ def handle_payment_created_or_updated(sender: type[Payment], instance: Payment, 
             audit_event_type = "payment_initiated" if created else f"payment_{instance.status}"
 
             from apps.audit.services import BusinessEventData  # noqa: PLC0415
+
             event_data = BusinessEventData(
                 event_type=audit_event_type,
                 business_object=instance,
@@ -353,15 +364,20 @@ def handle_proforma_invoice_conversion(
         # Enhanced proforma audit logging
         event_type = "proforma_created" if created else "proforma_updated"
 
-        old_values = _serialize_values_for_audit(getattr(instance, "_original_proforma_values", {})) if not created else {}
-        new_values = _serialize_values_for_audit({
-            "number": instance.number,
-            "total_cents": instance.total_cents,
-            "customer_id": str(instance.customer.id),
-        })
+        old_values = (
+            _serialize_values_for_audit(getattr(instance, "_original_proforma_values", {})) if not created else {}
+        )
+        new_values = _serialize_values_for_audit(
+            {
+                "number": instance.number,
+                "total_cents": instance.total_cents,
+                "customer_id": str(instance.customer.id),
+            }
+        )
 
         if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
             from apps.audit.services import BusinessEventData  # noqa: PLC0415
+
             event_data = BusinessEventData(
                 event_type=event_type,
                 business_object=instance,
@@ -383,8 +399,8 @@ def handle_proforma_invoice_conversion(
                         ProformaConversionService,
                     )
 
-                    result = ProformaConversionService.convert_to_invoice(
-                        proforma=instance, conversion_reason="payment_received"
+                    result = ProformaConversionService.convert_to_invoice(  # type: ignore[call-arg]
+                        proforma_id=str(instance.id), conversion_reason="payment_received"
                     )
 
                     if result.is_ok():
@@ -863,7 +879,7 @@ def _handle_payment_success(payment: Payment) -> None:
                 payment.invoice.status = "paid"
                 payment.invoice.paid_at = timezone.now()
                 payment.invoice.save(update_fields=["status", "paid_at"])
-                
+
                 # 🚀 CROSS-APP INTEGRATION: Trigger Virtualmin provisioning on invoice payment
                 _trigger_virtualmin_provisioning_on_payment(payment.invoice)
 
@@ -1165,9 +1181,9 @@ def _requires_efactura_submission(invoice: Invoice) -> bool:
 def _trigger_efactura_submission(invoice: Invoice) -> None:
     """Trigger e-Factura submission for Romanian compliance"""
     try:
-        from apps.billing.tasks import submit_efactura  # noqa: PLC0415
+        from django_q.tasks import async_task  # noqa: PLC0415
 
-        submit_efactura.delay(str(invoice.id))
+        async_task("apps.billing.tasks.submit_efactura", str(invoice.id))
         logger.info(f"🏛️ [e-Factura] Queued submission for {invoice.number}")
     except ImportError:
         logger.warning("⚠️ [e-Factura] Django-Q2 not available - implement sync submission")
@@ -1177,9 +1193,9 @@ def _schedule_payment_reminders(invoice: Invoice) -> None:
     """Schedule payment reminder emails"""
     try:
         if invoice.due_at:
-            from apps.billing.tasks import schedule_payment_reminders  # noqa: PLC0415
+            from django_q.tasks import async_task  # noqa: PLC0415
 
-            schedule_payment_reminders.delay(str(invoice.id))
+            async_task("apps.billing.tasks.schedule_payment_reminders", str(invoice.id))
     except ImportError:
         logger.info(f"📅 [Invoice] Would schedule reminders for {invoice.number}")
 
@@ -1187,9 +1203,9 @@ def _schedule_payment_reminders(invoice: Invoice) -> None:
 def _cancel_payment_reminders(invoice: Invoice) -> None:
     """Cancel scheduled payment reminders"""
     try:
-        from apps.billing.tasks import cancel_payment_reminders  # noqa: PLC0415
+        from django_q.tasks import async_task  # noqa: PLC0415
 
-        cancel_payment_reminders.delay(str(invoice.id))
+        async_task("apps.billing.tasks.cancel_payment_reminders", str(invoice.id))
     except ImportError:
         logger.info(f"🚫 [Invoice] Would cancel reminders for {invoice.number}")
 
@@ -1197,9 +1213,9 @@ def _cancel_payment_reminders(invoice: Invoice) -> None:
 def _trigger_dunning_process(invoice: Invoice) -> None:
     """Start automated dunning process for overdue invoice"""
     try:
-        from apps.billing.tasks import start_dunning_process  # noqa: PLC0415
+        from django_q.tasks import async_task  # noqa: PLC0415
 
-        start_dunning_process.delay(str(invoice.id))
+        async_task("apps.billing.tasks.start_dunning_process", str(invoice.id))
     except ImportError:
         logger.warning(f"⚠️ [Invoice] Would start dunning for {invoice.number}")
 
@@ -1209,9 +1225,9 @@ def _schedule_payment_retry(payment: Payment) -> None:
     try:
         from apps.billing.services import PaymentRetryService  # noqa: PLC0415
 
-        policy = PaymentRetryService.get_customer_retry_policy(payment.customer)
+        policy = PaymentRetryService.get_customer_retry_policy(payment.customer)  # type: ignore[attr-defined]
         if policy and policy.is_active:
-            PaymentRetryService.schedule_retry(payment, policy)
+            PaymentRetryService.schedule_retry(payment, policy)  # type: ignore[attr-defined]
             logger.info(f"🔄 [Payment] Retry scheduled for payment {payment.id}")
     except Exception as e:
         logger.exception(f"🔥 [Payment] Failed to schedule retry: {e}")
@@ -1238,7 +1254,7 @@ def _update_customer_invoice_history(invoice: Invoice, event_type: str) -> None:
     try:
         from apps.customers.services import CustomerAnalyticsService  # noqa: PLC0415
 
-        CustomerAnalyticsService.record_invoice_event(
+        CustomerAnalyticsService.record_invoice_event(  # type: ignore[attr-defined]
             customer=invoice.customer,
             event_type=event_type,
             invoice_amount_cents=invoice.total_cents,
@@ -1282,7 +1298,7 @@ def _handle_overdue_service_suspension(invoice: Invoice) -> None:
 
         # Suspend services for overdue invoices (configurable business rule)
         for service in services:
-            result = ServiceManagementService.suspend_service(
+            result = ServiceManagementService.suspend_service(  # type: ignore[attr-defined]
                 service=service,
                 reason=f"Invoice {invoice.number} overdue",
                 suspend_immediately=False,  # Grace period
@@ -1374,7 +1390,7 @@ def _handle_efactura_refund_reporting(invoice: Invoice) -> None:
             from apps.billing.services import EFacturaService  # noqa: PLC0415
 
             # Generate refund notification for e-Factura
-            result = EFacturaService.generate_refund_notification(
+            result = EFacturaService.generate_refund_notification(  # type: ignore[attr-defined]
                 original_invoice=invoice, refund_reason="customer_request", refund_date=invoice.updated_at
             )
 
@@ -1497,22 +1513,27 @@ def _revert_customer_credit_score(customer: Any, event_type: str) -> None:
 def _trigger_virtualmin_provisioning_on_payment(invoice: Invoice) -> None:
     """
     Trigger Virtualmin provisioning when invoice is fully paid.
-    
+
     Cross-app integration point: billing → provisioning
     """
     try:
         # Import here to avoid circular imports
+        from django_q.tasks import async_task  # noqa: PLC0415
+
         from apps.orders.models import OrderItem  # noqa: PLC0415
-        from apps.provisioning.virtualmin_tasks import provision_virtualmin_account  # noqa: PLC0415
-        
+
         # Find hosting services in the paid invoice
-        order_items = OrderItem.objects.filter(order__invoice=invoice).select_related('service')
-        
-        hosting_services = [item.service for item in order_items if item.service and item.service.requires_hosting_account()]
-        
+        order_items = OrderItem.objects.filter(order__invoice=invoice).select_related("service")
+
+        hosting_services = [
+            item.service for item in order_items if item.service and item.service.requires_hosting_account()
+        ]
+
         if hosting_services:
-            logger.info(f"🚀 [CrossApp] Triggering Virtualmin provisioning for {len(hosting_services)} services on invoice {invoice.number}")
-            
+            logger.info(
+                f"🚀 [CrossApp] Triggering Virtualmin provisioning for {len(hosting_services)} services on invoice {invoice.number}"
+            )
+
             # Queue provisioning tasks for each hosting service
             for service in hosting_services:
                 try:
@@ -1520,21 +1541,28 @@ def _trigger_virtualmin_provisioning_on_payment(invoice: Invoice) -> None:
                     primary_domain = service.get_primary_domain()
                     if primary_domain:
                         # Queue async provisioning task
-                        provision_virtualmin_account.delay(
-                            service_id=str(service.id),
-                            domain=primary_domain,
-                            template="Default"  # Use default template, can be customized per service plan
+                        params = {
+                            "service_id": str(service.id),
+                            "domain": primary_domain,
+                            "template": "Default",  # Use default template, can be customized per service plan
+                        }
+                        async_task("apps.provisioning.virtualmin_tasks.provision_virtualmin_account", params)
+
+                        logger.info(
+                            f"🔄 [CrossApp] Queued Virtualmin provisioning for {primary_domain} (service: {service.id})"
                         )
-                        
-                        logger.info(f"🔄 [CrossApp] Queued Virtualmin provisioning for {primary_domain} (service: {service.id})")
                     else:
-                        logger.warning(f"⚠️ [CrossApp] No primary domain found for service {service.id}, skipping Virtualmin provisioning")
-                        
+                        logger.warning(
+                            f"⚠️ [CrossApp] No primary domain found for service {service.id}, skipping Virtualmin provisioning"
+                        )
+
                 except Exception as e:
                     logger.error(f"🔥 [CrossApp] Failed to queue Virtualmin provisioning for service {service.id}: {e}")
-                    
+
         else:
-            logger.debug(f"📋 [CrossApp] No hosting services found in invoice {invoice.number}, skipping Virtualmin provisioning")
-            
+            logger.debug(
+                f"📋 [CrossApp] No hosting services found in invoice {invoice.number}, skipping Virtualmin provisioning"
+            )
+
     except Exception as e:
         logger.error(f"🔥 [CrossApp] Failed to trigger Virtualmin provisioning on payment: {e}")

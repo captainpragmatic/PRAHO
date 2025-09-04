@@ -53,7 +53,7 @@ def _get_accessible_customer_ids(user: User) -> list[int]:
     elif isinstance(accessible_customers, list | tuple):
         return [c.id for c in accessible_customers]
     else:
-        return []
+        return []  # type: ignore[unreachable]
 
 
 def _build_domain_table_data(domains: QuerySet[Domain] | list[Domain], user: User) -> dict[str, Any]:
@@ -329,7 +329,7 @@ def domain_register(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912 # Do
     elif isinstance(accessible_customers, list | tuple):
         customers = Customer.objects.filter(id__in=[c.id for c in accessible_customers])
     else:
-        customers = Customer.objects.none()
+        customers = Customer.objects.none()  # type: ignore[unreachable]
 
     # Get featured and all TLDs for selection
     featured_tlds = TLDService.get_featured_tlds()[:6]  # Top 6 featured TLDs
@@ -367,7 +367,7 @@ def domain_register(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912 # Do
                     if success:
                         messages.success(request, _(f"✅ Domain {domain_name} registered successfully!"))
                         # result is a Domain object when success is True
-                        domain: Domain = result
+                        domain = cast(Domain, result)
                         return redirect("domains:detail", domain_id=domain.id)
                     else:
                         # result is a string error message when success is False

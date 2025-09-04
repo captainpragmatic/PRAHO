@@ -200,10 +200,10 @@ def can_manage_financial_data(user: User) -> bool:
     """
     if user.is_superuser:
         return True
-        
+
     if not user.is_staff:
         return False
-        
+
     allowed_roles = ["admin", "billing", "manager"]
     return getattr(user, "staff_role", "") in allowed_roles
 

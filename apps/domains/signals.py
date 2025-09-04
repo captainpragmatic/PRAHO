@@ -13,7 +13,7 @@ Includes:
 """
 
 import logging
-from typing import Any
+from typing import Any, cast
 
 from django.conf import settings
 from django.core.cache import cache
@@ -63,7 +63,7 @@ def handle_domain_created_or_updated(sender: type[Domain], instance: Domain, cre
             "expires_at": instance.expires_at.isoformat() if instance.expires_at else None,
             "auto_renew": instance.auto_renew,
             "whois_privacy": instance.whois_privacy,
-            "is_locked": instance.is_locked,
+            "is_locked": instance.locked,
             "customer_id": str(instance.customer.id) if instance.customer else None,
         }
 
@@ -97,8 +97,9 @@ def handle_domain_created_or_updated(sender: type[Domain], instance: Domain, cre
 
             # Check for registrar changes (transfers)
             old_registrar = old_values.get("registrar")
-            if old_registrar and old_registrar != new_values.get("registrar"):
-                _handle_domain_transfer(instance, old_registrar, new_values.get("registrar"))
+            new_registrar = cast(str | None, new_values.get("registrar"))
+            if old_registrar and old_registrar != new_registrar:
+                _handle_domain_transfer(instance, old_registrar, new_registrar)
 
             # Check for security-related changes
             _check_domain_security_changes(instance, old_values, new_values)
@@ -123,9 +124,9 @@ def store_original_domain_values(sender: type[Domain], instance: Domain, **kwarg
                     "registrar": original.registrar.name if original.registrar else None,
                     "tld": original.tld.extension if original.tld else None,
                     "expires_at": original.expires_at.isoformat() if original.expires_at else None,
-                    "auto_renew": original.auto_renew,
-                    "whois_privacy": original.whois_privacy,
-                    "is_locked": original.is_locked,
+                    "auto_renew": str(original.auto_renew),
+                    "whois_privacy": str(original.whois_privacy),
+                    "is_locked": str(original.locked),
                 }
             except Domain.DoesNotExist:
                 instance._original_domain_values = {}
@@ -190,7 +191,7 @@ def handle_tld_created_or_updated(sender: type[TLD], instance: TLD, created: boo
             "registration_price_cents": instance.registration_price_cents,
             "renewal_price_cents": instance.renewal_price_cents,
             "transfer_price_cents": instance.transfer_price_cents,
-            "status": instance.status,
+            "is_active": instance.is_active,
         }
 
         if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
@@ -230,10 +231,10 @@ def store_original_tld_values(sender: type[TLD], instance: TLD, **kwargs: Any) -
                 original = TLD.objects.get(pk=instance.pk)
                 instance._original_tld_values = {
                     "extension": original.extension,
-                    "registration_price_cents": original.registration_price_cents,
-                    "renewal_price_cents": original.renewal_price_cents,
-                    "transfer_price_cents": original.transfer_price_cents,
-                    "status": original.status,
+                    "registration_price_cents": str(original.registration_price_cents),
+                    "renewal_price_cents": str(original.renewal_price_cents),
+                    "transfer_price_cents": str(original.transfer_price_cents),
+                    "is_active": str(original.is_active),
                 }
             except TLD.DoesNotExist:
                 instance._original_tld_values = {}
@@ -387,10 +388,10 @@ def handle_domain_order_item_processing(
         old_values = getattr(instance, "_original_order_item_values", {}) if not created else {}
         new_values = {
             "domain_name": instance.domain_name,
-            "operation_type": instance.operation_type,
-            "registrar": instance.registrar.name if instance.registrar else None,
+            "action": instance.action,
+            "registrar": None,  # TLD doesn't have direct registrar relation
             "tld": instance.tld.extension if instance.tld else None,
-            "price_cents": instance.price_cents,
+            "total_price_cents": instance.total_price_cents,
         }
 
         if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
@@ -401,7 +402,7 @@ def handle_domain_order_item_processing(
                 context=AuditContext(actor_type="system"),
                 old_values=old_values,
                 new_values=new_values,
-                description=f"Domain order {instance.operation_type}: {instance.domain_name}",
+                description=f"Domain order {instance.action}: {instance.domain_name}",
             )
 
         if created:
@@ -412,7 +413,7 @@ def handle_domain_order_item_processing(
             # This would typically involve checking order item status fields
             _handle_domain_order_processing(instance, old_values, new_values)
 
-        logger.info(f"📋 [Domain Order] {instance.operation_type} for {instance.domain_name}")
+        logger.info(f"📋 [Domain Order] {instance.action} for {instance.domain_name}")
 
     except Exception as e:
         logger.exception(f"🔥 [Domain Order Signal] Failed to handle order item: {e}")
@@ -427,10 +428,10 @@ def store_original_order_item_values(sender: type[DomainOrderItem], instance: Do
                 original = DomainOrderItem.objects.get(pk=instance.pk)
                 instance._original_order_item_values = {
                     "domain_name": original.domain_name,
-                    "operation_type": original.operation_type,
-                    "registrar": original.registrar.name if original.registrar else None,
+                    "action": original.action,
+                    "registrar": None,  # TLD doesn't have direct registrar relation
                     "tld": original.tld.extension if original.tld else None,
-                    "price_cents": original.price_cents,
+                    "total_price_cents": original.total_price_cents,
                 }
             except DomainOrderItem.DoesNotExist:
                 instance._original_order_item_values = {}
@@ -878,72 +879,73 @@ def _invalidate_billing_tld_caches(tld: TLD) -> None:
 def _handle_existing_virtualmin_account(domain: Domain, virtualmin_account: Any) -> None:
     """Handle updates to existing Virtualmin account based on domain status changes"""
     from apps.provisioning.virtualmin_service import VirtualminProvisioningService  # noqa: PLC0415
-    
-    if domain.status != 'active' and virtualmin_account.status == 'active':
+
+    if domain.status != "active" and virtualmin_account.status == "active":
         # Domain became inactive - suspend Virtualmin account
         provisioning_service = VirtualminProvisioningService()
         result = provisioning_service.suspend_account(
-            virtualmin_account, 
-            reason=f"Domain status changed to {domain.status}"
+            virtualmin_account, reason=f"Domain status changed to {domain.status}"
         )
-        
+
         if result.is_ok():
             logger.info(f"🚫 [CrossApp] Suspended Virtualmin account for {domain.name}")
         else:
             logger.error(f"🔥 [CrossApp] Failed to suspend Virtualmin account for {domain.name}: {result.unwrap_err()}")
-            
-    elif domain.status == 'active' and virtualmin_account.status == 'suspended':
+
+    elif domain.status == "active" and virtualmin_account.status == "suspended":
         # Domain became active - unsuspend Virtualmin account
         provisioning_service = VirtualminProvisioningService()
         result = provisioning_service.unsuspend_account(virtualmin_account)
-        
+
         if result.is_ok():
             logger.info(f"✅ [CrossApp] Unsuspended Virtualmin account for {domain.name}")
         else:
-            logger.error(f"🔥 [CrossApp] Failed to unsuspend Virtualmin account for {domain.name}: {result.unwrap_err()}")
+            logger.error(
+                f"🔥 [CrossApp] Failed to unsuspend Virtualmin account for {domain.name}: {result.unwrap_err()}"
+            )
 
 
 def sync_domain_to_virtualmin(domain: Domain) -> None:
     """
     Sync domain creation/updates to Virtualmin control panel.
-    
+
     Cross-app integration point: domains → provisioning
     """
     try:
         # Import here to avoid circular imports
         from apps.provisioning.models import Service  # noqa: PLC0415
         from apps.provisioning.virtualmin_models import VirtualminAccount  # noqa: PLC0415
-        
+
         # Find hosting services associated with this domain
         hosting_services = Service.objects.filter(
-            domains__domain__name=domain.name,
-            status__in=['active', 'provisioning']
+            domains__domain__name=domain.name, status__in=["active", "provisioning"]
         ).distinct()
-        
+
         if hosting_services:
-            logger.info(f"🔄 [CrossApp] Syncing domain {domain.name} to Virtualmin for {len(hosting_services)} services")
-            
+            logger.info(
+                f"🔄 [CrossApp] Syncing domain {domain.name} to Virtualmin for {len(hosting_services)} services"
+            )
+
             for service in hosting_services:
                 try:
                     # Check if Virtualmin account already exists
-                    virtualmin_account = VirtualminAccount.objects.filter(
-                        domain=domain.name,
-                        service=service
-                    ).first()
-                    
+                    virtualmin_account = VirtualminAccount.objects.filter(domain=domain.name, service=service).first()
+
                     if virtualmin_account:
                         # Update existing account if needed
                         _handle_existing_virtualmin_account(domain, virtualmin_account)
                     else:
                         # No existing account - this might need provisioning
-                        logger.debug(f"📋 [CrossApp] No Virtualmin account found for domain {domain.name}, may need provisioning")
-                        
+                        logger.debug(
+                            f"📋 [CrossApp] No Virtualmin account found for domain {domain.name}, may need provisioning"
+                        )
+
                 except Exception as e:
                     logger.error(f"🔥 [CrossApp] Failed to sync domain {domain.name} to service {service.id}: {e}")
-                    
+
         else:
             logger.debug(f"📋 [CrossApp] No hosting services found for domain {domain.name}, skipping Virtualmin sync")
-            
+
     except Exception as e:
         logger.error(f"🔥 [CrossApp] Failed to sync domain {domain.name} to Virtualmin: {e}")
 
@@ -952,17 +954,17 @@ def sync_domain_to_virtualmin(domain: Domain) -> None:
 def _handle_new_domain_registration_with_virtualmin_sync(domain: Domain) -> None:
     """
     Handle new domain registration with Virtualmin synchronization.
-    
+
     Extends the existing domain registration handler to include control panel sync.
     """
     try:
         # Call existing domain registration logic
         _handle_new_domain_registration(domain)
-        
+
         # Add Virtualmin synchronization
-        if domain.status == 'active':
+        if domain.status == "active":
             sync_domain_to_virtualmin(domain)
-            
+
     except Exception as e:
         logger.error(f"🔥 [CrossApp] Enhanced domain registration handling failed for {domain.name}: {e}")
 
@@ -970,16 +972,16 @@ def _handle_new_domain_registration_with_virtualmin_sync(domain: Domain) -> None
 def _handle_domain_status_change_with_virtualmin_sync(domain: Domain, old_status: str, new_status: str) -> None:
     """
     Handle domain status changes with Virtualmin synchronization.
-    
+
     Extends the existing status change handler to include control panel sync.
     """
     try:
         # Call existing status change logic
         _handle_domain_status_change(domain, old_status, new_status)
-        
+
         # Add Virtualmin synchronization for status changes
         if old_status != new_status:
             sync_domain_to_virtualmin(domain)
-            
+
     except Exception as e:
         logger.error(f"🔥 [CrossApp] Enhanced domain status change handling failed for {domain.name}: {e}")

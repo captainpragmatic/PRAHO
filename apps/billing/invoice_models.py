@@ -24,16 +24,22 @@ logger = logging.getLogger(__name__)
 
 MAX_ADDRESS_FIELD_LENGTH = 500  # Constant
 
+
 def validate_financial_amount(amount_cents: int, field_name: str = "Amount") -> None:
     """Placeholder - actual validation will be done via main models"""
 
-def validate_financial_json(data: Any, field_name: str = "Financial JSON field") -> None:  
+
+def validate_financial_json(data: Any, field_name: str = "Financial JSON field") -> None:
     """Placeholder - actual validation will be done via main models"""
+
 
 def validate_financial_text_field(text: str, field_name: str, max_length: int | None = None) -> None:
     """Placeholder - actual validation will be done via main models"""
 
-def log_security_event(event_type: str, details: dict[str, Any], request_ip: str | None = None, user_email: str | None = None) -> None:
+
+def log_security_event(
+    event_type: str, details: dict[str, Any], request_ip: str | None = None, user_email: str | None = None
+) -> None:
     """Placeholder - actual logging will be done via main models"""
     logger.info(f"🔒 [Billing Security] {event_type}: {details}")
 
@@ -95,7 +101,7 @@ class Invoice(models.Model):
     Updated status choices as requested.
     """
 
-    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("draft", _("Draft")),
         ("issued", _("Issued")),  # Changed from 'sent' to 'issued'
         ("paid", _("Paid")),
@@ -278,6 +284,21 @@ class Invoice(models.Model):
         self.status = "paid"
         self.paid_at = timezone.now()
         self.save()
+    
+    @property
+    def amount_due(self) -> int:
+        """Calculate remaining amount due after payments"""
+        # TODO: Implement actual payment tracking
+        # For now, assume unpaid invoices have full amount due
+        if self.status == "paid":
+            return 0
+        return self.total_cents
+    
+    def update_status_from_payments(self) -> None:
+        """Update invoice status based on associated payments"""
+        # TODO: Implement payment-based status update logic
+        if self.amount_due <= 0:
+            self.mark_as_paid()
 
 
 class InvoiceLine(models.Model):
@@ -286,7 +307,7 @@ class InvoiceLine(models.Model):
     Replaces old InvoiceItem model with better structure from schema.
     """
 
-    KIND_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    KIND_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("service", _("Service")),
         ("setup", _("Setup Fee")),
         ("credit", _("Credit")),

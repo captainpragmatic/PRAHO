@@ -18,7 +18,7 @@ MIN_HSTS_SECONDS = 300  # 5 minutes minimum
 MAX_SESSION_AGE_HOURS = 86400  # 24 hours in seconds
 
 
-def _validate_proxy_entries(trusted_proxies: list[str]) -> list[Any]:
+def _validate_proxy_entries(trusted_proxies: list[Any]) -> list[Any]:
     """Validate individual proxy entries for format and security issues."""
     errors = []
 

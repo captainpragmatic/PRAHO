@@ -33,8 +33,11 @@ def customer_tax_profile(request: HttpRequest, customer_id: int) -> HttpResponse
     user = cast(User, request.user)  # Safe due to @staff_required
     accessible_customers = user.get_accessible_customers()
     accessible_qs = (
-        accessible_customers if isinstance(accessible_customers, QuerySet)
-        else Customer.objects.filter(id__in=[c.id for c in accessible_customers]) if accessible_customers else Customer.objects.none()
+        accessible_customers
+        if isinstance(accessible_customers, QuerySet)
+        else Customer.objects.filter(id__in=[c.id for c in accessible_customers])
+        if accessible_customers
+        else Customer.objects.none()
     )
     customer = get_object_or_404(accessible_qs, id=customer_id)
 
@@ -71,8 +74,11 @@ def customer_billing_profile(request: HttpRequest, customer_id: int) -> HttpResp
     user = cast(User, request.user)  # Safe due to @staff_required
     accessible_customers = user.get_accessible_customers()
     accessible_qs = (
-        accessible_customers if isinstance(accessible_customers, QuerySet)
-        else Customer.objects.filter(id__in=[c.id for c in accessible_customers]) if accessible_customers else Customer.objects.none()
+        accessible_customers
+        if isinstance(accessible_customers, QuerySet)
+        else Customer.objects.filter(id__in=[c.id for c in accessible_customers])
+        if accessible_customers
+        else Customer.objects.none()
     )
     customer = get_object_or_404(accessible_qs, id=customer_id)
 

@@ -3,7 +3,7 @@ import hmac
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from django.db import transaction
 from django.utils import timezone
@@ -95,7 +95,7 @@ class BaseWebhookProcessor(ABC):
         if not self.source_name:
             # Keep defensive check, but ABC prevents direct instantiation anyway
             self.source_name = self.__class__.__name__.lower()
-        
+
         # Validate that signature implementation is secure
         self._validate_signature_implementation()
 
@@ -129,7 +129,7 @@ class BaseWebhookProcessor(ABC):
             match result:
                 case Ok(processing_result):
                     # result is Ok[WebhookProcessingResult] - safe to access .value
-                    return processing_result.to_tuple()
+                    return cast("tuple[bool, str, WebhookEvent | None]", processing_result.to_tuple())
                 case Err(error_message):
                     # result is Err[str] - safe to access .error
                     # Handle special duplicate case
@@ -143,9 +143,6 @@ class BaseWebhookProcessor(ABC):
                         ).to_tuple()
 
                     return WebhookProcessingResult.error_result(error_message).to_tuple()
-                case _:
-                    # This should never happen with proper Result types, but provides safety
-                    return WebhookProcessingResult.error_result("Unknown result type").to_tuple()
 
         except Exception as e:
             logger.exception(f"💥 Critical error processing {self.source_name} webhook")
@@ -247,7 +244,6 @@ class BaseWebhookProcessor(ABC):
     @abstractmethod
     def verify_signature(self, payload: dict[str, Any], signature: str, headers: dict[str, str]) -> bool:
         """🔐 Verify webhook signature - must be implemented by subclasses"""
-
 
     def handle_event(self, webhook_event: WebhookEvent) -> tuple[bool, str]:
         """

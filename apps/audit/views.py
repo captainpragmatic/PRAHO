@@ -10,7 +10,7 @@ import logging
 import uuid
 from datetime import timedelta
 from io import StringIO
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from django.contrib import messages
 from django.contrib.auth import get_user_model, logout  # For GDPR deletion logout
@@ -18,8 +18,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.contenttypes.models import ContentType
 from django.core.files.storage import default_storage
 from django.core.paginator import Paginator
-from django.db import models
-from django.db.models import Q
+from django.db.models import Q, QuerySet
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -61,9 +60,7 @@ else:
 logger = logging.getLogger(__name__)
 
 
-
-
-def _parse_date_filters(filters: dict) -> dict:
+def _parse_date_filters(filters: dict[str, Any]) -> dict[str, Any]:
     """Parse date strings to timezone-aware datetime objects to prevent naive datetime warnings."""
     parsed_filters = filters.copy()
 
@@ -169,7 +166,7 @@ def request_data_export(request: HttpRequest) -> HttpResponse:
                     ).format(str(export_request.id)[:8]),
                 )
 
-                # Process export asynchronously (in a real app, use Celery)
+                # Process export asynchronously using Django-Q2
                 # For now, process immediately for demo
                 logger.info("🔍 [GDPR Export] Processing export immediately...")
                 processing_result = gdpr_export_service.process_data_export(export_request)
@@ -705,7 +702,7 @@ def export_logs(request: HttpRequest) -> HttpResponse:
         return _export_logs_csv(queryset, timestamp)
 
 
-def _export_logs_csv(queryset: models.QuerySet[AuditEvent], timestamp: str) -> HttpResponse:
+def _export_logs_csv(queryset: QuerySet[AuditEvent], timestamp: str) -> HttpResponse:
     """Export audit logs as CSV."""
     output = StringIO()
     writer = csv.writer(output)
@@ -762,7 +759,7 @@ def _export_logs_csv(queryset: models.QuerySet[AuditEvent], timestamp: str) -> H
     return response
 
 
-def _export_logs_json(queryset: models.QuerySet[AuditEvent], timestamp: str) -> HttpResponse:
+def _export_logs_json(queryset: QuerySet[AuditEvent], timestamp: str) -> HttpResponse:
     """Export audit logs as JSON."""
 
     data = {
@@ -1352,12 +1349,12 @@ def update_alert_status(request: HttpRequest, alert_id: uuid.UUID) -> HttpRespon
 
         if action == "acknowledge":
             alert.status = "acknowledged"
-            alert.acknowledged_by = request.user
+            alert.acknowledged_by = cast(User, request.user)
             alert.acknowledged_at = timezone.now()
             messages.success(request, _("Alert acknowledged."))
 
         elif action == "assign_to_me":
-            alert.assigned_to = request.user
+            alert.assigned_to = cast(User, request.user)
             if alert.status == "active":
                 alert.status = "investigating"
             messages.success(request, _("Alert assigned to you."))

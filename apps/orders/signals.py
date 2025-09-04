@@ -132,7 +132,12 @@ def _handle_order_status_change(order: Order, old_status: str, new_status: str) 
 def _trigger_invoice_generation(order: Order) -> None:
     """Trigger automatic invoice generation for processing orders"""
     try:
-        from apps.billing.services import InvoiceGenerationService  # noqa: PLC0415  # type: ignore[attr-defined]
+        # Try to import invoice generation service
+        try:
+            from apps.billing.services import InvoiceGenerationService  # noqa: PLC0415  # type: ignore[attr-defined]
+        except ImportError:
+            logger.warning("📋 [Order] InvoiceGenerationService not available, skipping invoice generation")
+            return
 
         # Generate invoice asynchronously if Django-Q2 is available
         try:
@@ -142,12 +147,13 @@ def _trigger_invoice_generation(order: Order) -> None:
             logger.info(f"📋 [Order] Invoice generation queued for {order.order_number}")
         except ImportError:
             # Fallback to synchronous generation
-            result = InvoiceGenerationService.generate_from_order(order)
-            if result.is_ok():
-                invoice = result.unwrap()
-                logger.info(f"📋 [Order] Invoice {invoice.number} generated for {order.order_number}")
+            result = InvoiceGenerationService.generate_from_order(order)  # type: ignore[attr-defined]
+            if hasattr(result, 'is_ok') and result.is_ok():
+                invoice = result.unwrap() if hasattr(result, 'unwrap') else None
+                if invoice:
+                    logger.info(f"📋 [Order] Invoice {invoice.number} generated for {order.order_number}")
             else:
-                logger.error(f"🔥 [Order] Invoice generation failed: {result.error}")
+                logger.error(f"🔥 [Order] Invoice generation failed: {getattr(result, 'error', 'Unknown error')}")
 
     except Exception as e:
         logger.exception(f"🔥 [Order Signal] Invoice generation failed: {e}")

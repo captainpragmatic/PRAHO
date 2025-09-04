@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import ClassVar
+from typing import Any, ClassVar, TypedDict
 
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
@@ -16,6 +16,13 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from .currency_models import Currency
+
+
+# TypedDict definitions for private tracking attributes
+class _PaymentSnapshot(TypedDict, total=False):
+    """Snapshot of payment state for change tracking"""
+    status: str
+    amount_cents: int
 
 # ===============================================================================
 # PAYMENT & CREDIT MODELS
@@ -28,7 +35,7 @@ class Payment(models.Model):
     Updated to support multiple payment methods and gateway responses.
     """
 
-    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("pending", _("Pending")),
         ("succeeded", _("Succeeded")),  # Changed from 'completed'
         ("failed", _("Failed")),
@@ -36,7 +43,7 @@ class Payment(models.Model):
         ("partially_refunded", _("Partially Refunded")),
     )
 
-    METHOD_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    METHOD_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("stripe", _("Stripe")),
         ("bank", _("Bank Transfer")),
         ("paypal", _("PayPal")),
@@ -46,7 +53,9 @@ class Payment(models.Model):
 
     # Core relationships
     customer = models.ForeignKey("customers.Customer", on_delete=models.RESTRICT, related_name="payments")
-    invoice = models.ForeignKey("billing.Invoice", on_delete=models.SET_NULL, null=True, blank=True, related_name="payments")
+    invoice = models.ForeignKey(
+        "billing.Invoice", on_delete=models.SET_NULL, null=True, blank=True, related_name="payments"
+    )
 
     # Payment details
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
@@ -68,6 +77,9 @@ class Payment(models.Model):
 
     # Audit
     created_by = models.ForeignKey("users.User", on_delete=models.SET_NULL, null=True, related_name="created_payments")
+    
+    # Private attributes for change tracking (not DB fields - annotations only)
+    _original_payment_values: _PaymentSnapshot | None = None
 
     class Meta:
         db_table = "payment"
@@ -247,6 +259,9 @@ class PaymentRetryAttempt(models.Model):
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    
+    # Private attributes for change tracking (not DB fields - annotations only)
+    _original_retry_status: str | None = None
 
     class Meta:
         db_table = "payment_retry_attempts"

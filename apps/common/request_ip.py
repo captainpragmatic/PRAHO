@@ -112,14 +112,14 @@ def get_safe_client_ip(request: HttpRequest) -> str:
             # Get first IP in chain (original client)
             client_ip = x_forwarded_for.split(",")[0].strip()
             if client_ip and _is_valid_ip(client_ip):
-                return client_ip
+                return str(client_ip)
 
         # Check X-Real-IP header (alternative)
         x_real_ip = request.META.get("HTTP_X_REAL_IP")
         if x_real_ip:
             client_ip = x_real_ip.split(",")[0].strip()
             if client_ip and _is_valid_ip(client_ip):
-                return client_ip
+                return str(client_ip)
 
         # No valid proxy headers found, fallback to REMOTE_ADDR
         return remote_addr

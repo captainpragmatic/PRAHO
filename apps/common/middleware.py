@@ -244,7 +244,7 @@ class GDPRComplianceMiddleware:
         # Track consent for cookies and data processing
         if not request.session.get("gdpr_consent_shown"):
             # Mark that GDPR banner should be shown
-            request.gdpr_banner_required = True
+            request.gdpr_banner_required = True  # type: ignore[attr-defined]
             request.session["gdpr_consent_shown"] = True
 
         response = self.get_response(request)
@@ -292,7 +292,7 @@ class SessionSecurityMiddleware:
         try:
             if SessionSecurityService is None:
                 # Service not available due to circular import - skip processing
-                return
+                return  # type: ignore[unreachable]
 
             # Update session timeout based on current context
             SessionSecurityService.update_session_timeout(request)

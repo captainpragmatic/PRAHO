@@ -87,7 +87,7 @@ def validate_financial_json(data: Any, field_name: str = "Financial JSON field")
     _check_financial_json_security(data, field_name)
 
 
-def validate_financial_amount(amount_cents: int, field_name: str = "Amount") -> None:
+def validate_financial_amount(amount_cents: int | None, field_name: str = "Amount") -> None:
     """🔒 Validate financial amounts to prevent overflow/underflow"""
     if amount_cents is None:
         return

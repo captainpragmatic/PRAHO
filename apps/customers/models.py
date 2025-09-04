@@ -3,7 +3,7 @@ Customer models re-export hub for PRAHO Platform.
 Maintains backward compatibility after ADR-0012 feature-based reorganization.
 """
 
-# Core customer models  
+# Core customer models
 # Contact models
 from .contact_models import (
     CustomerAddress,

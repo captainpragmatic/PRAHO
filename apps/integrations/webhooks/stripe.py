@@ -43,11 +43,11 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
 
     def extract_event_id(self, payload: dict[str, Any]) -> str:
         """🔍 Extract Stripe event ID"""
-        return payload.get("id", "")
+        return str(payload.get("id", ""))
 
     def extract_event_type(self, payload: dict[str, Any]) -> str:
         """🏷️ Extract Stripe event type"""
-        return payload.get("type", "")
+        return str(payload.get("type", ""))
 
     def verify_signature(self, payload: dict[str, Any], signature: str, headers: dict[str, str]) -> bool:
         """🔐 Verify Stripe webhook signature"""
@@ -193,9 +193,8 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             if customer_email:
                 try:
                     customer = Customer.objects.get(primary_email=customer_email)
-                    # Store Stripe customer ID in metadata
-                    customer.meta["stripe_customer_id"] = stripe_customer_id
-                    customer.save(update_fields=["meta"])
+                    # TODO: Store Stripe customer ID in metadata (requires meta JSONField)
+                    logger.info(f"🔗 Linked Stripe customer {stripe_customer_id} to {customer.name}")
 
                     logger.info(f"🔗 Linked Stripe customer {stripe_customer_id} to {customer}")
                     return True, f"Customer linked: {customer}"

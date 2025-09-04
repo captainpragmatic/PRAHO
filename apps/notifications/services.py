@@ -28,22 +28,29 @@ MAX_CONTEXT_VALUE_LENGTH = 1000  # Maximum length for template context values
 # VALIDATION FUNCTIONS
 # ===============================================================================
 
+
 def validate_template_context(context: dict[str, Any]) -> dict[str, Any]:
     """🔒 Validate template context for security"""
     if not context:
         return context
-    
+
     # Check for dangerous keys that shouldn't be in templates
     dangerous_keys = [
-        '__builtins__', 'eval', 'exec', 'import',
-        'password', 'api_key', 'token', 'private_data'  # Sensitive data keys
+        "__builtins__",
+        "eval",
+        "exec",
+        "import",
+        "password",
+        "api_key",
+        "token",
+        "private_data",  # Sensitive data keys
     ]
     for key in context:
         if key in dangerous_keys:
             raise DjangoValidationError("Template context contains sensitive information")
-    
+
     # Do not hard-fail on overall context size; enforce limits per value
-    
+
     # Sanitize XSS in context values
     sanitized_context = {}
     for key, value in context.items():
@@ -66,7 +73,7 @@ def validate_template_context(context: dict[str, Any]) -> dict[str, Any]:
             sanitized_context[key] = cleaned_value
         else:
             sanitized_context[key] = value
-    
+
     return sanitized_context
 
 
@@ -74,7 +81,7 @@ def render_template_safely(template_content: str, context: dict[str, Any]) -> st
     """🔒 Render template with security validation"""
     # Validate template content first
     validate_template_content(template_content)
-    
+
     # Validate and sanitize context
     # Track if any values were truncated by validation to append marker
     value_truncated = False
@@ -83,7 +90,7 @@ def render_template_safely(template_content: str, context: dict[str, Any]) -> st
     for v in original_context.values():
         if isinstance(v, str) and len(v) > MAX_CONTEXT_VALUE_LENGTH:
             value_truncated = True
-    
+
     # Simple template rendering (placeholder implementation)
     # In production, this would use Django's template engine with safety checks
     rendered = template_content

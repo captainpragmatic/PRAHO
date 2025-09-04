@@ -1,5 +1,5 @@
 """
-Customer contact models for PRAHO Platform  
+Customer contact models for PRAHO Platform
 Address, payment methods, and notes models for customer contact management.
 """
 
@@ -131,15 +131,14 @@ class CustomerPaymentMethod(SoftDeleteModel):
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Save with bank details validation and default method logic"""
         self.full_clean()
-        
+
         # Handle default payment method logic
         if self.is_default:
             # Set all other payment methods for this customer to non-default
-            CustomerPaymentMethod.objects.filter(
-                customer=self.customer,
-                is_default=True
-            ).exclude(pk=self.pk).update(is_default=False)
-        
+            CustomerPaymentMethod.objects.filter(customer=self.customer, is_default=True).exclude(pk=self.pk).update(
+                is_default=False
+            )
+
         super().save(*args, **kwargs)
 
     def clean(self) -> None:

@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from django import forms
 from django.contrib.auth import get_user_model
@@ -57,7 +57,7 @@ class CustomerForm(forms.ModelForm):
 
     class Meta:
         model = Customer
-        fields: ClassVar[list[str]] = (
+        fields: ClassVar[tuple[str, ...]] = (
             "name",
             "customer_type",
             "company_name",
@@ -116,7 +116,7 @@ class CustomerForm(forms.ModelForm):
         if customer_type == "company" and not company_name:
             raise ValidationError(_("Company name is required for companies"))
 
-        return cast(str, company_name or "")
+        return company_name or ""
 
     def clean_website(self) -> str:
         """Validate website URL for SSRF prevention"""
@@ -142,7 +142,7 @@ class CustomerTaxProfileForm(forms.ModelForm):
 
     class Meta:
         model = CustomerTaxProfile
-        fields: ClassVar[list[str]] = (
+        fields: ClassVar[tuple[str, ...]] = (
             "cui",
             "registration_number",
             "is_vat_payer",
@@ -190,7 +190,7 @@ class CustomerTaxProfileForm(forms.ModelForm):
             # Security: Use more specific regex pattern to prevent ReDoS
             if not re.match(r"^RO\d{6,10}$", cui):  # Romanian CUI is typically 6-10 digits
                 raise ValidationError(_("CUI must be in format RO followed by 6-10 digits"))
-        return cast(str, cui or "")
+        return cui or ""
 
     def clean_vat_number(self) -> str:
         """🔒 Validate VAT number format with ReDoS protection"""
@@ -208,7 +208,7 @@ class CustomerTaxProfileForm(forms.ModelForm):
             if not re.match(r"^RO\d{6,10}$", vat_number):  # Romanian VAT is typically 6-10 digits
                 raise ValidationError(_("VAT number must be in format RO followed by 6-10 digits"))
 
-        return cast(str, vat_number or "")
+        return vat_number or ""
 
 
 # ===============================================================================
@@ -223,7 +223,7 @@ class CustomerBillingProfileForm(forms.ModelForm):
 
     class Meta:
         model = CustomerBillingProfile
-        fields: ClassVar[list[str]] = (
+        fields: ClassVar[tuple[str, ...]] = (
             "payment_terms",
             "credit_limit",
             "preferred_currency",
@@ -268,7 +268,7 @@ class CustomerAddressForm(forms.ModelForm):
 
     class Meta:
         model = CustomerAddress
-        fields: ClassVar[list[str]] = (
+        fields: ClassVar[tuple[str, ...]] = (
             "address_type",
             "address_line1",
             "address_line2",
@@ -325,7 +325,7 @@ class CustomerAddressForm(forms.ModelForm):
         if country == "România" and postal_code and not re.match(r"^\d{6}$", postal_code):
             raise ValidationError(_("Romanian postal codes must be 6 digits"))
 
-        return cast(str, postal_code or "")
+        return postal_code or ""
 
 
 # ===============================================================================
@@ -340,7 +340,7 @@ class CustomerNoteForm(forms.ModelForm):
 
     class Meta:
         model = CustomerNote
-        fields: ClassVar[list[str]] = ("note_type", "title", "content", "is_important", "is_private")
+        fields: ClassVar[tuple[str, ...]] = ("note_type", "title", "content", "is_important", "is_private")
 
         widgets: ClassVar[dict[str, forms.Widget]] = {
             "title": forms.TextInput(
@@ -712,7 +712,7 @@ class CustomerCreationForm(forms.Form):
         )
 
         # Create tax profile
-        CustomerTaxProfile.objects.create(
+        CustomerTaxProfile.objects.create(  # type: ignore[misc]
             customer=customer,
             cui=data.get("cui", ""),
             is_vat_payer=data.get("is_vat_payer", False),
@@ -721,7 +721,7 @@ class CustomerCreationForm(forms.Form):
         )
 
         # Create billing profile
-        CustomerBillingProfile.objects.create(
+        CustomerBillingProfile.objects.create(  # type: ignore[misc]
             customer=customer,
             payment_terms=data["payment_terms"],
             credit_limit=data["credit_limit"],
@@ -729,7 +729,7 @@ class CustomerCreationForm(forms.Form):
         )
 
         # Create primary address
-        CustomerAddress.objects.create(
+        CustomerAddress.objects.create(  # type: ignore[misc]
             customer=customer,
             address_type="primary",
             address_line1=data["address_line1"],
@@ -761,7 +761,7 @@ class CustomerUserAssignmentForm(forms.Form):
     Provides the same three options as customer creation
     """
 
-    USER_ACTION_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    USER_ACTION_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("create", _("Create new user account")),
         ("link", _("Link existing user")),
         ("skip", _("Skip user assignment")),

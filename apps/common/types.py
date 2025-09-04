@@ -9,7 +9,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar
 
 # ModelAdmin import removed - Django admin disabled
 from django.contrib.auth.models import AbstractUser
@@ -136,7 +136,6 @@ HTMXHandler = Callable[[HttpRequest], HttpResponse]
 # DJANGO MODEL TYPES
 # ===============================================================================
 
-QuerySetGeneric = QuerySet[M]
 # ModelAdminGeneric types removed - Django admin disabled
 
 # ===============================================================================
@@ -581,20 +580,20 @@ class APIRateLimitError(BusinessError):
 # ===============================================================================
 
 
-class Serializable:
+class Serializable(Protocol):
     """Protocol for objects that can be serialized to JSON"""
 
     def serialize(self) -> dict[str, Any]: ...
 
 
-class Auditable:
+class Auditable(Protocol):
     """Protocol for objects that support audit logging"""
 
     def get_audit_data(self) -> AuditChanges: ...
     def get_audit_entity(self) -> AuditEntity: ...
 
 
-class Billable:
+class Billable(Protocol):
     """Protocol for objects that can generate billing entries"""
 
     def get_billing_amount(self) -> Amount: ...
@@ -602,7 +601,7 @@ class Billable:
     def get_billing_currency(self) -> Currency: ...
 
 
-class Provisionable:
+class Provisionable(Protocol):
     """Protocol for services that can be provisioned"""
 
     def provision(self) -> Result[ServiceConfig, str]: ...
@@ -610,14 +609,14 @@ class Provisionable:
     def get_status(self) -> ServiceStatus: ...
 
 
-class Cacheable:
+class Cacheable(Protocol):
     """Protocol for objects that can be cached"""
 
     def get_cache_key(self) -> CacheKey: ...
     def get_cache_ttl(self) -> CacheTTL: ...
 
 
-class Notifiable:
+class Notifiable(Protocol):
     """Protocol for objects that can receive notifications"""
 
     def get_notification_preferences(self) -> dict[NotificationType, bool]: ...
@@ -674,6 +673,12 @@ ModelMetaOptions = dict[str, Any]
 AsyncRequestHandler = Callable[[HttpRequest], Any]  # Will be Awaitable[HttpResponse]
 AsyncServiceMethod = Callable[..., Any]  # Will be Awaitable[ServiceResult]
 AsyncRepoMethod = Callable[..., Any]  # Will be Awaitable[RepoCreateResult]
+
+# ===============================================================================
+# DJANGO CHOICE FIELD STUB
+# ===============================================================================
+
+# Import ChoiceField from django_choices module
 
 # ===============================================================================
 # LEGACY COMPATIBILITY ALIASES 🔄

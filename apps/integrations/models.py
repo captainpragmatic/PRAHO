@@ -33,14 +33,14 @@ class WebhookEvent(models.Model):
     double provisioning, and data corruption from retried webhooks.
     """
 
-    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("pending", _("⏳ Pending")),
         ("processed", _("✅ Processed")),
         ("failed", _("❌ Failed")),
         ("skipped", _("⏭️ Skipped")),  # Duplicate or irrelevant
     )
 
-    SOURCE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    SOURCE_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("stripe", _("💳 Stripe")),
         ("paypal", _("🟡 PayPal")),
         ("virtualmin", _("🖥️ Virtualmin")),
@@ -104,7 +104,7 @@ class WebhookEvent(models.Model):
         verbose_name_plural = _("🔄 Webhook Events")
 
         # Prevent duplicate processing
-        unique_together: ClassVar[list[list[str]]] = ("source", "event_id")
+        unique_together: ClassVar[tuple[tuple[str, ...]]] = (("source", "event_id"),)
 
         indexes: ClassVar[tuple[models.Index, ...]] = (
             # Query pending webhooks for processing
@@ -127,9 +127,7 @@ class WebhookEvent(models.Model):
         return f"🔄 {self.get_source_display()} | {self.event_type} | {self.status}"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        """Ensure non-null signature_hash value for NOT NULL DB constraint."""
-        if self.signature_hash is None:
-            self.signature_hash = ""
+        """Save webhook event."""
         super().save(*args, **kwargs)
 
     @property
@@ -241,7 +239,7 @@ class WebhookDelivery(models.Model):
     - domain.registered, domain.expired
     """
 
-    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("pending", _("⏳ Pending")),
         ("delivered", _("✅ Delivered")),
         ("failed", _("❌ Failed")),
@@ -299,28 +297,27 @@ class WebhookDelivery(models.Model):
     def clean(self) -> None:
         """🔒 Validate webhook delivery for SSRF protection"""
         # Skip the default URL validation to implement our own security checks
-        
+
         # Don't call super().clean() as it would validate the URL field normally
         # Instead, we implement our own comprehensive validation
-        
+
         if self.endpoint_url:
-            
             try:
                 parsed = urlparse(self.endpoint_url)
                 hostname = parsed.hostname
-                
-                # Special check for malformed IPv6 URLs like http://::1/path 
+
+                # Special check for malformed IPv6 URLs like http://::1/path
                 # (should be http://[::1]/path)
-                if not hostname and '::' in self.endpoint_url:
+                if not hostname and "::" in self.endpoint_url:
                     raise ValidationError("Webhook URLs cannot target localhost")
-                
+
                 if not hostname:
                     raise ValidationError("Invalid webhook URL format")
-                
+
                 # Block localhost and loopback
-                if hostname in ['localhost', '127.0.0.1', '::1']:
+                if hostname in ["localhost", "127.0.0.1", "::1"]:
                     raise ValidationError("Webhook URLs cannot target localhost")
-                
+
                 # Check for private IP ranges
                 try:
                     ip = ipaddress.ip_address(hostname)
@@ -329,13 +326,13 @@ class WebhookDelivery(models.Model):
                 except (ipaddress.AddressValueError, ValueError):
                     # Not an IP address, continue with other checks
                     pass
-                
+
                 # Block dangerous ports
                 dangerous_ports = [22, 23, 25, 53, 135, 139, 445, 993, 995, 1433, 1521, 3306, 3389, 5432, 6379]
                 if parsed.port in dangerous_ports:
                     # Lowercase message fragment to satisfy tests expecting 'port {n}'
                     raise ValidationError(f"port {parsed.port} is not allowed for webhooks")
-                    
+
             except ValidationError:
                 # Re-raise ValidationError as-is
                 raise

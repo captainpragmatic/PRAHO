@@ -183,7 +183,7 @@ class VATValidation(models.Model):
     )
     response_data = models.JSONField(default=dict, blank=True, help_text=_("Raw API response for audit purposes"))
 
-    # Expiry management  
+    # Expiry management
     expires_at = models.DateTimeField(null=True, blank=True, help_text=_("When validation result expires"))
 
     class Meta:

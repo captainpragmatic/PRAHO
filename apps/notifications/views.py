@@ -38,7 +38,7 @@ class EmailTemplateListView(LoginRequiredMixin, AdminRequiredMixin, ListView):
     model = EmailTemplate
     template_name = "notifications/template_list.html"  # not used in tests
 
-    def get_queryset(self) -> QuerySet:  # type: ignore[override]
+    def get_queryset(self) -> QuerySet[EmailTemplate]:
         # Security logging for monitoring access
         request: HttpRequest = self.request
         validators.log_security_event(
@@ -60,7 +60,7 @@ class EmailLogListView(LoginRequiredMixin, StaffRequiredMixin, ListView):
 
 
 @login_required
-def template_api(request: HttpRequest) -> JsonResponse:
+def template_api(request: HttpRequest) -> HttpResponse:
     # Admin-only API
     if not request.user.is_superuser:
         return HttpResponseForbidden()
@@ -71,7 +71,7 @@ def template_api(request: HttpRequest) -> JsonResponse:
 
 
 @login_required
-def email_stats_api(request: HttpRequest) -> JsonResponse:
+def email_stats_api(request: HttpRequest) -> HttpResponse:
     # Staff or admin may access basic stats
     if not (request.user.is_staff or request.user.is_superuser):
         return HttpResponseForbidden()
@@ -83,7 +83,7 @@ def email_stats_api(request: HttpRequest) -> JsonResponse:
 
 
 @login_required
-def security_monitoring_api(request: HttpRequest) -> JsonResponse:
+def security_monitoring_api(request: HttpRequest) -> HttpResponse:
     # Admin-only
     if not request.user.is_superuser:
         return HttpResponseForbidden()

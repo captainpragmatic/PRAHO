@@ -6,15 +6,7 @@ Customer model and SoftDeleteModel infrastructure for customer management.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, ClassVar
-
-if TYPE_CHECKING:
-    from django.db.models.query import QuerySet
-
-    from apps.users.models import User
-    
-    from .contact_models import CustomerAddress
-    from .profile_models import CustomerBillingProfile, CustomerTaxProfile
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
@@ -22,6 +14,14 @@ from django.db import models, transaction
 from django.db.models.query import QuerySet
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+
+if TYPE_CHECKING:
+    from apps.users.models import User
+
+    from .contact_models import CustomerAddress
+    from .profile_models import CustomerBillingProfile, CustomerTaxProfile
+
+# Python 3.13 + Django 5.2 Generic Support - TypeVar removed for compatibility
 
 # Security logging
 security_logger = logging.getLogger("security")
@@ -31,8 +31,9 @@ def validate_bank_details(bank_details: dict[str, Any]) -> None:
     """🔒 Validate bank details for security and compliance"""
     # Use logger from re-export module so patches work correctly
     import apps.customers.models as models_module  # noqa: PLC0415
+
     logger = models_module.security_logger
-    
+
     if not isinstance(bank_details, dict):
         raise ValidationError("Bank details must be a dictionary")
 
@@ -45,9 +46,9 @@ def validate_bank_details(bank_details: dict[str, Any]) -> None:
         "iban",
         "account_holder",
         "bank_address",
-        "notes"
+        "notes",
     }
-    
+
     provided_fields = set(bank_details.keys())
     invalid_fields = provided_fields - allowed_fields
     if invalid_fields:
@@ -66,9 +67,9 @@ def validate_bank_details(bank_details: dict[str, Any]) -> None:
         "iban": 34,
         "account_holder": 100,
         "bank_address": 200,
-        "notes": 500
+        "notes": 500,
     }
-    
+
     for field, value in bank_details.items():
         if isinstance(value, str) and field in field_limits:
             max_length = field_limits[field]
@@ -81,26 +82,22 @@ def validate_bank_details(bank_details: dict[str, Any]) -> None:
     # Security: Log bank details validation for audit
     logger.info(
         "🔒 [Security] Bank details validation completed",
-        extra={
-            "fields_count": len(bank_details), 
-            "operation": "bank_details_validation",
-            "sensitive_operation": True
-        },
+        extra={"fields_count": len(bank_details), "operation": "bank_details_validation", "sensitive_operation": True},
     )
 
 
-class SoftDeleteManager(models.Manager["SoftDeleteModel"]):
-    """Manager for soft delete operations"""
+class SoftDeleteManager(models.Manager["Customer"]):
+    """Manager for soft delete operations with Python 3.13 generic support"""
 
-    def get_queryset(self) -> QuerySet[Any]:
+    def get_queryset(self) -> QuerySet[Customer]:
         """Only show non-deleted records by default"""
         return super().get_queryset().filter(deleted_at__isnull=True)
 
-    def with_deleted(self) -> QuerySet[Any]:
+    def with_deleted(self) -> QuerySet[Customer]:
         """Show all records including soft-deleted"""
         return super().get_queryset()
 
-    def deleted_only(self) -> QuerySet[Any]:
+    def deleted_only(self) -> QuerySet[Customer]:
         """Only show soft-deleted records"""
         return super().get_queryset().filter(deleted_at__isnull=False)
 
@@ -118,8 +115,8 @@ class SoftDeleteModel(models.Model):
         verbose_name="Șters de",
     )
 
-    all_objects = models.Manager()  # Shows all records including deleted
-    objects = SoftDeleteManager()
+    all_objects = models.Manager()  # Manager - All records including soft-deleted
+    objects = SoftDeleteManager()  # SoftDeleteManager - Only non-deleted records
 
     class Meta:
         abstract = True
@@ -129,8 +126,9 @@ class SoftDeleteModel(models.Model):
         with transaction.atomic():
             # Use logger from re-export module so patches work correctly
             import apps.customers.models as models_module  # noqa: PLC0415
+
             logger = models_module.security_logger
-            
+
             # Security: Log deletion for audit purposes
             logger.warning(
                 f"⚡ [Security] Soft delete initiated: {self.__class__.__name__} ID {self.pk}",
@@ -157,8 +155,9 @@ class SoftDeleteModel(models.Model):
         with transaction.atomic():
             # Use logger from re-export module so patches work correctly
             import apps.customers.models as models_module  # noqa: PLC0415
+
             logger = models_module.security_logger
-            
+
             # Security: Log restoration for audit purposes
             logger.info(
                 f"⚡ [Security] Soft restore initiated: {self.__class__.__name__} ID {self.pk}",
@@ -203,14 +202,14 @@ class Customer(SoftDeleteModel):
     """
 
     # Customer Types aligned with PostgreSQL schema
-    CUSTOMER_TYPE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    CUSTOMER_TYPE_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("individual", _("Individual")),
         ("company", _("Company")),
         ("pfa", _("PFA/SRL")),
         ("ngo", _("NGO/Association")),
     )
 
-    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("active", _("Active")),
         ("inactive", _("Inactive")),
         ("suspended", _("Suspended")),
@@ -297,26 +296,30 @@ class Customer(SoftDeleteModel):
     def get_tax_profile(self) -> CustomerTaxProfile | None:
         """Get customer tax profile"""
         from .profile_models import CustomerTaxProfile  # noqa: PLC0415
+
         try:
-            return CustomerTaxProfile.objects.get(customer=self)
+            return cast(CustomerTaxProfile, CustomerTaxProfile.objects.get(customer=self))
         except CustomerTaxProfile.DoesNotExist:
             return None
 
     def get_billing_profile(self) -> CustomerBillingProfile | None:
         """Get customer billing profile"""
         from .profile_models import CustomerBillingProfile  # noqa: PLC0415
+
         try:
-            return CustomerBillingProfile.objects.get(customer=self)
+            return cast(CustomerBillingProfile, CustomerBillingProfile.objects.get(customer=self))
         except CustomerBillingProfile.DoesNotExist:
             return None
 
     def get_primary_address(self) -> CustomerAddress | None:
         """Get primary address"""
         from .contact_models import CustomerAddress  # noqa: PLC0415
-        return CustomerAddress.objects.filter(customer=self, address_type="primary", is_current=True).first()
+
+        return cast(CustomerAddress | None, CustomerAddress.objects.filter(customer=self, address_type="primary", is_current=True).first())
 
     def get_billing_address(self) -> CustomerAddress | None:
         """Get billing address or fall back to primary"""
         from .contact_models import CustomerAddress  # noqa: PLC0415
-        billing = CustomerAddress.objects.filter(customer=self, address_type="billing", is_current=True).first()
-        return billing or self.get_primary_address()
+
+        billing_address = cast(CustomerAddress | None, CustomerAddress.objects.filter(customer=self, address_type="billing", is_current=True).first())
+        return billing_address or self.get_primary_address()

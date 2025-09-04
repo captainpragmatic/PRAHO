@@ -53,19 +53,19 @@ class ProformaService:
         """Update proforma invoice with new data"""
         try:
             # Update basic fields
-            if 'bill_to_name' in update_data:
-                proforma.bill_to_name = update_data['bill_to_name']
-            if 'bill_to_email' in update_data:
-                proforma.bill_to_email = update_data['bill_to_email']
-            if 'notes' in update_data:
-                proforma.notes = update_data['notes']
-            
+            if "bill_to_name" in update_data:
+                proforma.bill_to_name = update_data["bill_to_name"]
+            if "bill_to_email" in update_data:
+                proforma.bill_to_email = update_data["bill_to_email"]
+            if "notes" in update_data:
+                proforma.notes = update_data["notes"]
+
             # Save changes
             proforma.save()
-            
+
             logger.info(f"📝 [Proforma] Updated proforma {proforma.number} by user {user.email}")
             return Ok(True)
-            
+
         except Exception as e:
             logger.error(f"Failed to update proforma {proforma.number}: {e}")
             return Err(f"Failed to update proforma: {e}")
@@ -77,10 +77,12 @@ class ProformaService:
             old_status = proforma.status
             proforma.status = new_status
             proforma.save()
-            
-            logger.info(f"📝 [Proforma] Changed status of {proforma.number} from {old_status} to {new_status} by user {user.email}")
+
+            logger.info(
+                f"📝 [Proforma] Changed status of {proforma.number} from {old_status} to {new_status} by user {user.email}"
+            )
             return Ok(True)
-            
+
         except Exception as e:
             logger.error(f"Failed to change proforma status: {e}")
             return Err(f"Failed to change status: {e}")

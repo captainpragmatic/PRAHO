@@ -55,12 +55,14 @@ class RegistrarForm(forms.ModelForm):
         if not isinstance(value, list):
             raise forms.ValidationError("Nameservers must be a list of hostnames")
 
-        hostname_re = re.compile(r"^(?=.{1,253}\.?)([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[A-Za-z]{2,63}\.?$")
+        hostname_re = re.compile(
+            r"^(?=.{1,253}\.?)([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[A-Za-z]{2,63}\.?$"
+        )
         cleaned: list[str] = []
         for ns in value:
             if not isinstance(ns, str) or not hostname_re.match(ns):
                 raise forms.ValidationError("Invalid nameserver hostname")
-            cleaned.append(ns.rstrip('.'))
+            cleaned.append(ns.rstrip("."))
         return cleaned
 
     def save(self, commit: bool = True) -> Registrar:

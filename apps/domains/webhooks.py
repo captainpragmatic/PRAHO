@@ -5,6 +5,7 @@ Secure webhook processing for registrar integrations with signature verification
 
 import json
 import logging
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
@@ -146,7 +147,7 @@ class RegistrarWebhookView(View):
             return False, f"Domain {domain_name} not found in system"
 
         # Process based on event type via handler map for fewer returns
-        handler_map: dict[str, Any] = {
+        handler_map: dict[str, Callable[[Domain, dict[str, Any], str], tuple[bool, str]]] = {
             "domain.registered": self._handle_domain_registered,
             "domain.renewed": self._handle_domain_renewed,
             "domain.transfer.completed": self._handle_domain_transfer_completed,
@@ -219,7 +220,7 @@ class RegistrarWebhookView(View):
                         event_type="domain_renewed_webhook",
                         domain=domain,
                         user=None,
-                            context=AuditContext(actor_type="system", ip_address=client_ip),
+                        context=AuditContext(actor_type="system", ip_address=client_ip),
                         description=f"Domain renewal processed via webhook from {domain.registrar.name}",
                     )
 

@@ -39,15 +39,16 @@ CONTENT_PREVIEW_LENGTH = 100  # Length for content preview
 # SECURITY VALIDATION FUNCTIONS
 # ===============================================================================
 
+
 def validate_template_content(content: str) -> None:
     """🔒 Validate template content for security"""
     if not content:
         return
-    
+
     # Size limit check - templates over 100KB are rejected
     if len(content) > MAX_TEMPLATE_SIZE:
         raise ValidationError("Template content too large")
-    
+
     # Disallowed tags that should be explicitly blocked
     disallowed_tags = [
         r"\{\%\s*csrf_token\s*\%\}",
@@ -75,23 +76,23 @@ def validate_json_field(data: Any) -> None:
     """🔒 Validate JSON field data"""
     if data is None:
         return
-    
+
     # Check size limit
     if len(str(data)) > MAX_JSON_SIZE:
         raise ValidationError("JSON content too large")
-    
+
     # Check depth limit to prevent stack overflow
     def check_depth(obj: Any, depth: int = 0) -> None:
         if depth > MAX_JSON_DEPTH:
             raise ValidationError("JSON nesting too deep")
-        
+
         if isinstance(obj, dict):
             for value in obj.values():
                 check_depth(value, depth + 1)
         elif isinstance(obj, list):
             for item in obj:
                 check_depth(item, depth + 1)
-    
+
     check_depth(data)
 
 
@@ -99,14 +100,14 @@ def validate_email_subject(subject: str) -> None:
     """🔒 Validate email subject for security"""
     if not subject:
         return
-    
+
     if len(subject) > MAX_SUBJECT_LENGTH:
         raise ValidationError("Subject too long")
-    
+
     # Check for email header injection attempts (newlines, carriage returns, null bytes)
     if re.search(r"[\r\n\x00]", subject):
         raise ValidationError("Subject contains invalid characters")
-    
+
     # Check for dangerous patterns
     if re.search(r"<script", subject, flags=re.IGNORECASE):
         raise ValidationError("Subject contains dangerous content")
@@ -171,7 +172,7 @@ class EmailTemplate(models.Model):
     version = models.PositiveIntegerField(default=1, help_text=_("Template version for change tracking"))
 
     # Romanian hosting provider categories
-    CATEGORY_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    CATEGORY_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("billing", _("Billing & Invoices")),
         ("dunning", _("Payment Reminders")),
         ("provisioning", _("Service Provisioning")),
@@ -237,7 +238,7 @@ class EmailTemplate(models.Model):
                 raise ValidationError("Template variables too large")
         except Exception as e:  # pragma: no cover - defensive
             raise ValidationError(f"Invalid variables JSON: {e}") from e
-        
+
         # Log template modification for security audit
         try:
             logger.info(f"Template modified: {self.key} ({self.locale})")
@@ -288,7 +289,7 @@ class EmailLog(models.Model):
     body_html = models.TextField(blank=True, help_text=_("HTML version of email body"))
 
     # Delivery tracking
-    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("queued", _("Queued")),  # Waiting to be sent
         ("sending", _("Sending")),  # Currently being processed
         ("sent", _("Sent")),  # Successfully sent to provider
@@ -363,7 +364,7 @@ class EmailLog(models.Model):
     def __str__(self) -> str:
         return f"{self.subject} → {self.to_addr} ({self.status})"
 
-    def save(self, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
+    def save(self, *args: Any, **kwargs: Any) -> None:
         """Encrypt body fields at rest when available."""
         if ENCRYPTION_AVAILABLE:
             try:
@@ -431,7 +432,7 @@ class EmailLog(models.Model):
         """Return decrypted HTML body, handling missing encryption gracefully."""
         content = self.body_html or ""
         try:
-            return settings_encryption.decrypt_if_needed(content)
+            return str(settings_encryption.decrypt_if_needed(content))
         except Exception:  # pragma: no cover
             return content
 
@@ -439,7 +440,7 @@ class EmailLog(models.Model):
         """Return decrypted text body, handling missing encryption gracefully."""
         content = self.body_text or ""
         try:
-            return settings_encryption.decrypt_if_needed(content)
+            return str(settings_encryption.decrypt_if_needed(content))
         except Exception:  # pragma: no cover
             return content
 
@@ -468,7 +469,7 @@ class EmailCampaign(models.Model):
     )
 
     # Targeting
-    AUDIENCE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    AUDIENCE_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("all_customers", _("All Customers")),
         ("active_customers", _("Active Customers")),
         ("inactive_customers", _("Inactive Customers")),
@@ -487,7 +488,7 @@ class EmailCampaign(models.Model):
     )
 
     # Campaign status
-    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("draft", _("Draft")),  # Being prepared
         ("scheduled", _("Scheduled")),  # Scheduled for future sending
         ("sending", _("Sending")),  # Currently being sent

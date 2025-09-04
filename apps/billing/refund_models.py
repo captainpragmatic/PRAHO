@@ -28,7 +28,7 @@ class Refund(models.Model):
     Supports both order and invoice refunds with audit trails and Romanian compliance.
     """
 
-    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("pending", _("Pending")),
         ("processing", _("Processing")),
         ("approved", _("Approved")),
@@ -38,12 +38,12 @@ class Refund(models.Model):
         ("cancelled", _("Cancelled")),
     )
 
-    TYPE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    TYPE_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("full", _("Full Refund")),
         ("partial", _("Partial Refund")),
     )
 
-    REASON_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+    REASON_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("customer_request", _("Customer Request")),
         ("error_correction", _("Error Correction")),
         ("dispute", _("Dispute")),
@@ -88,9 +88,7 @@ class Refund(models.Model):
 
     # Processing details
     processed_at = models.DateTimeField(null=True, blank=True, help_text=_("When refund was actually processed"))
-    gateway_processed_at = models.DateTimeField(
-        null=True, blank=True, help_text=_("When gateway confirmed processing")
-    )
+    gateway_processed_at = models.DateTimeField(null=True, blank=True, help_text=_("When gateway confirmed processing"))
 
     # Metadata and audit
     metadata = models.JSONField(default=dict, blank=True, help_text=_("Additional refund metadata"))
@@ -123,7 +121,7 @@ class Refund(models.Model):
             models.Index(fields=["invoice"]),
             models.Index(fields=["payment"]),
         )
-        constraints: ClassVar[list] = [
+        constraints: ClassVar[list[models.CheckConstraint]] = [
             # Ensure either order OR invoice is specified, not both
             models.CheckConstraint(
                 check=(
@@ -137,7 +135,7 @@ class Refund(models.Model):
         ]
 
     def __str__(self) -> str:
-        entity = f"Order {self.order.id}" if self.order else f"Invoice {self.invoice.id}"
+        entity = f"Order {self.order.id}" if self.order else f"Invoice {self.invoice.id if self.invoice else 'None'}"
         return f"Refund {self.reference_number} - {entity} - {self.amount} {self.currency.code}"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
@@ -195,7 +193,7 @@ class Refund(models.Model):
     @property
     def entity_id(self) -> str:
         """Get the ID of the entity being refunded"""
-        return str(self.order.id) if self.order else str(self.invoice.id)
+        return str(self.order.id) if self.order else str(self.invoice.id if self.invoice else 0)
 
     def get_entity(self) -> Any:
         """Get the actual entity being refunded"""
@@ -208,7 +206,7 @@ class RefundNote(models.Model):
     Supports both internal notes and customer-visible comments.
     """
 
-    NOTE_TYPES: ClassVar[tuple[tuple[str, str], ...]] = (
+    NOTE_TYPES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("internal", _("Internal Note")),
         ("customer", _("Customer Communication")),
         ("gateway", _("Gateway Response")),
@@ -220,21 +218,21 @@ class RefundNote(models.Model):
 
     # Relationships
     refund = models.ForeignKey(Refund, on_delete=models.CASCADE, related_name="notes")
-    
+
     # Note details
     note_type = models.CharField(max_length=20, choices=NOTE_TYPES, default="internal")
     title = models.CharField(max_length=200, blank=True, help_text=_("Optional note title"))
     content = models.TextField(help_text=_("Note content"))
-    
+
     # Visibility
     is_customer_visible = models.BooleanField(default=False, help_text=_("Whether customer can see this note"))
-    
+
     # Metadata
     metadata = models.JSONField(default=dict, blank=True, help_text=_("Additional note metadata"))
-    
+
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
-    
+
     # Audit
     created_by = models.ForeignKey("users.User", on_delete=models.SET_NULL, null=True, related_name="refund_notes")
 
@@ -250,16 +248,18 @@ class RefundNote(models.Model):
         ordering = ("-created_at",)
 
     def __str__(self) -> str:
-        return f"Note on {self.refund.reference_number} - {self.note_type} - {self.created_at.strftime('%Y-%m-%d %H:%M')}"
+        return (
+            f"Note on {self.refund.reference_number} - {self.note_type} - {self.created_at.strftime('%Y-%m-%d %H:%M')}"
+        )
 
     def clean(self) -> None:
         """Validate note data"""
         super().clean()
-        
+
         # Validate text fields
         validate_financial_text_field(self.title, "Note title", 200)
         validate_financial_text_field(self.content, "Note content")
-        
+
         # Validate metadata
         validate_financial_json(self.metadata, "Note metadata")
 
@@ -277,7 +277,7 @@ class RefundStatusHistory(models.Model):
     refund = models.ForeignKey(Refund, on_delete=models.CASCADE, related_name="status_history")
 
     # Status change details
-    previous_status = models.CharField(max_length=20, choices=Refund.STATUS_CHOICES, blank=True, default='')
+    previous_status = models.CharField(max_length=20, choices=Refund.STATUS_CHOICES, blank=True, default="")
     new_status = models.CharField(max_length=20, choices=Refund.STATUS_CHOICES)
     change_reason = models.TextField(blank=True, help_text=_("Reason for status change"))
 
@@ -303,15 +303,17 @@ class RefundStatusHistory(models.Model):
         ordering = ("-changed_at",)
 
     def __str__(self) -> str:
-        change = f"{self.previous_status} → {self.new_status}" if self.previous_status else f"Initial → {self.new_status}"
+        change = (
+            f"{self.previous_status} → {self.new_status}" if self.previous_status else f"Initial → {self.new_status}"
+        )
         return f"{self.refund.reference_number}: {change}"
 
     def clean(self) -> None:
         """Validate status history data"""
         super().clean()
-        
+
         # Validate text fields
         validate_financial_text_field(self.change_reason, "Change reason")
-        
+
         # Validate metadata
         validate_financial_json(self.metadata, "Status change metadata")

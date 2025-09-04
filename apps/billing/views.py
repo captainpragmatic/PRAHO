@@ -7,7 +7,7 @@ from __future__ import annotations
 import decimal
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
@@ -147,7 +147,7 @@ def _validate_financial_document_access(
         request_ip=request.META.get("REMOTE_ADDR"),
         user_email=request.user.email,
     )
-    
+
     # Return None for successful access validation
     return None
 
@@ -179,7 +179,7 @@ def _validate_financial_document_access_with_redirect(
             redirect_response = result  # type: ignore[assignment]
     except PermissionDenied:
         if request is None or document is None:
-            redirect_response = HttpResponseRedirect(reverse("users:login"))
+            redirect_response = HttpResponseRedirect(reverse("users:login"))  # type: ignore[unreachable]
         elif not hasattr(request, "user") or not isinstance(request.user, User) or not request.user.is_authenticated:
             login_url = reverse("users:login")
             if hasattr(request, "get_full_path") and callable(request.get_full_path):
@@ -658,7 +658,7 @@ def _handle_proforma_create_post(request: HttpRequest) -> HttpResponse:
             messages.error(request, _("❌ Customer is required to create proforma."))
             return redirect("billing:proforma_list")
         proforma = _create_proforma_with_sequence(customer, valid_until)
-        
+
         # Update billing info from POST data if provided
         bill_to_name = request.POST.get("bill_to_name")
         bill_to_email = request.POST.get("bill_to_email")
@@ -666,7 +666,7 @@ def _handle_proforma_create_post(request: HttpRequest) -> HttpResponse:
             proforma.bill_to_name = bill_to_name
         if bill_to_email:
             proforma.bill_to_email = bill_to_email
-        
+
     except Exception as e:
         messages.error(request, _("❌ Error creating proforma: {error}").format(error=str(e)))
         return redirect("billing:proforma_list")
@@ -776,7 +776,7 @@ def proforma_to_invoice(request: HttpRequest, pk: int) -> HttpResponse:
             tax_cents=proforma.tax_cents,
             total_cents=proforma.total_cents,
             issued_at=timezone.now(),
-            due_at=timezone.now() + timezone.timedelta(days=30),
+            due_at=timezone.now() + timedelta(days=30),
             # Copy billing address from proforma
             bill_to_name=proforma.bill_to_name,
             bill_to_tax_id=proforma.bill_to_tax_id,
@@ -1113,7 +1113,7 @@ def _handle_proforma_edit_post(request: HttpRequest, proforma: ProformaInvoice) 
     return redirect("billing:proforma_detail", pk=proforma.pk)
 
 
-def _get_customers_for_edit_form(user: User) -> QuerySet[Customer, Customer]:
+def _get_customers_for_edit_form(user: User) -> QuerySet[Customer]:
     """Get accessible customers for the edit form dropdown."""
     accessible_customers = user.get_accessible_customers()
     if isinstance(accessible_customers, QuerySet):
@@ -1124,7 +1124,7 @@ def _get_customers_for_edit_form(user: User) -> QuerySet[Customer, Customer]:
         )
     else:
         # Fallback - return empty queryset if None or other unexpected value
-        if accessible_customers is None:
+        if accessible_customers is None:  # type: ignore[unreachable]
             return Customer.objects.none()
         # Assume it's already a QuerySet
         return accessible_customers.select_related("tax_profile", "billing_profile")
@@ -1318,14 +1318,14 @@ def payment_list(request: HttpRequest) -> HttpResponse:
         .select_related("invoice", "invoice__customer")
         .order_by("-created_at")
     )
-    
+
     # Apply status filter if provided
-    status = request.GET.get('status')
+    status = request.GET.get("status")
     if status:
         payments = payments.filter(status=status)
-        
-    # Apply invoice filter if provided  
-    invoice_id = request.GET.get('invoice')
+
+    # Apply invoice filter if provided
+    invoice_id = request.GET.get("invoice")
     if invoice_id:
         payments = payments.filter(invoice_id=invoice_id)
 
@@ -1361,7 +1361,7 @@ def process_payment(request: HttpRequest, pk: int) -> HttpResponse:
             amount = Decimal(request.POST.get("amount", "0"))
         except (ValueError, TypeError, decimal.InvalidOperation):
             return JsonResponse({"error": "Invalid amount provided"}, status=400)
-            
+
         payment_method = request.POST.get("payment_method", "bank_transfer")
 
         # Create payment record

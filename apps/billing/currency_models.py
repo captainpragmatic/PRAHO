@@ -31,7 +31,7 @@ class Currency(models.Model):
 
     # Convenience for tests that expect integer PK `.id`
     @property
-    def id(self) -> str:  # type: ignore[override]
+    def id(self) -> str:
         return self.code
 
 

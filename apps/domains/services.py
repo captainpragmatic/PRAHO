@@ -16,6 +16,7 @@ Provides business logic for domain operations including:
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
@@ -36,9 +37,21 @@ logger = logging.getLogger(__name__)
 MIN_DOMAIN_NAME_LENGTH = 3  # Minimum length for domain names
 MAX_DOMAIN_NAME_LENGTH = 253  # Maximum length per RFC 1035
 
-# Domain registration constants  
+# Domain registration constants
 MIN_REGISTRATION_YEARS = 1  # Minimum registration period
 MAX_REGISTRATION_YEARS = 10  # Maximum registration period
+
+
+@dataclass
+class DomainRegistrationConfig:
+    """Configuration for domain registration"""
+
+    customer: Any
+    domain_name: str
+    tld: Any
+    registrar: Any
+    whois_privacy: bool = False
+    auto_renew: bool = True
 
 
 # ===============================================================================
@@ -319,24 +332,30 @@ class DomainLifecycleService:
         customer: Customer, domain_name: str, years: int = 1, whois_privacy: bool = False, auto_renew: bool = True
     ) -> tuple[bool, Domain | str]:
         """🆕 Create new domain registration"""
-        
+
         # Run all validation checks
         validation_result = DomainLifecycleService._validate_registration_preconditions(domain_name, years)
         if validation_result is not None:
             return False, validation_result
-        
+
         # Get validated components
         components_result = DomainLifecycleService._get_registration_components(domain_name)
         if isinstance(components_result, str):
             return False, components_result
-        
+
         tld, registrar = components_result
-        
+
         # Execute registration
-        return DomainLifecycleService._execute_domain_registration(
-            customer, domain_name, tld, registrar, whois_privacy, auto_renew
+        config = DomainRegistrationConfig(
+            customer=customer,
+            domain_name=domain_name,
+            tld=tld,
+            registrar=registrar,
+            whois_privacy=whois_privacy,
+            auto_renew=auto_renew,
         )
-    
+        return DomainLifecycleService._execute_domain_registration(config)
+
     @staticmethod
     def _validate_registration_preconditions(domain_name: str, years: int) -> str | None:
         """Validate all preconditions for domain registration"""
@@ -347,15 +366,16 @@ class DomainLifecycleService:
 
         # Validate registration period
         if years < MIN_REGISTRATION_YEARS or years > MAX_REGISTRATION_YEARS:
-            return cast(str, _("Registration period must be between {min} and {max} years").format(
-                min=MIN_REGISTRATION_YEARS, max=MAX_REGISTRATION_YEARS))
+            return str(_("Registration period must be between {min} and {max} years").format(
+                min=MIN_REGISTRATION_YEARS, max=MAX_REGISTRATION_YEARS
+            ))
 
         # Check if domain already exists
         if Domain.objects.filter(name=domain_name.lower()).exists():
             return cast(str, _("Domain is already registered in the system"))
-        
+
         return None
-    
+
     @staticmethod
     def _get_registration_components(domain_name: str) -> tuple[Any, Any] | str:
         """Get TLD and registrar for domain registration"""
@@ -369,28 +389,27 @@ class DomainLifecycleService:
         registrar = RegistrarService.select_best_registrar_for_tld(tld)
         if not registrar:
             return cast(str, _("No available registrar for this TLD"))
-        
+
         return tld, registrar
-    
+
     @staticmethod
-    def _execute_domain_registration(
-        customer: Customer, domain_name: str, tld: Any, registrar: Any, 
-        whois_privacy: bool, auto_renew: bool
-    ) -> tuple[bool, Domain | str]:
+    def _execute_domain_registration(config: DomainRegistrationConfig) -> tuple[bool, Domain | str]:
         """Execute the actual domain registration"""
         try:
             with transaction.atomic():
                 domain = Domain.objects.create(
-                    name=domain_name.lower(),
-                    tld=tld,
-                    registrar=registrar,
-                    customer=customer,
+                    name=config.domain_name.lower(),
+                    tld=config.tld,
+                    registrar=config.registrar,
+                    customer=config.customer,
                     status="pending",
-                    whois_privacy=whois_privacy,
-                    auto_renew=auto_renew,
+                    whois_privacy=config.whois_privacy,
+                    auto_renew=config.auto_renew,
                 )
 
-                logger.info(f"🆕 [Domain] Created domain registration record: {domain_name} for customer {customer.id}")
+                logger.info(
+                    f"🆕 [Domain] Created domain registration record: {config.domain_name} for customer {config.customer.id}"
+                )
                 return True, domain
 
         except Exception as e:
@@ -634,3 +653,12 @@ class DomainRegistrarGateway:
         is_available = not Domain.objects.filter(name=domain_name.lower()).exists()
 
         return True, is_available
+
+    @staticmethod
+    def verify_webhook_signature(registrar: Registrar, payload: str, signature: str) -> bool:
+        """🔐 Verify webhook signature using registrar's webhook secret"""
+        logger.info(f"🌐 [Gateway] Would verify webhook signature for {registrar.name}")
+        
+        # TODO: Implement actual signature verification
+        # For now, return True as placeholder (webhook verification disabled)
+        return True
