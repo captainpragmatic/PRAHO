@@ -116,7 +116,7 @@ def test_customer_billing_list_display_own_invoices_only(page: Page) -> None:
         # Login and navigate to billing
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
-        page.goto("http://localhost:8001/app/billing/invoices/")
+        page.goto("http://localhost:8701/app/billing/invoices/")
         page.wait_for_load_state("networkidle")
         
         # Verify customer can access the billing system (support both English and Romanian)
@@ -181,7 +181,7 @@ def test_customer_invoice_detail_and_pdf_access(page: Page) -> None:
         # Login and navigate to billing
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
-        page.goto("http://localhost:8001/app/billing/invoices/")
+        page.goto("http://localhost:8701/app/billing/invoices/")
         page.wait_for_load_state("networkidle")
         
         # Find first invoice to view (customer's own invoices only)
@@ -272,7 +272,7 @@ def test_customer_payment_status_and_history(page: Page) -> None:
         # Login and navigate to billing
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
-        page.goto("http://localhost:8001/app/billing/invoices/")
+        page.goto("http://localhost:8701/app/billing/invoices/")
         page.wait_for_load_state("networkidle")
         
         # Check for payment status indicators in the main list
@@ -318,7 +318,7 @@ def test_customer_payment_status_and_history(page: Page) -> None:
             print("  ℹ️ No billing documents available for payment testing")
         
         # Test payments list access (if separate endpoint exists)
-        page.goto("http://localhost:8001/app/billing/payments/")
+        page.goto("http://localhost:8701/app/billing/payments/")
         page.wait_for_load_state("networkidle")
         
         if "/app/billing/payments/" in page.url:
@@ -361,7 +361,7 @@ def test_customer_billing_access_control_security(page: Page) -> None:
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
         
         # Navigate directly to billing URL
-        page.goto("http://localhost:8001/app/billing/invoices/")
+        page.goto("http://localhost:8701/app/billing/invoices/")
         page.wait_for_load_state("networkidle")
         
         # Should successfully load billing system for customer
@@ -385,7 +385,7 @@ def test_customer_billing_access_control_security(page: Page) -> None:
             print("    ✅ Customer has proper navigation access to billing")
         
         # Test that customer cannot access proforma creation
-        page.goto("http://localhost:8001/app/billing/proformas/create/")
+        page.goto("http://localhost:8701/app/billing/proformas/create/")
         page.wait_for_load_state("networkidle")
         
         # Should be redirected away or show access denied
@@ -424,7 +424,7 @@ def test_customer_billing_isolation_comprehensive_security(page: Page) -> None:
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
         
         # Navigate to billing page
-        page.goto("http://localhost:8001/app/billing/invoices/")
+        page.goto("http://localhost:8701/app/billing/invoices/")
         page.wait_for_load_state("networkidle")
         
         # Verify customer 1 can access their billing
@@ -456,7 +456,7 @@ def test_customer_billing_isolation_comprehensive_security(page: Page) -> None:
         assert login_user(page, CUSTOMER2_EMAIL, CUSTOMER2_PASSWORD)
         
         # Navigate to billing page  
-        page.goto("http://localhost:8001/app/billing/invoices/")
+        page.goto("http://localhost:8701/app/billing/invoices/")
         page.wait_for_load_state("networkidle")
         
         # Verify customer 2 can access billing system
@@ -511,7 +511,7 @@ def test_customer_cannot_access_other_customers_billing(page: Page) -> None:
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
         
         # Navigate to billing
-        page.goto("http://localhost:8001/app/billing/invoices/")
+        page.goto("http://localhost:8701/app/billing/invoices/")
         page.wait_for_load_state("networkidle")
         
         # Get list of documents visible to this customer
@@ -535,7 +535,7 @@ def test_customer_cannot_access_other_customers_billing(page: Page) -> None:
         
         # Try accessing document IDs that might exist but don't belong to this customer
         for test_id in [999, 1000, 1001]:  # High IDs unlikely to be customer's documents
-            page.goto(f"http://localhost:8001/app/billing/invoices/{test_id}/")
+            page.goto(f"http://localhost:8701/app/billing/invoices/{test_id}/")
             page.wait_for_load_state("networkidle")
             
             # Should either redirect away or show access denied
@@ -582,7 +582,7 @@ def test_customer_billing_system_mobile_responsiveness(page: Page) -> None:
         # Login and navigate to billing on desktop first
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
-        page.goto("http://localhost:8001/app/billing/invoices/")
+        page.goto("http://localhost:8701/app/billing/invoices/")
         page.wait_for_load_state("networkidle")
         
         # Test mobile viewport
@@ -674,7 +674,7 @@ def test_customer_complete_billing_workflow(page: Page) -> None:
         
         # Step 1: View billing document list
         print("    Step 1: Viewing billing document list...")
-        page.goto("http://localhost:8001/app/billing/invoices/")
+        page.goto("http://localhost:8701/app/billing/invoices/")
         page.wait_for_load_state("networkidle")
         
         # Verify billing access
@@ -764,7 +764,7 @@ def test_customer_billing_system_responsive_breakpoints(page: Page) -> None:
             """Test core customer billing functionality across viewports."""
             try:
                 # Navigate to billing
-                test_page.goto("http://localhost:8001/app/billing/invoices/")
+                test_page.goto("http://localhost:8701/app/billing/invoices/")
                 test_page.wait_for_load_state("networkidle")
                 
                 # Verify authentication maintained

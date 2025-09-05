@@ -1,0 +1,156 @@
+# ===============================================================================
+# PRAHO SERVICES - PRODUCTION DOCKER COMPOSE 🐳
+# ===============================================================================
+# Multi-service architecture with network isolation and no Redis dependency
+# Platform: Full Django + DB access | Portal: API-only, no DB access
+
+# ⚠️ SECURITY ARCHITECTURE:
+# - Platform service: Full Django app with DB access (admin, provisioning)
+# - Portal service: Customer-facing API only, NO database access
+# - Network isolation: Portal cannot access platform-network (DB isolation)
+
+services:
+  # ===============================================================================
+  # DATABASE - POSTGRESQL (PLATFORM ACCESS ONLY) 🗄️
+  # ===============================================================================
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: praho_platform
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-dev_password_change_in_prod}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    networks:
+      - platform-network
+
+  # ===============================================================================
+  # PLATFORM SERVICE - FULL DJANGO APPLICATION 🏗️
+  # ===============================================================================
+  platform:
+    build:
+      context: ..
+      dockerfile: deploy/platform/Dockerfile
+    ports:
+      - "8700:8700"
+    volumes:
+      - static_volume:/app/staticfiles
+      - media_volume:/app/media
+      - logs_volume:/app/logs
+    environment:
+      - DEBUG=1
+      - DATABASE_URL=postgresql://postgres:${DB_PASSWORD:-dev_password_change_in_prod}@db:5432/praho_platform
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      - DJANGO_SETTINGS_MODULE=config.settings.dev
+      - PYTHONPATH=/app
+      - SERVICE_NAME=platform
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - platform-network
+      - api-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8700/users/login/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ===============================================================================
+  # PORTAL SERVICE - LIGHTWEIGHT CUSTOMER API 🌐
+  # ===============================================================================
+  portal:
+    build:
+      context: ..
+      dockerfile: deploy/portal/Dockerfile
+    ports:
+      - "8701:8701"
+    volumes:
+      - portal_static_volume:/app/staticfiles
+      - portal_logs_volume:/app/logs
+    environment:
+      - DEBUG=1
+      - PLATFORM_API_BASE_URL=http://platform:8700/api
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      - DJANGO_SETTINGS_MODULE=config.settings
+      - SERVICE_NAME=portal
+      # ⚠️ CRITICAL: NO DATABASE_URL - portal has no DB access
+      # ⚠️ CRITICAL: NO PYTHONPATH - portal cannot import platform code
+    depends_on:
+      platform:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - api-network  # Portal CANNOT access platform-network (no DB)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8701/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # ===============================================================================
+  # NGINX REVERSE PROXY - TRAFFIC ROUTING 🌐
+  # ===============================================================================
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - static_volume:/app/staticfiles:ro
+      - media_volume:/app/media:ro
+      - portal_static_volume:/app/portal/staticfiles:ro
+    depends_on:
+      - platform
+      - portal
+    restart: unless-stopped
+    networks:
+      - api-network
+
+# ===============================================================================
+# NETWORKS - ISOLATION ARCHITECTURE 🔒
+# ===============================================================================
+networks:
+  # Platform network - DB, Platform service only (no Redis)
+  platform-network:
+    driver: bridge
+    name: praho_platform-network
+
+  # API network - All services for HTTP communication
+  api-network:
+    driver: bridge
+    name: praho_api-network
+
+# ===============================================================================
+# PERSISTENT VOLUMES 💾
+# ===============================================================================
+volumes:
+  # Database storage
+  postgres_data:
+    name: praho_postgres_data
+
+  # Platform service volumes
+  static_volume:
+    name: praho_static_volume
+  media_volume:
+    name: praho_media_volume
+  logs_volume:
+    name: praho_logs_volume
+
+  # Portal service volumes (isolated)
+  portal_static_volume:
+    name: praho_portal_static_volume
+  portal_logs_volume:
+    name: praho_portal_logs_volume

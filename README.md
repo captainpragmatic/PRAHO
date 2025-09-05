@@ -5,7 +5,7 @@
 
 [![Django 5.x](https://img.shields.io/badge/Django-5.x-green.svg)](https://www.djangoproject.com/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16+-blue.svg)](https://www.postgresql.org/)
-[![License](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE.md)
+[![License: GPL v3 or later](https://img.shields.io/badge/License-GPLv3%2B-blue.svg)](LICENSE.md)
 [![Code Quality](https://img.shields.io/badge/code%20quality-excellent-green.svg)]()
 
 ## 📋 Overview
@@ -21,25 +21,34 @@
 - **📊 Compliance**: GDPR compliance with comprehensive audit trails
 - **🔐 Security**: Two-factor authentication, encryption, and secure defaults
 
-## 🏗️ Architecture
+## 🏗️ Services Architecture
 
-**Modular Monolith** (Enhanced Option A) with strategic seams for future microservices migration:
+**Services-based architecture** for enhanced security and scalability:
 
 ```
 PRAHO Platform
-├── 🔐 apps/users/          # Authentication & User Management
-├── 👥 apps/customers/      # Customer Organization Management  
-├── 💰 apps/billing/        # Invoice & Payment Processing
-├── 🎫 apps/tickets/        # Customer Support System
-├── 🖥️ apps/provisioning/   # Hosting Service Management
-├── 📋 apps/audit/          # Compliance & Audit Logging
-├── 🔧 apps/common/         # Shared Utilities & Validators
-└── 🎨 apps/ui/             # UI Components & Templates
+├── 🏢 services/platform/    # Main Django application with database
+│   ├── 🔐 apps/users/          # Authentication & User Management
+│   ├── 👥 apps/customers/      # Customer Organization Management  
+│   ├── 💰 apps/billing/        # Invoice & Payment Processing
+│   ├── 🎫 apps/tickets/        # Customer Support System
+│   ├── 🖥️ apps/provisioning/   # Hosting Service Management
+│   ├── 📋 apps/audit/          # Compliance & Audit Logging
+│   ├── 🔧 apps/common/         # Shared Utilities & Validators
+│   └── 🎨 apps/ui/             # UI Components & Templates
+└── 🌐 services/portal/      # Customer-facing API portal (no DB access)
+    └── 📡 apps/portal/         # Customer API endpoints
 ```
 
+### Service Isolation
+- **Platform Service**: Full Django application with database access and business logic
+- **Portal Service**: API-only Django application with no database drivers or access
+- **Database Cache**: Uses Django's database cache (no Redis dependency)
+- **Security**: Portal cannot access platform models or database
+
 ### Database Schema
-- **PostgreSQL 16+** primary database
-- **Redis** for caching and session storage
+- **PostgreSQL 16+** primary database (platform only)
+- **Database cache table** for session storage and caching
 - **Normalized design** with soft deletes and audit trails
 
 ## 🚀 Quick Start
@@ -47,7 +56,7 @@ PRAHO Platform
 ### Prerequisites
 - **Python 3.11+**
 - **PostgreSQL 16+**
-- **Redis 7+**
+- **No Redis required** (uses database cache)
 - **Git**
 
 ### Installation
@@ -67,7 +76,8 @@ source .venv/bin/activate  # Linux/Mac
 
 3. **Install dependencies**
 ```bash
-pip install -r requirements/dev.txt
+make install
+# This installs all dependencies for both services
 ```
 
 4. **Configure environment**
@@ -81,28 +91,33 @@ cp .env.example .env
 # Create PostgreSQL database
 createdb pragmatichost
 
-# Run migrations
-python manage.py migrate
-
-# Create superuser
-python manage.py createsuperuser
+# Set up platform database and cache
+make migrate
 ```
 
 6. **Generate sample data** (optional)
 ```bash
-python manage.py generate_sample_data
+make fixtures
 ```
 
-7. **Start development server**
+7. **Start development servers**
 ```bash
-python manage.py runserver
+# Option 1: Start both services
+make dev-all
+
+# Option 2: Start services individually
+make dev-platform  # Platform on :8700
+make dev-portal     # Portal on :8701
 ```
 
-Visit [http://localhost:8000](http://localhost:8000) to access the application.
+Visit:
+- **Platform**: [http://localhost:8700](http://localhost:8700) (Full Django app)
+- **Portal**: [http://localhost:8701](http://localhost:8701) (Customer API)
 
-## 📱 Application Structure
+## 📱 Services Structure
 
-### Core Apps
+### 🏢 Platform Service (`services/platform/`)
+Main Django application with full database access and business logic.
 
 #### 🔐 Users (`apps/users/`)
 - **Custom User model** (email-based, no username)
@@ -145,6 +160,17 @@ Visit [http://localhost:8000](http://localhost:8000) to access the application.
 - **GDPR data export** tracking
 - **Romanian compliance logging**
 - **Security incident tracking**
+
+### 🌐 Portal Service (`services/portal/`)
+Customer-facing API service with **no database access** for enhanced security.
+
+#### 📡 Portal API (`apps/portal/`)
+- **Customer authentication** via platform API
+- **Service status queries** and monitoring
+- **Billing information** (invoices, payments)
+- **Support ticket creation** and updates  
+- **Account management** (profile, settings)
+- **Secure API gateway** to platform services
 
 ## 🔧 Configuration
 
@@ -237,6 +263,17 @@ docker-compose up -d
 # Production deployment
 docker-compose -f docker-compose.prod.yml up -d
 ```
+
+## 🤝 Contributing
+
+We welcome contributions! Before opening a pull request, please read `CONTRIBUTING.md`.
+
+- License of contributions: GPL-3.0-or-later (inbound = outbound)
+- DCO required: sign off your commits with `git commit -s`
+- By contributing, you grant maintainers permission to relicense your contribution under
+  AGPL-3.0-or-later or another OSI-approved license used by the project in the future.
+
+See `CONTRIBUTING.md` for details and the PR checklist.
 
 ### Production Checklist
 - [ ] Environment variables configured
@@ -392,6 +429,61 @@ This project is licensed under the GNU Affero General Public License v3.0 or lat
 2. **Query budget** tests
 3. **Promotions/coupons** system
 4. **Advanced monitoring** (job queue lag, etc.)
+
+---
+
+## 🛠️ Development Commands
+
+The project includes a comprehensive Makefile with service-specific commands:
+
+### Service Management
+```bash
+# Start both services
+make dev-all
+
+# Start individual services
+make dev-platform      # Platform service on :8700
+make dev-portal        # Portal service on :8701
+
+# Database operations
+make migrate           # Run platform migrations
+make shell-platform    # Django shell for platform
+make fixtures          # Load sample data
+```
+
+### Testing
+```bash
+# Run all tests
+make test
+
+# Service-specific tests
+make test-platform     # Platform unit tests
+make test-portal       # Portal unit tests (no DB access)
+make test-integration  # Cross-service integration tests
+
+# Security and validation
+make test-security     # Validate service isolation
+make test-cache        # Test database cache functionality
+```
+
+### Code Quality
+```bash
+# Type checking and linting
+make lint              # Strategic linting (performance & security)
+make lint-fix          # Auto-fix linting issues
+make type-check        # Type coverage analysis
+
+# Security
+make lint-credentials  # Check for hardcoded credentials
+```
+
+### Docker Operations
+```bash
+# Build and run with Docker
+make docker-build      # Build both service images
+make docker-up         # Start services with docker-compose
+make docker-down       # Stop and cleanup containers
+```
 
 ---
 

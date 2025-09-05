@@ -26,6 +26,7 @@ MANIFEST
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
+# Old root paths (remove after migration verified)
 /media/
 /static/
 /staticfiles/
@@ -97,3 +98,24 @@ cursor-instructions*
 
 # Playwright MCP cache
 .playwright-mcp/
+
+# Services architecture specific
+services/platform/staticfiles/
+services/platform/*.sqlite3
+services/platform/media/
+services/platform/.coverage
+services/platform/htmlcov/
+services/platform/.pytest_cache/
+services/platform/__pycache__/
+services/platform/static/dist/
+services/portal/staticfiles/
+services/portal/*.sqlite3
+services/portal/media/
+services/portal/.coverage
+services/portal/htmlcov/
+services/portal/.pytest_cache/
+services/portal/__pycache__/
+services/portal/static/dist/
+
+# Django Q logs
+django_q.log

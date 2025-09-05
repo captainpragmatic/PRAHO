@@ -13,7 +13,7 @@ description = "PRAHO Platform - PRAHO Really Automates Hosting Operations"
 authors = [
     {name = "PragmaticHost Development Team", email = "dev@pragmatichost.com"}
 ]
-license = {text = "AGPL-3.0-or-later"}
+license = {text = "GPL-3.0-or-later"}
 requires-python = ">=3.11"
 keywords = ["hosting", "praho platform", "billing", "web hosting", "django", "htmx", "tailwindcss", "platform"]
 classifiers = [
@@ -32,7 +32,7 @@ classifiers = [
     "Environment :: Console",
     
     # License
-    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     
     # Operating System
     "Operating System :: OS Independent",
@@ -352,7 +352,7 @@ suppress-dummy-args = true
 python_version = "3.13"
 plugins = ["mypy_django_plugin.main"]
 strict = false
-mypy_path = ["stubs"]
+mypy_path = ["services/platform/stubs"]
 exclude = '(^|/)(migrations|static|media|htmlcov|node_modules|\.venv)(/|$)'
 
 # Guardrails
@@ -435,38 +435,39 @@ disable_error_code = ["misc"]
 # ===============================================================================
 
 [tool.pytest.ini_options]
-# Romanian business compliance testing
-DJANGO_SETTINGS_MODULE = "config.settings.test"
+# ===============================================================================
+# ROOT-LEVEL PYTEST CONFIGURATION - Integration & E2E Tests Only
+# ===============================================================================
+# Service-specific tests are in services/platform/pytest.ini and services/portal/pytest.ini
+# This config is for cross-service black-box testing only
+
+# NO Django settings at root - tests should be framework-agnostic
+# DJANGO_SETTINGS_MODULE should NOT be set here
+
 addopts = [
     "--verbose",
     "--tb=short",
     "--strict-markers",
     "--disable-warnings",
-    "--reuse-db",
+    "-p no:django",  # Disable Django plugin for integration tests
 ]
+
+# Only integration and E2E tests at root
 testpaths = [
-    "tests/users",
-    "tests/billing", 
-    "tests/customers",
-    "tests/audit",
-    "tests/common",
-    "tests/domains",
-    "tests/notifications", 
-    "tests/orders",
-    "tests/products",
-    "tests/provisioning",
-    "tests/tickets",
-    "tests/ui",
-    "tests/integration_tests"
+    "tests/integration_tests",
+    "tests/e2e",
 ]
+
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
-    "integration: marks tests as integration tests (cross-app functionality)",
-    "e2e: marks tests as end-to-end tests",
-    "romanian_compliance: marks tests for Romanian regulations",
+    "integration: marks tests as integration tests (API-level cross-service)",
+    "e2e: marks tests as end-to-end tests (browser-level)",
     "security: marks security-related tests",
-    "unit: marks tests as unit tests (single app/component)",
+    "smoke: marks smoke tests for quick validation",
+    "requires_platform: marks tests requiring platform service running",
+    "requires_portal: marks tests requiring portal service running",
 ]
+
 filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::PendingDeprecationWarning",

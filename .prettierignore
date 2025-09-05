@@ -4,12 +4,14 @@
 # Prevents Prettier from breaking Django templates
 
 # Django Templates - NEVER format these!
-templates/
+services/platform/templates/
+services/portal/templates/
 *.html
 **/*.html
 
 # Generated/Build files
-staticfiles/
+services/platform/staticfiles/
+services/portal/staticfiles/
 node_modules/
 .venv/
 __pycache__/

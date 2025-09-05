@@ -59,10 +59,10 @@ repos:
       - id: type-check-modified
         name: "Type Check Modified Files"
         entry: .venv/bin/python
-        args: [scripts/check_types_modified.py]
+        args: [services/platform/scripts/check_types_modified.py]
         language: system
         files: \.py$
-        exclude: ^(migrations/.*\.py|scripts/backup\.py|scripts/deploy\.py)$
+        exclude: ^(migrations/.*\.py|services/platform/scripts/backup\.py|services/platform/scripts/deploy\.py)$
         pass_filenames: true
         require_serial: false
         
@@ -70,7 +70,7 @@ repos:
       - id: prevent-type-ignore
         name: "Block New Type Ignore Comments"
         entry: .venv/bin/python
-        args: [scripts/prevent_type_ignore.py]
+        args: [services/platform/scripts/prevent_type_ignore.py]
         language: system
         files: \.py$
         exclude: ^(migrations/.*\.py|tests/.*\.py)$
@@ -87,10 +87,10 @@ repos:
       - id: django-template-check
         name: "Django Template Syntax Check"
         entry: .venv/bin/python
-        args: [scripts/fix_template_comparisons.py, --check]
+        args: [services/platform/scripts/fix_template_comparisons.py, --check]
         language: system
         files: \.html$
-        exclude: ^(static/|htmlcov/)
+        exclude: ^(services/platform/static/|services/portal/static/|htmlcov/)
 
   # ===============================================================================
   # SECURITY CHECKS 🔒
@@ -98,6 +98,23 @@ repos:
   
   - repo: local
     hooks:
+      # Check portal doesn't import platform code
+      - id: portal-isolation-check
+        name: "Security: Portal Isolation Check"
+        entry: bash
+        args:
+          - -c
+          - |
+            # Check if portal tries to import platform code
+            if grep -r "from apps\." services/portal/ --include="*.py" 2>/dev/null; then
+              echo "❌ Portal is trying to import platform apps!"
+              exit 1
+            fi
+            exit 0
+        language: system
+        files: ^services/portal/.*\.py$
+        pass_filenames: false
+        
       # Check for hardcoded credentials (warning only)
       - id: security-credentials-check
         name: "Security: Check for Hardcoded Credentials"

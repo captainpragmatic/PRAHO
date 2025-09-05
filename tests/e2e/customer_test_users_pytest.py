@@ -77,7 +77,7 @@ def test_customer_login_and_profile_access(page: Page) -> None:
         assert "/app/" in page.url
         
         # Navigate to user profile
-        page.goto("http://localhost:8001/auth/profile/")
+        page.goto("http://localhost:8701/auth/profile/")
         page.wait_for_load_state("networkidle")
         
         # Verify we're on the profile page
@@ -132,7 +132,7 @@ def test_customer_profile_using_convenience_helper(page: Page) -> None:
         assert login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
         
         # Navigate to profile (already authenticated)
-        page.goto("http://localhost:8001/auth/profile/")
+        page.goto("http://localhost:8701/auth/profile/")
         page.wait_for_load_state("networkidle")
         
         # Verify profile page access
@@ -184,7 +184,7 @@ def test_customer_profile_editing(page: Page) -> None:
         # Login and navigate to profile
         ensure_fresh_session(page)
         assert login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
-        page.goto("http://localhost:8001/auth/profile/")
+        page.goto("http://localhost:8701/auth/profile/")
         page.wait_for_load_state("networkidle")
         
         # Test profile data
@@ -272,7 +272,7 @@ def test_customer_password_change_workflow(page: Page) -> None:
         assert login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
         
         # Navigate to password change page
-        page.goto("http://localhost:8001/auth/password-change/")
+        page.goto("http://localhost:8701/auth/password-change/")
         page.wait_for_load_state("networkidle")
         
         # Verify we're on the password change page
@@ -365,7 +365,7 @@ def test_customer_2fa_setup_access_and_flow(page: Page) -> None:
         assert login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
         
         # Navigate to 2FA setup
-        page.goto("http://localhost:8001/auth/2fa/setup/")
+        page.goto("http://localhost:8701/auth/2fa/setup/")
         page.wait_for_load_state("networkidle")
         
         # Verify we're on 2FA setup page
@@ -408,7 +408,7 @@ def test_customer_2fa_setup_access_and_flow(page: Page) -> None:
                 print("  ℹ️ TOTP option not found on method selection")
             
             # Navigate back to method selection
-            page.goto("http://localhost:8001/auth/2fa/setup/")
+            page.goto("http://localhost:8701/auth/2fa/setup/")
             page.wait_for_load_state("networkidle")
             
             # Look for WebAuthn option
@@ -432,7 +432,7 @@ def test_customer_2fa_setup_access_and_flow(page: Page) -> None:
             print("  ⚠️ 2FA setup page not properly loaded")
         
         # Test 2FA disable access (if user has 2FA enabled)
-        page.goto("http://localhost:8001/auth/2fa/disable/")
+        page.goto("http://localhost:8701/auth/2fa/disable/")
         page.wait_for_load_state("networkidle")
         
         if "/auth/2fa/disable/" in page.url:
@@ -478,7 +478,7 @@ def test_customer_staff_access_restrictions(page: Page) -> None:
         
         # Test 1: Try to access staff user list
         print("  🔒 Testing staff user list access restriction")
-        page.goto("http://localhost:8001/auth/users/")
+        page.goto("http://localhost:8701/auth/users/")
         page.wait_for_load_state("networkidle")
         
         # Should be denied access - check for various denial indicators
@@ -514,7 +514,7 @@ def test_customer_staff_access_restrictions(page: Page) -> None:
         
         # Test 2: Try to access individual user detail page
         print("  🔒 Testing individual user detail access restriction")
-        page.goto("http://localhost:8001/auth/users/1/")
+        page.goto("http://localhost:8701/auth/users/1/")
         page.wait_for_load_state("networkidle")
         
         # Should be denied access
@@ -543,7 +543,7 @@ def test_customer_staff_access_restrictions(page: Page) -> None:
         
         # Test 3: Verify customer can still access their own profile
         print("  ✅ Verifying customer can still access own profile")
-        page.goto("http://localhost:8001/auth/profile/")
+        page.goto("http://localhost:8701/auth/profile/")
         page.wait_for_load_state("networkidle")
         
         assert "/auth/profile/" in page.url, "Customer should still access own profile"
@@ -579,7 +579,7 @@ def test_customer_cannot_edit_other_users(page: Page) -> None:
         print("  🔒 Testing API endpoint protection")
         
         # Try to access user check API (should be protected or limited)
-        page.goto("http://localhost:8001/auth/api/check-email/")
+        page.goto("http://localhost:8701/auth/api/check-email/")
         page.wait_for_load_state("networkidle")
         
         # Should not show internal user data
@@ -607,7 +607,7 @@ def test_customer_cannot_edit_other_users(page: Page) -> None:
         
         for restricted_url in restricted_urls:
             try:
-                full_url = f"http://localhost:8001{restricted_url}"
+                full_url = f"http://localhost:8701{restricted_url}"
                 page.goto(full_url)
                 page.wait_for_load_state("networkidle", timeout=3000)
                 
@@ -664,7 +664,7 @@ def test_customer_profile_mobile_responsiveness(page: Page) -> None:
         # Login and navigate to profile on desktop first
         ensure_fresh_session(page)
         assert login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
-        page.goto("http://localhost:8001/auth/profile/")
+        page.goto("http://localhost:8701/auth/profile/")
         page.wait_for_load_state("networkidle")
         
         # Test mobile viewport
@@ -762,7 +762,7 @@ def test_customer_complete_account_management_workflow(page: Page) -> None:
         
         # Step 2: Profile management
         print("    Step 2: Profile viewing and basic information")
-        page.goto("http://localhost:8001/auth/profile/")
+        page.goto("http://localhost:8701/auth/profile/")
         page.wait_for_load_state("networkidle")
         
         # Verify profile content
@@ -803,7 +803,7 @@ def test_customer_complete_account_management_workflow(page: Page) -> None:
                     print("      ✅ Password change form properly structured")
                 
                 # Navigate back to profile
-                page.goto("http://localhost:8001/auth/profile/")
+                page.goto("http://localhost:8701/auth/profile/")
                 page.wait_for_load_state("networkidle")
         
         # Step 4: 2FA setup exploration
@@ -845,7 +845,7 @@ def test_customer_complete_account_management_workflow(page: Page) -> None:
         print("      ✅ Customer session maintained throughout workflow")
         
         # Test navigation to restricted areas (should be blocked)
-        page.goto("http://localhost:8001/auth/users/")
+        page.goto("http://localhost:8701/auth/users/")
         page.wait_for_load_state("networkidle")
         
         # Should not have access to staff areas
@@ -881,7 +881,7 @@ def test_customer_account_responsive_breakpoints(page: Page) -> None:
             """Test core customer account functionality across viewports."""
             try:
                 # Navigate to profile
-                test_page.goto("http://localhost:8001/auth/profile/")
+                test_page.goto("http://localhost:8701/auth/profile/")
                 test_page.wait_for_load_state("networkidle")
                 
                 # Verify authentication maintained
