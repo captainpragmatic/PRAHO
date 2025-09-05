@@ -119,7 +119,7 @@ def test_customer_ticket_list_display_own_tickets_only(page: Page) -> None:
         # Login and navigate to tickets
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
-        page.goto("http://localhost:8001/app/tickets/")
+        page.goto("http://localhost:8701/app/tickets/")
         page.wait_for_load_state("networkidle")
         
         # Verify customer can access the ticket system (support both English and Romanian)
@@ -181,7 +181,7 @@ def test_customer_ticket_creation_workflow(page: Page) -> None:
         # Login and navigate to ticket creation
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
-        page.goto("http://localhost:8001/app/tickets/")
+        page.goto("http://localhost:8701/app/tickets/")
         page.wait_for_load_state("networkidle")
         
         # Click "New Ticket" button (use the main button, avoid dropdown)
@@ -264,7 +264,7 @@ def test_customer_ticket_creation_workflow(page: Page) -> None:
             page.wait_for_timeout(1000)
             
             # Check if ticket was created successfully
-            if "/app/tickets/" in page.url and page.url != "http://localhost:8001/app/tickets/create/":
+            if "/app/tickets/" in page.url and page.url != "http://localhost:8701/app/tickets/create/":
                 print("  ✅ Customer ticket creation succeeded - redirected away from create page")
                 
                 # Look for success message
@@ -283,7 +283,7 @@ def test_customer_ticket_creation_workflow(page: Page) -> None:
                     print("  ℹ️ Form submitted but still on create page - checking if ticket was created")
                     
                     # Navigate to ticket list to verify creation
-                    page.goto("http://localhost:8001/app/tickets/")
+                    page.goto("http://localhost:8701/app/tickets/")
                     page.wait_for_load_state("networkidle")
                     
                     created_ticket = page.locator(f'text="{test_ticket_data["subject"][:20]}"')
@@ -321,7 +321,7 @@ def test_customer_ticket_detail_and_comments(page: Page) -> None:
         # Login and navigate to tickets
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
-        page.goto("http://localhost:8001/app/tickets/")
+        page.goto("http://localhost:8701/app/tickets/")
         page.wait_for_load_state("networkidle")
         
         # Find first ticket to view (customer's own tickets only)
@@ -416,7 +416,7 @@ def test_customer_ticket_file_attachments(page: Page) -> None:
         # Login and navigate to tickets
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
-        page.goto("http://localhost:8001/app/tickets/")
+        page.goto("http://localhost:8701/app/tickets/")
         page.wait_for_load_state("networkidle")
         
         # Find a ticket to work with
@@ -487,7 +487,7 @@ def test_customer_ticket_status_visibility_and_actions(page: Page) -> None:
         # Login and navigate to tickets
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
-        page.goto("http://localhost:8001/app/tickets/")
+        page.goto("http://localhost:8701/app/tickets/")
         page.wait_for_load_state("networkidle")
         
         # Find a ticket to work with
@@ -564,7 +564,7 @@ def test_customer_ticket_access_control_security(page: Page) -> None:
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
         
         # Navigate directly to tickets URL
-        page.goto("http://localhost:8001/app/tickets/")
+        page.goto("http://localhost:8701/app/tickets/")
         page.wait_for_load_state("networkidle")
         
         # Should successfully load ticket system for customer
@@ -588,7 +588,7 @@ def test_customer_ticket_access_control_security(page: Page) -> None:
             print("    ✅ Customer has proper navigation access to tickets")
         
         # Test access to ticket creation form
-        page.goto("http://localhost:8001/app/tickets/create/")
+        page.goto("http://localhost:8701/app/tickets/create/")
         page.wait_for_load_state("networkidle")
         
         create_form = page.locator('form.space-y-6, form:has(select[name="customer_id"]), form:has(input[name="subject"])').first
@@ -637,7 +637,7 @@ def test_customer_ticket_isolation_comprehensive_security(page: Page) -> None:
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
         
         # Navigate to tickets page
-        page.goto("http://localhost:8001/app/tickets/")
+        page.goto("http://localhost:8701/app/tickets/")
         page.wait_for_load_state("networkidle")
         
         # Verify customer 1 can access their tickets
@@ -674,7 +674,7 @@ def test_customer_ticket_isolation_comprehensive_security(page: Page) -> None:
         assert login_user(page, CUSTOMER2_EMAIL, CUSTOMER2_PASSWORD)
         
         # Navigate to tickets page  
-        page.goto("http://localhost:8001/app/tickets/")
+        page.goto("http://localhost:8701/app/tickets/")
         page.wait_for_load_state("networkidle")
         
         # Verify customer 2 can access ticket system
@@ -734,7 +734,7 @@ def test_customer_cannot_access_other_customers_tickets(page: Page) -> None:
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
         
         # Navigate to tickets
-        page.goto("http://localhost:8001/app/tickets/")
+        page.goto("http://localhost:8701/app/tickets/")
         page.wait_for_load_state("networkidle")
         
         # Get list of tickets visible to this customer
@@ -758,7 +758,7 @@ def test_customer_cannot_access_other_customers_tickets(page: Page) -> None:
         
         # Try accessing ticket IDs that might exist but don't belong to this customer
         for test_id in [999, 1000, 1001]:  # High IDs unlikely to be customer's tickets
-            page.goto(f"http://localhost:8001/app/tickets/{test_id}/")
+            page.goto(f"http://localhost:8701/app/tickets/{test_id}/")
             page.wait_for_load_state("networkidle")
             
             # Should either redirect away or show access denied
@@ -805,7 +805,7 @@ def test_customer_ticket_system_mobile_responsiveness(page: Page) -> None:
         # Login and navigate to tickets on desktop first
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
-        page.goto("http://localhost:8001/app/tickets/")
+        page.goto("http://localhost:8701/app/tickets/")
         page.wait_for_load_state("networkidle")
         
         # Test mobile viewport
@@ -898,7 +898,7 @@ def test_customer_complete_ticket_workflow(page: Page) -> None:
         
         # Step 1: Create a new ticket
         print("    Step 1: Creating new ticket as customer...")
-        page.goto("http://localhost:8001/app/tickets/create/")
+        page.goto("http://localhost:8701/app/tickets/create/")
         page.wait_for_load_state("networkidle")
         
         # Test ticket data for comprehensive customer workflow
@@ -945,7 +945,7 @@ def test_customer_complete_ticket_workflow(page: Page) -> None:
             ticket_created = True
         else:
             # Check if ticket exists in list
-            page.goto("http://localhost:8001/app/tickets/")
+            page.goto("http://localhost:8701/app/tickets/")
             page.wait_for_load_state("networkidle")
             
             created_ticket_link = page.locator(f'text="{workflow_ticket["subject"][:20]}"')
@@ -1023,7 +1023,7 @@ def test_customer_ticket_system_responsive_breakpoints(page: Page) -> None:
             """Test core customer ticket functionality across viewports."""
             try:
                 # Navigate to tickets
-                test_page.goto("http://localhost:8001/app/tickets/")
+                test_page.goto("http://localhost:8701/app/tickets/")
                 test_page.wait_for_load_state("networkidle")
                 
                 # Verify authentication maintained

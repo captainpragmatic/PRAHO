@@ -62,7 +62,7 @@ def test_staff_provisioning_system_access_via_navigation(page: Page) -> None:
         assert login_user(page, STAFF_EMAIL, STAFF_PASSWORD)
         
         # Navigate directly to provisioning (since dropdown navigation is complex)
-        page.goto("http://localhost:8001/app/provisioning/services/")
+        page.goto("http://localhost:8701/app/provisioning/services/")
         page.wait_for_load_state("networkidle")
         
         # Verify we're on provisioning page
@@ -92,7 +92,7 @@ def test_staff_provisioning_dashboard_display(page: Page) -> None:
         ensure_fresh_session(page)
         assert login_user(page, STAFF_EMAIL, STAFF_PASSWORD)
         
-        page.goto("http://localhost:8001/app/provisioning/services/")
+        page.goto("http://localhost:8701/app/provisioning/services/")
         page.wait_for_load_state("networkidle")
         
         # Verify authentication maintained
@@ -147,7 +147,7 @@ def test_staff_service_creation_workflow(page: Page) -> None:
         ensure_fresh_session(page)
         assert login_user(page, STAFF_EMAIL, STAFF_PASSWORD)
         
-        page.goto("http://localhost:8001/app/provisioning/services/")
+        page.goto("http://localhost:8701/app/provisioning/services/")
         page.wait_for_load_state("networkidle")
         
         # Look for New Service button (specifically for provisioning)
@@ -209,7 +209,7 @@ def test_staff_service_management_actions(page: Page) -> None:
         ensure_fresh_session(page)
         assert login_user(page, STAFF_EMAIL, STAFF_PASSWORD)
         
-        page.goto("http://localhost:8001/app/provisioning/services/")
+        page.goto("http://localhost:8701/app/provisioning/services/")
         page.wait_for_load_state("networkidle")
         
         # Look for existing services in the main content area (not navigation)
@@ -227,7 +227,7 @@ def test_staff_service_management_actions(page: Page) -> None:
             service_href = first_service.get_attribute('href')
             if service_href and "/create/" not in service_href:
                 print("  📋 Testing service detail access")
-                page.goto(f"http://localhost:8001{service_href}")
+                page.goto(f"http://localhost:8701{service_href}")
                 page.wait_for_load_state("networkidle")
                 
                 # Check if we're on service detail page
@@ -280,7 +280,7 @@ def test_staff_service_status_filtering(page: Page) -> None:
         ensure_fresh_session(page)
         assert login_user(page, STAFF_EMAIL, STAFF_PASSWORD)
         
-        page.goto("http://localhost:8001/app/provisioning/services/")
+        page.goto("http://localhost:8701/app/provisioning/services/")
         page.wait_for_load_state("networkidle")
         
         # Test status filter tabs
@@ -334,7 +334,7 @@ def test_staff_servers_and_plans_access(page: Page) -> None:
         ensure_fresh_session(page)
         assert login_user(page, STAFF_EMAIL, STAFF_PASSWORD)
         
-        page.goto("http://localhost:8001/app/provisioning/services/")
+        page.goto("http://localhost:8701/app/provisioning/services/")
         page.wait_for_load_state("networkidle")
         
         # Test Servers access
@@ -350,7 +350,7 @@ def test_staff_servers_and_plans_access(page: Page) -> None:
                 print("  ℹ️ Servers button led to different page")
             
             # Go back to services
-            page.goto("http://localhost:8001/app/provisioning/services/")
+            page.goto("http://localhost:8701/app/provisioning/services/")
             page.wait_for_load_state("networkidle")
         
         # Test Plans access
@@ -387,7 +387,7 @@ def test_staff_provisioning_system_mobile_responsiveness(page: Page) -> None:
             """Test core provisioning functionality across viewports."""
             try:
                 # Navigate to provisioning
-                test_page.goto("http://localhost:8001/app/provisioning/services/")
+                test_page.goto("http://localhost:8701/app/provisioning/services/")
                 test_page.wait_for_load_state("networkidle")
                 
                 # Verify authentication maintained
@@ -453,7 +453,7 @@ def test_staff_provisioning_system_responsive_breakpoints(page: Page) -> None:
             """Test core staff provisioning functionality across viewports."""
             try:
                 # Navigate to provisioning
-                test_page.goto("http://localhost:8001/app/provisioning/services/")
+                test_page.goto("http://localhost:8701/app/provisioning/services/")
                 test_page.wait_for_load_state("networkidle")
                 
                 # Verify authentication maintained
@@ -531,7 +531,7 @@ def test_staff_complete_provisioning_workflow(page: Page) -> None:
         ensure_fresh_session(page)
         assert login_user(page, STAFF_EMAIL, STAFF_PASSWORD)
         
-        page.goto("http://localhost:8001/app/provisioning/services/")
+        page.goto("http://localhost:8701/app/provisioning/services/")
         page.wait_for_load_state("networkidle")
         
         print("  🔍 Phase 1: Dashboard access and navigation")
@@ -579,7 +579,7 @@ def test_staff_complete_provisioning_workflow(page: Page) -> None:
         print("  🖥️ Phase 4: Supporting sections access")
         
         # Test servers section
-        page.goto("http://localhost:8001/app/provisioning/services/")
+        page.goto("http://localhost:8701/app/provisioning/services/")
         page.wait_for_load_state("networkidle")
         
         servers_btn = page.locator('a:has-text("🖥️"), a[href*="servers"]')

@@ -117,7 +117,7 @@ def test_staff_billing_list_dashboard_display(page: Page) -> None:
         # Login and navigate to billing
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-        page.goto("http://localhost:8001/app/billing/invoices/")
+        page.goto("http://localhost:8701/app/billing/invoices/")
         page.wait_for_load_state("networkidle")
         
         # Verify billing statistics are present
@@ -188,7 +188,7 @@ def test_staff_proforma_creation_workflow(page: Page) -> None:
         # Login and navigate to proforma creation
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-        page.goto("http://localhost:8001/app/billing/invoices/")
+        page.goto("http://localhost:8701/app/billing/invoices/")
         page.wait_for_load_state("networkidle")
         
         # Click "New Proforma" button
@@ -260,7 +260,7 @@ def test_staff_proforma_creation_workflow(page: Page) -> None:
             page.wait_for_timeout(1000)
             
             # Check if proforma was created successfully
-            if "/app/billing/proformas/" in page.url and page.url != "http://localhost:8001/app/billing/proformas/create/":
+            if "/app/billing/proformas/" in page.url and page.url != "http://localhost:8701/app/billing/proformas/create/":
                 print("  ✅ Proforma creation succeeded - redirected away from create page")
                 
                 # Look for success message
@@ -308,7 +308,7 @@ def test_staff_proforma_to_invoice_conversion(page: Page) -> None:
         # Login and navigate to billing
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-        page.goto("http://localhost:8001/app/billing/invoices/")
+        page.goto("http://localhost:8701/app/billing/invoices/")
         page.wait_for_load_state("networkidle")
         
         # Find first proforma to convert (if any exist)
@@ -398,7 +398,7 @@ def test_staff_invoice_detail_and_management_features(page: Page) -> None:
         # Login and navigate to billing
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-        page.goto("http://localhost:8001/app/billing/invoices/")
+        page.goto("http://localhost:8701/app/billing/invoices/")
         page.wait_for_load_state("networkidle")
         
         # Find first invoice to view (if any exist)  
@@ -495,7 +495,7 @@ def test_staff_billing_reports_and_analytics(page: Page) -> None:
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
         
         # Test access to billing reports
-        page.goto("http://localhost:8001/app/billing/reports/")
+        page.goto("http://localhost:8701/app/billing/reports/")
         page.wait_for_load_state("networkidle")
         
         # Verify reports page loads
@@ -523,7 +523,7 @@ def test_staff_billing_reports_and_analytics(page: Page) -> None:
                     print("  ℹ️ VAT report may not be implemented")
             
             # Navigate back to main reports
-            page.goto("http://localhost:8001/app/billing/reports/")
+            page.goto("http://localhost:8701/app/billing/reports/")
             page.wait_for_load_state("networkidle")
             
             # Check for payment reports
@@ -568,7 +568,7 @@ def test_staff_billing_system_mobile_responsiveness(page: Page) -> None:
         # Login and navigate to billing on desktop first
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-        page.goto("http://localhost:8001/app/billing/invoices/")
+        page.goto("http://localhost:8701/app/billing/invoices/")
         page.wait_for_load_state("networkidle")
         
         # Test mobile viewport
@@ -641,7 +641,7 @@ def test_staff_complete_billing_workflow(page: Page) -> None:
         
         # Step 1: Create a new proforma
         print("    Step 1: Creating new proforma for customer...")
-        page.goto("http://localhost:8001/app/billing/proformas/create/")
+        page.goto("http://localhost:8701/app/billing/proformas/create/")
         page.wait_for_load_state("networkidle")
         
         # Test proforma data for comprehensive workflow
@@ -679,7 +679,7 @@ def test_staff_complete_billing_workflow(page: Page) -> None:
             proforma_created = True
         else:
             print("      ℹ️ Proforma creation may have validation issues - checking list")
-            page.goto("http://localhost:8001/app/billing/invoices/")
+            page.goto("http://localhost:8701/app/billing/invoices/")
             page.wait_for_load_state("networkidle")
             
             # Look for our proforma
@@ -761,7 +761,7 @@ def test_staff_billing_system_responsive_breakpoints(page: Page) -> None:
             """Test core staff billing functionality across viewports."""
             try:
                 # Navigate to billing
-                test_page.goto("http://localhost:8001/app/billing/invoices/")
+                test_page.goto("http://localhost:8701/app/billing/invoices/")
                 test_page.wait_for_load_state("networkidle")
                 
                 # Verify authentication maintained

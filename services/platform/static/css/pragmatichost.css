@@ -1,0 +1,277 @@
+/* ===============================================================================
+ * PRAHO PLATFORM - ROMANIAN HOSTING PROVIDER STYLES
+ * =============================================================================== */
+
+/* Romanian Brand Colors */
+:root {
+  --ro-blue: #003DA5;
+  /* Romanian flag blue */
+  --ro-yellow: #FCD116;
+  /* Romanian flag yellow */
+  --ro-red: #CE1126;
+  /* Romanian flag red */
+  --brand-primary: #3B82F6;
+  /* Modern blue */
+  --brand-secondary: #1E40AF;
+  /* Darker blue */
+  --success: #10B981;
+  /* Romanian green */
+  --warning: #F59E0B;
+  /* Warning yellow */
+  --error: #EF4444;
+  /* Error red */
+  --bg-dark: #0F172A;
+  /* Dark background */
+  --bg-card: #1E293B;
+  /* Card background */
+  --border-color: #334155;
+  /* Border color */
+  --text-primary: #F8FAFC;
+  /* Primary text */
+  --text-secondary: #94A3B8;
+  /* Secondary text */
+}
+
+/* Romanian Flag Animation */
+.romanian-flag {
+  position: relative;
+  display: inline-block;
+}
+
+.romanian-flag::before {
+  content: "🇷🇴";
+  margin-right: 0.5rem;
+  animation: flag-wave 2s ease-in-out infinite;
+}
+
+@keyframes flag-wave {
+
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+
+  25% {
+    transform: rotate(-5deg);
+  }
+
+  75% {
+    transform: rotate(5deg);
+  }
+}
+
+/* Custom scrollbar for dark theme */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-dark);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--brand-primary);
+}
+
+/* Romanian currency formatting */
+.currency-ron::after {
+  content: " RON";
+  font-weight: normal;
+  color: var(--text-secondary);
+}
+
+/* CUI validation styles */
+.cui-input.valid {
+  border-color: var(--success) !important;
+  box-shadow: 0 0 0 1px var(--success);
+}
+
+.cui-input.invalid {
+  border-color: var(--error) !important;
+  box-shadow: 0 0 0 1px var(--error);
+}
+
+/* Status badges */
+.status-active {
+  background-color: rgba(16, 185, 129, 0.1);
+  color: #10B981;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.status-pending {
+  background-color: rgba(245, 158, 11, 0.1);
+  color: #F59E0B;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+.status-suspended {
+  background-color: rgba(239, 68, 68, 0.1);
+  color: #EF4444;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+/* Invoice status styles */
+.invoice-paid {
+  background-color: rgba(16, 185, 129, 0.1);
+  color: #10B981;
+}
+
+.invoice-pending {
+  background-color: rgba(245, 158, 11, 0.1);
+  color: #F59E0B;
+}
+
+.invoice-overdue {
+  background-color: rgba(239, 68, 68, 0.1);
+  color: #EF4444;
+}
+
+/* Loading spinner for HTMX */
+.htmx-indicator {
+  display: none;
+}
+
+.htmx-request .htmx-indicator {
+  display: inline;
+}
+
+.htmx-request.loading {
+  opacity: 0.8;
+  cursor: wait;
+}
+
+/* Romanian phone number formatting hint */
+.phone-hint::after {
+  content: "Exemplu: +40 21 123 4567 sau 0712 345 678";
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-top: 0.25rem;
+}
+
+/* VAT calculation display */
+.vat-breakdown {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(30, 64, 175, 0.1) 100%);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin: 1rem 0;
+}
+
+.vat-breakdown .vat-rate {
+  font-weight: bold;
+  color: var(--brand-primary);
+}
+
+/* Dashboard stats cards hover effect */
+.stats-card {
+  transition: all 0.3s ease;
+  border: 1px solid var(--border-color);
+}
+
+.stats-card:hover {
+  border-color: var(--brand-primary);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
+  transform: translateY(-2px);
+}
+
+/* Form validation feedback */
+.form-field.error input,
+.form-field.error textarea,
+.form-field.error select {
+  border-color: var(--error);
+  box-shadow: 0 0 0 1px var(--error);
+}
+
+.form-field.success input,
+.form-field.success textarea,
+.form-field.success select {
+  border-color: var(--success);
+  box-shadow: 0 0 0 1px var(--success);
+}
+
+/* Romanian business compliance indicators */
+.compliance-indicator {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.compliance-gdpr {
+  background-color: rgba(59, 130, 246, 0.1);
+  color: #3B82F6;
+}
+
+.compliance-vat {
+  background-color: rgba(16, 185, 129, 0.1);
+  color: #10B981;
+}
+
+.compliance-e-factura {
+  background-color: rgba(147, 51, 234, 0.1);
+  color: #9333EA;
+}
+
+/* Responsive design for Romanian business forms */
+@media (max-width: 768px) {
+  .romanian-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .table-responsive {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .table-responsive table {
+    min-width: 600px;
+  }
+}
+
+/* Print styles for invoices */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  .invoice-print {
+    background: white !important;
+    color: black !important;
+  }
+
+  .romanian-flag::before {
+    filter: grayscale(100%);
+  }
+}
+
+/* Dark mode overrides for better contrast */
+@media (prefers-color-scheme: dark) {
+  .form-input {
+    background-color: var(--bg-card);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+  }
+
+  .form-input:focus {
+    border-color: var(--brand-primary);
+    box-shadow: 0 0 0 1px var(--brand-primary);
+  }
+}

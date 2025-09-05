@@ -1,0 +1,27 @@
+{
+  "metadata": {
+    "generated_at": "2025-09-03T13:38:55.895520+00:00",
+    "user_id": 1,
+    "export_type": "gdpr_data_portability",
+    "praho_platform_version": "1.0.0",
+    "gdpr_article": "Article 20 - Right to data portability",
+    "legal_basis": "Romanian Law 190/2018, GDPR Article 20"
+  },
+  "user_profile": {
+    "email": "views@example.com",
+    "first_name": "",
+    "last_name": "",
+    "phone": "",
+    "date_joined": "2025-09-03T13:38:55.893698+00:00",
+    "last_login": "2025-09-03T13:38:55.894339+00:00",
+    "staff_role": "",
+    "gdpr_consent_date": null,
+    "accepts_marketing": false,
+    "last_privacy_policy_accepted": null,
+    "account_status": "active"
+  },
+  "customers": [],
+  "billing_data": [],
+  "support_tickets": [],
+  "audit_summary": {}
+}

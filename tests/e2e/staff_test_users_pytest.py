@@ -67,7 +67,7 @@ def test_staff_user_management_access_via_navigation(page: Page) -> None:
         assert "/app/" in page.url
         
         # Test direct access to user management
-        page.goto("http://localhost:8001/auth/users/")
+        page.goto("http://localhost:8701/auth/users/")
         page.wait_for_load_state("networkidle")
         
         # Verify we're on the user management page
@@ -143,7 +143,7 @@ def test_staff_user_list_display_and_filtering(page: Page) -> None:
         # Login and navigate to user management
         ensure_fresh_session(page)
         assert login_user_with_retry(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-        page.goto("http://localhost:8001/auth/users/")
+        page.goto("http://localhost:8701/auth/users/")
         page.wait_for_load_state("networkidle")
         
         # Verify user list displays
@@ -259,7 +259,7 @@ def test_staff_user_detail_view_and_management(page: Page) -> None:
         # Login and navigate to user management
         ensure_fresh_session(page)
         assert login_user_with_retry(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-        page.goto("http://localhost:8001/auth/users/")
+        page.goto("http://localhost:8701/auth/users/")
         page.wait_for_load_state("networkidle")
         
         # Find a user detail link to test
@@ -352,7 +352,7 @@ def test_staff_user_creation_workflow(page: Page) -> None:
         # Login and navigate to user management
         ensure_fresh_session(page)
         assert login_user_with_retry(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-        page.goto("http://localhost:8001/auth/users/")
+        page.goto("http://localhost:8701/auth/users/")
         page.wait_for_load_state("networkidle")
         
         # Verify staff can access user list
@@ -372,7 +372,7 @@ def test_staff_user_creation_workflow(page: Page) -> None:
         
         # Test staff can access registration workflow (since PRAHO uses registration)
         print("  📝 Testing registration workflow access")
-        page.goto("http://localhost:8001/auth/register/")
+        page.goto("http://localhost:8701/auth/register/")
         page.wait_for_load_state("networkidle")
         
         # Verify registration form is accessible
@@ -411,7 +411,7 @@ def test_staff_user_creation_workflow(page: Page) -> None:
         
         # Return to user management
         print("  🔙 Returning to user management")
-        page.goto("http://localhost:8001/auth/users/")
+        page.goto("http://localhost:8701/auth/users/")
         page.wait_for_load_state("networkidle")
         
         if "/users/" in page.url:
@@ -445,7 +445,7 @@ def test_staff_user_search_and_bulk_operations(page: Page) -> None:
         # Login and navigate to user management
         ensure_fresh_session(page)
         assert login_user_with_retry(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-        page.goto("http://localhost:8001/auth/users/")
+        page.goto("http://localhost:8701/auth/users/")
         page.wait_for_load_state("networkidle")
         
         # Test advanced search functionality
@@ -592,7 +592,7 @@ def test_staff_customer_user_assignment_and_management(page: Page) -> None:
         # Login and navigate to user management
         ensure_fresh_session(page)
         assert login_user_with_retry(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-        page.goto("http://localhost:8001/auth/users/")
+        page.goto("http://localhost:8701/auth/users/")
         page.wait_for_load_state("networkidle")
         
         # Find a user to test customer assignment
@@ -651,7 +651,7 @@ def test_staff_customer_user_assignment_and_management(page: Page) -> None:
                 
                 # Test customer filtering from user list
                 print("  🔍 Testing customer-based user filtering")
-                page.goto("http://localhost:8001/auth/users/")
+                page.goto("http://localhost:8701/auth/users/")
                 page.wait_for_load_state("networkidle")
                 
                 # Look for customer filter
@@ -677,7 +677,7 @@ def test_staff_customer_user_assignment_and_management(page: Page) -> None:
         # Test access to customer management section
         print("  🏢 Testing integration with customer management")
         
-        page.goto("http://localhost:8001/app/customers/")
+        page.goto("http://localhost:8701/app/customers/")
         page.wait_for_load_state("networkidle")
         
         if "/app/customers/" in page.url:
@@ -722,7 +722,7 @@ def test_staff_user_management_mobile_responsiveness(page: Page) -> None:
         # Login and navigate to user management on desktop first
         ensure_fresh_session(page)
         assert login_user_with_retry(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-        page.goto("http://localhost:8001/auth/users/")
+        page.goto("http://localhost:8701/auth/users/")
         page.wait_for_load_state("networkidle")
         
         # Test mobile viewport
@@ -831,7 +831,7 @@ def test_staff_complete_user_management_workflow(page: Page) -> None:
         
         # Step 2: User management system access
         print("    Step 2: User management system navigation")
-        page.goto("http://localhost:8001/auth/users/")
+        page.goto("http://localhost:8701/auth/users/")
         page.wait_for_load_state("networkidle")
         
         # Verify user management page
@@ -895,14 +895,14 @@ def test_staff_complete_user_management_workflow(page: Page) -> None:
                         print(f"        ✅ {mgmt_actions} management actions available")
                 
                 # Navigate back to user list
-                page.goto("http://localhost:8001/auth/users/")
+                page.goto("http://localhost:8701/auth/users/")
                 page.wait_for_load_state("networkidle")
             
             # Step 5: User creation workflow test
             print("    Step 5: User creation workflow exploration")
             
             # Test registration page access since PRAHO uses registration not admin creation  
-            page.goto("http://localhost:8001/auth/register/")
+            page.goto("http://localhost:8701/auth/register/")
             page.wait_for_load_state("networkidle")
             
             if "/register" in page.url:
@@ -932,7 +932,7 @@ def test_staff_complete_user_management_workflow(page: Page) -> None:
         print("    Step 6: Cross-system integration validation")
         
         # Test integration with customer management
-        page.goto("http://localhost:8001/app/customers/")
+        page.goto("http://localhost:8701/app/customers/")
         page.wait_for_load_state("networkidle")
         
         if "/app/customers/" in page.url:
@@ -969,7 +969,7 @@ def test_staff_user_management_responsive_breakpoints(page: Page) -> None:
             """Test core staff user management functionality across viewports."""
             try:
                 # Navigate to user management
-                test_page.goto("http://localhost:8001/auth/users/")
+                test_page.goto("http://localhost:8701/auth/users/")
                 test_page.wait_for_load_state("networkidle")
                 
                 # Verify authentication maintained

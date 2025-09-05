@@ -65,7 +65,7 @@ await page.click('button[type="submit"]')  # Requires careful async/await
 ```python
 def test_dashboard_functionality(page: Page):
     """Simple, focused E2E test."""
-    page.goto("http://localhost:8001/auth/login/")
+    page.goto("http://localhost:8701/auth/login/")
     page.fill('input[name="email"]', ADMIN_EMAIL)
     page.fill('input[name="password"]', ADMIN_PASSWORD)
     page.click('button[type="submit"]')

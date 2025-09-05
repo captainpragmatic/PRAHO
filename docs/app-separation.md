@@ -152,7 +152,7 @@ INTER_SERVICE_SECRET = env('INTER_SERVICE_SECRET')
 # praho-customer/services/admin_api.py
 class AdminAPIClient:
     """Single point of integration with admin app"""
-    BASE_URL = "http://10.0.1.5:8000/api"
+    BASE_URL = "http://10.0.1.5:8700/api"
     
     def get_customer_invoices(self, customer_id):
         # All admin communication through this service

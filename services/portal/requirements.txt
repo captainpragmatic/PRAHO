@@ -1,0 +1,27 @@
+# PRAHO Portal Service - Requirements (NO DATABASE ACCESS)  
+# 🚨 SECURITY: Intentionally excludes database drivers to prevent DB access
+# Portal communicates with platform service via API only
+
+-c ../../constraints.txt
+
+# Core Django (minimal)
+Django>=5.2,<5.3
+django-environ>=0.11.0
+
+# API framework  
+djangorestframework>=3.14.0
+
+# HTTP client for platform API communication
+requests>=2.31.0
+
+# Production server
+gunicorn>=21.2.0
+
+# Session management (cookie-based, no DB)
+# No additional packages needed - uses Django's signed cookie sessions
+
+# 🚨 INTENTIONALLY EXCLUDED:
+# - psycopg2-binary (PostgreSQL)  
+# - django-redis (Redis)
+# - Any database-related packages
+# This ensures portal cannot accidentally access the database

@@ -25,7 +25,7 @@ from playwright.sync_api import Page, ViewportSize
 # ===============================================================================
 
 # Base URL for the application
-BASE_URL = "http://localhost:8001"
+BASE_URL = "http://localhost:8701"
 
 # Test user credentials - using dedicated E2E users  
 SUPERUSER_EMAIL = "e2e-admin@test.local"

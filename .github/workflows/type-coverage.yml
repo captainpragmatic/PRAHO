@@ -3,8 +3,18 @@ name: Type Coverage Check
 on:
   push:
     branches: [ master, develop, 'feat/*', 'fix/*' ]
+    paths:
+      - 'services/platform/**'
+      - 'requirements/**'
+      - 'pyproject.toml'
+      - 'scripts/type_coverage_report.py'
   pull_request:
     branches: [ master, develop ]
+    paths:
+      - 'services/platform/**'
+      - 'requirements/**'
+      - 'pyproject.toml'
+      - 'scripts/type_coverage_report.py'
 
 jobs:
   type-check:
@@ -23,16 +33,6 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
-      
-      redis:
-        image: redis:7-alpine
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 6379:6379
 
     steps:
     - uses: actions/checkout@v4
@@ -59,22 +59,32 @@ jobs:
       run: |
         export DJANGO_SETTINGS_MODULE=config.settings.test
         export DATABASE_URL=postgres://postgres:postgres@localhost:5432/test_db
-        export REDIS_URL=redis://localhost:6379/0
+        echo "DJANGO_SETTINGS_MODULE=config.settings.test" >> $GITHUB_ENV
+        echo "DATABASE_URL=postgres://postgres:postgres@localhost:5432/test_db" >> $GITHUB_ENV
+    
+    - name: Set up platform database
+      run: |
+        cd services/platform
+        PYTHONPATH=$(pwd) python manage.py createcachetable django_cache_table || echo "Cache table exists"
+        PYTHONPATH=$(pwd) python manage.py migrate --no-input
     
     - name: Run type coverage check
       run: |
         echo "🔍 Running type coverage analysis..."
-        python scripts/type_coverage_report.py || echo "Warning: Type coverage script failed, continuing..."
+        cd services/platform
+        PYTHONPATH=$(pwd) python ../../scripts/type_coverage_report.py || echo "Warning: Type coverage script failed, continuing..."
     
     - name: Run mypy type checking
       run: |
         echo "🏷️ Running mypy type checking..."
-        python -m mypy apps/ --config-file pyproject.toml --no-error-summary > mypy_errors.txt || true
+        cd services/platform
+        PYTHONPATH=$(pwd) python -m mypy apps/ --config-file ../../pyproject.toml --no-error-summary > mypy_errors.txt || true
         echo "Mypy output saved to mypy_errors.txt"
         head -20 mypy_errors.txt || echo "No mypy output file or file is empty"
     
     - name: Count type errors
       run: |
+        cd services/platform
         # Count errors with better error handling
         if [ -f mypy_errors.txt ]; then
           ERROR_COUNT=$(grep -c "error:" mypy_errors.txt || echo "0")
@@ -106,8 +116,8 @@ jobs:
       with:
         name: type-coverage-report
         path: |
-          type_coverage_report.json
-          mypy_errors.txt
+          services/platform/type_coverage_report.json
+          services/platform/mypy_errors.txt
         if-no-files-found: warn
     
     - name: Comment PR with type coverage

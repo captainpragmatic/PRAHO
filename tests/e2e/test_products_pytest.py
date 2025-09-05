@@ -115,7 +115,7 @@ def test_product_catalog_dashboard_display(page: Page) -> None:
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
         page.wait_for_timeout(1000)  # Prevent rate limiting
-        page.goto("http://localhost:8001/app/products/")
+        page.goto("http://localhost:8701/app/products/")
         page.wait_for_load_state("networkidle")
         
         # Verify statistics cards are present and show data
@@ -196,7 +196,7 @@ def test_product_creation_full_workflow(page: Page) -> None:
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
         page.wait_for_timeout(1000)  # Prevent rate limiting
-        page.goto("http://localhost:8001/app/products/")
+        page.goto("http://localhost:8701/app/products/")
         
         # Click "New Product" button
         new_product_button = page.locator('a:has-text("✨ New Product")')
@@ -267,7 +267,7 @@ def test_product_creation_full_workflow(page: Page) -> None:
             print("      Form may have validation issues - checking if product was created anyway")
             
             # Navigate to products list to verify product was created
-            page.goto("http://localhost:8001/app/products/")
+            page.goto("http://localhost:8701/app/products/")
             page.wait_for_load_state("networkidle")
             
             # Search for the product
@@ -325,7 +325,7 @@ def test_product_pricing_management(page: Page) -> None:
         page.wait_for_timeout(1000)  # Prevent rate limiting
         
         # Navigate to an existing product's pricing (use first product in list)
-        page.goto("http://localhost:8001/app/products/")
+        page.goto("http://localhost:8701/app/products/")
         page.wait_for_load_state("networkidle")
         
         # Find first product pricing link (💰 icon)
@@ -333,7 +333,7 @@ def test_product_pricing_management(page: Page) -> None:
         assert first_pricing_link.is_visible(), "Product pricing link should be available"
         
         pricing_url = first_pricing_link.get_attribute('href')
-        page.goto(f"http://localhost:8001{pricing_url}")
+        page.goto(f"http://localhost:8701{pricing_url}")
         page.wait_for_load_state("networkidle")
         
         # Verify we're on pricing management page
@@ -435,7 +435,7 @@ def test_product_status_toggles(page: Page) -> None:
         page.wait_for_timeout(1000)  # Prevent rate limiting
         
         # Navigate to first product detail page
-        page.goto("http://localhost:8001/app/products/")
+        page.goto("http://localhost:8701/app/products/")
         page.wait_for_load_state("networkidle")
         
         # Click on first product name link
@@ -444,7 +444,7 @@ def test_product_status_toggles(page: Page) -> None:
         first_product_link.click()
         
         page.wait_for_load_state("networkidle")
-        assert "/app/products/" in page.url and page.url != "http://localhost:8001/app/products/"
+        assert "/app/products/" in page.url and page.url != "http://localhost:8701/app/products/"
         
         # Verify status toggle section is present
         status_section = page.locator('h2:has-text("⚙️ Status & Settings")')
@@ -501,7 +501,7 @@ def test_product_search_and_filtering(page: Page) -> None:
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
         page.wait_for_timeout(1000)  # Prevent rate limiting
-        page.goto("http://localhost:8001/app/products/")
+        page.goto("http://localhost:8701/app/products/")
         page.wait_for_load_state("networkidle")
         
         # Get initial product count
@@ -537,7 +537,7 @@ def test_product_search_and_filtering(page: Page) -> None:
             clear_button.click()
         else:
             # Navigate directly to products page to clear filters
-            page.goto("http://localhost:8001/app/products/")
+            page.goto("http://localhost:8701/app/products/")
         page.wait_for_load_state("networkidle")
         
         # Select VPS from product type filter
@@ -556,7 +556,7 @@ def test_product_search_and_filtering(page: Page) -> None:
         if clear_button.count() > 0:
             clear_button.click()
         else:
-            page.goto("http://localhost:8001/app/products/")
+            page.goto("http://localhost:8701/app/products/")
         page.wait_for_load_state("networkidle")
         
         # Test active status filter
@@ -579,7 +579,7 @@ def test_product_search_and_filtering(page: Page) -> None:
         if clear_button.count() > 0:
             clear_button.click()
         else:
-            page.goto("http://localhost:8001/app/products/")
+            page.goto("http://localhost:8701/app/products/")
         page.wait_for_load_state("networkidle")
         
         cleared_count = page.locator('h3:has-text("📦 Products")').inner_text()
@@ -616,7 +616,7 @@ def test_product_catalog_staff_access_control(page: Page) -> None:
         page.wait_for_timeout(1000)  # Prevent rate limiting
         
         # Navigate directly to products URL
-        page.goto("http://localhost:8001/app/products/")
+        page.goto("http://localhost:8701/app/products/")
         page.wait_for_load_state("networkidle")
         
         # Should successfully load product catalog
@@ -655,7 +655,7 @@ def test_product_catalog_staff_access_control(page: Page) -> None:
             print("    ✅ Business dropdown appropriately hidden from customers")
         
         # Test direct URL access - should be blocked
-        page.goto("http://localhost:8001/app/products/")
+        page.goto("http://localhost:8701/app/products/")
         page.wait_for_load_state("networkidle")
         
         # Should either redirect to login, show error, or not show product management interface
@@ -702,7 +702,7 @@ def test_product_catalog_mobile_responsiveness(page: Page) -> None:
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
         page.wait_for_timeout(1000)  # Prevent rate limiting
-        page.goto("http://localhost:8001/app/products/")
+        page.goto("http://localhost:8701/app/products/")
         page.wait_for_load_state("networkidle")
         
         # Test mobile viewport
@@ -753,10 +753,10 @@ def test_product_catalog_mobile_responsiveness(page: Page) -> None:
                     if first_button.is_visible():
                         first_button.click()
                         page.wait_for_load_state("networkidle")
-                        if "/app/products/" in page.url and page.url != "http://localhost:8001/app/products/":
+                        if "/app/products/" in page.url and page.url != "http://localhost:8701/app/products/":
                             print("      ✅ Product action buttons work on mobile")
                             # Navigate back
-                            page.goto("http://localhost:8001/app/products/")
+                            page.goto("http://localhost:8701/app/products/")
                         else:
                             print("      ⚠️ Product action button click may not have worked")
                 except Exception:
@@ -819,7 +819,7 @@ def test_product_catalog_responsive_breakpoints(page: Page) -> None:
             """Test core product catalog functionality across viewports."""
             try:
                 # Navigate to products
-                test_page.goto("http://localhost:8001/app/products/")
+                test_page.goto("http://localhost:8701/app/products/")
                 test_page.wait_for_load_state("networkidle")
                 
                 # Verify authentication maintained

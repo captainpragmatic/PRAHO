@@ -58,7 +58,7 @@ def test_customer_can_view_own_services_but_not_manage(page: Page) -> None:
         
         # Access provisioning services as customer
         print("  👁️ Accessing provisioning services as customer")
-        page.goto("http://localhost:8001/app/provisioning/services/")
+        page.goto("http://localhost:8701/app/provisioning/services/")
         page.wait_for_load_state("networkidle")
         
         # Customer should be able to see the services page
@@ -105,7 +105,7 @@ def test_customer_cannot_create_services(page: Page) -> None:
         
         # Attempt to access service creation directly
         print("  🚨 Attempting direct access to /app/provisioning/services/create/")
-        page.goto("http://localhost:8001/app/provisioning/services/create/")
+        page.goto("http://localhost:8701/app/provisioning/services/create/")
         page.wait_for_load_state("networkidle")
         
         # Should be redirected away from service creation
@@ -150,7 +150,7 @@ def test_customer_cannot_access_service_management_actions(page: Page) -> None:
         blocked_actions = 0
         for url, action_name in management_actions:
             print(f"  🚨 Testing {action_name} access control")
-            page.goto(f"http://localhost:8001{url}")
+            page.goto(f"http://localhost:8701{url}")
             page.wait_for_load_state("networkidle")
             
             # Should be redirected away from service management actions
@@ -189,7 +189,7 @@ def test_customer_server_access_blocked_but_plans_allowed(page: Page) -> None:
         
         # Test servers section access (should be blocked)
         print("  🖥️ Testing servers section access control")
-        page.goto("http://localhost:8001/app/provisioning/servers/")
+        page.goto("http://localhost:8701/app/provisioning/servers/")
         page.wait_for_load_state("networkidle")
         
         servers_url = page.url
@@ -201,7 +201,7 @@ def test_customer_server_access_blocked_but_plans_allowed(page: Page) -> None:
         
         # Test plans section access (should be allowed - customers need to see available plans)
         print("  📦 Testing plans section access (should be allowed)")
-        page.goto("http://localhost:8001/app/provisioning/plans/")
+        page.goto("http://localhost:8701/app/provisioning/plans/")
         page.wait_for_load_state("networkidle")
         
         plans_url = page.url
@@ -237,7 +237,7 @@ def test_customer_provisioning_navigation_not_available(page: Page) -> None:
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
         
         # Go to dashboard/main page
-        page.goto("http://localhost:8001/app/")
+        page.goto("http://localhost:8701/app/")
         page.wait_for_load_state("networkidle")
         
         # Check if Business dropdown exists (it should, but shouldn't contain provisioning)
@@ -310,7 +310,7 @@ def test_customer_provisioning_comprehensive_security_validation(page: Page) -> 
         
         correct_count = 0
         for test_url, should_allow, description in test_urls:
-            page.goto(f"http://localhost:8001{test_url}")
+            page.goto(f"http://localhost:8701{test_url}")
             page.wait_for_load_state("networkidle")
             
             current_url = page.url
@@ -335,7 +335,7 @@ def test_customer_provisioning_comprehensive_security_validation(page: Page) -> 
         print("  🔍 Phase 2: Error message validation")
         
         # Test that we get proper error messaging
-        page.goto("http://localhost:8001/app/provisioning/services/")
+        page.goto("http://localhost:8701/app/provisioning/services/")
         page.wait_for_load_state("networkidle")
         
         # Look for appropriate security messaging
@@ -391,7 +391,7 @@ def test_customer_provisioning_security_mobile_compatibility(page: Page) -> None
         print("  📱 Testing provisioning access on mobile viewport")
         
         # Test provisioning access on mobile (should follow same rules as desktop)
-        page.goto("http://localhost:8001/app/provisioning/services/")
+        page.goto("http://localhost:8701/app/provisioning/services/")
         page.wait_for_load_state("networkidle")
         
         # Customer should be able to view services (same as desktop)
@@ -400,7 +400,7 @@ def test_customer_provisioning_security_mobile_compatibility(page: Page) -> None
             print("    ✅ Customer can view services on mobile (correct - same as desktop)")
             
             # Test that management actions are still blocked on mobile
-            page.goto("http://localhost:8001/app/provisioning/services/create/")
+            page.goto("http://localhost:8701/app/provisioning/services/create/")
             page.wait_for_load_state("networkidle")
             
             create_url = page.url

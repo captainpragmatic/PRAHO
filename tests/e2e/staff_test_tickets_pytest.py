@@ -113,7 +113,7 @@ def test_staff_ticket_list_dashboard_display(page: Page) -> None:
         # Login and navigate to tickets
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-        page.goto("http://localhost:8001/app/tickets/")
+        page.goto("http://localhost:8701/app/tickets/")
         page.wait_for_load_state("networkidle")
         
         # Verify ticket statistics are present
@@ -181,7 +181,7 @@ def test_staff_ticket_creation_workflow(page: Page) -> None:
         # Login and navigate to ticket creation
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-        page.goto("http://localhost:8001/app/tickets/")
+        page.goto("http://localhost:8701/app/tickets/")
         page.wait_for_load_state("networkidle")
         
         # Click "New Ticket" button
@@ -251,7 +251,7 @@ def test_staff_ticket_creation_workflow(page: Page) -> None:
             page.wait_for_timeout(1000)
             
             # Check if ticket was created successfully
-            if "/app/tickets/" in page.url and page.url != "http://localhost:8001/app/tickets/create/":
+            if "/app/tickets/" in page.url and page.url != "http://localhost:8701/app/tickets/create/":
                 print("  ✅ Ticket creation succeeded - redirected away from create page")
                 
                 # Look for success message
@@ -299,7 +299,7 @@ def test_staff_ticket_detail_and_management_features(page: Page) -> None:
         # Login and navigate to tickets
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-        page.goto("http://localhost:8001/app/tickets/")
+        page.goto("http://localhost:8701/app/tickets/")
         page.wait_for_load_state("networkidle")
         
         # Find first ticket to view (if any exist)
@@ -364,7 +364,7 @@ def test_staff_ticket_detail_and_management_features(page: Page) -> None:
             print("  ℹ️ No existing tickets found - creating sample ticket for testing")
             
             # Navigate back to create a test ticket first
-            page.goto("http://localhost:8001/app/tickets/create/")
+            page.goto("http://localhost:8701/app/tickets/create/")
             # ... (ticket creation logic would go here)
         
         print("  ✅ Staff ticket management features verified")
@@ -390,7 +390,7 @@ def test_staff_ticket_comments_and_internal_notes(page: Page) -> None:
         # Login and navigate to tickets
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-        page.goto("http://localhost:8001/app/tickets/")
+        page.goto("http://localhost:8701/app/tickets/")
         page.wait_for_load_state("networkidle")
         
         # Find a ticket to work with
@@ -480,7 +480,7 @@ def test_staff_ticket_status_management(page: Page) -> None:
         # Login and navigate to tickets
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-        page.goto("http://localhost:8001/app/tickets/")
+        page.goto("http://localhost:8701/app/tickets/")
         page.wait_for_load_state("networkidle")
         
         # Find an open ticket to work with
@@ -564,7 +564,7 @@ def test_staff_ticket_access_control_permissions(page: Page) -> None:
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
         
         # Navigate directly to tickets URL
-        page.goto("http://localhost:8001/app/tickets/")
+        page.goto("http://localhost:8701/app/tickets/")
         page.wait_for_load_state("networkidle")
         
         # Should successfully load ticket system
@@ -588,7 +588,7 @@ def test_staff_ticket_access_control_permissions(page: Page) -> None:
             print("    ✅ Staff has proper navigation access to tickets")
         
         # Test access to ticket creation form
-        page.goto("http://localhost:8001/app/tickets/create/")
+        page.goto("http://localhost:8701/app/tickets/create/")
         page.wait_for_load_state("networkidle")
         
         create_form = page.locator('form').filter(has_text="Subject").first
@@ -628,7 +628,7 @@ def test_staff_ticket_system_mobile_responsiveness(page: Page) -> None:
         # Login and navigate to tickets on desktop first
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-        page.goto("http://localhost:8001/app/tickets/")
+        page.goto("http://localhost:8701/app/tickets/")
         page.wait_for_load_state("networkidle")
         
         # Test mobile viewport
@@ -700,7 +700,7 @@ def test_staff_complete_ticket_management_workflow(page: Page) -> None:
         
         # Step 1: Create a new ticket
         print("    Step 1: Creating new ticket for customer...")
-        page.goto("http://localhost:8001/app/tickets/create/")
+        page.goto("http://localhost:8701/app/tickets/create/")
         page.wait_for_load_state("networkidle")
         
         # Test ticket data for comprehensive workflow
@@ -738,7 +738,7 @@ def test_staff_complete_ticket_management_workflow(page: Page) -> None:
             ticket_created = True
         else:
             print("      ℹ️ Ticket creation may have validation issues - checking list")
-            page.goto("http://localhost:8001/app/tickets/")
+            page.goto("http://localhost:8701/app/tickets/")
             page.wait_for_load_state("networkidle")
             
             # Look for our ticket
@@ -819,7 +819,7 @@ def test_staff_ticket_system_responsive_breakpoints(page: Page) -> None:
             """Test core staff ticket functionality across viewports."""
             try:
                 # Navigate to tickets
-                test_page.goto("http://localhost:8001/app/tickets/")
+                test_page.goto("http://localhost:8701/app/tickets/")
                 test_page.wait_for_load_state("networkidle")
                 
                 # Verify authentication maintained

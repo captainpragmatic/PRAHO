@@ -1,0 +1,92 @@
+# ===============================================================================
+# PRAHO SERVICES - DEVELOPMENT DOCKER COMPOSE 🛠️
+# ===============================================================================
+# Development environment with hot reload and debug settings (no Redis)
+
+services:
+  # ===============================================================================
+  # DATABASE - POSTGRESQL (DEVELOPMENT) 🗄️
+  # ===============================================================================
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: praho_dev
+      POSTGRES_USER: praho
+      POSTGRES_PASSWORD: praho123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U praho"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+
+  # ===============================================================================
+  # PLATFORM SERVICE - DEVELOPMENT HOT RELOAD 🔥
+  # ===============================================================================
+  platform:
+    build:
+      context: ..
+      dockerfile: deploy/platform/Dockerfile
+    ports:
+      - "8700:8700"
+    volumes:
+      # Hot reload - mount source code
+      - ../services/platform:/app:delegated
+      - dev_static_volume:/app/staticfiles
+      - dev_media_volume:/app/media
+    environment:
+      - DEBUG=1
+      - DATABASE_URL=postgresql://praho:praho123@db:5432/praho_dev
+      - SECRET_KEY=dev-secret-key-for-development-only
+      - DJANGO_SETTINGS_MODULE=config.settings.dev
+      - PYTHONPATH=/app
+      - SERVICE_NAME=platform
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    command: >
+      sh -c "python manage.py migrate --noinput && 
+             python manage.py runserver 0.0.0.0:8700"
+
+  # ===============================================================================
+  # PORTAL SERVICE - DEVELOPMENT HOT RELOAD 🌐
+  # ===============================================================================
+  portal:
+    build:
+      context: ..
+      dockerfile: deploy/portal/Dockerfile
+    ports:
+      - "8701:8701"
+    volumes:
+      # Hot reload - mount source code
+      - ../services/portal:/app:delegated
+      - dev_portal_static_volume:/app/staticfiles
+    environment:
+      - DEBUG=1
+      - PLATFORM_API_BASE_URL=http://platform:8700/api
+      - SECRET_KEY=dev-secret-key-for-development-only
+      - DJANGO_SETTINGS_MODULE=config.settings
+      - SERVICE_NAME=portal
+    depends_on:
+      - platform
+    restart: unless-stopped
+    command: >
+      sh -c "python manage.py runserver 0.0.0.0:8701"
+
+# ===============================================================================
+# DEVELOPMENT VOLUMES 💾
+# ===============================================================================
+volumes:
+  postgres_dev_data:
+    name: praho_dev_postgres_data
+  dev_static_volume:
+    name: praho_dev_static_volume
+  dev_media_volume:
+    name: praho_dev_media_volume
+  dev_portal_static_volume:
+    name: praho_dev_portal_static_volume
