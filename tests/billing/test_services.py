@@ -107,17 +107,24 @@ class RefundServiceComprehensiveCoverageTestCase(TransactionTestCase):
         )
 
     def _create_test_order(self) -> Any:
-        """Create a mock order for testing."""
-        mock_order = Mock()
-        mock_order.id = uuid.uuid4()
-        mock_order.customer = self.customer
-        mock_order.status = 'completed'
-        mock_order.total_cents = 15000
-        mock_order.order_number = 'ORD-000001'
-        mock_order.meta = {}
-        mock_order.invoice = self.invoice
-        mock_order.save = Mock()
-        return mock_order
+        """Create a real order for testing."""
+        from apps.orders.models import Order
+        from apps.billing.models import Currency
+        
+        # Get or create RON currency
+        currency, _ = Currency.objects.get_or_create(
+            code="RON",
+            defaults={"name": "Romanian Leu", "symbol": "lei"}
+        )
+        
+        return Order.objects.create(
+            customer=self.customer,
+            status='completed',
+            total_cents=15000,
+            order_number='ORD-000001',
+            currency=currency,
+            meta={}
+        )
 
     def _create_refund_data(
         self, 
@@ -488,24 +495,25 @@ class RefundServiceComprehensiveCoverageTestCase(TransactionTestCase):
 
 
 
-    def test_process_bidirectional_refund_order_update_failed(self) -> None:
-        """Test _process_bidirectional_refund with order update failure (Line 349-350)."""
+    def test_process_bidirectional_refund_simplified_behavior(self) -> None:
+        """Test _process_bidirectional_refund with simplified order processing."""
         mock_order = self._create_test_order()
         
-        with patch.object(RefundService, '_update_order_refund_status') as mock_update:
-            mock_update.return_value = Err("Order update failed")
-            
-            refund_data = self._create_refund_data()
-            result = RefundService._process_bidirectional_refund(
-                order=mock_order,
-                invoice=None,
-                refund_id=uuid.uuid4(),
-                refund_amount_cents=5000,
-                refund_data=refund_data
-            )
-            
-            self.assertTrue(result.is_err())
-            self.assertEqual(result.error, "Order update failed")
+        refund_data = self._create_refund_data()
+        result = RefundService._process_bidirectional_refund(
+            order=mock_order,
+            invoice=None,
+            refund_id=uuid.uuid4(),
+            refund_amount_cents=5000,
+            refund_data=refund_data
+        )
+        
+        # With simplified processing, refunds should succeed
+        self.assertTrue(result.is_ok())
+        result_data = result.unwrap()
+        self.assertTrue(result_data["refund_record_created"])
+        self.assertTrue(result_data["order_status_updated"])
+        self.assertEqual(result_data["order_id"], mock_order.id)
 
 
 

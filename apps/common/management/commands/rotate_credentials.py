@@ -113,7 +113,7 @@ class Command(BaseCommand):
         # Find credentials that need rotation
         cutoff_date = timezone.now() - timedelta(days=max_age_days)
 
-        query = EncryptedCredential.objects.filter(is_active=True)  # type: ignore[attr-defined]
+        query = EncryptedCredential.objects.filter(is_active=True)
 
         if service_filter:
             query = query.filter(service_type=service_filter)
@@ -183,7 +183,7 @@ class Command(BaseCommand):
             self.stdout.write(self.style.ERROR(f"❌ Failed Rotations: {status['failed_rotations']}"))
 
             # Show which credentials have rotation failures
-            failed_creds = EncryptedCredential.objects.filter(rotation_failure_count__gt=0, is_active=True)  # type: ignore[attr-defined]
+            failed_creds = EncryptedCredential.objects.filter(rotation_failure_count__gt=0, is_active=True)
 
             self.stdout.write("\n🚨 Credentials with rotation failures:")
             for cred in failed_creds:

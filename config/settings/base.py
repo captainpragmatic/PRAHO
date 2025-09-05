@@ -384,6 +384,37 @@ CREDENTIAL_VAULT_DEFAULT_EXPIRY_DAYS = int(os.environ.get("CREDENTIAL_VAULT_DEFA
 CREDENTIAL_VAULT_MAX_AGE_DAYS = int(os.environ.get("CREDENTIAL_VAULT_MAX_AGE_DAYS", "90"))
 
 # ===============================================================================
+# VIRTUALMIN TIMEOUT CONFIGURATIONS ⏱️
+# ===============================================================================
+
+# Externalized timeout configurations for production optimization
+# These values can be overridden by environment variables (VIRTUALMIN_*_TIMEOUT)
+VIRTUALMIN_TIMEOUTS = {
+    # API request timeouts (seconds)
+    'API_REQUEST_TIMEOUT': int(os.environ.get('VIRTUALMIN_API_REQUEST_TIMEOUT', '30')),
+    'API_HEALTH_CHECK_TIMEOUT': int(os.environ.get('VIRTUALMIN_API_HEALTH_CHECK_TIMEOUT', '10')),
+    'API_BACKUP_TIMEOUT': int(os.environ.get('VIRTUALMIN_API_BACKUP_TIMEOUT', '300')),
+    'API_BULK_TIMEOUT': int(os.environ.get('VIRTUALMIN_API_BULK_TIMEOUT', '600')),
+    
+    # Connection timeouts (seconds)
+    'CONNECTION_TIMEOUT': int(os.environ.get('VIRTUALMIN_CONNECTION_TIMEOUT', '15')),
+    'READ_TIMEOUT': int(os.environ.get('VIRTUALMIN_READ_TIMEOUT', '30')),
+    'WRITE_TIMEOUT': int(os.environ.get('VIRTUALMIN_WRITE_TIMEOUT', '30')),
+    
+    # Task-specific timeouts (seconds)
+    'PROVISIONING_TIMEOUT': int(os.environ.get('VIRTUALMIN_PROVISIONING_TIMEOUT', '180')),
+    'DOMAIN_SYNC_TIMEOUT': int(os.environ.get('VIRTUALMIN_DOMAIN_SYNC_TIMEOUT', '120')),
+    'USAGE_SYNC_TIMEOUT': int(os.environ.get('VIRTUALMIN_USAGE_SYNC_TIMEOUT', '60')),
+    
+    # Retry and rate limiting
+    'RETRY_DELAY': int(os.environ.get('VIRTUALMIN_RETRY_DELAY', '5')),
+    'MAX_RETRIES': int(os.environ.get('VIRTUALMIN_MAX_RETRIES', '3')),
+    'RATE_LIMIT_WINDOW': int(os.environ.get('VIRTUALMIN_RATE_LIMIT_WINDOW', '3600')),
+    'RATE_LIMIT_MAX_CALLS': int(os.environ.get('VIRTUALMIN_RATE_LIMIT_MAX_CALLS', '100')),
+    'CONNECTION_POOL_SIZE': int(os.environ.get('VIRTUALMIN_CONNECTION_POOL_SIZE', '10')),
+}
+
+# ===============================================================================
 # RATE LIMITING CONFIGURATION 🔒
 # ===============================================================================
 

@@ -298,7 +298,7 @@ class CredentialVault:
                 expires_at = timezone.now() + timedelta(days=credential_data.expires_in_days)
 
                 # Store or update credential
-                credential, created = EncryptedCredential.objects.update_or_create(  # type: ignore[attr-defined]
+                credential, created = EncryptedCredential.objects.update_or_create(
                     service_type=credential_data.service_type,
                     service_identifier=credential_data.service_identifier,
                     defaults={
@@ -386,7 +386,7 @@ class CredentialVault:
         try:
             # Find credential
             try:
-                credential = EncryptedCredential.objects.get(  # type: ignore[attr-defined]  # type: ignore[attr-defined]
+                credential = EncryptedCredential.objects.get(
                     service_type=service_type, service_identifier=service_identifier, is_active=True
                 )
             except EncryptedCredential.DoesNotExist:
@@ -419,12 +419,12 @@ class CredentialVault:
                 return Err("Access denied to credential")
 
             # Decrypt credential data
-            username = self._cipher.decrypt(credential.encrypted_username).decode()
-            password = self._cipher.decrypt(credential.encrypted_password).decode()
+            username = self._cipher.decrypt(bytes(credential.encrypted_username)).decode()
+            password = self._cipher.decrypt(bytes(credential.encrypted_password)).decode()
 
             metadata = None
             if credential.encrypted_metadata:
-                metadata_json = self._cipher.decrypt(credential.encrypted_metadata).decode()
+                metadata_json = self._cipher.decrypt(bytes(credential.encrypted_metadata)).decode()
                 metadata = json.loads(metadata_json)
 
             # Update access tracking
@@ -459,7 +459,7 @@ class CredentialVault:
         try:
             # Find existing credential
             try:
-                credential = EncryptedCredential.objects.get(  # type: ignore[attr-defined]
+                credential = EncryptedCredential.objects.get(
                     service_type=rotation_data.service_type,
                     service_identifier=rotation_data.service_identifier,
                     is_active=True,
@@ -479,7 +479,7 @@ class CredentialVault:
 
                 # Get current username if new one not provided
                 if not rotation_data.new_username:
-                    current_username = self._cipher.decrypt(credential.encrypted_username).decode()
+                    current_username = self._cipher.decrypt(bytes(credential.encrypted_username)).decode()
                     rotation_data.new_username = current_username
 
                 # Test new credential works (implement service-specific testing)
@@ -606,7 +606,7 @@ class CredentialVault:
                 access_data.user.username if access_data.user and hasattr(access_data.user, "username") else "system"
             )
 
-            CredentialAccessLog.objects.create(  # type: ignore[attr-defined]
+            CredentialAccessLog.objects.create(
                 credential=access_data.credential,
                 user=access_data.user,
                 username=username,
@@ -623,25 +623,25 @@ class CredentialVault:
         """Get credentials expiring within specified days"""
         cutoff_date = timezone.now() + timedelta(days=days)
         return list(
-            EncryptedCredential.objects.filter(expires_at__lte=cutoff_date, is_active=True).order_by("expires_at")  # type: ignore[attr-defined]
+            EncryptedCredential.objects.filter(expires_at__lte=cutoff_date, is_active=True).order_by("expires_at")
         )
 
     def get_vault_health_status(self) -> dict[str, Any]:
         """Get comprehensive vault health status"""
         try:
-            total_credentials = EncryptedCredential.objects.count()  # type: ignore[attr-defined]
-            active_credentials = EncryptedCredential.objects.filter(is_active=True).count()  # type: ignore[attr-defined]
-            expired_credentials = EncryptedCredential.objects.filter(  # type: ignore[attr-defined]
+            total_credentials = EncryptedCredential.objects.count()
+            active_credentials = EncryptedCredential.objects.filter(is_active=True).count()
+            expired_credentials = EncryptedCredential.objects.filter(
                 expires_at__lt=timezone.now(), is_active=True
             ).count()
 
             expiring_soon = len(self.get_credentials_expiring_soon())
 
-            recent_accesses = CredentialAccessLog.objects.filter(  # type: ignore[attr-defined]
+            recent_accesses = CredentialAccessLog.objects.filter(
                 accessed_at__gte=timezone.now() - timedelta(hours=24)
             ).count()
 
-            failed_rotations = EncryptedCredential.objects.filter(rotation_failure_count__gt=0, is_active=True).count()  # type: ignore[attr-defined]
+            failed_rotations = EncryptedCredential.objects.filter(rotation_failure_count__gt=0, is_active=True).count()
 
             return {
                 "vault_healthy": expired_credentials == 0 and failed_rotations == 0,
@@ -659,13 +659,9 @@ class CredentialVault:
             return {"vault_healthy": False, "error": str(e), "last_check": timezone.now().isoformat()}
 
 
-# Global vault instance - lazy initialization
-_credential_vault: CredentialVault | None = None
-
-
+# Global vault instance using module-level caching
 def get_credential_vault() -> CredentialVault:
     """Get global credential vault instance with lazy initialization"""
-    global _credential_vault
-    if _credential_vault is None:
-        _credential_vault = CredentialVault()
-    return _credential_vault
+    if not hasattr(get_credential_vault, '_instance'):
+        get_credential_vault._instance = CredentialVault()  # type: ignore[attr-defined]
+    return get_credential_vault._instance  # type: ignore[attr-defined,no-any-return]

@@ -116,7 +116,7 @@ class Command(BaseCommand):
             raise CommandError("Credential round-trip test failed")
 
         # Clean up test credential
-        EncryptedCredential.objects.filter(service_type=test_service, service_identifier=test_identifier).delete()  # type: ignore[attr-defined]
+        EncryptedCredential.objects.filter(service_type=test_service, service_identifier=test_identifier).delete()
 
         self.stdout.write(self.style.SUCCESS("✅ Vault functionality test passed"))
 
