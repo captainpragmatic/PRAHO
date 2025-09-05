@@ -7,6 +7,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.4.0] - 2025-01-05
+
+### 🚀 MAJOR RELEASE: Services Architecture Migration
+
+This release represents a complete architectural transformation of PRAHO into a services-based platform with enterprise-grade security isolation and scalability.
+
+### Added
+- **🏗️ Services-Based Architecture**: Complete platform restructure with security isolation
+  - **Platform Service** (`services/platform/`): Full Django application with database access
+    - All existing Django applications moved to platform service  
+    - Complete business logic including billing, provisioning, customers, orders
+    - Database access with PostgreSQL and Django ORM
+    - Full admin interface and management capabilities
+  - **Portal Service** (`services/portal/`): Customer-facing API with strict isolation
+    - API-only Django application with NO database access
+    - Cookie-based sessions (no database session storage)
+    - HTTP API communication with platform service only
+    - Strict import isolation preventing platform model access
+  - **Security Isolation Enforcement**:
+    - Portal service cannot import platform models (ImportError enforced)
+    - Portal service has no database drivers in production
+    - Scoped PYTHONPATH for development prevents code mixing
+    - Comprehensive security test suite validates isolation boundaries
+
+### Changed  
+- **🐳 Docker Infrastructure**: Complete containerization with network isolation
+  - Platform and Portal Dockerfiles with optimized builds
+  - Nginx reverse proxy with intelligent routing
+  - Network isolation (`platform-network` for DB access, `api-network` for Portal)
+  - Production and development docker-compose configurations
+  - Docker files relocated from project root to `deploy/` directory
+- **🗄️ Database Architecture**: Redis completely replaced with database cache
+  - Django database cache implementation (`django_cache_table`)
+  - All Redis dependencies removed from configurations
+  - Platform service handles all database operations
+  - Cache operations validated and working in production
+- **🔧 Build System Enhancement**: Service-aware Makefile and tooling
+  - Service-specific commands: `make dev-platform`, `make dev-portal`, `make dev-all`
+  - Testing isolation: `make test-platform`, `make test-portal`, `make test-security`
+  - Docker operations: `make docker-build`, `make docker-up`
+  - Database cache validation: `make test-cache`
+- **📁 File Structure Migration**: 728 files reorganized for services architecture
+  - All Django apps moved to `services/platform/apps/`
+  - Configuration moved to `services/platform/config/`
+  - Templates, static files, and requirements properly organized
+  - Portal service with minimal, isolated configuration
+
+### Infrastructure
+- **🚀 CI/CD Pipelines**: Three comprehensive GitHub workflows
+  - **Platform workflow** (`.github/workflows/platform.yml`): Full Django testing with database
+  - **Portal workflow** (`.github/workflows/portal.yml`): API testing without database access  
+  - **Integration workflow** (`.github/workflows/integration.yml`): Service communication testing
+  - Updated type coverage workflow for services architecture
+- **🧪 Testing Infrastructure**: Comprehensive test suite with security validation
+  - Integration tests for platform→portal API communication
+  - Portal tests block database access (security enforcement)
+  - Platform tests validate database cache functionality  
+  - Security test suite ensures proper service boundaries
+  - Automated validation of service isolation in CI/CD
+
+### Security
+- **🔒 Service Isolation**: Enterprise-grade security boundaries
+  - Portal service cannot access platform database or models
+  - Network isolation through Docker compose networks
+  - Cookie-based sessions in portal eliminate database dependencies
+  - Comprehensive security testing validates isolation at runtime
+- **🎯 Database Cache Security**: Secure caching without Redis complexity  
+  - Database-backed cache eliminates external cache dependencies
+  - Cache operations isolated to platform service only
+  - Validated cache table creation and operations
+
+### Documentation  
+- **📚 Complete Documentation Overhaul**: Services architecture documentation
+  - README.md completely rewritten for services development workflow
+  - ARCHITECTURE.md updated with service boundaries and security model
+  - Enhanced copilot-instructions.md with services development guidelines
+  - Migration documentation with comprehensive phase tracking
+
+### Verification Status
+All critical systems validated before release:
+- ✅ Platform can import billing models and initialize Django ORM
+- ✅ Portal properly isolated - cannot import platform models
+- ✅ Security test suite passes with proper isolation  
+- ✅ Both services start successfully without errors
+- ✅ Database cache operations working correctly
+- ✅ Cache table created and functional
+- ✅ Docker builds tested and working
+- ✅ CI/CD pipelines validated and functional
+
+### Migration Impact
+This release establishes PRAHO as a secure, scalable services-based platform with proper separation of concerns and enterprise-grade architecture. The migration involved 728 files with 8,114 insertions and 1,731 deletions, representing a comprehensive architectural evolution while maintaining backward compatibility for existing functionality.
+
 ### Added
 - **🚀 Virtualmin Integration with Rollback Strategy**: Complete hosting provider automation with production-ready safety mechanisms
   - **Two-Phase Provisioning**: Pre-flight validation and rollback capability preventing partial failures

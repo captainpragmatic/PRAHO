@@ -86,8 +86,12 @@ repos:
     hooks:
       - id: django-template-check
         name: "Django Template Syntax Check"
-        entry: .venv/bin/python
-        args: [services/platform/scripts/fix_template_comparisons.py, --check]
+        entry: bash
+        args:
+          - -c
+          - |
+            # Check Django templates from the platform service
+            cd services/platform && ../../.venv/bin/python scripts/fix_template_comparisons.py --check
         language: system
         files: \.html$
         exclude: ^(services/platform/static/|services/portal/static/|htmlcov/)
