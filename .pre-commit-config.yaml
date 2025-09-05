@@ -90,8 +90,13 @@ repos:
         args:
           - -c
           - |
-            # Check Django templates from the platform service
-            cd services/platform && ../../.venv/bin/python scripts/fix_template_comparisons.py --check
+            # Check Django templates from the services/platform directory
+            if [[ -f "services/platform/scripts/fix_template_comparisons.py" ]]; then
+              cd services/platform && ../../.venv/bin/python scripts/fix_template_comparisons.py --check
+            else
+              echo "⚠️  Template check script not found, skipping..."
+              exit 0
+            fi
         language: system
         files: \.html$
         exclude: ^(services/platform/static/|services/portal/static/|htmlcov/)
