@@ -85,7 +85,7 @@ jobs:
       run: |
         cd services/platform
         echo "🧪 Running platform unit tests..."
-        PYTHONPATH=$(pwd) python -m pytest apps/ -v --tb=short --maxfail=10
+        PYTHONPATH=$(pwd) python manage.py test tests --verbosity=2 --parallel --keepdb
     
     - name: Run platform database cache tests
       run: |
