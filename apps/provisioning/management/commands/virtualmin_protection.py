@@ -139,12 +139,13 @@ class Command(BaseCommand):
             return
             
         # Show what will be affected
+        display_limit = 10  # Maximum number of accounts to show in list
         self.stdout.write("⚠️  Will disable protection for:")
-        for account in accounts[:10]:  # Show first 10
+        for account in accounts[:display_limit]:  
             self.stdout.write(f"   • {account.domain} ({account.status})")
         
-        if accounts.count() > 10:
-            self.stdout.write(f"   ... and {accounts.count() - 10} more")
+        if accounts.count() > display_limit:
+            self.stdout.write(f"   ... and {accounts.count() - display_limit} more")
             
         # Final confirmation
         confirm = input("\nType 'I really am sure I want to do this!' to confirm: ")

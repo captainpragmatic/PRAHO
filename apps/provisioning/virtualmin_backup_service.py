@@ -546,8 +546,12 @@ class VirtualminBackupService:
             return Err(f"Server {self.server.hostname} is unreachable")
 
         # Check account exists on server
-        account_info = gateway.get_domain_info(account.domain)
-        if not account_info.get("domain"):
+        account_info_result = gateway.get_domain_info(account.domain)
+        if account_info_result.is_err():
+            return Err(f"Failed to get domain info: {account_info_result.unwrap_err()}")
+        
+        account_info = account_info_result.unwrap()
+        if not account_info.get("disk_usage_mb"):
             return Err(f"Domain {account.domain} not found on server")
 
         # Check available disk space (rough estimate)

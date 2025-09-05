@@ -6,12 +6,13 @@ replacing any existing usage data with actual values from the servers.
 """
 
 import logging
-from django.core.management.base import BaseCommand
+from typing import Any
+
+from django.core.management.base import BaseCommand, CommandParser
 from django.utils import timezone
 
-from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer
+from apps.provisioning.virtualmin_models import VirtualminAccount
 from apps.provisioning.virtualmin_service import VirtualminProvisioningService
-
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,7 @@ class Command(BaseCommand):
 
     help = "Fetch real usage data from Virtualmin API for all accounts"
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: CommandParser) -> None:
         """Add command arguments."""
         parser.add_argument(
             "--dry-run",
@@ -34,7 +35,7 @@ class Command(BaseCommand):
             help="Sync only accounts on specific server (by name)",
         )
 
-    def handle(self, *args, **options):
+    def handle(self, *args: Any, **options: Any) -> None:
         """Execute the command."""
         dry_run = options["dry_run"]
         server_name = options.get("server")

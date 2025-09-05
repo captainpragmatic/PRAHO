@@ -194,6 +194,28 @@ class VirtualminAccount(models.Model):
 
     Represents a Virtualmin virtual server that hosts customer domains.
     Links PRAHO's service management to Virtualmin's hosting infrastructure.
+
+    ARCHITECTURAL DECISION: OneToOne Relationship with Service
+    
+    We use OneToOneField instead of ForeignKey because:
+    1. **Current Business Logic**: Each PRAHO service should have at most one 
+       VirtualMin hosting account. This enforces data integrity at the database level.
+    2. **Simplified Queries**: service.virtualmin_account provides direct access
+       without additional filtering or .first() calls.
+    3. **Performance**: OneToOne generates more efficient reverse lookups and
+       avoids N+1 query problems in list views.
+    4. **Domain Modeling**: Represents the real-world constraint that one service
+       maps to one hosting account in our current business model.
+
+    FUTURE MIGRATION PATH:
+    If business requirements change to allow multiple VirtualMin accounts per service:
+    1. Change OneToOneField to ForeignKey(Service, related_name="virtualmin_accounts")
+    2. Update all service.virtualmin_account references to service.virtualmin_accounts.all()
+    3. Add filtering logic in views/serializers to handle multiple accounts
+    4. Update domain uniqueness constraint to allow multiple accounts per service
+    
+    The migration is straightforward since OneToOne is implemented as FK + unique
+    constraint, so dropping the unique constraint converts it to ForeignKey.
     """
 
     STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
@@ -206,14 +228,24 @@ class VirtualminAccount(models.Model):
 
     # Account identification
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    domain = models.CharField(max_length=255, db_index=True, verbose_name=_("Primary Domain"))
+    domain = models.CharField(
+        max_length=255, 
+        unique=True,  # Database-level uniqueness constraint
+        db_index=True, 
+        verbose_name=_("Primary Domain"),
+        help_text=_("Must be unique across all VirtualMin accounts")
+    )
 
-    # Service linkage
+    # Service linkage (OneToOne for current business logic - see class docstring)
     service = models.OneToOneField(
         "provisioning.Service",
         on_delete=models.CASCADE,
         related_name="virtualmin_account",
         verbose_name=_("PRAHO Service"),
+        help_text=_(
+            "One-to-one relationship ensures each service has at most one VirtualMin account. "
+            "This enforces current business logic at database level."
+        ),
     )
 
     # Customer relationship (Cross-app integration)

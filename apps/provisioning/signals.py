@@ -19,8 +19,10 @@ import logging
 from typing import Any
 
 from django.conf import settings
+from django.db import transaction
 from django.db.models.signals import post_save
 from django.dispatch import receiver
+from django.utils import timezone
 
 from apps.audit.services import (
     AuditContext,
@@ -35,8 +37,20 @@ from .models import (
     ServiceDomain,
     ServicePlan,
 )
+from .security_utils import (
+    IdempotencyManager,
+    ProvisioningErrorClassifier,
+    ProvisioningParametersValidator,
+    SecureTaskParameters,
+    log_security_event_safe,
+    sanitize_log_parameters,
+)
+from .virtualmin_tasks import VirtualminProvisioningParams, provision_virtualmin_account_async
 
 logger = logging.getLogger(__name__)
+
+# Constants for magic values used in signal handlers
+DEFAULT_TEMPLATE_NAME = "Default"
 
 # ===============================================================================
 # BUSINESS CONSTANTS
@@ -151,6 +165,7 @@ def audit_service_lifecycle_events(sender: type[Service], instance: Service, cre
             update_fields = kwargs.get("update_fields")
 
             if update_fields and "status" in update_fields:
+                # Log status change
                 AuditService.log_event(
                     AuditEventData(
                         event_type="service_status_changed",
@@ -170,6 +185,10 @@ def audit_service_lifecycle_events(sender: type[Service], instance: Service, cre
                         },
                     ),
                 )
+
+                # Trigger automatic provisioning if service becomes active
+                if instance.status == "active":
+                    _trigger_automatic_virtualmin_provisioning(instance)
 
     except Exception as e:
         logger.exception(f"🔥 [Service] Failed to audit service lifecycle: {e}")
@@ -487,3 +506,264 @@ def notify_provisioning_completion(account: Any, success: bool = True, details: 
         logger.error(
             f"🔥 [Provisioning] Failed to notify completion for domain {getattr(account, 'domain', 'unknown')}: {e}"
         )
+
+
+def _validate_service_for_provisioning(service: Service) -> bool:
+    """Check if service requires and is ready for provisioning."""
+    if not service.requires_hosting_account():
+        logger.info(f"⏭️ [AutoProvisioning] Service {service.service_name} doesn't require hosting account")
+        return False
+    return True
+
+
+def _check_existing_virtualmin_account(service: Service) -> bool:
+    """Check if service already has a VirtualMin account."""
+    if hasattr(service, 'virtualmin_account') and service.virtualmin_account:
+        logger.info(f"⏭️ [AutoProvisioning] VirtualMin account already exists for {service.service_name}")
+        return True
+    return False
+
+
+def _get_and_validate_primary_domain(service: Service) -> str | None:
+    """Get and validate primary domain for the service."""
+    primary_domain = service.get_primary_domain()
+    if not primary_domain:
+        logger.warning(f"⚠️ [AutoProvisioning] No primary domain found for service {service.service_name}")
+        return None
+    return primary_domain
+
+
+def _validate_provisioning_parameters(service_id_str: str, primary_domain: str) -> tuple[bool, dict[str, str]]:
+    """Validate all provisioning parameters."""
+    try:
+        validated_service_id = ProvisioningParametersValidator.validate_service_id(service_id_str)
+        validated_domain = ProvisioningParametersValidator.validate_domain(primary_domain)
+        validated_template = ProvisioningParametersValidator.validate_template(DEFAULT_TEMPLATE_NAME)
+        
+        return True, {
+            "service_id": validated_service_id,
+            "domain": validated_domain,
+            "template": validated_template
+        }
+    except Exception as validation_error:
+        logger.error(f"❌ [AutoProvisioning] Parameter validation failed: {validation_error}")
+        log_security_event_safe(
+            "virtualmin_parameter_validation_failed", 
+            {"error": str(validation_error), "original_domain": primary_domain},
+            service_id_str,
+            primary_domain
+        )
+        return False, {}
+
+
+def _handle_idempotency_check(service_id: str, operation_params: dict[str, Any]) -> tuple[bool, str | None]:
+    """Handle idempotency check for the operation."""
+    idempotency_key = IdempotencyManager.generate_key(
+        service_id, 
+        "auto_provision", 
+        operation_params
+    )
+    
+    is_new, existing_result = IdempotencyManager.check_and_set(
+        idempotency_key,
+        {"status": "in_progress", "started_at": timezone.now().isoformat()}
+    )
+    
+    if not is_new:
+        logger.info(f"⏭️ [AutoProvisioning] Operation already in progress (key: {idempotency_key[:16]}...)")
+        return False, idempotency_key
+        
+    return True, idempotency_key
+
+
+def _prepare_secure_parameters(validated_params: dict[str, str]) -> tuple[bool, SecureTaskParameters | None]:
+    """Prepare and encrypt secure parameters for the task."""
+    raw_params: VirtualminProvisioningParams = {
+        "service_id": validated_params["service_id"],
+        "domain": validated_params["domain"],
+        "username": None,  # Will be generated automatically
+        "password": None,  # Will be generated automatically
+        "template": validated_params["template"],
+        "server_id": None,  # Will be selected automatically by load balancer
+    }
+
+    try:
+        secure_params = SecureTaskParameters.create(dict(raw_params))
+        return True, secure_params
+    except Exception as encryption_error:
+        logger.error(f"🔥 [AutoProvisioning] Parameter encryption failed: {encryption_error}")
+        log_security_event_safe(
+            "virtualmin_parameter_encryption_failed",
+            {"error": str(encryption_error)},
+            validated_params["service_id"],
+            validated_params["domain"]
+        )
+        return False, None
+
+
+def _schedule_provisioning_task(secure_params: SecureTaskParameters, validated_params: dict[str, str]) -> tuple[bool, str | None]:
+    """Schedule the async provisioning task."""
+    try:
+        task_id = provision_virtualmin_account_async(secure_params)
+        return True, task_id
+    except Exception as task_error:
+        logger.error(f"🔥 [AutoProvisioning] Task scheduling failed: {task_error}")
+        log_security_event_safe(
+            "virtualmin_task_scheduling_failed",
+            {"error": str(task_error)},
+            validated_params["service_id"],
+            validated_params["domain"]
+        )
+        return False, None
+
+
+def _log_audit_event(service: Service, audit_data: dict[str, Any]) -> None:
+    """Log audit event for the provisioning operation."""
+    try:
+        AuditService.log_event(
+            AuditEventData(
+                event_type="virtualmin_auto_provisioning_scheduled",
+                content_object=service,
+                new_values={
+                    "domain": audit_data["domain"],
+                    "task_id": audit_data["task_id"],
+                    "service_id": audit_data["service_id"],
+                    "customer_id": str(service.customer.id),
+                    "idempotency_key": audit_data["idempotency_key"][:16] + "...",  # Truncated for security
+                    "parameter_hash": audit_data["parameter_hash"][:16] + "...",
+                },
+                description=f"Automatic VirtualMin provisioning scheduled for domain '{audit_data['domain']}'",
+            ),
+            context=AuditContext(
+                actor_type="system",
+                metadata={
+                    "source_app": "provisioning",
+                    "provisioning_event": True,
+                    "automatic_provisioning": True,
+                    "service_lifecycle": True,
+                    "domain": audit_data["domain"],
+                    "task_id": audit_data["task_id"],
+                    "customer_id": str(service.customer.id),
+                    "security_enhanced": True,
+                    "correlation_id": audit_data["correlation_id"],
+                },
+            ),
+        )
+    except Exception as audit_error:
+        logger.warning(f"⚠️ [AutoProvisioning] Audit logging failed (non-critical): {audit_error}")
+
+
+def _trigger_automatic_virtualmin_provisioning(service: Service) -> None:
+    """
+    Trigger automatic VirtualMin account creation when service becomes active.
+    
+    SECURITY FIXES APPLIED:
+    1. Race condition protection with atomic database operations
+    2. Input validation and sanitization for all parameters
+    3. Secure parameter handling with encryption
+    4. Proper error classification and state management
+    5. Idempotency key management to prevent duplicate operations
+    
+    Args:
+        service: The Service instance that became active
+    """
+    service_id_str = str(service.id)
+    correlation_id = f"auto_provision_{service_id_str}"
+    
+    # Initialize secure logging context
+    safe_log_ctx = {
+        "service_id": service_id_str,
+        "service_name": service.service_name,
+        "customer_id": str(service.customer.id),
+        "correlation_id": correlation_id,
+    }
+    
+    try:
+        # Step 1-3: Validate service requirements and setup
+        if not _validate_service_for_provisioning(service):
+            return
+
+        # Step 2: RACE CONDITION FIX - Use atomic transaction with select_for_update
+        with transaction.atomic():
+            # Lock the service row to prevent concurrent provisioning attempts
+            locked_service = Service.objects.select_for_update().select_related('customer').get(id=service.id)
+            
+            # Perform all validation checks within transaction
+            if _check_existing_virtualmin_account(locked_service):
+                return
+
+            primary_domain = _get_and_validate_primary_domain(locked_service)
+            is_valid, validated_params = _validate_provisioning_parameters(service_id_str, primary_domain) if primary_domain else (False, {})
+            
+            # Early exit for any validation failures
+            if not primary_domain or not is_valid:
+                return
+                
+            safe_log_ctx["domain"] = validated_params["domain"]
+
+            # Step 4-5: Idempotency check and parameter preparation
+            operation_params = {**validated_params, "operation": "auto_provision"}
+            is_new_operation, idempotency_key = _handle_idempotency_check(validated_params["service_id"], operation_params)
+            
+            if not is_new_operation:
+                return
+            
+            params_prepared, secure_params = _prepare_secure_parameters(validated_params)
+            if not params_prepared or secure_params is None:
+                if idempotency_key:
+                    IdempotencyManager.clear(idempotency_key)
+                return
+                
+            safe_log_ctx["parameter_hash"] = secure_params.parameter_hash[:16]
+
+        # Step 6: Schedule async provisioning task (outside transaction to avoid deadlock)
+        task_scheduled, task_id = _schedule_provisioning_task(secure_params, validated_params)
+        if not task_scheduled or task_id is None:
+            if idempotency_key:
+                IdempotencyManager.clear(idempotency_key)
+            return
+            
+        safe_log_ctx["task_id"] = task_id
+
+        # Step 7: Update idempotency with task ID
+        if idempotency_key:
+            IdempotencyManager.complete(idempotency_key, {
+            "status": "scheduled",
+            "task_id": task_id,
+            "scheduled_at": timezone.now().isoformat()
+        })
+        
+        # Step 8: Secure audit logging
+        assert secure_params is not None  # We checked earlier and returned if None
+        audit_data = {
+            "domain": validated_params["domain"],
+            "task_id": task_id,
+            "service_id": validated_params["service_id"],
+            "idempotency_key": idempotency_key,
+            "parameter_hash": secure_params.parameter_hash,
+            "correlation_id": correlation_id
+        }
+        _log_audit_event(service, audit_data)
+
+        # Success logging
+        logger.info(f"🚀 [AutoProvisioning] Scheduled secure VirtualMin provisioning: {sanitize_log_parameters(safe_log_ctx)}")
+
+    except Exception as e:
+        error_type = ProvisioningErrorClassifier.classify_error(str(e))
+        
+        logger.error(f"🔥 [AutoProvisioning] Critical error in secure provisioning: {e}")
+        
+        # Log security event for critical errors
+        log_security_event_safe(
+            "virtualmin_auto_provisioning_critical_error",
+            {
+                "error": str(e),
+                "error_type": error_type.value,
+                "context": safe_log_ctx,
+            },
+            service_id_str
+        )
+        
+        # Clear any partial idempotency state
+        if 'idempotency_key' in locals() and idempotency_key:
+            IdempotencyManager.clear(idempotency_key)

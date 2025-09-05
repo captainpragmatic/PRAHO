@@ -5,7 +5,9 @@ This command sets all existing accounts' usage data to zero so that the next syn
 will fetch real data from the Virtualmin API instead of showing fake generated data.
 """
 
-from django.core.management.base import BaseCommand
+from typing import Any
+
+from django.core.management.base import BaseCommand, CommandParser
 
 from apps.provisioning.virtualmin_models import VirtualminAccount
 
@@ -15,7 +17,7 @@ class Command(BaseCommand):
 
     help = "Reset all Virtualmin account usage data to zero for fresh API sync"
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: CommandParser) -> None:
         """Add command arguments."""
         parser.add_argument(
             "--dry-run",
@@ -23,7 +25,7 @@ class Command(BaseCommand):
             help="Show what would be updated without making changes",
         )
 
-    def handle(self, *args, **options):
+    def handle(self, *args: Any, **options: Any) -> None:
         """Execute the command."""
         dry_run = options["dry_run"]
         
