@@ -47,7 +47,7 @@ jobs:
       uses: actions/cache@v3
       with:
         path: ~/.cache/pip
-        key: integration-${{ runner.os }}-pip-${{ hashFiles('requirements/*.txt', 'services/portal/requirements.txt') }}
+        key: integration-${{ runner.os }}-pip-${{ hashFiles('services/platform/requirements/*.txt', 'services/portal/requirements.txt') }}
         restore-keys: |
           integration-${{ runner.os }}-pip-
     
@@ -55,7 +55,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         # Install platform dependencies (full Django)
-        pip install -r requirements/dev.txt
+        pip install -r services/platform/requirements/dev.txt
         # Install portal dependencies (API-only)
         pip install -r services/portal/requirements.txt
     
