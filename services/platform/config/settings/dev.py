@@ -242,6 +242,13 @@ ROMANIAN_BUSINESS_CONTEXT.update(
 )
 
 # ===============================================================================
+# INTER-SERVICE COMMUNICATION
+# ===============================================================================
+
+# Shared secret for portal service authentication
+PLATFORM_API_SECRET = "dev-shared-secret-change-in-production"
+
+# ===============================================================================
 # SECURE IP DETECTION - DEVELOPMENT CONFIGURATION 🔒
 # ===============================================================================
 

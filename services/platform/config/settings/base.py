@@ -26,6 +26,7 @@ DJANGO_APPS: list[str] = [
 
 THIRD_PARTY_APPS: list[str] = [
     "rest_framework",
+    "rest_framework.authtoken",  # 🔐 Token authentication for API access
     "django_extensions",
     "ipware",
     "django_q",  # Async task processing
@@ -46,6 +47,7 @@ LOCAL_APPS: list[str] = [
     "apps.audit",
     "apps.ui",
     "apps.settings",  # ⚙️ System configuration management
+    "apps.api",  # 🚀 Centralized API endpoints (Sentry/Stripe pattern)
 ]
 
 INSTALLED_APPS: list[str] = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -58,6 +60,7 @@ MIDDLEWARE: list[str] = [
     "django.middleware.locale.LocaleMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
+    "apps.common.middleware.PortalServiceHMACMiddleware",  # HMAC auth for portal API requests
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
@@ -142,7 +145,7 @@ PASSWORD_HASHERS = [
 
 # Authentication URLs
 LOGIN_URL = "/users/login/"
-LOGIN_REDIRECT_URL = "/app/"
+LOGIN_REDIRECT_URL = "/dashboard/"
 LOGOUT_REDIRECT_URL = "/"
 
 # Password reset settings
@@ -240,16 +243,28 @@ EMAIL_USE_SSL = False  # Use TLS instead of SSL
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
+        # Session auth for web UI (HTMX calls from platform)
         "rest_framework.authentication.SessionAuthentication",
+        # Token auth for portal service and external clients
+        "rest_framework.authentication.TokenAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
-    "PAGE_SIZE": 25,
+    "PAGE_SIZE": 20,  # Updated to match our API pagination
     "DEFAULT_FILTER_BACKENDS": [
         "django_filters.rest_framework.DjangoFilterBackend",
     ],
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle", 
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": "100/hour",     # Anonymous users (very limited)
+        "user": "1000/hour",    # Authenticated users (generous for portal)
+        "burst": "60/min",      # Search/autocomplete endpoints
+    },
 }
 
 # ===============================================================================

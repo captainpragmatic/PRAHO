@@ -579,7 +579,7 @@ class OrderCancelViewTestCase(TestCase):
         
         # Should redirect to order detail
         self.assertEqual(response.status_code, 302)
-        self.assertTrue(response.url.endswith(f'/app/orders/{self.order.id}/'))
+        self.assertTrue(response.url.endswith(f'/orders/{self.order.id}/'))
         
         # Verify order cancelled
         self.order.refresh_from_db()

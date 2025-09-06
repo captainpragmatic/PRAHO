@@ -130,7 +130,7 @@ def virtualmin_servers_list(request: HttpRequest) -> HttpResponse:
 
     # Build breadcrumb navigation
     breadcrumb_items = [
-        {"text": "🏠 Management", "url": "/app/"},
+        {"text": "🏠 Management", "url": "/dashboard/"},
         {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
         {"text": "🖥️ Virtualmin", "url": "#"},
         {"text": "Servers"},  # Current page - no URL
@@ -225,7 +225,7 @@ def virtualmin_server_detail(request: HttpRequest, server_id: str) -> HttpRespon
 
     # Build breadcrumb navigation
     breadcrumb_items = [
-        {"text": "🏠 Management", "url": "/app/"},
+        {"text": "🏠 Management", "url": "/dashboard/"},
         {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
         {"text": "🖥️ Virtualmin", "url": "#"},
         {"text": "Servers", "url": reverse("provisioning:virtualmin_servers")},
@@ -330,7 +330,7 @@ def virtualmin_accounts_list(request: HttpRequest) -> HttpResponse:
 
     # Build breadcrumb navigation
     breadcrumb_items = [
-        {"text": "🏠 Management", "url": "/app/"},
+        {"text": "🏠 Management", "url": "/dashboard/"},
         {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
         {"text": "🖥️ Virtualmin", "url": "#"},
         {"text": "Accounts"},  # Current page - no URL
@@ -383,7 +383,7 @@ def virtualmin_account_detail(request: HttpRequest, account_id: str) -> HttpResp
 
     # Build breadcrumb navigation
     breadcrumb_items = [
-        {"text": "🏠 Management", "url": "/app/"},
+        {"text": "🏠 Management", "url": "/dashboard/"},
         {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
         {"text": "🖥️ Virtualmin", "url": "#"},
         {"text": "Accounts", "url": reverse("provisioning:virtualmin_accounts")},
@@ -458,7 +458,7 @@ def virtualmin_account_backup(request: HttpRequest, account_id: str) -> HttpResp
 
     # Build breadcrumb navigation
     breadcrumb_items = [
-        {"text": "🏠 Management", "url": "/app/"},
+        {"text": "🏠 Management", "url": "/dashboard/"},
         {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
         {"text": "🖥️ Virtualmin", "url": "#"},
         {"text": "Accounts", "url": reverse("provisioning:virtualmin_accounts")},
@@ -642,7 +642,7 @@ def virtualmin_server_create(request: HttpRequest) -> HttpResponse:
 
     # Build breadcrumb navigation
     breadcrumb_items = [
-        {"text": "🏠 Management", "url": "/app/"},
+        {"text": "🏠 Management", "url": "/dashboard/"},
         {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
         {"text": "🖥️ Virtualmin", "url": "#"},
         {"text": "Servers", "url": reverse("provisioning:virtualmin_servers")},
@@ -680,7 +680,7 @@ def virtualmin_server_edit(request: HttpRequest, server_id: str) -> HttpResponse
 
     # Build breadcrumb navigation
     breadcrumb_items = [
-        {"text": "🏠 Management", "url": "/app/"},
+        {"text": "🏠 Management", "url": "/dashboard/"},
         {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
         {"text": "🖥️ Virtualmin", "url": "#"},
         {"text": "Servers", "url": reverse("provisioning:virtualmin_servers")},
@@ -1890,7 +1890,7 @@ def virtualmin_account_new(request: HttpRequest) -> HttpResponse:
 
     # Build breadcrumb navigation
     breadcrumb_items = [
-        {"text": "🏠 Management", "url": "/app/"},
+        {"text": "🏠 Management", "url": "/dashboard/"},
         {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
         {"text": "🖥️ Virtualmin", "url": "#"},
         {"text": "Accounts", "url": reverse("provisioning:virtualmin_accounts")},
@@ -2077,7 +2077,7 @@ def virtualmin_job_status(request: HttpRequest, job_id: str) -> HttpResponse:
     
     # Build breadcrumb navigation
     breadcrumb_items = [
-        {"text": "🏠 Management", "url": "/app/"},
+        {"text": "🏠 Management", "url": "/dashboard/"},
         {"text": "🖥️ Provisioning", "url": reverse("provisioning:virtualmin_servers")},
         {"text": "⚙️ Jobs", "url": reverse("provisioning:virtualmin_servers")},
         {"text": f"Job {job.correlation_id[:8]}", "url": ""},

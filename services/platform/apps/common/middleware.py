@@ -3,6 +3,9 @@ Common middleware for PRAHO Platform
 Security headers, Romanian compliance, and audit logging.
 """
 
+import base64
+import hashlib
+import hmac
 import json
 import logging
 import time
@@ -252,6 +255,239 @@ class GDPRComplianceMiddleware:
         # Add privacy policy header
         response["X-Privacy-Policy"] = "/privacy-policy/"
 
+        return response
+
+
+# ===============================================================================
+# PORTAL SERVICE AUTHENTICATION MIDDLEWARE
+# ===============================================================================
+
+
+class PortalServiceAuthMiddleware:
+    """
+    🔐 Authentication middleware for portal service API requests.
+    
+    Validates shared secret and sets up user context for API endpoints.
+    Only applies to /api/ endpoints.
+    """
+    
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
+        self.get_response = get_response
+    
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        # Only process API requests
+        if request.path.startswith('/api/'):
+            # Check for service authentication header
+            service_auth = request.META.get('HTTP_X_SERVICE_AUTH')
+            
+            if not service_auth:
+                return HttpResponse(
+                    json.dumps({'error': 'Service authentication required'}),
+                    status=401,
+                    content_type='application/json'
+                )
+            
+            # Validate shared secret
+            expected_secret = getattr(settings, 'PLATFORM_API_SECRET', None)
+            if not expected_secret or service_auth != expected_secret:
+                logger.warning(f"🔥 [Portal Auth] Invalid service auth from {get_safe_client_ip(request)}")
+                return HttpResponse(
+                    json.dumps({'error': 'Invalid service authentication'}),
+                    status=403,
+                    content_type='application/json'
+                )
+            
+            # Extract user context from portal service
+            user_id = request.META.get('HTTP_X_USER_ID')
+            if user_id:
+                try:
+                    user_id = int(user_id)
+                    # Get user from database
+                    user = User.objects.get(id=user_id)
+                    # Set user context for API request (don't actually log them in)
+                    request.user = user
+                    request._portal_authenticated = True  # Mark as portal-authenticated
+                    
+                    logger.debug(f"✅ [Portal Auth] User context set for API request: {user.email}")
+                    
+                except (ValueError, User.DoesNotExist):
+                    logger.warning(f"🔥 [Portal Auth] Invalid user ID in API request: {user_id}")
+                    return HttpResponse(
+                        json.dumps({'error': 'Invalid user context'}),
+                        status=400,
+                        content_type='application/json'
+                    )
+            
+            # Log successful portal service authentication
+            logger.info(f"✅ [Portal Auth] API request authenticated from {get_safe_client_ip(request)}")
+        
+        response = self.get_response(request)
+        
+        # Add service identification header
+        if request.path.startswith('/api/'):
+            response['X-Service'] = 'platform'
+            response['X-Portal-Auth'] = 'verified' if hasattr(request, '_portal_authenticated') else 'none'
+        
+        return response
+
+
+# ===============================================================================
+# PORTAL SERVICE HMAC AUTHENTICATION MIDDLEWARE
+# ===============================================================================
+
+
+class PortalServiceHMACMiddleware:
+    """
+    🔐 HMAC authentication middleware for portal service API requests.
+    
+    Validates HMAC signatures with nonce deduplication and timestamp validation.
+    Only applies to /api/ endpoints. Replaces simple shared secret authentication.
+    """
+    
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
+        self.get_response = get_response
+        # Store recent nonces to prevent replay attacks
+        self._nonce_cache: set[str] = set()
+        self._nonce_cleanup_counter = 0
+    
+    def _cleanup_nonces(self) -> None:
+        """Periodically clean old nonces from memory (simple implementation)"""
+        self._nonce_cleanup_counter += 1
+        if self._nonce_cleanup_counter > 100:  # Every 100 requests
+            # In production, use Redis with TTL for distributed systems
+            if len(self._nonce_cache) > 1000:
+                # Keep only the most recent 500 nonces
+                nonces_list = list(self._nonce_cache)
+                self._nonce_cache = set(nonces_list[-500:])
+            self._nonce_cleanup_counter = 0
+    
+    def _validate_hmac_signature(self, request: HttpRequest) -> tuple[bool, str]:
+        """
+        Validate HMAC signature from portal service.
+        Returns (is_valid, error_message)
+        """
+        try:
+            # Extract HMAC headers
+            portal_id = request.META.get('HTTP_X_PORTAL_ID', '')
+            nonce = request.META.get('HTTP_X_NONCE', '')
+            timestamp = request.META.get('HTTP_X_TIMESTAMP', '')
+            body_hash = request.META.get('HTTP_X_BODY_HASH', '')
+            signature = request.META.get('HTTP_X_SIGNATURE', '')
+            content_type = request.META.get('CONTENT_TYPE', '')
+            
+            # Check required headers
+            if not all([portal_id, nonce, timestamp, body_hash, signature]):
+                return False, "Missing HMAC authentication headers"
+            
+            # Validate timestamp (5-minute window)
+            try:
+                request_time = float(timestamp)
+                current_time = time.time()
+                if abs(current_time - request_time) > 300:  # 5 minutes
+                    return False, "Request timestamp outside allowed window"
+            except ValueError:
+                return False, "Invalid timestamp format"
+            
+            # Check for nonce replay
+            if nonce in self._nonce_cache:
+                return False, "Nonce already used (replay attack)"
+            
+            # Verify body hash
+            request_body = request.body
+            computed_body_hash = base64.b64encode(
+                hashlib.sha256(request_body).digest()
+            ).decode('ascii')
+            
+            if body_hash != computed_body_hash:
+                return False, "Body hash mismatch"
+            
+            # Get portal secret for this portal ID
+            expected_secret = getattr(settings, 'PLATFORM_API_SECRET', None)
+            if not expected_secret:
+                return False, "Portal authentication not configured"
+            
+            # Build canonical string for signature verification
+            method = request.method.upper()
+            path = request.get_full_path()
+            
+            canonical_string = "\n".join([
+                method,
+                path,
+                content_type,
+                body_hash,
+                nonce,
+                timestamp
+            ])
+            
+            # Compute expected signature
+            expected_signature = hmac.new(
+                expected_secret.encode(),
+                canonical_string.encode(),
+                hashlib.sha256
+            ).hexdigest()
+            
+            # Constant-time comparison to prevent timing attacks
+            if not hmac.compare_digest(signature, expected_signature):
+                return False, "HMAC signature verification failed"
+            
+            # Store nonce to prevent replay
+            self._nonce_cache.add(nonce)
+            self._cleanup_nonces()
+            
+            return True, ""
+            
+        except Exception as e:
+            logger.error(f"🔥 [HMAC Auth] Signature validation error: {e}")
+            return False, f"Signature validation error: {str(e)}"
+    
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        # Only process API requests
+        if request.path.startswith('/api/'):
+            # Validate HMAC signature
+            is_valid, error_msg = self._validate_hmac_signature(request)
+            
+            if not is_valid:
+                logger.warning(f"🔥 [HMAC Auth] Authentication failed from {get_safe_client_ip(request)}: {error_msg}")
+                return HttpResponse(
+                    json.dumps({'error': f'HMAC authentication failed: {error_msg}'}),
+                    status=401,
+                    content_type='application/json'
+                )
+            
+            # Extract user context from portal service (optional)
+            user_id = request.META.get('HTTP_X_USER_ID')
+            if user_id:
+                try:
+                    user_id = int(user_id)
+                    # Get user from database
+                    user = User.objects.get(id=user_id)
+                    # Set user context for API request (don't actually log them in)
+                    request.user = user
+                    request._portal_authenticated = True  # Mark as portal-authenticated
+                    
+                    logger.debug(f"✅ [HMAC Auth] User context set for API request: {user.email}")
+                    
+                except (ValueError, User.DoesNotExist):
+                    logger.warning(f"🔥 [HMAC Auth] Invalid user ID in API request: {user_id}")
+                    return HttpResponse(
+                        json.dumps({'error': 'Invalid user context'}),
+                        status=400,
+                        content_type='application/json'
+                    )
+            
+            # Mark portal ID for logging
+            request._portal_id = request.META.get('HTTP_X_PORTAL_ID', 'unknown')
+            
+            # Log successful portal service authentication
+            logger.info(f"✅ [HMAC Auth] API request authenticated from portal {request._portal_id} at {get_safe_client_ip(request)}")
+        
+        response = self.get_response(request)
+        
+        # Add service identification header
+        if request.path.startswith('/api/'):
+            response['X-Service'] = 'platform'
+            response['X-Portal-Auth'] = 'hmac-verified' if hasattr(request, '_portal_authenticated') else 'none'
+        
         return response
 
 

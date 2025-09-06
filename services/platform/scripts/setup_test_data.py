@@ -1105,7 +1105,7 @@ def print_credentials(superuser, customer_user, customer):
         print("   💼 Tax info: Not configured")
 
     print("\n🌐 Access URLs:")
-    print("   📊 Dashboard: http://localhost:8701/app/")
+    print("   📊 Dashboard: http://localhost:8701/dashboard/")
     print("   🔐 Admin: http://localhost:8701/admin/")
     print("   🎯 Login: http://localhost:8701/auth/login/")
 
@@ -1136,7 +1136,7 @@ def print_credentials(superuser, customer_user, customer):
         orders_count = Order.objects.count()
         print(f"   🛒 Orders: {orders_count}")
         if orders_count == 0:
-            print("   ➡️  Create orders via Dashboard: http://localhost:8701/app/orders/create/")
+            print("   ➡️  Create orders via Dashboard: http://localhost:8701/orders/create/")
     except:
         pass
 
@@ -1168,7 +1168,7 @@ def print_credentials(superuser, customer_user, customer):
         tickets_count = Ticket.objects.count()
         print(f"   🎫 Tickets: {tickets_count}")
         if tickets_count == 0:
-            print("   ➡️  Create tickets via Dashboard: http://localhost:8701/app/tickets/create/")
+            print("   ➡️  Create tickets via Dashboard: http://localhost:8701/tickets/create/")
     except:
         pass
 
