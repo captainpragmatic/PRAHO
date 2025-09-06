@@ -43,12 +43,12 @@ def navigate_to_invoices(page: Page) -> bool:
         bool: True if navigation successful
     """
     try:
-        page.goto(f"{BASE_URL}/app/billing/invoices/")
+        page.goto(f"{BASE_URL}/billing/invoices/")
         page.wait_for_load_state("networkidle", timeout=5000)
         
         # Verify we're on the billing page
         current_url = page.url
-        if "/app/billing/invoices/" in current_url:
+        if "/billing/invoices/" in current_url:
             print("    ✅ Successfully navigated to invoices page")
             return True
         else:
@@ -126,7 +126,7 @@ def _count_navigation_elements(page: Page) -> int:
     """Count navigation elements on the page."""
     nav_elements = [
         ('nav', 'navigation elements'),
-        ('a[href*="/app/"]', 'app navigation links'),
+        ('a[href*="/dashboard/"], a[href*="/billing/"], a[href*="/tickets/"]', 'navigation links'),
         ('button', 'interactive buttons'),
     ]
     

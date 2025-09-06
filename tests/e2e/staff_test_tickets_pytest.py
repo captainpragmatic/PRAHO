@@ -63,7 +63,7 @@ def test_staff_ticket_system_access_via_navigation(page: Page) -> None:
         
         # Navigate to dashboard first
         assert navigate_to_dashboard(page)
-        assert "/app/" in page.url
+        assert "/dashboard/" in page.url
         
         # Click on Support dropdown button to open the menu
         support_dropdown = page.get_by_role('button', name='🎫 Support')
@@ -77,8 +77,8 @@ def test_staff_ticket_system_access_via_navigation(page: Page) -> None:
         tickets_menuitem.click()
         
         # Verify we're on the ticket list page
-        page.wait_for_url("**/app/tickets/", timeout=8000)
-        assert "/app/tickets/" in page.url, "Should navigate to ticket list page"
+        page.wait_for_url("**/tickets/", timeout=8000)
+        assert "/tickets/" in page.url, "Should navigate to ticket list page"
         
         # Verify page title and staff-specific content (handle both English and Romanian)
         title = page.title()
@@ -113,7 +113,7 @@ def test_staff_ticket_list_dashboard_display(page: Page) -> None:
         # Login and navigate to tickets
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-        page.goto("http://localhost:8701/app/tickets/")
+        page.goto("http://localhost:8701/tickets/")
         page.wait_for_load_state("networkidle")
         
         # Verify ticket statistics are present
@@ -181,7 +181,7 @@ def test_staff_ticket_creation_workflow(page: Page) -> None:
         # Login and navigate to ticket creation
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-        page.goto("http://localhost:8701/app/tickets/")
+        page.goto("http://localhost:8701/tickets/")
         page.wait_for_load_state("networkidle")
         
         # Click "New Ticket" button
@@ -190,8 +190,8 @@ def test_staff_ticket_creation_workflow(page: Page) -> None:
         new_ticket_button.click()
         
         # Verify we're on the create ticket page
-        page.wait_for_url("**/app/tickets/create/", timeout=8000)
-        assert "/app/tickets/create/" in page.url
+        page.wait_for_url("**/tickets/create/", timeout=8000)
+        assert "/tickets/create/" in page.url
         
         # Verify create ticket form elements
         create_heading = page.locator('h1:has-text("Create New Ticket")')
@@ -251,7 +251,7 @@ def test_staff_ticket_creation_workflow(page: Page) -> None:
             page.wait_for_timeout(1000)
             
             # Check if ticket was created successfully
-            if "/app/tickets/" in page.url and page.url != "http://localhost:8701/app/tickets/create/":
+            if "/tickets/" in page.url and page.url != "http://localhost:8701/tickets/create/":
                 print("  ✅ Ticket creation succeeded - redirected away from create page")
                 
                 # Look for success message
@@ -299,14 +299,14 @@ def test_staff_ticket_detail_and_management_features(page: Page) -> None:
         # Login and navigate to tickets
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-        page.goto("http://localhost:8701/app/tickets/")
+        page.goto("http://localhost:8701/tickets/")
         page.wait_for_load_state("networkidle")
         
         # Find first ticket to view (if any exist)
-        ticket_links = page.locator('a[href*="/app/tickets/"]:has-text("TK")')
+        ticket_links = page.locator('a[href*="/tickets/"]:has-text("TK")')
         if ticket_links.count() == 0:
             # Try alternative selectors for ticket links
-            ticket_links = page.locator('a[href*="/app/tickets/"][href*="/"]').filter(lambda el: "create" not in el.get_attribute("href", ""))
+            ticket_links = page.locator('a[href*="/tickets/"][href*="/"]').filter(lambda el: "create" not in el.get_attribute("href", ""))
         
         if ticket_links.count() > 0:
             # Click on first ticket
@@ -315,7 +315,7 @@ def test_staff_ticket_detail_and_management_features(page: Page) -> None:
             page.wait_for_load_state("networkidle")
             
             # Verify we're on a ticket detail page
-            assert "/app/tickets/" in page.url and page.url.endswith("/")
+            assert "/tickets/" in page.url and page.url.endswith("/")
             print("  ✅ Navigated to ticket detail page")
             
             # Verify ticket detail elements are present
@@ -364,7 +364,7 @@ def test_staff_ticket_detail_and_management_features(page: Page) -> None:
             print("  ℹ️ No existing tickets found - creating sample ticket for testing")
             
             # Navigate back to create a test ticket first
-            page.goto("http://localhost:8701/app/tickets/create/")
+            page.goto("http://localhost:8701/tickets/create/")
             # ... (ticket creation logic would go here)
         
         print("  ✅ Staff ticket management features verified")
@@ -390,13 +390,13 @@ def test_staff_ticket_comments_and_internal_notes(page: Page) -> None:
         # Login and navigate to tickets
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-        page.goto("http://localhost:8701/app/tickets/")
+        page.goto("http://localhost:8701/tickets/")
         page.wait_for_load_state("networkidle")
         
         # Find a ticket to work with
-        ticket_links = page.locator('a[href*="/app/tickets/"]:has-text("TK")')
+        ticket_links = page.locator('a[href*="/tickets/"]:has-text("TK")')
         if ticket_links.count() == 0:
-            ticket_links = page.locator('a[href*="/app/tickets/"][href*="/"]').filter(lambda el: "create" not in el.get_attribute("href", ""))
+            ticket_links = page.locator('a[href*="/tickets/"][href*="/"]').filter(lambda el: "create" not in el.get_attribute("href", ""))
         
         if ticket_links.count() > 0:
             first_ticket_link = ticket_links.first
@@ -480,13 +480,13 @@ def test_staff_ticket_status_management(page: Page) -> None:
         # Login and navigate to tickets
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-        page.goto("http://localhost:8701/app/tickets/")
+        page.goto("http://localhost:8701/tickets/")
         page.wait_for_load_state("networkidle")
         
         # Find an open ticket to work with
-        ticket_links = page.locator('a[href*="/app/tickets/"]:has-text("TK")')
+        ticket_links = page.locator('a[href*="/tickets/"]:has-text("TK")')
         if ticket_links.count() == 0:
-            ticket_links = page.locator('a[href*="/app/tickets/"][href*="/"]').filter(lambda el: "create" not in el.get_attribute("href", ""))
+            ticket_links = page.locator('a[href*="/tickets/"][href*="/"]').filter(lambda el: "create" not in el.get_attribute("href", ""))
         
         if ticket_links.count() > 0:
             first_ticket_link = ticket_links.first
@@ -564,11 +564,11 @@ def test_staff_ticket_access_control_permissions(page: Page) -> None:
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
         
         # Navigate directly to tickets URL
-        page.goto("http://localhost:8701/app/tickets/")
+        page.goto("http://localhost:8701/tickets/")
         page.wait_for_load_state("networkidle")
         
         # Should successfully load ticket system
-        assert "/app/tickets/" in page.url, "Staff user should access ticket system"
+        assert "/tickets/" in page.url, "Staff user should access ticket system"
         tickets_heading = page.locator('h1:has-text("🎫 Support Tickets"), h1:has-text("🎫 Tichete de suport")').first
         assert tickets_heading.is_visible(), "Ticket system should load for staff user"
         
@@ -588,7 +588,7 @@ def test_staff_ticket_access_control_permissions(page: Page) -> None:
             print("    ✅ Staff has proper navigation access to tickets")
         
         # Test access to ticket creation form
-        page.goto("http://localhost:8701/app/tickets/create/")
+        page.goto("http://localhost:8701/tickets/create/")
         page.wait_for_load_state("networkidle")
         
         create_form = page.locator('form').filter(has_text="Subject").first
@@ -628,7 +628,7 @@ def test_staff_ticket_system_mobile_responsiveness(page: Page) -> None:
         # Login and navigate to tickets on desktop first
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-        page.goto("http://localhost:8701/app/tickets/")
+        page.goto("http://localhost:8701/tickets/")
         page.wait_for_load_state("networkidle")
         
         # Test mobile viewport
@@ -700,7 +700,7 @@ def test_staff_complete_ticket_management_workflow(page: Page) -> None:
         
         # Step 1: Create a new ticket
         print("    Step 1: Creating new ticket for customer...")
-        page.goto("http://localhost:8701/app/tickets/create/")
+        page.goto("http://localhost:8701/tickets/create/")
         page.wait_for_load_state("networkidle")
         
         # Test ticket data for comprehensive workflow
@@ -733,12 +733,12 @@ def test_staff_complete_ticket_management_workflow(page: Page) -> None:
             page.wait_for_load_state("networkidle")
         
         # Verify ticket creation
-        if "/app/tickets/" in page.url and "create" not in page.url:
+        if "/tickets/" in page.url and "create" not in page.url:
             print("      ✅ Ticket created successfully")
             ticket_created = True
         else:
             print("      ℹ️ Ticket creation may have validation issues - checking list")
-            page.goto("http://localhost:8701/app/tickets/")
+            page.goto("http://localhost:8701/tickets/")
             page.wait_for_load_state("networkidle")
             
             # Look for our ticket
@@ -819,7 +819,7 @@ def test_staff_ticket_system_responsive_breakpoints(page: Page) -> None:
             """Test core staff ticket functionality across viewports."""
             try:
                 # Navigate to tickets
-                test_page.goto("http://localhost:8701/app/tickets/")
+                test_page.goto("http://localhost:8701/tickets/")
                 test_page.wait_for_load_state("networkidle")
                 
                 # Verify authentication maintained
