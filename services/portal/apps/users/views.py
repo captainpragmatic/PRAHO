@@ -60,9 +60,16 @@ def login_view(request: HttpRequest) -> HttpResponse:
                     request.session['customer_id'] = customer_id
                     request.session['email'] = email
                     request.session['authenticated_at'] = timezone.now().isoformat()
+                    request.session['remember_me'] = remember_me
                     
-                    # Set session expiry: 30 days or 24 hours
-                    session_age = 2592000 if remember_me else 86400  # 30 days or 24 hours
+                    # Set session expiry based on remember me checkbox
+                    if remember_me:
+                        session_age = settings.SESSION_COOKIE_AGE_REMEMBER_ME  # 30 days
+                        logger.info(f"✅ [Portal Session] Extended session set for {email} (30 days)")
+                    else:
+                        session_age = settings.SESSION_COOKIE_AGE_DEFAULT  # 24 hours  
+                        logger.info(f"✅ [Portal Session] Standard session set for {email} (24 hours)")
+                    
                     request.session.set_expiry(session_age)
                     
                     messages.success(request, f"✅ Welcome back, {email}!")

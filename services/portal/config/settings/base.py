@@ -119,8 +119,7 @@ else:
             'LOCATION': 'portal-dev-cache',
         }
     }
-SESSION_COOKIE_NAME = "portal_session"
-SESSION_SAVE_EVERY_REQUEST = False  # Only save when modified
+SESSION_ENGINE = "django.contrib.sessions.backends.cache"
 
 
 # ===============================================================================
@@ -171,6 +170,19 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "portal-dev-key-change-in-production")
 DEBUG = os.environ.get("DEBUG", "True").lower() == "true"
 
 ALLOWED_HOSTS = ["localhost", "127.0.0.1", "portal.pragmatichost.com"]
+
+# ===============================================================================
+# SESSION CONFIGURATION 🔐
+# ===============================================================================
+
+# Session duration settings
+SESSION_COOKIE_AGE_DEFAULT = 24 * 60 * 60       # 24 hours (86400 seconds)
+SESSION_COOKIE_AGE_REMEMBER_ME = 30 * 24 * 60 * 60  # 30 days (2592000 seconds)
+
+# Session behavior
+SESSION_EXPIRE_AT_BROWSER_CLOSE = False  # Use custom age settings
+SESSION_SAVE_EVERY_REQUEST = False       # Only save when modified
+SESSION_COOKIE_NAME = "portal_session"   # Custom session name
 
 # Cookie security settings
 SESSION_COOKIE_SECURE = not DEBUG  # HTTPS in production

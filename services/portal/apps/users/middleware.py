@@ -7,6 +7,7 @@ import logging
 import random
 import time
 from datetime import datetime, timedelta, timezone
+from django.conf import settings
 from django.shortcuts import redirect
 from django.core.cache import cache
 from django.http import HttpRequest, HttpResponse
@@ -54,10 +55,16 @@ class PortalAuthenticationMiddleware:
         if self.is_public_url(request.path):
             return self.get_response(request)
         
-        # Tier 1: Fast session check
+        # Tier 1: Fast session check with age validation
         customer_id = request.session.get('customer_id')
         if not customer_id:
             logger.debug("🔒 [Auth] No customer_id in session, redirecting to login")
+            return redirect('/login/')
+            
+        # Check if session has exceeded its intended lifetime
+        if not self._is_session_age_valid(request):
+            logger.warning(f"⏰ [Auth] Session for customer {customer_id} has exceeded lifetime, forcing logout")
+            request.session.flush()
             return redirect('/login/')
         
         # Tier 2: Sophisticated validation with timing controls
@@ -194,3 +201,45 @@ class PortalAuthenticationMiddleware:
             logger.error(f"🔥 [Auth] Unexpected validation error for {customer_id}: {e}")
             # Fail-open for unexpected errors too
             return True
+    
+    def _is_session_age_valid(self, request: HttpRequest) -> bool:
+        """
+        Validate that the session hasn't exceeded its intended lifetime based on 'remember_me' setting.
+        
+        Returns:
+            bool: True if session is within its intended lifetime, False if expired
+        """
+        authenticated_at_str = request.session.get('authenticated_at')
+        remember_me = request.session.get('remember_me', False)
+        
+        if not authenticated_at_str:
+            logger.warning("⚠️ [Auth] No authenticated_at timestamp in session")
+            return False
+            
+        try:
+            authenticated_at = datetime.fromisoformat(authenticated_at_str.replace('Z', '+00:00'))
+        except (ValueError, AttributeError) as e:
+            logger.error(f"🔥 [Auth] Invalid authenticated_at format in session: {e}")
+            return False
+        
+        # Calculate intended session lifetime
+        if remember_me:
+            max_age_seconds = getattr(settings, 'SESSION_COOKIE_AGE_REMEMBER_ME', 30 * 24 * 60 * 60)  # 30 days
+            session_type = "extended (30 days)"
+        else:
+            max_age_seconds = getattr(settings, 'SESSION_COOKIE_AGE_DEFAULT', 24 * 60 * 60)  # 24 hours
+            session_type = "standard (24 hours)"
+        
+        # Check if session has exceeded its intended lifetime
+        now = django_timezone.now()
+        session_age = (now - authenticated_at).total_seconds()
+        
+        if session_age > max_age_seconds:
+            customer_id = request.session.get('customer_id', 'unknown')
+            logger.warning(f"⏰ [Auth] {session_type} session for customer {customer_id} has exceeded lifetime "
+                         f"({session_age:.0f}s > {max_age_seconds:.0f}s)")
+            return False
+        
+        logger.debug(f"✅ [Auth] {session_type} session is within valid lifetime "
+                    f"({session_age:.0f}s / {max_age_seconds:.0f}s)")
+        return True
