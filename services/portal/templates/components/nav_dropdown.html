@@ -1,0 +1,71 @@
+{% load i18n %}
+
+{# Romanian hosting provider dropdown navigation component #}
+<div class="relative inline-block text-left" x-data="{ open: false }" @click.away="open = false">
+  <div>
+    <button type="button" @click="open = !open"
+      class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center transition-colors"
+      :class="{ 'text-white bg-slate-700': open }"
+      aria-expanded="false" 
+      aria-haspopup="true">
+      {% if icon %}
+        <span class="mr-2">{{ icon }}</span>
+      {% endif %}
+      {{ title }}
+      <svg class="ml-1 h-4 w-4 transition-transform duration-200" :class="{ 'rotate-180': open }" 
+           fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+      </svg>
+    </button>
+  </div>
+
+  <div x-show="open" 
+       x-transition:enter="transition ease-out duration-100"
+       x-transition:enter-start="transform opacity-0 scale-95"
+       x-transition:enter-end="transform opacity-100 scale-100"
+       x-transition:leave="transition ease-in duration-75"
+       x-transition:leave-start="transform opacity-100 scale-100"
+       x-transition:leave-end="transform opacity-0 scale-95"
+       class="origin-top-right absolute left-0 mt-2 w-56 rounded-md shadow-lg bg-slate-800 border border-slate-700 z-50"
+       role="menu" 
+       aria-orientation="vertical">
+    <div class="py-1" role="none">
+      {% for item in items %}
+        {% if item.divider %}
+          <div class="border-t border-slate-700 my-1"></div>
+        {% else %}
+          <a href="{{ item.url }}" 
+             class="group flex items-center px-4 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700 transition-colors"
+             role="menuitem"
+             @click="open = false">
+            {% if item.icon %}
+              <span class="mr-3">{{ item.icon }}</span>
+            {% endif %}
+            {{ item.text }}
+            {% if item.badge %}
+              <span class="ml-auto">
+                {% if item.badge.variant == 'success' %}
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-900 text-green-200">
+                    {{ item.badge.text }}
+                  </span>
+                {% elif item.badge.variant == 'warning' %}
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-900 text-yellow-200">
+                    {{ item.badge.text }}
+                  </span>
+                {% elif item.badge.variant == 'danger' %}
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-900 text-red-200">
+                    {{ item.badge.text }}
+                  </span>
+                {% else %}
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-700 text-slate-300">
+                    {{ item.badge.text }}
+                  </span>
+                {% endif %}
+              </span>
+            {% endif %}
+          </a>
+        {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+</div>

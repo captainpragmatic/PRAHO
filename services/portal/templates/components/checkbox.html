@@ -1,0 +1,63 @@
+{# =============================================================================== #}
+{# 🇷🇴 PRAHO PLATFORM - CHECKBOX COMPONENT #}
+{# =============================================================================== #}
+{# Accessible checkbox with Romanian hosting provider theming and proper centering #}
+
+{% load static %}
+
+{# Container wrapper #}
+<div class="{% if container_class %}{{ container_class }}{% else %}flex items-start space-x-3{% endif %}">
+  {# Checkbox input wrapper for proper centering #}
+  <div class="flex items-center mt-0.5">
+    <input type="checkbox"
+           {% if html_id %}id="{{ html_id }}"{% endif %}
+           {% if name %}name="{{ name }}"{% endif %}
+           {% if value %}value="{{ value }}"{% endif %}
+           {% if checked %}checked{% endif %}
+           {% if required %}required{% endif %}
+           {% if disabled %}disabled{% endif %}
+           {% if hx_get %}hx-get="{{ hx_get }}"{% endif %}
+           {% if hx_post %}hx-post="{{ hx_post }}"{% endif %}
+           {% if hx_trigger %}hx-trigger="{{ hx_trigger }}"{% endif %}
+           {% if hx_target %}hx-target="{{ hx_target }}"{% endif %}
+           {% if hx_swap %}hx-swap="{{ hx_swap }}"{% endif %}
+           {% if data_attrs %}{% for key, val in data_attrs.items %}data-{{ key }}="{{ val }}" {% endfor %}{% endif %}
+           class="h-4 w-4 rounded border
+           {% if variant == 'danger' %}text-red-600 focus:ring-red-500 border-red-400{% elif variant == 'warning' %}text-yellow-600 focus:ring-yellow-500 border-yellow-400{% elif variant == 'success' %}text-green-600 focus:ring-green-500 border-green-400{% else %}text-blue-600 focus:ring-blue-500 border-slate-600{% endif %}
+           bg-slate-700 focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-800
+           disabled:opacity-50 disabled:cursor-not-allowed
+           {% if error %}border-red-500 focus:ring-red-500{% endif %}
+           {% if css_class %} {{ css_class }}{% endif %}"
+           {% if error %}aria-invalid="true" aria-describedby="{{ html_id }}-error"{% endif %}
+           {% if help_text %}aria-describedby="{{ html_id }}-help"{% endif %} />
+  </div>
+
+  {# Content wrapper for proper text alignment #}
+  <div class="flex-1">
+    {# Label #}
+    {% if label %}
+    <label {% if html_id %}for="{{ html_id }}"{% endif %}
+           class="text-sm font-medium leading-relaxed cursor-pointer
+           {% if variant == 'danger' %}text-red-300{% elif variant == 'warning' %}text-yellow-200{% elif variant == 'success' %}text-green-300{% else %}text-slate-300{% endif %}
+           {% if disabled %}opacity-50 cursor-not-allowed{% endif %}">
+      {{ label }}
+      {% if required %}<span class="text-red-500 ml-1">*</span>{% endif %}
+    </label>
+    {% endif %}
+
+    {# Help text #}
+    {% if help_text %}
+    <p id="{{ html_id }}-help" class="mt-1 text-xs leading-relaxed
+       {% if variant == 'danger' %}text-red-400{% elif variant == 'warning' %}text-yellow-400{% elif variant == 'success' %}text-green-400{% else %}text-slate-400{% endif %}">
+      {{ help_text }}
+    </p>
+    {% endif %}
+
+    {# Error message #}
+    {% if error %}
+    <p id="{{ html_id }}-error" class="mt-1 text-xs text-red-400">
+      {{ error }}
+    </p>
+    {% endif %}
+  </div>
+</div>

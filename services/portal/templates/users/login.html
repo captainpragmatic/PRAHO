@@ -1,0 +1,130 @@
+{% extends 'base.html' %}
+{% load i18n %}
+
+{% block title %}{% trans 'Login' %} - PRAHO Portal{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+  <div class="max-w-md w-full space-y-8">
+    <!-- Header -->
+    <div class="text-center">
+      <div class="mx-auto h-16 w-16 mb-4">
+        <div class="h-full w-full bg-blue-600 rounded-lg flex items-center justify-center text-white text-2xl font-bold">
+          P
+        </div>
+      </div>
+      <h2 class="mt-6 text-3xl font-extrabold text-white">
+        {% trans 'PRAHO Portal Login' %}
+      </h2>
+      <p class="mt-2 text-sm text-slate-400">
+        {% trans 'Customer Portal Access' %}
+      </p>
+    </div>
+
+    <!-- Login Form -->
+    <form class="mt-8 space-y-6" method="post" hx-post="{% url 'users:login' %}" hx-swap="outerHTML">
+      {% csrf_token %}
+
+      <div class="rounded-lg bg-slate-800 p-6 space-y-4">
+        <!-- Email Field -->
+        <div>
+          <label for="id_email" class="block text-sm font-medium text-slate-300">
+            📧 {% trans 'Email Address' %}
+          </label>
+          <div class="mt-1">
+            {{ form.email }}
+          </div>
+          {% if form.email.errors %}
+          <p class="mt-1 text-sm text-red-400">{{ form.email.errors.0 }}</p>
+          {% endif %}
+        </div>
+
+        <!-- Password Field -->
+        <div>
+          <label for="id_password" class="block text-sm font-medium text-slate-300">
+            🔐 {% trans 'Password' %}
+          </label>
+          <div class="mt-1">
+            {{ form.password }}
+          </div>
+          {% if form.password.errors %}
+          <p class="mt-1 text-sm text-red-400">{{ form.password.errors.0 }}</p>
+          {% endif %}
+        </div>
+
+        <!-- Remember Me -->
+        <div class="flex items-center justify-between">
+          <div class="flex items-center">
+            {{ form.remember_me }}
+            <label for="id_remember_me" class="ml-2 block text-sm text-slate-300">
+              {% trans 'Keep me logged in' %}
+            </label>
+          </div>
+
+          <div class="text-sm">
+            <a href="#" class="text-blue-400 hover:text-blue-300">
+              {% trans 'Forgot password?' %}
+            </a>
+          </div>
+        </div>
+
+        <!-- Form Errors -->
+        {% if form.non_field_errors %}
+        <div class="bg-red-900 border border-red-700 rounded-md p-3">
+          {% for error in form.non_field_errors %}
+          <p class="text-red-100 text-sm">❌ {{ error }}</p>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        <!-- Submit Button -->
+        <div>
+          <button type="submit" 
+                  class="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all duration-200">
+            <span class="htmx-indicator">
+              <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            </span>
+            <span class="login-text">{% trans 'Sign In' %}</span>
+          </button>
+        </div>
+
+        <!-- Register Link (if applicable) -->
+        <div class="text-center pt-4 border-t border-slate-700">
+          <p class="text-slate-400 text-sm">
+            {% trans 'Need an account?' %}
+            <a href="#" class="text-blue-400 hover:text-blue-300 font-medium">
+              {% trans 'Contact support' %}
+            </a>
+          </p>
+        </div>
+      </div>
+    </form>
+
+    <!-- Security Notice -->
+    <div class="text-center text-xs text-slate-500">
+      <p>🔒 {% trans 'Secure Connection' %} | {% trans 'GDPR Compliance' %}</p>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Add styling to form fields
+  document.addEventListener('DOMContentLoaded', function() {
+    const emailField = document.getElementById('id_email');
+    const passwordField = document.getElementById('id_password');
+    
+    if (emailField) {
+      emailField.className = 'w-full px-3 py-2 border border-slate-600 rounded-md bg-slate-700 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500';
+      emailField.placeholder = 'Enter your email address';
+    }
+    
+    if (passwordField) {
+      passwordField.className = 'w-full px-3 py-2 border border-slate-600 rounded-md bg-slate-700 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500';
+      passwordField.placeholder = 'Enter your password';
+    }
+  });
+</script>
+{% endblock %}

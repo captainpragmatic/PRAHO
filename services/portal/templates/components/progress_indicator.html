@@ -1,0 +1,116 @@
+{% comment %}
+===============================================================================
+🚀 GENERIC MULTI-STEP PROGRESS INDICATOR
+===============================================================================
+Reusable progress indicator for any multi-step flow in PRAHO Platform
+
+Usage Examples:
+- {% include 'components/progress_indicator.html' with steps=onboarding_steps current_step=2 %}
+- {% include 'components/progress_indicator.html' with steps=provisioning_steps current_step=1 show_back_button=True %}
+
+Required Context:
+- steps: List of step objects with 'label', 'description' (optional), 'url' (optional)
+- current_step: Integer (1-based) indicating current step
+
+Optional Context:
+- show_back_button: Boolean to show navigation
+- variant: 'default', 'compact', 'vertical' 
+- color_scheme: 'blue-green', 'purple', 'red' (for different contexts)
+- back_url: Custom back URL override
+{% endcomment %}
+
+{% load i18n %}
+
+<div class="{% if variant == 'compact' %}mb-4{% else %}mb-8{% endif %}">
+  
+  {% if variant == 'vertical' %}
+  <!-- Vertical Progress (for narrow screens/sidebars) -->
+  <div class="space-y-4">
+    {% for step in steps %}
+    <div class="flex items-center {% if forloop.counter <= current_step %}text-white{% else %}text-slate-500{% endif %}">
+      <div class="w-8 h-8 
+        {% if forloop.counter < current_step %}
+          {% if color_scheme == 'purple' %}bg-purple-600{% elif color_scheme == 'red' %}bg-red-600{% else %}bg-blue-600{% endif %}
+        {% elif forloop.counter == current_step %}
+          {% if color_scheme == 'purple' %}bg-purple-600{% elif color_scheme == 'red' %}bg-red-600{% else %}bg-green-600{% endif %}
+        {% else %}bg-slate-600{% endif %} 
+        rounded-full flex items-center justify-center text-white text-sm font-bold">
+        {% if forloop.counter < current_step %}✓{% else %}{{ forloop.counter }}{% endif %}
+      </div>
+      <div class="ml-3">
+        <div class="text-sm font-medium">{{ step.label }}</div>
+        {% if step.description %}<div class="text-xs opacity-75">{{ step.description }}</div>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  
+  {% else %}
+  <!-- Horizontal Progress (default) -->
+  <div class="{% if variant == 'compact' %}text-center{% else %}text-center{% endif %}">
+    <div class="flex justify-center items-center {% if variant == 'compact' %}space-x-2{% else %}space-x-4{% endif %} mb-6">
+      {% for step in steps %}
+        
+        <!-- Step Circle -->
+        <div class="flex items-center">
+          <div class="{% if variant == 'compact' %}w-6 h-6 text-xs{% else %}w-8 h-8 text-sm{% endif %} 
+            {% if forloop.counter < current_step %}
+              {% if color_scheme == 'purple' %}bg-purple-600{% elif color_scheme == 'red' %}bg-red-600{% else %}bg-blue-600{% endif %}
+            {% elif forloop.counter == current_step %}
+              {% if color_scheme == 'purple' %}bg-purple-600{% elif color_scheme == 'red' %}bg-red-600{% else %}bg-green-600{% endif %}
+            {% else %}bg-slate-600{% endif %} 
+            rounded-full flex items-center justify-center text-white font-bold">
+            {% if forloop.counter < current_step %}✓{% else %}{{ forloop.counter }}{% endif %}
+          </div>
+          
+          {% if not variant == 'compact' %}
+          <span class="ml-2 {% if variant == 'compact' %}text-xs{% else %}text-sm{% endif %} 
+            {% if forloop.counter == current_step %}text-white font-medium
+            {% elif forloop.counter < current_step %}
+              {% if color_scheme == 'purple' %}text-purple-400{% elif color_scheme == 'red' %}text-red-400{% else %}text-blue-400{% endif %}
+            {% else %}text-slate-500{% endif %}">
+            {{ step.label }}
+          </span>
+          {% endif %}
+        </div>
+        
+        <!-- Progress Line (not after last step) -->
+        {% if not forloop.last %}
+        <div class="{% if variant == 'compact' %}w-8 h-0.5{% else %}w-12 h-0.5{% endif %} 
+          {% if forloop.counter < current_step %}
+            {% if color_scheme == 'purple' %}bg-purple-600{% elif color_scheme == 'red' %}bg-red-600{% else %}bg-blue-600{% endif %}
+          {% else %}bg-slate-600{% endif %}">
+        </div>
+        {% endif %}
+        
+      {% endfor %}
+    </div>
+    
+    <!-- Compact variant labels below -->
+    {% if variant == 'compact' %}
+    <div class="flex justify-center space-x-8">
+      {% for step in steps %}
+      <span class="text-xs {% if forloop.counter == current_step %}text-white font-medium{% elif forloop.counter < current_step %}text-blue-400{% else %}text-slate-500{% endif %}">
+        {{ step.label }}
+      </span>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+  
+  <!-- Navigation Links -->
+  {% if show_back_button and current_step > 1 %}
+  <div class="flex justify-center mt-4">
+    {% if back_url %}
+      <a href="{{ back_url }}" class="inline-flex items-center px-4 py-2 text-sm font-medium text-slate-400 hover:text-slate-300 transition-colors">
+        ← {% trans 'Back' %}
+      </a>
+    {% elif steps|length >= current_step and steps|slice:"0:current_step"|last.url %}
+      <a href="{{ steps|slice:"0:current_step"|last.url }}" class="inline-flex items-center px-4 py-2 text-sm font-medium text-slate-400 hover:text-slate-300 transition-colors">
+        ← {% trans 'Back to' %} {{ steps|slice:"0:current_step"|last.label }}
+      </a>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
