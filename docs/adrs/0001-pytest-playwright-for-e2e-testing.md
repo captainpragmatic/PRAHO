@@ -71,7 +71,7 @@ def test_dashboard_functionality(page: Page):
     page.click('button[type="submit"]')
     
     # Automatic waits and error handling
-    assert "/app/" in page.url
+    assert "/dashboard/" in page.url
 ```
 
 #### Django + Playwright (Complex Setup)
