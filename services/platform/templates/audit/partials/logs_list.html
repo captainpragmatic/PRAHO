@@ -22,7 +22,7 @@
                                 {% include 'components/badge.html' with text='🔐 '|add:event.get_action_display variant='primary' size='sm' %}
                             {% elif event.action == 'logout' %}
                                 {% include 'components/badge.html' with text='👋 '|add:event.get_action_display variant='secondary' size='sm' %}
-                            {% elif '2fa' in event.action %}
+                            {% elif 'mfa' in event.action %}
                                 {% include 'components/badge.html' with text='🔒 '|add:event.get_action_display variant='warning' size='sm' %}
                             {% else %}
                                 {% include 'components/badge.html' with text='📋 '|add:event.get_action_display variant='secondary' size='sm' %}

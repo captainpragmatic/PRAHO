@@ -102,7 +102,7 @@
             {% trans 'QR Code' %}
           </h3>
           <div class="bg-white p-4 rounded-lg inline-block">
-            <img src="data:image/png;base64,{{ qr_code }}" alt="{% trans '2FA QR Code' %}" class="max-w-xs">
+            <img src="data:image/png;base64,{{ qr_code }}" alt="{% trans 'MFA QR Code' %}" class="max-w-xs">
           </div>
           <p class="text-sm text-slate-400 mt-4">
             {% trans 'Scan this QR code with your authenticator app' %}
@@ -175,7 +175,7 @@
             <div class="flex gap-3">
               <button type="submit" 
                       class="flex-1 bg-green-600 hover:bg-green-700 text-white font-medium py-3 px-6 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 focus:ring-offset-slate-800">
-                {% trans 'Verify & Enable 2FA' %}
+                {% trans 'Verify & Enable MFA' %}
               </button>
             </div>
           </form>

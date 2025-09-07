@@ -113,7 +113,7 @@
               <div class="text-sm text-blue-200">
                 <p class="font-medium mb-2">{% trans 'How to use backup codes:' %}</p>
                 <ol class="space-y-1 text-blue-300 list-decimal list-inside">
-                  <li>{% trans 'When prompted for 2FA code, enter a backup code instead' %}</li>
+                  <li>{% trans 'When prompted for MFA code, enter a backup code instead' %}</li>
                   <li>{% trans 'Each code works only once - they will be marked as used' %}</li>
                   <li>{% trans 'Generate new codes when you have few remaining' %}</li>
                 </ol>
@@ -132,7 +132,7 @@
         {% trans 'Continue to Profile' %}
       </a>
       
-      <a href="{% url 'users:two_factor_regenerate_backup_codes' %}" 
+      <a href="{% url 'users:mfa_regenerate_backup_codes' %}" 
          class="flex items-center justify-center px-6 py-3 border border-yellow-600 text-sm font-medium rounded-lg text-yellow-200 bg-yellow-900 bg-opacity-50 hover:bg-opacity-75 focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-colors">
         <span class="mr-2">🔄</span>
         {% trans 'Generate New Codes' %}
