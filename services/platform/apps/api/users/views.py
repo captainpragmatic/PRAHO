@@ -889,3 +889,44 @@ def customer_profile_api(request: HttpRequest, user) -> Response:
             'success': False,
             'error': 'Profile service unavailable'
         }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+
+# ===============================================================================
+# ACCESSIBLE CUSTOMERS FOR USER (HMAC-SIGNED) 👥
+# ===============================================================================
+
+@api_view(['POST'])
+@authentication_classes([])  # HMAC handled by middleware + secure_auth
+@permission_classes([AllowAny])
+@require_user_authentication
+def user_customers_api(request: HttpRequest, user: User) -> Response:
+    """
+    Return customers accessible to the authenticated user.
+
+    POST /api/users/customers/
+
+    Request Body (HMAC-signed):
+    {
+        "customer_id": <user_id>,
+        "action": "get_user_customers",
+        "timestamp": 1699999999
+    }
+    """
+    try:
+        customers = user.get_accessible_customers()
+        results = []
+        # Handle both QuerySet and list
+        if hasattr(customers, 'all'):
+            iterable = customers.all()
+        else:
+            iterable = customers or []
+        for c in iterable:
+            results.append({
+                'id': c.id,
+                'company_name': getattr(c, 'company_name', ''),
+                'name': getattr(c, 'name', ''),
+            })
+        return Response({'success': True, 'results': results})
+    except Exception as e:
+        logger.error(f"🔥 [User Customers API] Error fetching customers for {getattr(user, 'email', 'unknown')}: {e}")
+        return Response({'success': False, 'error': 'Unable to fetch customers'}, status=500)

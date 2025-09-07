@@ -4,7 +4,12 @@
 
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import CustomerSearchViewSet, CustomerServicesViewSet
+from .views import (
+    CustomerSearchViewSet, 
+    CustomerServicesViewSet,
+    customer_register_api,
+    CustomerProfileAPIView
+)
 
 # Create router for customer API endpoints
 router = DefaultRouter()
@@ -14,5 +19,12 @@ router.register('', CustomerServicesViewSet, basename='customer-services')
 app_name = 'customers'
 
 urlpatterns = [
+    # Customer registration endpoint (public)
+    path('register/', customer_register_api, name='customer-register'),
+    
+    # Customer profile management (authenticated)
+    path('profile/', CustomerProfileAPIView.as_view(), name='customer-profile'),
+    
+    # Router-based endpoints
     path('', include(router.urls)),
 ]

@@ -1,15 +1,29 @@
 # ===============================================================================
-# TICKETS API URLS - PLACEHOLDER 🎫
+# TICKETS API URLS - CUSTOMER SUPPORT OPERATIONS 🎫
 # ===============================================================================
 
 from django.urls import path
-from .views import TicketPlaceholderViewSet
+from .views import (
+    customer_tickets_api,
+    customer_ticket_detail_api,
+    customer_ticket_create_api,
+    customer_ticket_reply_api,
+    customer_tickets_summary_api,
+    support_categories_api,
+    ticket_attachment_download_api
+)
 
 app_name = 'tickets'
 
-# TODO: Add actual ticket API endpoints
 urlpatterns = [
-    # Placeholder for future ticket endpoints
-    # path('', TicketViewSet.as_view(), name='tickets'),
-    # path('sla/', SLAViewSet.as_view(), name='sla'),
+    # Customer tickets endpoints
+    path('', customer_tickets_api, name='customer_tickets_list'),
+    path('summary/', customer_tickets_summary_api, name='customer_tickets_summary'),
+    path('categories/', support_categories_api, name='support_categories'),
+    path('create/', customer_ticket_create_api, name='customer_ticket_create'),
+    
+    # Individual ticket endpoints
+    path('<str:ticket_number>/', customer_ticket_detail_api, name='customer_ticket_detail'),
+    path('<str:ticket_number>/reply/', customer_ticket_reply_api, name='customer_ticket_reply'),
+    path('<str:ticket_number>/attachments/<int:attachment_id>/download/', ticket_attachment_download_api, name='ticket_attachment_download'),
 ]

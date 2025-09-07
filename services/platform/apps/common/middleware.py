@@ -15,6 +15,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 
 from django.conf import settings
+from django.core.cache import cache
 from django.contrib.auth import get_user_model
 from django.http import HttpRequest, HttpResponse
 from django.utils import timezone
@@ -346,20 +347,23 @@ class PortalServiceHMACMiddleware:
     
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
         self.get_response = get_response
-        # Store recent nonces to prevent replay attacks
-        self._nonce_cache: set[str] = set()
-        self._nonce_cleanup_counter = 0
-    
-    def _cleanup_nonces(self) -> None:
-        """Periodically clean old nonces from memory (simple implementation)"""
-        self._nonce_cleanup_counter += 1
-        if self._nonce_cleanup_counter > 100:  # Every 100 requests
-            # In production, use Redis with TTL for distributed systems
-            if len(self._nonce_cache) > 1000:
-                # Keep only the most recent 500 nonces
-                nonces_list = list(self._nonce_cache)
-                self._nonce_cache = set(nonces_list[-500:])
-            self._nonce_cleanup_counter = 0
+        # Rate limit config (fallbacks if not in settings)
+        self._rl_window = int(getattr(settings, 'HMAC_RATE_LIMIT_WINDOW', 60))
+        self._rl_max_calls = int(getattr(settings, 'HMAC_RATE_LIMIT_MAX_CALLS', 300))
+
+    def _rate_limited(self, portal_id: str, client_ip: str) -> bool:
+        """Simple rate limiting keyed by portal_id and client IP using Django cache."""
+        try:
+            key = f"hmac_rl:{portal_id}:{client_ip}"
+            # Initialize counter if absent
+            cache.add(key, 0, timeout=self._rl_window)
+            # Increment atomically
+            current = cache.incr(key)
+        except Exception:
+            # Fallback if backend doesn't support incr reliably
+            current = (cache.get(key) or 0) + 1
+            cache.set(key, current, timeout=self._rl_window)
+        return current > self._rl_max_calls
     
     def _validate_hmac_signature(self, request: HttpRequest) -> tuple[bool, str]:
         """
@@ -373,7 +377,7 @@ class PortalServiceHMACMiddleware:
             timestamp = request.META.get('HTTP_X_TIMESTAMP', '')
             body_hash = request.META.get('HTTP_X_BODY_HASH', '')
             signature = request.META.get('HTTP_X_SIGNATURE', '')
-            content_type = request.META.get('CONTENT_TYPE', '')
+            raw_content_type = request.META.get('CONTENT_TYPE', '')
             
             # Check required headers
             if not all([portal_id, nonce, timestamp, body_hash, signature]):
@@ -388,8 +392,11 @@ class PortalServiceHMACMiddleware:
             except ValueError:
                 return False, "Invalid timestamp format"
             
-            # Check for nonce replay
-            if nonce in self._nonce_cache:
+            # Check for nonce replay using shared cache with TTL (scoped by portal)
+            nonce_key = f"hmac_nonce:{portal_id}:{nonce}"
+            # TTL matches timestamp window (5 minutes)
+            added = cache.add(nonce_key, True, timeout=300)
+            if not added:
                 return False, "Nonce already used (replay attack)"
             
             # Verify body hash
@@ -406,33 +413,54 @@ class PortalServiceHMACMiddleware:
             if not expected_secret:
                 return False, "Portal authentication not configured"
             
-            # Build canonical string for signature verification
+            # Build canonical string for signature verification (Phase 2 - strict, no legacy fallback)
+            # - Normalize content-type (lowercase, strip parameters)
+            # - Normalize query params: percent-encode and sort by key/value
+            # - Include portal_id to bind tenant identity
+            import urllib.parse
+
             method = request.method.upper()
-            path = request.get_full_path()
-            
-            canonical_string = "\n".join([
+
+            # Normalize path + query
+            full_path = request.get_full_path()
+            parsed = urllib.parse.urlsplit(full_path)
+            query_pairs = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+            query_pairs.sort(key=lambda kv: (kv[0], kv[1]))
+            normalized_query = urllib.parse.urlencode(query_pairs, doseq=True)
+            normalized_path = parsed.path + ("?" + normalized_query if normalized_query else "")
+
+            # Normalize content type
+            content_type_main = raw_content_type.split(";")[0].strip().lower()
+
+            canonical_new = "\n".join([
                 method,
-                path,
-                content_type,
+                normalized_path,
+                content_type_main,
                 body_hash,
+                portal_id,
                 nonce,
-                timestamp
+                timestamp,
             ])
             
             # Compute expected signature
-            expected_signature = hmac.new(
+            expected_signature_new = hmac.new(
                 expected_secret.encode(),
-                canonical_string.encode(),
-                hashlib.sha256
+                canonical_new.encode(),
+                hashlib.sha256,
             ).hexdigest()
-            
-            # Constant-time comparison to prevent timing attacks
-            if not hmac.compare_digest(signature, expected_signature):
+            if not hmac.compare_digest(signature, expected_signature_new):
                 return False, "HMAC signature verification failed"
-            
-            # Store nonce to prevent replay
-            self._nonce_cache.add(nonce)
-            self._cleanup_nonces()
+
+            # Enforce timestamp consistency between header and signed body
+            try:
+                # Only JSON bodies are supported for API
+                body_json = json.loads(request_body.decode('utf-8') or '{}')
+                body_ts = body_json.get('timestamp')
+                # Normalize both sides to strings for exact match
+                if body_ts is None or str(body_ts) != str(timestamp):
+                    return False, "Timestamp mismatch between body and headers"
+            except Exception:
+                return False, "Invalid JSON body for timestamp validation"
             
             return True, ""
             
@@ -443,37 +471,34 @@ class PortalServiceHMACMiddleware:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         # Only process API requests
         if request.path.startswith('/api/'):
+            # Global rate limiting keyed by portal and IP
+            portal_id_for_rl = request.META.get('HTTP_X_PORTAL_ID', 'unknown')
+            client_ip = get_safe_client_ip(request)
+            if self._rate_limited(portal_id_for_rl, client_ip):
+                logger.warning(
+                    f"🚨 [HMAC Auth] Rate limit exceeded for portal={portal_id_for_rl} ip={client_ip}"
+                )
+                return HttpResponse(
+                    json.dumps({'error': 'Too Many Requests'}),
+                    status=429,
+                    content_type='application/json'
+                )
+
             # Validate HMAC signature
             is_valid, error_msg = self._validate_hmac_signature(request)
             
             if not is_valid:
                 logger.warning(f"🔥 [HMAC Auth] Authentication failed from {get_safe_client_ip(request)}: {error_msg}")
                 return HttpResponse(
-                    json.dumps({'error': f'HMAC authentication failed: {error_msg}'}),
+                    json.dumps({'error': 'HMAC authentication failed'}),
                     status=401,
                     content_type='application/json'
                 )
             
-            # Extract user context from portal service (optional)
-            user_id = request.META.get('HTTP_X_USER_ID')
-            if user_id:
-                try:
-                    user_id = int(user_id)
-                    # Get user from database
-                    user = User.objects.get(id=user_id)
-                    # Set user context for API request (don't actually log them in)
-                    request.user = user
-                    request._portal_authenticated = True  # Mark as portal-authenticated
-                    
-                    logger.debug(f"✅ [HMAC Auth] User context set for API request: {user.email}")
-                    
-                except (ValueError, User.DoesNotExist):
-                    logger.warning(f"🔥 [HMAC Auth] Invalid user ID in API request: {user_id}")
-                    return HttpResponse(
-                        json.dumps({'error': 'Invalid user context'}),
-                        status=400,
-                        content_type='application/json'
-                    )
+            # Mark as portal-authenticated after successful HMAC validation
+            request._portal_authenticated = True
+            
+            # Identity now comes from signed body in API layer; ignore any X-User-Id header
             
             # Mark portal ID for logging
             request._portal_id = request.META.get('HTTP_X_PORTAL_ID', 'unknown')

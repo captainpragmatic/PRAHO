@@ -1,7 +1,9 @@
 # =====# URL Structure:
 #   /api/customers/  → Customer management APIs
 #   /api/billing/    → Romanian VAT-compliant billing APIs
-#   /api/tickets/    → Support tickets API endpoints======================================================================
+#   /api/tickets/    → Support tickets API endpoints
+#   /api/services/   → Customer hosting services APIs
+# ===============================================================================
 # PRAHO API MAIN URLS 🚀
 # ===============================================================================
 #
@@ -9,14 +11,15 @@
 # This file is the single entry point for all API endpoints.
 #
 # URL Structure:
-#   /api/v1/customers/  → Customer management APIs
-#   /api/v1/billing/    → Romanian VAT-compliant billing APIs
-#   /api/v1/tickets/    → Support ticket & SLA APIs
+#   /api/customers/  → Customer management APIs
+#   /api/billing/    → Romanian VAT-compliant billing APIs
+#   /api/tickets/    → Support ticket & SLA APIs
+#   /api/services/   → Customer hosting services APIs
 #
 # Architecture:
 #   - Centralized routing (like Sentry, Stripe)
-#   - Versioned endpoints (v1 currently)
 #   - Domain-specific sub-routing
+#   - Future versioning ready
 #
 
 from django.urls import path, include
@@ -26,6 +29,7 @@ from rest_framework.routers import DefaultRouter
 from .customers import urls as customer_urls
 from .billing import urls as billing_urls  
 from .tickets import urls as ticket_urls
+from .services import urls as services_urls
 
 app_name = 'api'
 
@@ -45,6 +49,9 @@ urlpatterns = [
     
     # Support Tickets & SLA APIs  
     path('tickets/', include((ticket_urls, 'tickets'))),
+    
+    # Services & Hosting APIs
+    path('services/', include((services_urls, 'services'))),
     
     # Future API endpoints can be added here:
     # path('domains/', include((domain_urls, 'domains'))),

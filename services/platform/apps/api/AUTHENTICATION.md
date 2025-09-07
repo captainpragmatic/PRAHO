@@ -4,6 +4,30 @@
 
 PRAHO Platform API supports multiple authentication methods for different use cases:
 
+### 0. HMAC Authentication (Portal → Platform) 🔐
+- Use case: Portal backend calling Platform APIs
+- Method: HMAC-SHA256 over a canonical string; identity and context in a signed JSON body
+- Required headers: `X-Portal-Id`, `X-Nonce`, `X-Timestamp`, `X-Body-Hash`, `X-Signature`
+
+Canonical string (each on its own line):
+
+1) METHOD (uppercased)
+2) PATH?QUERY with query params percent-encoded and sorted by key, then value
+3) content-type lowercased, no parameters (e.g., application/json)
+4) body-hash as base64(SHA-256(raw body bytes))
+5) X-Portal-Id value
+6) X-Nonce
+7) X-Timestamp
+
+Signed JSON body must include:
+- user_id: the acting user identity (required)
+- timestamp: unix timestamp (5-minute freshness window)
+- Domain fields (e.g., customer_id, action, etc.)
+
+Notes:
+- X-User-Id header is ignored; user identity must be signed in the body.
+- Query parameter fallbacks for customer_id are deprecated and rejected.
+
 ### 1. **Session Authentication** 🍪
 - **Use case**: Web UI (HTMX calls from platform service)
 - **Method**: Django session cookies
