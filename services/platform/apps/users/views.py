@@ -556,7 +556,7 @@ def mfa_method_selection(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
-def two_factor_setup_totp(request: HttpRequest) -> HttpResponse:
+def mfa_setup_totp(request: HttpRequest) -> HttpResponse:
     """Set up 2FA for user account using new MFA service"""
     # Check if user already has 2FA enabled - user is guaranteed to be authenticated due to @login_required
     user = cast(User, request.user)
@@ -624,7 +624,7 @@ def two_factor_setup_totp(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
-def two_factor_setup_webauthn(request: HttpRequest) -> HttpResponse:
+def mfa_setup_webauthn(request: HttpRequest) -> HttpResponse:
     """WebAuthn/Passkey setup - future implementation"""
 
     # Check if user already has 2FA enabled - user is guaranteed to be authenticated due to @login_required
@@ -691,7 +691,7 @@ def _handle_backup_code_warnings(request: HttpRequest, user: User) -> None:
 
 
 @ratelimit(key="ip", rate="10/m", method="POST", block=False)  # type: ignore[misc]
-def two_factor_verify(request: HttpRequest) -> HttpResponse:
+def mfa_verify(request: HttpRequest) -> HttpResponse:
     """Verify 2FA token during login"""
     user_id = request.session.get("pre_2fa_user_id")
     if not user_id:
@@ -740,7 +740,7 @@ def two_factor_verify(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
-def two_factor_backup_codes(request: HttpRequest) -> HttpResponse:
+def mfa_backup_codes(request: HttpRequest) -> HttpResponse:
     """Display backup codes after 2FA setup or regeneration"""
     backup_codes = request.session.get("new_backup_codes")
 
@@ -764,7 +764,7 @@ def two_factor_backup_codes(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
-def two_factor_regenerate_backup_codes(request: HttpRequest) -> HttpResponse:
+def mfa_regenerate_backup_codes(request: HttpRequest) -> HttpResponse:
     """Regenerate backup codes for 2FA"""
     # User is guaranteed to be authenticated due to @login_required
     user = cast(User, request.user)
@@ -784,7 +784,7 @@ def two_factor_regenerate_backup_codes(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
-def two_factor_disable(request: HttpRequest) -> HttpResponse:
+def mfa_disable(request: HttpRequest) -> HttpResponse:
     """Disable 2FA for user account"""
     # User is guaranteed to be authenticated due to @login_required
     user = cast(User, request.user)

@@ -60,8 +60,8 @@ MIDDLEWARE: list[str] = [
     "django.middleware.locale.LocaleMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
-    "apps.common.middleware.PortalServiceHMACMiddleware",  # HMAC auth for portal API requests
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "apps.common.middleware.PortalServiceHMACMiddleware",  # HMAC auth for portal API requests (after AuthenticationMiddleware)
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]

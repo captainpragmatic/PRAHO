@@ -321,6 +321,12 @@ class User(AbstractUser):
         """Check if user has unused backup codes"""
         return len(self.backup_tokens) > 0
 
+    # MFA alias properties for API compatibility
+    @property
+    def mfa_enabled(self) -> bool:
+        """Alias for two_factor_enabled - for MFA API compatibility"""
+        return self.two_factor_enabled
+
 
 class CustomerMembership(models.Model):
     """
