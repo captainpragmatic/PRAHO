@@ -34,6 +34,7 @@ class PortalAuthenticationMiddleware:
     PUBLIC_URLS = [
         '/login/',
         '/logout/', 
+        '/password-reset/',
         '/static/',
         '/media/',
         '/status/',
@@ -53,11 +54,26 @@ class PortalAuthenticationMiddleware:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         # Skip authentication for public URLs
         if self.is_public_url(request.path):
+            # Add an anonymous user for Django auth compatibility
+            class AnonymousUser:
+                id = None
+                email = None
+                is_authenticated = False
+                is_active = False
+                is_staff = False
+                is_superuser = False
+                
+                def __str__(self):
+                    return "AnonymousUser"
+            
+            request.user = AnonymousUser()
             return self.get_response(request)
         
         # Tier 1: Fast session check with age validation
-        customer_id = request.session.get('customer_id')
-        if not customer_id:
+        # Historically, 'customer_id' in session stored the platform user_id.
+        # We normalize here: ensure we have a user_id and derive an active customer_id.
+        session_user_id = request.session.get('user_id') or request.session.get('customer_id')
+        if not session_user_id:
             logger.debug("🔒 [Auth] No customer_id in session, redirecting to login")
             return redirect('/login/')
             
@@ -68,7 +84,7 @@ class PortalAuthenticationMiddleware:
             return redirect('/login/')
         
         # Tier 2: Sophisticated validation with timing controls
-        validation_result = self.validate_customer_with_timing(request, customer_id)
+        validation_result = self.validate_customer_with_timing(request, str(session_user_id))
         
         if not validation_result:
             logger.warning(f"⚠️ [Auth] Customer {customer_id} validation failed, clearing session")
@@ -76,9 +92,52 @@ class PortalAuthenticationMiddleware:
             return redirect('/login/')
         
         # Attach customer data to request for views
-        request.customer_id = customer_id
+        # Resolve active customer context for this user (first accessible if not set)
+        active_customer_id = request.session.get('active_customer_id')
+        try:
+            user_id_int = int(session_user_id)
+        except (TypeError, ValueError):
+            user_id_int = None
+
+        if user_id_int and not active_customer_id:
+            try:
+                customers = api_client.get_user_customers(user_id_int)
+                if customers:
+                    active_customer_id = customers[0].get('id')
+                    request.session['active_customer_id'] = active_customer_id
+                    logger.debug(
+                        f"[TEMP DEBUG][PortalAuth] Resolved active_customer_id={active_customer_id} for user_id={user_id_int}; "
+                        f"customers_count={len(customers)}"
+                    )
+                else:
+                    logger.debug(
+                        f"[TEMP DEBUG][PortalAuth] No accessible customers for user_id={user_id_int}; "
+                        f"session has customer_id={request.session.get('customer_id')}"
+                    )
+            except Exception as e:
+                logger.error(f"🔥 [Auth] Failed to fetch accessible customers for user {session_user_id}: {e}")
+
+        request.customer_id = active_customer_id or request.session.get('customer_id')
+        logger.debug(
+            f"[TEMP DEBUG][PortalAuth] Using request.customer_id={request.customer_id} for user_id={session_user_id}"
+        )
         request.customer_email = request.session.get('email')
         request.is_authenticated = True
+        
+        # Create a simple user-like object for Django auth compatibility
+        class PortalUser:
+            def __init__(self, user_id: str, email: str):
+                self.id = user_id
+                self.email = email
+                self.is_authenticated = True
+                self.is_active = True
+                self.is_staff = False
+                self.is_superuser = False
+            
+            def __str__(self):
+                return self.email or f"customer_{self.id}"
+        
+        request.user = PortalUser(str(session_user_id), request.session.get('email', ''))
         
         return self.get_response(request)
     
