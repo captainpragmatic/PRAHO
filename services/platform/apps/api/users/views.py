@@ -9,8 +9,8 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.utils.decorators import method_decorator
-from rest_framework.decorators import api_view, permission_classes, throttle_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.decorators import api_view, permission_classes, throttle_classes, authentication_classes
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.authtoken.models import Token
@@ -18,6 +18,7 @@ from rest_framework.throttling import AnonRateThrottle
 import json
 
 from apps.users.models import User
+from ..secure_auth import require_user_authentication, require_customer_authentication
 import base64
 from datetime import datetime, timedelta, timezone
 from django.views.decorators.cache import never_cache
@@ -61,6 +62,7 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:
                 'last_name': user.last_name,
                 'is_staff': user.is_staff,
                 'is_active': user.is_active,
+                'customer_id': user.primary_customer.id if user.primary_customer else None,
             }
             
             return JsonResponse({
@@ -297,6 +299,7 @@ class SessionValidationThrottle(BaseThrottle):
 @never_cache
 @csrf_exempt
 @api_view(['POST'])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware
 @permission_classes([AllowAny])  # HMAC authentication required
 @throttle_classes([SessionValidationThrottle])
 def validate_session_secure(request: HttpRequest) -> Response:
@@ -364,7 +367,7 @@ def validate_session_secure(request: HttpRequest) -> Response:
             logger.warning(f"🚨 [Security] Portal {portal_id} invalid request body format")
             return _uniform_session_error(security_headers)
         
-        # Validate customer exists and is active
+        # Validate user exists and is active (customer_id is actually user_id in this context)
         try:
             user = User.objects.get(id=customer_id, is_active=True)
             
@@ -404,3 +407,485 @@ def _uniform_session_error(headers: dict) -> Response:
     for key, value in headers.items():
         response[key] = value
     return response
+
+
+# ===============================================================================
+# MULTI-FACTOR AUTHENTICATION ENDPOINTS 📱
+# ===============================================================================
+
+@api_view(['POST'])
+@permission_classes([AllowAny])  # HMAC auth handled by secure_auth
+@require_customer_authentication
+def mfa_setup_api(request: HttpRequest, customer) -> Response:
+    """
+    📱 Initialize MFA Setup
+    
+    POST /api/users/mfa/setup/
+    
+    Generates QR code and secret for authenticator app setup.
+    User must verify with a token to complete setup.
+    
+    Response:
+    {
+        "secret": "JBSWY3DPEHPK3PXP",
+        "qr_code_svg": "<svg>...</svg>",
+        "provisioning_uri": "otpauth://totp/PRAHO...",
+        "manual_entry_key": "JBSWY3DPEHPK3PXP"
+    }
+    """
+    from .serializers import MFASetupSerializer
+    from apps.users.models import CustomerMembership
+    
+    # Get the user from the customer context (since this is a customer-authenticated endpoint)
+    # The customer parameter comes from @require_customer_authentication
+    # We need to get the associated user from the customer membership
+    membership = CustomerMembership.objects.filter(customer=customer).first()
+    if not membership:
+        return Response({
+            'success': False,
+            'error': 'No user associated with this customer'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    user = membership.user
+    
+    if user.mfa_enabled:
+        return Response({
+            'success': False,
+            'error': 'MFA is already enabled for this account'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    serializer = MFASetupSerializer(context={'request': request})
+    
+    try:
+        result = serializer.save()
+        
+        return Response({
+            'success': True,
+            'message': 'Scan the QR code with your authenticator app',
+            'setup_data': {
+                'qr_code_svg': result['qr_code_svg'],
+                'manual_entry_key': result['manual_entry_key'],
+                'provisioning_uri': result['provisioning_uri']
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"🔥 [MFA Setup] Setup failed for user {user.email}: {e}")
+        return Response({
+            'success': False,
+            'error': 'MFA setup failed. Please try again.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])  # HMAC auth handled by secure_auth
+@require_user_authentication
+def mfa_verify_api(request: HttpRequest, user) -> Response:
+    """
+    🔐 Verify MFA Token and Enable
+    
+    POST /api/users/mfa/verify/
+    {
+        "token": "123456"
+    }
+    
+    Verifies the token from authenticator app and enables MFA.
+    Returns backup codes on successful verification.
+    
+    Response:
+    {
+        "success": true,
+        "message": "MFA enabled successfully",
+        "backup_codes": ["12345678", "87654321", ...]
+    }
+    """
+    from .serializers import MFAVerifySerializer
+    
+    if user.mfa_enabled:
+        return Response({
+            'success': False,
+            'error': 'MFA is already enabled for this account'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    serializer = MFAVerifySerializer(
+        data=request.data,
+        context={'request': request}
+    )
+    
+    if serializer.is_valid():
+        try:
+            result = serializer.save()
+            
+            # Rotate session for security after enabling MFA
+            from apps.users.services import SessionSecurityService
+            SessionSecurityService.rotate_session_on_mfa_change(request)
+            
+            return Response(result)
+            
+        except Exception as e:
+            logger.error(f"🔥 [MFA Verify] Verification failed for user {user.email}: {e}")
+            return Response({
+                'success': False,
+                'error': 'MFA verification failed. Please try again.'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    else:
+        return Response({
+            'success': False,
+            'error': 'Validation failed',
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@throttle_classes([AuthThrottle])
+def mfa_disable_api(request: HttpRequest) -> Response:
+    """
+    🚫 Disable MFA
+    
+    POST /api/users/mfa/disable/
+    {
+        "token": "123456",
+        "password": "current_password"
+    }
+    
+    Disables MFA after verifying current password and MFA token.
+    """
+    from .serializers import MFADisableSerializer
+    
+    user = cast(User, request.user)
+    
+    if not user.mfa_enabled:
+        return Response({
+            'success': False,
+            'error': 'MFA is not enabled for this account'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    serializer = MFADisableSerializer(
+        data=request.data,
+        context={'request': request}
+    )
+    
+    if serializer.is_valid():
+        try:
+            result = serializer.save()
+            
+            # Rotate session for security after disabling MFA
+            from apps.users.services import SessionSecurityService
+            SessionSecurityService.rotate_session_on_mfa_change(request)
+            
+            return Response(result)
+            
+        except Exception as e:
+            logger.error(f"🔥 [MFA Disable] Disable failed for user {user.email}: {e}")
+            return Response({
+                'success': False,
+                'error': 'MFA disable failed. Please try again.'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    else:
+        return Response({
+            'success': False,
+            'error': 'Validation failed',
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def mfa_status_api(request: HttpRequest) -> Response:
+    """
+    📊 Get MFA Status
+    
+    GET /api/users/mfa/status/
+    
+    Returns current MFA status and backup codes count.
+    
+    Response:
+    {
+        "enabled": true,
+        "backup_codes_remaining": 5
+    }
+    """
+    user = cast(User, request.user)
+    
+    return Response({
+        'enabled': user.mfa_enabled,
+        'backup_codes_remaining': len(user.backup_tokens) if user.mfa_enabled else 0,
+        'has_backup_codes': user.has_backup_codes() if user.mfa_enabled else False
+    })
+
+
+# ===============================================================================
+# PASSWORD RESET ENDPOINTS 🔑
+# ===============================================================================
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@throttle_classes([AuthThrottle])
+def password_reset_request_api(request: HttpRequest) -> Response:
+    """
+    🔑 Request Password Reset
+    
+    POST /api/users/password/reset/
+    {
+        "email": "user@example.com"
+    }
+    
+    Sends password reset email if account exists.
+    Always returns success to prevent email enumeration.
+    
+    Response:
+    {
+        "success": true,
+        "message": "If the email exists, a reset link has been sent."
+    }
+    """
+    from .serializers import PasswordResetRequestSerializer
+    
+    serializer = PasswordResetRequestSerializer(data=request.data)
+    
+    if serializer.is_valid():
+        try:
+            result = serializer.save()
+            return Response(result)
+            
+        except Exception as e:
+            logger.error(f"🔥 [Password Reset] Request failed: {e}")
+            return Response({
+                'success': False,
+                'error': 'Password reset service temporarily unavailable.'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    else:
+        return Response({
+            'success': False,
+            'error': 'Invalid email address',
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@throttle_classes([AuthThrottle])
+def password_reset_confirm_api(request: HttpRequest) -> Response:
+    """
+    🔐 Confirm Password Reset
+    
+    POST /api/users/password/reset/confirm/
+    {
+        "token": "abc123-def456-ghi789",
+        "uid": "MjM",
+        "new_password": "new_secure_password",
+        "new_password_confirm": "new_secure_password"
+    }
+    
+    Resets password with valid reset token.
+    
+    Response:
+    {
+        "success": true,
+        "message": "Password reset successfully."
+    }
+    """
+    from .serializers import PasswordResetConfirmSerializer
+    
+    serializer = PasswordResetConfirmSerializer(data=request.data)
+    
+    if serializer.is_valid():
+        try:
+            result = serializer.save()
+            
+            # Log successful password reset
+            user = serializer.validated_data['uid']
+            logger.info(f"✅ [Password Reset] Password reset completed for user: {user.email}")
+            
+            return Response(result)
+            
+        except Exception as e:
+            logger.error(f"🔥 [Password Reset] Confirm failed: {e}")
+            return Response({
+                'success': False,
+                'error': 'Password reset failed. Please try again.'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    else:
+        return Response({
+            'success': False,
+            'error': 'Validation failed',
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ===============================================================================
+# CUSTOMER REGISTRATION API
+# ===============================================================================
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@throttle_classes([AnonRateThrottle])
+def customer_registration_api(request: HttpRequest) -> Response:
+    """
+    Customer registration API endpoint for Portal service.
+    Creates new customer account with business information via Platform API.
+    """
+    try:
+        # Use existing UserRegistrationService for consistency
+        from apps.users.forms import UserRegistrationForm
+        
+        # Create form from API data
+        form_data = {
+            'email': request.data.get('email', '').lower().strip(),
+            'first_name': request.data.get('first_name', ''),
+            'last_name': request.data.get('last_name', ''),
+            'phone': request.data.get('phone', ''),
+            'password1': request.data.get('password1', ''),
+            'password2': request.data.get('password2', ''),
+            'gdpr_consent': request.data.get('gdpr_consent', False),
+            'accepts_marketing': request.data.get('accepts_marketing', False),
+        }
+        
+        form = UserRegistrationForm(data=form_data)
+        
+        if form.is_valid():
+            try:
+                # Create user using existing service
+                user = form.save()
+                
+                logger.info(f"✅ [Registration API] Customer account created: {user.email}")
+                
+                return Response({
+                    'success': True,
+                    'message': 'Registration successful',
+                    'customer_id': user.id,
+                    'email': user.email,
+                    'requires_verification': False  # Email verification can be added later
+                }, status=status.HTTP_201_CREATED)
+                
+            except Exception as e:
+                logger.error(f"🔥 [Registration API] Registration failed: {e}")
+                return Response({
+                    'success': False,
+                    'error': 'Registration failed. Please try again.'
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        else:
+            return Response({
+                'success': False,
+                'error': 'Validation failed',
+                'errors': form.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+    except Exception as e:
+        logger.error(f"🔥 [Registration API] Unexpected error: {e}")
+        return Response({
+            'success': False,
+            'error': 'Registration service unavailable'
+        }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+
+# ===============================================================================  
+# PROFILE UPDATE API
+# ===============================================================================
+
+@api_view(['POST', 'PUT'])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
+@permission_classes([AllowAny])  # HMAC auth handled by secure_auth
+@require_user_authentication
+def customer_profile_api(request: HttpRequest, user) -> Response:
+    """
+    Customer profile management API endpoint for Portal service.
+    Allows customers to view and update their profile via Platform API.
+    
+    POST /api/users/profile/ (to get profile)
+    PUT /api/users/profile/ (to update profile)
+    
+    Request Body (HMAC-signed):
+    {
+        "customer_id": 123,
+        "action": "get_profile" | "update_profile",
+        "timestamp": 1699999999,
+        // For updates:
+        "first_name": "John",
+        "last_name": "Doe",
+        "phone": "+40123456789",
+        "preferred_language": "en",
+        "timezone": "Europe/Bucharest",
+        "email_notifications": true,
+        "sms_notifications": false
+    }
+    
+    Security Features:
+    - HMAC authentication required (user passed by decorator)
+    - User validated by secure authentication system
+    """
+    try:
+        
+        if request.method == 'POST':  # Changed from GET to POST for security
+            # Return profile data
+            profile_data = {
+                'id': user.id,
+                'email': user.email,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'phone': user.phone or '',
+                'mfa_enabled': user.mfa_enabled,
+            }
+            
+            # Add profile data (create default if doesn't exist)
+            from apps.users.models import UserProfile
+            profile, created = UserProfile.objects.get_or_create(user=user)
+            
+            if created:
+                logger.info(f"✅ [Profile API] Created default profile for customer: {user.email}")
+            
+            profile_data['profile'] = {
+                'preferred_language': profile.preferred_language,
+                'timezone': profile.timezone,
+                'email_notifications': profile.email_notifications,
+                'sms_notifications': profile.sms_notifications,
+            }
+            
+            return Response({
+                'success': True,
+                'profile': profile_data
+            })
+            
+        elif request.method == 'PUT':
+            # Get profile data from HMAC-signed request body
+            request_data = request.data if hasattr(request, 'data') else {}
+            
+            # Update basic user fields
+            user.first_name = request_data.get('first_name', user.first_name)
+            user.last_name = request_data.get('last_name', user.last_name)
+            user.phone = request_data.get('phone', user.phone)
+            user.save()
+            
+            # Update or create profile
+            from apps.users.models import UserProfile
+            profile, created = UserProfile.objects.get_or_create(user=user)
+            
+            # Update profile fields if provided in request body
+            if 'preferred_language' in request_data:
+                profile.preferred_language = request_data.get('preferred_language')
+            if 'timezone' in request_data:
+                profile.timezone = request_data.get('timezone')
+            if 'email_notifications' in request_data:
+                profile.email_notifications = request_data.get('email_notifications')
+            if 'sms_notifications' in request_data:
+                profile.sms_notifications = request_data.get('sms_notifications')
+            
+            profile.save()
+            
+            if created:
+                logger.info(f"✅ [Profile API] Created new profile for customer: {user.email}")
+            else:
+                logger.info(f"✅ [Profile API] Updated existing profile for customer: {user.email}")
+            
+            return Response({
+                'success': True,
+                'message': 'Profile updated successfully'
+            })
+                
+    except Exception as e:
+        logger.error(f"🔥 [Profile API] Unexpected error: {e}")
+        return Response({
+            'success': False,
+            'error': 'Profile service unavailable'
+        }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
