@@ -1,0 +1,271 @@
+"""
+Portal Billing Data Classes - API Response Models
+Pure Python dataclasses for representing invoice data from Platform API.
+NO DATABASE MODELS - API-only communication.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from datetime import datetime
+from typing import List, Optional, Dict, Any
+from decimal import Decimal
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class Currency:
+    """Currency data from Platform API"""
+    id: int
+    code: str
+    name: str
+    symbol: str = ""
+    decimal_places: int = 2
+    is_active: bool = True
+
+
+@dataclass
+class InvoiceLine:
+    """Invoice line item from Platform API"""
+    id: int
+    invoice_id: int
+    kind: str
+    service_id: Optional[int]
+    description: str
+    quantity: Decimal
+    unit_price_cents: int
+    tax_rate: Decimal
+    line_total_cents: int
+    
+    @property
+    def unit_price_display(self) -> str:
+        """Format unit price for display"""
+        return f"{self.unit_price_cents / 100:.2f}"
+    
+    @property
+    def line_total_display(self) -> str:
+        """Format line total for display"""
+        return f"{self.line_total_cents / 100:.2f}"
+
+
+@dataclass
+class Invoice:
+    """Invoice data from Platform API"""
+    id: int
+    number: str
+    status: str
+    currency: Currency
+    exchange_to_ron: Optional[Decimal]
+    subtotal_cents: int
+    tax_cents: int
+    total_cents: int
+    issued_at: Optional[datetime]
+    due_at: Optional[datetime]
+    created_at: datetime
+    updated_at: datetime
+    locked_at: Optional[datetime]
+    sent_at: Optional[datetime] 
+    paid_at: Optional[datetime]
+    
+    # Billing information
+    bill_to_name: str = ""
+    bill_to_tax_id: str = ""
+    bill_to_email: str = ""
+    bill_to_address1: str = ""
+    bill_to_address2: str = ""
+    bill_to_city: str = ""
+    bill_to_region: str = ""
+    bill_to_postal: str = ""
+    bill_to_country: str = ""
+    
+    # Optional field - not always provided by platform API
+    customer_id: Optional[int] = None
+    
+    # E-factura integration
+    efactura_id: str = ""
+    efactura_sent: bool = False
+    efactura_sent_date: Optional[datetime] = None
+    efactura_response: Dict[str, Any] = None
+    
+    # File attachments
+    pdf_file: str = ""
+    xml_file: str = ""
+    
+    # Additional fields
+    meta: Dict[str, Any] = None
+    created_by_id: Optional[int] = None
+    converted_from_proforma_id: Optional[int] = None
+    
+    # Line items (populated separately)
+    lines: List[InvoiceLine] = None
+    
+    def __post_init__(self):
+        """Initialize mutable defaults"""
+        if self.efactura_response is None:
+            self.efactura_response = {}
+        if self.meta is None:
+            self.meta = {}
+        if self.lines is None:
+            self.lines = []
+    
+    @property
+    def subtotal_display(self) -> str:
+        """Format subtotal for display"""
+        return f"{self.subtotal_cents / 100:.2f} {self.currency.code}"
+    
+    @property 
+    def tax_display(self) -> str:
+        """Format tax amount for display"""
+        return f"{self.tax_cents / 100:.2f} {self.currency.code}"
+    
+    @property
+    def total_display(self) -> str:
+        """Format total amount for display"""
+        return f"{self.total_cents / 100:.2f} {self.currency.code}"
+    
+    @property
+    def is_overdue(self) -> bool:
+        """Check if invoice is overdue"""
+        if not self.due_at or self.status in ['paid', 'void', 'refunded']:
+            return False
+        from django.utils import timezone
+        return timezone.now() > self.due_at
+    
+    @property
+    def status_display(self) -> str:
+        """Human-readable status"""
+        status_map = {
+            'draft': 'Draft',
+            'issued': 'Issued', 
+            'paid': 'Paid',
+            'overdue': 'Overdue',
+            'void': 'Void',
+            'refunded': 'Refunded'
+        }
+        return status_map.get(self.status, self.status.title())
+
+
+@dataclass
+class InvoiceSummary:
+    """Invoice summary data from Platform API"""
+    customer_id: int
+    total_invoices: int
+    draft_invoices: int
+    issued_invoices: int
+    overdue_invoices: int
+    paid_invoices: int
+    void_invoices: int
+    refunded_invoices: int
+    total_amount_due_cents: int
+    currency_code: str
+    recent_invoices: List[Dict[str, Any]]
+    
+    @property
+    def total_amount_due_display(self) -> str:
+        """Format total amount due for display"""
+        return f"{self.total_amount_due_cents / 100:.2f} {self.currency_code}"
+
+
+# Helper functions for creating dataclass instances from API responses
+
+def create_currency_from_api(data: Dict[str, Any]) -> Currency:
+    """Create Currency dataclass from API response"""
+    return Currency(
+        id=data['id'],
+        code=data['code'],
+        name=data['name'],
+        symbol=data.get('symbol', ''),
+        decimal_places=data.get('decimal_places', 2),
+        is_active=data.get('is_active', True)
+    )
+
+
+def create_invoice_line_from_api(data: Dict[str, Any]) -> InvoiceLine:
+    """Create InvoiceLine dataclass from API response"""
+    return InvoiceLine(
+        id=data['id'],
+        invoice_id=data.get('invoice_id', data.get('invoice')),
+        kind=data['kind'],
+        service_id=data.get('service_id'),
+        description=data['description'],
+        quantity=Decimal(str(data['quantity'])),
+        unit_price_cents=data['unit_price_cents'],
+        tax_rate=Decimal(str(data['tax_rate'])),
+        line_total_cents=data['line_total_cents']
+    )
+
+
+def create_invoice_from_api(data: Dict[str, Any], lines: List[Dict[str, Any]] = None) -> Invoice:
+    """Create Invoice dataclass from API response"""
+    from django.utils.dateparse import parse_datetime
+    
+    # Parse currency
+    currency_data = data.get('currency', {})
+    currency = create_currency_from_api(currency_data) if currency_data else None
+    
+    # Parse dates
+    def parse_date_field(field_name):
+        date_str = data.get(field_name)
+        return parse_datetime(date_str) if date_str else None
+    
+    # Create invoice - only use fields available from platform API
+    invoice = Invoice(
+        id=data['id'],
+        number=data['number'],
+        status=data['status'],
+        currency=currency,
+        exchange_to_ron=None,  # Not provided by list API
+        subtotal_cents=data.get('subtotal_cents', 0),  # Not in list API
+        tax_cents=data.get('tax_cents', 0),  # Not in list API
+        total_cents=data['total_cents'],
+        issued_at=None,  # Not provided by list API
+        due_at=parse_date_field('due_at'),
+        created_at=parse_datetime(data['created_at']),
+        updated_at=parse_datetime(data.get('updated_at')) if data.get('updated_at') else None,
+        locked_at=None,  # Not provided by list API
+        sent_at=None,  # Not provided by list API
+        paid_at=None,  # Not provided by list API
+        bill_to_name=data.get('bill_to_name', ''),
+        bill_to_tax_id=data.get('bill_to_tax_id', ''),
+        bill_to_email=data.get('bill_to_email', ''),
+        bill_to_address1=data.get('bill_to_address1', ''),
+        bill_to_address2=data.get('bill_to_address2', ''),
+        bill_to_city=data.get('bill_to_city', ''),
+        bill_to_region=data.get('bill_to_region', ''),
+        bill_to_postal=data.get('bill_to_postal', ''),
+        bill_to_country=data.get('bill_to_country', ''),
+        efactura_id=data.get('efactura_id', ''),
+        efactura_sent=data.get('efactura_sent', False),
+        efactura_sent_date=parse_date_field('efactura_sent_date'),
+        efactura_response=data.get('efactura_response', {}),
+        pdf_file=data.get('pdf_file', ''),
+        xml_file=data.get('xml_file', ''),
+        meta=data.get('meta', {}),
+        created_by_id=data.get('created_by_id'),
+        converted_from_proforma_id=data.get('converted_from_proforma_id'),
+    )
+    
+    # Add line items if provided
+    if lines:
+        invoice.lines = [create_invoice_line_from_api(line_data) for line_data in lines]
+    
+    return invoice
+
+
+def create_invoice_summary_from_api(data: Dict[str, Any]) -> InvoiceSummary:
+    """Create InvoiceSummary dataclass from API response"""
+    return InvoiceSummary(
+        customer_id=data['customer_id'],
+        total_invoices=data['total_invoices'],
+        draft_invoices=data['draft_invoices'],
+        issued_invoices=data['issued_invoices'],
+        overdue_invoices=data['overdue_invoices'],
+        paid_invoices=data['paid_invoices'],
+        void_invoices=data.get('void_invoices', 0),
+        refunded_invoices=data.get('refunded_invoices', 0),
+        total_amount_due_cents=data['total_amount_due_cents'],
+        currency_code=data['currency_code'],
+        recent_invoices=data.get('recent_invoices', [])
+    )

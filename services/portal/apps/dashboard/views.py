@@ -10,6 +10,7 @@ from django.utils.translation import gettext as _
 from django.contrib import messages
 
 from apps.api_client.services import api_client, PlatformAPIError
+from apps.billing.services import InvoiceViewService
 from apps.users.views import check_authentication
 
 logger = logging.getLogger(__name__)
@@ -44,14 +45,54 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
         'platform_available': True,
     }
     
-    # Get dashboard data from platform API
+    # Get dashboard data from platform API using billing service
     try:
-        dashboard_data = api_client.get_dashboard_data(customer_id)
+        invoice_service = InvoiceViewService()
+        
+        # Get both invoices and proformas using the same method as billing page
+        user_id = request.user.id
+        invoices = invoice_service.get_customer_invoices(customer_id, user_id)
+        proformas = invoice_service.get_customer_proformas(customer_id, user_id)
+        invoice_summary = invoice_service.get_invoice_summary(customer_id, user_id)
+        
+        # Mix invoices and proformas, add document type, and sort by date
+        documents = []
+        
+        # Add document type to each invoice
+        for invoice in invoices:
+            invoice.document_type = 'invoice'
+        documents.extend(invoices)
+        
+        # Add document type to each proforma  
+        for proforma in proformas:
+            proforma.document_type = 'proforma'
+        documents.extend(proformas)
+        
+        # Sort documents by creation date (newest first) and take last 5
+        documents.sort(key=lambda x: x.created_at, reverse=True)
+        recent_documents = documents[:5]
+        
+        # Get customer data (simplified for now)
+        customers = []  # Could be populated from API if needed
+        recent_tickets = []  # Could be populated from tickets API if implemented
+        
+        dashboard_data = {
+            'customers': customers,
+            'recent_invoices': recent_documents,  # Keep template compatibility by using 'recent_invoices'
+            'recent_tickets': recent_tickets,
+            'stats': {
+                'total_customers': len(customers),
+                'active_services': 0,  # Could be populated from services API
+                'open_tickets': len(recent_tickets),
+                'total_invoices': invoice_summary.get('total_invoices', 0),
+            }
+        }
+        
         context['dashboard_data'] = dashboard_data
         
         logger.debug(f"✅ [Dashboard] Loaded data for customer {customer_id}")
         
-    except PlatformAPIError as e:
+    except Exception as e:
         logger.error(f"🔥 [Dashboard] Failed to load data for customer {customer_id}: {e}")
         context['platform_available'] = False
         messages.error(request, _("Could not load account information. Please try again later or contact support if the problem persists."))
