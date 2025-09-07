@@ -1,0 +1,309 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans 'Account Settings' %} - PragmaticHost{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 max-w-4xl mx-auto">
+  <!-- Header -->
+  <div class="mb-6">
+    <h1 class="text-2xl font-bold text-white romanian-flag">
+      {% trans 'Account Settings' %}
+    </h1>
+    <p class="mt-2 text-sm text-slate-400">
+      {% trans 'Manage your account settings and personal information' %}
+    </p>
+  </div>
+
+  <!-- Profile Form -->
+  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg">
+    <div class="p-6">
+      <h3 class="text-lg font-medium text-white mb-6">
+        👤 {% trans 'Personal Information' %}
+      </h3>
+
+      <form method="post" class="space-y-6">
+        {% csrf_token %}
+
+        <!-- Form Errors -->
+        {% if form.non_field_errors %}
+        <div class="bg-red-900 border border-red-700 rounded-md p-3">
+          {% for error in form.non_field_errors %}
+          <p class="text-red-100 text-sm">❌ {{ error }}</p>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        <!-- Basic Information -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <label for="id_first_name" class="block text-sm font-medium text-slate-300 mb-1">
+              {% trans 'First Name' %}
+            </label>
+            <input type="text" name="first_name" id="id_first_name" value="{{ profile.first_name|default:'' }}"
+                   class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
+                   placeholder="{% trans 'Your first name' %}">
+          </div>
+
+          <div>
+            <label for="id_last_name" class="block text-sm font-medium text-slate-300 mb-1">
+              {% trans 'Last Name' %}
+            </label>
+            <input type="text" name="last_name" id="id_last_name" value="{{ profile.last_name|default:'' }}"
+                   class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
+                   placeholder="{% trans 'Your last name' %}">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <label for="id_email" class="block text-sm font-medium text-slate-300 mb-1">
+              {% trans 'Email Address' %}
+            </label>
+            <input type="email" name="email" id="id_email" value="{{ profile.email|default:customer_email }}" disabled
+                   class="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded-md text-slate-300 cursor-not-allowed">
+            <p class="mt-1 text-xs text-slate-400">
+              {% trans 'Contact support to change your email address' %}
+            </p>
+          </div>
+
+          <div>
+            <label for="id_phone" class="block text-sm font-medium text-slate-300 mb-1">
+              {% trans 'Phone Number' %}
+            </label>
+            <input type="text" name="phone" id="id_phone" value="{{ profile.phone|default:'' }}"
+                   class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
+                   placeholder="+40 721 123 456">
+          </div>
+        </div>
+
+        <!-- Language & Preferences -->
+        <div class="border-t border-slate-600 pt-6">
+          <h4 class="text-md font-medium text-white mb-4">
+            🌐 {% trans 'Preferences' %}
+          </h4>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <label for="preferred_language" class="block text-sm font-medium text-slate-300 mb-1">
+                {% trans 'Language' %}
+              </label>
+              <select name="preferred_language" id="preferred_language"
+                      class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+                <option value="ro" {% if profile.profile.preferred_language == 'ro' %}selected{% endif %}>🇷🇴 Română</option>
+                <option value="en" {% if profile.profile.preferred_language == 'en' %}selected{% endif %}>🇬🇧 English</option>
+              </select>
+            </div>
+
+            <div>
+              <label for="timezone" class="block text-sm font-medium text-slate-300 mb-1">
+                {% trans 'Timezone' %}
+              </label>
+              <select name="timezone" id="timezone"
+                      class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+                <option value="Europe/Bucharest" {% if profile.profile.timezone == 'Europe/Bucharest' or not profile.profile.timezone %}selected{% endif %}>🇷🇴 Europe/Bucharest</option>
+                <option value="UTC" {% if profile.profile.timezone == 'UTC' %}selected{% endif %}>🌍 UTC</option>
+                <option value="Europe/London" {% if profile.profile.timezone == 'Europe/London' %}selected{% endif %}>🇬🇧 Europe/London</option>
+                <option value="Europe/Paris" {% if profile.profile.timezone == 'Europe/Paris' %}selected{% endif %}>🇫🇷 Europe/Paris</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="flex justify-end space-x-4 pt-6 border-t border-slate-600">
+          <button type="submit"
+                  class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md font-medium transition-colors">
+            💾 {% trans 'Save Changes' %}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Account Information Card -->
+  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mt-6">
+    <div class="p-6">
+      <h3 class="text-lg font-medium text-white mb-6">
+        🔐 {% trans 'Account Information' %}
+      </h3>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="space-y-4">
+          <div>
+            <dt class="text-sm font-medium text-slate-400">{% trans 'Account Status' %}</dt>
+            <dd class="mt-1 text-sm text-white">
+              {% if profile.is_active|default:True %}
+                {% badge "Active" variant="success" icon="✅" %}
+              {% else %}
+                {% badge "Inactive" variant="danger" icon="❌" %}
+              {% endif %}
+            </dd>
+          </div>
+
+          <div>
+            <dt class="text-sm font-medium text-slate-400">{% trans 'Member Since' %}</dt>
+            <dd class="mt-1 text-sm text-white">{{ profile.date_joined|date:"d.m.Y"|default:'N/A' }}</dd>
+          </div>
+        </div>
+
+        <div class="space-y-4">
+          <div>
+            <dt class="text-sm font-medium text-slate-400">{% trans 'Last Login' %}</dt>
+            <dd class="mt-1 text-sm text-white">
+              {% if profile.last_login %}
+                {{ profile.last_login|date:"d.m.Y H:i" }}
+              {% else %}
+                <span class="text-slate-500">{% trans 'Never' %}</span>
+              {% endif %}
+            </dd>
+          </div>
+
+          <div>
+            <dt class="text-sm font-medium text-slate-400">{% trans 'Two-Factor Authentication' %}</dt>
+            <dd class="mt-1 text-sm">
+              {% if profile.mfa_enabled %}
+                {% badge "Enabled" variant="success" icon="🔒" %}
+                <div class="mt-2">
+                  <a href="{% url 'users:mfa_management' %}" 
+                     class="text-blue-400 hover:text-blue-300 text-xs">
+                    🔧 {% trans 'Manage MFA Settings' %}
+                  </a>
+                </div>
+              {% else %}
+                {% badge "Disabled" variant="warning" icon="⚠️" %}
+                <div class="mt-2">
+                  <a href="{% url 'users:mfa_management' %}" 
+                     class="text-yellow-400 hover:text-yellow-300 text-xs">
+                    ⚡ {% trans 'Enable MFA Now' %}
+                  </a>
+                </div>
+              {% endif %}
+            </dd>
+          </div>
+
+          <div>
+            <dt class="text-sm font-medium text-slate-400">{% trans 'Password Security' %}</dt>
+            <dd class="mt-1 text-sm">
+              <a href="{% url 'users:change_password' %}" 
+                 class="text-blue-400 hover:text-blue-300">
+                🔑 {% trans 'Change Password' %}
+              </a>
+            </dd>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- GDPR Privacy & Data Protection -->
+  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mt-6">
+    <div class="p-6">
+      <h3 class="text-lg font-medium text-white mb-6">
+        🛡️ {% trans 'Privacy & Data Protection' %}
+      </h3>
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Current Consent Status -->
+        <div class="space-y-4">
+          <h4 class="text-sm font-semibold text-slate-300">{% trans 'Current Consent Status' %}</h4>
+          
+          <div class="space-y-3">
+            <!-- Data Processing Consent -->
+            <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
+              <div class="flex items-center">
+                <span class="text-green-400 mr-2">🔒</span>
+                <div>
+                  <div class="text-sm font-medium text-white">{% trans 'Data Processing' %}</div>
+                  <div class="text-xs text-slate-400">{% trans 'Required for service' %}</div>
+                </div>
+              </div>
+              {% if profile.gdpr_consent_date %}
+                {% badge "Given" variant="success" icon="✅" %}
+              {% else %}
+                {% badge "Not Given" variant="danger" icon="❌" %}
+              {% endif %}
+            </div>
+
+            <!-- Marketing Consent -->
+            <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
+              <div class="flex items-center">
+                <span class="text-blue-400 mr-2">📧</span>
+                <div>
+                  <div class="text-sm font-medium text-white">{% trans 'Marketing Communications' %}</div>
+                  <div class="text-xs text-slate-400">{% trans 'Newsletters and updates' %}</div>
+                </div>
+              </div>
+              {% if profile.accepts_marketing %}
+                {% badge "Enabled" variant="success" icon="✅" %}
+              {% else %}
+                {% badge "Disabled" variant="secondary" icon="📛" %}
+              {% endif %}
+            </div>
+          </div>
+
+          {% if profile.gdpr_consent_date %}
+          <div class="text-xs text-slate-400">
+            {% trans 'Last updated:' %} {{ profile.gdpr_consent_date|date:"M d, Y" }}
+          </div>
+          {% endif %}
+        </div>
+
+        <!-- GDPR Actions -->
+        <div class="space-y-4">
+          <h4 class="text-sm font-semibold text-slate-300">{% trans 'Your Data Rights' %}</h4>
+          
+          <div class="space-y-3">
+            <a href="{% url 'users:privacy_dashboard' %}" class="flex items-center p-3 bg-blue-900/50 hover:bg-blue-800/60 rounded-lg transition-colors group">
+              <span class="text-blue-400 mr-3 text-lg">🛡️</span>
+              <div class="flex-1">
+                <div class="text-sm font-medium text-white group-hover:text-blue-200">
+                  {% trans 'Privacy Dashboard' %}
+                </div>
+                <div class="text-xs text-blue-300">
+                  {% trans 'Manage your privacy settings and data preferences' %}
+                </div>
+              </div>
+              <span class="text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+            </a>
+
+            <a href="{% url 'users:data_export' %}" class="flex items-center p-3 bg-slate-700/50 hover:bg-slate-600/60 rounded-lg transition-colors group">
+              <span class="text-green-400 mr-3">📄</span>
+              <div class="flex-1">
+                <div class="text-sm font-medium text-white group-hover:text-green-200">
+                  {% trans 'Export My Data' %}
+                </div>
+                <div class="text-xs text-slate-400">
+                  {% trans 'Download a copy of your personal data' %}
+                </div>
+              </div>
+              <span class="text-green-400 opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+            </a>
+
+            <a href="{% url 'users:consent_history' %}" class="flex items-center p-3 bg-slate-700/50 hover:bg-slate-600/60 rounded-lg transition-colors group">
+              <span class="text-yellow-400 mr-3">📜</span>
+              <div class="flex-1">
+                <div class="text-sm font-medium text-white group-hover:text-yellow-200">
+                  {% trans 'Consent History' %}
+                </div>
+                <div class="text-xs text-slate-400">
+                  {% trans 'View and manage your consent preferences' %}
+                </div>
+              </div>
+              <span class="text-yellow-400 opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+            </a>
+          </div>
+
+          <!-- Legal compliance note -->
+          <div class="mt-4 p-3 bg-slate-900 border border-slate-600 rounded-lg">
+            <p class="text-xs text-slate-400">
+              🇷🇴 {% trans 'GDPR compliant according to Romanian Law 190/2018 and EU Regulation 2016/679' %}
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

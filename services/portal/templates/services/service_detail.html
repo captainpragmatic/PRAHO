@@ -1,0 +1,311 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans "Service Details" %} - {{ service.name }}{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <!-- Header -->
+    <div class="mb-8">
+        <div class="flex items-center justify-between">
+            <div>
+                <div class="flex items-center space-x-3 mb-2">
+                    <h1 class="text-3xl font-bold text-gray-900 dark:text-white">
+                        {{ service.name }}
+                    </h1>
+                    {% if service.status == "active" %}
+                        {% badge "Active" variant="success" icon="🟢" %}
+                    {% elif service.status == "suspended" %}
+                        {% badge "Suspended" variant="warning" icon="⏸️" %}
+                    {% elif service.status == "pending" %}
+                        {% badge "Pending Setup" variant="info" icon="🔄" %}
+                    {% elif service.status == "cancelled" %}
+                        {% badge "Cancelled" variant="secondary" icon="❌" %}
+                    {% else %}
+                        {% badge service.status|title variant="secondary" %}
+                    {% endif %}
+                    
+                    {% if service.service_type == "shared_hosting" %}
+                        {% badge "Shared Hosting" variant="info" icon="🌐" %}
+                    {% elif service.service_type == "vps" %}
+                        {% badge "VPS" variant="primary" icon="🖥️" %}
+                    {% elif service.service_type == "dedicated" %}
+                        {% badge "Dedicated Server" variant="primary" icon="🏢" %}
+                    {% elif service.service_type == "domain" %}
+                        {% badge "Domain" variant="secondary" icon="🌍" %}
+                    {% endif %}
+                </div>
+                {% if service.description %}
+                    <p class="text-gray-600 dark:text-gray-400">
+                        {{ service.description }}
+                    </p>
+                {% endif %}
+            </div>
+            <div>
+                {% button text=_("Back to Services") href="services:list" variant="outline" icon="arrow-left" %}
+            </div>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <!-- Main Content -->
+        <div class="lg:col-span-2 space-y-6">
+            <!-- Service Information -->
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-4">
+                    {% trans "Service Information" %}
+                </h2>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">
+                            {% trans "Basic Information" %}
+                        </h3>
+                        <dl class="space-y-2">
+                            <div>
+                                <dt class="text-sm font-medium text-gray-700 dark:text-gray-300">{% trans "Service ID" %}</dt>
+                                <dd class="text-sm text-gray-900 dark:text-white">#{{ service.id }}</dd>
+                            </div>
+                            <div>
+                                <dt class="text-sm font-medium text-gray-700 dark:text-gray-300">{% trans "Created" %}</dt>
+                                <dd class="text-sm text-gray-900 dark:text-white">{{ service.created_at|date:"M j, Y H:i" }}</dd>
+                            </div>
+                            <div>
+                                <dt class="text-sm font-medium text-gray-700 dark:text-gray-300">{% trans "Last Updated" %}</dt>
+                                <dd class="text-sm text-gray-900 dark:text-white">{{ service.updated_at|date:"M j, Y H:i" }}</dd>
+                            </div>
+                        </dl>
+                    </div>
+                    
+                    <div>
+                        <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">
+                            {% trans "Billing Information" %}
+                        </h3>
+                        <dl class="space-y-2">
+                            <div>
+                                <dt class="text-sm font-medium text-gray-700 dark:text-gray-300">{% trans "Monthly Cost" %}</dt>
+                                <dd class="text-sm text-gray-900 dark:text-white">{{ service.monthly_cost|floatformat:2 }}€</dd>
+                            </div>
+                            <div>
+                                <dt class="text-sm font-medium text-gray-700 dark:text-gray-300">{% trans "Next Billing" %}</dt>
+                                <dd class="text-sm text-gray-900 dark:text-white">{{ service.next_billing_date|date:"M j, Y"|default:_("N/A") }}</dd>
+                            </div>
+                            <div>
+                                <dt class="text-sm font-medium text-gray-700 dark:text-gray-300">{% trans "Billing Cycle" %}</dt>
+                                <dd class="text-sm text-gray-900 dark:text-white">{{ service.billing_cycle|default:_("Monthly") }}</dd>
+                            </div>
+                        </dl>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Service Specifications -->
+            {% if service.specifications %}
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                    <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-4">
+                        {% trans "Specifications" %}
+                    </h2>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {% for spec_key, spec_value in service.specifications.items %}
+                            <div class="flex justify-between py-2 border-b border-gray-200 dark:border-gray-700 last:border-b-0">
+                                <dt class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                    {{ spec_key|title }}
+                                </dt>
+                                <dd class="text-sm text-gray-900 dark:text-white">
+                                    {{ spec_value }}
+                                </dd>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+
+            <!-- Usage Charts -->
+            {% if service.status == "active" %}
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-xl font-semibold text-gray-900 dark:text-white">
+                            {% trans "Resource Usage" %}
+                        </h2>
+                        <select onchange="loadUsageData(this.value)" class="text-sm rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white">
+                            <option value="24h">{% trans "Last 24 Hours" %}</option>
+                            <option value="7d">{% trans "Last 7 Days" %}</option>
+                            <option value="30d">{% trans "Last 30 Days" %}</option>
+                        </select>
+                    </div>
+                    
+                    <div id="usage-charts" hx-get="{% url 'services:usage' service_id=service.id %}" hx-trigger="load" hx-vals='{"period": "24h"}'>
+                        <!-- Usage charts will be loaded here -->
+                        <div class="flex items-center justify-center h-48">
+                            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                        </div>
+                    </div>
+                </div>
+            {% endif %}
+
+            <!-- Recent Activity -->
+            {% if service.recent_activity %}
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                    <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-4">
+                        {% trans "Recent Activity" %}
+                    </h2>
+                    
+                    <div class="space-y-4">
+                        {% for activity in service.recent_activity %}
+                            <div class="flex items-start space-x-3">
+                                <div class="flex-shrink-0 mt-1">
+                                    <div class="w-2 h-2 bg-blue-500 rounded-full"></div>
+                                </div>
+                                <div class="flex-1">
+                                    <p class="text-sm text-gray-900 dark:text-white">
+                                        {{ activity.description }}
+                                    </p>
+                                    <p class="text-xs text-gray-500 dark:text-gray-400">
+                                        {{ activity.timestamp|date:"M j, Y H:i" }}
+                                    </p>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+        </div>
+
+        <!-- Sidebar -->
+        <div class="lg:col-span-1 space-y-6">
+            <!-- Service Actions -->
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                    {% trans "Service Actions" %}
+                </h3>
+                
+                <div class="space-y-3">
+                    {% if service.status == "active" %}
+                        {% button text=_("Request Upgrade") hx_post="{% url 'services:request_action' service_id=service.id %}" hx_vals='{"action": "upgrade_request"}' variant="primary" full_width=True %}
+                        {% button text=_("Request Suspension") hx_post="{% url 'services:request_action' service_id=service.id %}" hx_vals='{"action": "suspend_request"}' variant="warning" full_width=True hx_confirm=_("Are you sure you want to request suspension?") %}
+                    {% elif service.status == "suspended" %}
+                        {% button text=_("Request Reactivation") hx_post="{% url 'services:request_action' service_id=service.id %}" hx_vals='{"action": "reactivate_request"}' variant="primary" full_width=True %}
+                    {% endif %}
+                    
+                    {% button text=_("View Usage History") href="services:usage" href_kwargs="service_id:service.id" variant="outline" full_width=True %}
+                    {% button text=_("Contact Support") href="tickets:create" href_params="service_id:service.id" variant="outline" full_width=True %}
+                </div>
+            </div>
+
+            <!-- Quick Stats -->
+            {% if service.status == "active" %}
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                        {% trans "Current Usage" %}
+                    </h3>
+                    
+                    <div class="space-y-4">
+                        {% if service.current_usage.disk %}
+                            <div>
+                                <div class="flex justify-between text-sm mb-1">
+                                    <span class="text-gray-700 dark:text-gray-300">{% trans "Disk Space" %}</span>
+                                    <span class="text-gray-900 dark:text-white">{{ service.current_usage.disk.used }} / {{ service.current_usage.disk.total }}</span>
+                                </div>
+                                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                                    <div class="bg-blue-600 h-2 rounded-full" style="width: {{ service.current_usage.disk.percentage }}%"></div>
+                                </div>
+                            </div>
+                        {% endif %}
+                        
+                        {% if service.current_usage.bandwidth %}
+                            <div>
+                                <div class="flex justify-between text-sm mb-1">
+                                    <span class="text-gray-700 dark:text-gray-300">{% trans "Bandwidth" %}</span>
+                                    <span class="text-gray-900 dark:text-white">{{ service.current_usage.bandwidth.used }} / {{ service.current_usage.bandwidth.total }}</span>
+                                </div>
+                                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                                    <div class="bg-green-600 h-2 rounded-full" style="width: {{ service.current_usage.bandwidth.percentage }}%"></div>
+                                </div>
+                            </div>
+                        {% endif %}
+                        
+                        {% if service.current_usage.cpu %}
+                            <div>
+                                <div class="flex justify-between text-sm mb-1">
+                                    <span class="text-gray-700 dark:text-gray-300">{% trans "CPU Usage" %}</span>
+                                    <span class="text-gray-900 dark:text-white">{{ service.current_usage.cpu }}%</span>
+                                </div>
+                                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                                    <div class="bg-yellow-600 h-2 rounded-full" style="width: {{ service.current_usage.cpu }}%"></div>
+                                </div>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            {% endif %}
+
+            <!-- Service Information -->
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                    {% trans "Service Details" %}
+                </h3>
+                
+                <dl class="space-y-3">
+                    <div>
+                        <dt class="text-sm font-medium text-gray-500 dark:text-gray-400">{% trans "Server Location" %}</dt>
+                        <dd class="text-sm text-gray-900 dark:text-white">{{ service.server_location|default:_("Romania") }}</dd>
+                    </div>
+                    
+                    <div>
+                        <dt class="text-sm font-medium text-gray-500 dark:text-gray-400">{% trans "IP Address" %}</dt>
+                        <dd class="text-sm text-gray-900 dark:text-white font-mono">{{ service.ip_address|default:_("Not assigned") }}</dd>
+                    </div>
+                    
+                    <div>
+                        <dt class="text-sm font-medium text-gray-500 dark:text-gray-400">{% trans "Control Panel" %}</dt>
+                        <dd class="text-sm text-gray-900 dark:text-white">
+                            {% if service.control_panel_url %}
+                                <a href="{{ service.control_panel_url }}" target="_blank" class="text-blue-600 hover:text-blue-800 dark:text-blue-400">
+                                    {% trans "Access Control Panel" %} ↗
+                                </a>
+                            {% else %}
+                                {% trans "Not available" %}
+                            {% endif %}
+                        </dd>
+                    </div>
+                    
+                    {% if service.domain_name %}
+                        <div>
+                            <dt class="text-sm font-medium text-gray-500 dark:text-gray-400">{% trans "Primary Domain" %}</dt>
+                            <dd class="text-sm text-gray-900 dark:text-white">{{ service.domain_name }}</dd>
+                        </div>
+                    {% endif %}
+                </dl>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Usage Data Loading Script -->
+<script>
+function loadUsageData(period) {
+    htmx.ajax('GET', '{% url "services:usage" service_id=service.id %}', {
+        values: {'period': period},
+        target: '#usage-charts',
+        swap: 'innerHTML'
+    });
+}
+
+// Handle service action responses
+document.body.addEventListener('htmx:afterRequest', function(evt) {
+    if (evt.detail.xhr.status === 200 && evt.detail.requestConfig.verb === 'post') {
+        // Show success message
+        const response = JSON.parse(evt.detail.xhr.responseText);
+        if (response.success) {
+            alert(response.message || 'Action completed successfully');
+            // Optionally reload the page to reflect changes
+            location.reload();
+        } else {
+            alert(response.error || 'An error occurred');
+        }
+    }
+});
+</script>
+{% endblock %}

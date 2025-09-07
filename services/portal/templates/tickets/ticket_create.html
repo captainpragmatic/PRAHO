@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans "Create Support Ticket" %}{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <div class="max-w-2xl mx-auto">
+        <!-- Header -->
+        <div class="mb-8">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+                        {% trans "Create Support Ticket" %}
+                    </h1>
+                    <p class="text-gray-600 dark:text-gray-400">
+                        {% trans "Get help from our support team" %}
+                    </p>
+                </div>
+                <div>
+                    {% button text=_("Back to Tickets") href="tickets:list" variant="outline" icon="arrow-left" %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Create Ticket Form -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+            <form method="post" class="space-y-6">
+                {% csrf_token %}
+                
+                <div>
+                    <label for="subject" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        {% trans "Subject" %} <span class="text-red-500">*</span>
+                    </label>
+                    <input type="text" name="subject" id="subject" required maxlength="200" 
+                           class="w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                           placeholder="{% trans 'Brief description of your issue' %}">
+                </div>
+
+                <div>
+                    <label for="priority" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        {% trans "Priority" %} <span class="text-red-500">*</span>
+                    </label>
+                    <select name="priority" id="priority" required class="w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white">
+                        <option value="">{% trans "Select priority" %}</option>
+                        <option value="low">{% trans "Low - General questions or minor issues" %}</option>
+                        <option value="normal" selected>{% trans "Normal - Standard support requests" %}</option>
+                        <option value="high">{% trans "High - Urgent issues affecting service" %}</option>
+                        <option value="critical">{% trans "Critical - Service completely down" %}</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label for="category" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        {% trans "Category" %}
+                    </label>
+                    <select name="category" id="category" class="w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white">
+                        <option value="">{% trans "Select category (optional)" %}</option>
+                        <option value="technical">{% trans "Technical Support" %}</option>
+                        <option value="billing">{% trans "Billing & Account" %}</option>
+                        <option value="hosting">{% trans "Hosting Services" %}</option>
+                        <option value="domains">{% trans "Domain Management" %}</option>
+                        <option value="general">{% trans "General Inquiry" %}</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label for="description" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        {% trans "Description" %} <span class="text-red-500">*</span>
+                    </label>
+                    <textarea name="description" id="description" rows="8" required 
+                              class="w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                              placeholder="{% trans 'Please provide detailed information about your issue, including steps to reproduce if applicable' %}"></textarea>
+                    <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                        {% trans "Please include as much detail as possible to help us resolve your issue quickly." %}
+                    </p>
+                </div>
+
+                <!-- Priority Guidelines -->
+                <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                    <h3 class="text-sm font-medium text-blue-900 dark:text-blue-100 mb-3">
+                        {% trans "Priority Guidelines" %}
+                    </h3>
+                    <div class="space-y-2 text-sm">
+                        <div class="flex items-start space-x-2">
+                            {% badge "Critical" variant="danger" icon="🚨" size="sm" %}
+                            <span class="text-blue-800 dark:text-blue-200">
+                                {% trans "Service completely down, affecting all users" %}
+                            </span>
+                        </div>
+                        <div class="flex items-start space-x-2">
+                            {% badge "High" variant="warning" icon="🔥" size="sm" %}
+                            <span class="text-blue-800 dark:text-blue-200">
+                                {% trans "Urgent issues significantly impacting service" %}
+                            </span>
+                        </div>
+                        <div class="flex items-start space-x-2">
+                            {% badge "Normal" variant="info" icon="📋" size="sm" %}
+                            <span class="text-blue-800 dark:text-blue-200">
+                                {% trans "Standard support requests and questions" %}
+                            </span>
+                        </div>
+                        <div class="flex items-start space-x-2">
+                            {% badge "Low" variant="secondary" icon="📝" size="sm" %}
+                            <span class="text-blue-800 dark:text-blue-200">
+                                {% trans "General questions or minor issues" %}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Form Actions -->
+                <div class="flex items-center justify-between pt-4">
+                    <p class="text-sm text-gray-500 dark:text-gray-400">
+                        {% trans "You will receive email notifications about replies to your ticket." %}
+                    </p>
+                    <div class="flex space-x-3">
+                        {% button text=_("Cancel") href="tickets:list" variant="outline" %}
+                        {% button text=_("Create Ticket") type="submit" variant="primary" icon="plus" %}
+                    </div>
+                </div>
+            </form>
+        </div>
+
+        <!-- Support Contact Info -->
+        <div class="mt-8 bg-gray-50 dark:bg-gray-700 rounded-lg p-6">
+            <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-3">
+                {% trans "Need Immediate Help?" %}
+            </h3>
+            <div class="space-y-2 text-sm text-gray-600 dark:text-gray-400">
+                <p>
+                    {% trans "For critical issues affecting your service, you can also:" %}
+                </p>
+                <ul class="list-disc list-inside space-y-1 ml-4">
+                    <li>{% trans "Call our emergency support line" %}</li>
+                    <li>{% trans "Check our status page for known issues" %}</li>
+                    <li>{% trans "Browse our knowledge base for quick solutions" %}</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

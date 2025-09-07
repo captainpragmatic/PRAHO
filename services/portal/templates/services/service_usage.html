@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans "Usage Statistics" %} - {{ service.name }}{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <!-- Header -->
+    <div class="mb-8">
+        <div class="flex items-center justify-between">
+            <div>
+                <h1 class="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+                    {% trans "Usage Statistics" %}
+                </h1>
+                <p class="text-gray-600 dark:text-gray-400">
+                    {{ service.name }}
+                </p>
+            </div>
+            <div class="flex space-x-2">
+                {% button text=_("Back to Service") href="services:detail" href_kwargs="service_id:service.id" variant="outline" icon="arrow-left" %}
+                {% button text=_("Back to Services") href="services:list" variant="outline" %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Period Selector -->
+    <div class="mb-6">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+            <div class="flex items-center justify-between">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                    {% trans "Time Period" %}
+                </h2>
+                <div class="flex space-x-2">
+                    <button onclick="loadUsageData('24h')" class="px-3 py-2 text-sm rounded-md bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 hover:bg-blue-200 dark:hover:bg-blue-800">
+                        {% trans "24 Hours" %}
+                    </button>
+                    <button onclick="loadUsageData('7d')" class="px-3 py-2 text-sm rounded-md bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600">
+                        {% trans "7 Days" %}
+                    </button>
+                    <button onclick="loadUsageData('30d')" class="px-3 py-2 text-sm rounded-md bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600">
+                        {% trans "30 Days" %}
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Usage Charts -->
+    <div id="usage-data" hx-get="{% url 'services:usage_data' service_id=service.id %}" hx-trigger="load" hx-vals='{"period": "24h"}'>
+        <!-- Charts will be loaded here -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                <div class="flex items-center justify-center h-48">
+                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                </div>
+            </div>
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                <div class="flex items-center justify-center h-48">
+                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Current Usage Summary -->
+    {% if usage_summary %}
+        <div class="mt-8 bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+            <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-4">
+                {% trans "Current Usage Summary" %}
+            </h2>
+            
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {% if usage_summary.disk %}
+                    <div class="text-center">
+                        <div class="text-3xl font-bold text-blue-600 dark:text-blue-400 mb-2">
+                            {{ usage_summary.disk.percentage }}%
+                        </div>
+                        <div class="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                            {% trans "Disk Space Used" %}
+                        </div>
+                        <div class="text-xs text-gray-600 dark:text-gray-300">
+                            {{ usage_summary.disk.used }} / {{ usage_summary.disk.total }}
+                        </div>
+                        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 mt-2">
+                            <div class="bg-blue-600 h-2 rounded-full" style="width: {{ usage_summary.disk.percentage }}%"></div>
+                        </div>
+                    </div>
+                {% endif %}
+                
+                {% if usage_summary.bandwidth %}
+                    <div class="text-center">
+                        <div class="text-3xl font-bold text-green-600 dark:text-green-400 mb-2">
+                            {{ usage_summary.bandwidth.percentage }}%
+                        </div>
+                        <div class="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                            {% trans "Bandwidth Used" %}
+                        </div>
+                        <div class="text-xs text-gray-600 dark:text-gray-300">
+                            {{ usage_summary.bandwidth.used }} / {{ usage_summary.bandwidth.total }}
+                        </div>
+                        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 mt-2">
+                            <div class="bg-green-600 h-2 rounded-full" style="width: {{ usage_summary.bandwidth.percentage }}%"></div>
+                        </div>
+                    </div>
+                {% endif %}
+                
+                {% if usage_summary.cpu %}
+                    <div class="text-center">
+                        <div class="text-3xl font-bold text-yellow-600 dark:text-yellow-400 mb-2">
+                            {{ usage_summary.cpu.average }}%
+                        </div>
+                        <div class="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                            {% trans "Average CPU Usage" %}
+                        </div>
+                        <div class="text-xs text-gray-600 dark:text-gray-300">
+                            {% trans "Peak:" %} {{ usage_summary.cpu.peak }}%
+                        </div>
+                        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 mt-2">
+                            <div class="bg-yellow-600 h-2 rounded-full" style="width: {{ usage_summary.cpu.average }}%"></div>
+                        </div>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    {% endif %}
+
+    <!-- Usage History Table -->
+    {% if usage_history %}
+        <div class="mt-8 bg-white dark:bg-gray-800 rounded-lg shadow">
+            <div class="p-6 border-b border-gray-200 dark:border-gray-700">
+                <h2 class="text-xl font-semibold text-gray-900 dark:text-white">
+                    {% trans "Usage History" %}
+                </h2>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                    <thead class="bg-gray-50 dark:bg-gray-700">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                {% trans "Date" %}
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                {% trans "Disk Usage" %}
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                {% trans "Bandwidth" %}
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                {% trans "CPU %" %}
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                        {% for entry in usage_history %}
+                            <tr>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                                    {{ entry.date|date:"M j, Y H:i" }}
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                                    {{ entry.disk_usage|default:"-" }}
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                                    {{ entry.bandwidth_usage|default:"-" }}
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                                    {{ entry.cpu_usage|default:"-" }}%
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% endif %}
+</div>
+
+<script>
+function loadUsageData(period) {
+    // Update active button
+    document.querySelectorAll('[onclick*="loadUsageData"]').forEach(btn => {
+        btn.className = btn.className.replace('bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200', 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200');
+    });
+    event.target.className = event.target.className.replace('bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200', 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200');
+    
+    // Load new data
+    htmx.ajax('GET', '{% url "services:usage_data" service_id=service.id %}', {
+        values: {'period': period},
+        target: '#usage-data',
+        swap: 'innerHTML'
+    });
+}
+</script>
+{% endblock %}

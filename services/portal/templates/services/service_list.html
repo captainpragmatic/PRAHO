@@ -1,0 +1,249 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "My Services" %}{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+  <!-- Page Header -->
+  <div class="mb-8">
+    <div class="flex items-center justify-between">
+      <div>
+        <h1 class="text-3xl font-bold text-white">🌐 {% trans 'My Services' %}</h1>
+        <p class="mt-2 text-slate-400">{% trans 'Manage your hosting services and resources' %}</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Status Filter Tabs -->
+  <div class="mb-6">
+    <div class="border-b border-slate-700">
+      <nav class="-mb-px flex space-x-8">
+        <a href="{% url 'services:list' %}"
+           class="{% if not status_filter %}border-blue-500 text-blue-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
+          📊 {% trans 'All Services' %}
+        </a>
+
+        <a href="{% url 'services:list' %}?status=active"
+           class="{% if status_filter == 'active' %}border-green-500 text-green-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
+          ✅ {% trans 'Active' %}
+        </a>
+
+        <a href="{% url 'services:list' %}?status=suspended"
+           class="{% if status_filter == 'suspended' %}border-red-500 text-red-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
+          ⏸️ {% trans 'Suspended' %}
+        </a>
+
+        <a href="{% url 'services:list' %}?status=pending"
+           class="{% if status_filter == 'pending' %}border-yellow-500 text-yellow-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
+          ⏳ {% trans 'Pending' %}
+        </a>
+
+        <a href="{% url 'services:list' %}?status=cancelled"
+           class="{% if status_filter == 'cancelled' %}border-slate-500 text-slate-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
+          ❌ {% trans 'Cancelled' %}
+        </a>
+      </nav>
+    </div>
+  </div>
+
+  <!-- Services Table -->
+  <div class="bg-slate-800 rounded-lg overflow-hidden">
+    <!-- Services Count Header -->
+    <div class="px-6 py-4 border-b border-slate-700">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center space-x-4">
+          <h3 class="text-lg font-medium text-white">📦 {% trans 'My Services' %}</h3>
+          
+          <!-- Service Count Badge -->
+          <div class="bg-blue-600/20 text-blue-400 px-3 py-1 rounded-full text-sm font-medium">
+            {% if total_count == 1 %}
+              1 {% trans 'service' %}
+            {% else %}
+              {{ total_count }} {% trans 'services' %}
+            {% endif %}
+          </div>
+          
+          {% if status_filter %}
+          <div class="bg-purple-600/20 text-purple-400 px-3 py-1 rounded-full text-sm">
+            {% trans 'Filter:' %} {{ status_filter|title }}
+          </div>
+          {% endif %}
+        </div>
+
+        <!-- Quick Stats -->
+        <div class="flex items-center space-x-4 text-sm">
+          <div class="text-green-400">
+            ✅ {{ active_count }} {% trans 'active' %}
+          </div>
+          <div class="text-slate-400">
+            📊 {{ total_count }} {% trans 'total' %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Services Table -->
+    {% if services %}
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-slate-700">
+        <thead class="bg-slate-700">
+          <tr>
+            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+              {% trans 'Service Name' %}
+            </th>
+            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+              {% trans 'Plan' %}
+            </th>
+            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+              {% trans 'Price' %}
+            </th>
+            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+              {% trans 'Status' %}
+            </th>
+            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+              {% trans 'Next Billing' %}
+            </th>
+            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+              {% trans 'Actions' %}
+            </th>
+          </tr>
+        </thead>
+        <tbody class="bg-slate-800 divide-y divide-slate-700">
+          {% for service in services %}
+          <tr class="hover:bg-slate-700 transition-colors">
+            <td class="px-6 py-4 whitespace-nowrap">
+              <div class="text-sm font-medium text-white">{{ service.name }}</div>
+              {% if service.domain %}
+              <div class="text-sm text-slate-400">{{ service.domain }}</div>
+              {% endif %}
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap">
+              <div class="text-sm text-slate-300">{{ service.service_type|title }}</div>
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap">
+              <div class="text-sm font-mono text-green-400">€{{ service.monthly_cost|floatformat:2 }}</div>
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap">
+              {% if service.status == 'active' %}
+              <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                {% trans 'Active' %}
+              </span>
+              {% elif service.status == 'suspended' %}
+              <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
+                {% trans 'Suspended' %}
+              </span>
+              {% elif service.status == 'pending' %}
+              <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
+                {% trans 'Pending' %}
+              </span>
+              {% elif service.status == 'cancelled' %}
+              <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
+                {% trans 'Cancelled' %}
+              </span>
+              {% else %}
+              <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
+                {{ service.status|title }}
+              </span>
+              {% endif %}
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
+              {{ service.next_billing_date|date:"M d, Y"|default:"N/A" }}
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+              <div class="flex space-x-2">
+                <a href="{% url 'services:detail' service_id=service.id %}" 
+                   class="text-blue-400 hover:text-blue-300 transition-colors">
+                  👁️ {% trans 'View' %}
+                </a>
+                {% if service.status == 'suspended' %}
+                <button onclick="requestReactivation({{ service.id }}, '{{ service.name }}')"
+                        class="text-green-400 hover:text-green-300 transition-colors">
+                  ▶️ {% trans 'Reactivate' %}
+                </button>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <!-- Empty State -->
+    <div class="text-center py-12">
+      <div class="text-slate-400 text-lg mb-4">
+        {% if status_filter %}
+          📋 {% trans 'No services found for the selected filter' %}
+        {% else %}
+          📦 {% trans 'No services yet' %}
+        {% endif %}
+      </div>
+      {% if not status_filter %}
+      <p class="text-slate-500 mb-6">
+        {% trans 'Contact our sales team to get started with hosting services.' %}
+      </p>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Pagination -->
+    {% if has_next or has_previous %}
+    <div class="bg-slate-700 px-6 py-3 border-t border-slate-600">
+      <div class="flex items-center justify-between">
+        <!-- Page Info -->
+        <div class="text-sm text-slate-400">
+          {% trans 'Page' %} {{ current_page }}
+        </div>
+
+        <!-- Navigation Controls -->
+        <div class="flex space-x-1">
+          {% if has_previous %}
+          <a href="?page={{ previous_page }}{% if status_filter %}&status={{ status_filter }}{% endif %}"
+             class="bg-slate-600 hover:bg-slate-500 text-white px-3 py-1 rounded text-sm transition-colors">
+            {% trans 'Previous' %}
+          </a>
+          {% endif %}
+
+          {% if has_next %}
+          <a href="?page={{ next_page }}{% if status_filter %}&status={{ status_filter }}{% endif %}"
+             class="bg-slate-600 hover:bg-slate-500 text-white px-3 py-1 rounded text-sm transition-colors">
+            {% trans 'Next' %}
+          </a>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Service Actions JavaScript -->
+<script>
+function requestReactivation(serviceId, serviceName) {
+  if (confirm('{% trans "Request reactivation for service?" %} ' + serviceName)) {
+    // Create form and submit
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = `/services/${serviceId}/request-action/`;
+    
+    // CSRF token
+    const csrfInput = document.createElement('input');
+    csrfInput.type = 'hidden';
+    csrfInput.name = 'csrfmiddlewaretoken';
+    csrfInput.value = '{{ csrf_token }}';
+    form.appendChild(csrfInput);
+    
+    // Action input
+    const actionInput = document.createElement('input');
+    actionInput.type = 'hidden';
+    actionInput.name = 'action';
+    actionInput.value = 'reactivate_request';
+    form.appendChild(actionInput);
+    
+    document.body.appendChild(form);
+    form.submit();
+  }
+}
+</script>
+{% endblock %}

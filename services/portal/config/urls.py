@@ -18,6 +18,15 @@ urlpatterns = [
     # Dashboard - main customer interface  
     path('dashboard/', include('apps.dashboard.urls')),
     
+    # Billing - customer invoices and payments
+    path('billing/', include('apps.billing.urls')),
+    
+    # Support tickets - customer support
+    path('tickets/', include('apps.tickets.urls')),
+    
+    # Hosting services - customer service management
+    path('services/', include('apps.services.urls')),
+    
     # API client health check
     path('status/', portal_status, name='portal_status'),
     

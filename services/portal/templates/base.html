@@ -68,52 +68,80 @@
 </head>
 <body class="h-full bg-slate-900 text-slate-100">
     <div class="min-h-full">
-        <!-- Portal Header -->
-        <nav class="bg-slate-800 border-b border-slate-700">
-            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="flex justify-between h-16">
-                    <div class="flex items-center min-w-0 flex-1">
-                        <!-- Logo -->
-                        <a href="/dashboard/" class="flex-shrink-0 flex items-center hover:opacity-80 transition-opacity">
-                            <div class="h-8 w-8 bg-blue-600 rounded-lg flex items-center justify-center text-white text-lg font-bold mr-3">
-                                P
-                            </div>
-                            <h1 class="text-xl font-bold text-blue-400">
-                                PRAHO Portal
-                            </h1>
-                        </a>
+        <!-- Mobile Header & Navigation -->
+        {% include 'components/mobile_header.html' %}
+        
+        <!-- Desktop Navigation -->
+        {% if request.session.customer_id %}
+        <nav class="hidden lg:block bg-slate-800 border-b border-slate-700">
+          <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+              <div class="flex items-center min-w-0 flex-1">
+                <!-- Logo -->
+                <a href="/dashboard/" class="flex-shrink-0 flex items-center hover:opacity-80 transition-opacity">
+                  <div class="h-8 w-8 bg-blue-600 rounded-lg flex items-center justify-center text-white text-lg font-bold mr-3">
+                    P
+                  </div>
+                  <h1 class="text-xl font-bold text-blue-400">
+                    PRAHO Portal
+                  </h1>
+                </a>
 
-                        <!-- Navigation Links -->
-                        <div class="ml-6 flex space-x-4">
-                            <a href="/dashboard/" class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
-                                <span class="mr-2">📊</span> {% trans 'Dashboard' %}
-                            </a>
-                            <a href="/billing/" class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
-                                <span class="mr-2">💳</span> {% trans 'Billing' %}
-                            </a>
-                            <a href="/services/" class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
-                                <span class="mr-2">🖥️</span> {% trans 'Services' %}
-                            </a>
-                            <a href="/tickets/" class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
-                                <span class="mr-2">🎫</span> {% trans 'Support' %}
-                            </a>
-                        </div>
-                    </div>
+                <!-- Navigation Links -->
+                <div class="hidden lg:ml-6 lg:flex lg:space-x-4">
+                  <!-- Dashboard -->
+                  <a href="/dashboard/"
+                    class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
+                    <span class="mr-2">📊</span> {% trans 'Dashboard' %}
+                  </a>
 
-                    <!-- User Menu -->
-                    <div class="flex items-center space-x-4">
-                        <div class="text-slate-400 text-sm">
-                            {% trans 'Customer Portal' %}
-                        </div>
-                        <div class="relative">
-                            <a href="/logout/" class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
-                                <span class="mr-2">🚪</span> {% trans 'Logout' %}
-                            </a>
-                        </div>
-                    </div>
+                  <!-- My Invoices -->
+                  <a href="/billing/invoices/"
+                    class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
+                    <span class="mr-2">📄</span> {% trans 'My Invoices' %}
+                  </a>
+
+                  <!-- My Services -->
+                  <a href="/services/"
+                    class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
+                    <span class="mr-2">🚀</span> {% trans 'My Services' %}
+                  </a>
+
+                  <!-- My Tickets -->
+                  <a href="/tickets/"
+                    class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
+                    <span class="mr-2">🎫</span> {% trans 'My Tickets' %}
+                  </a>
                 </div>
+              </div>
+
+              <!-- User Menu -->
+              <div class="flex items-center space-x-3 flex-shrink-0">
+                <a href="{% url 'users:profile' %}"
+                  class="text-slate-300 hover:text-white flex items-center px-2 py-1 whitespace-nowrap">
+                  <span class="mr-1">⚙️</span> {% trans 'Profile' %}
+                </a>
+                <form action="/i18n/setlang/" method="post" class="inline">
+                  {% csrf_token %}
+                  <input name="next" type="hidden" value="{{ request.get_full_path|slice:':-1' }}" />
+                  <select name="language" onchange="this.form.submit()"
+                    class="bg-slate-700 text-white rounded-md text-sm font-medium">
+                    <option value="en">🇬🇧 English</option>
+                    <option value="ro">🇷🇴 Română</option>
+                  </select>
+                </form>
+                <form action="{% url 'users:logout' %}" method="post" class="inline">
+                  {% csrf_token %}
+                  <button type="submit"
+                    class="inline-flex items-center justify-center font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-4 disabled:opacity-50 disabled:cursor-not-allowed bg-red-600 text-white hover:bg-red-700 focus:ring-red-300 border border-red-600 px-3 py-1.5 text-sm">
+                    <span class="htmx-indicator-text">Logout</span>
+                  </button>
+                </form>
+              </div>
             </div>
+          </div>
         </nav>
+        {% endif %}
 
         <!-- Main Content -->
         <div id="main-content" class="min-h-full">

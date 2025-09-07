@@ -1,0 +1,314 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans 'Ticket Details' %} - PRAHO Portal{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6">
+    <h1 class="text-3xl font-bold text-white mb-6">
+        {% trans 'Ticket' %} 
+        {% if ticket.ticket_number %}
+            #{{ ticket.ticket_number }}
+        {% else %}
+            #{{ ticket.id }}
+        {% endif %}
+    </h1>
+
+    <div class="bg-slate-800 rounded-lg p-6 border border-slate-700 mb-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <p class="text-slate-400 text-sm">{% trans 'Subject' %}:</p>
+                <p class="text-white font-medium text-lg">
+                    {% if ticket.title %}{{ ticket.title }}{% elif ticket.subject %}{{ ticket.subject }}{% else %}{{ ticket.description|truncatechars:50 }}{% endif %}
+                </p>
+            </div>
+            <div>
+                <p class="text-slate-400 text-sm">{% trans 'Status' %}:</p>
+                {% if ticket.status == 'new' %}
+                  {% badge "New" variant="success" icon="🆕" %}
+                {% elif ticket.status == 'open' %}
+                  {% badge "Open" variant="info" icon="📂" %}
+                {% elif ticket.status == 'pending' %}
+                  {% badge "Pending" variant="warning" icon="⏳" %}
+                {% elif ticket.status == 'resolved' %}
+                  {% badge "Resolved" variant="primary" icon="✅" %}
+                {% elif ticket.status == 'closed' %}
+                  {% badge "Closed" variant="secondary" icon="📁" %}
+                {% elif ticket.status == 'cancelled' %}
+                  {% badge "Cancelled" variant="danger" icon="❌" %}
+                {% else %}
+                  {% badge ticket.status|capfirst variant="default" %}
+                {% endif %}
+            </div>
+            <div>
+                <p class="text-slate-400 text-sm">{% trans 'Priority' %}:</p>
+                {% if ticket.priority == 'critical' %}
+                  {% badge "Critical" variant="danger" icon="🚨" %}
+                {% elif ticket.priority == 'urgent' %}
+                  {% badge "Urgent" variant="danger" icon="🔴" %}
+                {% elif ticket.priority == 'high' %}
+                  {% badge "High" variant="warning" icon="🟡" %}
+                {% elif ticket.priority == 'normal' %}
+                  {% badge "Normal" variant="info" icon="🔵" %}
+                {% elif ticket.priority == 'low' %}
+                  {% badge "Low" variant="success" icon="🟢" %}
+                {% else %}
+                  {% badge ticket.priority|capfirst variant="default" %}
+                {% endif %}
+            </div>
+            <div>
+                <p class="text-slate-400 text-sm">{% trans 'Created At' %}:</p>
+                <p class="text-white font-medium">{{ ticket.created_at|date:"d.m.Y H:i" }}</p>
+            </div>
+        </div>
+
+        <div class="mt-6 border-t border-slate-700 pt-6">
+            <p class="text-slate-400 text-sm mb-2">{% trans 'Description' %}:</p>
+            <div class="bg-slate-700 p-4 rounded-md text-white prose prose-invert max-w-none">
+                {{ ticket.description|linebreaksbr }}
+            </div>
+        </div>
+    </div>
+
+    <!-- Ticket Replies/Comments -->
+    <div class="bg-slate-800 rounded-lg border border-slate-700 mb-6" id="replies-section">
+        <div class="px-6 py-4 border-b border-slate-700">
+            <h3 class="text-lg font-medium text-white flex items-center">
+                <svg class="w-5 h-5 mr-2 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-3.582 8-8 8a8.955 8.955 0 01-1.946-.228A18.89 18.89 0 0111 22l-1-1 1-1c.636-.636 1-1.5 1-2.4 0-1.778 1.44-3.22 3.22-3.22M21 12c0-4.418-3.582-8-8-8s-8 3.582-8 8"></path>
+                </svg>
+                {% trans 'Conversation' %}
+                <span class="ml-2 text-sm font-normal text-slate-400" id="reply-count">({{ replies|length }} {% trans 'replies' %})</span>
+            </h3>
+        </div>
+        
+        <div class="px-6 py-4 max-h-96 overflow-y-auto" id="comments-container">
+            {% for reply in replies %}
+            <div class="mb-6 {% if not reply.is_staff %}border-l-2 border-blue-500 pl-4{% endif %}">
+                <div class="flex items-start space-x-3">
+                    <!-- User Avatar -->
+                    <div class="flex-shrink-0">
+                        <div class="w-8 h-8 rounded-full {% if reply.is_staff %}bg-green-100 text-green-800{% else %}bg-blue-100 text-blue-800{% endif %} flex items-center justify-center text-sm font-medium">
+                            {% if reply.is_staff %}
+                                🛠️
+                            {% else %}
+                                👤
+                            {% endif %}
+                        </div>
+                    </div>
+                    
+                    <!-- Reply Content -->
+                    <div class="flex-1">
+                        <div class="flex items-center space-x-2 mb-1">
+                            <span class="text-sm font-medium text-white">
+                                {% if reply.is_staff %}
+                                    {% trans 'Support Team' %}
+                                {% else %}
+                                    {% trans 'You' %}
+                                {% endif %}
+                            </span>
+                            {% if reply.is_staff %}
+                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-800 text-green-200">
+                                    {% trans 'Staff' %}
+                                </span>
+                            {% endif %}
+                            <span class="text-xs text-slate-400">
+                                {{ reply.created_at|date:"d.m.Y H:i" }}
+                            </span>
+                        </div>
+                        <div class="text-sm text-slate-300 prose prose-invert max-w-none">
+                            {{ reply.message|linebreaksbr }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% empty %}
+            <div class="text-center py-8">
+                <p class="text-slate-400 text-sm">{% trans 'No replies yet.' %}</p>
+            </div>
+            {% endfor %}
+        </div>
+
+        {% if ticket.status != 'closed' and ticket.status != 'resolved' %}
+        <div class="border-t border-slate-700 px-6 py-4">
+            <form method="post" action="{% url 'tickets:reply' ticket_id=ticket.id %}" class="space-y-4" id="reply-form" hx-post="{% url 'tickets:reply' ticket_id=ticket.id %}" hx-target="#comments-container" hx-swap="innerHTML" hx-on::after-request="this.reset(); updateReplyCount();">
+                {% csrf_token %}
+                <div class="flex items-start space-x-3">
+                    <!-- User Avatar -->
+                    <div class="flex-shrink-0">
+                        <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-sm font-medium text-blue-800">
+                            👤
+                        </div>
+                    </div>
+                    
+                    <!-- Reply Form -->
+                    <div class="flex-1">
+                        <div class="relative">
+                            <textarea 
+                                name="message" 
+                                rows="3" 
+                                class="block w-full rounded-lg border-0 bg-slate-700 py-3 px-4 text-white placeholder-slate-400 ring-1 ring-inset ring-slate-600 focus:ring-2 focus:ring-inset focus:ring-blue-500 resize-none" 
+                                placeholder="{% trans 'Write a reply...' %}" 
+                                required></textarea>
+                            
+                            <!-- Character Counter -->
+                            <div class="absolute bottom-2 right-2">
+                                <span class="text-xs text-slate-400" id="char-counter">0</span>
+                            </div>
+                        </div>
+                        
+                        <!-- Form Actions -->
+                        <div class="mt-3 flex items-center justify-between">
+                            <div class="flex items-center space-x-3">
+                                <!-- Helper text -->
+                                <p class="text-xs text-slate-500">
+                                    <svg class="w-3 h-3 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                    </svg>
+                                    {% trans 'Your reply will be visible to both you and the support team.' %}
+                                </p>
+                            </div>
+                            
+                            <!-- Submit Button -->
+                            <div class="flex items-center space-x-2">
+                                <button type="button" class="px-3 py-2 text-sm text-slate-400 hover:text-slate-300" onclick="document.getElementById('reply-form').reset(); document.getElementById('char-counter').textContent = '0';">
+                                    {% trans 'Cancel' %}
+                                </button>
+                                <button type="submit" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 focus:ring-offset-slate-800 disabled:opacity-50 disabled:cursor-not-allowed">
+                                    <svg class="w-4 h-4 mr-2 hidden" id="submit-spinner" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                                    </svg>
+                                    <span id="submit-text">{% trans 'Send Reply' %}</span>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Keyboard shortcut hint -->
+                        <p class="mt-2 text-xs text-slate-500">
+                            {% trans 'Press Ctrl+Enter to send' %}
+                        </p>
+                    </div>
+                </div>
+            </form>
+        </div>
+        {% else %}
+        <div class="border-t border-slate-700 px-6 py-4">
+            <div class="text-center py-4">
+                <svg class="mx-auto h-8 w-8 text-slate-400 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+                <p class="text-slate-400 text-sm">{% trans 'This ticket is closed. No new replies can be added.' %}</p>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="flex justify-between items-center mt-6">
+        <a href="{% url 'tickets:list' %}" class="inline-block align-baseline font-bold text-sm text-blue-400 hover:text-blue-300">
+            ← {% trans 'Back to Tickets' %}
+        </a>
+        <div class="space-x-2">
+            <a href="{% url 'tickets:create' %}" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 focus:ring-offset-slate-800">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                </svg>
+                {% trans 'New Ticket' %}
+            </a>
+        </div>
+    </div>
+</div>
+
+<!-- Enhanced JavaScript for HTMX replies -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const textarea = document.querySelector('textarea[name="message"]');
+    const charCounter = document.getElementById('char-counter');
+    const submitBtn = document.querySelector('#reply-form button[type="submit"]');
+    const submitText = document.getElementById('submit-text');
+    const submitSpinner = document.getElementById('submit-spinner');
+    
+    // Character counter
+    if (textarea && charCounter) {
+        textarea.addEventListener('input', function() {
+            charCounter.textContent = this.value.length;
+            
+            // Visual feedback for long messages
+            if (this.value.length > 1000) {
+                charCounter.className = 'text-xs text-yellow-400';
+            } else if (this.value.length > 2000) {
+                charCounter.className = 'text-xs text-red-400';
+            } else {
+                charCounter.className = 'text-xs text-slate-400';
+            }
+        });
+    }
+    
+    // Auto-scroll to bottom after new comment
+    window.updateReplyCount = function() {
+        const container = document.getElementById('comments-container');
+        if (container) {
+            container.scrollTop = container.scrollHeight;
+        }
+        
+        // Update reply count in header
+        const comments = container.querySelectorAll('.mb-6:not(.text-center)');
+        const countSpan = document.getElementById('reply-count');
+        if (countSpan && comments.length >= 0) {
+            countSpan.textContent = `(${comments.length} replies)`;
+        }
+    };
+    
+    // Auto-resize textarea
+    if (textarea) {
+        textarea.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = Math.min(this.scrollHeight, 200) + 'px';
+        });
+    }
+    
+    // Keyboard shortcuts
+    if (textarea) {
+        textarea.addEventListener('keydown', function(e) {
+            // Ctrl+Enter or Cmd+Enter to submit
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                const form = this.closest('form');
+                if (form) form.requestSubmit();
+            }
+        });
+    }
+});
+
+// HTMX event listeners
+document.addEventListener('htmx:beforeRequest', function(e) {
+    if (e.detail.elt.id === 'reply-form') {
+        const submitBtn = document.querySelector('#reply-form button[type="submit"]');
+        const submitText = document.getElementById('submit-text');
+        const submitSpinner = document.getElementById('submit-spinner');
+        
+        if (submitBtn) submitBtn.disabled = true;
+        if (submitText) submitText.textContent = 'Sending...';
+        if (submitSpinner) submitSpinner.classList.remove('hidden');
+    }
+});
+
+document.addEventListener('htmx:afterRequest', function(e) {
+    if (e.detail.elt.id === 'reply-form') {
+        const submitBtn = document.querySelector('#reply-form button[type="submit"]');
+        const submitText = document.getElementById('submit-text');
+        const submitSpinner = document.getElementById('submit-spinner');
+        const charCounter = document.getElementById('char-counter');
+        
+        if (submitBtn) submitBtn.disabled = false;
+        if (submitText) submitText.textContent = 'Send Reply';
+        if (submitSpinner) submitSpinner.classList.add('hidden');
+        if (charCounter) {
+            charCounter.textContent = '0';
+            charCounter.className = 'text-xs text-slate-400';
+        }
+    }
+});
+</script>
+
+{% endblock %}

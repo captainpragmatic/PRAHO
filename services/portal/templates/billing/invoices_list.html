@@ -1,0 +1,333 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load ui_components %}
+{% load formatting %}
+
+{% block title %}{% trans 'My Invoices' %} - PRAHO Portal{% endblock %}
+
+{% block content %}
+<div class="px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+  <!-- Header -->
+  <div class="sm:flex sm:items-center mb-6">
+    <div class="sm:flex-auto">
+      <h1 class="text-2xl sm:text-3xl font-bold text-white">
+        🧾 {% trans "My Billing Documents" %}
+      </h1>
+      <p class="mt-2 text-slate-400 text-sm sm:text-base">
+        {% trans "View your invoices and proformas" %}
+      </p>
+    </div>
+    <div class="mt-4 sm:ml-16 sm:mt-0 sm:flex-none">
+      <button hx-post="{% url 'billing:sync_invoices' %}" 
+              hx-target="#sync-status"
+              hx-swap="innerHTML"
+              class="inline-flex items-center justify-center rounded-md border border-transparent bg-blue-600 px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+        🔄 <span class="hidden sm:inline ml-1">{% trans 'Sync Documents' %}</span>
+        <span class="sm:hidden">{% trans 'Sync' %}</span>
+      </button>
+    </div>
+  </div>
+
+  <div id="sync-status" class="mb-4"></div>
+
+  <!-- Statistics Cards -->
+  <div class="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6 mb-6 sm:mb-8">
+    <div class="bg-slate-800 rounded-lg p-4 sm:p-6 border border-slate-700">
+      <div class="flex items-center">
+        <div class="flex-shrink-0">
+          <div class="w-6 h-6 sm:w-8 sm:h-8 text-xl sm:text-2xl">📄</div>
+        </div>
+        <div class="ml-3 sm:ml-4">
+          <p class="text-xs sm:text-sm font-medium text-slate-400">{% trans 'Pending Quotes' %}</p>
+          <p class="text-lg sm:text-2xl font-semibold text-white">0</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-slate-800 rounded-lg p-4 sm:p-6 border border-slate-700">
+      <div class="flex items-center">
+        <div class="flex-shrink-0">
+          <div class="w-6 h-6 sm:w-8 sm:h-8 text-xl sm:text-2xl">🧾</div>
+        </div>
+        <div class="ml-3 sm:ml-4">
+          <p class="text-xs sm:text-sm font-medium text-slate-400">{% trans 'My Invoices' %}</p>
+          <p class="text-lg sm:text-2xl font-semibold text-white">{{ pagination.total_items }}</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-slate-800 rounded-lg p-4 sm:p-6 border border-slate-700">
+      <div class="flex items-center">
+        <div class="flex-shrink-0">
+          <div class="w-6 h-6 sm:w-8 sm:h-8 text-xl sm:text-2xl">💰</div>
+        </div>
+        <div class="ml-3 sm:ml-4">
+          <p class="text-xs sm:text-sm font-medium text-slate-400">{% trans 'Pending Payments' %}</p>
+          <p class="text-sm sm:text-2xl font-semibold text-white">-- RON</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-slate-800 rounded-lg p-4 sm:p-6 border border-slate-700">
+      <div class="flex items-center">
+        <div class="flex-shrink-0">
+          <div class="w-6 h-6 sm:w-8 sm:h-8 text-xl sm:text-2xl">💳</div>
+        </div>
+        <div class="ml-3 sm:ml-4">
+          <p class="text-xs sm:text-sm font-medium text-slate-400">{% trans 'Total Spent' %}</p>
+          <p class="text-sm sm:text-2xl font-semibold text-white">-- RON</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Filters and Search -->
+  <div class="bg-slate-800 rounded-lg border border-slate-700 p-4 sm:p-6 mb-6">
+    <form method="GET" class="space-y-4 sm:space-y-0 sm:flex sm:flex-wrap sm:items-end sm:gap-4">
+      <!-- Search -->
+      <div class="sm:flex-1 sm:min-w-64">
+        <label class="block text-xs sm:text-sm font-medium text-slate-300 mb-2">
+          {% trans 'Search' %}
+        </label>
+        <input type="text" name="search" value="{{ search_query }}" 
+               placeholder="{% trans 'Document number...' %}"
+               class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500 text-sm">
+      </div>
+
+      <!-- Document Type Filter -->
+      <div class="sm:min-w-0">
+        <label class="block text-xs sm:text-sm font-medium text-slate-300 mb-2">
+          {% trans 'Document Type' %}
+        </label>
+        <select name="type" class="w-full sm:w-auto px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500 text-sm">
+          <option value="all" {% if doc_type == 'all' %}selected{% endif %}>{% trans 'All Documents' %}</option>
+          <option value="proforma" {% if doc_type == 'proforma' %}selected{% endif %}>{% trans 'Proformas Only' %}</option>
+          <option value="invoice" {% if doc_type == 'invoice' %}selected{% endif %}>{% trans 'Invoices Only' %}</option>
+        </select>
+      </div>
+
+      <!-- Status Filter -->
+      <div class="sm:min-w-0">
+        <label class="block text-xs sm:text-sm font-medium text-slate-300 mb-2">
+          {% trans 'Status' %}
+        </label>
+        <select name="status" class="w-full sm:w-auto px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500 text-sm">
+          {% for value, label in status_choices %}
+          <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>
+            {{ label }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <!-- Filter Buttons -->
+      <div class="flex gap-2 sm:flex-shrink-0">
+        {% button "🔍 Filter" variant="primary" type="submit" size="sm" %}
+        <a href="{% url 'billing:invoices_list' %}" class="px-3 sm:px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-md font-medium transition-colors text-xs sm:text-sm">
+          ❌ <span class="hidden sm:inline">{% trans 'Clear' %}</span>
+        </a>
+      </div>
+    </form>
+  </div>
+
+  <!-- Documents Table -->
+  <div class="bg-slate-800 rounded-lg border border-slate-700">
+    <div class="px-4 sm:px-6 py-4 border-b border-slate-700">
+      <h3 class="text-base sm:text-lg font-medium text-white">
+        📋 {% trans 'Documents' %}
+        <span class="text-slate-400">
+          {% if pagination.total_items > 0 %}
+            ({{ pagination.total_items }})
+          {% endif %}
+        </span>
+      </h3>
+    </div>
+
+    {% if invoices %}
+    <!-- Desktop Table (hidden on mobile) -->
+    <div class="hidden sm:block overflow-x-auto">
+        <table class="min-w-full divide-y divide-slate-700">
+          <thead class="bg-slate-900">
+            <tr>
+              <th class="px-6 py-3 text-center text-xs font-medium text-slate-300 uppercase tracking-wider w-28">
+                {% trans 'Type' %}
+              </th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider w-32">
+                {% trans 'Number' %}
+              </th>
+              <th class="px-6 py-3 text-right text-xs font-medium text-slate-300 uppercase tracking-wider w-24">
+                {% trans 'Total' %}
+              </th>
+              <th class="px-6 py-3 text-center text-xs font-medium text-slate-300 uppercase tracking-wider w-32">
+                {% trans 'Status' %}
+              </th>
+              <th class="px-6 py-3 text-center text-xs font-medium text-slate-300 uppercase tracking-wider w-24">
+                {% trans 'Date' %}
+              </th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-700">
+            {% for invoice in invoices %}
+            <tr class="hover:bg-slate-700 cursor-pointer transition-colors" onclick="{% if invoice.document_type == 'proforma' %}window.location.href='{% url 'billing:proforma_detail' invoice.number %}';{% else %}window.location.href='{% url 'billing:invoice_detail' invoice.number %}';{% endif %}">
+              <td class="px-6 py-4 whitespace-nowrap text-center">
+                {% if invoice.document_type == 'proforma' %}
+                  {% badge "📄 Proforma" variant="primary" %}
+                {% else %}
+                  {% badge "🧾 Invoice" variant="success" %}
+                {% endif %}
+              </td>
+              
+              <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">
+                <div class="truncate font-mono">
+                  {{ invoice.number }}
+                </div>
+              </td>
+              
+              <td class="px-6 py-4 whitespace-nowrap text-sm text-white text-right font-mono">
+                {{ invoice.total_cents|cents_to_currency|romanian_currency:invoice.currency.code }}
+              </td>
+              
+              <td class="px-6 py-4 whitespace-nowrap text-center">
+                {% if invoice.document_type == 'proforma' %}
+                  {% if invoice.status == 'draft' %}
+                    {% badge "📝 Draft" variant="secondary" %}
+                  {% elif invoice.status == 'sent' %}
+                    {% badge "📧 Sent" variant="primary" %}
+                  {% elif invoice.status == 'accepted' %}
+                    {% badge "✅ Accepted" variant="success" %}
+                  {% elif invoice.status == 'expired' %}
+                    {% badge "❌ Expired" variant="danger" %}
+                  {% else %}
+                    {% badge invoice.status_display variant="secondary" %}
+                  {% endif %}
+                {% else %}
+                  {% if invoice.status == 'paid' %}
+                    {% badge "✅ Paid" variant="success" %}
+                  {% elif invoice.status == 'overdue' %}
+                    {% badge "❌ Overdue" variant="danger" %}
+                  {% elif invoice.status == 'sent' or invoice.status == 'issued' %}
+                    {% badge "📧 Sent" variant="primary" %}
+                  {% elif invoice.status == 'pending' %}
+                    {% badge "⏳ Pending" variant="warning" %}
+                  {% elif invoice.status == 'cancelled' or invoice.status == 'void' %}
+                    {% badge "❌ Cancelled" variant="danger" %}
+                  {% elif invoice.status == 'refunded' %}
+                    {% badge "↩️ Refunded" variant="warning" %}
+                  {% else %}
+                    {% badge "📝 Draft" variant="secondary" %}
+                  {% endif %}
+                {% endif %}
+              </td>
+              
+              <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-300 text-center font-mono">
+                {{ invoice.created_at|date:"d.m.Y" }}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Mobile Card List (visible on mobile only) -->
+      <div class="sm:hidden divide-y divide-slate-700">
+        {% for invoice in invoices %}
+        <div class="p-4 hover:bg-slate-700 transition-colors cursor-pointer" onclick="{% if invoice.document_type == 'proforma' %}window.location.href='{% url 'billing:proforma_detail' invoice.number %}';{% else %}window.location.href='{% url 'billing:invoice_detail' invoice.number %}';{% endif %}">
+          <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center space-x-2">
+              {% if invoice.document_type == 'proforma' %}
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-800 text-blue-200">
+                  📄 {% trans 'Proforma' %}
+                </span>
+              {% else %}
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-800 text-green-200">
+                  🧾 {% trans 'Invoice' %}
+                </span>
+              {% endif %}
+              <span class="text-white font-medium text-sm font-mono truncate">{{ invoice.number }}</span>
+            </div>
+            <div class="text-right">
+              {% if invoice.document_type == 'proforma' %}
+                {% if invoice.status == 'draft' %}
+                  {% badge "Draft" variant="secondary" icon="📝" %}
+                {% elif invoice.status == 'sent' %}
+                  {% badge "Sent" variant="primary" icon="📧" %}
+                {% elif invoice.status == 'accepted' %}
+                  {% badge "Accepted" variant="success" icon="✅" %}
+                {% elif invoice.status == 'expired' %}
+                  {% badge "Expired" variant="danger" icon="❌" %}
+                {% else %}
+                  {% badge invoice.status_display variant="secondary" %}
+                {% endif %}
+              {% else %}
+                {% if invoice.status == 'paid' %}
+                  {% badge "Paid" variant="success" icon="✅" %}
+                {% elif invoice.status == 'overdue' %}
+                  {% badge "Overdue" variant="danger" icon="❌" %}
+                {% elif invoice.status == 'sent' or invoice.status == 'issued' %}
+                  {% badge "Sent" variant="primary" icon="📧" %}
+                {% elif invoice.status == 'pending' %}
+                  {% badge "Pending" variant="warning" icon="⏳" %}
+                {% elif invoice.status == 'cancelled' or invoice.status == 'void' %}
+                  {% badge "Cancelled" variant="danger" icon="❌" %}
+                {% elif invoice.status == 'refunded' %}
+                  {% badge "Refunded" variant="warning" icon="↩️" %}
+                {% else %}
+                  {% badge "Draft" variant="secondary" icon="📝" %}
+                {% endif %}
+              {% endif %}
+            </div>
+          </div>
+          <div class="flex items-center justify-between text-sm">
+            <span class="text-slate-400 font-mono">{{ invoice.created_at|date:"d.m.Y" }}</span>
+            <span class="text-white font-medium font-mono">{{ invoice.total_cents|cents_to_currency|romanian_currency:invoice.currency.code }}</span>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <!-- Pagination -->
+      {% if pagination.total_pages > 1 %}
+      <div class="bg-slate-700 px-4 sm:px-6 py-3 border-t border-slate-600">
+        <div class="flex items-center justify-between">
+          <div class="text-xs sm:text-sm text-slate-400">
+            {% blocktrans with pagination.current_page as page_number and pagination.total_pages as num_pages %}
+            Page {{ page_number }} of {{ num_pages }}
+            {% endblocktrans %}
+          </div>
+
+          <div class="flex space-x-1">
+            {% if pagination.has_previous %}
+            <a href="?page={{ pagination.current_page|add:"-1" }}{% if status_filter %}&status={{ status_filter }}{% endif %}"
+              class="bg-slate-600 hover:bg-slate-500 text-white px-2 sm:px-3 py-1 rounded text-xs sm:text-sm">
+              <span class="hidden sm:inline">{% trans 'Previous' %}</span>
+              <span class="sm:hidden">← {% trans 'Prev' %}</span>
+            </a>
+            {% endif %}
+
+            {% if pagination.has_next %}
+            <a href="?page={{ pagination.current_page|add:"1" }}{% if status_filter %}&status={{ status_filter }}{% endif %}"
+              class="bg-slate-600 hover:bg-slate-500 text-white px-2 sm:px-3 py-1 rounded text-xs sm:text-sm">
+              <span class="hidden sm:inline">{% trans 'Next' %}</span>
+              <span class="sm:hidden">{% trans 'Next' %} →</span>
+            </a>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      {% endif %}
+      {% else %}
+      <!-- Empty State -->
+      <div class="text-center py-12">
+        <div class="text-slate-400">
+          <div class="text-4xl mb-4">📋</div>
+          <h3 class="text-lg font-medium mb-2">{% trans 'No documents found' %}</h3>
+          <p class="text-sm">
+            {% trans 'No billing documents available for your account.' %}
+          </p>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
