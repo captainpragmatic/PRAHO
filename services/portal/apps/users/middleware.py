@@ -34,6 +34,7 @@ class PortalAuthenticationMiddleware:
     PUBLIC_URLS = [
         '/login/',
         '/logout/', 
+        '/register/',
         '/password-reset/',
         '/static/',
         '/media/',

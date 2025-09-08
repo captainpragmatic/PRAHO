@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install dev dev-platform dev-portal dev-all test test-platform test-portal test-integration test-e2e test-security build-css migrate fixtures clean lint lint-platform lint-portal type-check pre-commit
+.PHONY: help install dev dev-platform dev-portal dev-all test test-platform test-portal test-integration test-e2e test-security build-css migrate fixtures fixtures-light clean lint lint-platform lint-portal type-check pre-commit
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -43,7 +43,8 @@ help:
 	@echo ""
 	@echo "🔧 DATABASE & ASSETS:"
 	@echo "  make migrate         - Run platform database migrations"
-	@echo "  make fixtures        - Load sample data (platform only)"
+	@echo "  make fixtures        - Load comprehensive sample data (platform only)"
+	@echo "  make fixtures-light  - Load minimal sample data (fast, platform only)"
 	@echo "  make build-css       - Build Tailwind CSS assets"
 	@echo ""
 	@echo "🧹 CODE QUALITY:"
@@ -226,8 +227,12 @@ migrate:
 	@$(PYTHON_PLATFORM_MANAGE) migrate --settings=config.settings.dev
 
 fixtures:
-	@echo "📊 [Platform] Loading sample data..."
+	@echo "📊 [Platform] Loading comprehensive sample data..."
 	@$(PYTHON_PLATFORM_MANAGE) generate_sample_data --settings=config.settings.dev
+
+fixtures-light:
+	@echo "📊 [Platform] Loading minimal sample data (fast)..."
+	@$(PYTHON_PLATFORM_MANAGE) generate_sample_data --customers 2 --users 3 --services-per-customer 2 --orders-per-customer 1 --invoices-per-customer 2 --proformas-per-customer 1 --tickets-per-customer 2 --settings=config.settings.dev
 
 # ===============================================================================
 # CODE QUALITY 🧹

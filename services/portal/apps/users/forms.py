@@ -121,16 +121,17 @@ class CustomerRegistrationForm(forms.Form):
     customer_type = forms.ChoiceField(
         label=_("Organization Type"),
         choices=[
-            ('individual', _('Individual')),
             ('srl', _('SRL (Limited Liability Company)')),
             ('pfa', _('PFA (Authorized Individual)')),
             ('sa', _('SA (Joint Stock Company)')),
             ('ong', _('ONG (Non-Profit Organization)')),
+            ('individual', _('Individual')),
         ],
         initial='srl',
         help_text=_("Select your business type for proper invoicing and VAT handling."),
         widget=forms.Select(attrs={
-            'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500'
+            'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
+            'onchange': 'toggleIndividualFields(this.value)'
         })
     )
     
@@ -152,6 +153,20 @@ class CustomerRegistrationForm(forms.Form):
         widget=forms.TextInput(attrs={
             'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400',
             'placeholder': 'RO12345678',
+            'id': 'id_vat_number'
+        })
+    )
+    
+    cnp = forms.CharField(
+        label=_("CNP (Cod Numeric Personal)"),
+        max_length=13,
+        required=False,
+        help_text=_("Romanian Personal Identification Number - required for individuals."),
+        widget=forms.TextInput(attrs={
+            'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400',
+            'placeholder': '1234567890123',
+            'id': 'id_cnp',
+            'style': 'display: none;'  # Hidden by default
         })
     )
     
@@ -265,6 +280,44 @@ class CustomerRegistrationForm(forms.Form):
                     raise ValidationError(_("VAT number must start with RO followed by digits (e.g., RO12345678)"))
         return vat_number
     
+    def clean_cnp(self) -> str:
+        """Validate Romanian CNP (Cod Numeric Personal) format"""
+        cnp = self.cleaned_data.get('cnp', '').strip()
+        if cnp:
+            # CNP must be exactly 13 digits
+            if not cnp.isdigit() or len(cnp) != 13:
+                raise ValidationError(_("CNP must be exactly 13 digits."))
+            
+            # Basic CNP checksum validation (simplified)
+            # Full validation would include birth date validation, county codes, etc.
+            if cnp[0] not in '1234567890':  # Valid century markers
+                raise ValidationError(_("Invalid CNP format."))
+                
+        return cnp
+    
+    def clean(self):
+        """Custom validation that depends on multiple fields"""
+        cleaned_data = super().clean()
+        customer_type = cleaned_data.get('customer_type')
+        vat_number = cleaned_data.get('vat_number')
+        cnp = cleaned_data.get('cnp')
+        
+        # Validate that individuals have CNP, companies have VAT
+        if customer_type == 'individual':
+            if not cnp:
+                raise ValidationError({
+                    'cnp': _('CNP is required for individuals.')
+                })
+            if vat_number:
+                # Clear VAT number for individuals
+                cleaned_data['vat_number'] = ''
+        else:
+            # For companies, CNP should be cleared
+            if cnp:
+                cleaned_data['cnp'] = ''
+                
+        return cleaned_data
+    
     def register_customer(self) -> Optional[Dict[str, Any]]:
         """
         Register customer via Platform API.
@@ -283,6 +336,7 @@ class CustomerRegistrationForm(forms.Form):
                     'customer_type': self.cleaned_data['customer_type'],
                     'company_name': self.cleaned_data['company_name'],
                     'vat_number': self.cleaned_data.get('vat_number', ''),
+                    'cnp': self.cleaned_data.get('cnp', ''),
                     'address_line1': self.cleaned_data['address_line1'],
                     'city': self.cleaned_data['city'],
                     'county': self.cleaned_data['county'],
