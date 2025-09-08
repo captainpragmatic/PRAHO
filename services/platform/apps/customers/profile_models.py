@@ -31,6 +31,13 @@ class CustomerTaxProfile(SoftDeleteModel):
     )
 
     # Romanian Tax Fields
+    cnp = models.CharField(
+        max_length=13,
+        blank=True,
+        verbose_name="CNP",
+        help_text="Cod Numeric Personal (13 cifre)",
+        validators=[RegexValidator(r"^\d{13}$", "CNP invalid (trebuie 13 cifre)")],
+    )
     cui = models.CharField(
         max_length=20, blank=True, verbose_name="CUI/CIF", validators=[RegexValidator(r"^RO\d{2,10}$", "CUI invalid")]
     )
@@ -58,6 +65,7 @@ class CustomerTaxProfile(SoftDeleteModel):
         verbose_name = _("Customer Tax Profile")
         verbose_name_plural = _("Customer Tax Profiles")
         indexes: ClassVar[tuple[models.Index, ...]] = (
+            models.Index(fields=["cnp"]),
             models.Index(fields=["cui"]),
             models.Index(fields=["vat_number"]),
         )
