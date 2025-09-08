@@ -155,7 +155,7 @@ def customer_invoices_api(request: HttpRequest, customer) -> Response:
 @api_view(['POST'])
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
-def customer_invoice_detail_api(request: HttpRequest, invoice_number: str, customer) -> Response:
+def customer_invoice_detail_api(request: HttpRequest, customer, invoice_number: str) -> Response:
     """
     📄 Customer Invoice Detail API
     
@@ -476,7 +476,7 @@ def customer_proformas_api(request: HttpRequest, customer) -> Response:
 @api_view(['POST'])
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
-def customer_proforma_detail_api(request: HttpRequest, proforma_number: str, customer) -> Response:
+def customer_proforma_detail_api(request: HttpRequest, customer, proforma_number: str) -> Response:
     """
     📄 Customer Proforma Detail API
     
