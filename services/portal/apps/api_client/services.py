@@ -1,3 +1,17 @@
+"""
+Platform API Client (Portal → Platform)
+
+Security guidelines for all requests:
+- Customer/user‑scoped endpoints MUST use POST with an HMAC‑signed JSON body
+  that includes identity fields: 'user_id' and, for customer‑scoped calls,
+  'customer_id'. Do not put identities in URL or query parameters
+  (prevents ID enumeration).
+- GET is allowed only for public/non‑identity resources (e.g., service plans,
+  currencies) where no customer/user context is required.
+- The client automatically injects 'timestamp' (and 'user_id' when provided)
+  into the signed body and ensures header/body timestamps match the signature.
+"""
+
 # ===============================================================================
 # PLATFORM API CLIENT SERVICE - PORTAL TO PLATFORM COMMUNICATION 🔗
 # ===============================================================================
@@ -286,7 +300,7 @@ class PlatformAPIClient:
             logger.warning(f"⚠️ [API Client] Customer authentication failed for {email}: {e}")
             return None
     
-    def validate_session_secure(self, customer_id: str, state_version: int = 1) -> Optional[Dict[str, Any]]:
+    def validate_session_secure(self, user_id: str, state_version: int = 1) -> Optional[Dict[str, Any]]:
         """
         🔒 SECURE session validation using HMAC-signed context (No JWT, No ID enumeration)
         
@@ -297,7 +311,7 @@ class PlatformAPIClient:
             # Create request body with user context
             current_timestamp = time.time()
             request_data = {
-                'customer_id': customer_id,
+                'user_id': user_id,
                 'state_version': state_version,
                 'timestamp': current_timestamp
             }
@@ -306,6 +320,7 @@ class PlatformAPIClient:
             data = self._make_request(
                 'POST', 
                 '/users/session/validate/',
+                user_id=user_id,
                 data=request_data  # Context in body, signed by HMAC
             )
             return data
@@ -326,11 +341,12 @@ class PlatformAPIClient:
             return cached_data
 
         request_data = {
-            'customer_id': user_id,
             'action': 'get_user_customers',
+            'user_id': user_id,
             'timestamp': time.time(),
         }
-        data = self._make_request('POST', '/users/customers/', data=request_data)
+        # Pass user_id to _make_request so it auto-injects 'user_id' in the signed body (defensive)
+        data = self._make_request('POST', '/users/customers/', user_id=user_id, data=request_data)
         customers = data.get('results', []) if data.get('success') else []
         cache.set(cache_key, customers, 300)
         return customers
@@ -345,13 +361,15 @@ class PlatformAPIClient:
         data = self._make_request('GET', '/customers/search/', user_id=user_id, params=params)
         return data.get('results', [])
     
-    def get_customer_profile(self, customer_id: str) -> Optional[Dict[str, Any]]:
-        """Get customer profile data"""
+    def get_customer_profile(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """Get user profile data (user-scoped, HMAC body with user_id)"""
         try:
+            payload = {'user_id': user_id, 'timestamp': time.time()}
             data = self._make_request(
-                'GET', 
+                'POST', 
                 '/users/profile/',
-                data={'customer_id': customer_id}
+                user_id=user_id,
+                data=payload
             )
             
             if data.get('success'):
@@ -362,38 +380,40 @@ class PlatformAPIClient:
             logger.warning(f"⚠️ [API Client] Failed to get customer profile: {e}")
             return None
     
-    def update_customer_profile(self, customer_id: str, profile_data: Dict[str, Any]) -> bool:
-        """Update customer profile data"""
+    def update_customer_profile(self, user_id: int, profile_data: Dict[str, Any]) -> bool:
+        """Update customer profile data (requires user_id in signed body for HMAC validation)."""
         try:
-            update_data = {'customer_id': customer_id}
-            update_data.update(profile_data)
-            
+            # Ensure the signed body contains user identity for the HMAC validator
+            update_data: Dict[str, Any] = {**profile_data, 'user_id': user_id}
+
             data = self._make_request(
                 'PUT',
                 '/users/profile/',
-                data=update_data
+                user_id=user_id,
+                data=update_data,
             )
-            
+
             return data.get('success', False)
-            
+
         except PlatformAPIError as e:
             logger.warning(f"⚠️ [API Client] Failed to update customer profile: {e}")
             return False
     
-    def update_customer_password(self, customer_id: str, new_password: str) -> bool:
-        """Update customer password"""
+    def update_customer_password(self, user_id: int, new_password: str) -> bool:
+        """Update customer password (requires user_id in signed body for HMAC validation)."""
         try:
             data = self._make_request(
                 'PUT',
                 '/users/change-password/',
+                user_id=user_id,
                 data={
-                    'customer_id': customer_id,
-                    'new_password': new_password
-                }
+                    'user_id': user_id,
+                    'new_password': new_password,
+                },
             )
-            
+
             return data.get('success', False)
-            
+
         except PlatformAPIError as e:
             logger.warning(f"⚠️ [API Client] Failed to update customer password: {e}")
             return False
@@ -531,28 +551,15 @@ class PlatformAPIClient:
     # BILLING API ENDPOINTS  
     # ===============================================================================
     
-    def get_user_invoices(self, user_id: int, page: int = 1) -> Dict[str, Any]:
-        """Get invoices for user"""
-        params = {'customer_id': user_id, 'page': page}
-        return self._make_request('GET', '/api/billing/invoices/', params=params)
-    
     def get_invoice_details(self, invoice_id: int, user_id: int) -> Dict[str, Any]:
         """Get invoice details"""
         return self._make_request('GET', f'/billing/invoices/{invoice_id}/', user_id=user_id)
-    
-    def get_user_payments(self, user_id: int) -> List[Dict[str, Any]]:
-        """Get payments for user"""
-        data = self._make_request('GET', '/billing/payments/', user_id=user_id)
-        return data.get('results', [])
     
     # ===============================================================================
     # TICKETS API ENDPOINTS
     # ===============================================================================
     
-    def get_user_tickets(self, user_id: int, page: int = 1) -> Dict[str, Any]:
-        """Get tickets for user"""
-        params = {'customer_id': user_id, 'page': page}
-        return self._make_request('GET', '/api/tickets/', params=params)
+    # (Legacy user-scoped GET ticket methods removed; use secure POST endpoints instead)
     
     def get_ticket_details(self, ticket_id: int, user_id: int) -> Dict[str, Any]:
         """Get ticket details"""
@@ -579,58 +586,7 @@ class PlatformAPIClient:
     # DASHBOARD DATA
     # ===============================================================================
     
-    def get_dashboard_data(self, user_id: int) -> Dict[str, Any]:
-        """Get dashboard data for user"""
-        cache_key = f"dashboard_data_{user_id}"
-        cached_data = cache.get(cache_key)
-        if cached_data:
-            return cached_data
-        
-        try:
-            # Make multiple API calls to get dashboard data
-            customers = self.get_user_customers(user_id)
-            invoices_data = self.get_user_invoices(user_id)
-            tickets_data = self.get_user_tickets(user_id)
-            
-            # The platform API returns invoices in 'invoices' key, not 'results'
-            invoices_list = invoices_data.get('invoices', [])
-            tickets_list = tickets_data.get('results', [])  # Tickets might still use 'results'
-            
-            # Convert invoice cents to decimal amounts for easier template usage
-            for invoice in invoices_list:
-                if 'total_cents' in invoice:
-                    invoice['total_amount'] = invoice['total_cents'] / 100.0
-            
-            dashboard_data = {
-                'customers': customers,
-                'recent_invoices': invoices_list[:5],  # Last 5 invoices
-                'recent_tickets': tickets_list[:5],    # Last 5 tickets
-                'stats': {
-                    'total_customers': len(customers),
-                    'active_services': sum(len(self.get_customer_services(c['id'], user_id)) for c in customers[:3]),  # Sample first 3
-                    'open_tickets': len([t for t in tickets_list if t.get('status') == 'open']),
-                    'total_invoices': invoices_data.get('pagination', {}).get('total_items', 0),
-                }
-            }
-            
-            # Cache for 2 minutes
-            cache.set(cache_key, dashboard_data, 120)
-            return dashboard_data
-            
-        except PlatformAPIError as e:
-            logger.error(f"🔥 [API Client] Failed to get dashboard data: {e}")
-            # Return empty data structure on API failure
-            return {
-                'customers': [],
-                'recent_invoices': [],
-                'recent_tickets': [],
-                'stats': {
-                    'total_customers': 0,
-                    'active_services': 0,
-                    'open_tickets': 0,
-                    'total_invoices': 0,
-                }
-            }
+    # (Removed legacy get_dashboard_data; portal dashboard aggregates via InvoiceViewService)
     
     # ===============================================================================
     # SECURE BILLING API ENDPOINTS 💳
