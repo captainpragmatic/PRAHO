@@ -256,6 +256,215 @@
     </div>
     {% endif %}
 
+    <!-- Hosting Services Card -->
+    <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
+        <div class="p-6">
+            <div class="flex items-center justify-between mb-6">
+                <h2 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
+                    🔧 {% trans 'Hosting Services' %}
+                </h2>
+                <div class="flex items-center space-x-2 text-sm text-slate-400">
+                    <span class="bg-slate-700 px-2 py-1 rounded">{{ services_summary.total }} {% trans 'Total' %}</span>
+                    {% if services_summary.active > 0 %}
+                    <span class="bg-green-900 text-green-300 px-2 py-1 rounded">{{ services_summary.active }} {% trans 'Active' %}</span>
+                    {% endif %}
+                    {% if services_summary.suspended > 0 %}
+                    <span class="bg-yellow-900 text-yellow-300 px-2 py-1 rounded">{{ services_summary.suspended }} {% trans 'Suspended' %}</span>
+                    {% endif %}
+                    {% if services_summary.pending > 0 %}
+                    <span class="bg-blue-900 text-blue-300 px-2 py-1 rounded">{{ services_summary.pending }} {% trans 'Pending' %}</span>
+                    {% endif %}
+                </div>
+            </div>
+
+            {% if services %}
+            <div class="space-y-3">
+                {% for service in services %}
+                <div class="bg-slate-700 border border-slate-600 rounded-lg p-4">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h3 class="font-medium text-white">
+                                {% if service.service_plan %}{{ service.service_plan.name }}{% else %}{% trans 'Service' %}{% endif %}
+                            </h3>
+                            <p class="text-sm text-slate-400">
+                                {% trans 'Created' %}: {{ service.created_at|date:"d M Y" }}
+                                {% if service.domain %}• {{ service.domain }}{% endif %}
+                            </p>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            {% if service.status == 'active' %}
+                            {% badge service.get_status_display variant="success" icon="🟢" %}
+                            {% elif service.status == 'suspended' %}
+                            {% badge service.get_status_display variant="warning" icon="⏸️" %}
+                            {% elif service.status == 'pending' %}
+                            {% badge service.get_status_display variant="info" icon="⏳" %}
+                            {% else %}
+                            {% badge service.get_status_display variant="secondary" %}
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+                {% if services_summary.total > 5 %}
+                <div class="text-center py-2">
+                    <a href="#" class="text-blue-400 hover:text-blue-300 text-sm">
+                        {% trans 'View all' %} {{ services_summary.total }} {% trans 'services' %} →
+                    </a>
+                </div>
+                {% endif %}
+            </div>
+            {% else %}
+            <div class="text-center py-8">
+                <p class="text-slate-400">🔧 {% trans 'No hosting services found' %}</p>
+                <p class="text-sm text-slate-500 mt-2">
+                    {% trans 'This customer has not purchased any hosting services yet.' %}
+                </p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Orders & Invoices Card -->
+    <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
+        <div class="p-6">
+            <div class="flex items-center justify-between mb-6">
+                <h2 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
+                    💰 {% trans 'Orders & Invoices' %}
+                </h2>
+                <div class="flex items-center space-x-2 text-sm text-slate-400">
+                    <span class="bg-slate-700 px-2 py-1 rounded">{{ invoices_summary.total }} {% trans 'Total' %}</span>
+                    {% if invoices_summary.paid > 0 %}
+                    <span class="bg-green-900 text-green-300 px-2 py-1 rounded">{{ invoices_summary.paid }} {% trans 'Paid' %}</span>
+                    {% endif %}
+                    {% if invoices_summary.unpaid > 0 %}
+                    <span class="bg-red-900 text-red-300 px-2 py-1 rounded">{{ invoices_summary.unpaid }} {% trans 'Unpaid' %}</span>
+                    {% endif %}
+                    {% if invoices_summary.draft > 0 %}
+                    <span class="bg-slate-600 text-slate-300 px-2 py-1 rounded">{{ invoices_summary.draft }} {% trans 'Draft' %}</span>
+                    {% endif %}
+                </div>
+            </div>
+
+            {% if invoices %}
+            <div class="space-y-3">
+                {% for invoice in invoices %}
+                <div class="bg-slate-700 border border-slate-600 rounded-lg p-4">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h3 class="font-medium text-white">
+                                {% if invoice.type == 'proforma' %}📋 {% trans 'Proforma' %}{% else %}📄 {% trans 'Invoice' %}{% endif %}
+                                {{ invoice.invoice_number }}
+                            </h3>
+                            <p class="text-sm text-slate-400">
+                                {{ invoice.created_at|date:"d M Y" }} • 
+                                {% if invoice.total %}{{ invoice.total|floatformat:2 }} {% trans 'RON' %}{% endif %}
+                            </p>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            {% if invoice.status == 'paid' %}
+                            {% badge invoice.get_status_display variant="success" icon="✅" %}
+                            {% elif invoice.status == 'pending' %}
+                            {% badge invoice.get_status_display variant="warning" icon="⏳" %}
+                            {% elif invoice.status == 'overdue' %}
+                            {% badge invoice.get_status_display variant="danger" icon="❌" %}
+                            {% elif invoice.status == 'draft' %}
+                            {% badge invoice.get_status_display variant="secondary" icon="📝" %}
+                            {% else %}
+                            {% badge invoice.get_status_display variant="secondary" %}
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+                {% if invoices_summary.total > 5 %}
+                <div class="text-center py-2">
+                    <a href="#" class="text-blue-400 hover:text-blue-300 text-sm">
+                        {% trans 'View all' %} {{ invoices_summary.total }} {% trans 'invoices' %} →
+                    </a>
+                </div>
+                {% endif %}
+            </div>
+            {% else %}
+            <div class="text-center py-8">
+                <p class="text-slate-400">💰 {% trans 'No invoices found' %}</p>
+                <p class="text-sm text-slate-500 mt-2">
+                    {% trans 'This customer has not been billed yet.' %}
+                </p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Support Tickets Card -->
+    <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
+        <div class="p-6">
+            <div class="flex items-center justify-between mb-6">
+                <h2 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
+                    🎫 {% trans 'Support Tickets' %}
+                </h2>
+                <div class="flex items-center space-x-2 text-sm text-slate-400">
+                    <span class="bg-slate-700 px-2 py-1 rounded">{{ tickets_summary.total }} {% trans 'Total' %}</span>
+                    {% if tickets_summary.open > 0 %}
+                    <span class="bg-yellow-900 text-yellow-300 px-2 py-1 rounded">{{ tickets_summary.open }} {% trans 'Open' %}</span>
+                    {% endif %}
+                    {% if tickets_summary.closed > 0 %}
+                    <span class="bg-green-900 text-green-300 px-2 py-1 rounded">{{ tickets_summary.closed }} {% trans 'Closed' %}</span>
+                    {% endif %}
+                    {% if tickets_summary.pending > 0 %}
+                    <span class="bg-blue-900 text-blue-300 px-2 py-1 rounded">{{ tickets_summary.pending }} {% trans 'Pending' %}</span>
+                    {% endif %}
+                </div>
+            </div>
+
+            {% if tickets %}
+            <div class="space-y-3">
+                {% for ticket in tickets %}
+                <div class="bg-slate-700 border border-slate-600 rounded-lg p-4">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h3 class="font-medium text-white">
+                                #{{ ticket.id }} - {{ ticket.subject|truncatechars:50 }}
+                            </h3>
+                            <p class="text-sm text-slate-400">
+                                {{ ticket.created_at|date:"d M Y H:i" }}
+                                {% if ticket.priority %}• {% trans 'Priority' %}: {{ ticket.get_priority_display }}{% endif %}
+                            </p>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            {% if ticket.status == 'open' %}
+                            {% badge ticket.get_status_display variant="warning" icon="🔓" %}
+                            {% elif ticket.status == 'in_progress' %}
+                            {% badge ticket.get_status_display variant="info" icon="⚡" %}
+                            {% elif ticket.status == 'closed' %}
+                            {% badge ticket.get_status_display variant="success" icon="✅" %}
+                            {% elif ticket.status == 'pending' %}
+                            {% badge ticket.get_status_display variant="secondary" icon="⏳" %}
+                            {% else %}
+                            {% badge ticket.get_status_display variant="secondary" %}
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+                {% if tickets_summary.total > 5 %}
+                <div class="text-center py-2">
+                    <a href="#" class="text-blue-400 hover:text-blue-300 text-sm">
+                        {% trans 'View all' %} {{ tickets_summary.total }} {% trans 'tickets' %} →
+                    </a>
+                </div>
+                {% endif %}
+            </div>
+            {% else %}
+            <div class="text-center py-8">
+                <p class="text-slate-400">🎫 {% trans 'No support tickets found' %}</p>
+                <p class="text-sm text-slate-500 mt-2">
+                    {% trans 'This customer has not created any support tickets yet.' %}
+                </p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
     <!-- Navigation -->
     <div class="flex justify-between items-center">
         <a href="{% url 'customers:list' %}"

@@ -146,6 +146,67 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
     # Get recent notes
     recent_notes = customer.notes.order_by("-created_at")[:5]
 
+    # Get services for this customer (using services app)
+    services = []
+    services_summary = {'total': 0, 'active': 0, 'suspended': 0}
+    try:
+        # Import here to avoid circular imports
+        from apps.provisioning.models import Service
+        services_qs = Service.objects.filter(customer=customer).select_related('service_plan').order_by('-created_at')[:5]
+        services = list(services_qs)
+        
+        # Calculate services summary
+        all_services = Service.objects.filter(customer=customer)
+        services_summary = {
+            'total': all_services.count(),
+            'active': all_services.filter(status='active').count(),
+            'suspended': all_services.filter(status='suspended').count(),
+            'pending': all_services.filter(status='pending').count(),
+        }
+    except ImportError:
+        # Services app not available
+        pass
+
+    # Get recent invoices/orders for this customer (using billing app)
+    invoices = []
+    invoices_summary = {'total': 0, 'paid': 0, 'unpaid': 0}
+    try:
+        from apps.billing.models import Invoice
+        invoices_qs = Invoice.objects.filter(customer=customer).order_by('-created_at')[:5]
+        invoices = list(invoices_qs)
+        
+        # Calculate invoices summary
+        all_invoices = Invoice.objects.filter(customer=customer)
+        invoices_summary = {
+            'total': all_invoices.count(),
+            'paid': all_invoices.filter(status='paid').count(),
+            'unpaid': all_invoices.filter(status__in=['pending', 'overdue']).count(),
+            'draft': all_invoices.filter(status='draft').count(),
+        }
+    except ImportError:
+        # Billing app not available
+        pass
+
+    # Get recent tickets for this customer (using tickets app)
+    tickets = []
+    tickets_summary = {'total': 0, 'open': 0, 'closed': 0}
+    try:
+        from apps.tickets.models import Ticket
+        tickets_qs = Ticket.objects.filter(customer=customer).order_by('-created_at')[:5]
+        tickets = list(tickets_qs)
+        
+        # Calculate tickets summary
+        all_tickets = Ticket.objects.filter(customer=customer)
+        tickets_summary = {
+            'total': all_tickets.count(),
+            'open': all_tickets.filter(status__in=['open', 'in_progress']).count(),
+            'closed': all_tickets.filter(status='closed').count(),
+            'pending': all_tickets.filter(status='pending').count(),
+        }
+    except ImportError:
+        # Tickets app not available
+        pass
+
     context = {
         "customer": customer,
         "tax_profile": customer.get_tax_profile(),
@@ -153,6 +214,13 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
         "primary_address": customer.get_primary_address(),
         "billing_address": customer.get_billing_address(),
         "recent_notes": recent_notes,
+        # New data for cards
+        "services": services,
+        "services_summary": services_summary,
+        "invoices": invoices,
+        "invoices_summary": invoices_summary,
+        "tickets": tickets,
+        "tickets_summary": tickets_summary,
     }
 
     return render(request, "customers/detail.html", context)
