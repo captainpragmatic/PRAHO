@@ -100,8 +100,8 @@ dev-platform:
 	@echo "📍 PYTHONPATH: services/platform (scoped)"
 	@echo "🗄️ Running migrations..."
 	@$(PYTHON_PLATFORM_MANAGE) migrate --settings=config.settings.dev
-	@echo "🔧 Setting up test data..."
-	@$(PYTHON_PLATFORM) scripts/setup_test_data.py || echo "⚠️ Test data setup skipped"
+	@echo "🔧 Setting up comprehensive test data..."
+	@$(PYTHON_PLATFORM_MANAGE) generate_sample_data --customers 2 --users 3 --services-per-customer 2 --orders-per-customer 1 --invoices-per-customer 2 --proformas-per-customer 1 --tickets-per-customer 2 --settings=config.settings.dev || echo "⚠️ Sample data setup skipped"
 	@echo "⚙️ Setting up scheduled tasks..."
 	@$(PYTHON_PLATFORM_MANAGE) setup_scheduled_tasks --settings=config.settings.dev || echo "⚠️ Scheduled tasks setup skipped"
 	@echo "🚀 Starting Django-Q2 workers in background..."
