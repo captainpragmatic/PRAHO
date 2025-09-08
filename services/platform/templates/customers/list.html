@@ -24,7 +24,7 @@
         <label for="search" class="block text-sm font-medium text-slate-300 mb-1">
           🔍 {% trans 'Search' %}
         </label>
-        {% input_field name="search" value=search_query placeholder="Company name, CUI, email..." %}
+        {% input_field name="search" value=search_query placeholder="Name, CNP/CUI, email..." %}
       </div>
 
       {% button "Search" variant="primary" type="submit" %}
@@ -62,13 +62,13 @@
         <thead class="bg-slate-700">
           <tr>
             <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Company' %}
+              {% trans 'Customer' %}
             </th>
             <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
               {% trans 'Contact' %}
             </th>
             <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'CUI / VAT' %}
+              {% trans 'ID (CNP/CUI/VAT)' %}
             </th>
             <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
               {% trans 'Status' %}
@@ -83,10 +83,24 @@
           <tr class="hover:bg-slate-700/50 transition-colors">
             <td class="px-6 py-4">
               <div>
-                <div class="text-white font-medium">
+                <div class="text-white font-medium flex items-center gap-2">
                   <a href="{% url 'customers:detail' customer.pk %}" class="hover:text-blue-400">
-                    {{ customer.company_name }}
+                    {{ customer.get_display_name }}
                   </a>
+                  {# Show customer type badge: Individual / Company / PFA/SRL / NGO #}
+                  {% if customer.customer_type %}
+                    {% if customer.customer_type == "individual" %}
+                      {% badge customer.get_customer_type_display variant="secondary" size="sm" %}
+                    {% elif customer.customer_type == "company" %}
+                      {% badge customer.get_customer_type_display variant="primary" size="sm" %}
+                    {% elif customer.customer_type == "pfa" %}
+                      {% badge customer.get_customer_type_display variant="info" size="sm" %}
+                    {% elif customer.customer_type == "ngo" %}
+                      {% badge customer.get_customer_type_display variant="success" size="sm" %}
+                    {% else %}
+                      {% badge customer.get_customer_type_display variant="secondary" size="sm" %}
+                    {% endif %}
+                  {% endif %}
                 </div>
                 <div class="text-slate-400 text-sm">
                   {{ customer.legal_address|truncatechars:40 }}
@@ -106,19 +120,35 @@
 
             <td class="px-6 py-4">
               <div>
-                <div class="text-white font-mono">
-                  🇷🇴 {{ customer.cui }}
-                </div>
-                {% if customer.vat_number %}
-                <div class="text-slate-400 text-sm">
-                  💰 {{ customer.vat_number }}
-                </div>
+                {% if customer.customer_type == 'individual' %}
+                  {% if customer.tax_profile and customer.tax_profile.cnp %}
+                    <div class="text-white font-mono">🧾 {{ customer.tax_profile.cnp|slice:':8' }}</div>
+                  {% else %}
+                    <div class="text-slate-400 text-sm">—</div>
+                  {% endif %}
+                {% else %}
+                  {% if customer.tax_profile and customer.tax_profile.cui %}
+                    <div class="text-white font-mono">🇷🇴 {{ customer.tax_profile.cui }}</div>
+                  {% endif %}
+                  {% if customer.tax_profile and customer.tax_profile.vat_number %}
+                    <div class="text-slate-400 text-sm">💰 {{ customer.tax_profile.vat_number }}</div>
+                  {% endif %}
                 {% endif %}
               </div>
             </td>
 
             <td class="px-6 py-4">
-              {% badge "Active" variant="success" icon="✅" %}
+              {% if customer.status == 'active' %}
+                {% badge customer.get_status_display variant="success" icon="✅" %}
+              {% elif customer.status == 'suspended' %}
+                {% badge customer.get_status_display variant="warning" icon="⏸️" %}
+              {% elif customer.status == 'inactive' %}
+                {% badge customer.get_status_display variant="secondary" icon="⚪" %}
+              {% elif customer.status == 'prospect' %}
+                {% badge customer.get_status_display variant="info" icon="🕓" %}
+              {% else %}
+                {% badge customer.get_status_display variant="secondary" %}
+              {% endif %}
             </td>
 
             <td class="px-6 py-4">
