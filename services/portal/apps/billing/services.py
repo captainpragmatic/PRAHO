@@ -2,6 +2,12 @@
 Portal Billing Services - Direct Platform API Integration
 Handles fetching billing data directly from the platform service via API.
 NO DATABASE QUERIES - Pure API-only communication.
+
+Security guidelines:
+- All customer/user‑scoped requests use POST with an HMAC‑signed JSON body
+  that includes 'user_id' and 'customer_id'. Do not place identities in URL or
+  query parameters (prevents ID enumeration).
+- GET is used only for public/non‑identity resources (e.g., currencies list).
 """
 
 from __future__ import annotations
@@ -9,7 +15,6 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from django.conf import settings
 from apps.api_client.services import PlatformAPIClient
 from .schemas import Currency, Invoice, InvoiceLine, InvoiceSummary, Proforma, ProformaLine
 from .serializers import (
@@ -30,9 +35,7 @@ class InvoiceViewService:
     def get_customer_invoices(self, customer_id: int, user_id: int, force_sync: bool = False) -> List[Invoice]:
         """Get invoices for a customer directly from Platform API"""
         try:
-            logger.debug(
-                f"[TEMP DEBUG][InvoiceService] Request invoices: customer_id={customer_id} user_id={user_id} force_sync={force_sync}"
-            )
+            # Debug logging reduced after stabilization
             # Call Platform API directly
             response = self.api_client.post('/billing/invoices/', data={
                 'customer_id': customer_id,
@@ -45,9 +48,7 @@ class InvoiceViewService:
                 return []
             
             invoices_data = response.get('invoices', [])
-            logger.debug(
-                f"[TEMP DEBUG][InvoiceService] Platform returned invoices_count={len(invoices_data)} for customer_id={customer_id}"
-            )
+            # Debug logging reduced after stabilization
             invoices = []
             
             # Convert API response to dataclass instances
@@ -66,12 +67,10 @@ class InvoiceViewService:
             logger.error(f"🔥 [Invoice API] Error retrieving invoices for customer {customer_id}: {e}")
             return []
     
-    def get_invoice_detail(self, invoice_number: str, customer_id: int, force_sync: bool = False) -> Optional[Invoice]:
+    def get_invoice_detail(self, invoice_number: str, customer_id: int, user_id: int, force_sync: bool = False) -> Optional[Invoice]:
         """Get invoice details by number directly from Platform API"""
         try:
-            logger.debug(
-                f"[TEMP DEBUG][InvoiceService] Request invoice detail: number={invoice_number} customer_id={customer_id}"
-            )
+            # Debug logging reduced after stabilization
             # Call Platform API directly
             response = self.api_client.post(
                 f'/billing/invoices/{invoice_number}/',
@@ -103,9 +102,7 @@ class InvoiceViewService:
     def get_invoice_summary(self, customer_id: int, user_id: int) -> Dict[str, Any]:
         """Get invoice summary statistics directly from Platform API"""
         try:
-            logger.debug(
-                f"[TEMP DEBUG][InvoiceService] Request invoice summary: customer_id={customer_id} user_id={user_id}"
-            )
+            # Debug logging reduced after stabilization
             # Call Platform API directly
             response = self.api_client.post('/billing/summary/', data={
                 'customer_id': customer_id,
@@ -145,9 +142,7 @@ class InvoiceViewService:
     def get_customer_proformas(self, customer_id: int, user_id: int, force_sync: bool = False) -> List[Proforma]:
         """Get proformas for a customer directly from Platform API"""
         try:
-            logger.debug(
-                f"[TEMP DEBUG][InvoiceService] Request proformas: customer_id={customer_id} user_id={user_id} force_sync={force_sync}"
-            )
+            # Debug logging reduced after stabilization
             # Call Platform API directly
             response = self.api_client.post('/billing/proformas/', data={
                 'customer_id': customer_id,
@@ -160,9 +155,7 @@ class InvoiceViewService:
                 return []
             
             proformas_data = response.get('proformas', [])
-            logger.debug(
-                f"[TEMP DEBUG][InvoiceService] Platform returned proformas_count={len(proformas_data)} for customer_id={customer_id}"
-            )
+            # Debug logging reduced after stabilization
             proformas = []
             
             # Convert API response to dataclass instances
@@ -181,7 +174,7 @@ class InvoiceViewService:
             logger.error(f"🔥 [Proforma API] Error retrieving proformas for customer {customer_id}: {e}")
             return []
     
-    def get_proforma_detail(self, proforma_number: str, customer_id: int, force_sync: bool = False) -> Optional[Proforma]:
+    def get_proforma_detail(self, proforma_number: str, customer_id: int, user_id: int, force_sync: bool = False) -> Optional[Proforma]:
         """Get proforma details by number directly from Platform API"""
         try:
             # Call Platform API directly

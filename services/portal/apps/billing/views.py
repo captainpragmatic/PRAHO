@@ -45,9 +45,6 @@ def invoices_list_view(request: HttpRequest) -> HttpResponse:
         
         # Get both invoices and proformas from service
         documents = []
-        logger.debug(
-            f"[TEMP DEBUG][BillingView] invoices_list_view start: user_id={request.user.id} customer_id={customer_id} doc_type={doc_type}"
-        )
         
         if doc_type in ['all', 'invoice']:
             invoices = invoice_service.get_customer_invoices(
@@ -80,9 +77,6 @@ def invoices_list_view(request: HttpRequest) -> HttpResponse:
         
         # Sort documents by creation date (newest first)
         documents.sort(key=lambda x: x.created_at, reverse=True)
-        logger.debug(
-            f"[TEMP DEBUG][BillingView] After merge/filter: documents_total={len(documents)}"
-        )
         
         # Simple pagination (could be enhanced)
         page = max(1, int(request.GET.get('page', 1)))
@@ -143,7 +137,8 @@ def invoice_detail_view(request: HttpRequest, invoice_number: str) -> HttpRespon
     """
     # Check authentication via middleware (customer_id is set by PortalAuthenticationMiddleware)
     customer_id = getattr(request, 'customer_id', None)
-    if not customer_id:
+    user_id = getattr(request, 'user_id', None)
+    if not customer_id or not user_id:
         from django.shortcuts import redirect
         return redirect('/login/')
     
@@ -155,6 +150,7 @@ def invoice_detail_view(request: HttpRequest, invoice_number: str) -> HttpRespon
         invoice = invoice_service.get_invoice_detail(
             invoice_number=invoice_number,
             customer_id=customer_id,
+            user_id=user_id,
             force_sync=force_sync
         )
         
@@ -373,7 +369,8 @@ def proforma_detail_view(request: HttpRequest, proforma_number: str) -> HttpResp
     """
     # Check authentication via middleware (customer_id is set by PortalAuthenticationMiddleware)
     customer_id = getattr(request, 'customer_id', None)
-    if not customer_id:
+    user_id = getattr(request, 'user_id', None)
+    if not customer_id or not user_id:
         from django.shortcuts import redirect
         return redirect('/login/')
     
@@ -385,6 +382,7 @@ def proforma_detail_view(request: HttpRequest, proforma_number: str) -> HttpResp
         proforma = invoice_service.get_proforma_detail(
             proforma_number=proforma_number,
             customer_id=customer_id,
+            user_id=user_id,
             force_sync=force_sync
         )
         

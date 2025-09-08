@@ -11,7 +11,6 @@ from django.contrib import messages
 
 from apps.api_client.services import api_client, PlatformAPIError
 from apps.billing.services import InvoiceViewService
-from apps.users.views import check_authentication
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +120,7 @@ def account_overview_view(request: HttpRequest) -> HttpResponse:
     
     try:
         # Get customer information directly from API
-        customer_details = api_client.get_customer_details(customer_id)
+        customer_details = api_client.get_customer_details(customer_id, request.user.id)
         context['account_info'] = customer_details
         context['customers'] = [customer_details]  # Single customer view
         
@@ -133,5 +132,3 @@ def account_overview_view(request: HttpRequest) -> HttpResponse:
         messages.error(request, _("Could not load account information. Please try again later."))
     
     return render(request, "dashboard/account_overview.html", context)
-
-

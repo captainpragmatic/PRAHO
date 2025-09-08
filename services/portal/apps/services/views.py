@@ -20,7 +20,8 @@ def service_list(request: HttpRequest):
     """
     # Check authentication via Django session
     customer_id = request.session.get('customer_id')
-    if not customer_id:
+    user_id = request.session.get('user_id')
+    if not customer_id or not user_id:
         return redirect('/login/')
     
     # Get filter parameters
@@ -32,6 +33,7 @@ def service_list(request: HttpRequest):
         # Get services from platform API
         response = services_api.get_customer_services(
             customer_id=customer_id,
+            user_id=user_id,
             page=page,
             status=status_filter,
             service_type=service_type_filter
@@ -41,7 +43,7 @@ def service_list(request: HttpRequest):
         total_count = response.get('count', 0)
         
         # Get summary for header stats
-        summary = services_api.get_services_summary(customer_id)
+        summary = services_api.get_services_summary(customer_id, user_id)
         active_count = summary.get('active_services', 0)
         
         context = {
@@ -92,19 +94,19 @@ def service_list(request: HttpRequest):
 
 
 def service_detail(request: HttpRequest, service_id: int):
-    # Check authentication via Django session
-    customer_id = request.session.get('customer_id')
-    if not customer_id:
-        return redirect('/login/')
     """
     Customer service detail view - shows service info, usage, and management options.
     Only accessible by service owner (customer).
     """
+    # Check authentication via Django session
     customer_id = request.session.get('customer_id')
+    user_id = request.session.get('user_id')
+    if not customer_id or not user_id:
+        return redirect('/login/')
     
     try:
         # Get service details
-        service = services_api.get_service_detail(customer_id, service_id)
+        service = services_api.get_service_detail(customer_id, user_id, service_id)
         
         # Get service usage statistics
         usage = services_api.get_service_usage(customer_id, service_id, period='30d')
@@ -114,6 +116,7 @@ def service_detail(request: HttpRequest, service_id: int):
         
         context = {
             'service': service,
+            'service_id': service_id,  # Add service_id explicitly for URL reversing
             'usage': usage,
             'domains': domains,
             'can_manage': service.get('status') in ['active', 'suspended'],  # Customer can manage active/suspended services
@@ -165,15 +168,15 @@ def service_usage(request: HttpRequest, service_id: int):
 
 
 def service_request_action(request: HttpRequest, service_id: int):
-    # Check authentication via Django session
-    customer_id = request.session.get('customer_id')
-    if not customer_id:
-        return redirect('/login/')
     """
     Customer service action request (upgrade, suspend request, etc.).
     Creates requests that require staff approval.
     """
+    # Check authentication via Django session
     customer_id = request.session.get('customer_id')
+    user_id = request.session.get('user_id')
+    if not customer_id or not user_id:
+        return redirect('/login/')
     
     if request.method == 'POST':
         action = request.POST.get('action', '')
@@ -220,7 +223,7 @@ def service_request_action(request: HttpRequest, service_id: int):
     
     # GET request - show action form
     try:
-        service = services_api.get_service_detail(customer_id, service_id)
+        service = services_api.get_service_detail(customer_id, user_id, service_id)
         available_plans = services_api.get_available_plans(customer_id, service.get('service_type', ''))
         
         context = {
@@ -243,21 +246,21 @@ def service_request_action(request: HttpRequest, service_id: int):
 
 
 def services_dashboard_widget(request: HttpRequest):
-    # Check authentication via Django session
-    customer_id = request.session.get('customer_id')
-    if not customer_id:
-        return redirect('/login/')
     """
     Dashboard widget showing services summary for customer.
     Used in main dashboard view.
     """
+    # Check authentication via Django session
     customer_id = request.session.get('customer_id')
+    user_id = request.session.get('user_id')
+    if not customer_id or not user_id:
+        return redirect('/login/')
     
     try:
-        summary = services_api.get_services_summary(customer_id)
+        summary = services_api.get_services_summary(customer_id, user_id)
         
         # Get recent services (last 5)
-        response = services_api.get_customer_services(customer_id, page=1)
+        response = services_api.get_customer_services(customer_id, user_id, page=1)
         recent_services = response.get('results', [])[:5]
         
         context = {

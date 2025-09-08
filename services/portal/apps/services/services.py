@@ -1,9 +1,20 @@
+"""
+Services API Client (customer‑facing "My Services")
+
+Security guidelines:
+- All customer/user‑scoped calls MUST use POST with an HMAC‑signed JSON body
+  that includes 'user_id' and 'customer_id'. Avoid putting identities in URL
+  or query parameters to prevent ID enumeration.
+- GET is reserved for public/non‑identity endpoints (e.g., /api/services/plans/),
+  which accept optional filters but no customer/user identity.
+"""
+
 # ===============================================================================
 # SERVICES API CLIENT SERVICE - CUSTOMER HOSTING MANAGEMENT 🔧
 # ===============================================================================
 
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Any
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 
 logger = logging.getLogger(__name__)
@@ -20,12 +31,13 @@ class ServicesAPIClient(PlatformAPIClient):
     - Service management (limited customer actions)
     """
     
-    def get_customer_services(self, customer_id: int, page: int = 1, status: str = '', service_type: str = '') -> Dict[str, Any]:
+    def get_customer_services(self, customer_id: int, user_id: int, page: int = 1, status: str = '', service_type: str = '') -> Dict[str, Any]:
         """
         Get paginated list of hosting services for a specific customer.
         
         Args:
             customer_id: Customer ID for filtering services
+            user_id: User ID for HMAC authentication
             page: Page number for pagination
             status: Filter by service status (active, suspended, pending, cancelled)
             service_type: Filter by service type (shared, vps, dedicated, etc.)
@@ -34,40 +46,53 @@ class ServicesAPIClient(PlatformAPIClient):
             Dict containing services list and pagination info
         """
         try:
-            params = {
+            data = {
                 'customer_id': customer_id,
+                'user_id': user_id,
                 'page': page,
                 'page_size': 20,
             }
             
             if status:
-                params['status'] = status
+                data['status'] = status
             if service_type:
-                params['service_type'] = service_type
+                data['service_type'] = service_type
                 
-            response = self._make_request('GET', '/services/', params=params)
+            response = self._make_request('POST', '/services/', user_id=user_id, data=data)
             
-            logger.info(f"✅ [Services API] Retrieved services for customer {customer_id}: {response.get('count', 0)} total")
-            return response
+            # Transform platform API response format to expected portal format
+            if response.get('success') and 'data' in response:
+                platform_data = response['data']
+                adapted_response = {
+                    'results': platform_data.get('services', []),
+                    'count': platform_data.get('pagination', {}).get('total', 0),
+                    'stats': platform_data.get('stats', {})
+                }
+                logger.info(f"✅ [Services API] Retrieved services for customer {customer_id}: {adapted_response.get('count', 0)} total")
+                return adapted_response
+            else:
+                logger.warning(f"⚠️ [Services API] Unexpected response format: {response}")
+                return {'results': [], 'count': 0}
             
         except PlatformAPIError as e:
             logger.error(f"🔥 [Services API] Error retrieving services for customer {customer_id}: {e}")
             raise
     
-    def get_service_detail(self, customer_id: int, service_id: int) -> Dict[str, Any]:
+    def get_service_detail(self, customer_id: int, user_id: int, service_id: int) -> Dict[str, Any]:
         """
         Get detailed service information for customer view.
         
         Args:
             customer_id: Customer ID for authorization
+            user_id: User ID for HMAC authentication
             service_id: Service ID to retrieve
             
         Returns:
             Dict containing service details, plan info, and configuration
         """
         try:
-            data = {'customer_id': customer_id}
-            response = self._make_request('POST', f'/services/{service_id}/', data=data)
+            data = {'customer_id': customer_id, 'user_id': user_id}
+            response = self._make_request('POST', f'/services/{service_id}/', user_id=user_id, data=data)
             
             logger.info(f"✅ [Services API] Retrieved service {service_id} details for customer {customer_id}")
             return response
@@ -109,19 +134,20 @@ class ServicesAPIClient(PlatformAPIClient):
                 'period': period
             }
     
-    def get_services_summary(self, customer_id: int) -> Dict[str, Any]:
+    def get_services_summary(self, customer_id: int, user_id: int) -> Dict[str, Any]:
         """
         Get services summary statistics for customer dashboard.
         
         Args:
             customer_id: Customer ID for statistics
+            user_id: User ID for HMAC authentication
             
         Returns:
             Dict containing service counts by status and type
         """
         try:
-            data = {'customer_id': customer_id}
-            response = self._make_request('POST', '/services/summary/', data=data)
+            data = {'customer_id': customer_id, 'user_id': user_id}
+            response = self._make_request('POST', '/services/summary/', user_id=user_id, data=data)
             
             logger.info(f"✅ [Services API] Retrieved services summary for customer {customer_id}")
             return response
@@ -207,11 +233,12 @@ class ServicesAPIClient(PlatformAPIClient):
             List of available plan dictionaries
         """
         try:
-            params = {'customer_id': customer_id}
+            # Platform expects GET /api/services/plans/ with optional plan_type filter
+            params = {}
             if service_type:
-                params['service_type'] = service_type
-                
-            response = self._make_request('GET', '/plans/', params=params)
+                params['plan_type'] = service_type
+            
+            response = self._make_request('GET', '/services/plans/', params=params)
             
             logger.info(f"✅ [Services API] Retrieved available plans for customer {customer_id}")
             return response.get('plans', [])

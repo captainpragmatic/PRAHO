@@ -65,7 +65,7 @@
                         <dl class="space-y-2">
                             <div>
                                 <dt class="text-sm font-medium text-gray-700 dark:text-gray-300">{% trans "Service ID" %}</dt>
-                                <dd class="text-sm text-gray-900 dark:text-white">#{{ service.id }}</dd>
+                                <dd class="text-sm text-gray-900 dark:text-white">#{{ service_id }}</dd>
                             </div>
                             <div>
                                 <dt class="text-sm font-medium text-gray-700 dark:text-gray-300">{% trans "Created" %}</dt>
@@ -136,7 +136,7 @@
                         </select>
                     </div>
                     
-                    <div id="usage-charts" hx-get="{% url 'services:usage' service_id=service.id %}" hx-trigger="load" hx-vals='{"period": "24h"}'>
+                    <div id="usage-charts" hx-get="{% url 'services:usage' service_id=service_id %}" hx-trigger="load" hx-vals="{'period': '24h'}">
                         <!-- Usage charts will be loaded here -->
                         <div class="flex items-center justify-center h-48">
                             <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -181,16 +181,18 @@
                     {% trans "Service Actions" %}
                 </h3>
                 
+                {% url 'services:request_action' service_id=service_id as action_url %}
                 <div class="space-y-3">
                     {% if service.status == "active" %}
-                        {% button text=_("Request Upgrade") hx_post="{% url 'services:request_action' service_id=service.id %}" hx_vals='{"action": "upgrade_request"}' variant="primary" full_width=True %}
-                        {% button text=_("Request Suspension") hx_post="{% url 'services:request_action' service_id=service.id %}" hx_vals='{"action": "suspend_request"}' variant="warning" full_width=True hx_confirm=_("Are you sure you want to request suspension?") %}
+                        {% button text=_("Request Upgrade") hx_post=action_url hx_vals="{'action': 'upgrade_request'}" variant="primary" full_width=True %}
+                        {% button text=_("Request Suspension") hx_post=action_url hx_vals="{'action': 'suspend_request'}" variant="warning" full_width=True hx_confirm=_("Are you sure you want to request suspension?") %}
                     {% elif service.status == "suspended" %}
-                        {% button text=_("Request Reactivation") hx_post="{% url 'services:request_action' service_id=service.id %}" hx_vals='{"action": "reactivate_request"}' variant="primary" full_width=True %}
+                        {% button text=_("Request Reactivation") hx_post=action_url hx_vals="{'action': 'reactivate_request'}" variant="primary" full_width=True %}
                     {% endif %}
                     
-                    {% button text=_("View Usage History") href="services:usage" href_kwargs="service_id:service.id" variant="outline" full_width=True %}
-                    {% button text=_("Contact Support") href="tickets:create" href_params="service_id:service.id" variant="outline" full_width=True %}
+                    {% url 'services:usage' service_id=service_id as usage_url %}
+                    {% button text=_("View Usage History") href=usage_url variant="outline" full_width=True %}
+                    {% button text=_("Contact Support") href="#" variant="outline" full_width=True %}
                 </div>
             </div>
 
@@ -286,7 +288,7 @@
 <!-- Usage Data Loading Script -->
 <script>
 function loadUsageData(period) {
-    htmx.ajax('GET', '{% url "services:usage" service_id=service.id %}', {
+    htmx.ajax('GET', '{% url "services:usage" service_id=service_id %}', {
         values: {'period': period},
         target: '#usage-charts',
         swap: 'innerHTML'
