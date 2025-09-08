@@ -45,6 +45,9 @@ def invoices_list_view(request: HttpRequest) -> HttpResponse:
         
         # Get both invoices and proformas from service
         documents = []
+        logger.debug(
+            f"[TEMP DEBUG][BillingView] invoices_list_view start: user_id={request.user.id} customer_id={customer_id} doc_type={doc_type}"
+        )
         
         if doc_type in ['all', 'invoice']:
             invoices = invoice_service.get_customer_invoices(
@@ -77,6 +80,9 @@ def invoices_list_view(request: HttpRequest) -> HttpResponse:
         
         # Sort documents by creation date (newest first)
         documents.sort(key=lambda x: x.created_at, reverse=True)
+        logger.debug(
+            f"[TEMP DEBUG][BillingView] After merge/filter: documents_total={len(documents)}"
+        )
         
         # Simple pagination (could be enhanced)
         page = max(1, int(request.GET.get('page', 1)))

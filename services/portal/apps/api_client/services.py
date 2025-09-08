@@ -274,7 +274,9 @@ class PlatformAPIClient:
                 return {
                     'valid': True,
                     'token': user_data.get('id'),  # Use user ID as simple token for now
-                    'customer_id': user_data.get('customer_id'),  # Use actual customer_id from platform
+                    # Backward-compatible: expose both user_id and customer_id (legacy name)
+                    'user_id': user_data.get('id'),
+                    'customer_id': user_data.get('customer_id') or user_data.get('id'),
                     'customer_data': data.get('user', {})
                 }
             else:
@@ -322,17 +324,14 @@ class PlatformAPIClient:
         cached_data = cache.get(cache_key)
         if cached_data:
             return cached_data
-        
-        # Use secure HMAC body pattern (not query params)
+
         request_data = {
             'customer_id': user_id,
             'action': 'get_user_customers',
-            'timestamp': time.time()
+            'timestamp': time.time(),
         }
-        data = self._make_request('POST', '/api/customers/', data=request_data)
-        customers = data.get('results', [])
-        
-        # Cache for 5 minutes
+        data = self._make_request('POST', '/users/customers/', data=request_data)
+        customers = data.get('results', []) if data.get('success') else []
         cache.set(cache_key, customers, 300)
         return customers
     
