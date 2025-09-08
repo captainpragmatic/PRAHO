@@ -165,8 +165,7 @@ class CustomerRegistrationForm(forms.Form):
         widget=forms.TextInput(attrs={
             'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400',
             'placeholder': '1234567890123',
-            'id': 'id_cnp',
-            'style': 'display: none;'  # Hidden by default
+            'id': 'id_cnp'
         })
     )
     
