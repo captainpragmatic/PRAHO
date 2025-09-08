@@ -119,3 +119,11 @@ services/portal/static/dist/
 
 # Django Q logs
 django_q.log
+
+# Logs directory - ignore all contents but keep the directory structure
+logs/*
+!logs/.gitkeep
+services/platform/logs/*
+!services/platform/logs/.gitkeep
+services/portal/logs/*
+!services/portal/logs/.gitkeep

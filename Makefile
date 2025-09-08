@@ -129,6 +129,24 @@ dev-all:
 dev:
 	@$(MAKE) dev-all
 
+# Start both services and write logs to files via tee
+.PHONY: dev-with-logs
+dev-with-logs:
+	@echo "🚀 [All Services] Starting platform + portal with logs..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@mkdir -p logs
+	@echo "🧹 Killing anything bound to :8700/:8701 (if any)"
+	@-lsof -tiTCP:8700 -sTCP:LISTEN | xargs -r kill -9 >/dev/null 2>&1 || true
+	@-lsof -tiTCP:8701 -sTCP:LISTEN | xargs -r kill -9 >/dev/null 2>&1 || true
+	@echo "📜 Logs: logs/platform_dev.log, logs/portal_dev.log"
+	@echo "🏗️  Starting platform (port :8700)..."
+	@sh -c '$(MAKE) dev-platform 2>&1 | tee logs/platform_dev.log' & echo $$! > logs/platform_dev.pid
+	@sleep 2
+	@echo "🌐 Starting portal (port :8701)..."
+	@sh -c '$(MAKE) dev-portal 2>&1 | tee logs/portal_dev.log' & echo $$! > logs/portal_dev.pid
+	@echo "📍 Follow logs:"
+	@echo "  tail -f logs/platform_dev.log logs/portal_dev.log"
+
 # ===============================================================================
 # TESTING WITH SERVICE ISOLATION 🧪
 # ===============================================================================
