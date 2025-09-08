@@ -10,11 +10,18 @@ from typing import Any
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError, CommandParser
+from django.utils import timezone
 from faker import Faker
 
-from apps.customers.models import Customer
+from apps.billing.models import Currency, TaxRule, Invoice, ProformaInvoice, InvoiceLine, ProformaLine
+from apps.billing.invoice_models import InvoiceSequence
+from apps.billing.proforma_models import ProformaSequence
+from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile, CustomerBillingProfile
+from apps.orders.models import Order, OrderItem
+from apps.products.models import Product
 from apps.provisioning.models import Server, Service, ServicePlan
 from apps.tickets.models import SupportCategory, Ticket
+from apps.users.models import CustomerMembership
 
 User = get_user_model()
 
@@ -23,9 +30,13 @@ class Command(BaseCommand):
     help = "Generate sample data for Romanian hosting provider"
 
     def add_arguments(self, parser: CommandParser) -> None:
-        parser.add_argument("--customers", type=int, default=50, help="Number of customers to create")
-        parser.add_argument("--services", type=int, default=100, help="Number of services to create")
-        parser.add_argument("--tickets", type=int, default=200, help="Number of tickets to create")
+        parser.add_argument("--customers", type=int, default=5, help="Number of customers to create")
+        parser.add_argument("--users", type=int, default=10, help="Number of users to create")
+        parser.add_argument("--services-per-customer", type=int, default=5, help="Number of services per customer")
+        parser.add_argument("--orders-per-customer", type=int, default=3, help="Number of orders per customer")
+        parser.add_argument("--invoices-per-customer", type=int, default=5, help="Number of invoices per customer")
+        parser.add_argument("--proformas-per-customer", type=int, default=5, help="Number of proformas per customer")
+        parser.add_argument("--tickets-per-customer", type=int, default=5, help="Number of tickets per customer")
 
     def handle(self, *args: Any, **options: Any) -> None:
         # Simple safety check - must be in DEBUG mode
@@ -37,33 +48,63 @@ class Command(BaseCommand):
         fake = Faker("ro_RO")  # Romanian locale
         Faker.seed(42)  # Consistent data
 
-        self.stdout.write("🇷🇴 Generez date de test pentru PragmaticHost...")
+        self.stdout.write("�� Generating comprehensive test data for PragmaticHost...")
 
-        # Create admin users
+        # Create foundation data first
         self.create_admin_users(fake)
-
-        # Create service plans
         self.create_service_plans()
-
-        # Create servers
         self.create_servers()
-
-        # Create support categories
         self.create_support_categories()
+        self.create_billing_foundation()
 
-        # Create customers
-        customers = self.create_customers(fake, options["customers"])
+        # Create customers and all their related data
+        num_customers = options["customers"]
+        num_users = options["users"]
+        services_per_customer = options["services_per_customer"]
+        orders_per_customer = options["orders_per_customer"]
+        invoices_per_customer = options["invoices_per_customer"]
+        proformas_per_customer = options["proformas_per_customer"]
+        tickets_per_customer = options["tickets_per_customer"]
 
-        # Create services
-        self.create_services(fake, customers, options["services"])
+        # Create all users first
+        self.stdout.write(f"Creating {num_users} users...")
+        users = self.create_users(fake, num_users)
 
-        # Create tickets
-        self.create_tickets(fake, customers, options["tickets"])
+        # Create the guaranteed test company first (will always have ID #1)
+        test_customer = self.create_test_company_customer(fake, users, services_per_customer, orders_per_customer, invoices_per_customer, proformas_per_customer, tickets_per_customer)
+        customers = [test_customer]
+        self.stdout.write(f"  ✓ Created guaranteed test customer #1: {test_customer.get_display_name()}")
 
-        self.stdout.write(self.style.SUCCESS("✅ Date generate cu succes!"))
+        # Create remaining customers with comprehensive data
+        remaining_customers = max(0, num_customers - 1)  # -1 because we already created the test customer
+        if remaining_customers > 0:
+            self.stdout.write(f"Creating {remaining_customers} additional customers with complete data...")
+            for i in range(remaining_customers):
+                customer = self.create_customer_with_data(
+                    fake, i + 1, users,  # i + 1 to continue numbering after test customer
+                    services_per_customer, 
+                    orders_per_customer,
+                    invoices_per_customer,
+                    proformas_per_customer,
+                    tickets_per_customer
+                )
+                customers.append(customer)
+                self.stdout.write(f"  ✓ Complete customer {i+2}/{num_customers}: {customer.get_display_name()}")
+        else:
+            self.stdout.write("Only creating the guaranteed test customer.")
+
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"✅ Success! Generated: {num_customers} customers, {num_users} users, "
+                f"{num_customers * services_per_customer} services, "
+                f"{num_customers * orders_per_customer} orders, "
+                f"{num_customers * (invoices_per_customer + proformas_per_customer)} billing documents, "
+                f"{num_customers * tickets_per_customer} tickets"
+            )
+        )
 
     def create_admin_users(self, fake: Faker) -> None:
-        self.stdout.write("Creez utilizatori admin...")
+        self.stdout.write("Creating admin users...")
 
         # Create superuser with consistent credentials for E2E testing
         # Note: These are development/test credentials only - DEBUG mode enforced above
@@ -78,26 +119,25 @@ class Command(BaseCommand):
 
         # Create support users
         support_users = [
-            ("Ionuț", "Popescu", "ionut@pragmatichost.com"),
-            ("Maria", "Gheorghe", "maria@pragmatichost.com"),
-            ("Andrei", "Stancu", "andrei@pragmatichost.com"),
+            ("John", "Doe", "john@pragmatichost.com"),
+            ("Jane", "Smith", "jane@pragmatichost.com"),
+            ("Mike", "Johnson", "mike@pragmatichost.com"),
         ]
 
         for first, last, email in support_users:
             if not User.objects.filter(email=email).exists():
                 user = User.objects.create_user(
-                    username=email.split("@")[0],
-                    email=email,
-                    password="support123",  # Dev/test only - protected by DEBUG check
                     first_name=first,
                     last_name=last,
-                    role="support",
-                    is_customer=False,
+                    email=email,
+                    password="support123",  # Dev/test only
+                    staff_role="support",
+                    is_active=True,
                 )
-                self.stdout.write(f"  ✓ Suport: {user.email}")
+                self.stdout.write(f"  ✓ Support: {user.email}")
 
     def create_service_plans(self) -> list[ServicePlan]:
-        self.stdout.write("Creez planuri de servicii...")
+        self.stdout.write("Creating service plans...")
 
         plans = [
             {
@@ -152,7 +192,7 @@ class Command(BaseCommand):
         return created_plans
 
     def create_servers(self) -> list[Server]:
-        self.stdout.write("Creez servere...")
+        self.stdout.write("Creating servers...")
 
         servers = [
             {
@@ -197,7 +237,7 @@ class Command(BaseCommand):
         return created_servers
 
     def create_support_categories(self) -> list[SupportCategory]:
-        self.stdout.write("Creez categorii de suport...")
+        self.stdout.write("Creating support categories...")
 
         categories = [
             {
@@ -348,3 +388,533 @@ class Command(BaseCommand):
 
             if i % 50 == 0:
                 self.stdout.write(f"  ✓ Creat {i + 1}/{count} tickete")
+
+    # ===============================================================================
+    # COMPREHENSIVE DATA GENERATION METHODS
+    # ===============================================================================
+
+    def create_billing_foundation(self) -> None:
+        """Create base billing data and clean existing sample data"""
+        # Clean existing sample data in proper order to avoid FK constraints
+        # Delete orders first (and their items via CASCADE)
+        from apps.orders.models import Order
+        from apps.billing.models import Invoice, ProformaInvoice
+        from apps.tickets.models import Ticket
+        
+        # Delete in reverse dependency order
+        Order.objects.filter(customer__primary_email__contains='@example.').delete()
+        Invoice.objects.filter(customer__primary_email__contains='@example.').delete() 
+        ProformaInvoice.objects.filter(customer__primary_email__contains='@example.').delete()
+        Ticket.objects.filter(customer__primary_email__contains='@example.').delete()
+        
+        # Delete services (which may be referenced by orders)
+        Service.objects.filter(customer__primary_email__contains='@example.').delete()
+        
+        # Delete customer memberships
+        CustomerMembership.objects.filter(customer__primary_email__contains='@example.').delete()
+        
+        # Now delete customers and their profiles
+        Customer.objects.filter(primary_email__contains='@example.').delete()
+        
+        # Delete users
+        User.objects.filter(email__contains='@example.').delete()
+        
+        print("✓ Cleaned existing sample data")
+        
+        # Create Products from ServicePlans if they don't exist
+        self.create_products_from_service_plans()
+
+    def create_products_from_service_plans(self) -> None:
+        """Create Product objects based on existing ServicePlans"""
+        service_plans = ServicePlan.objects.all()
+        
+        # Map ServicePlan types to Product types
+        type_mapping = {
+            'shared_hosting': 'shared_hosting',
+            'vps': 'vps', 
+            'dedicated': 'dedicated',
+            'cloud': 'shared_hosting',  # Map to shared hosting
+            'domain': 'domain',
+            'ssl': 'ssl',
+            'email': 'email',
+            'backup': 'backup',
+            'maintenance': 'addon'  # Map to addon
+        }
+        
+        for plan in service_plans:
+            # Check if Product already exists for this plan
+            product, created = Product.objects.get_or_create(
+                slug=f"product-{plan.id}",
+                defaults={
+                    'name': plan.name,
+                    'description': plan.description,
+                    'short_description': plan.description[:500] if plan.description else '',
+                    'product_type': type_mapping.get(plan.plan_type, 'shared_hosting'),
+                    'is_active': plan.is_active,
+                    'is_featured': False,
+                    'requires_domain': plan.plan_type in ['shared_hosting', 'vps', 'dedicated'],
+                    'includes_vat': plan.includes_vat,
+                }
+            )
+            
+        print(f"✓ Created/verified {service_plans.count()} products from service plans")
+
+    def create_users(self, fake: Faker, count: int) -> list[User]:
+        """Create users that will be attached to customers"""
+        users = []
+        
+        # Clear existing users first to avoid conflicts
+        User.objects.filter(email__contains='@example.').delete()
+        
+        for i in range(count):
+            # Some users are individuals, some are business contacts
+            is_business = random.choice([True, False])
+            
+            user_data = {
+                "first_name": fake.first_name(),
+                "last_name": fake.last_name(), 
+                "email": f"user{i+1}@example.com",  # Use unique predictable emails
+                "is_active": True,
+                "staff_role": "customer"
+            }
+            
+            user = User.objects.create_user(password="testpass123", **user_data)
+            users.append(user)
+            
+            if i % 2 == 0:
+                self.stdout.write(f"  ✓ User {i+1}/{count}: {user.email}")
+                
+        return users
+
+    def create_test_company_customer(
+        self, fake: Faker, users: list[User], 
+        services_count: int, orders_count: int, 
+        invoices_count: int, proformas_count: int, tickets_count: int
+    ) -> Customer:
+        """Create the guaranteed test company customer that should always have ID #1"""
+        
+        # Check if test company already exists
+        test_company_email = "contact@testcompany.com"
+        try:
+            existing_customer = Customer.objects.get(primary_email=test_company_email)
+            self.stdout.write(f"  ✓ Test company already exists: {existing_customer.get_display_name()} (ID: {existing_customer.id})")
+            return existing_customer
+        except Customer.DoesNotExist:
+            pass
+        
+        # Create the specific test user first if it doesn't exist
+        test_user_email = "customer@pragmatichost.com"
+        test_user = None
+        try:
+            test_user = User.objects.get(email=test_user_email)
+            self.stdout.write(f"  ✓ Test user already exists: {test_user_email}")
+        except User.DoesNotExist:
+            test_user = User.objects.create_user(
+                first_name="Ion",
+                last_name="Pop", 
+                email=test_user_email,
+                password="testpass123",
+                is_active=True,
+                staff_role="customer"
+            )
+            users.append(test_user)
+            self.stdout.write(f"  ✓ Created test user: {test_user_email}")
+        
+        # Create the specific test company
+        customer_data = {
+            "customer_type": "company",
+            "name": "Test Company SRL",
+            "company_name": "Test Company SRL", 
+            "primary_email": test_company_email,
+            "primary_phone": "+40722123456",
+            "status": "active",
+        }
+            
+        customer = Customer.objects.create(**customer_data)
+        self.stdout.write(f"  ✓ Created test company: {customer.get_display_name()} (ID: {customer.id})")
+        
+        # Create customer address with specific data
+        address = CustomerAddress.objects.create(
+            customer=customer,
+            address_type="billing",
+            address_line1="Str. Revolutiei nr. 1",
+            city="Bucharest", 
+            county="Bucharest",
+            postal_code="010000",
+            country="România"
+        )
+        
+        # Create tax profile with specific CUI
+        tax_profile = CustomerTaxProfile.objects.create(
+            customer=customer,
+            cui="RO12345678",
+            is_vat_payer=True,
+            vat_number="RO12345678", 
+            reverse_charge_eligible=True
+        )
+            
+        # Create billing profile
+        billing_profile = CustomerBillingProfile.objects.create(
+            customer=customer,
+            payment_terms=30,
+            preferred_currency="RON",
+            invoice_delivery_method="email"
+        )
+        
+        # Create customer membership for the test user (if it doesn't exist)
+        membership, created = CustomerMembership.objects.get_or_create(
+            customer=customer,
+            user=test_user,
+            defaults={
+                "role": "owner",
+                "status": "active"
+            }
+        )
+        
+        if created:
+            self.stdout.write(f"  ✓ Created customer membership for {test_user.email}")
+        else:
+            self.stdout.write(f"  ✓ Customer membership already exists for {test_user.email}")
+        
+        # Create services, orders, invoices, proformas, and tickets just like other customers
+        self.create_services_for_customer(customer, services_count)
+        self.create_orders_for_customer(fake, customer, orders_count) 
+        self.create_invoices_for_customer(fake, customer, invoices_count)
+        self.create_proformas_for_customer(fake, customer, proformas_count)
+        self.create_tickets_for_customer(fake, customer, tickets_count)
+        
+        return customer
+
+    def create_customer_with_data(
+        self, fake: Faker, index: int, users: list[User], 
+        services_count: int, orders_count: int, 
+        invoices_count: int, proformas_count: int, tickets_count: int
+    ) -> Customer:
+        """Create a customer with all related data: profiles, services, orders, invoices, tickets"""
+        
+        # Decide if this is a company or individual
+        is_company = random.choice([True, False, True])  # 2/3 chance of company
+        
+        if is_company:
+            customer_data = {
+                "customer_type": "company",
+                "name": f"{fake.first_name()} {fake.last_name()}",
+                "company_name": fake.company(),
+                "primary_email": fake.unique.email(),
+                "primary_phone": f"+40{fake.random_int(min=700000000, max=799999999)}",
+                "status": "active",
+            }
+        else:
+            customer_data = {
+                "customer_type": "individual", 
+                "name": f"{fake.first_name()} {fake.last_name()}",
+                "primary_email": fake.unique.email(),
+                "primary_phone": f"+40{fake.random_int(min=700000000, max=799999999)}",
+                "status": "active",
+            }
+            
+        customer = Customer.objects.create(**customer_data)
+        
+        # Create customer address
+        address = CustomerAddress.objects.create(
+            customer=customer,
+            address_type="billing",
+            address_line1=fake.street_address(),
+            city=fake.city(), 
+            county=fake.city(),  # Use city as county
+            postal_code=fake.postcode(),
+            country="România"
+        )
+        
+        # Create tax profile for companies
+        if is_company:
+            tax_number = f"RO{fake.random_int(min=10000000, max=99999999)}"
+            tax_profile = CustomerTaxProfile.objects.create(
+                customer=customer,
+                cui=tax_number,
+                is_vat_payer=True,
+                vat_number=tax_number,
+                reverse_charge_eligible=True
+            )
+            
+        # Create billing profile
+        billing_profile = CustomerBillingProfile.objects.create(
+            customer=customer,
+            payment_terms=30,
+            preferred_currency="RON",
+            invoice_delivery_method="email"
+        )
+        
+        # Attach 1-3 users to this customer
+        customer_users = random.sample(users, random.randint(1, min(3, len(users))))
+        for user in customer_users:
+            CustomerMembership.objects.create(
+                user=user,
+                customer=customer, 
+                role=random.choice(["owner", "billing", "tech"]),
+                is_primary=random.choice([True, False])
+            )
+            
+        # Create related data
+        self.create_customer_services(fake, customer, services_count)
+        orders = self.create_customer_orders(fake, customer, orders_count)
+        self.create_customer_invoices(fake, customer, orders, invoices_count)
+        self.create_customer_proformas(fake, customer, orders, proformas_count) 
+        self.create_customer_tickets(fake, customer, tickets_count)
+        
+        return customer
+
+    def create_customer_services(self, fake: Faker, customer: Customer, count: int) -> list[Service]:
+        """Create services for a customer"""
+        services = []
+        plans = list(ServicePlan.objects.all())
+        servers = list(Server.objects.all())
+        
+        for i in range(count):
+            plan = random.choice(plans)
+            server = random.choice(servers) if servers else None
+            
+            service_data = {
+                "customer": customer,
+                "service_plan": plan,
+                "server": server,
+                "service_name": f"{plan.name} - {customer.get_display_name()}",
+                "domain": fake.domain_name(),
+                "username": f"user{customer.id:04d}{i:03d}{random.randint(100, 999)}",  # Unique username
+                "billing_cycle": random.choice(["monthly", "annual"]),
+                "price": plan.price_monthly,
+                "status": random.choice(["active", "pending", "suspended", "active", "active"]),  # More active
+                "auto_renew": random.choice([True, False]),
+            }
+            
+            service = Service.objects.create(**service_data)
+            services.append(service)
+            
+        return services
+
+    def create_customer_orders(self, fake: Faker, customer: Customer, count: int) -> list[Order]:
+        """Create orders for a customer"""
+        orders = []
+        services = list(Service.objects.filter(customer=customer))
+        currency = Currency.objects.get(code="RON")
+        
+        for i in range(count):
+            # Generate amounts in cents for precision
+            base_amount = Decimal(str(random.uniform(50.0, 500.0))).quantize(Decimal("0.01"))
+            subtotal_cents = int(base_amount * 100)  # Convert to cents
+            tax_cents = int(subtotal_cents * Decimal("0.19"))  # 19% VAT
+            total_cents = subtotal_cents + tax_cents
+            
+            order_data = {
+                "customer": customer,
+                "order_number": f"ORD-{customer.id:04d}-{i+1:03d}",
+                "status": random.choice(["pending", "processing", "completed", "cancelled", "completed"]),  # More completed
+                "currency": currency,
+                "subtotal_cents": subtotal_cents,
+                "tax_cents": tax_cents,
+                "total_cents": total_cents,
+                "customer_email": customer.primary_email,
+                "customer_name": customer.name,
+                "customer_company": customer.company_name or "",
+                "created_at": fake.date_time_between(start_date="-1y", end_date="now", tzinfo=timezone.get_current_timezone()),
+            }
+            
+            order = Order.objects.create(**order_data)
+            
+            # Add order items (link to services)
+            if services:
+                num_items = random.randint(1, min(3, len(services)))
+                order_services = random.sample(services, num_items)
+                
+                for service in order_services:
+                    unit_price_cents = int(service.price * 100)
+                    tax_cents = int(unit_price_cents * Decimal('0.19'))  # 19% VAT
+                    line_total_cents = unit_price_cents + tax_cents
+                    
+                    # Get the Product that corresponds to this service's plan
+                    try:
+                        product = Product.objects.get(slug=f"product-{service.service_plan.id}")
+                    except Product.DoesNotExist:
+                        # Fallback: create a basic product
+                        product = Product.objects.create(
+                            slug=f"product-{service.service_plan.id}",
+                            name=service.service_plan.name,
+                            description=service.service_plan.description,
+                            product_type='shared_hosting',
+                            is_active=True
+                        )
+                    
+                    OrderItem.objects.create(
+                        order=order,
+                        product=product,
+                        product_name=service.service_plan.name,
+                        product_type=service.service_plan.plan_type,
+                        billing_period=service.billing_cycle,
+                        quantity=1,
+                        unit_price_cents=unit_price_cents,
+                        tax_rate=Decimal('0.1900'),
+                        tax_cents=tax_cents,
+                        line_total_cents=line_total_cents,
+                        service=service  # Link to provisioned service
+                    )
+                    
+            orders.append(order)
+            
+        return orders
+
+    def create_customer_invoices(self, fake: Faker, customer: Customer, orders: list[Order], count: int) -> list[Invoice]:
+        """Create invoices for a customer linked to orders"""
+        invoices = []
+        currency = Currency.objects.get(code="RON")
+        tax_rule = TaxRule.objects.get(country_code="RO", tax_type="vat")
+        
+        for i in range(count):
+            # Some invoices are linked to orders, some are standalone
+            order = random.choice(orders) if orders and random.choice([True, False]) else None
+            if order:
+                base_amount = Decimal(order.subtotal_cents) / 100  # Convert cents to decimal
+                tax_amount = Decimal(order.tax_cents) / 100
+                total_amount = Decimal(order.total_cents) / 100
+            else:
+                base_amount = Decimal(str(random.uniform(100.0, 1000.0))).quantize(Decimal("0.01"))
+                tax_amount = base_amount * tax_rule.rate
+                total_amount = base_amount + tax_amount
+            # Generate amounts in cents for precision  
+            base_amount_cents = int(base_amount * 100)
+            tax_amount_cents = int(tax_amount * 100)
+            total_amount_cents = int(total_amount * 100)
+            
+            invoice_data = {
+                "customer": customer,
+                "status": random.choice(["draft", "issued", "paid", "overdue", "paid", "paid"]),  # More paid
+                "issued_at": fake.date_between(start_date="-1y", end_date="today"),
+                "due_at": fake.date_between(start_date="today", end_date="+30d"),
+                "subtotal_cents": base_amount_cents,
+                "tax_cents": tax_amount_cents,
+                "total_cents": total_amount_cents,
+                "currency": currency,
+                "bill_to_name": customer.get_display_name(),
+                "bill_to_email": customer.primary_email,
+                # Add billing address from customer profiles
+                "bill_to_address1": customer.addresses.first().address_line1 if customer.addresses.exists() else "",
+                "bill_to_address2": customer.addresses.first().address_line2 if customer.addresses.exists() else "",
+                "bill_to_city": customer.addresses.first().city if customer.addresses.exists() else "",
+                "bill_to_region": customer.addresses.first().county if customer.addresses.exists() else "",
+                "bill_to_country": "RO",
+                "bill_to_postal": customer.addresses.first().postal_code if customer.addresses.exists() else "",
+                "bill_to_tax_id": customer.get_tax_profile().cui if customer.get_tax_profile() else "",
+            }
+            
+            invoice = Invoice.objects.create(**invoice_data)
+            
+            # Generate proper invoice number using sequence
+            sequence, _ = InvoiceSequence.objects.get_or_create(scope="default")
+            invoice.number = sequence.get_next_number("INV")
+            invoice.save()
+            
+            # Add invoice items
+            InvoiceLine.objects.create(
+                invoice=invoice,
+                kind="service",
+                description=f"Hosting services - {fake.month_name()} {fake.year()}",
+                quantity=Decimal("1.000"),
+                unit_price_cents=base_amount_cents,
+                tax_rate=Decimal("0.1900"),
+                line_total_cents=base_amount_cents
+            )
+            
+            invoices.append(invoice)
+            
+        return invoices
+
+    def create_customer_proformas(self, fake: Faker, customer: Customer, orders: list[Order], count: int) -> list[ProformaInvoice]:
+        """Create proforma invoices for a customer"""
+        proformas = []
+        currency = Currency.objects.get(code="RON") 
+        tax_rule = TaxRule.objects.get(country_code="RO", tax_type="vat")
+        
+        for i in range(count):
+            # Some proformas are linked to orders
+            order = random.choice(orders) if orders and random.choice([True, False]) else None
+            if order:
+                base_amount = Decimal(order.subtotal_cents) / 100  # Convert cents to decimal
+                tax_amount = Decimal(order.tax_cents) / 100
+                total_amount = Decimal(order.total_cents) / 100
+            else:
+                base_amount = Decimal(str(random.uniform(100.0, 1000.0))).quantize(Decimal("0.01"))
+                tax_amount = base_amount * tax_rule.rate
+                total_amount = base_amount + tax_amount
+            
+            # Generate amounts in cents for precision
+            base_amount_cents = int(base_amount * 100)
+            tax_amount_cents = int(tax_amount * 100)
+            total_amount_cents = int(total_amount * 100)
+            
+            proforma_data = {
+                "customer": customer,
+                "status": random.choice(["draft", "sent", "accepted", "expired"]),
+                "valid_until": fake.date_between(start_date="today", end_date="+30d"),
+                "subtotal_cents": base_amount_cents,
+                "tax_cents": tax_amount_cents,
+                "total_cents": total_amount_cents,
+                "currency": currency,
+                "notes": fake.text(max_nb_chars=200) if random.choice([True, False]) else "",
+                "bill_to_name": customer.get_display_name(),
+                "bill_to_email": customer.primary_email,
+                "bill_to_address1": customer.addresses.first().address_line1 if customer.addresses.exists() else "",
+                "bill_to_address2": customer.addresses.first().address_line2 if customer.addresses.exists() else "",
+                "bill_to_city": customer.addresses.first().city if customer.addresses.exists() else "",
+                "bill_to_region": customer.addresses.first().county if customer.addresses.exists() else "",
+                "bill_to_country": "RO",
+                "bill_to_postal": customer.addresses.first().postal_code if customer.addresses.exists() else "",
+                "bill_to_tax_id": customer.get_tax_profile().cui if customer.get_tax_profile() else "",
+            }
+            
+            proforma = ProformaInvoice.objects.create(**proforma_data)
+            
+            # Generate proper proforma number using sequence
+            sequence, _ = ProformaSequence.objects.get_or_create(scope="default")
+            proforma.number = sequence.get_next_number("PRO")  
+            proforma.save()
+            
+            # Add proforma items
+            ProformaLine.objects.create(
+                proforma=proforma,
+                kind="service", 
+                description=f"Hosting services - {fake.month_name()} {fake.year()}",
+                quantity=Decimal("1.000"),
+                unit_price_cents=base_amount_cents,
+                tax_rate=Decimal("0.1900"),
+                line_total_cents=base_amount_cents
+            )
+            
+            proformas.append(proforma)
+            
+        return proformas
+
+    def create_customer_tickets(self, fake: Faker, customer: Customer, count: int) -> list[Ticket]:
+        """Create support tickets for a customer"""
+        tickets = []
+        categories = list(SupportCategory.objects.all())
+        support_users = list(User.objects.filter(staff_role="support"))
+        
+        for i in range(count):
+            category = random.choice(categories)
+            assigned_to = random.choice(support_users) if random.choice([True, False]) and support_users else None
+            
+            ticket_data = {
+                "title": fake.sentence(nb_words=6),
+                "description": fake.text(max_nb_chars=500),
+                "customer": customer,
+                "contact_email": customer.primary_email,
+                "category": category,
+                "priority": random.choice(["low", "normal", "high", "normal"]),  # More normal priority
+                "status": random.choice(["new", "open", "pending", "resolved", "resolved"]),  # More resolved
+                "source": random.choice(["web", "email", "phone"]),
+                "assigned_to": assigned_to,
+            }
+            
+            ticket = Ticket.objects.create(**ticket_data)
+            tickets.append(ticket)
+            
+        return tickets
