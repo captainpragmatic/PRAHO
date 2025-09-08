@@ -65,6 +65,7 @@ TEMPLATES = [
             "context_processors": [
                 "django.template.context_processors.debug",
                 "django.template.context_processors.request",
+                "django.template.context_processors.i18n",
                 "django.contrib.messages.context_processors.messages",  # Messages in templates
                 "apps.common.context_processors.portal_context",
             ],
@@ -83,43 +84,34 @@ WSGI_APPLICATION = "config.wsgi.application"
 DATABASES: dict[str, dict[str, Any]] = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": ":memory:",  # In-memory DB that disappears on restart
+        # Use a file-backed SQLite DB so sessions persist across reloads
+        "NAME": str(BASE_DIR / "portal.sqlite3"),
         "OPTIONS": {
             "timeout": 20,
         },
     }
 }
 
-# STATELESS SESSIONS - CACHE ONLY (NO DATABASE STORAGE)
-if os.environ.get("DEBUG", "True").lower() != "true":
-    SESSION_ENGINE = "django.contrib.sessions.backends.cache"
-    
-    # Redis cache for production (shared across instances)
-    CACHES = {
-        'default': {
-            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
-            'LOCATION': os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/1'),
-            'OPTIONS': {
-                'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-                'CONNECTION_POOL_KWARGS': {
-                    'max_connections': 50,
-                    'retry_on_timeout': True,
-                },
-            }
-        }
-    }
-else:
-    # Development: STATELESS CACHE-ONLY SESSIONS (no database storage)
-    SESSION_ENGINE = "django.contrib.sessions.backends.cache"
-    
-    # Development cache (memory) - sessions stored here, not database
+# SESSION STORAGE
+# Use DB-backed sessions in both dev and prod (simple, persistent across reloads)
+SESSION_ENGINE = "django.contrib.sessions.backends.db"
+
+# Keep a local cache for general portal caching (not sessions)
+if os.environ.get("DEBUG", "True").lower() == "true":
     CACHES = {
         'default': {
             'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
             'LOCATION': 'portal-dev-cache',
         }
     }
-SESSION_ENGINE = "django.contrib.sessions.backends.cache"
+else:
+    # In production we can still use LocMem or point to Redis later
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'portal-prod-cache',
+        }
+    }
 
 
 # ===============================================================================
@@ -139,7 +131,6 @@ PLATFORM_API_TIMEOUT = int(os.environ.get("PLATFORM_API_TIMEOUT", "30"))
 LANGUAGE_CODE = "en"
 TIME_ZONE = "Europe/Bucharest"  # Romanian timezone
 USE_I18N = True
-USE_L10N = True
 USE_TZ = True
 
 LANGUAGES = [

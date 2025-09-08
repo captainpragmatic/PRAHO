@@ -29,6 +29,9 @@ urlpatterns = [
     
     # API client health check
     path('status/', portal_status, name='portal_status'),
+
+    # Internationalization (language switch)
+    path('i18n/', include('django.conf.urls.i18n')),
     
     # Root redirect to login
     path('', lambda request: redirect('/login/') if not request.COOKIES.get('portal_token') else redirect('/dashboard/'), name='root'),

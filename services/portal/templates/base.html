@@ -2,6 +2,7 @@
 {% load ui_components %}
 {% load formatting %}
 <!DOCTYPE html>
+{% get_current_language as LANGUAGE_CODE %}
 <html lang="{{ LANGUAGE_CODE|default:'en' }}" class="h-full bg-slate-900">
 <head>
     <meta charset="UTF-8">
@@ -126,8 +127,8 @@
                   <input name="next" type="hidden" value="{{ request.get_full_path|slice:':-1' }}" />
                   <select name="language" onchange="this.form.submit()"
                     class="bg-slate-700 text-white rounded-md text-sm font-medium">
-                    <option value="en">🇬🇧 English</option>
-                    <option value="ro">🇷🇴 Română</option>
+                    <option value="en" {% if LANGUAGE_CODE|slice:":2" == "en" %}selected{% endif %}>🇬🇧 English</option>
+                    <option value="ro" {% if LANGUAGE_CODE|slice:":2" == "ro" %}selected{% endif %}>🇷🇴 Română</option>
                   </select>
                 </form>
                 <form action="{% url 'users:logout' %}" method="post" class="inline">

@@ -1,0 +1,3047 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2025-09-08 13:29+0300\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n==1?0:(((n%100>19)||((n%100==0)&&(n!=0)))?"
+"2:1));\n"
+#: apps/billing/views.py:103
+msgid "All Statuses"
+msgstr ""
+
+#: apps/billing/views.py:104
+msgid "Draft"
+msgstr "Ciornă"
+
+#: apps/billing/views.py:105
+msgid "Issued"
+msgstr ""
+
+#: apps/billing/views.py:106
+msgid "Sent"
+msgstr ""
+
+#: apps/billing/views.py:107
+msgid "Accepted"
+msgstr ""
+
+#: apps/billing/views.py:108
+msgid "Paid"
+msgstr ""
+
+#: apps/billing/views.py:109
+msgid "Overdue"
+msgstr ""
+
+#: apps/billing/views.py:110
+msgid "Expired"
+msgstr ""
+
+#: apps/billing/views.py:111
+msgid "Void"
+msgstr ""
+
+#: apps/billing/views.py:112
+msgid "Refunded"
+msgstr ""
+
+#: apps/billing/views.py:121
+msgid "Unable to load invoices. Please try again."
+msgstr ""
+
+#: apps/billing/views.py:158
+msgid "Invoice not found or access denied."
+msgstr ""
+
+#: apps/billing/views.py:173
+msgid "Unable to load invoice details. Please try again."
+msgstr ""
+
+#: apps/billing/views.py:276
+msgid "Unable to sync invoices. Please try again."
+msgstr ""
+
+#: apps/billing/views.py:318 apps/billing/views.py:352
+msgid "Unable to generate PDF. Please try again."
+msgstr ""
+
+#: apps/billing/views.py:390
+msgid "Proforma not found or access denied."
+msgstr ""
+
+#: apps/billing/views.py:409
+msgid "Unable to load proforma details. Please try again."
+msgstr ""
+
+#: apps/dashboard/views.py:97
+msgid ""
+"Could not load account information. Please try again later or contact "
+"support if the problem persists."
+msgstr ""
+
+#: apps/dashboard/views.py:132
+msgid "Could not load account information. Please try again later."
+msgstr ""
+
+#: apps/services/views.py:63 templates/services/service_list.html:24
+msgid "All Services"
+msgstr ""
+
+#: apps/services/views.py:64 templates/dashboard/dashboard.html:72
+#: templates/services/service_list.html:29
+#: templates/services/service_list.html:130
+#: templates/users/consent_history.html:35
+#: templates/users/privacy_dashboard.html:42
+msgid "Active"
+msgstr ""
+
+#: apps/services/views.py:65 templates/services/service_list.html:34
+#: templates/services/service_list.html:134
+msgid "Suspended"
+msgstr ""
+
+#: apps/services/views.py:66 templates/services/service_list.html:39
+#: templates/services/service_list.html:138
+#: templates/tickets/ticket_list.html:78
+msgid "Pending"
+msgstr "În așteptare"
+
+#: apps/services/views.py:67 templates/services/service_list.html:44
+#: templates/services/service_list.html:142
+msgid "Cancelled"
+msgstr ""
+
+#: apps/services/views.py:70
+msgid "All Types"
+msgstr ""
+
+#: apps/services/views.py:71 apps/services/views.py:301
+msgid "Shared Hosting"
+msgstr ""
+
+#: apps/services/views.py:72
+msgid "VPS"
+msgstr ""
+
+#: apps/services/views.py:73
+msgid "Dedicated Server"
+msgstr ""
+
+#: apps/services/views.py:74 apps/services/views.py:304
+msgid "Cloud Hosting"
+msgstr ""
+
+#: apps/services/views.py:75 apps/services/views.py:305
+#: apps/tickets/views.py:184
+msgid "Email Services"
+msgstr ""
+
+#: apps/services/views.py:83
+msgid "Unable to load hosting services. Please try again later."
+msgstr ""
+
+#: apps/services/views.py:130 apps/services/views.py:244
+msgid "Service not found or access denied."
+msgstr ""
+
+#: apps/services/views.py:188
+msgid "Invalid action requested."
+msgstr ""
+
+#: apps/services/views.py:192
+msgid "Reason is required for this request."
+msgstr ""
+
+#: apps/services/views.py:205
+msgid "Upgrade Request"
+msgstr ""
+
+#: apps/services/views.py:206
+msgid "Downgrade Request"
+msgstr ""
+
+#: apps/services/views.py:207
+msgid "Suspension Request"
+msgstr ""
+
+#: apps/services/views.py:208
+msgid "Cancellation Request"
+msgstr ""
+
+#: apps/services/views.py:211
+#, python-brace-format
+msgid "{} submitted successfully. Request ID: #{}"
+msgstr ""
+
+#: apps/services/views.py:220
+msgid "Unable to submit service request. Please try again later."
+msgstr ""
+
+#: apps/services/views.py:233
+msgid "Request Service Upgrade"
+msgstr ""
+
+#: apps/services/views.py:234
+msgid "Request Service Downgrade"
+msgstr ""
+
+#: apps/services/views.py:235
+msgid "Request Service Suspension"
+msgstr ""
+
+#: apps/services/views.py:236
+msgid "Request Service Cancellation"
+msgstr ""
+
+#: apps/services/views.py:300
+msgid "All Plan Types"
+msgstr ""
+
+#: apps/services/views.py:302
+msgid "VPS Hosting"
+msgstr ""
+
+#: apps/services/views.py:303
+msgid "Dedicated Servers"
+msgstr ""
+
+#: apps/services/views.py:313
+msgid "Unable to load hosting plans. Please try again later."
+msgstr ""
+
+#: apps/tickets/views.py:71
+msgid "Unable to load support tickets. Please try again later."
+msgstr ""
+
+#: apps/tickets/views.py:113
+msgid "Ticket not found or access denied."
+msgstr ""
+
+#: apps/tickets/views.py:138
+msgid "Title and description are required."
+msgstr ""
+
+#: apps/tickets/views.py:157
+#, python-brace-format
+msgid "Support ticket created successfully. Ticket #{}."
+msgstr ""
+
+#: apps/tickets/views.py:167
+msgid "Unable to create support ticket. Please try again later."
+msgstr ""
+
+#: apps/tickets/views.py:172 templates/tickets/ticket_list.html:71
+msgid "Low"
+msgstr ""
+
+#: apps/tickets/views.py:173 templates/tickets/ticket_list.html:70
+msgid "Normal"
+msgstr ""
+
+#: apps/tickets/views.py:174 templates/tickets/ticket_list.html:69
+msgid "High"
+msgstr ""
+
+#: apps/tickets/views.py:175 templates/tickets/ticket_list.html:68
+msgid "Urgent"
+msgstr ""
+
+#: apps/tickets/views.py:176 templates/tickets/ticket_list.html:67
+msgid "Critical"
+msgstr ""
+
+#: apps/tickets/views.py:179
+msgid "General Support"
+msgstr ""
+
+#: apps/tickets/views.py:180
+msgid "Technical Issue"
+msgstr ""
+
+#: apps/tickets/views.py:181
+msgid "Billing Question"
+msgstr ""
+
+#: apps/tickets/views.py:182 templates/tickets/ticket_create.html:62
+msgid "Hosting Services"
+msgstr ""
+
+#: apps/tickets/views.py:183 templates/tickets/ticket_create.html:63
+msgid "Domain Management"
+msgstr ""
+
+#: apps/tickets/views.py:207 apps/tickets/views.py:208
+msgid "Reply text is required."
+msgstr ""
+
+#: apps/tickets/views.py:230
+msgid "Reply added successfully."
+msgstr ""
+
+#: apps/tickets/views.py:237
+msgid "Unable to add reply. Please try again."
+msgstr ""
+
+#: apps/tickets/views.py:239
+msgid "Unable to add reply. Please try again later."
+msgstr ""
+
+#: apps/tickets/views.py:279
+msgid "Search failed. Please try again."
+msgstr ""
+
+#: apps/users/forms.py:29 apps/users/forms.py:65 apps/users/forms.py:450
+#: templates/users/login.html:32 templates/users/password_reset.html:49
+#: templates/users/profile.html:62
+msgid "Email Address"
+msgstr ""
+
+#: apps/users/forms.py:32 apps/users/forms.py:69 apps/users/forms.py:453
+msgid "your@company.com"
+msgstr ""
+
+#: apps/users/forms.py:38 apps/users/forms.py:102 templates/users/login.html:45
+msgid "Password"
+msgstr ""
+
+#: apps/users/forms.py:41
+msgid "Your password"
+msgstr ""
+
+#: apps/users/forms.py:46
+msgid "Remember me for 30 days"
+msgstr ""
+
+#: apps/users/forms.py:66
+msgid "This will be used for authentication and billing notifications."
+msgstr ""
+
+#: apps/users/forms.py:74 apps/users/forms.py:314
+#: templates/users/profile.html:42
+msgid "First Name"
+msgstr ""
+
+#: apps/users/forms.py:78
+msgid "Ion"
+msgstr ""
+
+#: apps/users/forms.py:83 apps/users/forms.py:322
+#: templates/users/profile.html:51
+msgid "Last Name"
+msgstr ""
+
+#: apps/users/forms.py:87
+msgid "Popescu"
+msgstr ""
+
+#: apps/users/forms.py:92 apps/users/forms.py:330
+#: templates/users/profile.html:73
+msgid "Phone Number"
+msgstr ""
+
+#: apps/users/forms.py:94
+msgid "Romanian phone number (+40.XX.XXX.XXXX)"
+msgstr ""
+
+#: apps/users/forms.py:105
+msgid "Minimum 12 characters"
+msgstr ""
+
+#: apps/users/forms.py:110
+msgid "Confirm Password"
+msgstr ""
+
+#: apps/users/forms.py:113
+msgid "Repeat password"
+msgstr ""
+
+#: apps/users/forms.py:122
+msgid "Organization Type"
+msgstr ""
+
+#: apps/users/forms.py:124
+msgid "Individual"
+msgstr ""
+
+#: apps/users/forms.py:125
+msgid "SRL (Limited Liability Company)"
+msgstr ""
+
+#: apps/users/forms.py:126
+msgid "PFA (Authorized Individual)"
+msgstr ""
+
+#: apps/users/forms.py:127
+msgid "SA (Joint Stock Company)"
+msgstr ""
+
+#: apps/users/forms.py:128
+msgid "ONG (Non-Profit Organization)"
+msgstr ""
+
+#: apps/users/forms.py:131
+msgid "Select your business type for proper invoicing and VAT handling."
+msgstr ""
+
+#: apps/users/forms.py:138
+msgid "Company/Organization Name"
+msgstr ""
+
+#: apps/users/forms.py:140
+msgid "Official name as it appears on legal documents."
+msgstr ""
+
+#: apps/users/forms.py:143
+msgid "Your Company SRL"
+msgstr ""
+
+#: apps/users/forms.py:148 templates/dashboard/dashboard.html:256
+msgid "VAT Number"
+msgstr ""
+
+#: apps/users/forms.py:151
+msgid ""
+"Romanian VAT number (RO12345678) - required for VAT registered companies."
+msgstr ""
+
+#: apps/users/forms.py:163
+msgid "Address"
+msgstr ""
+
+#: apps/users/forms.py:165
+msgid "Street address of your business."
+msgstr ""
+
+#: apps/users/forms.py:168
+msgid "Str. Example Nr. 123"
+msgstr ""
+
+#: apps/users/forms.py:173
+msgid "City"
+msgstr ""
+
+#: apps/users/forms.py:177 apps/users/forms.py:186
+msgid "București"
+msgstr ""
+
+#: apps/users/forms.py:182
+msgid "County"
+msgstr ""
+
+#: apps/users/forms.py:191
+msgid "Postal Code"
+msgstr ""
+
+#: apps/users/forms.py:204
+msgid "I agree to data processing according to GDPR"
+msgstr ""
+
+#: apps/users/forms.py:205
+msgid "Required: Agreement to process personal data according to GDPR."
+msgstr ""
+
+#: apps/users/forms.py:212
+msgid "I agree to receive marketing communications"
+msgstr ""
+
+#: apps/users/forms.py:214
+msgid "Optional: Receive newsletters and product updates."
+msgstr ""
+
+#: apps/users/forms.py:221
+msgid "I accept the terms and conditions"
+msgstr ""
+
+#: apps/users/forms.py:222
+msgid "Required: Agreement to terms of service."
+msgstr ""
+
+#: apps/users/forms.py:237
+msgid "The two password fields didn't match."
+msgstr ""
+
+#: apps/users/forms.py:240
+msgid "Password must be at least 12 characters long."
+msgstr ""
+
+#: apps/users/forms.py:250 apps/users/forms.py:393
+msgid "Invalid phone number format. Use Romanian format: +40.XX.XXX.XXXX"
+msgstr ""
+
+#: apps/users/forms.py:261 apps/users/forms.py:265
+msgid "VAT number must start with RO followed by digits (e.g., RO12345678)"
+msgstr ""
+
+#: apps/users/forms.py:339
+msgid "Preferred Language"
+msgstr ""
+
+#: apps/users/forms.py:341
+msgid "Română"
+msgstr ""
+
+#: apps/users/forms.py:342
+msgid "English"
+msgstr ""
+
+#: apps/users/forms.py:351 templates/users/profile.html:101
+msgid "Timezone"
+msgstr ""
+
+#: apps/users/forms.py:353
+msgid "Europe/Bucharest (Romania)"
+msgstr ""
+
+#: apps/users/forms.py:354
+msgid "UTC (Universal Time)"
+msgstr ""
+
+#: apps/users/forms.py:355
+msgid "Europe/London"
+msgstr ""
+
+#: apps/users/forms.py:356
+msgid "Europe/Paris"
+msgstr ""
+
+#: apps/users/forms.py:365
+msgid "Email notifications"
+msgstr ""
+
+#: apps/users/forms.py:373
+msgid "SMS notifications"
+msgstr ""
+
+#: apps/users/forms.py:381
+msgid "Marketing emails"
+msgstr ""
+
+#: apps/users/forms.py:401
+msgid "Verification Code"
+msgstr ""
+
+#: apps/users/forms.py:411
+msgid "Enter the code from the authenticator app"
+msgstr ""
+
+#: apps/users/forms.py:417 apps/users/forms.py:442
+msgid "The code must contain only digits."
+msgstr ""
+
+#: apps/users/forms.py:425
+msgid "2FA Code"
+msgstr ""
+
+#: apps/users/forms.py:436
+msgid "Enter the code from the authenticator app or backup code"
+msgstr ""
+
+#: apps/users/forms.py:456
+msgid "Enter the email associated with your account."
+msgstr ""
+
+#: apps/users/forms.py:464
+msgid "Current Password"
+msgstr ""
+
+#: apps/users/forms.py:467
+msgid "Enter your current password"
+msgstr ""
+
+#: apps/users/forms.py:470
+msgid "Enter your current password to verify identity."
+msgstr ""
+
+#: apps/users/forms.py:474
+msgid "New Password"
+msgstr ""
+
+#: apps/users/forms.py:477
+msgid "Enter your new password"
+msgstr ""
+
+#: apps/users/forms.py:480
+msgid "Choose a strong password with at least 8 characters."
+msgstr ""
+
+#: apps/users/forms.py:484
+msgid "Confirm New Password"
+msgstr ""
+
+#: apps/users/forms.py:487
+msgid "Confirm your new password"
+msgstr ""
+
+#: apps/users/forms.py:490
+msgid "Re-enter your new password to confirm."
+msgstr ""
+
+#: apps/users/forms.py:500
+msgid "New password and confirmation don't match."
+msgstr ""
+
+#: apps/users/forms.py:503
+msgid "Password must be at least 8 characters long."
+msgstr ""
+
+#: apps/users/views.py:84
+msgid "Invalid email address or password. Please try again."
+msgstr ""
+
+#: apps/users/views.py:88 apps/users/views.py:364
+msgid ""
+"Authentication service is temporarily unavailable. Please try again later."
+msgstr ""
+
+#: apps/users/views.py:92 apps/users/views.py:368
+msgid "An unexpected error occurred. Please try again."
+msgstr ""
+
+#: apps/users/views.py:96
+msgid "Customer Login"
+msgstr ""
+
+#: apps/users/views.py:117
+msgid "You have been logged out successfully."
+msgstr ""
+
+#: apps/users/views.py:171
+msgid "Registration successful! You can now login with your credentials."
+msgstr ""
+
+#: apps/users/views.py:174
+msgid "Registration failed. Please check your information and try again."
+msgstr ""
+
+#: apps/users/views.py:178
+msgid "An unexpected error occurred during registration. Please try again."
+msgstr ""
+
+#: apps/users/views.py:182
+msgid "Customer Registration"
+msgstr ""
+
+#: apps/users/views.py:228
+msgid "Error loading profile data."
+msgstr ""
+
+#: apps/users/views.py:249
+msgid "Profile updated successfully!"
+msgstr ""
+
+#: apps/users/views.py:253 apps/users/views.py:257
+msgid "Error updating profile. Please try again."
+msgstr ""
+
+#: apps/users/views.py:273 templates/users/profile.html:5
+#: templates/users/profile.html:12
+msgid "Account Settings"
+msgstr ""
+
+#: apps/users/views.py:301
+msgid ""
+"If an account with that email exists, you will receive password reset "
+"instructions."
+msgstr ""
+
+#: apps/users/views.py:306
+msgid "Error processing password reset request. Please try again."
+msgstr ""
+
+#: apps/users/views.py:310
+msgid "Password Reset"
+msgstr ""
+
+#: apps/users/views.py:349
+msgid "Current password is incorrect."
+msgstr ""
+
+#: apps/users/views.py:356
+msgid "Password changed successfully!"
+msgstr ""
+
+#: apps/users/views.py:360
+msgid "Error updating password. Please try again."
+msgstr ""
+
+#: apps/users/views.py:373 templates/users/change_password.html:4
+#: templates/users/change_password.html:11
+#: templates/users/change_password.html:108 templates/users/profile.html:191
+msgid "Change Password"
+msgstr ""
+
+#: apps/users/views.py:406 templates/users/privacy_dashboard.html:4
+#: templates/users/privacy_dashboard.html:11 templates/users/profile.html:262
+msgid "Privacy Dashboard"
+msgstr ""
+
+#: apps/users/views.py:433
+msgid ""
+"Data export request submitted successfully. You will receive an email with "
+"download instructions within 48 hours."
+msgstr ""
+
+#: apps/users/views.py:438
+msgid "Error processing your data export request. Please try again."
+msgstr ""
+
+#: apps/users/views.py:443 templates/users/data_export.html:4
+#: templates/users/data_export.html:11
+#: templates/users/privacy_dashboard.html:82 templates/users/profile.html:275
+msgid "Export My Data"
+msgstr ""
+
+#: apps/users/views.py:493 templates/users/consent_history.html:4
+#: templates/users/consent_history.html:11
+#: templates/users/privacy_dashboard.html:95 templates/users/profile.html:288
+msgid "Consent History"
+msgstr ""
+
+#: apps/users/views.py:530
+msgid "Multi-Factor Authentication"
+msgstr ""
+
+#: apps/users/views.py:561 templates/users/mfa_management.html:149
+#: templates/users/mfa_setup_totp.html:5 templates/users/mfa_setup_totp.html:12
+msgid "Set Up Authenticator App"
+msgstr ""
+
+#: apps/users/views.py:566
+msgid "Failed to initialize MFA setup. Please try again."
+msgstr ""
+
+#: apps/users/views.py:571 apps/users/views.py:592 apps/users/views.py:663
+msgid "An error occurred. Please try again."
+msgstr ""
+
+#: apps/users/views.py:577
+msgid "Please enter the verification code."
+msgstr ""
+
+#: apps/users/views.py:584
+msgid "Two-factor authentication has been enabled successfully!"
+msgstr ""
+
+#: apps/users/views.py:587
+msgid "Invalid verification code. Please try again."
+msgstr ""
+
+#: apps/users/views.py:618
+msgid "You need to enable 2FA first before accessing backup codes."
+msgstr ""
+
+#: apps/users/views.py:627
+msgid "Error loading backup codes."
+msgstr ""
+
+#: apps/users/views.py:633 templates/users/mfa_backup_codes.html:5
+#: templates/users/mfa_backup_codes.html:12
+#: templates/users/mfa_management.html:224
+msgid "Backup Codes"
+msgstr ""
+
+#: apps/users/views.py:657
+msgid "Two-factor authentication has been disabled."
+msgstr ""
+
+#: apps/users/views.py:659
+msgid "Failed to disable 2FA. Please try again."
+msgstr ""
+
+#: templates/403.html:5 templates/403.html:70
+msgid "Access Denied"
+msgstr ""
+
+#: templates/403.html:73
+msgid "Hold up! Our security guard server says you can\\"
+msgstr ""
+
+#: templates/403.html:76
+msgid "You don\\"
+msgstr ""
+
+#: templates/403.html:88
+msgid "Think this is a mistake? Contact our support team at"
+msgstr ""
+
+#: templates/404.html:5 templates/404.html:50
+msgid "Page Not Found"
+msgstr ""
+
+#: templates/404.html:53
+msgid "Oops! Our server searched high and low but couldn\\"
+msgstr ""
+
+#: templates/404.html:56
+msgid ""
+"The page may have been moved, deleted, or you might have a typo in the URL. "
+"Don\\"
+msgstr ""
+
+#: templates/404.html:68
+msgid "Need help? Contact support at"
+msgstr ""
+
+#: templates/500.html:5 templates/500.html:69
+msgid "Server Error"
+msgstr ""
+
+#: templates/500.html:72
+msgid "Whoops! Our server is having a rough day and needs a coffee break."
+msgstr ""
+
+#: templates/500.html:75
+msgid "Something went wrong on our end, but don\\"
+msgstr ""
+
+#: templates/500.html:87
+msgid "If the problem persists, please contact our support team at"
+msgstr ""
+
+#: templates/base.html:16
+msgid "PRAHO Customer Portal - Manage your hosting services"
+msgstr ""
+
+#: templates/base.html:96 templates/billing/proforma_not_found.html:53
+#: templates/components/mobile_header.html:60
+#: templates/components/portal_mobile_header.html:57
+#: templates/dashboard/dashboard.html:6
+msgid "Dashboard"
+msgstr ""
+
+#: templates/base.html:102 templates/billing/invoices_list.html:6
+#: templates/billing/invoices_list.html:53
+#: templates/components/mobile_header.html:78
+msgid "My Invoices"
+msgstr "Facturile mele"
+
+#: templates/base.html:108 templates/components/mobile_header.html:96
+#: templates/dashboard/dashboard.html:45 templates/dashboard/dashboard.html:227
+#: templates/services/service_list.html:4
+#: templates/services/service_list.html:12
+#: templates/services/service_list.html:56
+msgid "My Services"
+msgstr "Serviciile mele"
+
+#: templates/base.html:114 templates/components/mobile_header.html:114
+msgid "My Tickets"
+msgstr ""
+
+#: templates/base.html:123 templates/dashboard/dashboard.html:233
+msgid "Profile"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:6
+#: templates/billing/invoice_detail.html:14
+#: templates/billing/invoices_list.html:243
+#: templates/dashboard/dashboard.html:112
+msgid "Invoice"
+msgstr "Factură"
+
+#: templates/billing/invoice_detail.html:17
+msgid "Invoice details and line items"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:26
+#: templates/billing/proforma_detail.html:26
+msgid "Download PDF"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:32
+msgid "Request Refund"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:38
+#: templates/billing/proforma_detail.html:31
+#: templates/billing/proforma_not_found.html:48
+msgid "Back to Billing"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:50
+msgid "Customer"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:58
+#: templates/billing/invoices_list.html:112
+#: templates/billing/invoices_list.html:162
+#: templates/services/service_list.html:102
+#: templates/tickets/ticket_detail.html:27
+#: templates/tickets/ticket_list.html:103
+msgid "Status"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:73
+msgid "Total Amount"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:81
+msgid "Issue Date"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:89
+msgid "Due Date"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:97
+msgid "Payment Date"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:102
+msgid "Not paid"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:112
+msgid "Invoice Lines"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:121
+#: templates/billing/proforma_detail.html:132
+#: templates/tickets/ticket_create.html:70
+#: templates/tickets/ticket_detail.html:67
+msgid "Description"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:124
+#: templates/billing/invoices_list.html:153
+msgid "Type"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:127
+msgid "Quantity"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:130
+#: templates/billing/proforma_detail.html:138
+msgid "Unit Price"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:133
+#: templates/billing/invoices_list.html:159
+#: templates/billing/proforma_detail.html:144
+#: templates/tickets/ticket_list.html:22
+msgid "Total"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:159
+#: templates/billing/invoice_detail.html:220
+msgid "No invoice lines found"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:167
+#: templates/billing/invoice_detail.html:227
+#: templates/billing/proforma_detail.html:235
+msgid "Subtotal:"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:175
+#: templates/billing/invoice_detail.html:233
+#: templates/billing/proforma_detail.html:192
+#: templates/billing/proforma_detail.html:240
+msgid "VAT:"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:183
+#: templates/billing/invoice_detail.html:239
+#: templates/billing/proforma_detail.html:246
+msgid "Total:"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:214
+#: templates/billing/proforma_detail.html:190
+msgid "Qty:"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:215
+#: templates/billing/proforma_detail.html:191
+msgid "Unit:"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:262
+msgid "Request Invoice Refund"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:264
+msgid ""
+"Submit a refund request for this invoice. Our billing team will review your "
+"request and contact you."
+msgstr ""
+
+#: templates/billing/invoice_detail.html:269
+msgid "Refund Reason"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:273
+msgid "Please select a reason..."
+msgstr ""
+
+#: templates/billing/invoice_detail.html:274
+msgid "General Customer Request"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:275
+msgid "Service Not Working"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:276
+msgid "Quality Not As Expected"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:277
+msgid "Technical Problems"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:278
+msgid "Want to Cancel Service"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:279
+msgid "Duplicate Invoice"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:280
+msgid "Billing Error"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:281
+msgid "Service Policy Issue"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:282
+msgid "Not Satisfied with Service"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:283
+msgid "Other Reason"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:289
+msgid "Details"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:293
+msgid ""
+"Please provide details about your refund request. The more information you "
+"provide, the faster we can process your request."
+msgstr ""
+
+#: templates/billing/invoice_detail.html:295
+msgid ""
+"Include details like what went wrong, when the issue occurred, or any "
+"relevant information."
+msgstr ""
+
+#: templates/billing/invoice_detail.html:305
+msgid "What happens next?"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:307
+msgid ""
+"We will create a support ticket for your refund request and our billing team "
+"will review it within 1-2 business days."
+msgstr ""
+
+#: templates/billing/invoice_detail.html:317 templates/components/modal.html:76
+#: templates/tickets/ticket_create.html:119
+#: templates/tickets/ticket_detail.html:176
+#: templates/users/mfa_setup_totp.html:163
+msgid "Cancel"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:321
+#: templates/billing/invoice_detail.html:365
+msgid "Submit Request"
+msgstr ""
+
+#: templates/billing/invoice_detail.html:346
+msgid "Please fill in all required fields."
+msgstr ""
+
+#: templates/billing/invoice_detail.html:351
+msgid "Submit refund request? We will create a support ticket and contact you."
+msgstr ""
+
+#: templates/billing/invoice_detail.html:358
+msgid "Submitting..."
+msgstr ""
+
+#: templates/billing/invoice_detail.html:361
+msgid "Refund request feature coming soon! Please contact support directly."
+msgstr ""
+
+#: templates/billing/invoices_list.html:14
+msgid "My Billing Documents"
+msgstr ""
+
+#: templates/billing/invoices_list.html:17
+msgid "View your invoices and proformas"
+msgstr ""
+
+#: templates/billing/invoices_list.html:25
+msgid "Sync Documents"
+msgstr ""
+
+#: templates/billing/invoices_list.html:26
+msgid "Sync"
+msgstr ""
+
+#: templates/billing/invoices_list.html:41
+msgid "Pending Quotes"
+msgstr ""
+
+#: templates/billing/invoices_list.html:65
+msgid "Pending Payments"
+msgstr ""
+
+#: templates/billing/invoices_list.html:77
+msgid "Total Spent"
+msgstr ""
+
+#: templates/billing/invoices_list.html:90
+#: templates/tickets/ticket_list.html:51
+msgid "Search"
+msgstr ""
+
+#: templates/billing/invoices_list.html:93
+msgid "Document number..."
+msgstr ""
+
+#: templates/billing/invoices_list.html:100
+msgid "Document Type"
+msgstr ""
+
+#: templates/billing/invoices_list.html:103
+msgid "All Documents"
+msgstr ""
+
+#: templates/billing/invoices_list.html:104
+msgid "Proformas Only"
+msgstr ""
+
+#: templates/billing/invoices_list.html:105
+msgid "Invoices Only"
+msgstr ""
+
+#: templates/billing/invoices_list.html:127
+msgid "Clear"
+msgstr ""
+
+#: templates/billing/invoices_list.html:137
+msgid "Documents"
+msgstr ""
+
+#: templates/billing/invoices_list.html:156
+msgid "Number"
+msgstr ""
+
+#: templates/billing/invoices_list.html:165
+#: templates/services/service_usage.html:141
+msgid "Date"
+msgstr ""
+
+#: templates/billing/invoices_list.html:239
+#: templates/billing/proforma_detail.html:6
+#: templates/billing/proforma_detail.html:14
+#: templates/dashboard/dashboard.html:108
+msgid "Proforma"
+msgstr "Proformă"
+
+#: templates/billing/invoices_list.html:293
+#, python-format
+msgid ""
+"\n"
+"            Page %(page_number)s of %(num_pages)s\n"
+"            "
+msgstr ""
+
+#: templates/billing/invoices_list.html:302
+#: templates/components/pagination.html:70
+#: templates/components/pagination.html:79
+#: templates/services/service_list.html:204
+#: templates/tickets/ticket_list.html:202
+#: templates/tickets/ticket_list.html:223
+msgid "Previous"
+msgstr ""
+
+#: templates/billing/invoices_list.html:303
+msgid "Prev"
+msgstr ""
+
+#: templates/billing/invoices_list.html:310
+#: templates/billing/invoices_list.html:311
+#: templates/components/pagination.html:171
+#: templates/components/pagination.html:180
+#: templates/services/service_list.html:211
+#: templates/tickets/ticket_list.html:208
+#: templates/tickets/ticket_list.html:249
+msgid "Next"
+msgstr ""
+
+#: templates/billing/invoices_list.html:323
+msgid "No documents found"
+msgstr ""
+
+#: templates/billing/invoices_list.html:325
+msgid "No billing documents available for your account."
+msgstr ""
+
+#: templates/billing/proforma_detail.html:17
+msgid "Created on"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:45
+msgid "Proforma Expired"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:47
+msgid "This proforma expired on"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:47
+msgid "It can no longer be processed."
+msgstr ""
+
+#: templates/billing/proforma_detail.html:59
+msgid "Proforma Valid"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:61
+msgid "Valid until"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:61
+msgid "Please contact us to proceed with this quote."
+msgstr ""
+
+#: templates/billing/proforma_detail.html:75
+msgid "Bill To Information"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:82
+msgid "Company:"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:88
+msgid "VAT Number:"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:94
+#: templates/users/data_export.html:109
+#: templates/users/privacy_dashboard.html:166
+msgid "Email:"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:103
+msgid "Address:"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:123
+msgid "Quote Items"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:135
+msgid "Qty"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:141
+msgid "VAT"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:170
+#: templates/billing/proforma_detail.html:204
+msgid "No items found"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:214
+msgid "Additional Information"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:230
+msgid "Summary"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:256
+msgid "Valid until:"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:285
+msgid "About This Quote"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:291
+msgid "Quote for your approval"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:295
+msgid "Becomes invoice when accepted"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:299
+msgid "Romanian business compliant"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:303
+msgid "Contact us to proceed"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:311
+msgid "Contact Us"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:315
+msgid "Ready to proceed with this quote?"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:323
+msgid "Live chat available"
+msgstr ""
+
+#: templates/billing/proforma_detail.html:327
+msgid "Open a support ticket"
+msgstr ""
+
+#: templates/billing/proforma_not_found.html:5
+#: templates/billing/proforma_not_found.html:13
+msgid "Proforma Not Found"
+msgstr ""
+
+#: templates/billing/proforma_not_found.html:22
+msgid "Proforma Not Available"
+msgstr ""
+
+#: templates/billing/proforma_not_found.html:26
+#, python-format
+msgid ""
+"\n"
+"          Proforma %(number)s could not be found or you don't have access to "
+"it.\n"
+"          "
+msgstr ""
+
+#: templates/billing/proforma_not_found.html:32
+msgid "The requested proforma could not be found or you don\\"
+msgstr ""
+
+#: templates/billing/proforma_not_found.html:40
+msgid ""
+"An error occurred while loading the proforma. Please try again or contact "
+"support if the problem persists."
+msgstr ""
+
+#: templates/components/badge.html:53
+msgid "Închide"
+msgstr ""
+
+#: templates/components/breadcrumb.html:8
+msgid "Breadcrumb"
+msgstr ""
+
+#: templates/components/mobile_header.html:32
+#: templates/components/portal_mobile_header.html:29
+msgid "Toggle mobile menu"
+msgstr ""
+
+#: templates/components/mobile_header.html:61
+msgid "Overview & analytics"
+msgstr ""
+
+#: templates/components/mobile_header.html:79
+#: templates/components/portal_mobile_header.html:76
+msgid "Invoices & payments"
+msgstr ""
+
+#: templates/components/mobile_header.html:97
+msgid "Hosting & services"
+msgstr ""
+
+#: templates/components/mobile_header.html:115
+msgid "Help & support"
+msgstr ""
+
+#: templates/components/mobile_header.html:147
+#: templates/components/portal_mobile_header.html:143
+msgid "Settings"
+msgstr ""
+
+#: templates/components/mobile_header.html:148
+#: templates/components/portal_mobile_header.html:144
+msgid "Profile & preferences"
+msgstr ""
+
+#: templates/components/mobile_header.html:167
+#: templates/components/portal_mobile_header.html:161
+msgid "Sign Out"
+msgstr ""
+
+#: templates/components/mobile_header.html:168
+#: templates/components/portal_mobile_header.html:162
+msgid "End your session"
+msgstr ""
+
+#: templates/components/modal.html:40 templates/components/toast.html:35
+msgid "Close"
+msgstr ""
+
+#: templates/components/modal.html:91
+msgid "Confirm"
+msgstr ""
+
+#: templates/components/pagination.html:47
+#, python-format
+msgid ""
+"\n"
+"          Showing %(start_index)s–%(end_index)s of %(count)s results\n"
+"        "
+msgstr ""
+
+#: templates/components/pagination.html:56
+msgid "Pagination"
+msgstr ""
+
+#: templates/components/pagination.html:64
+msgid "Go to previous page"
+msgstr ""
+
+#: templates/components/pagination.html:75
+msgid "Previous page (unavailable)"
+msgstr ""
+
+#: templates/components/pagination.html:106
+#: templates/components/pagination.html:146
+msgid "More pages"
+msgstr ""
+
+#: templates/components/pagination.html:168
+msgid "Go to next page"
+msgstr ""
+
+#: templates/components/pagination.html:179
+msgid "Next page (unavailable)"
+msgstr ""
+
+#: templates/components/portal_mobile_header.html:58
+msgid "Overview & status"
+msgstr ""
+
+#: templates/components/portal_mobile_header.html:75
+msgid "Billing"
+msgstr ""
+
+#: templates/components/portal_mobile_header.html:93
+#: templates/dashboard/dashboard.html:228
+msgid "Services"
+msgstr ""
+
+#: templates/components/portal_mobile_header.html:94
+msgid "My hosting services"
+msgstr ""
+
+#: templates/components/portal_mobile_header.html:111
+msgid "Support"
+msgstr ""
+
+#: templates/components/portal_mobile_header.html:112
+msgid "Help & tickets"
+msgstr ""
+
+#: templates/components/progress_indicator.html:107
+#: templates/components/step_navigation.html:108
+#: templates/components/step_navigation.html:117
+msgid "Back"
+msgstr ""
+
+#: templates/components/progress_indicator.html:111
+msgid "Back to"
+msgstr ""
+
+#: templates/components/table_enhanced.html:38
+#: templates/services/service_list.html:108
+#: templates/tickets/ticket_list.html:109
+msgid "Actions"
+msgstr ""
+
+#: templates/components/table_enhanced.html:89
+msgid "No data found"
+msgstr ""
+
+#: templates/components/table_enhanced.html:90
+msgid "No items available."
+msgstr ""
+
+#: templates/dashboard/dashboard.html:15
+msgid "Platform service temporarily unavailable. Some features may be limited."
+msgstr ""
+
+#: templates/dashboard/dashboard.html:23
+msgid "Welcome to PragmaticHost"
+msgstr "Bun venit la PragmaticHost"
+
+#: templates/dashboard/dashboard.html:28 templates/dashboard/dashboard.html:30
+#, python-format
+msgid ""
+"Hello, %(first_name)s! Here is an overview of your hosting services and "
+"account."
+msgstr "Salut, %(first_name)s! Iată o prezentare generală a serviciilor tale de găzduire și a contului."
+
+#: templates/dashboard/dashboard.html:58
+msgid "My Open Tickets"
+msgstr "Tichetele mele deschise"
+
+#: templates/dashboard/dashboard.html:71 templates/users/profile.html:135
+msgid "Account Status"
+msgstr "Starea contului"
+
+#: templates/dashboard/dashboard.html:84
+#: templates/services/service_detail.html:91
+#: templates/services/service_list.html:105
+msgid "Next Billing"
+msgstr "Următoarea facturare"
+
+#: templates/dashboard/dashboard.html:85
+msgid "End of Month"
+msgstr "Sfârșitul lunii"
+
+#: templates/dashboard/dashboard.html:97
+msgid "My Recent Documents"
+msgstr "Documentele mele recente"
+
+#: templates/dashboard/dashboard.html:151
+msgid "No recent documents found"
+msgstr "Nu au fost găsite documente recente"
+
+#: templates/dashboard/dashboard.html:158
+msgid "View all documents"
+msgstr "Vezi toate documentele"
+
+#: templates/dashboard/dashboard.html:168
+msgid "My Recent Tickets"
+msgstr "Tichetele mele recente"
+
+#: templates/dashboard/dashboard.html:194
+msgid "No recent support tickets"
+msgstr "Nu există tichete de suport recente"
+
+#: templates/dashboard/dashboard.html:201
+msgid "View my tickets"
+msgstr "Vezi tichetele mele"
+
+#: templates/dashboard/dashboard.html:211
+#: templates/users/privacy_dashboard.html:75
+msgid "Quick Actions"
+msgstr "Acțiuni rapide"
+
+#: templates/dashboard/dashboard.html:217
+#: templates/tickets/ticket_detail.html:216
+#: templates/tickets/ticket_list.html:30
+msgid "New Ticket"
+msgstr "Tichet nou"
+
+#: templates/dashboard/dashboard.html:218
+#: templates/tickets/ticket_detail.html:10
+#: templates/tickets/ticket_list.html:94
+msgid "Ticket"
+msgstr "Tichet"
+
+#: templates/dashboard/dashboard.html:222
+msgid "View Invoices"
+msgstr "Vezi facturile"
+
+#: templates/dashboard/dashboard.html:223
+msgid "Invoices"
+msgstr "Facturi"
+
+#: templates/dashboard/dashboard.html:232
+msgid "My Profile"
+msgstr "Profilul meu"
+
+#: templates/dashboard/dashboard.html:243 templates/users/data_export.html:30
+#: templates/users/data_export.html:107 templates/users/profile.html:129
+msgid "Account Information"
+msgstr "Informații despre cont"
+
+#: templates/dashboard/dashboard.html:250
+msgid "Company"
+msgstr "Companie"
+
+#: templates/dashboard/dashboard.html:262
+msgid "Customer Since"
+msgstr "Client din"
+
+#: templates/dashboard/dashboard.html:269
+msgid "Support Level"
+msgstr "Nivel de suport"
+
+#: templates/dashboard/dashboard.html:271
+msgid "Standard"
+msgstr "Standard"
+
+#: templates/dashboard/dashboard.html:278
+msgid "Need help?"
+msgstr "Ai nevoie de ajutor?"
+
+#: templates/dashboard/dashboard.html:280
+#: templates/services/service_detail.html:195
+msgid "Contact Support"
+msgstr "Contactează suportul"
+
+#: templates/services/service_detail.html:5
+#: templates/services/service_detail.html:249
+msgid "Service Details"
+msgstr ""
+
+#: templates/services/service_detail.html:46
+#: templates/services/service_usage.html:22
+msgid "Back to Services"
+msgstr ""
+
+#: templates/services/service_detail.html:57
+msgid "Service Information"
+msgstr ""
+
+#: templates/services/service_detail.html:63
+msgid "Basic Information"
+msgstr ""
+
+#: templates/services/service_detail.html:67
+msgid "Service ID"
+msgstr ""
+
+#: templates/services/service_detail.html:71
+#: templates/tickets/ticket_list.html:106
+msgid "Created"
+msgstr ""
+
+#: templates/services/service_detail.html:75
+msgid "Last Updated"
+msgstr ""
+
+#: templates/services/service_detail.html:83
+msgid "Billing Information"
+msgstr ""
+
+#: templates/services/service_detail.html:87
+msgid "Monthly Cost"
+msgstr ""
+
+#: templates/services/service_detail.html:92
+msgid "N/A"
+msgstr ""
+
+#: templates/services/service_detail.html:95
+msgid "Billing Cycle"
+msgstr ""
+
+#: templates/services/service_detail.html:96
+msgid "Monthly"
+msgstr ""
+
+#: templates/services/service_detail.html:107
+msgid "Specifications"
+msgstr ""
+
+#: templates/services/service_detail.html:130
+msgid "Resource Usage"
+msgstr ""
+
+#: templates/services/service_detail.html:133
+msgid "Last 24 Hours"
+msgstr ""
+
+#: templates/services/service_detail.html:134
+msgid "Last 7 Days"
+msgstr ""
+
+#: templates/services/service_detail.html:135
+msgid "Last 30 Days"
+msgstr ""
+
+#: templates/services/service_detail.html:152
+msgid "Recent Activity"
+msgstr ""
+
+#: templates/services/service_detail.html:181
+msgid "Service Actions"
+msgstr ""
+
+#: templates/services/service_detail.html:187
+msgid "Request Upgrade"
+msgstr ""
+
+#: templates/services/service_detail.html:188
+msgid "Request Suspension"
+msgstr ""
+
+#: templates/services/service_detail.html:188
+msgid "Are you sure you want to request suspension?"
+msgstr ""
+
+#: templates/services/service_detail.html:190
+msgid "Request Reactivation"
+msgstr ""
+
+#: templates/services/service_detail.html:194
+msgid "View Usage History"
+msgstr ""
+
+#: templates/services/service_detail.html:203
+msgid "Current Usage"
+msgstr ""
+
+#: templates/services/service_detail.html:210
+msgid "Disk Space"
+msgstr ""
+
+#: templates/services/service_detail.html:222
+#: templates/services/service_usage.html:147
+msgid "Bandwidth"
+msgstr ""
+
+#: templates/services/service_detail.html:234
+msgid "CPU Usage"
+msgstr ""
+
+#: templates/services/service_detail.html:254
+msgid "Server Location"
+msgstr ""
+
+#: templates/services/service_detail.html:255
+msgid "Romania"
+msgstr ""
+
+#: templates/services/service_detail.html:259
+msgid "IP Address"
+msgstr ""
+
+#: templates/services/service_detail.html:260
+msgid "Not assigned"
+msgstr ""
+
+#: templates/services/service_detail.html:264
+msgid "Control Panel"
+msgstr ""
+
+#: templates/services/service_detail.html:268
+msgid "Access Control Panel"
+msgstr ""
+
+#: templates/services/service_detail.html:271
+msgid "Not available"
+msgstr ""
+
+#: templates/services/service_detail.html:278
+msgid "Primary Domain"
+msgstr ""
+
+#: templates/services/service_list.html:13
+msgid "Manage your hosting services and resources"
+msgstr ""
+
+#: templates/services/service_list.html:61
+msgid "service"
+msgstr ""
+
+#: templates/services/service_list.html:63
+msgid "services"
+msgstr ""
+
+#: templates/services/service_list.html:69
+msgid "Filter:"
+msgstr ""
+
+#: templates/services/service_list.html:77
+msgid "active"
+msgstr ""
+
+#: templates/services/service_list.html:80
+msgid "total"
+msgstr ""
+
+#: templates/services/service_list.html:93
+msgid "Service Name"
+msgstr ""
+
+#: templates/services/service_list.html:96
+msgid "Plan"
+msgstr ""
+
+#: templates/services/service_list.html:99
+msgid "Price"
+msgstr ""
+
+#: templates/services/service_list.html:157
+msgid "View"
+msgstr ""
+
+#: templates/services/service_list.html:162
+msgid "Reactivate"
+msgstr ""
+
+#: templates/services/service_list.html:177
+msgid "No services found for the selected filter"
+msgstr ""
+
+#: templates/services/service_list.html:179
+msgid "No services yet"
+msgstr ""
+
+#: templates/services/service_list.html:184
+msgid "Contact our sales team to get started with hosting services."
+msgstr ""
+
+#: templates/services/service_list.html:196
+msgid "Page"
+msgstr ""
+
+#: templates/services/service_list.html:224
+msgid "Request reactivation for service?"
+msgstr ""
+
+#: templates/services/service_usage.html:5
+#: templates/services/service_usage.html:14
+msgid "Usage Statistics"
+msgstr ""
+
+#: templates/services/service_usage.html:21
+msgid "Back to Service"
+msgstr ""
+
+#: templates/services/service_usage.html:32
+msgid "Time Period"
+msgstr ""
+
+#: templates/services/service_usage.html:36
+msgid "24 Hours"
+msgstr ""
+
+#: templates/services/service_usage.html:39
+msgid "7 Days"
+msgstr ""
+
+#: templates/services/service_usage.html:42
+msgid "30 Days"
+msgstr ""
+
+#: templates/services/service_usage.html:70
+msgid "Current Usage Summary"
+msgstr ""
+
+#: templates/services/service_usage.html:80
+msgid "Disk Space Used"
+msgstr ""
+
+#: templates/services/service_usage.html:97
+msgid "Bandwidth Used"
+msgstr ""
+
+#: templates/services/service_usage.html:114
+msgid "Average CPU Usage"
+msgstr ""
+
+#: templates/services/service_usage.html:117
+msgid "Peak:"
+msgstr ""
+
+#: templates/services/service_usage.html:133
+msgid "Usage History"
+msgstr ""
+
+#: templates/services/service_usage.html:144
+msgid "Disk Usage"
+msgstr ""
+
+#: templates/services/service_usage.html:150
+#, python-format
+msgid "CPU %%"
+msgstr ""
+
+#: templates/tickets/ticket_create.html:5
+#: templates/tickets/ticket_create.html:15
+msgid "Create Support Ticket"
+msgstr ""
+
+#: templates/tickets/ticket_create.html:18
+msgid "Get help from our support team"
+msgstr ""
+
+#: templates/tickets/ticket_create.html:22
+#: templates/tickets/ticket_detail.html:209
+msgid "Back to Tickets"
+msgstr ""
+
+#: templates/tickets/ticket_create.html:34
+#: templates/tickets/ticket_detail.html:21
+#: templates/tickets/ticket_list.html:97
+msgid "Subject"
+msgstr ""
+
+#: templates/tickets/ticket_create.html:38
+msgid "Brief description of your issue"
+msgstr ""
+
+#: templates/tickets/ticket_create.html:43
+#: templates/tickets/ticket_detail.html:45
+#: templates/tickets/ticket_list.html:100
+msgid "Priority"
+msgstr ""
+
+#: templates/tickets/ticket_create.html:46
+msgid "Select priority"
+msgstr ""
+
+#: templates/tickets/ticket_create.html:47
+msgid "Low - General questions or minor issues"
+msgstr ""
+
+#: templates/tickets/ticket_create.html:48
+msgid "Normal - Standard support requests"
+msgstr ""
+
+#: templates/tickets/ticket_create.html:49
+msgid "High - Urgent issues affecting service"
+msgstr ""
+
+#: templates/tickets/ticket_create.html:50
+msgid "Critical - Service completely down"
+msgstr ""
+
+#: templates/tickets/ticket_create.html:56
+msgid "Category"
+msgstr ""
+
+#: templates/tickets/ticket_create.html:59
+msgid "Select category (optional)"
+msgstr ""
+
+#: templates/tickets/ticket_create.html:60
+msgid "Technical Support"
+msgstr ""
+
+#: templates/tickets/ticket_create.html:61
+msgid "Billing & Account"
+msgstr ""
+
+#: templates/tickets/ticket_create.html:64
+msgid "General Inquiry"
+msgstr ""
+
+#: templates/tickets/ticket_create.html:74
+msgid ""
+"Please provide detailed information about your issue, including steps to "
+"reproduce if applicable"
+msgstr ""
+
+#: templates/tickets/ticket_create.html:76
+msgid ""
+"Please include as much detail as possible to help us resolve your issue "
+"quickly."
+msgstr ""
+
+#: templates/tickets/ticket_create.html:83
+msgid "Priority Guidelines"
+msgstr ""
+
+#: templates/tickets/ticket_create.html:89
+msgid "Service completely down, affecting all users"
+msgstr ""
+
+#: templates/tickets/ticket_create.html:95
+msgid "Urgent issues significantly impacting service"
+msgstr ""
+
+#: templates/tickets/ticket_create.html:101
+msgid "Standard support requests and questions"
+msgstr ""
+
+#: templates/tickets/ticket_create.html:107
+msgid "General questions or minor issues"
+msgstr ""
+
+#: templates/tickets/ticket_create.html:116
+msgid "You will receive email notifications about replies to your ticket."
+msgstr ""
+
+#: templates/tickets/ticket_create.html:120
+msgid "Create Ticket"
+msgstr ""
+
+#: templates/tickets/ticket_create.html:129
+msgid "Need Immediate Help?"
+msgstr ""
+
+#: templates/tickets/ticket_create.html:133
+msgid "For critical issues affecting your service, you can also:"
+msgstr ""
+
+#: templates/tickets/ticket_create.html:136
+msgid "Call our emergency support line"
+msgstr ""
+
+#: templates/tickets/ticket_create.html:137
+msgid "Check our status page for known issues"
+msgstr ""
+
+#: templates/tickets/ticket_create.html:138
+msgid "Browse our knowledge base for quick solutions"
+msgstr ""
+
+#: templates/tickets/ticket_detail.html:5
+msgid "Ticket Details"
+msgstr ""
+
+#: templates/tickets/ticket_detail.html:61
+msgid "Created At"
+msgstr ""
+
+#: templates/tickets/ticket_detail.html:81
+msgid "Conversation"
+msgstr ""
+
+#: templates/tickets/ticket_detail.html:82
+msgid "replies"
+msgstr ""
+
+#: templates/tickets/ticket_detail.html:106
+msgid "Support Team"
+msgstr ""
+
+#: templates/tickets/ticket_detail.html:108
+msgid "You"
+msgstr ""
+
+#: templates/tickets/ticket_detail.html:113
+msgid "Staff"
+msgstr ""
+
+#: templates/tickets/ticket_detail.html:128
+msgid "No replies yet."
+msgstr ""
+
+#: templates/tickets/ticket_detail.html:152
+msgid "Write a reply..."
+msgstr ""
+
+#: templates/tickets/ticket_detail.html:169
+msgid "Your reply will be visible to both you and the support team."
+msgstr ""
+
+#: templates/tickets/ticket_detail.html:182
+msgid "Send Reply"
+msgstr ""
+
+#: templates/tickets/ticket_detail.html:189
+msgid "Press Ctrl+Enter to send"
+msgstr ""
+
+#: templates/tickets/ticket_detail.html:201
+msgid "This ticket is closed. No new replies can be added."
+msgstr ""
+
+#: templates/tickets/ticket_list.html:5 templates/tickets/ticket_list.html:13
+msgid "My Support Tickets"
+msgstr ""
+
+#: templates/tickets/ticket_list.html:15
+msgid "View and manage your support requests"
+msgstr ""
+
+#: templates/tickets/ticket_list.html:20 templates/tickets/ticket_list.html:77
+msgid "Open"
+msgstr ""
+
+#: templates/tickets/ticket_list.html:61
+msgid "Search by number or subject..."
+msgstr ""
+
+#: templates/tickets/ticket_list.html:66
+msgid "All priorities"
+msgstr ""
+
+#: templates/tickets/ticket_list.html:75
+msgid "All statuses"
+msgstr ""
+
+#: templates/tickets/ticket_list.html:76
+msgid "New"
+msgstr ""
+
+#: templates/tickets/ticket_list.html:79
+msgid "Resolved"
+msgstr ""
+
+#: templates/tickets/ticket_list.html:80
+msgid "Closed"
+msgstr ""
+
+#: templates/tickets/ticket_list.html:185
+msgid "View Details"
+msgstr ""
+
+#: templates/tickets/ticket_list.html:215
+msgid "Showing"
+msgstr ""
+
+#: templates/tickets/ticket_list.html:215
+msgid "of"
+msgstr ""
+
+#: templates/tickets/ticket_list.html:215
+msgid "results"
+msgstr ""
+
+#: templates/tickets/ticket_list.html:270
+msgid "No tickets found"
+msgstr ""
+
+#: templates/tickets/ticket_list.html:272
+msgid "You have no support tickets yet."
+msgstr ""
+
+#: templates/tickets/ticket_list.html:280
+msgid "Create your first ticket"
+msgstr ""
+
+#: templates/users/change_password.html:14
+msgid "Update your account password securely"
+msgstr ""
+
+#: templates/users/change_password.html:89
+msgid "Password Security Tips"
+msgstr ""
+
+#: templates/users/change_password.html:91
+msgid "Use at least 8 characters"
+msgstr ""
+
+#: templates/users/change_password.html:92
+msgid "Include uppercase and lowercase letters"
+msgstr ""
+
+#: templates/users/change_password.html:93
+msgid "Include numbers and special characters"
+msgstr ""
+
+#: templates/users/change_password.html:94
+msgid "Avoid using personal information"
+msgstr ""
+
+#: templates/users/change_password.html:95
+msgid "Use a unique password for this account"
+msgstr ""
+
+#: templates/users/change_password.html:103
+#: templates/users/mfa_management.html:276
+#: templates/users/privacy_dashboard.html:180
+msgid "Back to Profile"
+msgstr ""
+
+#: templates/users/change_password.html:119
+msgid "Security Information"
+msgstr ""
+
+#: templates/users/change_password.html:125
+msgid "Account"
+msgstr ""
+
+#: templates/users/change_password.html:132
+msgid "Security Level"
+msgstr ""
+
+#: templates/users/change_password.html:135
+msgid "Secure Authentication"
+msgstr ""
+
+#: templates/users/change_password.html:144
+msgid ""
+"Your password is encrypted and stored securely. We never store or have "
+"access to your actual password."
+msgstr ""
+
+#: templates/users/consent_history.html:14
+msgid "View and manage your GDPR consents and marketing preferences"
+msgstr ""
+
+#: templates/users/consent_history.html:22 templates/users/profile.html:210
+msgid "Current Consent Status"
+msgstr ""
+
+#: templates/users/consent_history.html:31
+#: templates/users/privacy_dashboard.html:36 templates/users/profile.html:218
+msgid "Data Processing"
+msgstr ""
+
+#: templates/users/consent_history.html:39
+#: templates/users/privacy_dashboard.html:46
+msgid "Inactive"
+msgstr ""
+
+#: templates/users/consent_history.html:43
+msgid "Required for account operation and service delivery"
+msgstr ""
+
+#: templates/users/consent_history.html:45
+msgid "Granted on:"
+msgstr ""
+
+#: templates/users/consent_history.html:54
+#: templates/users/privacy_dashboard.html:56 templates/users/profile.html:234
+msgid "Marketing Communications"
+msgstr ""
+
+#: templates/users/consent_history.html:58
+#: templates/users/privacy_dashboard.html:62
+msgid "Enabled"
+msgstr ""
+
+#: templates/users/consent_history.html:62
+#: templates/users/privacy_dashboard.html:66
+msgid "Disabled"
+msgstr ""
+
+#: templates/users/consent_history.html:66
+msgid "Newsletters, promotional emails, and service updates"
+msgstr ""
+
+#: templates/users/consent_history.html:69
+msgid "You can unsubscribe at any time from any marketing email"
+msgstr ""
+
+#: templates/users/consent_history.html:71
+msgid "You have opted out of marketing communications"
+msgstr ""
+
+#: templates/users/consent_history.html:83
+msgid "Consent Timeline"
+msgstr ""
+
+#: templates/users/consent_history.html:105
+msgid "Status:"
+msgstr ""
+
+#: templates/users/consent_history.html:116
+msgid "No consent history available"
+msgstr ""
+
+#: templates/users/consent_history.html:127
+msgid "Manage Preferences"
+msgstr ""
+
+#: templates/users/consent_history.html:134
+msgid "Marketing Emails"
+msgstr ""
+
+#: templates/users/consent_history.html:135
+msgid "Receive newsletters and promotional content"
+msgstr ""
+
+#: templates/users/consent_history.html:140
+msgid "Unsubscribe"
+msgstr ""
+
+#: templates/users/consent_history.html:144
+msgid "Subscribe"
+msgstr ""
+
+#: templates/users/consent_history.html:154
+msgid "Essential Communications"
+msgstr ""
+
+#: templates/users/consent_history.html:155
+msgid "Account security, billing, and service notifications"
+msgstr ""
+
+#: templates/users/consent_history.html:159
+msgid "Required"
+msgstr ""
+
+#: templates/users/consent_history.html:172
+#: templates/users/data_export.html:133
+msgid "Legal Information"
+msgstr ""
+
+#: templates/users/consent_history.html:177
+msgid ""
+"You can withdraw your consent at any time by contacting our support team or "
+"using the preference controls above."
+msgstr ""
+
+#: templates/users/consent_history.html:180
+msgid ""
+"Withdrawal of consent does not affect the lawfulness of processing based on "
+"consent before withdrawal."
+msgstr ""
+
+#: templates/users/consent_history.html:183
+msgid ""
+"Essential communications (billing, security, service updates) cannot be "
+"disabled as they are necessary for service delivery."
+msgstr ""
+
+#: templates/users/consent_history.html:186
+msgid "GDPR Article 7 - Conditions for consent | Romanian Law 190/2018"
+msgstr ""
+
+#: templates/users/consent_history.html:196
+#: templates/users/data_export.html:117
+msgid "Back to Privacy Dashboard"
+msgstr ""
+
+#: templates/users/data_export.html:14
+msgid ""
+"Request a copy of your personal data in machine-readable format (GDPR "
+"Article 20)"
+msgstr ""
+
+#: templates/users/data_export.html:22
+msgid "What Data Will Be Included"
+msgstr ""
+
+#: templates/users/data_export.html:31
+msgid "Name, email, phone number, account settings"
+msgstr ""
+
+#: templates/users/data_export.html:38
+msgid "Service History"
+msgstr ""
+
+#: templates/users/data_export.html:39
+msgid "Hosting services, domains, configuration data"
+msgstr ""
+
+#: templates/users/data_export.html:46
+msgid "Billing Records"
+msgstr ""
+
+#: templates/users/data_export.html:47
+msgid "Invoices, payments, billing preferences"
+msgstr ""
+
+#: templates/users/data_export.html:56
+msgid "Support Tickets"
+msgstr ""
+
+#: templates/users/data_export.html:57
+msgid "Support requests and communications"
+msgstr ""
+
+#: templates/users/data_export.html:64
+msgid "Privacy Consents"
+msgstr ""
+
+#: templates/users/data_export.html:65
+msgid "GDPR consents and marketing preferences"
+msgstr ""
+
+#: templates/users/data_export.html:72
+msgid "Server Data"
+msgstr ""
+
+#: templates/users/data_export.html:73
+msgid "Website files not included - contact support if needed"
+msgstr ""
+
+#: templates/users/data_export.html:85 templates/users/data_export.html:122
+msgid "Request Data Export"
+msgstr ""
+
+#: templates/users/data_export.html:95
+msgid "Export Process"
+msgstr ""
+
+#: templates/users/data_export.html:97
+msgid "Your request will be processed within 48 hours"
+msgstr ""
+
+#: templates/users/data_export.html:98
+msgid "You will receive an email with a secure download link"
+msgstr ""
+
+#: templates/users/data_export.html:99
+msgid "The download link expires after 7 days for security"
+msgstr ""
+
+#: templates/users/data_export.html:100
+msgid "Data will be provided in JSON format"
+msgstr ""
+
+#: templates/users/data_export.html:110
+msgid "Customer ID:"
+msgstr ""
+
+#: templates/users/data_export.html:138
+msgid ""
+"This data export is provided under GDPR Article 20 (Right to Data "
+"Portability) and Article 15 (Right of Access)."
+msgstr ""
+
+#: templates/users/data_export.html:141
+msgid ""
+"The export includes personal data you provided and data generated through "
+"your use of our services."
+msgstr ""
+
+#: templates/users/data_export.html:144
+msgid "In compliance with Romanian Law 190/2018 and EU Regulation 2016/679"
+msgstr ""
+
+#: templates/users/login.html:4
+msgid "Login"
+msgstr ""
+
+#: templates/users/login.html:17
+msgid "PRAHO Portal Login"
+msgstr ""
+
+#: templates/users/login.html:20
+msgid "Customer Portal Access"
+msgstr ""
+
+#: templates/users/login.html:60
+msgid "Keep me logged in"
+msgstr ""
+
+#: templates/users/login.html:66
+msgid "Forgot password?"
+msgstr ""
+
+#: templates/users/login.html:90
+msgid "Sign In"
+msgstr ""
+
+#: templates/users/login.html:97 templates/users/mfa_backup_codes.html:37
+msgid "Don\\"
+msgstr ""
+
+#: templates/users/login.html:99
+msgid "Register here"
+msgstr ""
+
+#: templates/users/login.html:108
+msgid "Secure Connection"
+msgstr ""
+
+#: templates/users/login.html:108
+msgid "GDPR Compliance"
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:15
+msgid ""
+"Use these codes to access your account if you lose your phone or "
+"authenticator app"
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:23
+msgid "Your Recovery Codes"
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:33
+msgid "Important Security Information"
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:35
+msgid "Each code can only be used once"
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:36
+msgid "Store these codes in a safe place"
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:38
+msgid "Generate new codes if these are compromised"
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:51
+msgid "Copy code"
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:62
+msgid "Copy All Codes"
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:67
+msgid "Print Codes"
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:76
+msgid "No Backup Codes Available"
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:78
+msgid ""
+"Unable to load your backup codes. Please try again or contact support if the "
+"problem persists."
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:91
+msgid "Regenerate Codes"
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:96
+msgid "If you\\"
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:103
+msgid "Warning"
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:105
+msgid ""
+"Generating new codes will immediately invalidate all current backup codes. "
+"Make sure you have access to your authenticator app before proceeding."
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:113
+msgid "Generate New Backup Codes"
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:123
+msgid "How to Use Backup Codes"
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:129
+msgid "When logging in, if you can\\"
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:133
+msgid ""
+"Enter one of these backup codes exactly as shown (including any dashes)."
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:137
+msgid "Each code can only be used once. Cross it off your list after use."
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:141
+msgid ""
+"When you have only a few codes left, generate new ones to ensure continued "
+"access."
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:151
+#: templates/users/mfa_setup_totp.html:189
+msgid "Back to MFA Management"
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:172
+msgid "All backup codes copied to clipboard!"
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:185
+msgid "MFA Backup Codes"
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:205
+msgid "PragmaticHost - MFA Backup Codes"
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:206
+msgid "Account:"
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:208
+msgid "Important:"
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:209
+msgid "Store these codes safely. Each can only be used once."
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:212
+msgid "Generated:"
+msgstr ""
+
+#: templates/users/mfa_backup_codes.html:222
+msgid ""
+"Are you sure you want to generate new backup codes? This will invalidate all "
+"current codes."
+msgstr ""
+
+#: templates/users/mfa_management.html:5 templates/users/mfa_management.html:12
+#: templates/users/mfa_management.html:30 templates/users/profile.html:164
+msgid "Two-Factor Authentication"
+msgstr ""
+
+#: templates/users/mfa_management.html:15
+msgid "Manage your account security and two-factor authentication settings"
+msgstr ""
+
+#: templates/users/mfa_management.html:23
+msgid "Current Security Status"
+msgstr ""
+
+#: templates/users/mfa_management.html:35
+msgid "Your account is protected with MFA"
+msgstr ""
+
+#: templates/users/mfa_management.html:40
+msgid "Your account is not protected with MFA"
+msgstr ""
+
+#: templates/users/mfa_management.html:48
+msgid "Active Methods"
+msgstr ""
+
+#: templates/users/mfa_management.html:54
+#: templates/users/mfa_management.html:129
+msgid "Authenticator App"
+msgstr ""
+
+#: templates/users/mfa_management.html:60
+msgid "Passkeys/Hardware Keys"
+msgstr ""
+
+#: templates/users/mfa_management.html:72 templates/users/profile.html:153
+msgid "Last Login"
+msgstr ""
+
+#: templates/users/mfa_management.html:77 templates/users/profile.html:158
+msgid "Never"
+msgstr ""
+
+#: templates/users/mfa_management.html:84
+msgid "Backup Codes Available"
+msgstr ""
+
+#: templates/users/mfa_management.html:89
+msgid "codes remaining"
+msgstr ""
+
+#: templates/users/mfa_management.html:94
+msgid "Generate backup codes for account recovery"
+msgstr ""
+
+#: templates/users/mfa_management.html:109 templates/users/profile.html:171
+msgid "Manage MFA Settings"
+msgstr ""
+
+#: templates/users/mfa_management.html:119
+msgid "Enable Two-Factor Authentication"
+msgstr ""
+
+#: templates/users/mfa_management.html:120
+msgid "Protect your account with an additional security layer"
+msgstr ""
+
+#: templates/users/mfa_management.html:130
+msgid "Google Authenticator, Authy, Microsoft Authenticator"
+msgstr ""
+
+#: templates/users/mfa_management.html:135
+msgid "Works offline"
+msgstr ""
+
+#: templates/users/mfa_management.html:139
+msgid "Very secure"
+msgstr ""
+
+#: templates/users/mfa_management.html:144
+msgid "Set up time-based codes with your favorite authenticator app."
+msgstr ""
+
+#: templates/users/mfa_management.html:159
+msgid "RECOMMENDED"
+msgstr ""
+
+#: templates/users/mfa_management.html:165
+msgid "Passkeys"
+msgstr ""
+
+#: templates/users/mfa_management.html:166
+msgid "Face ID, Touch ID, fingerprint, hardware keys"
+msgstr ""
+
+#: templates/users/mfa_management.html:171
+msgid "Most secure"
+msgstr ""
+
+#: templates/users/mfa_management.html:175
+msgid "Fastest login"
+msgstr ""
+
+#: templates/users/mfa_management.html:180
+msgid "Contact support to enable passkey MFA for your account."
+msgstr ""
+
+#: templates/users/mfa_management.html:185
+msgid "Contact Support to Enable"
+msgstr ""
+
+#: templates/users/mfa_management.html:193
+msgid "Why enable MFA?"
+msgstr ""
+
+#: templates/users/mfa_management.html:195
+msgid "Protects against password breaches"
+msgstr ""
+
+#: templates/users/mfa_management.html:196
+msgid "Prevents unauthorized access"
+msgstr ""
+
+#: templates/users/mfa_management.html:197
+msgid "Required for admin and billing access"
+msgstr ""
+
+#: templates/users/mfa_management.html:198
+msgid "Industry standard security practice"
+msgstr ""
+
+#: templates/users/mfa_management.html:213
+msgid "MFA is Active"
+msgstr ""
+
+#: templates/users/mfa_management.html:214
+msgid "Your account is protected"
+msgstr ""
+
+#: templates/users/mfa_management.html:225
+msgid "View or regenerate recovery codes"
+msgstr ""
+
+#: templates/users/mfa_management.html:232
+msgid "Add Method"
+msgstr ""
+
+#: templates/users/mfa_management.html:233
+msgid "Set up additional MFA methods"
+msgstr ""
+
+#: templates/users/mfa_management.html:238
+msgid ""
+"Are you sure you want to disable two-factor authentication? This will make "
+"your account less secure."
+msgstr ""
+
+#: templates/users/mfa_management.html:243
+msgid "Disable MFA"
+msgstr ""
+
+#: templates/users/mfa_management.html:244
+msgid "Turn off two-factor authentication"
+msgstr ""
+
+#: templates/users/mfa_management.html:255
+msgid "Need Help with MFA?"
+msgstr ""
+
+#: templates/users/mfa_management.html:257
+msgid ""
+"Contact our support team to enable, disable, or manage your two-factor "
+"authentication settings. We\\"
+msgstr ""
+
+#: templates/users/mfa_setup_totp.html:15
+msgid ""
+"Follow these steps to secure your account with time-based verification codes"
+msgstr ""
+
+#: templates/users/mfa_setup_totp.html:30
+msgid "Download Authenticator App"
+msgstr ""
+
+#: templates/users/mfa_setup_totp.html:70
+msgid "Scan QR Code"
+msgstr ""
+
+#: templates/users/mfa_setup_totp.html:77
+msgid "Open your authenticator app"
+msgstr ""
+
+#: templates/users/mfa_setup_totp.html:81
+msgid "Select \"Scan QR Code\" or \"+\" to add account"
+msgstr ""
+
+#: templates/users/mfa_setup_totp.html:85
+msgid "Point camera at QR code on the right"
+msgstr ""
+
+#: templates/users/mfa_setup_totp.html:97
+msgid "QR Code"
+msgstr ""
+
+#: templates/users/mfa_setup_totp.html:101
+msgid "MFA QR Code"
+msgstr ""
+
+#: templates/users/mfa_setup_totp.html:104
+msgid "Scan this QR code with your authenticator app"
+msgstr ""
+
+#: templates/users/mfa_setup_totp.html:111
+msgid "Can\\"
+msgstr ""
+
+#: templates/users/mfa_setup_totp.html:114
+msgid "Secret Key:"
+msgstr ""
+
+#: templates/users/mfa_setup_totp.html:119
+msgid "Copy secret key"
+msgstr ""
+
+#: templates/users/mfa_setup_totp.html:128
+msgid "Failed to generate QR code. Please try again."
+msgstr ""
+
+#: templates/users/mfa_setup_totp.html:138
+msgid "Verify Setup"
+msgstr ""
+
+#: templates/users/mfa_setup_totp.html:147
+msgid "Enter verification code from your app:"
+msgstr ""
+
+#: templates/users/mfa_setup_totp.html:167
+msgid "Verify & Enable MFA"
+msgstr ""
+
+#: templates/users/mfa_setup_totp.html:176
+msgid "Tip:"
+msgstr ""
+
+#: templates/users/mfa_setup_totp.html:177
+msgid "The verification code changes every 30 seconds. If it doesn\\"
+msgstr ""
+
+#: templates/users/password_reset.html:4 templates/users/password_reset.html:16
+msgid "Reset Your Password"
+msgstr ""
+
+#: templates/users/password_reset.html:19
+msgid "Enter your email address and we\\"
+msgstr ""
+
+#: templates/users/password_reset.html:66
+msgid "Send Password Reset Email"
+msgstr ""
+
+#: templates/users/password_reset.html:73
+msgid "Back to login"
+msgstr ""
+
+#: templates/users/privacy_dashboard.html:14
+msgid ""
+"Manage your privacy settings and data preferences in compliance with GDPR"
+msgstr ""
+
+#: templates/users/privacy_dashboard.html:22
+msgid "Privacy Settings Overview"
+msgstr ""
+
+#: templates/users/privacy_dashboard.html:28
+msgid "Current Settings"
+msgstr ""
+
+#: templates/users/privacy_dashboard.html:37
+msgid "Required for service operation"
+msgstr ""
+
+#: templates/users/privacy_dashboard.html:57
+msgid "Newsletters and promotional content"
+msgstr ""
+
+#: templates/users/privacy_dashboard.html:85
+msgid "Download your data"
+msgstr ""
+
+#: templates/users/privacy_dashboard.html:98
+msgid "View consent changes"
+msgstr ""
+
+#: templates/users/privacy_dashboard.html:113
+msgid "Your GDPR Rights"
+msgstr ""
+
+#: templates/users/privacy_dashboard.html:119
+msgid "Right to Access"
+msgstr ""
+
+#: templates/users/privacy_dashboard.html:120
+msgid "View what personal data we hold about you"
+msgstr ""
+
+#: templates/users/privacy_dashboard.html:125
+msgid "Right to Rectification"
+msgstr ""
+
+#: templates/users/privacy_dashboard.html:126
+msgid "Correct any inaccurate personal data"
+msgstr ""
+
+#: templates/users/privacy_dashboard.html:131
+msgid "Right to Erasure"
+msgstr ""
+
+#: templates/users/privacy_dashboard.html:132
+msgid "Request deletion of your data (\"Right to be forgotten\")"
+msgstr ""
+
+#: templates/users/privacy_dashboard.html:137
+msgid "Right to Portability"
+msgstr ""
+
+#: templates/users/privacy_dashboard.html:138
+msgid "Export your data in machine-readable format"
+msgstr ""
+
+#: templates/users/privacy_dashboard.html:143
+msgid "Right to Object"
+msgstr ""
+
+#: templates/users/privacy_dashboard.html:144
+msgid "Object to processing for direct marketing"
+msgstr ""
+
+#: templates/users/privacy_dashboard.html:149
+msgid "Right to Restrict"
+msgstr ""
+
+#: templates/users/privacy_dashboard.html:150
+msgid "Limit how we process your data"
+msgstr ""
+
+#: templates/users/privacy_dashboard.html:160
+msgid "Data Protection Contact"
+msgstr ""
+
+#: templates/users/privacy_dashboard.html:164
+msgid "For any privacy-related questions or to exercise your rights:"
+msgstr ""
+
+#: templates/users/privacy_dashboard.html:167
+msgid "Subject:"
+msgstr ""
+
+#: templates/users/privacy_dashboard.html:169
+msgid ""
+"We will respond to your request within 30 days as required by GDPR Article "
+"12."
+msgstr ""
+
+#: templates/users/profile.html:15
+msgid "Manage your account settings and personal information"
+msgstr ""
+
+#: templates/users/profile.html:23 templates/users/register.html:51
+msgid "Personal Information"
+msgstr ""
+
+#: templates/users/profile.html:46
+msgid "Your first name"
+msgstr ""
+
+#: templates/users/profile.html:55
+msgid "Your last name"
+msgstr ""
+
+#: templates/users/profile.html:67
+msgid "Contact support to change your email address"
+msgstr ""
+
+#: templates/users/profile.html:84
+msgid "Preferences"
+msgstr ""
+
+#: templates/users/profile.html:90
+msgid "Language"
+msgstr ""
+
+#: templates/users/profile.html:118
+msgid "Save Changes"
+msgstr ""
+
+#: templates/users/profile.html:146
+msgid "Member Since"
+msgstr ""
+
+#: templates/users/profile.html:179
+msgid "Enable MFA Now"
+msgstr ""
+
+#: templates/users/profile.html:187
+msgid "Password Security"
+msgstr ""
+
+#: templates/users/profile.html:204
+msgid "Privacy & Data Protection"
+msgstr ""
+
+#: templates/users/profile.html:219
+msgid "Required for service"
+msgstr ""
+
+#: templates/users/profile.html:235
+msgid "Newsletters and updates"
+msgstr ""
+
+#: templates/users/profile.html:248
+msgid "Last updated:"
+msgstr ""
+
+#: templates/users/profile.html:255
+msgid "Your Data Rights"
+msgstr ""
+
+#: templates/users/profile.html:265
+msgid "Manage your privacy settings and data preferences"
+msgstr ""
+
+#: templates/users/profile.html:278
+msgid "Download a copy of your personal data"
+msgstr ""
+
+#: templates/users/profile.html:291
+msgid "View and manage your consent preferences"
+msgstr ""
+
+#: templates/users/profile.html:301
+msgid ""
+"GDPR compliant according to Romanian Law 190/2018 and EU Regulation 2016/679"
+msgstr ""
+
+#: templates/users/register.html:4
+msgid "Create Account"
+msgstr ""
+
+#: templates/users/register.html:16
+msgid "Create Your PragmaticHost Account"
+msgstr ""
+
+#: templates/users/register.html:19
+msgid "Start your hosting journey with Romanian compliance built-in"
+msgstr ""
+
+#: templates/users/register.html:110
+msgid "Business Information"
+msgstr ""
+
+#: templates/users/register.html:159
+msgid "Address Information"
+msgstr ""
+
+#: templates/users/register.html:215
+msgid "Account Security"
+msgstr ""
+
+#: templates/users/register.html:246
+msgid "Privacy & Consent"
+msgstr ""
+
+#: templates/users/register.html:284
+msgid "Already have an account?"
+msgstr ""
+
+#: templates/users/register.html:286
+msgid "Sign in here"
+msgstr ""

@@ -81,6 +81,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.locale.LocaleMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
@@ -98,6 +99,7 @@ TEMPLATES = [
             'context_processors': [
                 'django.template.context_processors.debug',
                 'django.template.context_processors.request',
+                'django.template.context_processors.i18n',
                 'django.contrib.messages.context_processors.messages',
             ],
         },
@@ -125,10 +127,15 @@ PLATFORM_API_TIMEOUT = int(os.environ.get('PLATFORM_API_TIMEOUT', '30'))  # 30 s
 # LOCALIZATION
 # ===============================================================================
 
-LANGUAGE_CODE = 'ro'  # Romanian default
+LANGUAGE_CODE = 'en'  # English default
 TIME_ZONE = 'Europe/Bucharest'
 USE_I18N = True
 USE_TZ = True
+
+# Where project-level translations live (services/portal/locale)
+LOCALE_PATHS = [
+    BASE_DIR / 'locale',
+]
 
 # ===============================================================================
 # STATIC FILES (NO MEDIA - API ONLY)
