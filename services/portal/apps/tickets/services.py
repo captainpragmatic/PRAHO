@@ -151,7 +151,7 @@ class TicketAPIClient(PlatformAPIClient):
             data = {
                 'customer_id': customer_id,
                 'user_id': user_id,
-                'message': message,
+                'content': message,  # Platform API expects 'content' field
                 'is_internal': False,  # Customer replies are always public
             }
             

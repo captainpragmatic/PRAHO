@@ -352,8 +352,8 @@ class CommentCreateSerializer(serializers.ModelSerializer):
     
     def validate_content(self, value):
         """Validate comment content"""
-        if not value or len(value.strip()) < 10:
-            raise serializers.ValidationError("Comment must be at least 10 characters long")
+        if not value or len(value.strip()) < 2:
+            raise serializers.ValidationError("Comment must be at least 2 characters long")
         return value.strip()
 
 

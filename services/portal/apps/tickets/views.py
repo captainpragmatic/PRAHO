@@ -205,7 +205,7 @@ def ticket_reply(request: HttpRequest, ticket_id: int):
     if not customer_id or not user_id:
         return redirect('/login/')
     
-    reply_text = request.POST.get('reply', '').strip()
+    reply_text = request.POST.get('message', '').strip()
     
     if not reply_text:
         if request.headers.get('HX-Request'):
@@ -226,7 +226,17 @@ def ticket_reply(request: HttpRequest, ticket_id: int):
         
         if request.headers.get('HX-Request'):
             # HTMX request - return updated replies partial
-            replies = ticket_api.get_ticket_replies(customer_id, user_id, ticket_id)
+            # Get updated ticket details with all comments/replies
+            ticket_response = ticket_api.get_ticket_detail(customer_id, user_id, ticket_id)
+            
+            # Extract replies from the ticket response
+            if ticket_response.get('success') and 'data' in ticket_response:
+                ticket = ticket_response['data'].get('ticket', {})
+                replies = ticket.get('comments', [])
+            else:
+                ticket = ticket_response
+                replies = ticket.get('comments', [])
+                
             return render(request, 'tickets/partials/replies_list.html', {
                 'replies': replies,
                 'ticket_id': ticket_id
