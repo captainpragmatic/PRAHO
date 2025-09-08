@@ -68,14 +68,12 @@ def validate_hmac_authenticated_request(request: HttpRequest) -> Tuple[Optional[
         request_data = request.data if hasattr(request, 'data') else json.loads(request.body)
         
         # Validate required fields
-        customer_id = request_data.get('customer_id')
         request_timestamp = request_data.get('timestamp')
         user_id = request_data.get('user_id')
         
-        if not customer_id:
-            logger.warning(f"🚨 [API Security] Portal {portal_id} missing customer_id in HMAC context")
-            return None, _uniform_error_response("Invalid request format", 400)
-        
+        # Temporary debug logging to inspect parsed body keys for troubleshooting
+        # Debug noise removed after stabilization
+
         if not request_timestamp:
             logger.warning(f"🚨 [API Security] Portal {portal_id} missing timestamp in HMAC context")
             return None, _uniform_error_response("Invalid request format", 400)
@@ -197,22 +195,24 @@ def get_authenticated_user(request: HttpRequest) -> Tuple[Optional[User], Option
     if error_response:
         return None, error_response
     
-    customer_id = request_data['customer_id']  # Actually user_id for session validation
+    # Read user identity from 'user_id' field (no legacy overloading)
+    user_id_field = request_data.get('user_id')
+    # Debug noise removed after stabilization
     
     # Step 2: Validate user exists and is active
     try:
-        user_id = int(customer_id)
+        user_id = int(user_id_field)
         user = User.objects.get(id=user_id, is_active=True)
         
         logger.debug(f"✅ [API Security] User {user.email} authenticated for session validation")
         return user, None
         
     except (ValueError, TypeError):
-        logger.warning(f"🚨 [API Security] Invalid user_id format in session validation: {customer_id}")
+        logger.warning(f"🚨 [API Security] Invalid user_id format in session validation: {user_id_field}")
         return None, _uniform_error_response()
         
     except User.DoesNotExist:
-        logger.warning(f"🚨 [API Security] User not found or inactive: {customer_id}")
+        logger.warning(f"🚨 [API Security] User not found or inactive: {user_id_field}")
         return None, _uniform_error_response()
 
 
