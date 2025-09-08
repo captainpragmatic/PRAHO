@@ -79,7 +79,7 @@ class PortalAuthenticationMiddleware:
             
         # Check if session has exceeded its intended lifetime
         if not self._is_session_age_valid(request):
-            logger.warning(f"⏰ [Auth] Session for customer {customer_id} has exceeded lifetime, forcing logout")
+            logger.warning(f"⏰ [Auth] Session for user {session_user_id} has exceeded lifetime, forcing logout")
             request.session.flush()
             return redirect('/login/')
         
@@ -87,7 +87,7 @@ class PortalAuthenticationMiddleware:
         validation_result = self.validate_customer_with_timing(request, str(session_user_id))
         
         if not validation_result:
-            logger.warning(f"⚠️ [Auth] Customer {customer_id} validation failed, clearing session")
+            logger.warning(f"⚠️ [Auth] User {session_user_id} validation failed, clearing session")
             request.session.flush()
             return redirect('/login/')
         
@@ -105,22 +105,14 @@ class PortalAuthenticationMiddleware:
                 if customers:
                     active_customer_id = customers[0].get('id')
                     request.session['active_customer_id'] = active_customer_id
-                    logger.debug(
-                        f"[TEMP DEBUG][PortalAuth] Resolved active_customer_id={active_customer_id} for user_id={user_id_int}; "
-                        f"customers_count={len(customers)}"
-                    )
                 else:
-                    logger.debug(
-                        f"[TEMP DEBUG][PortalAuth] No accessible customers for user_id={user_id_int}; "
-                        f"session has customer_id={request.session.get('customer_id')}"
-                    )
+                    # No accessible customers for this user; leave active_customer_id unset
+                    active_customer_id = None
             except Exception as e:
                 logger.error(f"🔥 [Auth] Failed to fetch accessible customers for user {session_user_id}: {e}")
 
         request.customer_id = active_customer_id or request.session.get('customer_id')
-        logger.debug(
-            f"[TEMP DEBUG][PortalAuth] Using request.customer_id={request.customer_id} for user_id={session_user_id}"
-        )
+        request.user_id = session_user_id
         request.customer_email = request.session.get('email')
         request.is_authenticated = True
         

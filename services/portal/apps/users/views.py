@@ -49,6 +49,7 @@ def login_view(request: HttpRequest) -> HttpResponse:
                 
                 if auth_response and auth_response.get('valid'):
                     # Successful authentication - create Django session
+                    user_id = auth_response.get('user_id')
                     customer_id = auth_response.get('customer_id')
                     
                     logger.info(f"✅ [Portal Auth] Customer {email} authenticated successfully")
@@ -57,10 +58,10 @@ def login_view(request: HttpRequest) -> HttpResponse:
                     request.session.cycle_key()
                     
                     # Store in Django session (secure, handled by framework)
-                    # Note: In legacy code, 'customer_id' stored the platform user_id. Keep it for backward compatibility
-                    # and also store an explicit 'user_id'. Middleware will derive an active_customer_id.
-                    request.session['customer_id'] = customer_id
-                    request.session['user_id'] = customer_id
+                    # Store correct user_id (platform user.id) and primary customer_id separately
+                    # Middleware will resolve active_customer_id from accessible customers list
+                    request.session['user_id'] = user_id
+                    request.session['customer_id'] = customer_id  # Legacy field, prefer active_customer_id
                     request.session['email'] = email
                     request.session['authenticated_at'] = timezone.now().isoformat()
                     request.session['remember_me'] = remember_me
@@ -198,8 +199,9 @@ def profile_view(request: HttpRequest) -> HttpResponse:
     if not request.session.get('customer_id'):
         return redirect('/login/')
     
-    # Get customer ID from session
+    # Get IDs from session
     customer_id = request.session.get('customer_id')
+    user_id = request.session.get('user_id')
     customer_email = request.session.get('email')
     
     if request.method == 'GET':
@@ -207,7 +209,7 @@ def profile_view(request: HttpRequest) -> HttpResponse:
         try:
             # Call Platform API to get current profile data
             from apps.api_client.services import api_client
-            profile_data = api_client.get_customer_profile(customer_id)
+            profile_data = api_client.get_customer_profile(user_id)
             
             if profile_data:
                 # Initialize form with existing data
@@ -240,7 +242,7 @@ def profile_view(request: HttpRequest) -> HttpResponse:
                     'timezone': form.cleaned_data.get('timezone', 'Europe/Bucharest'),
                 }
                 
-                result = api_client.update_customer_profile(customer_id, update_data)
+                result = api_client.update_customer_profile(user_id, update_data)
                 
                 if result:
                     logger.info(f"✅ [Portal Profile] Profile updated for customer {customer_id}")
@@ -258,7 +260,7 @@ def profile_view(request: HttpRequest) -> HttpResponse:
     profile_data = {}
     try:
         from apps.api_client.services import api_client
-        profile_data = api_client.get_customer_profile(customer_id) or {}
+        profile_data = api_client.get_customer_profile(user_id) or {}
     except Exception as e:
         logger.debug(f"Could not load profile data from Platform API: {e}")
     
@@ -326,6 +328,7 @@ def change_password_view(request: HttpRequest) -> HttpResponse:
         return redirect('/login/')
     
     customer_id = request.session.get('customer_id')
+    user_id = request.session.get('user_id')
     customer_email = request.session.get('email')
     
     if request.method == 'GET':
@@ -346,7 +349,7 @@ def change_password_view(request: HttpRequest) -> HttpResponse:
                     messages.error(request, _("Current password is incorrect."))
                 else:
                     # Update password via Platform API
-                    update_result = api_client.update_customer_password(customer_id, new_password)
+                    update_result = api_client.update_customer_password(user_id, new_password)
                     
                     if update_result:
                         logger.info(f"✅ [Portal Change Password] Password changed successfully for customer {customer_id}")
