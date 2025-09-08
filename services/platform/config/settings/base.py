@@ -207,8 +207,8 @@ CACHES = {
 # SESSION & COOKIE SETTINGS
 # ===============================================================================
 
-SESSION_ENGINE = "django.contrib.sessions.backends.cache"
-SESSION_CACHE_ALIAS = "default"
+# Use DB-backed sessions across environments (simple and persistent)
+SESSION_ENGINE = "django.contrib.sessions.backends.db"
 SESSION_COOKIE_AGE = 86400  # 24 hours
 SESSION_COOKIE_HTTPONLY = True
 SESSION_SAVE_EVERY_REQUEST = True
