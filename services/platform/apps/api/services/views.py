@@ -138,7 +138,7 @@ def customer_services_api(request: HttpRequest, customer) -> Response:
 @api_view(['POST'])
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
-def customer_service_detail_api(request: HttpRequest, service_id: int, customer) -> Response:
+def customer_service_detail_api(request: HttpRequest, customer, service_id: int) -> Response:
     """
     📦 Customer Service Detail API
     

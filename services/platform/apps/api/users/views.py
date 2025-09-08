@@ -311,7 +311,7 @@ def validate_session_secure(request: HttpRequest) -> Response:
     
     Request Body:
     {
-        "customer_id": "2",
+        "user_id": "2",
         "state_version": 42,
         "timestamp": 1694022337
     }
@@ -325,7 +325,7 @@ def validate_session_secure(request: HttpRequest) -> Response:
     Response: {"active": true, "state_version": 43, "revoke_before": "..."}
     
     Security Features:
-    - No customer IDs in URL (prevents enumeration)
+    - No user IDs in URL (prevents enumeration)
     - HMAC-signed request body (simpler than JWT)
     - Rate limiting (60/min per portal)
     - Uniform error responses
@@ -349,12 +349,12 @@ def validate_session_secure(request: HttpRequest) -> Response:
         # Parse request body for user context
         try:
             request_data = request.data if hasattr(request, 'data') else json.loads(request.body)
-            customer_id = request_data.get('customer_id')
+            user_id = request_data.get('user_id')
             state_version = request_data.get('state_version', 1)
             request_timestamp = request_data.get('timestamp')
             
-            if not customer_id:
-                logger.warning(f"🚨 [Security] Portal {portal_id} missing customer_id in context")
+            if not user_id:
+                logger.warning(f"🚨 [Security] Portal {portal_id} missing user_id in context")
                 return _uniform_session_error(security_headers)
                 
             # Basic timestamp freshness check (within 5 minutes)
@@ -367,9 +367,9 @@ def validate_session_secure(request: HttpRequest) -> Response:
             logger.warning(f"🚨 [Security] Portal {portal_id} invalid request body format")
             return _uniform_session_error(security_headers)
         
-        # Validate user exists and is active (customer_id is actually user_id in this context)
+        # Validate user exists and is active
         try:
-            user = User.objects.get(id=customer_id, is_active=True)
+            user = User.objects.get(id=user_id, is_active=True)
             
             # Success - calculate next validation time
             next_validation = datetime.now(timezone.utc) + timedelta(minutes=10)
