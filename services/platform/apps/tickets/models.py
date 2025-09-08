@@ -37,7 +37,7 @@ class SupportCategory(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        limit_choices_to={"role__in": ["support", "admin"]},
+        limit_choices_to={"staff_role__in": ["support", "admin"]},
         verbose_name=_("Auto Assign To"),
     )
 
@@ -112,7 +112,7 @@ class Ticket(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        limit_choices_to={"role__in": ["support", "admin", "manager"]},
+        limit_choices_to={"staff_role__in": ["support", "admin", "manager"]},
         related_name="assigned_tickets",
         verbose_name=_("Assigned To"),
     )

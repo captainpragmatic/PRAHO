@@ -23,7 +23,7 @@ urlpatterns = [
     path('create/', customer_ticket_create_api, name='customer_ticket_create'),
     
     # Individual ticket endpoints
-    path('<str:ticket_number>/', customer_ticket_detail_api, name='customer_ticket_detail'),
-    path('<str:ticket_number>/reply/', customer_ticket_reply_api, name='customer_ticket_reply'),
-    path('<str:ticket_number>/attachments/<int:attachment_id>/download/', ticket_attachment_download_api, name='ticket_attachment_download'),
+    path('<int:ticket_id>/', customer_ticket_detail_api, name='customer_ticket_detail'),
+    path('<int:ticket_id>/reply/', customer_ticket_reply_api, name='customer_ticket_reply'),
+    path('<int:ticket_id>/attachments/<int:attachment_id>/download/', ticket_attachment_download_api, name='ticket_attachment_download'),
 ]

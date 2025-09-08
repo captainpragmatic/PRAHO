@@ -1,5 +1,5 @@
 # ===============================================================================
-# TICKETS API SERIALIZERS - CUSTOMER SUPPORT OPERATIONS <«
+# TICKETS API SERIALIZERS - CUSTOMER SUPPORT OPERATIONS <ï¿½
 # ===============================================================================
 
 from rest_framework import serializers
@@ -8,7 +8,7 @@ from apps.customers.models import Customer
 
 
 # ===============================================================================
-# SUPPORT CATEGORY SERIALIZERS =Â
+# SUPPORT CATEGORY SERIALIZERS =ï¿½
 # ===============================================================================
 
 class SupportCategorySerializer(serializers.ModelSerializer):
@@ -29,7 +29,7 @@ class SupportCategorySerializer(serializers.ModelSerializer):
 
 
 # ===============================================================================
-# TICKET LIST SERIALIZER =Ë
+# TICKET LIST SERIALIZER =ï¿½
 # ===============================================================================
 
 class TicketListSerializer(serializers.ModelSerializer):
@@ -105,7 +105,7 @@ class TicketListSerializer(serializers.ModelSerializer):
 
 
 # ===============================================================================
-# TICKET COMMENT SERIALIZER =¬
+# TICKET COMMENT SERIALIZER =ï¿½
 # ===============================================================================
 
 class TicketCommentSerializer(serializers.ModelSerializer):
@@ -137,20 +137,28 @@ class TicketCommentSerializer(serializers.ModelSerializer):
         return obj.get_author_name()
     
     def get_author_role(self, obj) -> str:
-        """Get author role for display"""
-        if obj.author and obj.author.role in ['support', 'admin', 'manager']:
+        """Get author role for display.
+
+        Any Django staff user or a user with a non-empty staff_role is treated as Staff.
+        """
+        author = getattr(obj, 'author', None)
+        if author and (getattr(author, 'is_staff', False) or getattr(author, 'staff_role', '') != ''):
             return 'Staff'
         return 'Customer'
     
     def get_is_staff_reply(self, obj) -> bool:
-        """Check if comment is from staff"""
-        return obj.comment_type in ['support', 'internal'] or (
-            obj.author and obj.author.role in ['support', 'admin', 'manager']
-        )
+        """Check if comment is from staff.
+
+        Internal/support comment types are staff replies; otherwise infer from author flags.
+        """
+        if obj.comment_type in ['support', 'internal']:
+            return True
+        author = getattr(obj, 'author', None)
+        return bool(author and (getattr(author, 'is_staff', False) or getattr(author, 'staff_role', '') != ''))
 
 
 # ===============================================================================
-# TICKET ATTACHMENT SERIALIZER =Î
+# TICKET ATTACHMENT SERIALIZER =ï¿½
 # ===============================================================================
 
 class TicketAttachmentSerializer(serializers.ModelSerializer):
@@ -187,7 +195,7 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
 
 
 # ===============================================================================
-# TICKET DETAIL SERIALIZER =Ä
+# TICKET DETAIL SERIALIZER =ï¿½
 # ===============================================================================
 
 class TicketDetailSerializer(serializers.ModelSerializer):
@@ -211,8 +219,9 @@ class TicketDetailSerializer(serializers.ModelSerializer):
     is_sla_breach_resolution = serializers.BooleanField(read_only=True)
     
     # Related data
-    comments = TicketCommentSerializer(many=True, read_only=True)
-    attachments = TicketAttachmentSerializer(many=True, read_only=True)
+    # Filtered for customer context to avoid exposing internal notes/attachments
+    comments = serializers.SerializerMethodField()
+    attachments = serializers.SerializerMethodField()
     
     # Service info
     related_service_name = serializers.SerializerMethodField()
@@ -277,6 +286,20 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             return str(obj.related_service)
         return ""
 
+    def get_comments(self, obj):
+        """Return comments, filtering out non-public ones for customer context."""
+        qs = obj.comments.all()
+        if self.context.get('for_customer'):
+            qs = qs.filter(is_public=True)
+        return TicketCommentSerializer(qs, many=True).data
+
+    def get_attachments(self, obj):
+        """Return attachments linked to public comments only for customer context."""
+        qs = obj.attachments.all()
+        if self.context.get('for_customer'):
+            qs = qs.filter(comment__is_public=True)
+        return TicketAttachmentSerializer(qs, many=True).data
+
 
 # ===============================================================================
 # TICKET CREATION SERIALIZER 	
@@ -312,7 +335,7 @@ class TicketCreateSerializer(serializers.ModelSerializer):
 
 
 # ===============================================================================
-# COMMENT CREATION SERIALIZER =­
+# COMMENT CREATION SERIALIZER =ï¿½
 # ===============================================================================
 
 class CommentCreateSerializer(serializers.ModelSerializer):
@@ -335,7 +358,7 @@ class CommentCreateSerializer(serializers.ModelSerializer):
 
 
 # ===============================================================================
-# TICKETS SUMMARY SERIALIZER =Ê
+# TICKETS SUMMARY SERIALIZER =ï¿½
 # ===============================================================================
 
 class TicketsSummarySerializer(serializers.Serializer):
