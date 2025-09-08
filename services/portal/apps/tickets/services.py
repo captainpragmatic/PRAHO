@@ -21,7 +21,7 @@ class TicketAPIClient(PlatformAPIClient):
     - View ticket status
     """
     
-    def get_customer_tickets(self, customer_id: int, page: int = 1, status: str = '', priority: str = '', search: str = '') -> Dict[str, Any]:
+    def get_customer_tickets(self, customer_id: int, user_id: int, page: int = 1, status: str = '', priority: str = '', search: str = '') -> Dict[str, Any]:
         """
         Get paginated list of tickets for a specific customer.
         
@@ -36,41 +36,55 @@ class TicketAPIClient(PlatformAPIClient):
             Dict containing tickets list and pagination info
         """
         try:
-            params = {
+            request_data = {
                 'customer_id': customer_id,
+                'user_id': user_id,
                 'page': page,
                 'page_size': 20,  # Customer portal pagination
             }
             
             if status:
-                params['status'] = status
+                request_data['status'] = status
             if priority:
-                params['priority'] = priority  
+                request_data['priority'] = priority  
             if search:
-                params['search'] = search
+                request_data['search'] = search
                 
-            response = self._make_request('GET', '/tickets/', params=params)
+            response = self._make_request('POST', '/tickets/', data=request_data)
             
-            logger.info(f"✅ [Tickets API] Retrieved tickets for customer {customer_id}: {response.get('count', 0)} total")
-            return response
+            # Transform platform API response format to expected portal format
+            if response.get('success') and 'data' in response:
+                platform_data = response['data']
+                adapted_response = {
+                    'results': platform_data.get('tickets', []),
+                    'count': platform_data.get('pagination', {}).get('total', 0),
+                    'next': platform_data.get('pagination', {}).get('has_next'),
+                    'previous': platform_data.get('pagination', {}).get('has_previous')
+                }
+                logger.info(f"✅ [Tickets API] Retrieved tickets for customer {customer_id}: {adapted_response.get('count', 0)} total")
+                return adapted_response
+            else:
+                logger.warning(f"⚠️ [Tickets API] Unexpected response format: {response}")
+                return {'results': [], 'count': 0}
             
         except PlatformAPIError as e:
             logger.error(f"🔥 [Tickets API] Error retrieving tickets for customer {customer_id}: {e}")
             raise
     
-    def get_ticket_detail(self, customer_id: int, ticket_id: int) -> Dict[str, Any]:
+    def get_ticket_detail(self, customer_id: int, user_id: int, ticket_id: int) -> Dict[str, Any]:
         """
         Get detailed ticket information for customer view.
         
         Args:
             customer_id: Customer ID for authorization
+            user_id: User ID for HMAC authentication
             ticket_id: Ticket ID to retrieve
             
         Returns:
             Dict containing ticket details and comments
         """
         try:
-            data = {'customer_id': customer_id}
+            data = {'customer_id': customer_id, 'user_id': user_id}
             response = self._make_request('POST', f'/tickets/{ticket_id}/', data=data)
             
             logger.info(f"✅ [Tickets API] Retrieved ticket {ticket_id} details for customer {customer_id}")
@@ -80,13 +94,14 @@ class TicketAPIClient(PlatformAPIClient):
             logger.error(f"🔥 [Tickets API] Error retrieving ticket {ticket_id} for customer {customer_id}: {e}")
             raise
     
-    def create_ticket(self, customer_id: int, title: str, description: str, 
+    def create_ticket(self, customer_id: int, user_id: int, title: str, description: str, 
                      priority: str = 'normal', category: str = '') -> Dict[str, Any]:
         """
         Create a new support ticket for customer.
         
         Args:
             customer_id: Customer ID creating the ticket
+            user_id: User ID for HMAC authentication
             title: Ticket subject/title
             description: Detailed description of the issue
             priority: Priority level (critical, urgent, high, normal, low)
@@ -98,6 +113,7 @@ class TicketAPIClient(PlatformAPIClient):
         try:
             data = {
                 'customer_id': customer_id,
+                'user_id': user_id,
                 'title': title,
                 'description': description,
                 'priority': priority,
@@ -116,13 +132,14 @@ class TicketAPIClient(PlatformAPIClient):
             logger.error(f"🔥 [Tickets API] Error creating ticket for customer {customer_id}: {e}")
             raise
     
-    def add_ticket_reply(self, customer_id: int, ticket_id: int, message: str, 
+    def add_ticket_reply(self, customer_id: int, user_id: int, ticket_id: int, message: str, 
                         attachments: Optional[List] = None) -> Dict[str, Any]:
         """
         Add customer reply to existing ticket.
         
         Args:
             customer_id: Customer ID for authorization
+            user_id: User ID for HMAC authentication
             ticket_id: Ticket ID to reply to
             message: Reply message content
             attachments: Optional list of file attachments
@@ -133,6 +150,7 @@ class TicketAPIClient(PlatformAPIClient):
         try:
             data = {
                 'customer_id': customer_id,
+                'user_id': user_id,
                 'message': message,
                 'is_internal': False,  # Customer replies are always public
             }
@@ -140,7 +158,7 @@ class TicketAPIClient(PlatformAPIClient):
             if attachments:
                 data['attachments'] = attachments
                 
-            response = self._make_request('POST', f'/tickets/{ticket_id}/replies/', data=data)
+            response = self._make_request('POST', f'/tickets/{ticket_id}/reply/', data=data)
             
             logger.info(f"✅ [Tickets API] Added reply to ticket {ticket_id} for customer {customer_id}")
             return response
@@ -149,20 +167,21 @@ class TicketAPIClient(PlatformAPIClient):
             logger.error(f"🔥 [Tickets API] Error adding reply to ticket {ticket_id} for customer {customer_id}: {e}")
             raise
     
-    def get_ticket_replies(self, customer_id: int, ticket_id: int) -> List[Dict[str, Any]]:
+    def get_ticket_replies(self, customer_id: int, user_id: int, ticket_id: int) -> List[Dict[str, Any]]:
         """
         Get all replies for a ticket (customer view - excludes internal notes).
         
         Args:
             customer_id: Customer ID for authorization
+            user_id: User ID for HMAC authentication
             ticket_id: Ticket ID to get replies for
             
         Returns:
             List of reply dictionaries
         """
         try:
-            data = {'customer_id': customer_id}
-            response = self._make_request('POST', f'/tickets/{ticket_id}/replies/', data=data)
+            data = {'customer_id': customer_id, 'user_id': user_id}
+            response = self._make_request('POST', f'/tickets/{ticket_id}/reply/', data=data)
             
             logger.info(f"✅ [Tickets API] Retrieved replies for ticket {ticket_id} for customer {customer_id}")
             return response.get('replies', [])
@@ -171,7 +190,7 @@ class TicketAPIClient(PlatformAPIClient):
             logger.error(f"🔥 [Tickets API] Error retrieving replies for ticket {ticket_id} for customer {customer_id}: {e}")
             raise
     
-    def get_tickets_summary(self, customer_id: int) -> Dict[str, Any]:
+    def get_tickets_summary(self, customer_id: int, user_id: int) -> Dict[str, Any]:
         """
         Get ticket summary statistics for customer dashboard.
         
@@ -182,7 +201,7 @@ class TicketAPIClient(PlatformAPIClient):
             Dict containing ticket counts by status
         """
         try:
-            data = {'customer_id': customer_id}
+            data = {'customer_id': customer_id, 'user_id': user_id}
             response = self._make_request('POST', '/tickets/summary/', data=data)
             
             logger.info(f"✅ [Tickets API] Retrieved ticket summary for customer {customer_id}")

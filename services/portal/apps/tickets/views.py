@@ -22,7 +22,8 @@ def ticket_list(request: HttpRequest):
     """
     # Check authentication via Django session
     customer_id = request.session.get('customer_id')
-    if not customer_id:
+    user_id = request.session.get('user_id')
+    if not customer_id or not user_id:
         return redirect('/login/')
     
     # Get filter parameters
@@ -35,6 +36,7 @@ def ticket_list(request: HttpRequest):
         # Get tickets from platform API
         response = ticket_api.get_customer_tickets(
             customer_id=customer_id,
+            user_id=user_id,
             page=page,
             status=status_filter,
             priority=priority_filter,
@@ -45,7 +47,7 @@ def ticket_list(request: HttpRequest):
         total_count = response.get('count', 0)
         
         # Get summary for header stats
-        summary = ticket_api.get_tickets_summary(customer_id)
+        summary = ticket_api.get_tickets_summary(customer_id, user_id)
         open_count = summary.get('open_tickets', 0)
         
         context = {
@@ -87,15 +89,21 @@ def ticket_detail(request: HttpRequest, ticket_id: int):
     """
     # Check authentication via Django session
     customer_id = request.session.get('customer_id')
-    if not customer_id:
+    user_id = request.session.get('user_id')
+    if not customer_id or not user_id:
         return redirect('/login/')
     
     try:
-        # Get ticket details
-        ticket = ticket_api.get_ticket_detail(customer_id, ticket_id)
+        # Get ticket details (includes comments/replies)
+        ticket_response = ticket_api.get_ticket_detail(customer_id, user_id, ticket_id)
         
-        # Get ticket replies/conversation
-        replies = ticket_api.get_ticket_replies(customer_id, ticket_id)
+        # Extract ticket data and replies from platform response
+        if ticket_response.get('success') and 'data' in ticket_response:
+            ticket = ticket_response['data'].get('ticket', {})
+            replies = ticket.get('comments', [])  # Replies are in comments field
+        else:
+            ticket = ticket_response
+            replies = ticket.get('comments', [])  # Fallback if response format is different
         
         context = {
             'ticket': ticket,
@@ -120,7 +128,8 @@ def ticket_create(request: HttpRequest):
     """
     # Check authentication via Django session
     customer_id = request.session.get('customer_id')
-    if not customer_id:
+    user_id = request.session.get('user_id')
+    if not customer_id or not user_id:
         return redirect('/login/')
     
     if request.method == 'POST':
@@ -143,6 +152,7 @@ def ticket_create(request: HttpRequest):
             # Create ticket via platform API
             ticket = ticket_api.create_ticket(
                 customer_id=customer_id,
+                user_id=user_id,
                 title=title,
                 description=description,
                 priority=priority,
@@ -191,7 +201,8 @@ def ticket_reply(request: HttpRequest, ticket_id: int):
     """
     # Check authentication via Django session
     customer_id = request.session.get('customer_id')
-    if not customer_id:
+    user_id = request.session.get('user_id')
+    if not customer_id or not user_id:
         return redirect('/login/')
     
     reply_text = request.POST.get('reply', '').strip()
@@ -206,6 +217,7 @@ def ticket_reply(request: HttpRequest, ticket_id: int):
         # Add reply via platform API
         reply = ticket_api.add_ticket_reply(
             customer_id=customer_id,
+            user_id=user_id,
             ticket_id=ticket_id,
             message=reply_text
         )
@@ -214,7 +226,7 @@ def ticket_reply(request: HttpRequest, ticket_id: int):
         
         if request.headers.get('HX-Request'):
             # HTMX request - return updated replies partial
-            replies = ticket_api.get_ticket_replies(customer_id, ticket_id)
+            replies = ticket_api.get_ticket_replies(customer_id, user_id, ticket_id)
             return render(request, 'tickets/partials/replies_list.html', {
                 'replies': replies,
                 'ticket_id': ticket_id
@@ -240,7 +252,8 @@ def ticket_search_api(request: HttpRequest):
     """
     # Check authentication via Django session
     customer_id = request.session.get('customer_id')
-    if not customer_id:
+    user_id = request.session.get('user_id')
+    if not customer_id or not user_id:
         return redirect('/login/')
     
     search_query = request.GET.get('q', '').strip()
@@ -250,6 +263,7 @@ def ticket_search_api(request: HttpRequest):
     try:
         response = ticket_api.get_customer_tickets(
             customer_id=customer_id,
+            user_id=user_id,
             page=1,
             status=status_filter,
             priority=priority_filter,
@@ -278,14 +292,15 @@ def tickets_dashboard_widget(request: HttpRequest):
     """
     # Check authentication via Django session
     customer_id = request.session.get('customer_id')
-    if not customer_id:
+    user_id = request.session.get('user_id')
+    if not customer_id or not user_id:
         return redirect('/login/')
     
     try:
-        summary = ticket_api.get_tickets_summary(customer_id)
+        summary = ticket_api.get_tickets_summary(customer_id, user_id)
         
         # Get recent tickets (last 5)
-        response = ticket_api.get_customer_tickets(customer_id, page=1)
+        response = ticket_api.get_customer_tickets(customer_id, user_id, page=1)
         recent_tickets = response.get('results', [])[:5]
         
         context = {
