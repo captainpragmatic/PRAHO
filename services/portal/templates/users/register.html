@@ -139,7 +139,7 @@
           </div>
 
           <!-- VAT Number -->
-          <div>
+          <div id="vat-field">
             <label for="{{ form.vat_number.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
               {{ form.vat_number.label }}
             </label>
@@ -149,6 +149,20 @@
             {% endif %}
             {% if form.vat_number.errors %}
             <p class="mt-1 text-sm text-red-400">{{ form.vat_number.errors.0 }}</p>
+            {% endif %}
+          </div>
+
+          <!-- CNP Field (for individuals) -->
+          <div id="cnp-field" style="display: none;">
+            <label for="{{ form.cnp.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+              {{ form.cnp.label }}
+            </label>
+            {{ form.cnp }}
+            {% if form.cnp.help_text %}
+            <p class="mt-1 text-xs text-slate-400">{{ form.cnp.help_text }}</p>
+            {% endif %}
+            {% if form.cnp.errors %}
+            <p class="mt-1 text-sm text-red-400">{{ form.cnp.errors.0 }}</p>
             {% endif %}
           </div>
         </div>
@@ -291,4 +305,76 @@
     </div>
   </div>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const customerTypeField = document.getElementById('id_customer_type');
+    const companyNameField = document.getElementById('id_company_name');
+    const firstNameField = document.getElementById('id_first_name');
+    const lastNameField = document.getElementById('id_last_name');
+    const vatField = document.getElementById('vat-field');
+    const cnpField = document.getElementById('cnp-field');
+    const vatInput = document.getElementById('id_vat_number');
+    const cnpInput = document.getElementById('id_cnp');
+    
+    function toggleIndividualFields(customerType) {
+        if (customerType === 'individual') {
+            // Show CNP field, hide VAT field
+            vatField.style.display = 'none';
+            cnpField.style.display = 'block';
+            
+            // Auto-fill company name with full name for individuals
+            updateIndividualCompanyName();
+            
+            // Clear VAT number for individuals
+            vatInput.value = '';
+        } else {
+            // Show VAT field, hide CNP field
+            vatField.style.display = 'block';
+            cnpField.style.display = 'none';
+            
+            // Clear CNP for companies
+            cnpInput.value = '';
+            
+            // Clear auto-filled company name for companies
+            if (companyNameField.value === getFullName()) {
+                companyNameField.value = '';
+            }
+        }
+    }
+    
+    function getFullName() {
+        const firstName = firstNameField.value.trim();
+        const lastName = lastNameField.value.trim();
+        if (firstName && lastName) {
+            return firstName + ' ' + lastName;
+        }
+        return '';
+    }
+    
+    function updateIndividualCompanyName() {
+        if (customerTypeField.value === 'individual') {
+            const fullName = getFullName();
+            if (fullName) {
+                companyNameField.value = fullName;
+            }
+        }
+    }
+    
+    // Set initial state based on current selection
+    toggleIndividualFields(customerTypeField.value);
+    
+    // Handle customer type changes
+    customerTypeField.addEventListener('change', function() {
+        toggleIndividualFields(this.value);
+    });
+    
+    // Update individual company name when name fields change
+    firstNameField.addEventListener('input', updateIndividualCompanyName);
+    lastNameField.addEventListener('input', updateIndividualCompanyName);
+    
+    // Make toggleIndividualFields available globally for form onchange
+    window.toggleIndividualFields = toggleIndividualFields;
+});
+</script>
 {% endblock %}
