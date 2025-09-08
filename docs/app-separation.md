@@ -24,8 +24,8 @@ PRAHO/                          # Beautiful monorepo root
 │       ├── apps/               # Customer-facing apps only
 │       ├── config/             # Django settings
 │       ├── manage.py           # Django management  
-│       ├── requirements/       # Portal-specific deps (no DB drivers)
-│       └── Public internet exposure, API-only
+│       ├── requirements/       # Portal-specific deps (no business DB drivers)
+│       └── Public internet exposure, in-memory DB for sessions only
 │
 ├── Makefile                    # Unified build commands
 ├── docker-compose.yml          # Multi-service orchestration
@@ -34,12 +34,28 @@ PRAHO/                          # Beautiful monorepo root
 └── tests/integration/          # Cross-service integration tests
 ```
 
+### Database Architecture
+
+**Critical Security Principle: Zero Business Data in Portal**
+
+| Service | Database Access | Purpose | Models/ORM |
+|---------|-----------------|---------|------------|
+| **Platform** | PostgreSQL + Redis | All business data, admin operations | ✅ Full Django models/ORM |
+| **Portal** | In-memory only | Django internals, sessions cache | ❌ NO business models/ORM |
+
+**Portal Database Restrictions:**
+- ✅ **In-memory SQLite**: Auto-created by Django for internals (migration tracking, content types)
+- ✅ **Session cache**: In-memory cache for user sessions (auto-cleanup)
+- ❌ **NO business models**: Portal apps must NOT define models.py files
+- ❌ **NO ORM queries**: All business data via Platform API calls only
+- ❌ **NO migrations**: Portal apps cannot create database migrations
+
 ### Why Beautiful Monorepo with Two Services?
 
 **No separate repositories or shared library needed.** Build and maintain a single beautiful monorepo with two complete Django services under `services/` folder. This approach:
 
 - ✅ **Maximizes development velocity** - Single repo, unified tooling, shared CI/CD
-- ✅ **Minimizes complexity** - One repo with clear service boundaries
+- ✅ **Minimizes complexity** - One repo with clear service boundaries  
 - ✅ **Enables atomic changes** - Cross-service changes in single commit/PR
 - ✅ **Aligns with modern practices** - Google, Facebook, Uber use monorepos
 - ✅ **Accepts deliberate duplication** of ~500 lines of shared code (validators, constants)
