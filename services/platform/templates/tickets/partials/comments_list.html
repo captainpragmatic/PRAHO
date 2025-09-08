@@ -86,15 +86,6 @@
                 </div>
                 {% endif %}
                 
-                <!-- Time Spent -->
-                {% if comment.time_spent > 0 %}
-                <div class="{% if comment.comment_type == 'internal' %}mt-3 text-xs text-amber-300{% else %}mt-2 text-xs text-slate-500{% endif %}">
-                    <svg class="w-3 h-3 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                    </svg>
-                    {% trans 'Time spent' %}: {{ comment.time_spent }} {% trans 'minutes' %}
-                </div>
-                {% endif %}
                 
                 <!-- Attachments -->
                 {% if comment.attachments.all %}
