@@ -45,10 +45,23 @@
             display: none;
         }
         .htmx-request .htmx-indicator {
-            display: inline;
+            display: block;
         }
         .htmx-request.htmx-indicator {
-            display: inline;
+            display: block;
+        }
+        
+        /* Ticket skeleton overlay specific styles */
+        #tickets-skeleton.htmx-indicator {
+            display: none;
+        }
+        .htmx-request #tickets-skeleton.htmx-indicator {
+            display: block !important;
+        }
+        
+        /* Ensure skeleton container has proper dimensions */
+        #tickets-container {
+            min-height: 400px;
         }
         
         /* Custom scrollbar */
@@ -79,14 +92,16 @@
             <div class="flex justify-between h-16">
               <div class="flex items-center min-w-0 flex-1">
                 <!-- Logo -->
-                <a href="/dashboard/" class="flex-shrink-0 flex items-center hover:opacity-80 transition-opacity">
-                  <div class="h-8 w-8 bg-blue-600 rounded-lg flex items-center justify-center text-white text-lg font-bold mr-3">
-                    P
-                  </div>
-                  <h1 class="text-xl font-bold text-blue-400">
-                    PRAHO Portal
-                  </h1>
-                </a>
+                <div class="w-64 flex-shrink-0">
+                  <a href="/dashboard/" class="flex items-center hover:opacity-80 transition-opacity">
+                    <div class="h-8 w-8 bg-blue-600 rounded-lg flex items-center justify-center text-white text-lg font-bold mr-3">
+                      P
+                    </div>
+                    <h1 class="text-xl font-bold text-blue-400 whitespace-nowrap">
+                      PRAHO Portal
+                    </h1>
+                  </a>
+                </div>
 
                 <!-- Navigation Links -->
                 <div class="hidden lg:ml-6 lg:flex lg:space-x-4">
@@ -117,8 +132,8 @@
               </div>
 
               <!-- User Menu -->
-              <div class="flex items-center space-x-3 flex-shrink-0">
-                <a href="{% url 'users:profile' %}"
+              <div class="w-80 flex items-center justify-end space-x-3 flex-shrink-0">
+                <a href="/profile/"
                   class="text-slate-300 hover:text-white flex items-center px-2 py-1 whitespace-nowrap">
                   <span class="mr-1">⚙️</span> {% trans 'Profile' %}
                 </a>
@@ -126,7 +141,7 @@
                   {% csrf_token %}
                   <input name="next" type="hidden" value="{{ request.get_full_path|slice:':-1' }}" />
                   <select name="language" onchange="this.form.submit()"
-                    class="bg-slate-700 text-white rounded-md text-sm font-medium">
+                    class="bg-slate-700 text-slate-300 hover:text-white hover:bg-slate-600 rounded-md font-medium px-2 py-1 text-sm transition-colors cursor-pointer flex items-center whitespace-nowrap">
                     <option value="en" {% if LANGUAGE_CODE|slice:":2" == "en" %}selected{% endif %}>🇬🇧 English</option>
                     <option value="ro" {% if LANGUAGE_CODE|slice:":2" == "ro" %}selected{% endif %}>🇷🇴 Română</option>
                   </select>
@@ -145,8 +160,10 @@
         {% endif %}
 
         <!-- Main Content -->
-        <div id="main-content" class="min-h-full">
-            {% block content %}{% endblock %}
+        <div id="main-content" class="min-h-full pt-4">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                {% block content %}{% endblock %}
+            </div>
         </div>
     </div>
     
@@ -188,6 +205,24 @@
         {% endfor %}
     </div>
     {% endif %}
+    
+    <!-- Footer -->
+    <footer class="bg-slate-800 border-t border-slate-700 mt-8 sm:mt-12 lg:mt-16 xl:mt-20">
+      <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+        <div class="text-center text-slate-400 text-sm">
+          <p>
+            © {% now "Y" %} PRAHO Portal - {% trans 'PRAHO Really Automates Hosting Operations' %}
+          </p>
+          <p class="mt-2 text-xs">
+            <span class="text-blue-400">Django 5.2</span> | 
+            <span class="text-green-400">Python 3.13</span> | 
+            <span class="text-purple-400">PostgreSQL 16+</span> | 
+            <span class="text-yellow-400">HTMX</span> | 
+            <span class="text-cyan-400">{% trans 'Version' %} 1.0.0</span>
+          </p>
+        </div>
+      </div>
+    </footer>
     
     <!-- Loading overlay -->
     <div id="loading-overlay" 
