@@ -1,11 +1,10 @@
+import unittest
 from unittest.mock import patch, MagicMock
-
-from django.test import TestCase
 
 from apps.billing.services import InvoiceViewService
 
 
-class BillingServicesTests(TestCase):
+class BillingServicesTests(unittest.TestCase):
     def setUp(self) -> None:
         self.service = InvoiceViewService()
 

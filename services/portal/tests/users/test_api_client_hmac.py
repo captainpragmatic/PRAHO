@@ -10,17 +10,17 @@ import hashlib
 import hmac
 import json
 import time
+import unittest
 from unittest.mock import Mock, patch
 from urllib.parse import urlencode
 
 import requests
 from django.conf import settings
-from django.test import TestCase, override_settings
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 
 
-class HMACAuthenticationTestCase(TestCase):
+class HMACAuthenticationTestCase(unittest.TestCase):
     """Test HMAC authentication implementation in Portal API Client"""
     
     def setUp(self):
@@ -284,14 +284,12 @@ class HMACAuthenticationTestCase(TestCase):
             self.assertNotIn(nonce, nonces, "Nonce collision detected")
             nonces.add(nonce)
 
-    @override_settings(
-        PLATFORM_API_BASE_URL='http://testserver',
-        PLATFORM_API_SECRET='test-secret-override',
-        PORTAL_ID='test-portal-override'
-    )
     def test_settings_override_in_client(self):
         """Test that client respects Django settings overrides"""
-        client = PlatformAPIClient()
+        with patch.object(settings, 'PLATFORM_API_BASE_URL', 'http://testserver'), \
+             patch.object(settings, 'PLATFORM_API_SECRET', 'test-secret-override'), \
+             patch.object(settings, 'PORTAL_ID', 'test-portal-override'):
+            client = PlatformAPIClient()
         
         # Verify settings are loaded correctly
         self.assertEqual(client.base_url, 'http://testserver')
@@ -318,7 +316,7 @@ class HMACAuthenticationTestCase(TestCase):
         self.assertEqual(str(parsed['timestamp']), headers['X-Timestamp'])
 
 
-class PlatformAPIClientIntegrationTestCase(TestCase):
+class PlatformAPIClientIntegrationTestCase(unittest.TestCase):
     """Integration tests for complete Portal → Platform API workflows"""
     
     def setUp(self):

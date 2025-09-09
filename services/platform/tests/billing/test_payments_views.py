@@ -91,7 +91,7 @@ class PaymentProcessingViewsTestCase(TestCase):
             'payment_method': 'stripe'
         }
         
-        request = self.factory.post('/app/billing/process-payment/', post_data)
+        request = self.factory.post('/billing/invoices/1/pay/', post_data)
         request.user = self.user
         request = self.add_middleware_to_request(request)
         
@@ -114,7 +114,7 @@ class PaymentProcessingViewsTestCase(TestCase):
             'payment_method': 'stripe'
         }
         
-        request = self.factory.post('/app/billing/process-payment/', post_data)
+        request = self.factory.post('/billing/invoices/1/pay/', post_data)
         request.user = unauthorized_user
         request = self.add_middleware_to_request(request)
         
@@ -130,7 +130,7 @@ class PaymentProcessingViewsTestCase(TestCase):
             'payment_method': 'stripe'
         }
         
-        request = self.factory.post('/app/billing/process-payment/', post_data)
+        request = self.factory.post('/billing/invoices/1/pay/', post_data)
         request.user = self.user
         request = self.add_middleware_to_request(request)
         
@@ -146,7 +146,7 @@ class PaymentProcessingViewsTestCase(TestCase):
             'payment_method': 'stripe'
         }
         
-        request = self.factory.post('/app/billing/process-payment/', post_data)
+        request = self.factory.post('/billing/invoices/1/pay/', post_data)
         request.user = self.user
         request = self.add_middleware_to_request(request)
         
@@ -237,7 +237,7 @@ class PaymentListViewsTestCase(TestCase):
         """Test successful payment list view"""
         # Use Django test client for easier testing of list views
         self.client.force_login(self.user)
-        response = self.client.get('/app/billing/payments/')
+        response = self.client.get('/billing/payments/')
         
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Payments')
@@ -249,7 +249,7 @@ class PaymentListViewsTestCase(TestCase):
     def test_payment_list_filtering_by_status(self):
         """Test payment list filtering by status"""
         self.client.force_login(self.user)
-        response = self.client.get('/app/billing/payments/?status=succeeded')
+        response = self.client.get('/billing/payments/?status=succeeded')
         
         self.assertEqual(response.status_code, 200)
         
@@ -262,7 +262,7 @@ class PaymentListViewsTestCase(TestCase):
     def test_payment_list_filtering_by_invoice(self):
         """Test payment list filtering by invoice"""
         self.client.force_login(self.user)
-        response = self.client.get(f'/app/billing/payments/?invoice={self.invoice.pk}')
+        response = self.client.get(f'/billing/payments/?invoice={self.invoice.pk}')
         
         self.assertEqual(response.status_code, 200)
         
@@ -280,7 +280,7 @@ class PaymentListViewsTestCase(TestCase):
         )
         
         self.client.force_login(unauthorized_user)
-        response = self.client.get('/app/billing/payments/')
+        response = self.client.get('/billing/payments/')
         
         self.assertEqual(response.status_code, 200)
         
@@ -291,7 +291,7 @@ class PaymentListViewsTestCase(TestCase):
     def test_payment_list_ordering(self):
         """Test payment list default ordering"""
         self.client.force_login(self.user)
-        response = self.client.get('/app/billing/payments/')
+        response = self.client.get('/billing/payments/')
         
         self.assertEqual(response.status_code, 200)
         
@@ -316,7 +316,7 @@ class PaymentListViewsTestCase(TestCase):
         
         try:
             self.client.force_login(self.user)
-            response = self.client.get('/app/billing/payments/')
+            response = self.client.get('/billing/payments/')
             
             self.assertEqual(response.status_code, 200)
             
