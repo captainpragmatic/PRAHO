@@ -177,6 +177,49 @@ class CustomerRegistrationSerializer(serializers.Serializer):
 
 
 # ===============================================================================
+# CUSTOMER DETAIL SERIALIZERS 🏢
+# ===============================================================================
+
+class CustomerTaxProfileSerializer(serializers.Serializer):
+    """
+    Serializer for customer tax profile data (safe fields only).
+    """
+    vat_number = serializers.CharField(max_length=20, allow_blank=True)
+    cui = serializers.CharField(max_length=20, allow_blank=True)
+    is_vat_payer = serializers.BooleanField()
+
+
+class CustomerBillingProfileSerializer(serializers.Serializer):
+    """
+    Serializer for customer billing profile data (safe fields only).
+    Excludes sensitive banking details and credit limits.
+    """
+    payment_terms = serializers.CharField(max_length=50, allow_blank=True)
+    preferred_currency = serializers.CharField(max_length=3, default='RON')
+    invoice_delivery_method = serializers.CharField(max_length=20, default='email')
+    auto_payment_enabled = serializers.BooleanField(default=False)
+
+
+class CustomerDetailSerializer(serializers.ModelSerializer):
+    """
+    Serializer for customer detail API response with nested profiles.
+    Returns safe customer data with optional expansions via 'include' parameter.
+    """
+    display_name = serializers.CharField(source='get_display_name', read_only=True)
+    tax_profile = CustomerTaxProfileSerializer(read_only=True)
+    billing_profile = CustomerBillingProfileSerializer(read_only=True)
+    
+    class Meta:
+        model = Customer
+        fields = [
+            'id', 'display_name', 'customer_type', 'status', 'created_at', 'updated_at',
+            'name', 'company_name', 'primary_email', 'primary_phone', 'website', 'industry',
+            'tax_profile', 'billing_profile'
+        ]
+        read_only_fields = fields
+
+
+# ===============================================================================
 # CUSTOMER PROFILE SERIALIZERS 👤
 # ===============================================================================
 

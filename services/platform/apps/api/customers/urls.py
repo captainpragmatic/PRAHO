@@ -8,7 +8,8 @@ from .views import (
     CustomerSearchViewSet, 
     CustomerServicesViewSet,
     customer_register_api,
-    CustomerProfileAPIView
+    CustomerProfileAPIView,
+    customer_detail_api
 )
 
 # Create router for customer API endpoints
@@ -24,6 +25,9 @@ urlpatterns = [
     
     # Customer profile management (authenticated)
     path('profile/', CustomerProfileAPIView.as_view(), name='customer-profile'),
+    
+    # Customer detail endpoint (HMAC authenticated)
+    path('details/', customer_detail_api, name='customer-detail'),
     
     # Router-based endpoints
     path('', include(router.urls)),

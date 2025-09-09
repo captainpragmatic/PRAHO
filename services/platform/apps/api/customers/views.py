@@ -9,20 +9,22 @@ from django.db.models import Q, QuerySet
 from django.http import HttpRequest
 from django.contrib.auth import get_user_model
 from rest_framework import status
-from rest_framework.decorators import action, api_view, permission_classes, throttle_classes
+from rest_framework.decorators import action, api_view, permission_classes, throttle_classes, authentication_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.api.core import BaseAPIViewSet, ReadOnlyAPIViewSet
 from apps.api.core.throttling import AuthThrottle, BurstAPIThrottle
+from apps.api.secure_auth import require_customer_authentication
 from apps.customers.models import Customer
 from apps.users.models import User
 from .serializers import (
     CustomerSearchSerializer, 
     CustomerServiceSerializer,
     CustomerRegistrationSerializer,
-    CustomerProfileSerializer
+    CustomerProfileSerializer,
+    CustomerDetailSerializer
 )
 
 User = get_user_model()
@@ -381,3 +383,165 @@ class CustomerProfileAPIView(APIView):
                 'error': 'Validation failed',
                 'errors': serializer.errors
             }, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ===============================================================================
+# CUSTOMER DETAIL API 🏢
+# ===============================================================================
+
+@api_view(['POST'])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
+@permission_classes([AllowAny])  # HMAC auth handled by secure_auth
+@require_customer_authentication
+def customer_detail_api(request: HttpRequest, customer: Customer) -> Response:
+    """
+    🏢 Customer Detail API
+    
+    POST /api/customers/details/
+    
+    Returns customer details with optional expansions for authenticated customers.
+    Uses HMAC authentication to prevent enumeration attacks.
+    
+    Request Body:
+    {
+        "customer_id": 123,
+        "user_id": 456,
+        "action": "get_customer_details",
+        "timestamp": 1699999999,
+        "include": ["stats", "membership", "billing_profile"]  // Optional
+    }
+    
+    Response:
+    {
+        "success": true,
+        "customer": {
+            "id": 123,
+            "display_name": "Test Company SRL",
+            "customer_type": "company",
+            "status": "active",
+            "created_at": "2025-09-01T00:00:00Z",
+            "updated_at": "2025-09-02T00:00:00Z",
+            "name": "Ion Popescu",
+            "company_name": "Test Company SRL",
+            "primary_email": "contact@testcompany.ro", 
+            "primary_phone": "+40.21.123.4567",
+            "website": "https://testcompany.ro",
+            "industry": "Technology",
+            "tax_profile": {
+                "vat_number": "RO12345678",
+                "cui": "RO12345678",
+                "is_vat_payer": true
+            },
+            "billing_profile": {
+                "payment_terms": "net_30",
+                "preferred_currency": "RON", 
+                "invoice_delivery_method": "email",
+                "auto_payment_enabled": false
+            }
+        },
+        "meta": {  // Optional, based on 'include' parameter
+            "membership": {
+                "role": "owner"
+            },
+            "stats": {
+                "services": 12,
+                "open_tickets": 1,
+                "outstanding_invoices": 0
+            },
+            "links": {
+                "invoices": "/api/billing/invoices/",
+                "services": "/api/services/",
+                "tickets": "/api/tickets/"
+            }
+        }
+    }
+    
+    Security Features:
+    - HMAC authentication required (customer passed by decorator)
+    - Customer ID from signed request body (no URL enumeration)
+    - Customer membership validation via @require_customer_authentication
+    - Safe fields only (no CNP, banking details, or internal audit data)
+    """
+    try:
+        # Extract optional includes from request
+        request_data = getattr(request, 'data', {})
+        includes = request_data.get('include', [])
+        if isinstance(includes, str):
+            includes = [includes]  # Handle single string
+        
+        # Optimize query with related fields
+        customer_with_profiles = Customer.objects.select_related(
+            'tax_profile', 'billing_profile'
+        ).get(id=customer.id)
+        
+        # Serialize customer data
+        serializer = CustomerDetailSerializer(customer_with_profiles)
+        response_data = {
+            'success': True,
+            'customer': serializer.data
+        }
+        
+        # Add optional expansions if requested
+        if includes:
+            meta = {}
+            
+            # Add membership role for requesting user
+            if 'membership' in includes:
+                user_id = request_data.get('user_id')
+                if user_id:
+                    try:
+                        from apps.users.models import CustomerMembership
+                        membership = CustomerMembership.objects.get(
+                            user_id=user_id, customer=customer
+                        )
+                        meta['membership'] = {
+                            'role': membership.role
+                        }
+                    except CustomerMembership.DoesNotExist:
+                        # Default role if membership not found (shouldn't happen due to auth decorator)
+                        meta['membership'] = {'role': 'member'}
+            
+            # Add stats if requested (cheap aggregates)
+            if 'stats' in includes:
+                # TODO: Replace with actual service/ticket/invoice counts from related models
+                # For now, return placeholder values
+                meta['stats'] = {
+                    'services': 0,  # customer.services.filter(status='active').count()
+                    'open_tickets': 0,  # customer.tickets.filter(status__in=['open', 'in_progress']).count()  
+                    'outstanding_invoices': 0  # customer.invoices.filter(status='pending').count()
+                }
+            
+            # Add billing profile if requested (already included in serializer, but could be conditional)
+            if 'billing_profile' in includes:
+                # Billing profile already included in customer serializer
+                pass
+                
+            # Add convenience links
+            if includes:  # Add links if any includes are requested
+                meta['links'] = {
+                    'invoices': '/api/billing/invoices/',
+                    'services': '/api/services/',
+                    'tickets': '/api/tickets/'
+                }
+            
+            if meta:
+                response_data['meta'] = meta
+        
+        logger.info(f"✅ [Customer Detail API] Retrieved details for customer {customer.company_name}")
+        
+        return Response(response_data, status=status.HTTP_200_OK)
+        
+    except Customer.DoesNotExist:
+        # This shouldn't happen due to @require_customer_authentication decorator
+        logger.error(f"🔥 [Customer Detail API] Customer not found: {customer.id}")
+        return Response({
+            'success': False,
+            'error': 'Customer not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+        
+    except Exception as e:
+        logger.error(f"🔥 [Customer Detail API] Unexpected error for customer {customer.id}: {e}")
+        return Response({
+            'success': False,
+            'error': 'Internal server error'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
