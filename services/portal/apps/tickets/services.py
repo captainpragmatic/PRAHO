@@ -204,8 +204,20 @@ class TicketAPIClient(PlatformAPIClient):
             data = {'customer_id': customer_id, 'user_id': user_id}
             response = self._make_request('POST', '/tickets/summary/', data=data)
             
-            logger.info(f"✅ [Tickets API] Retrieved ticket summary for customer {customer_id}")
-            return response
+            # Extract data from platform API response format (same as other methods)
+            if response.get('success') and 'data' in response:
+                summary_data = response['data']
+                logger.info(f"✅ [Tickets API] Retrieved ticket summary for customer {customer_id}")
+                return summary_data
+            else:
+                logger.warning(f"⚠️ [Tickets API] Unexpected summary response format: {response}")
+                return {
+                    'total_tickets': 0,
+                    'open_tickets': 0,
+                    'pending_tickets': 0,
+                    'resolved_tickets': 0,
+                    'by_priority': {'critical': 0, 'urgent': 0, 'high': 0, 'normal': 0, 'low': 0}
+                }
             
         except PlatformAPIError as e:
             logger.error(f"🔥 [Tickets API] Error retrieving ticket summary for customer {customer_id}: {e}")

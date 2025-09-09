@@ -352,8 +352,16 @@ class PlatformAPIClient:
         return customers
     
     def get_customer_details(self, customer_id: int, user_id: int) -> Dict[str, Any]:
-        """Get customer details"""
-        return self._make_request('GET', f'/customers/{customer_id}/', user_id=user_id)
+        """Get customer details using secure HMAC authenticated endpoint"""
+        return self._make_request(
+            'POST', 
+            '/customers/details/', 
+            user_id=user_id,
+            data={
+                'customer_id': customer_id,
+                'action': 'get_customer_details'
+            }
+        )
     
     def search_customers(self, query: str, user_id: int) -> List[Dict[str, Any]]:
         """Search customers"""
