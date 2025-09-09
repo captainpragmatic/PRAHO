@@ -149,8 +149,19 @@ class ServicesAPIClient(PlatformAPIClient):
             data = {'customer_id': customer_id, 'user_id': user_id}
             response = self._make_request('POST', '/services/summary/', user_id=user_id, data=data)
             
-            logger.info(f"✅ [Services API] Retrieved services summary for customer {customer_id}")
-            return response
+            # Extract summary data from nested response structure
+            if response.get('success') and 'data' in response and 'summary' in response['data']:
+                summary_data = response['data']['summary']
+                logger.info(f"✅ [Services API] Retrieved services summary for customer {customer_id}: {summary_data.get('active_services', 0)} active")
+                return summary_data
+            else:
+                logger.warning(f"⚠️ [Services API] Unexpected summary response format: {response}")
+                return {
+                    'total_services': 0,
+                    'active_services': 0,
+                    'suspended_services': 0,
+                    'pending_services': 0,
+                }
             
         except PlatformAPIError as e:
             logger.error(f"🔥 [Services API] Error retrieving services summary for customer {customer_id}: {e}")

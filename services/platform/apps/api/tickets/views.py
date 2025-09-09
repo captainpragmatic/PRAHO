@@ -521,7 +521,7 @@ def customer_tickets_summary_api(request: HttpRequest, customer) -> Response:
         
         # Calculate summary statistics
         total_tickets = tickets_qs.count()
-        open_tickets = tickets_qs.filter(status__in=['new', 'open']).count()
+        open_tickets = tickets_qs.filter(status__in=['open', 'in_progress']).count()
         pending_tickets = tickets_qs.filter(status='pending').count()
         resolved_tickets = tickets_qs.filter(status__in=['resolved', 'closed']).count()
         

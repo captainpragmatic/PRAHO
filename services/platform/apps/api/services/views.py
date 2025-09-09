@@ -275,10 +275,10 @@ def customer_services_summary_api(request: HttpRequest, customer) -> Response:
         recent_services_serializer = ServiceListSerializer(recent_services, many=True)
         
         summary_data = {
-            'total': stats['total'] or 0,
-            'active': stats['active'] or 0,
-            'suspended': stats['suspended'] or 0,
-            'pending': stats['pending'] or 0,
+            'total_services': stats['total'] or 0,
+            'active_services': stats['active'] or 0,
+            'suspended_services': stats['suspended'] or 0,
+            'pending_services': stats['pending'] or 0,
             'overdue': stats['overdue'] or 0,
             'expiring_soon': stats['expiring_soon'] or 0,
             'total_monthly_cost': round(total_monthly_cost, 2),
