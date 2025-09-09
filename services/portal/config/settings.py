@@ -12,10 +12,18 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# 🚨 CRITICAL: Empty DATABASES - Django creates in-memory DB for internals only
+# 🚨 CRITICAL: In-memory DATABASES - Django internals only, NO business models
 # Portal apps must NOT define models or use ORM - API-only communication with platform  
 # In-memory DB used for: sessions cache, Django internals, migration tracking
-DATABASES = {}
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': ':memory:',  # In-memory database
+        'OPTIONS': {
+            'timeout': 20,
+        },
+    }
+}
 
 # Use cache-based sessions (in-memory, auto-cleanup, no files)
 SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
