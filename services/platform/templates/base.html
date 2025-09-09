@@ -62,12 +62,14 @@
         <div class="flex justify-between h-16">
           <div class="flex items-center min-w-0 flex-1">
             <!-- Logo -->
-            <a href="{% url 'dashboard' %}" class="flex-shrink-0 flex items-center hover:opacity-80 transition-opacity">
-              <img src="{% static 'img/favicon.svg' %}" alt="PRAHO" class="h-8 w-8 mr-3">
-              <h1 class="text-xl font-bold text-blue-400">
-                PRAHO Platform
-              </h1>
-            </a>
+            <div class="w-64 flex-shrink-0">
+              <a href="{% url 'dashboard' %}" class="flex items-center hover:opacity-80 transition-opacity">
+                <img src="{% static 'img/favicon.svg' %}" alt="PRAHO" class="h-8 w-8 mr-3">
+                <h1 class="text-xl font-bold text-blue-400 whitespace-nowrap">
+                  PRAHO Platform
+                </h1>
+              </a>
+            </div>
 
             <!-- Navigation Links -->
             <div class="hidden lg:ml-6 lg:flex lg:space-x-4">
@@ -84,11 +86,26 @@
               {% dropdown "Support" support_items icon="🎫" %}
               
               {% else %}
-              <!-- Customer User Navigation with Dropdowns -->
+              <!-- Customer User Navigation with Direct Links -->
               {% if user.is_customer_user %}
               
-              {% dropdown "My Account" customer_items icon="👤" %}
-              {% dropdown "Support" customer_support_items icon="🎫" %}
+              <!-- My Invoices -->
+              <a href="{% url 'billing:invoice_list' %}"
+                class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
+                <span class="mr-2">📄</span> {% trans 'My Invoices' %}
+              </a>
+
+              <!-- My Services -->
+              <a href="{% url 'provisioning:services' %}"
+                class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
+                <span class="mr-2">🚀</span> {% trans 'My Services' %}
+              </a>
+
+              <!-- My Tickets -->
+              <a href="{% url 'tickets:list' %}"
+                class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
+                <span class="mr-2">🎫</span> {% trans 'My Tickets' %}
+              </a>
               
               {% else %}
               <!-- User with no customer access -->
@@ -101,7 +118,7 @@
           </div>
 
           <!-- User Menu -->
-          <div class="flex items-center space-x-3 flex-shrink-0">
+          <div class="w-80 flex items-center justify-end space-x-3 flex-shrink-0">
             <a href="{% url 'users:user_profile' %}"
               class="text-slate-300 hover:text-white flex items-center px-2 py-1 whitespace-nowrap">
               <span class="mr-1">⚙️</span> {% trans 'Profile' %}
@@ -110,13 +127,13 @@
               {% csrf_token %}
               <input name="next" type="hidden" value="{{ request.get_full_path|slice:':-1' }}" />
               <select name="language" onchange="this.form.submit()"
-                class="bg-slate-700 text-white rounded-md text-sm font-medium">
+                class="bg-slate-700 text-slate-300 hover:text-white hover:bg-slate-600 rounded-md font-medium px-2 py-1 text-sm transition-colors cursor-pointer flex items-center whitespace-nowrap">
                 {% get_current_language as LANGUAGE_CODE %}
                 {% get_available_languages as LANGUAGES %}
                 {% get_language_info_list for LANGUAGES as languages %}
                 {% for language in languages %}
                 <option value="{{ language.code }}" {% if language.code == LANGUAGE_CODE %}selected{% endif %}>
-                  {{ language.name_local }} ({{ language.code }})
+                  {% if language.code == 'en' %}🇬🇧 {{ language.name_local }}{% elif language.code == 'ro' %}🇷🇴 {{ language.name_local }}{% else %}{{ language.name_local }}{% endif %}
                 </option>
                 {% endfor %}
               </select>
@@ -139,13 +156,15 @@
     {% endif %}
 
     <!-- Main Content -->
-    <main class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-      {% block content %}
-      {% endblock %}
+    <main class="min-h-full pt-4">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        {% block content %}
+        {% endblock %}
+      </div>
     </main>
 
     <!-- Footer -->
-    <footer class="bg-slate-800 border-t border-slate-700 mt-12">
+    <footer class="bg-slate-800 border-t border-slate-700 mt-8 sm:mt-12 lg:mt-16 xl:mt-20">
       <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
         <div class="text-center text-slate-400 text-sm">
           <p>

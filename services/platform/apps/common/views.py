@@ -12,6 +12,7 @@ from django.shortcuts import redirect, render
 from django.utils import timezone
 
 from apps.billing.models import Invoice
+from apps.billing.proforma_models import ProformaInvoice
 from apps.customers.models import Customer
 from apps.provisioning.models import Service
 from apps.tickets.models import Ticket
@@ -60,23 +61,42 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
 
     thirty_days_ago = timezone.now() - timedelta(days=30)
 
-    # Recent invoices with Romanian formatting
+    # Recent documents (invoices and proformas combined)
     recent_invoices = (
         Invoice.objects.filter(customer__in=accessible_customers, created_at__gte=thirty_days_ago)
         .select_related("customer")
-        .order_by("-created_at")[:5]
+        .order_by("-created_at")[:4]
     )
+    
+    recent_proformas = (
+        ProformaInvoice.objects.filter(customer__in=accessible_customers, created_at__gte=thirty_days_ago)
+        .select_related("customer")
+        .order_by("-created_at")[:4]
+    )
+    
+    # Combine and annotate document type, then sort by date and limit to 4
+    recent_documents = []
+    for invoice in recent_invoices:
+        invoice.document_type = 'invoice'
+        recent_documents.append(invoice)
+    for proforma in recent_proformas:
+        proforma.document_type = 'proforma'
+        recent_documents.append(proforma)
+    
+    # Sort combined list by created_at and limit to 4
+    recent_documents.sort(key=lambda x: x.created_at, reverse=True)
+    recent_documents = recent_documents[:4]
 
-    # Recent support tickets
+    # Recent support tickets (limit to 4 for consistency)
     recent_tickets = (
         Ticket.objects.filter(customer__in=accessible_customers, created_at__gte=thirty_days_ago)
         .select_related("customer")
-        .order_by("-created_at")[:5]
+        .order_by("-created_at")[:4]
     )
 
     context = {
         "stats": stats,
-        "recent_invoices": recent_invoices,
+        "recent_documents": recent_documents,
         "recent_tickets": recent_tickets,
         "current_time": timezone.now(),
         "app_version": "1.0.0",
