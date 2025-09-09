@@ -531,13 +531,13 @@ logger = logging.getLogger(__name__)
 
 # Define 2FA Setup Steps for Progress Indicator
 TWO_FACTOR_STEPS = [
-    {"label": _("Choose Method"), "description": _("Select authentication method"), "url": "users:two_factor_setup"},
+    {"label": _("Choose Method"), "description": _("Select authentication method"), "url": "users:mfa_setup"},
     {
         "label": _("Set Up Method"),
         "description": _("Configure your authenticator"),
-        "url": "users:two_factor_setup_totp",
+        "url": "users:mfa_setup_totp",
     },
-    {"label": _("Complete"), "description": _("Save backup codes"), "url": "users:two_factor_backup_codes"},
+    {"label": _("Complete"), "description": _("Save backup codes"), "url": "users:mfa_backup_codes"},
 ]
 
 
@@ -552,7 +552,7 @@ def mfa_method_selection(request: HttpRequest) -> HttpResponse:
         return redirect("users:user_profile")
 
     context = {"steps": TWO_FACTOR_STEPS, "current_step": 1}
-    return render(request, "users/two_factor_method_selection.html", context)
+    return render(request, "users/mfa_method_selection.html", context)
 
 
 @login_required
@@ -591,7 +591,7 @@ def mfa_setup_totp(request: HttpRequest) -> HttpResponse:
                         if "2fa_secret" in request.session:
                             del request.session["2fa_secret"]
 
-                        return redirect("users:two_factor_backup_codes")
+                        return redirect("users:mfa_backup_codes")
 
                     except Exception as e:
                         logger.error(f"🔥 [2FA] Failed to enable TOTP: {e}")
@@ -617,10 +617,10 @@ def mfa_setup_totp(request: HttpRequest) -> HttpResponse:
         "user": user,
         "steps": TWO_FACTOR_STEPS,
         "current_step": 2,
-        "back_url": reverse("users:two_factor_setup"),  # Explicit back to method selection
+        "back_url": reverse("users:mfa_setup"),  # Explicit back to method selection
     }
 
-    return render(request, "users/two_factor_setup.html", context)
+    return render(request, "users/mfa_setup.html", context)
 
 
 @login_required
@@ -635,7 +635,7 @@ def mfa_setup_webauthn(request: HttpRequest) -> HttpResponse:
 
     # For now, redirect to TOTP setup with a message
     messages.info(request, _("WebAuthn/Passkeys are coming soon! Please use the Authenticator App method for now."))
-    return redirect("users:two_factor_setup_totp")
+    return redirect("users:mfa_setup_totp")
 
 
 def _handle_2fa_rate_limit(request: HttpRequest, user: User) -> HttpResponse | None:
@@ -643,7 +643,7 @@ def _handle_2fa_rate_limit(request: HttpRequest, user: User) -> HttpResponse | N
     if getattr(request, "limited", False) and not getattr(settings, "TESTING", False):
         # Log rate limit event to audit system
         rate_limit_data = RateLimitEventData(
-            endpoint="users:two_factor_verify",
+            endpoint="users:mfa_verify",
             ip_address=get_safe_client_ip(request),
             user_agent=request.META.get("HTTP_USER_AGENT", ""),
             rate_limit_key="ip",
@@ -656,7 +656,7 @@ def _handle_2fa_rate_limit(request: HttpRequest, user: User) -> HttpResponse | N
         messages.error(request, _("Too many verification attempts. Please wait and try again."))
         return render(
             request,
-            "users/two_factor_verify.html",
+            "users/mfa_verify.html",
             {"form": TwoFactorVerifyForm(request.POST), "user": user},
             status=429,
         )
@@ -736,7 +736,7 @@ def mfa_verify(request: HttpRequest) -> HttpResponse:
     else:
         form = TwoFactorVerifyForm()
 
-    return render(request, "users/two_factor_verify.html", {"form": form, "user": user})
+    return render(request, "users/mfa_verify.html", {"form": form, "user": user})
 
 
 @login_required
@@ -753,12 +753,12 @@ def mfa_backup_codes(request: HttpRequest) -> HttpResponse:
 
     return render(
         request,
-        "users/two_factor_backup_codes.html",
+        "users/mfa_backup_codes.html",
         {
             "backup_codes": backup_codes,
             "steps": TWO_FACTOR_STEPS,
             "current_step": 3,
-            "back_url": reverse("users:two_factor_setup_totp"),  # Back to TOTP setup
+            "back_url": reverse("users:mfa_setup_totp"),  # Back to TOTP setup
         },
     )
 
@@ -778,9 +778,9 @@ def mfa_regenerate_backup_codes(request: HttpRequest) -> HttpResponse:
         request.session["new_backup_codes"] = backup_codes
 
         messages.success(request, _("New backup codes have been generated."))
-        return redirect("users:two_factor_backup_codes")
+        return redirect("users:mfa_backup_codes")
 
-    return render(request, "users/two_factor_regenerate_backup_codes.html", {"backup_count": len(user.backup_tokens)})
+    return render(request, "users/mfa_regenerate_backup_codes.html", {"backup_count": len(user.backup_tokens)})
 
 
 @login_required
@@ -797,7 +797,7 @@ def mfa_disable(request: HttpRequest) -> HttpResponse:
         password = request.POST.get("password")
         if not password or not user.check_password(password):
             messages.error(request, _("Invalid password."))
-            return render(request, "users/two_factor_disable.html")
+            return render(request, "users/mfa_disable.html")
 
         # Disable 2FA
         user.two_factor_enabled = False
@@ -819,7 +819,7 @@ def mfa_disable(request: HttpRequest) -> HttpResponse:
         messages.success(request, _("Two-factor authentication has been disabled."))
         return redirect("users:user_profile")
 
-    return render(request, "users/two_factor_disable.html")
+    return render(request, "users/mfa_disable.html")
 
 
 # ===============================================================================

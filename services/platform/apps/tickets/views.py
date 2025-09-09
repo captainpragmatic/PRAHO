@@ -25,24 +25,97 @@ from .models import Ticket, TicketAttachment, TicketComment
 
 @login_required
 def ticket_list(request: HttpRequest) -> HttpResponse:
-    """🎫 Display support tickets for user's customers"""
+    """🎫 Display support tickets for user's customers with filtering"""
     user = cast(User, request.user)  # Safe after @login_required
     accessible_customers = user.get_accessible_customers()
     customer_ids = [customer.id for customer in accessible_customers]
+    
+    # Base queryset
     tickets = Ticket.objects.filter(customer_id__in=customer_ids).select_related("customer").order_by("-created_at")
+    
+    # Get filter parameters
+    search_query = request.GET.get("search", "").strip()
+    status_filter = request.GET.get("status", "").strip()
+    
+    # Apply search filter
+    if search_query:
+        from django.db.models import Q
+        tickets = tickets.filter(
+            Q(ticket_number__icontains=search_query) |
+            Q(title__icontains=search_query) |
+            Q(description__icontains=search_query) |
+            Q(customer__name__icontains=search_query) |
+            Q(contact_email__icontains=search_query)
+        )
+    
+    # Apply status filter
+    if status_filter:
+        tickets = tickets.filter(status=status_filter)
 
     # Pagination
     paginator = Paginator(tickets, 25)
     page_number = request.GET.get("page")
     tickets_page = paginator.get_page(page_number)
 
+    # Build URL parameters for pagination
+    url_params = []
+    if search_query:
+        url_params.append(f"search={search_query}")
+    if status_filter:
+        url_params.append(f"status={status_filter}")
+    url_params_str = "&".join(url_params)
+    
     context = {
         "tickets": tickets_page,
         "open_count": tickets.filter(status__in=["open", "in_progress"]).count(),
         "total_count": tickets.count(),
+        "search_query": search_query,
+        "status_filter": status_filter,
+        "url_params": url_params_str,
     }
 
     return render(request, "tickets/list.html", context)
+
+
+@login_required
+def ticket_search_htmx(request: HttpRequest) -> HttpResponse:
+    """🔄 HTMX endpoint for live ticket filtering"""
+    user = cast(User, request.user)  # Safe after @login_required
+    accessible_customers = user.get_accessible_customers()
+    customer_ids = [customer.id for customer in accessible_customers]
+    
+    # Base queryset
+    tickets = Ticket.objects.filter(customer_id__in=customer_ids).select_related("customer").order_by("-created_at")
+    
+    # Get filter parameters
+    search_query = request.GET.get("q", "").strip()
+    status_filter = request.GET.get("status", "").strip()
+    
+    # Apply search filter
+    if search_query:
+        from django.db.models import Q
+        tickets = tickets.filter(
+            Q(ticket_number__icontains=search_query) |
+            Q(title__icontains=search_query) |
+            Q(description__icontains=search_query) |
+            Q(customer__name__icontains=search_query) |
+            Q(contact_email__icontains=search_query)
+        )
+    
+    # Apply status filter
+    if status_filter:
+        tickets = tickets.filter(status=status_filter)
+
+    # Pagination for HTMX (first 25 results only for real-time filtering)
+    tickets = tickets[:25]
+
+    context = {
+        "tickets": tickets,
+        "search_query": search_query,
+        "status_filter": status_filter,
+    }
+
+    return render(request, "tickets/partials/tickets_table.html", context)
 
 
 @login_required
