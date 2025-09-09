@@ -47,7 +47,7 @@ class PortalAuthenticationMiddleware:
     JITTER_MAX = 120       # 0-2 minutes random jitter
     VALIDATION_TIMEOUT = 30  # Single-flight lock timeout
     SOFT_TTL_GRACE = 300   # 5 minutes soft grace period (stale-while-revalidate)
-    HARD_TTL_GRACE = 900   # 15 minutes hard grace period (force logout after this)
+    HARD_TTL_GRACE = 21600   # 6 hours hard grace period (force logout after this)
     
     def __init__(self, get_response):
         self.get_response = get_response
