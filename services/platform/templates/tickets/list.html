@@ -6,29 +6,90 @@
 
 {% block content %}
 <div class="space-y-6">
-  <!-- Header -->
-  <div class="border-b border-slate-700 pb-6">
-    <div class="flex items-center justify-between">
-      <div>
-        <h1 class="text-3xl font-bold text-white">🎫 {% trans 'Support Tickets' %}</h1>
-        <p class="mt-2 text-slate-400">
-          {% trans 'Management system for technical support requests' %}
-        </p>
-      </div>
-      <div class="flex items-center space-x-4">
-        <div class="flex items-center space-x-2 text-sm">
-          <span class="text-slate-400">{% trans 'Open' %}:</span>
-          <span class="font-semibold text-amber-400">{{ open_count }}</span>
-          <span class="text-slate-400">{% trans 'Total' %}:</span>
-          <span class="font-semibold text-white">{{ total_count }}</span>
+  <!-- Modern Header Card -->
+  <div class="bg-slate-800 rounded-lg border border-slate-700 mb-6">
+    <!-- Desktop Layout -->
+    <div class="hidden md:block p-6">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center space-x-4">
+          <div class="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center">
+            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+            </svg>
+          </div>
+          <div>
+            <h1 class="text-2xl font-bold text-white">
+              {% if user.is_staff %}
+                {% trans "Support Tickets" %}
+              {% else %}
+                {% trans "My Support Tickets" %}
+              {% endif %}
+            </h1>
+            <p class="text-slate-400">
+              {% if user.is_staff %}
+                {% trans "Manage customer support requests" %}
+              {% else %}
+                {% trans "Get help with your hosting services" %}
+              {% endif %}
+            </p>
+          </div>
         </div>
-        <a href="{% url 'tickets:create' %}"
-          class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-lg text-white bg-primary hover:bg-primary/90 transition-colors">
-          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-          </svg>
-          {% trans 'New Ticket' %}
-        </a>
+        <div class="flex items-center space-x-6">
+          <div class="grid grid-cols-2 gap-6">
+            <div class="text-center">
+              <p class="text-2xl font-bold text-amber-400">{{ open_count|default:0 }}</p>
+              <p class="text-xs text-slate-400">{% trans 'Open Tickets' %}</p>
+            </div>
+            <div class="text-center">
+              <p class="text-2xl font-bold text-white">{{ total_count|default:0 }}</p>
+              <p class="text-xs text-slate-400">{% trans 'Total Tickets' %}</p>
+            </div>
+          </div>
+          <!-- New Ticket Button -->
+          <div class="htmx-stable">
+            {% button "New Ticket" variant="primary" href="tickets:create" responsive_text="New" size="sm" class="min-w-[80px] whitespace-nowrap" %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mobile Layout -->
+    <div class="md:hidden p-4">
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
+            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+            </svg>
+          </div>
+          <div>
+            <h1 class="text-lg font-bold text-white">
+              {% if user.is_staff %}
+                {% trans "Tickets" %}
+              {% else %}
+                {% trans "Support Tickets" %}
+              {% endif %}
+            </h1>
+          </div>
+        </div>
+        <!-- New Ticket Button -->
+        <div class="htmx-stable">
+          {% button "New Ticket" variant="primary" href="tickets:create" responsive_text="New" size="sm" class="min-w-[60px] flex-shrink-0 whitespace-nowrap" %}
+        </div>
+      </div>
+      
+      <!-- Mobile Stats -->
+      <div class="grid grid-cols-2 gap-3">
+        <div class="text-center py-2">
+          <p class="text-lg font-bold text-amber-400">{{ open_count|default:0 }}</p>
+          <p class="text-xs text-slate-400">{% trans 'Open' %}</p>
+        </div>
+        <div class="text-center py-2">
+          <p class="text-lg font-bold text-white">{{ total_count|default:0 }}</p>
+          <p class="text-xs text-slate-400">{% trans 'Total' %}</p>
+        </div>
       </div>
     </div>
   </div>
@@ -46,7 +107,13 @@
 
   <!-- Filters -->
   <div class="bg-slate-800/50 border border-slate-700 rounded-lg p-4">
-    <div class="flex items-center space-x-4">
+    <form hx-get="{% url 'tickets:search_htmx' %}"
+          hx-target="#tickets-container"
+          hx-trigger="keyup changed delay:600ms from:#search, change from:select[name='status']"
+          hx-sync="this:replace"
+          hx-params="q,status"
+          hx-indicator="#loading-indicator"
+          class="flex items-center space-x-4">
       <div class="flex-1">
         <label for="search" class="sr-only">{% trans 'Search' %}</label>
         <div class="relative">
@@ -56,257 +123,161 @@
                 d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
           </div>
-          <input type="text" id="search" name="search"
+          <input type="text" id="search" name="q" value="{{ search_query|default:'' }}" autocomplete="off"
             class="block w-full pl-10 pr-3 py-2 border border-slate-600 rounded-lg bg-slate-700 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-            placeholder="{% trans 'Search by number, title or customer...' %}">
+            placeholder="{% if user.is_staff %}{% trans 'Search by number, title or customer...' %}{% else %}{% trans 'Search' %}{% endif %}">
         </div>
       </div>
-      <select
-        class="px-3 py-2 border border-slate-600 rounded-lg bg-slate-700 text-white focus:outline-none focus:ring-2 focus:ring-primary">
-        <option value="">{% trans 'All priorities' %}</option>
-        <option value="critical">{% trans 'Critical' %}</option>
-        <option value="urgent">{% trans 'Urgent' %}</option>
-        <option value="high">{% trans 'High' %}</option>
-        <option value="normal">{% trans 'Normal' %}</option>
-        <option value="low">{% trans 'Low' %}</option>
-      </select>
-      <select
+      <select name="status"
         class="px-3 py-2 border border-slate-600 rounded-lg bg-slate-700 text-white focus:outline-none focus:ring-2 focus:ring-primary">
         <option value="">{% trans 'All statuses' %}</option>
-        <option value="new">{% trans 'New' %}</option>
-        <option value="open">{% trans 'Open' %}</option>
-        <option value="pending">{% trans 'Pending' %}</option>
-        <option value="resolved">{% trans 'Resolved' %}</option>
-        <option value="closed">{% trans 'Closed' %}</option>
+        <option value="new"{% if status_filter == 'new' %} selected{% endif %}>{% trans 'New' %}</option>
+        <option value="open"{% if status_filter == 'open' %} selected{% endif %}>{% trans 'Open' %}</option>
+        <option value="pending"{% if status_filter == 'pending' %} selected{% endif %}>{% trans 'Pending' %}</option>
+        <option value="resolved"{% if status_filter == 'resolved' %} selected{% endif %}>{% trans 'Resolved' %}</option>
+        <option value="closed"{% if status_filter == 'closed' %} selected{% endif %}>{% trans 'Closed' %}</option>
       </select>
-    </div>
+    </form>
   </div>
 
-  <!-- Tickets List -->
-  {% if tickets %}
-  <div class="bg-slate-800/50 border border-slate-700 rounded-lg overflow-hidden">
-    <div class="overflow-x-auto">
-      <table class="min-w-full divide-y divide-slate-700">
-        <thead class="bg-slate-800">
-          <tr>
-            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Ticket' %}
-            </th>
-            {% if user.is_staff %}
-            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Customer' %}
-            </th>
-            {% else %}
-            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Your Company' %}
-            </th>
-            {% endif %}
-            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Priority' %}
-            </th>
-            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Status' %}
-            </th>
-            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Created' %}
-            </th>
-            <th scope="col" class="relative px-6 py-3">
-              <span class="sr-only">{% trans 'Actions' %}</span>
-            </th>
-          </tr>
-        </thead>
-        <tbody class="bg-slate-800/30 divide-y divide-slate-700">
-          {% for ticket in tickets %}
-          <tr class="hover:bg-slate-700/50 transition-colors">
-            <td class="px-6 py-4 whitespace-nowrap">
-              <div class="flex items-center">
-                <div class="flex-shrink-0 h-10 w-10">
-                  <div class="h-10 w-10 rounded-full bg-primary/20 flex items-center justify-center">
-                    <span class="text-sm font-medium text-primary">
-                      {% if ticket.ticket_number %}
-                      {{ ticket.ticket_number|slice:":2" }}
-                      {% else %}
-                      #{{ ticket.id }}
-                      {% endif %}
-                    </span>
-                  </div>
-                </div>
-                <div class="ml-4">
-                  <div class="text-sm font-medium text-white">
-                    <a href="{% url 'tickets:detail' ticket.pk %}" class="hover:text-blue-300 transition-colors">
-                      {% if ticket.ticket_number %}
-                      {{ ticket.ticket_number }}
-                      {% else %}
-                      #{{ ticket.id }}
-                      {% endif %}
-                    </a>
-                  </div>
-                  <div class="text-sm text-slate-400 truncate max-w-xs">
-                    {% if ticket.title %}{{ ticket.title }}{% elif ticket.subject %}{{ ticket.subject }}{% else %}{{
-                    ticket.description|truncatechars:50 }}{% endif %}
-                  </div>
-                </div>
-              </div>
-            </td>
-            <td class="px-6 py-4 whitespace-nowrap">
-              {% if user.is_staff %}
-              <div class="text-sm text-white">{{ ticket.customer.name }}</div>
-              {% if ticket.contact_email %}
-              <div class="text-sm text-slate-400">{{ ticket.contact_email }}</div>
-              {% endif %}
-              {% else %}
-              <div class="flex items-center">
-                <div class="flex-shrink-0 h-8 w-8">
-                  <div class="h-8 w-8 rounded-full bg-blue-500/20 flex items-center justify-center">
-                    <span class="text-xs font-medium text-blue-300">🏢</span>
-                  </div>
-                </div>
-                <div class="ml-3">
-                  <div class="text-sm font-medium text-white">{{ ticket.customer.name }}</div>
-                  <div class="text-xs text-slate-400">{% trans 'Your Company' %}</div>
-                </div>
-              </div>
-              {% endif %}
-            </td>
-            <td class="px-6 py-4 whitespace-nowrap">
-              {% if ticket.priority == 'critical' %}
-                {% badge "Critical" variant="danger" icon="🚨" %}
-              {% elif ticket.priority == 'urgent' %}
-                {% badge "Urgent" variant="danger" icon="🔴" %}
-              {% elif ticket.priority == 'high' %}
-                {% badge "High" variant="warning" icon="🟡" %}
-              {% elif ticket.priority == 'normal' %}
-                {% badge "Normal" variant="info" icon="🔵" %}
-              {% elif ticket.priority == 'low' %}
-                {% badge "Low" variant="success" icon="🟢" %}
-              {% else %}
-                {% badge ticket.priority|capfirst variant="default" %}
-              {% endif %}
-            </td>
-            <td class="px-6 py-4 whitespace-nowrap">
-              {% if ticket.status == 'new' %}
-                {% badge "New" variant="success" icon="🆕" %}
-              {% elif ticket.status == 'open' %}
-                {% badge "Open" variant="info" icon="📂" %}
-              {% elif ticket.status == 'pending' %}
-                {% badge "Pending" variant="warning" icon="⏳" %}
-              {% elif ticket.status == 'resolved' %}
-                {% badge "Resolved" variant="primary" icon="✅" %}
-              {% elif ticket.status == 'closed' %}
-                {% badge "Closed" variant="secondary" icon="📁" %}
-              {% elif ticket.status == 'cancelled' %}
-                {% badge "Cancelled" variant="danger" icon="❌" %}
-              {% else %}
-                {% badge ticket.status|capfirst variant="default" %}
-              {% endif %}
-            </td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
-              {{ ticket.created_at|date:"d M Y H:i" }}
-            </td>
-            <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-              <a href="{% url 'tickets:detail' ticket.pk %}"
-                class="text-primary hover:text-primary/80 transition-colors">
-                {% trans 'View Details' %}
-              </a>
-            </td>
-          </tr>
+  <!-- Loading Indicator with Skeleton -->
+  <div id="loading-indicator" class="htmx-indicator hidden">
+    <!-- Desktop Skeleton -->
+    <div class="hidden md:block bg-slate-800/50 border border-slate-700 rounded-lg overflow-hidden">
+      <div class="animate-pulse">
+        <div class="bg-slate-800 px-6 py-3">
+          <div class="grid {% if user.is_staff %}grid-cols-5{% else %}grid-cols-4{% endif %} gap-4">
+            <div class="h-4 bg-slate-600 rounded"></div>
+            <div class="h-4 bg-slate-600 rounded"></div>
+            {% if user.is_staff %}<div class="h-4 bg-slate-600 rounded"></div>{% endif %}
+            <div class="h-4 bg-slate-600 rounded"></div>
+            <div class="h-4 bg-slate-600 rounded"></div>
+          </div>
+        </div>
+        <div class="divide-y divide-slate-700">
+          {% for i in "123456" %}
+          <div class="px-6 py-4 flex items-center space-x-4">
+            <div class="flex-shrink-0">
+              <div class="h-10 w-10 bg-slate-600 rounded-full"></div>
+            </div>
+            <div class="flex-1 space-y-2">
+              <div class="h-4 bg-slate-600 rounded w-3/4"></div>
+              <div class="h-3 bg-slate-700 rounded w-1/2"></div>
+            </div>
+            <div class="h-6 w-16 bg-slate-600 rounded-full"></div>
+            <div class="h-6 w-16 bg-slate-600 rounded-full"></div>
+            <div class="h-4 w-20 bg-slate-700 rounded"></div>
+          </div>
           {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- Pagination -->
-  {% if tickets.has_other_pages %}
-  <div class="flex items-center justify-between">
-    <div class="flex-1 flex justify-between sm:hidden">
-      {% if tickets.has_previous %}
-      <a href="?page={{ tickets.previous_page_number }}"
-        class="relative inline-flex items-center px-4 py-2 border border-slate-600 text-sm font-medium rounded-md text-slate-300 bg-slate-800 hover:bg-slate-700">
-        {% trans 'Previous' %}
-      </a>
-      {% endif %}
-      {% if tickets.has_next %}
-      <a href="?page={{ tickets.next_page_number }}"
-        class="ml-3 relative inline-flex items-center px-4 py-2 border border-slate-600 text-sm font-medium rounded-md text-slate-300 bg-slate-800 hover:bg-slate-700">
-        {% trans 'Next' %}
-      </a>
-      {% endif %}
-    </div>
-    <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
-      <div>
-        <p class="text-sm text-slate-400">
-          {% blocktrans with tickets.start_index as start_index and tickets.end_index as end_index and tickets.paginator.count as count %}
-          Showing {{ start_index }} - {{ end_index }} of {{ count }} results
-          {% endblocktrans %}
-        </p>
-      </div>
-      <div>
-        <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
-          {% if tickets.has_previous %}
-          <a href="?page={{ tickets.previous_page_number }}"
-            class="relative inline-flex items-center px-2 py-2 rounded-l-md border border-slate-600 bg-slate-800 text-sm font-medium text-slate-300 hover:bg-slate-700">
-            <span class="sr-only">{% trans 'Previous' %}</span>
-            <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
-              <path fill-rule="evenodd"
-                d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
-                clip-rule="evenodd" />
-            </svg>
-          </a>
-          {% endif %}
-
-          {% for num in tickets.paginator.page_range %}
-          {% if tickets.number == num %}
-          <span
-            class="relative inline-flex items-center px-4 py-2 border border-primary bg-primary text-sm font-medium text-white">
-            {{ num }}
-          </span>
-          {% else %}
-          <a href="?page={{ num }}"
-            class="relative inline-flex items-center px-4 py-2 border border-slate-600 bg-slate-800 text-sm font-medium text-slate-300 hover:bg-slate-700">
-            {{ num }}
-          </a>
-          {% endif %}
-          {% endfor %}
-
-          {% if tickets.has_next %}
-          <a href="?page={{ tickets.next_page_number }}"
-            class="relative inline-flex items-center px-2 py-2 rounded-r-md border border-slate-600 bg-slate-800 text-sm font-medium text-slate-300 hover:bg-slate-700">
-            <span class="sr-only">{% trans 'Next' %}</span>
-            <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
-              <path fill-rule="evenodd"
-                d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
-                clip-rule="evenodd" />
-            </svg>
-          </a>
-          {% endif %}
-        </nav>
+        </div>
       </div>
     </div>
-  </div>
-  {% endif %}
 
-  {% else %}
-  <!-- Empty State -->
-  <div class="text-center py-12">
-    <svg class="mx-auto h-12 w-12 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-    </svg>
-    <h3 class="mt-2 text-sm font-medium text-slate-300">{% trans 'No tickets found' %}</h3>
-    <p class="mt-1 text-sm text-slate-400">
-      {% trans 'There are no support tickets for your customers yet.' %}
-    </p>
-    <div class="mt-6">
-      <a href="{% url 'tickets:create' %}"
-        class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary hover:bg-primary/90">
-        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-        </svg>
-        {% trans 'Create the first ticket' %}
-      </a>
+    <!-- Mobile Skeleton -->
+    <div class="sm:hidden divide-y divide-slate-700">
+      <div class="animate-pulse">
+        {% for i in "123456" %}
+        <div class="min-h-[72px] flex flex-col justify-center p-4">
+          <div class="flex items-center justify-between mb-2">
+            <div class="h-4 bg-slate-600 rounded w-24"></div>
+            <div class="h-6 w-16 bg-slate-600 rounded-full"></div>
+          </div>
+          <div class="mb-2">
+            <div class="h-4 bg-slate-600 rounded w-full mb-1"></div>
+            <div class="h-4 bg-slate-700 rounded w-3/4"></div>
+          </div>
+          <div class="flex items-center justify-between text-sm">
+            <div class="h-3 w-16 bg-slate-700 rounded"></div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Loading Text -->
+    <div class="flex items-center justify-center p-4 bg-slate-800/30 rounded-b-lg">
+      <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-primary mr-2"></div>
+      <span class="text-slate-400 text-sm">{% trans 'Loading tickets...' %}</span>
     </div>
   </div>
-  {% endif %}
+
+  <!-- Tickets List Container with inline skeleton -->
+  <div id="tickets-container" class="relative">
+    <!-- Inline Loading Skeleton that replaces content during loading -->
+    <div id="tickets-skeleton" class="htmx-indicator absolute inset-0 z-10 bg-slate-900">
+      <!-- Desktop Skeleton -->
+      <div class="hidden md:block w-full h-full">
+        <div class="w-full bg-slate-800/50 border border-slate-700 rounded-lg overflow-hidden h-full">
+          <div class="animate-pulse h-full">
+            <div class="bg-slate-800 px-6 py-3">
+              <div class="grid {% if user.is_staff %}grid-cols-5{% else %}grid-cols-4{% endif %} gap-4">
+                <div class="h-4 bg-slate-600 rounded"></div>
+                <div class="h-4 bg-slate-600 rounded"></div>
+                {% if user.is_staff %}<div class="h-4 bg-slate-600 rounded"></div>{% endif %}
+                <div class="h-4 bg-slate-600 rounded"></div>
+                <div class="h-4 bg-slate-600 rounded"></div>
+              </div>
+            </div>
+            <div class="divide-y divide-slate-700">
+              {% for i in "123456" %}
+              <div class="px-6 py-4 flex items-center space-x-4">
+                <div class="flex-shrink-0">
+                  <div class="h-10 w-10 bg-slate-600 rounded-full"></div>
+                </div>
+                <div class="flex-1 space-y-2">
+                  <div class="h-4 bg-slate-600 rounded w-3/4"></div>
+                  <div class="h-3 bg-slate-700 rounded w-1/2"></div>
+                </div>
+                <div class="h-6 w-16 bg-slate-600 rounded-full"></div>
+                <div class="h-6 w-16 bg-slate-600 rounded-full"></div>
+                <div class="h-4 w-20 bg-slate-700 rounded"></div>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Mobile Skeleton -->
+      <div class="sm:hidden w-full h-full">
+        <div class="w-full bg-slate-800/50 border border-slate-700 rounded-lg overflow-hidden h-full">
+          <div class="animate-pulse divide-y divide-slate-700">
+            {% for i in "123456" %}
+            <div class="min-h-[72px] flex flex-col justify-center p-4">
+              <div class="flex items-center justify-between mb-2">
+                <div class="h-4 bg-slate-600 rounded w-24"></div>
+                <div class="h-6 w-16 bg-slate-600 rounded-full"></div>
+              </div>
+              <div class="mb-2">
+                <div class="h-4 bg-slate-600 rounded w-full mb-1"></div>
+                <div class="h-4 bg-slate-700 rounded w-3/4"></div>
+              </div>
+              <div class="flex items-center justify-between text-sm">
+                <div class="h-3 w-16 bg-slate-700 rounded"></div>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Content that will be swapped by HTMX -->
+    <div id="tickets-content">
+      {% include 'tickets/partials/tickets_table.html' %}
+    </div>
+  </div>
 </div>
+
+<style>
+/* HTMX Loading Indicator Styles */
+.htmx-indicator {
+  display: none;
+}
+
+.htmx-request .htmx-indicator,
+.htmx-request.htmx-indicator {
+  display: block;
+}
+</style>
 {% endblock %}

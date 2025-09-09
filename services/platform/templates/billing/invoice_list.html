@@ -6,15 +6,76 @@
 
 {% block content %}
 <div class="px-4 py-6">
-  <!-- Header -->
-  <div class="flex justify-between items-center mb-6">
-    <div>
-      <h1 class="text-2xl font-bold text-white">🧾 {% trans 'Invoices' %}</h1>
-      <p class="text-slate-400 mt-1">{% trans 'Manage invoices and payments with Romanian VAT compliance' %}</p>
+  <!-- Modern Header Card -->
+  <div class="bg-slate-800 rounded-lg border border-slate-700 mb-6">
+    <!-- Desktop Layout -->
+    <div class="hidden md:block p-6">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center space-x-4">
+          <div class="w-12 h-12 bg-green-600 rounded-lg flex items-center justify-center">
+            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+            </svg>
+          </div>
+          <div>
+            <h1 class="text-2xl font-bold text-white">{% trans "Invoice Management" %}</h1>
+            <p class="text-slate-400">{% trans "Manage invoices and payments with Romanian VAT compliance" %}</p>
+          </div>
+        </div>
+        <div class="flex items-center space-x-4">
+          <div class="grid grid-cols-3 gap-6">
+            <div class="text-center">
+              <p class="text-2xl font-bold text-white">{{ total_amount|floatformat:2 }}</p>
+              <p class="text-xs text-slate-400">{% trans 'Total Amount' %}</p>
+            </div>
+            <div class="text-center">
+              <p class="text-2xl font-bold text-white">{{ invoices.paginator.count }}</p>
+              <p class="text-xs text-slate-400">{% trans 'Total Invoices' %}</p>
+            </div>
+            <div class="text-center">
+              <p class="text-2xl font-bold text-white">19%</p>
+              <p class="text-xs text-slate-400">{% trans 'VAT Rate' %}</p>
+            </div>
+          </div>
+          {% url 'billing:invoice_create' as create_url %}
+          {% button "New Invoice" variant="primary" href=create_url size="sm" %}
+        </div>
+      </div>
     </div>
 
-    {% url 'billing:invoice_create' as create_url %}
-    {% button "New Invoice" variant="primary" href=create_url icon="document" %}
+    <!-- Mobile Layout -->
+    <div class="md:hidden p-4">
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 bg-green-600 rounded-lg flex items-center justify-center">
+            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+            </svg>
+          </div>
+          <div>
+            <h1 class="text-lg font-bold text-white">{% trans "Invoices" %}</h1>
+          </div>
+        </div>
+        {% url 'billing:invoice_create' as create_url %}
+        {% button "New" variant="primary" href=create_url size="sm" %}
+      </div>
+      
+      <!-- Mobile Stats -->
+      <div class="grid grid-cols-3 gap-3">
+        <div class="text-center py-2">
+          <p class="text-lg font-bold text-white">{{ total_amount|floatformat:0 }}</p>
+          <p class="text-xs text-slate-400">{% trans 'Total' %}</p>
+        </div>
+        <div class="text-center py-2">
+          <p class="text-lg font-bold text-white">{{ invoices.paginator.count }}</p>
+          <p class="text-xs text-slate-400">{% trans 'Count' %}</p>
+        </div>
+        <div class="text-center py-2">
+          <p class="text-lg font-bold text-white">19%</p>
+          <p class="text-xs text-slate-400">{% trans 'VAT' %}</p>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Filters and Search -->
@@ -53,38 +114,6 @@
     </form>
   </div>
 
-  <!-- Summary Stats -->
-  <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
-      <div class="flex items-center">
-        <div class="text-2xl mr-3">💰</div>
-        <div>
-          <p class="text-slate-400 text-sm">{% trans 'Total Amount' %}</p>
-          <p class="text-white text-lg font-semibold">{{ total_amount|floatformat:2 }} RON</p>
-        </div>
-      </div>
-    </div>
-
-    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
-      <div class="flex items-center">
-        <div class="text-2xl mr-3">📊</div>
-        <div>
-          <p class="text-slate-400 text-sm">{% trans 'Total Invoices' %}</p>
-          <p class="text-white text-lg font-semibold">{{ invoices.paginator.count }}</p>
-        </div>
-      </div>
-    </div>
-
-    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
-      <div class="flex items-center">
-        <div class="text-2xl mr-3">🇷🇴</div>
-        <div>
-          <p class="text-slate-400 text-sm">{% trans 'Romanian VAT' %}</p>
-          <p class="text-white text-lg font-semibold">19%</p>
-        </div>
-      </div>
-    </div>
-  </div>
 
   <!-- Invoices Table -->
   <div class="bg-slate-800 rounded-lg border border-slate-700">

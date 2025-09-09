@@ -6,8 +6,9 @@
 
 <div class="bg-slate-800 rounded-lg overflow-hidden">
   <!-- Services Count Header -->
-  <div class="px-6 py-4 border-b border-slate-700">
-    <div class="flex items-center justify-between">
+  <div class="px-4 sm:px-6 py-4 border-b border-slate-700">
+    <!-- Desktop Layout -->
+    <div class="hidden sm:flex items-center justify-between">
       <div class="flex items-center space-x-4">
         <h3 class="text-lg font-medium text-white">📦 {% trans 'Services' %}</h3>
         
@@ -37,11 +38,38 @@
         </div>
       </div>
     </div>
+
+    <!-- Mobile Layout -->
+    <div class="sm:hidden">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-medium text-white">📦 {% trans 'Services' %}</h3>
+        <div class="bg-blue-600/20 text-blue-400 px-3 py-1 rounded-full text-sm font-medium">
+          {% if services.paginator.count == 1 %}
+            1 {% trans 'service' %}
+          {% else %}
+            {{ services.paginator.count }} {% trans 'services' %}
+          {% endif %}
+        </div>
+      </div>
+      
+      <div class="flex items-center justify-between">
+        <div class="flex items-center space-x-3 text-sm">
+          <div class="text-green-400">✅ {{ active_count }} {% trans 'active' %}</div>
+          <div class="text-slate-400">📊 {{ total_count }} {% trans 'total' %}</div>
+        </div>
+        
+        {% if status_filter %}
+        <div class="bg-purple-600/20 text-purple-400 px-2 py-1 rounded-full text-xs">
+          {{ status_filter|title }}
+        </div>
+        {% endif %}
+      </div>
+    </div>
   </div>
 
-  <!-- Services Table -->
+  <!-- Desktop Table View -->
   {% if services %}
-  <div class="overflow-x-auto">
+  <div class="hidden sm:block overflow-x-auto">
     <table class="min-w-full divide-y divide-slate-700">
       <thead class="bg-slate-700">
         <tr>
@@ -149,6 +177,92 @@
       </tbody>
     </table>
   </div>
+
+  <!-- Mobile Card View -->
+  <div class="sm:hidden divide-y divide-slate-700">
+    {% for service in services %}
+    <div class="p-4 hover:bg-slate-750 transition-colors cursor-pointer"
+         onclick="window.location.href='{% url 'provisioning:service_detail' service.pk %}'">
+      <div class="flex items-start justify-between mb-3">
+        <div class="flex-1">
+          <div class="text-sm font-medium text-white">{{ service.service_name }}</div>
+          {% if service.domain %}
+          <div class="text-xs text-slate-400 mt-1">{{ service.domain }}</div>
+          {% endif %}
+          <div class="text-xs text-slate-500 mt-1">{{ service.customer.get_display_name }}</div>
+        </div>
+        <div class="ml-3">
+          {% if service.status == 'active' %}
+          <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+            {% trans 'Active' %}
+          </span>
+          {% elif service.status == 'suspended' %}
+          <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
+            {% trans 'Suspended' %}
+          </span>
+          {% elif service.status == 'pending' %}
+          <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
+            {% trans 'Pending' %}
+          </span>
+          {% elif service.status == 'provisioning' %}
+          <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
+            {% trans 'Provisioning' %}
+          </span>
+          {% elif service.status == 'terminated' %}
+          <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
+            {% trans 'Terminated' %}
+          </span>
+          {% elif service.status == 'expired' %}
+          <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-orange-100 text-orange-800">
+            {% trans 'Expired' %}
+          </span>
+          {% else %}
+          <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
+            {{ service.get_status_display }}
+          </span>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3 mb-3">
+        <div>
+          <div class="text-xs text-slate-400 uppercase tracking-wide">{% trans 'Plan' %}</div>
+          <div class="text-sm text-slate-300">{{ service.service_plan.name }}</div>
+        </div>
+        <div>
+          <div class="text-xs text-slate-400 uppercase tracking-wide">{% trans 'Price' %}</div>
+          <div class="text-sm font-mono text-green-400">₾{{ service.price }}</div>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="text-xs text-slate-400 uppercase tracking-wide">{% trans 'Created' %}</div>
+          <div class="text-sm text-slate-300">{{ service.created_at|date:"M d, Y" }}</div>
+        </div>
+        {% if can_manage_services %}
+        <div class="flex space-x-2" onclick="event.stopPropagation();">
+          <a href="{% url 'provisioning:service_edit' service.pk %}" 
+             class="text-blue-400 hover:text-blue-300 transition-colors text-sm">
+            ✏️
+          </a>
+          {% if service.status == 'active' %}
+          <button onclick="confirmSuspend('{{ service.pk }}', '{{ service.service_name }}')"
+                  class="text-red-400 hover:text-red-300 transition-colors text-sm">
+            ⏸️
+          </button>
+          {% elif service.status == 'suspended' %}
+          <button onclick="confirmReactivate('{{ service.pk }}', '{{ service.service_name }}')"
+                  class="text-green-400 hover:text-green-300 transition-colors text-sm">
+            ▶️
+          </button>
+          {% endif %}
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
   {% else %}
   <!-- Empty State -->
   <div class="text-center py-12">
@@ -171,7 +285,7 @@
 
   <!-- Pagination -->
   {% if services.has_other_pages %}
-  <div class="bg-slate-700 px-6 py-3 border-t border-slate-600">
+  <div class="bg-slate-700 px-4 sm:px-6 py-3 border-t border-slate-600">
     <div class="flex items-center justify-between">
       <!-- Page Range Info -->
       <div class="text-sm text-slate-400">
@@ -184,14 +298,14 @@
       <div class="flex space-x-1">
         {% if services.has_previous %}
         <a href="?page={{ services.previous_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}"
-           class="bg-slate-600 hover:bg-slate-500 text-white px-3 py-1 rounded text-sm transition-colors">
+           class="bg-slate-600 hover:bg-slate-500 text-white px-2 sm:px-3 py-1 rounded text-xs sm:text-sm transition-colors">
           {% trans 'Previous' %}
         </a>
         {% endif %}
 
         {% if services.has_next %}
         <a href="?page={{ services.next_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}"
-           class="bg-slate-600 hover:bg-slate-500 text-white px-3 py-1 rounded text-sm transition-colors">
+           class="bg-slate-600 hover:bg-slate-500 text-white px-2 sm:px-3 py-1 rounded text-xs sm:text-sm transition-colors">
           {% trans 'Next' %}
         </a>
         {% endif %}
