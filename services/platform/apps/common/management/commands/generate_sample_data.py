@@ -379,7 +379,7 @@ class Command(BaseCommand):
                 "contact_email": customer.primary_email,
                 "category": category,
                 "priority": random.choice(["low", "normal", "high"]),
-                "status": random.choice(["new", "open", "pending", "resolved"]),
+                "status": random.choice(["open", "in_progress", "waiting_on_customer", "closed"]),
                 "source": random.choice(["web", "email", "phone"]),
                 "assigned_to": assigned_to,
             }
@@ -909,7 +909,7 @@ class Command(BaseCommand):
                 "contact_email": customer.primary_email,
                 "category": category,
                 "priority": random.choice(["low", "normal", "high", "normal"]),  # More normal priority
-                "status": random.choice(["new", "open", "pending", "resolved", "resolved"]),  # More resolved
+                "status": random.choice(["open", "in_progress", "waiting_on_customer", "closed", "closed"]),  # More closed
                 "source": random.choice(["web", "email", "phone"]),
                 "assigned_to": assigned_to,
             }

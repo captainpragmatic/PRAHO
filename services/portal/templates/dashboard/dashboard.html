@@ -155,10 +155,16 @@
                   <p class="text-white font-medium group-hover:text-blue-400 transition-colors leading-5 truncate">{{ ticket.title }}</p>
                 </div>
                 <div class="ml-2 flex-shrink-0">
-                  {% if ticket.status == 'closed' or ticket.status == 'resolved' %}
-                    {% badge "Closed" variant="secondary" icon="📁" css_class="w-20 justify-center" %}
+                  {% if ticket.status == 'open' %}
+                    {% badge "Open" variant="info" icon="📂" css_class="w-32 justify-center" %}
+                  {% elif ticket.status == 'in_progress' %}
+                    {% badge "In Progress" variant="primary" icon="⚡" css_class="w-32 justify-center" %}
+                  {% elif ticket.status == 'waiting_on_customer' %}
+                    {% badge "Waiting on You" variant="warning" icon="⏳" css_class="w-36 justify-center" %}
+                  {% elif ticket.status == 'closed' %}
+                    {% badge "Closed" variant="secondary" icon="📁" css_class="w-32 justify-center" %}
                   {% else %}
-                    {% badge "Open" variant="success" icon="📂" css_class="w-20 justify-center" %}
+                    {% badge ticket.status|capfirst variant="default" css_class="w-32 justify-center" %}
                   {% endif %}
                 </div>
               </div>
