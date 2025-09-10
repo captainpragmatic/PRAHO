@@ -31,6 +31,9 @@ urlpatterns = [
     
     # API client health check
     path('status/', portal_status, name='portal_status'),
+    
+    # API proxy endpoints
+    path('api/', include('apps.api_client.urls')),
 
     # Internationalization (language switch)
     path('i18n/', include('django.conf.urls.i18n')),

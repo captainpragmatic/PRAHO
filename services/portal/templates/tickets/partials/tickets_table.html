@@ -66,7 +66,7 @@
               {% elif ticket.status == 'closed' %}
                 {% badge "Closed" variant="secondary" icon="📁" %}
                 {% if ticket.resolution_code %}
-                  <span class="text-xs text-slate-400">({{ ticket.resolution_code|title }})</span>
+                  {% badge ticket.resolution_code|title variant="outline" size="xs" %}
                 {% endif %}
               {% else %}
                 {% badge ticket.status|capfirst variant="default" %}
@@ -132,7 +132,7 @@
         {% elif ticket.status == 'closed' %}
           {% badge "Closed" variant="secondary" icon="📁" %}
           {% if ticket.resolution_code %}
-            <span class="text-xs text-slate-400">({{ ticket.resolution_code|title }})</span>
+            {% badge ticket.resolution_code|title variant="outline" size="xs" %}
           {% endif %}
         {% else %}
           {% badge ticket.status|capfirst variant="default" %}

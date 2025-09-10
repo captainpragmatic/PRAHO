@@ -266,6 +266,80 @@ class PlatformAPIClient:
             logger.error(f"🔥 [API Client Binary] Request error: {e}")
             raise PlatformAPIError(f"Binary request failed: {e!s}")
     
+    def _make_binary_request_with_headers(self, method: str, endpoint: str, params: dict | None = None, data: dict | None = None) -> tuple[bytes, dict]:
+        """Make HMAC-authenticated request and return both binary content and headers."""
+        url = f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
+        
+        # Build normalized path for HMAC calculation
+        parsed_url = urllib.parse.urlsplit(url)
+        pairs = []
+        if params:
+            for k, v in params.items():
+                if isinstance(v, (list, tuple)):
+                    for item in v:
+                        pairs.append((str(k), str(item)))
+                else:
+                    pairs.append((str(k), str(v)))
+        pairs.sort(key=lambda kv: (kv[0], kv[1]))
+        normalized_query = urllib.parse.urlencode(pairs, doseq=True)
+        path_with_query = parsed_url.path + ("?" + normalized_query if normalized_query else "")
+        
+        # Prepare JSON body
+        body_bytes = b''
+        if data is None:
+            data = {}
+        if isinstance(data, dict):
+            # Ensure signed body carries user_id/timestamp if provided
+            if 'timestamp' not in data:
+                data['timestamp'] = time.time()
+            body_bytes = json.dumps(data).encode('utf-8')
+        else:
+            body_bytes = b''
+        # Use same timestamp for headers if present in body
+        fixed_ts = str(data.get('timestamp')) if isinstance(data, dict) and 'timestamp' in data else None
+        headers = self._generate_hmac_headers(method, path_with_query, body_bytes, fixed_timestamp=fixed_ts)
+        
+        try:
+            response = requests.request(
+                method=method,
+                url=url,
+                headers=headers,
+                data=body_bytes if body_bytes else None,
+                params=params if params else None,
+                timeout=self.timeout
+            )
+            
+            # Log the request for debugging
+            logger.debug(f"🌐 [API Client Binary+Headers] {method} {url} -> {response.status_code}")
+            
+            # Handle successful responses
+            if 200 <= response.status_code < 300:
+                return response.content, dict(response.headers)
+                    
+            # Handle API errors
+            try:
+                error_data = response.json()
+            except ValueError:
+                error_data = {'error': 'Invalid response format'}
+                
+            raise PlatformAPIError(
+                message=f"Binary API request failed: {error_data.get('error', 'Unknown error')}",
+                status_code=response.status_code,
+                response_data=error_data
+            )
+            
+        except requests.exceptions.ConnectionError:
+            logger.error(f"🔥 [API Client Binary+Headers] Connection failed to platform service: {url}")
+            raise PlatformAPIError("Platform service unavailable")
+            
+        except requests.exceptions.Timeout:
+            logger.error(f"🔥 [API Client Binary+Headers] Timeout connecting to platform service: {url}")
+            raise PlatformAPIError("Platform service timeout")
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"🔥 [API Client Binary+Headers] Request error: {e}")
+            raise PlatformAPIError(f"Binary request with headers failed: {e!s}")
+    
     # ===============================================================================
     # AUTHENTICATION API ENDPOINTS
     # ===============================================================================
@@ -731,7 +805,22 @@ class PlatformAPIClient:
             'timestamp': time.time()
         }
         return self._make_request('POST', f'/api/services/{service_id}/auto-renew/', data=request_data)
+    
+    def download_ticket_attachment(self, customer_id: int, user_id: int, ticket_id: int, attachment_id: int) -> dict[str, Any]:
+        """🔒 Download ticket attachment - SECURE HMAC BODY"""
+        request_data = {
+            'customer_id': customer_id,
+            'user_id': user_id,
+            'ticket_id': ticket_id,
+            'attachment_id': attachment_id,
+            'action': 'download_attachment',
+            'timestamp': time.time()
+        }
+        return self._make_request('POST', f'/tickets/{ticket_id}/attachments/{attachment_id}/download/', data=request_data)
 
 
 # Singleton instance
 api_client = PlatformAPIClient()
+
+# Alias for convenience  
+platform_api = api_client
