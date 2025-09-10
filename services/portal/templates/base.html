@@ -19,13 +19,13 @@
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3e%3crect width='100' height='100' fill='%233b82f6'/%3e%3ctext y='75' font-size='80' fill='white'%3eP%3c/text%3e%3c/svg%3e">
     
-    <!-- Scripts & Styles -->
+    <!-- Scripts & Styles - Same approach as platform -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
     
     <style>
-        /* Portal Brand Colors */
+        /* Portal Brand Colors - Same as platform */
         :root {
             --brand-h: 220;
             --brand-s: 90%;
@@ -34,6 +34,10 @@
             --bg-elev: #111217;
             --content: #e6e8eb;
             --primary: hsl(var(--brand-h) var(--brand-s) var(--brand-l));
+        }
+
+        .brand-gradient {
+            background: linear-gradient(135deg, #3b82f6 0%, #1e40af 100%);
         }
 
         .brand-gradient {
@@ -238,17 +242,15 @@
         </div>
     </div>
     
-    <!-- Custom JS -->
+    <!-- Custom JS - Simplified like platform -->
     <script>
         // Global HTMX configuration
         document.body.addEventListener('htmx:beforeRequest', function(evt) {
-            // Show loading indicator
             const indicators = document.querySelectorAll('.htmx-indicator');
             indicators.forEach(el => el.style.display = 'inline');
         });
         
         document.body.addEventListener('htmx:afterRequest', function(evt) {
-            // Hide loading indicator
             const indicators = document.querySelectorAll('.htmx-indicator');
             indicators.forEach(el => el.style.display = 'none');
         });
@@ -256,7 +258,6 @@
         // Handle HTMX errors
         document.body.addEventListener('htmx:responseError', function(evt) {
             console.error('HTMX Error:', evt.detail);
-            // You can add custom error handling here
         });
     </script>
     

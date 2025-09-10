@@ -281,6 +281,20 @@ body.mobile-menu-open {
 // MOBILE MENU FUNCTIONALITY 📱
 // ===============================================================================
 
+// Wait for DOM to be ready before binding events
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('📱 [Mobile Nav] Initializing mobile navigation');
+    
+    // Ensure mobile menu starts closed
+    const menu = document.getElementById('mobile-menu');
+    if (menu) {
+        menu.classList.add('hidden');
+    }
+    
+    // Initialize menu state
+    document.body.classList.remove('mobile-menu-open');
+});
+
 function toggleMobileMenu() {
     const menu = document.getElementById('mobile-menu');
     const hamburger = document.getElementById('hamburger-icon');
@@ -302,10 +316,12 @@ function toggleMobileMenu() {
             document.body.classList.remove('mobile-menu-open');
             console.log('📱 [Mobile Nav] Menu closed');
         }
+    } else {
+        console.warn('📱 [Mobile Nav] Menu elements not found - layout may not be ready');
     }
 }
 
-// Close menu when clicking outside
+// Close menu when clicking outside - use event delegation
 document.addEventListener('click', function(event) {
     const menu = document.getElementById('mobile-menu');
     const toggle = document.getElementById('mobile-menu-toggle');
