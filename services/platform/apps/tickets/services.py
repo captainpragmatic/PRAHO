@@ -4,13 +4,14 @@ Centralized state management for the 4-status ticket system.
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any, ClassVar
 
+from django.db.models import QuerySet
 from django.utils import timezone
 
 from apps.users.models import User
 
-from .models import Ticket, TicketComment
+from .models import Ticket
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ class TicketStatusService:
     """
     
     # Valid status transitions
-    VALID_TRANSITIONS = {
+    VALID_TRANSITIONS: ClassVar[dict[str, list[str]]] = {
         "open": ["in_progress", "waiting_on_customer", "closed"],
         "in_progress": ["waiting_on_customer", "closed", "open"], 
         "waiting_on_customer": ["in_progress", "open", "closed"],
@@ -35,12 +36,12 @@ class TicketStatusService:
     }
     
     # Status transition rules
-    AUTO_ASSIGN_ACTIONS = ["reply", "reply_and_wait"]
-    CUSTOMER_WAITING_ACTIONS = ["reply_and_wait"]
-    CLOSING_ACTIONS = ["close_with_resolution"]
+    AUTO_ASSIGN_ACTIONS: ClassVar[list[str]] = ["reply", "reply_and_wait"]
+    CUSTOMER_WAITING_ACTIONS: ClassVar[list[str]] = ["reply_and_wait"]
+    CLOSING_ACTIONS: ClassVar[list[str]] = ["close_with_resolution"]
     
     @classmethod
-    def create_ticket(cls, **ticket_data) -> Ticket:
+    def create_ticket(cls, **ticket_data: Any) -> Ticket:
         """
         Create a new ticket with initial status.
         
@@ -61,7 +62,7 @@ class TicketStatusService:
         ticket: Ticket, 
         agent: User, 
         reply_action: str,
-        resolution_code: Optional[str] = None
+        resolution_code: str | None = None
     ) -> Ticket:
         """
         Handle first agent reply with automatic assignment.
@@ -110,7 +111,7 @@ class TicketStatusService:
         ticket: Ticket,
         agent: User, 
         reply_action: str,
-        resolution_code: Optional[str] = None
+        resolution_code: str | None = None
     ) -> Ticket:
         """
         Handle subsequent agent replies with explicit action selection.
@@ -229,7 +230,7 @@ class TicketStatusService:
         new_status = "in_progress" if ticket.assigned_to else "open"
         
         ticket.status = new_status
-        ticket.resolution_code = None
+        ticket.resolution_code = ""
         ticket.closed_at = None
         ticket.has_customer_replied = False
         ticket.customer_replied_at = None
@@ -277,7 +278,7 @@ class TicketStatusService:
         return cls.VALID_TRANSITIONS.get(current_status, [])
     
     @classmethod
-    def get_queue_tickets(cls, queue_type: str, assigned_to: Optional[User] = None):
+    def get_queue_tickets(cls, queue_type: str, assigned_to: User | None = None) -> QuerySet[Ticket]:
         """
         Get tickets for specific queues.
         
