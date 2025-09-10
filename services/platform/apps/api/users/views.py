@@ -5,7 +5,7 @@
 import json
 import logging
 from datetime import UTC, datetime, timedelta
-from typing import cast
+from typing import Any, cast
 
 from django.contrib.auth import authenticate
 from django.core.cache import cache
@@ -20,9 +20,19 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle, BaseThrottle
 
-from apps.users.models import User
+from apps.api.secure_auth import require_customer_authentication, require_user_authentication
+from apps.customers.models import Customer
+from apps.users.forms import UserRegistrationForm
+from apps.users.models import CustomerMembership, User, UserProfile
+from apps.users.services import SessionSecurityService
 
-from ..secure_auth import require_customer_authentication, require_user_authentication
+from .serializers import (
+    MFADisableSerializer,
+    MFASetupSerializer,
+    MFAVerifySerializer,
+    PasswordResetConfirmSerializer,
+    PasswordResetRequestSerializer,
+)
 
 # Rate limiting and security constants
 SESSION_VALIDATION_RATE_LIMIT = 60  # requests per minute
@@ -149,7 +159,7 @@ class AuthThrottle(AnonRateThrottle):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 @throttle_classes([AuthThrottle])
-def obtain_token(request):
+def obtain_token(request: HttpRequest) -> Response:
     """
     🔐 Obtain authentication token for API access
     
@@ -211,7 +221,7 @@ def obtain_token(request):
 @api_view(['POST'])  
 @permission_classes([AllowAny])
 @throttle_classes([AuthThrottle])
-def revoke_token(request):
+def revoke_token(request: HttpRequest) -> Response:
     """
     🗑️ Revoke authentication token
     
@@ -242,7 +252,7 @@ def revoke_token(request):
 
 
 @api_view(['GET'])
-def verify_token(request):
+def verify_token(request: HttpRequest) -> Response:
     """
     ✅ Verify token is valid and get user info
     
@@ -286,7 +296,7 @@ def verify_token(request):
 class SessionValidationThrottle(BaseThrottle):
     """Custom throttle for session validation - prevent brute force (60/min per portal)"""
     
-    def allow_request(self, request, view):
+    def allow_request(self, request: HttpRequest, view: Any) -> bool:
         portal_id = request.headers.get('X-Portal-Id', 'unknown')
         cache_key = f"session_validation_throttle:{portal_id}"
         
@@ -399,7 +409,7 @@ def validate_session_secure(request: HttpRequest) -> Response:
         return _uniform_session_error(security_headers)
 
 
-def _uniform_session_error(headers: dict) -> Response:
+def _uniform_session_error(headers: dict[str, Any]) -> Response:
     """Uniform 401 response to prevent information leakage"""
     response_data = {
         'active': False,
@@ -419,7 +429,7 @@ def _uniform_session_error(headers: dict) -> Response:
 @api_view(['POST'])
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
-def mfa_setup_api(request: HttpRequest, customer) -> Response:
+def mfa_setup_api(request: HttpRequest, customer: Customer) -> Response:
     """
     📱 Initialize MFA Setup
     
@@ -436,9 +446,6 @@ def mfa_setup_api(request: HttpRequest, customer) -> Response:
         "manual_entry_key": "JBSWY3DPEHPK3PXP"
     }
     """
-    from apps.users.models import CustomerMembership
-
-    from .serializers import MFASetupSerializer
     
     # Get the user from the customer context (since this is a customer-authenticated endpoint)
     # The customer parameter comes from @require_customer_authentication
@@ -484,7 +491,7 @@ def mfa_setup_api(request: HttpRequest, customer) -> Response:
 @api_view(['POST'])
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_user_authentication
-def mfa_verify_api(request: HttpRequest, user) -> Response:
+def mfa_verify_api(request: HttpRequest, user: User) -> Response:
     """
     🔐 Verify MFA Token and Enable
     
@@ -503,7 +510,6 @@ def mfa_verify_api(request: HttpRequest, user) -> Response:
         "backup_codes": ["12345678", "87654321", ...]
     }
     """
-    from .serializers import MFAVerifySerializer
     
     if user.mfa_enabled:
         return Response({
@@ -521,7 +527,6 @@ def mfa_verify_api(request: HttpRequest, user) -> Response:
             result = serializer.save()
             
             # Rotate session for security after enabling MFA
-            from apps.users.services import SessionSecurityService
             SessionSecurityService.rotate_session_on_mfa_change(request)
             
             return Response(result)
@@ -555,7 +560,6 @@ def mfa_disable_api(request: HttpRequest) -> Response:
     
     Disables MFA after verifying current password and MFA token.
     """
-    from .serializers import MFADisableSerializer
     
     user = cast(User, request.user)
     
@@ -575,7 +579,6 @@ def mfa_disable_api(request: HttpRequest) -> Response:
             result = serializer.save()
             
             # Rotate session for security after disabling MFA
-            from apps.users.services import SessionSecurityService
             SessionSecurityService.rotate_session_on_mfa_change(request)
             
             return Response(result)
@@ -644,7 +647,6 @@ def password_reset_request_api(request: HttpRequest) -> Response:
         "message": "If the email exists, a reset link has been sent."
     }
     """
-    from .serializers import PasswordResetRequestSerializer
     
     serializer = PasswordResetRequestSerializer(data=request.data)
     
@@ -690,7 +692,6 @@ def password_reset_confirm_api(request: HttpRequest) -> Response:
         "message": "Password reset successfully."
     }
     """
-    from .serializers import PasswordResetConfirmSerializer
     
     serializer = PasswordResetConfirmSerializer(data=request.data)
     
@@ -732,7 +733,6 @@ def customer_registration_api(request: HttpRequest) -> Response:
     """
     try:
         # Use existing UserRegistrationService for consistency
-        from apps.users.forms import UserRegistrationForm
         
         # Create form from API data
         form_data = {
@@ -792,7 +792,7 @@ def customer_registration_api(request: HttpRequest) -> Response:
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_user_authentication
-def customer_profile_api(request: HttpRequest, user) -> Response:
+def customer_profile_api(request: HttpRequest, user: User) -> Response:
     """
     Customer profile management API endpoint for Portal service.
     Allows customers to view and update their profile via Platform API.
@@ -833,7 +833,6 @@ def customer_profile_api(request: HttpRequest, user) -> Response:
             }
             
             # Add profile data (create default if doesn't exist)
-            from apps.users.models import UserProfile
             profile, created = UserProfile.objects.get_or_create(user=user)
             
             if created:
@@ -862,18 +861,17 @@ def customer_profile_api(request: HttpRequest, user) -> Response:
             user.save()
             
             # Update or create profile
-            from apps.users.models import UserProfile
             profile, created = UserProfile.objects.get_or_create(user=user)
             
             # Update profile fields if provided in request body
             if 'preferred_language' in request_data:
-                profile.preferred_language = request_data.get('preferred_language')
+                profile.preferred_language = request_data['preferred_language']
             if 'timezone' in request_data:
-                profile.timezone = request_data.get('timezone')
+                profile.timezone = request_data['timezone']
             if 'email_notifications' in request_data:
-                profile.email_notifications = request_data.get('email_notifications')
+                profile.email_notifications = request_data['email_notifications']
             if 'sms_notifications' in request_data:
-                profile.sms_notifications = request_data.get('sms_notifications')
+                profile.sms_notifications = request_data['sms_notifications']
             
             profile.save()
             
@@ -918,18 +916,13 @@ def user_customers_api(request: HttpRequest, user: User) -> Response:
     """
     try:
         customers = user.get_accessible_customers()
-        results = []
         # Handle both QuerySet and list
-        if hasattr(customers, 'all'):
-            iterable = customers.all()
-        else:
-            iterable = customers or []
-        for c in iterable:
-            results.append({
-                'id': c.id,
-                'company_name': getattr(c, 'company_name', ''),
-                'name': getattr(c, 'name', ''),
-            })
+        iterable = customers.all() if hasattr(customers, 'all') else customers or []
+        results = [{
+            'id': c.id,
+            'company_name': getattr(c, 'company_name', ''),
+            'name': getattr(c, 'name', ''),
+        } for c in iterable]
         return Response({'success': True, 'results': results})
     except Exception as e:
         logger.error(f"🔥 [User Customers API] Error fetching customers for {getattr(user, 'email', 'unknown')}: {e}")

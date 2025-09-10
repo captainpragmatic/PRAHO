@@ -3,9 +3,8 @@
 # ===============================================================================
 
 import logging
-from typing import cast
+from typing import Any, ClassVar, cast
 
-from django.contrib.auth import get_user_model
 from django.db.models import Q, QuerySet
 from django.http import HttpRequest
 from rest_framework import status
@@ -18,7 +17,7 @@ from apps.api.core import ReadOnlyAPIViewSet
 from apps.api.core.throttling import AuthThrottle, BurstAPIThrottle
 from apps.api.secure_auth import require_customer_authentication
 from apps.customers.models import Customer
-from apps.users.models import User
+from apps.users.models import CustomerMembership, User
 
 from .serializers import (
     CustomerDetailSerializer,
@@ -28,7 +27,6 @@ from .serializers import (
     CustomerServiceSerializer,
 )
 
-User = get_user_model()
 logger = logging.getLogger(__name__)
 
 # Constants
@@ -49,7 +47,7 @@ class CustomerSearchViewSet(ReadOnlyAPIViewSet):
     
     serializer_class = CustomerSearchSerializer
     
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[Customer]:
         """Filter customers based on user access and search query"""
         user = cast(User, self.request.user)
         customers = user.get_accessible_customers()
@@ -63,7 +61,7 @@ class CustomerSearchViewSet(ReadOnlyAPIViewSet):
         else:
             return Customer.objects.none()
     
-    def list(self, request: HttpRequest, *args, **kwargs):
+    def list(self, request: HttpRequest, *args: Any, **kwargs: Any) -> Response:
         """
         Search customers with query parameter.
         
@@ -113,7 +111,7 @@ class CustomerServicesViewSet(ReadOnlyAPIViewSet):
     
     serializer_class = CustomerServiceSerializer
     
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[Customer]:
         """Get customers the user has access to"""
         user = cast(User, self.request.user)
         accessible_customers = user.get_accessible_customers()
@@ -127,7 +125,7 @@ class CustomerServicesViewSet(ReadOnlyAPIViewSet):
             return Customer.objects.none()
     
     @action(detail=True, methods=['get'], url_path='services')
-    def services(self, request: HttpRequest, pk=None):
+    def services(self, request: HttpRequest, pk: str | None = None) -> Response:
         """
         Get services for a specific customer.
         
@@ -138,6 +136,8 @@ class CustomerServicesViewSet(ReadOnlyAPIViewSet):
             List of services for the customer (empty for now)
         """
         try:
+            if pk is None:
+                raise ValueError("Missing customer ID")
             customer_id = int(pk)
         except (ValueError, TypeError):
             return Response(
@@ -263,8 +263,8 @@ class CustomerProfileAPIView(APIView):
     Integrates user fields and profile preferences in a single API.
     """
     
-    permission_classes = [IsAuthenticated]
-    throttle_classes = [BurstAPIThrottle]
+    permission_classes: ClassVar = [IsAuthenticated]
+    throttle_classes: ClassVar = [BurstAPIThrottle]
     
     def get(self, request: HttpRequest) -> Response:
         """
@@ -491,7 +491,6 @@ def customer_detail_api(request: HttpRequest, customer: Customer) -> Response:
                 user_id = request_data.get('user_id')
                 if user_id:
                     try:
-                        from apps.users.models import CustomerMembership
                         membership = CustomerMembership.objects.get(
                             user_id=user_id, customer=customer
                         )
