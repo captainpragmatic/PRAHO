@@ -142,15 +142,6 @@
                   class="text-slate-300 hover:text-white flex items-center px-2 py-1 whitespace-nowrap">
                   <span class="mr-1">⚙️</span> {% trans 'Profile' %}
                 </a>
-                <form action="/i18n/setlang/" method="post" class="inline">
-                  {% csrf_token %}
-                  <input name="next" type="hidden" value="{{ request.get_full_path|slice:':-1' }}" />
-                  <select name="language" onchange="this.form.submit()"
-                    class="bg-slate-700 text-slate-300 hover:text-white hover:bg-slate-600 rounded-md font-medium px-2 py-1 text-sm transition-colors cursor-pointer flex items-center whitespace-nowrap">
-                    <option value="en" {% if LANGUAGE_CODE|slice:":2" == "en" %}selected{% endif %}>🇬🇧 English</option>
-                    <option value="ro" {% if LANGUAGE_CODE|slice:":2" == "ro" %}selected{% endif %}>🇷🇴 Română</option>
-                  </select>
-                </form>
                 <form action="{% url 'users:logout' %}" method="post" class="inline">
                   {% csrf_token %}
                   <button type="submit"
