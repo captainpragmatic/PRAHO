@@ -153,6 +153,18 @@ def invoice_detail_view(request: HttpRequest, invoice_number: str) -> HttpRespon
         )
         
         if not invoice:
+            # Fallback: if not an invoice, try as proforma and route accordingly
+            proforma = invoice_service.get_proforma_detail(
+                proforma_number=invoice_number,
+                customer_id=customer_id,
+                user_id=user_id,
+                force_sync=force_sync,
+            )
+            if proforma:
+                from django.shortcuts import redirect
+                logger.info(f"➡️ [Portal Billing] {invoice_number} is a proforma; redirecting to proforma detail")
+                return redirect('billing:proforma_detail', proforma_number=invoice_number)
+
             messages.error(request, _('Invoice not found or access denied.'))
             return render(request, 'billing/invoice_not_found.html', {
                 'invoice_number': invoice_number
