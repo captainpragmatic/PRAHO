@@ -148,7 +148,7 @@ LOCALE_PATHS = [
 
 STATIC_URL = "/static/"
 STATICFILES_DIRS = [
-    BASE_DIR / "assets",
+    BASE_DIR / "static",  # Changed from "assets" to "static"
 ]
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
