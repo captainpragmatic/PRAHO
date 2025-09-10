@@ -37,7 +37,10 @@
           <!-- New Ticket Button -->
           <div class="htmx-stable">
             {% url 'tickets:create' as create_ticket_url %}
-            {% button "New Ticket" variant="primary" href=create_ticket_url responsive_text="New" size="sm" class="min-w-[80px] whitespace-nowrap" %}
+            <a href="{{ create_ticket_url }}" class="inline-flex items-center px-3 sm:px-4 py-2 text-sm font-medium rounded-md border border-transparent bg-blue-600 text-white shadow-sm hover:bg-blue-700 min-w-[80px] whitespace-nowrap">
+              <span class="hidden sm:inline">{% trans "New Ticket" %}</span>
+              <span class="sm:hidden">{% trans "New" %}</span>
+            </a>
           </div>
         </div>
       </div>
@@ -60,7 +63,9 @@
         <!-- New Ticket Button -->
         <div class="htmx-stable">
           {% url 'tickets:create' as create_ticket_url %}
-          {% button "New Ticket" variant="primary" href=create_ticket_url responsive_text="New" size="sm" class="min-w-[60px] flex-shrink-0 whitespace-nowrap" %}
+          <a href="{{ create_ticket_url }}" class="inline-flex items-center px-3 py-2 text-sm font-medium rounded-md border border-transparent bg-blue-600 text-white shadow-sm hover:bg-blue-700 min-w-[60px] flex-shrink-0 whitespace-nowrap">
+            {% trans "New" %}
+          </a>
         </div>
       </div>
       

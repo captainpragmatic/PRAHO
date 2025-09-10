@@ -120,7 +120,9 @@
 
       <!-- Filter Buttons -->
       <div class="flex gap-2 sm:flex-shrink-0">
-        {% button "🔍 Filter" variant="primary" type="submit" size="sm" %}
+        <button type="submit" class="inline-flex items-center px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium rounded-md border border-transparent bg-blue-600 text-white shadow-sm hover:bg-blue-700">
+          🔍 {% trans 'Filter' %}
+        </button>
         <a href="{% url 'billing:invoices_list' %}" class="px-3 sm:px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-md font-medium transition-colors text-xs sm:text-sm">
           ❌ <span class="hidden sm:inline">{% trans 'Clear' %}</span>
         </a>
