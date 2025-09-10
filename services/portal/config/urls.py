@@ -3,6 +3,7 @@ URL configuration for PRAHO Portal Service
 Customer-facing URLs only - authentication handled via platform API.
 """
 
+from django.conf import settings
 from django.http import JsonResponse
 from django.shortcuts import redirect
 from django.urls import include, path
@@ -37,3 +38,14 @@ urlpatterns = [
     # Root redirect to login
     path('', lambda request: redirect('/login/') if not request.COOKIES.get('portal_token') else redirect('/dashboard/'), name='root'),
 ]
+
+# ===============================================================================
+# DEVELOPMENT URLS (Debug toolbar)
+# ===============================================================================
+
+if settings.DEBUG:
+    # Debug toolbar
+    if "debug_toolbar" in settings.INSTALLED_APPS:
+        import debug_toolbar  # type: ignore[import-untyped]
+
+        urlpatterns = [path("__debug__/", include(debug_toolbar.urls)), *urlpatterns]
