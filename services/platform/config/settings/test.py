@@ -3,6 +3,9 @@ Test settings for PRAHO Platform
 Fast, isolated testing environment.
 """
 
+import os
+import sys
+
 from .base import *
 
 # ===============================================================================
@@ -226,8 +229,6 @@ DISABLE_ACCOUNT_LOCKOUT = False
 # Usage:
 #   python manage.py test --parallel 1  # Force single process
 #   DJANGO_SETTINGS_MODULE=config.settings.test python manage.py test  # Uses this config
-import os
-import sys
 
 # Force single-process test execution to avoid multiprocessing pickling errors
 if "test" in sys.argv or ("pytest" in sys.argv[0] if sys.argv else False):

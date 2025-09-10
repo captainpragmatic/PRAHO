@@ -10,21 +10,25 @@ import json
 import logging
 import time
 import traceback
+import urllib.parse
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta
 
 from django.conf import settings
-from django.contrib.auth import get_user_model
+from django.contrib import messages
+from django.contrib.auth import get_user_model, logout
 from django.core.cache import cache
 from django.http import HttpRequest, HttpResponse
+from django.shortcuts import redirect
 from django.utils import timezone
+from django.utils.translation import gettext as _
 
 from apps.common.constants import HTTP_CLIENT_ERROR_THRESHOLD
+from apps.common.request_ip import get_safe_client_ip
 
 # Security constants
 HMAC_TIMESTAMP_WINDOW_SECONDS = 300  # 5 minutes
-from apps.common.request_ip import get_safe_client_ip
 
 # Import for session security - handle potential circular import gracefully
 try:
@@ -368,11 +372,15 @@ class PortalServiceHMACMiddleware:
             cache.set(key, current, timeout=self._rl_window)
         return current > self._rl_max_calls
     
-    def _validate_hmac_signature(self, request: HttpRequest) -> tuple[bool, str]:
+    def _validate_hmac_signature(self, request: HttpRequest) -> tuple[bool, str]:  # noqa: C901,PLR0912,PLR0915
         """
         Validate HMAC signature from portal service.
         Returns (is_valid, error_message)
+        
+        NOTE: High complexity is justified for security-critical HMAC validation.
+        Each branch addresses a specific attack vector (replay, tampering, etc.)
         """
+        error_msg = ""
         try:
             # Extract HMAC headers
             portal_id = request.META.get('HTTP_X_PORTAL_ID', '')
@@ -381,95 +389,92 @@ class PortalServiceHMACMiddleware:
             body_hash = request.META.get('HTTP_X_BODY_HASH', '')
             signature = request.META.get('HTTP_X_SIGNATURE', '')
             raw_content_type = request.META.get('CONTENT_TYPE', '')
-            
+
             # Check required headers
             if not all([portal_id, nonce, timestamp, body_hash, signature]):
-                return False, "Missing HMAC authentication headers"
-            
+                error_msg = "Missing HMAC authentication headers"
+
             # Validate timestamp (5-minute window)
-            try:
-                request_time = float(timestamp)
-                current_time = time.time()
-                if abs(current_time - request_time) > HMAC_TIMESTAMP_WINDOW_SECONDS:
-                    return False, "Request timestamp outside allowed window"
-            except ValueError:
-                return False, "Invalid timestamp format"
-            
+            request_body = b""
+            if not error_msg:
+                try:
+                    request_time = float(timestamp)
+                    current_time = time.time()
+                    if abs(current_time - request_time) > HMAC_TIMESTAMP_WINDOW_SECONDS:
+                        error_msg = "Request timestamp outside allowed window"
+                except ValueError:
+                    error_msg = "Invalid timestamp format"
+
             # Check for nonce replay using shared cache with TTL (scoped by portal)
-            nonce_key = f"hmac_nonce:{portal_id}:{nonce}"
-            # TTL matches timestamp window (5 minutes)
-            added = cache.add(nonce_key, True, timeout=300)
-            if not added:
-                return False, "Nonce already used (replay attack)"
-            
+            if not error_msg:
+                nonce_key = f"hmac_nonce:{portal_id}:{nonce}"
+                # TTL matches timestamp window to mirror freshness guarantees
+                added = cache.add(nonce_key, True, timeout=HMAC_TIMESTAMP_WINDOW_SECONDS)
+                if not added:
+                    error_msg = "Nonce already used (replay attack)"
+
             # Verify body hash
-            request_body = request.body
-            computed_body_hash = base64.b64encode(
-                hashlib.sha256(request_body).digest()
-            ).decode('ascii')
-            
-            if body_hash != computed_body_hash:
-                return False, "Body hash mismatch"
-            
+            if not error_msg:
+                request_body = request.body
+                computed_body_hash = base64.b64encode(hashlib.sha256(request_body).digest()).decode('ascii')
+                if body_hash != computed_body_hash:
+                    error_msg = "Body hash mismatch"
+
             # Get portal secret for this portal ID
-            expected_secret = getattr(settings, 'PLATFORM_API_SECRET', None)
-            if not expected_secret:
-                return False, "Portal authentication not configured"
-            
-            # Build canonical string for signature verification (Phase 2 - strict, no legacy fallback)
-            # - Normalize content-type (lowercase, strip parameters)
-            # - Normalize query params: percent-encode and sort by key/value
-            # - Include portal_id to bind tenant identity
-            import urllib.parse
+            expected_secret = None
+            if not error_msg:
+                expected_secret = getattr(settings, 'PLATFORM_API_SECRET', None)
+                if not expected_secret:
+                    error_msg = "Portal authentication not configured"
 
-            method = request.method.upper()
+            # Build canonical string and verify signature
+            if not error_msg:
+                method = request.method.upper()
+                full_path = request.get_full_path()
+                parsed = urllib.parse.urlsplit(full_path)
+                query_pairs = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+                query_pairs.sort(key=lambda kv: (kv[0], kv[1]))
+                normalized_query = urllib.parse.urlencode(query_pairs, doseq=True)
+                normalized_path = parsed.path + ("?" + normalized_query if normalized_query else "")
 
-            # Normalize path + query
-            full_path = request.get_full_path()
-            parsed = urllib.parse.urlsplit(full_path)
-            query_pairs = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
-            query_pairs.sort(key=lambda kv: (kv[0], kv[1]))
-            normalized_query = urllib.parse.urlencode(query_pairs, doseq=True)
-            normalized_path = parsed.path + ("?" + normalized_query if normalized_query else "")
+                content_type_main = raw_content_type.split(";")[0].strip().lower()
 
-            # Normalize content type
-            content_type_main = raw_content_type.split(";")[0].strip().lower()
+                canonical_new = "\n".join([
+                    method,
+                    normalized_path,
+                    content_type_main,
+                    body_hash,
+                    portal_id,
+                    nonce,
+                    timestamp,
+                ])
 
-            canonical_new = "\n".join([
-                method,
-                normalized_path,
-                content_type_main,
-                body_hash,
-                portal_id,
-                nonce,
-                timestamp,
-            ])
-            
-            # Compute expected signature
-            expected_signature_new = hmac.new(
-                expected_secret.encode(),
-                canonical_new.encode(),
-                hashlib.sha256,
-            ).hexdigest()
-            if not hmac.compare_digest(signature, expected_signature_new):
-                return False, "HMAC signature verification failed"
+                expected_signature_new = hmac.new(
+                    expected_secret.encode(),  # type: ignore[union-attr]
+                    canonical_new.encode(),
+                    hashlib.sha256,
+                ).hexdigest()
+                if not hmac.compare_digest(signature, expected_signature_new):
+                    error_msg = "HMAC signature verification failed"
 
             # Enforce timestamp consistency between header and signed body
-            try:
-                # Only JSON bodies are supported for API
-                body_json = json.loads(request_body.decode('utf-8') or '{}')
-                body_ts = body_json.get('timestamp')
-                # Normalize both sides to strings for exact match
-                if body_ts is None or str(body_ts) != str(timestamp):
-                    return False, "Timestamp mismatch between body and headers"
-            except Exception:
-                return False, "Invalid JSON body for timestamp validation"
-            
-            return True, ""
-            
+            if not error_msg:
+                try:
+                    body_json = json.loads(request_body.decode('utf-8') or '{}')
+                    body_ts = body_json.get('timestamp')
+                    if body_ts is None or str(body_ts) != str(timestamp):
+                        error_msg = "Timestamp mismatch between body and headers"
+                except Exception:
+                    error_msg = "Invalid JSON body for timestamp validation"
+
+            if not error_msg:
+                return True, ""
+
         except Exception as e:
             logger.error(f"🔥 [HMAC Auth] Signature validation error: {e}")
-            return False, f"Signature validation error: {e!s}"
+            error_msg = f"Signature validation error: {e!s}"
+
+        return False, error_msg
     
     def __call__(self, request: HttpRequest) -> HttpResponse:
         # Only process API requests
@@ -675,10 +680,6 @@ class StaffOnlyPlatformMiddleware:
         
         # Block customer users - they should use portal
         if request.user.is_authenticated:
-            from django.contrib import messages
-            from django.contrib.auth import logout
-            from django.shortcuts import redirect
-            from django.utils.translation import gettext as _
             
             logout(request)
             messages.error(

@@ -172,7 +172,8 @@ CSRF_TRUSTED_ORIGINS = [
     "http://127.0.0.1:8700",
     "http://localhost:8701",
     "http://127.0.0.1:8701",
-    "http://100.73.13.8:8701",  # Tailscale IP
+    "http://100.73.13.8:8700",  # Tailscale IP - Platform
+    "http://100.73.13.8:8701",  # Tailscale IP - Portal
 ]
 
 # ===============================================================================
