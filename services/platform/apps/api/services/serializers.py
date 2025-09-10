@@ -3,7 +3,7 @@
 # ===============================================================================
 
 from decimal import Decimal
-from typing import Any
+from typing import Any, ClassVar
 
 from django.utils import timezone
 from rest_framework import serializers
@@ -19,7 +19,7 @@ class ServicePlanListSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = ServicePlan
-        fields = [
+        fields: ClassVar = [
             'id', 'name', 'plan_type', 'plan_type_display', 'description',
             'price_monthly', 'price_quarterly', 'price_annual', 'setup_fee',
             'disk_space_gb', 'bandwidth_gb', 'email_accounts', 'databases',
@@ -35,7 +35,7 @@ class ServerListSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Server
-        fields = [
+        fields: ClassVar = [
             'id', 'name', 'hostname', 'server_type', 'server_type_display',
             'primary_ip', 'location', 'datacenter', 'status'
         ]
@@ -75,7 +75,7 @@ class ServiceListSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Service
-        fields = [
+        fields: ClassVar = [
             'id', 'service_name', 'domain', 'username', 'status', 'status_display', 'status_color',
             'billing_cycle', 'billing_cycle_display', 'price', 'monthly_price', 'setup_fee_paid',
             'customer_name', 'service_plan_name', 'service_plan_type', 'service_plan_type_display',
@@ -161,7 +161,7 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Service
-        fields = [
+        fields: ClassVar = [
             'id', 'service_name', 'domain', 'username', 'status', 'status_display', 'status_color',
             'billing_cycle', 'billing_cycle_display', 'price', 'monthly_price', 'total_monthly_cost',
             'vat_amount', 'setup_fee_paid', 'auto_renew',
@@ -315,7 +315,7 @@ class ServicePlanAvailableSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = ServicePlan
-        fields = [
+        fields: ClassVar = [
             'id', 'name', 'plan_type', 'plan_type_display', 'description',
             'price_monthly', 'price_quarterly', 'price_annual', 'setup_fee',
             'monthly_equivalent', 'quarterly_savings', 'annual_savings',

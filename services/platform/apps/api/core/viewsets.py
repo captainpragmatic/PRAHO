@@ -2,7 +2,11 @@
 # API BASE VIEWSETS 🎯
 # ===============================================================================
 
+from typing import ClassVar
+
+from django.db.models import QuerySet
 from rest_framework import viewsets
+from rest_framework.serializers import BaseSerializer
 
 from .pagination import StandardResultsSetPagination
 from .permissions import IsAuthenticatedAndAccessible
@@ -26,11 +30,11 @@ class BaseAPIViewSet(viewsets.ModelViewSet):
             serializer_class = CustomerSerializer
     """
     
-    permission_classes = [IsAuthenticatedAndAccessible]
+    permission_classes: ClassVar = [IsAuthenticatedAndAccessible]
     pagination_class = StandardResultsSetPagination
-    throttle_classes = [StandardAPIThrottle]
+    throttle_classes: ClassVar = [StandardAPIThrottle]
     
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet:
         """
         Override in subclasses to filter based on user access.
         Each domain handles its own access control logic.
@@ -43,13 +47,13 @@ class BaseAPIViewSet(viewsets.ModelViewSet):
             )
         return queryset
     
-    def perform_create(self, serializer):
+    def perform_create(self, serializer: BaseSerializer) -> None:
         """Override to use domain services for business logic"""
         # Default implementation - subclasses should override
         # to use their domain's service layer
         serializer.save()
     
-    def perform_update(self, serializer):
+    def perform_update(self, serializer: BaseSerializer) -> None:
         """Override to use domain services for business logic"""
         # Default implementation - subclasses should override
         serializer.save()
@@ -61,11 +65,11 @@ class ReadOnlyAPIViewSet(viewsets.ReadOnlyModelViewSet):
     Used for reference data, search results, etc.
     """
     
-    permission_classes = [IsAuthenticatedAndAccessible]  
+    permission_classes: ClassVar = [IsAuthenticatedAndAccessible]  
     pagination_class = StandardResultsSetPagination
-    throttle_classes = [BurstAPIThrottle]  # Higher rate limit for read-only
+    throttle_classes: ClassVar = [BurstAPIThrottle]  # Higher rate limit for read-only
     
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet:
         """Must be implemented by subclasses"""
         queryset = getattr(self, 'queryset', None)
         if queryset is None:

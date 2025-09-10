@@ -5,13 +5,80 @@
 import json
 import logging
 
-from django.http import HttpRequest
+from django.http import HttpRequest, JsonResponse
 from rest_framework.response import Response
 
 from apps.customers.models import Customer
-from apps.users.models import CustomerMembership
+from apps.users.models import CustomerMembership, User
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_hmac_authentication(request: HttpRequest) -> tuple[bool, Response | None]:
+    """Validate HMAC authentication and return error if invalid"""
+    if not hasattr(request, '_portal_authenticated'):
+        logger.warning("🔥 [API Security] Request not HMAC authenticated")
+        return False, Response({
+            'success': False,
+            'error': 'Authentication required'
+        }, status=401)
+    
+    if not hasattr(request, 'user') or not request.user.is_authenticated:
+        logger.warning("🔥 [API Security] No authenticated user in HMAC request")
+        return False, Response({
+            'success': False, 
+            'error': 'User authentication required'
+        }, status=401)
+    
+    return True, None
+
+
+def _get_specific_customer(user: 'User', required_customer_id: int) -> tuple[Customer | None, Response | None]:
+    """Get and validate access to a specific customer"""
+    try:
+        customer = Customer.objects.get(id=required_customer_id)
+        
+        membership = CustomerMembership.objects.filter(
+            user=user, 
+            customer=customer,
+            is_active=True
+        ).first()
+        
+        if not membership:
+            logger.warning(f"🔥 [API Security] User {user.email} attempted access to customer {required_customer_id} without membership")
+            return None, Response({
+                'success': False,
+                'error': 'Access denied to customer data'
+            }, status=403)
+        
+        logger.debug(f"✅ [API Security] User {user.email} validated for customer {customer.company_name}")
+        return customer, None
+        
+    except Customer.DoesNotExist:
+        logger.warning(f"🔥 [API Security] Customer {required_customer_id} not found")
+        return None, Response({
+            'success': False,
+            'error': 'Customer not found'
+        }, status=404)
+
+
+def _get_primary_customer(user: 'User') -> tuple[Customer | None, Response | None]:
+    """Get user's primary customer"""
+    membership = CustomerMembership.objects.filter(
+        user=user,
+        is_primary=True,
+        is_active=True
+    ).select_related('customer').first()
+    
+    if not membership:
+        logger.warning(f"🔥 [API Security] User {user.email} has no primary customer membership")
+        return None, Response({
+            'success': False,
+            'error': 'No customer access found'
+        }, status=403)
+    
+    logger.debug(f"✅ [API Security] User {user.email} using primary customer {membership.customer.company_name}")
+    return membership.customer, None
 
 
 def get_authenticated_customer_from_request(request: HttpRequest, required_customer_id: int | None = None) -> tuple[Customer | None, Response | None]:
@@ -39,71 +106,20 @@ def get_authenticated_customer_from_request(request: HttpRequest, required_custo
         - If failed: (None, Error Response)
     """
     
-    # Check if request is HMAC authenticated
-    if not hasattr(request, '_portal_authenticated'):
-        logger.warning("🔥 [API Security] Request not HMAC authenticated")
-        return None, Response({
-            'success': False,
-            'error': 'Authentication required'
-        }, status=401)
-    
-    # Get authenticated user from HMAC middleware
-    if not hasattr(request, 'user') or not request.user.is_authenticated:
-        logger.warning("🔥 [API Security] No authenticated user in HMAC request")
-        return None, Response({
-            'success': False, 
-            'error': 'User authentication required'
-        }, status=401)
+    # Validate HMAC authentication
+    is_authenticated, auth_error = _validate_hmac_authentication(request)
+    if not is_authenticated:
+        return None, auth_error
     
     user = request.user
+    if not user.is_authenticated:
+        return None, JsonResponse({"error": "User not authenticated"}, status=401)
     
-    # If specific customer_id is requested, validate access
+    # Get customer based on whether specific ID is required
     if required_customer_id is not None:
-        try:
-            # Get customer and validate user has access
-            customer = Customer.objects.get(id=required_customer_id)
-            
-            # Check if user has membership to this customer
-            membership = CustomerMembership.objects.filter(
-                user=user, 
-                customer=customer,
-                is_active=True
-            ).first()
-            
-            if not membership:
-                logger.warning(f"🔥 [API Security] User {user.email} attempted access to customer {required_customer_id} without membership")
-                return None, Response({
-                    'success': False,
-                    'error': 'Access denied to customer data'
-                }, status=403)
-            
-            logger.debug(f"✅ [API Security] User {user.email} validated for customer {customer.company_name}")
-            return customer, None
-            
-        except Customer.DoesNotExist:
-            logger.warning(f"🔥 [API Security] Customer {required_customer_id} not found")
-            return None, Response({
-                'success': False,
-                'error': 'Customer not found'
-            }, status=404)
-    
+        return _get_specific_customer(user, required_customer_id)
     else:
-        # No specific customer requested, get user's primary customer
-        membership = CustomerMembership.objects.filter(
-            user=user,
-            is_primary=True,
-            is_active=True
-        ).select_related('customer').first()
-        
-        if not membership:
-            logger.warning(f"🔥 [API Security] User {user.email} has no primary customer membership")
-            return None, Response({
-                'success': False,
-                'error': 'No customer access found'
-            }, status=403)
-        
-        logger.debug(f"✅ [API Security] User {user.email} using primary customer {membership.customer.company_name}")
-        return membership.customer, None
+        return _get_primary_customer(user)
 
 
 def get_customer_id_from_request(request: HttpRequest) -> tuple[int | None, Response | None]:

@@ -4,6 +4,7 @@
 
 import logging
 import re
+from typing import Any, ClassVar
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
@@ -31,8 +32,8 @@ class CustomerSearchSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Customer
-        fields = ['id', 'text', 'primary_email']
-        read_only_fields = ['id', 'text', 'primary_email']
+        fields: ClassVar = ['id', 'text', 'primary_email']
+        read_only_fields: ClassVar = ['id', 'text', 'primary_email']
 
 
 class CustomerServiceSerializer(serializers.Serializer):
@@ -62,17 +63,16 @@ class UserRegistrationDataSerializer(serializers.Serializer):
     phone = serializers.CharField(max_length=20, required=False, allow_blank=True)
     password = serializers.CharField(min_length=12, write_only=True)
     
-    def validate_email(self, value):
+    def validate_email(self, value: str) -> str:
         """Ensure email is not already taken"""
         if User.objects.filter(email=value.lower()).exists():
             raise serializers.ValidationError("A user with this email already exists.")
         return value.lower()
     
-    def validate_phone(self, value):
+    def validate_phone(self, value: str) -> str:
         """Validate Romanian phone format"""
-        if value:
-            if not re.match(r"^(\+40[\s\.]?[0-9][\s\.0-9]{8,11}[0-9]|0[0-9]{9})$", value):
-                raise serializers.ValidationError("Invalid Romanian phone number format.")
+        if value and not re.match(r"^(\+40[\s\.]?[0-9][\s\.0-9]{8,11}[0-9]|0[0-9]{9})$", value):
+            raise serializers.ValidationError("Invalid Romanian phone number format.")
         return value
 
 
@@ -93,13 +93,13 @@ class CustomerRegistrationDataSerializer(serializers.Serializer):
     data_processing_consent = serializers.BooleanField()
     marketing_consent = serializers.BooleanField(default=False)
     
-    def validate_company_name(self, value):
+    def validate_company_name(self, value: str) -> str:
         """Ensure company name is unique"""
         if Customer.objects.filter(company_name__iexact=value.strip()).exists():
             raise serializers.ValidationError("A company with this name already exists.")
         return value.strip()
     
-    def validate_vat_number(self, value):
+    def validate_vat_number(self, value: str) -> str:
         """Validate Romanian VAT number format"""
         if value:
             value = value.strip().upper()
@@ -114,7 +114,7 @@ class CustomerRegistrationDataSerializer(serializers.Serializer):
                     raise serializers.ValidationError("VAT number must start with RO followed by digits.")
         return value
     
-    def validate_data_processing_consent(self, value):
+    def validate_data_processing_consent(self, value: bool) -> bool:
         """GDPR consent is required"""
         if not value:
             raise serializers.ValidationError("Data processing consent is required.")
@@ -129,7 +129,7 @@ class CustomerRegistrationSerializer(serializers.Serializer):
     user_data = UserRegistrationDataSerializer()
     customer_data = CustomerRegistrationDataSerializer()
     
-    def create(self, validated_data):
+    def create(self, validated_data: dict[str, Any]) -> User:
         """
         Create new customer owner using secure registration service.
         """
@@ -179,7 +179,7 @@ class CustomerRegistrationSerializer(serializers.Serializer):
                     
         except Exception as e:
             logger.error(f"🔥 [API Registration] Unexpected error: {e}")
-            raise serializers.ValidationError({"non_field_errors": ["Registration service temporarily unavailable"]})
+            raise serializers.ValidationError({"non_field_errors": ["Registration service temporarily unavailable"]}) from e
 
 
 # ===============================================================================
@@ -217,7 +217,7 @@ class CustomerDetailSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Customer
-        fields = [
+        fields: ClassVar = [
             'id', 'display_name', 'customer_type', 'status', 'created_at', 'updated_at',
             'name', 'company_name', 'primary_email', 'primary_phone', 'website', 'industry',
             'tax_profile', 'billing_profile'
@@ -253,14 +253,13 @@ class CustomerProfileSerializer(serializers.Serializer):
     sms_notifications = serializers.BooleanField(default=False)
     marketing_emails = serializers.BooleanField(default=False)
     
-    def validate_phone(self, value):
+    def validate_phone(self, value: str) -> str:
         """Validate Romanian phone format"""
-        if value:
-            if not re.match(r"^(\+40[\s\.]?[0-9][\s\.0-9]{8,11}[0-9]|0[0-9]{9})$", value):
-                raise serializers.ValidationError("Invalid Romanian phone number format.")
+        if value and not re.match(r"^(\+40[\s\.]?[0-9][\s\.0-9]{8,11}[0-9]|0[0-9]{9})$", value):
+            raise serializers.ValidationError("Invalid Romanian phone number format.")
         return value
     
-    def update(self, instance, validated_data):
+    def update(self, instance: User, validated_data: dict[str, Any]) -> User:
         """
         Update user profile data.
         """
@@ -292,13 +291,13 @@ class CustomerProfileSerializer(serializers.Serializer):
         
         return instance
     
-    def to_representation(self, instance):
+    def to_representation(self, instance: User) -> dict[str, Any]:
         """
         Convert user and profile data to API response format.
         """
         try:
             profile = instance.profile
-        except:
+        except AttributeError:
             # Create default profile if missing
             profile = instance.profile.create(
                 preferred_language='ro',

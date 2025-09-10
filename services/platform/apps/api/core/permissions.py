@@ -17,7 +17,7 @@ class IsAuthenticatedAndAccessible(permissions.BasePermission):
     
     def has_permission(self, request: HttpRequest, view: Any) -> bool:
         """Check if user is authenticated"""
-        return request.user and request.user.is_authenticated
+        return bool(request.user and request.user.is_authenticated)
     
     def has_object_permission(self, request: HttpRequest, view: Any, obj: Any) -> bool:
         """

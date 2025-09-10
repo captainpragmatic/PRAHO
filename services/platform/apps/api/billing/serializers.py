@@ -2,7 +2,7 @@
 # BILLING API SERIALIZERS - CUSTOMER INVOICE AND PROFORMA DATA 💳
 # ===============================================================================
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from django.utils import timezone
 from rest_framework import serializers
@@ -104,7 +104,7 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
     def get_amount_due(self, obj: Invoice) -> int:
         return obj.amount_due
     
-    def get_bill_to(self, obj: Invoice) -> dict:
+    def get_bill_to(self, obj: Invoice) -> dict[str, Any]:
         """Format billing address for display"""
         address_parts = []
         if obj.bill_to_address1:
@@ -141,7 +141,7 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
 class InvoiceSummarySerializer(serializers.Serializer):
     """Serializer for customer invoice summary/dashboard widget"""
     
-    def to_representation(self, instance: dict) -> dict:
+    def to_representation(self, instance: dict[str, Any]) -> dict[str, Any]:
         """Build invoice summary from queryset"""
         invoices_qs = instance['invoices_queryset']
         
@@ -258,7 +258,7 @@ class ProformaDetailSerializer(serializers.ModelSerializer):
     def get_is_expired(self, obj: ProformaInvoice) -> bool:
         return obj.valid_until < timezone.now() if obj.valid_until else False
     
-    def get_bill_to(self, obj: ProformaInvoice) -> dict:
+    def get_bill_to(self, obj: ProformaInvoice) -> dict[str, Any]:
         """Format billing address for display"""
         address_parts = []
         if obj.bill_to_address1:

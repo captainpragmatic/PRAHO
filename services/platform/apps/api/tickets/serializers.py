@@ -2,7 +2,7 @@
 # TICKETS API SERIALIZERS - CUSTOMER SUPPORT OPERATIONS <�
 # ===============================================================================
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from rest_framework import serializers
 
@@ -62,7 +62,7 @@ class TicketListSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Ticket
-        fields = [
+        fields: ClassVar = [
             'id',
             'ticket_number',
             'title',
@@ -122,7 +122,7 @@ class TicketCommentSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = TicketComment
-        fields = [
+        fields: ClassVar = [
             'id',
             'content',
             'comment_type',
@@ -162,7 +162,7 @@ class TicketCommentSerializer(serializers.ModelSerializer):
         author = getattr(obj, 'author', None)
         return bool(author and (getattr(author, 'is_staff', False) or getattr(author, 'staff_role', '') != ''))
     
-    def get_attachments(self, obj: 'TicketComment') -> list[dict]:
+    def get_attachments(self, obj: 'TicketComment') -> list[dict[str, Any]]:
         """Get attachments for this comment"""
         qs = obj.attachments.all()
         return TicketAttachmentSerializer(qs, many=True).data
@@ -181,7 +181,7 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = TicketAttachment
-        fields = [
+        fields: ClassVar = [
             'id',
             'filename',
             'file_size',
@@ -241,7 +241,7 @@ class TicketDetailSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Ticket
-        fields = [
+        fields: ClassVar = [
             'id',
             'ticket_number',
             'title',
@@ -298,14 +298,14 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             return str(obj.related_service)
         return ""
 
-    def get_comments(self, obj: 'Ticket') -> list[dict]:
+    def get_comments(self, obj: 'Ticket') -> list[dict[str, Any]]:
         """Return comments, filtering out non-public ones for customer context."""
         qs = obj.comments.all()
         if self.context.get('for_customer'):
             qs = qs.filter(is_public=True)
         return TicketCommentSerializer(qs, many=True).data
 
-    def get_attachments(self, obj: 'Ticket') -> list[dict]:
+    def get_attachments(self, obj: 'Ticket') -> list[dict[str, Any]]:
         """Return attachments linked to public comments only for customer context."""
         qs = obj.attachments.all()
         if self.context.get('for_customer'):
@@ -322,7 +322,7 @@ class TicketCreateSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Ticket
-        fields = [
+        fields: ClassVar = [
             'title',
             'description',
             'priority',
@@ -332,7 +332,7 @@ class TicketCreateSerializer(serializers.ModelSerializer):
             'contact_phone',
             'related_service'
         ]
-        extra_kwargs = {
+        extra_kwargs: ClassVar = {
             'title': {'required': True},
             'description': {'required': True},
             'priority': {'default': 'normal'}
@@ -349,10 +349,10 @@ class CommentCreateSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = TicketComment
-        fields = [
+        fields: ClassVar = [
             'content',
         ]
-        extra_kwargs = {
+        extra_kwargs: ClassVar = {
             'content': {'required': True}
         }
     
