@@ -4,7 +4,6 @@ Romanian hosting provider customer support system.
 """
 
 import secrets
-from datetime import timedelta
 from typing import Any, ClassVar
 
 from django.contrib.contenttypes.fields import GenericForeignKey
@@ -146,8 +145,8 @@ class Ticket(models.Model):
     resolution_code = models.CharField(
         max_length=20, 
         choices=RESOLUTION_CHOICES, 
-        null=True, 
         blank=True, 
+        default='',
         verbose_name=_("Resolution Code")
     )
     closed_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Closed At"))
@@ -294,7 +293,7 @@ class TicketComment(models.Model):
     reply_action = models.CharField(
         max_length=30, 
         choices=REPLY_ACTION_CHOICES, 
-        null=True, 
+        default='',
         blank=True, 
         verbose_name=_("Reply Action")
     )

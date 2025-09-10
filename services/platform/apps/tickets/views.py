@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 import mimetypes
 import os
+from dataclasses import dataclass
 from typing import cast
 
 from django.contrib import messages
@@ -14,6 +15,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.core.files.uploadedfile import UploadedFile
 from django.core.paginator import Paginator
+from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
@@ -25,6 +27,15 @@ from .models import Ticket, TicketAttachment, TicketComment
 from .services import TicketStatusService
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class TicketReplyData:
+    """Data container for ticket reply validation"""
+    reply_text: str
+    reply_action: str
+    resolution_code: str | None
+    is_internal: bool
 
 
 @login_required
@@ -43,7 +54,6 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     
     # Apply search filter
     if search_query:
-        from django.db.models import Q
         tickets = tickets.filter(
             Q(ticket_number__icontains=search_query) |
             Q(title__icontains=search_query) |
@@ -98,7 +108,6 @@ def ticket_search_htmx(request: HttpRequest) -> HttpResponse:
     
     # Apply search filter
     if search_query:
-        from django.db.models import Q
         tickets = tickets.filter(
             Q(ticket_number__icontains=search_query) |
             Q(title__icontains=search_query) |
@@ -311,54 +320,31 @@ def _process_ticket_attachments(request: HttpRequest, ticket: Ticket, comment: T
         )
 
 
-def _handle_ticket_reply_post(request: HttpRequest, ticket: Ticket) -> HttpResponse:
-    """Handle POST request for ticket reply with new status system."""
-    user = cast(User, request.user)  # Safe as this is only called from authenticated views
-    reply_text = request.POST.get("reply")
-    reply_action = request.POST.get("reply_action", "reply")  # New field for agent action
-    is_internal = reply_action == "internal_note"  # Internal notes are determined by reply action
-    resolution_code = request.POST.get("resolution_code")  # For closing tickets
-
+def _validate_ticket_reply_data(request: HttpRequest, user: User, ticket: Ticket, reply_data: TicketReplyData) -> HttpResponse | None:
+    """Validate reply data and return error response if invalid"""
     # Validate internal note permission
-    error_response = _validate_internal_note_permission(request, user, is_internal, ticket.pk)
+    error_response = _validate_internal_note_permission(request, user, reply_data.is_internal, ticket.pk)
     if error_response:
         return error_response
 
-    if not reply_text:
+    if not reply_data.reply_text:
         if request.headers.get("HX-Request"):
             return HttpResponse('<div class="text-red-500 text-sm">Reply cannot be empty.</div>')
         messages.error(request, _("❌ The reply cannot be empty."))
         return redirect("tickets:detail", pk=ticket.pk)
 
     # Validate resolution code if closing
-    if reply_action == "close_with_resolution" and not resolution_code:
+    if reply_data.reply_action == "close_with_resolution" and not reply_data.resolution_code:
         if request.headers.get("HX-Request"):
             return HttpResponse('<div class="text-red-500 text-sm">Resolution code required when closing ticket.</div>')
         messages.error(request, _("❌ Resolution code is required when closing the ticket."))
         return redirect("tickets:detail", pk=ticket.pk)
-
-    # Create comment with reply action
-    comment_type = _determine_comment_type(user, is_internal)
-    is_public = not (is_internal and (user.is_staff or getattr(user, "staff_role", None)))
     
-    logger.debug(f"🔍 [Tickets] Reply processing: action={reply_action}, is_internal={is_internal}, comment_type={comment_type}, is_public={is_public}")
+    return None
 
-    comment = TicketComment.objects.create(
-        ticket=ticket,
-        content=reply_text,
-        comment_type=comment_type,
-        author=user,
-        author_name=user.get_full_name(),
-        author_email=user.email,
-        is_public=is_public,
-        reply_action=reply_action if user.is_staff_user else None,  # Only staff get reply actions
-        sets_waiting_on_customer=(reply_action == "reply_and_wait"),
-    )
 
-    # Process attachments
-    _process_ticket_attachments(request, ticket, comment)
-
-    # Handle status transitions using TicketStatusService
+def _handle_ticket_status_update(request: HttpRequest, ticket: Ticket, user: User, reply_action: str, resolution_code: str | None) -> tuple[str, HttpResponse | None]:
+    """Handle ticket status updates and return success message and optional error response"""
     try:
         if user.is_staff_user:
             # Staff replies with actions
@@ -390,20 +376,69 @@ def _handle_ticket_reply_post(request: HttpRequest, ticket: Ticket) -> HttpRespo
         }
         
         success_msg = success_messages.get(reply_action, _("✅ Your reply has been added!"))
+        return success_msg, None
 
     except ValueError as e:
         # Handle validation errors from TicketStatusService
         if request.headers.get("HX-Request"):
-            return HttpResponse(f'<div class="text-red-500 text-sm">Error: {str(e)}</div>')
+            return "", HttpResponse(f'<div class="text-red-500 text-sm">Error: {e!s}</div>')
         messages.error(request, _("❌ Error: {error}").format(error=str(e)))
-        return redirect("tickets:detail", pk=ticket.pk)
+        return "", redirect("tickets:detail", pk=ticket.pk)
+
+
+def _handle_ticket_reply_post(request: HttpRequest, ticket: Ticket) -> HttpResponse:
+    """Handle POST request for ticket reply with new status system."""
+    user = cast(User, request.user)  # Safe as this is only called from authenticated views
+    reply_text = request.POST.get("reply")
+    reply_action = request.POST.get("reply_action", "reply")  # New field for agent action
+    is_internal = reply_action == "internal_note"  # Internal notes are determined by reply action
+    resolution_code = request.POST.get("resolution_code")  # For closing tickets
+
+    # Create reply data container
+    reply_data = TicketReplyData(
+        reply_text=reply_text or "",
+        reply_action=reply_action,
+        resolution_code=resolution_code,
+        is_internal=is_internal
+    )
+    
+    # Validate reply data
+    validation_error = _validate_ticket_reply_data(request, user, ticket, reply_data)
+    if validation_error:
+        return validation_error
+
+    # Create comment with reply action
+    comment_type = _determine_comment_type(user, reply_data.is_internal)
+    is_public = not (reply_data.is_internal and (user.is_staff or getattr(user, "staff_role", None)))
+    
+    logger.debug(f"🔍 [Tickets] Reply processing: action={reply_data.reply_action}, is_internal={reply_data.is_internal}, comment_type={comment_type}, is_public={is_public}")
+
+    comment = TicketComment.objects.create(
+        ticket=ticket,
+        content=reply_data.reply_text,
+        comment_type=comment_type,
+        author=user,
+        author_name=user.get_full_name(),
+        author_email=user.email,
+        is_public=is_public,
+        reply_action=reply_data.reply_action if user.is_staff_user else None,  # Only staff get reply actions
+        sets_waiting_on_customer=(reply_data.reply_action == "reply_and_wait"),
+    )
+
+    # Process attachments
+    _process_ticket_attachments(request, ticket, comment)
+
+    # Handle status transitions
+    success_msg, status_error = _handle_ticket_status_update(request, ticket, user, reply_action, resolution_code)
+    if status_error:
+        return status_error
 
     # Handle HTMX response
     if request.headers.get("HX-Request"):
         # Refresh ticket data and comments
         ticket.refresh_from_db()
         comments = ticket.comments.all().order_by("created_at")
-        can_edit = not ticket.status == "closed" or user.is_staff
+        can_edit = ticket.status != "closed" or user.is_staff
         return render(
             request,
             "tickets/partials/status_and_comments.html",

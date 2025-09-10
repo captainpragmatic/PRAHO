@@ -616,9 +616,8 @@ class CustomerOnboardingRegistrationForm(UserCreationForm):  # type: ignore[type
     def clean_cnp(self) -> str:
         """Validate CNP format (13 digits)."""
         cnp: str = (self.cleaned_data.get("cnp") or "").strip()
-        if cnp:
-            if not (cnp.isdigit() and len(cnp) == CNP_LENGTH):
-                raise ValidationError(_("CNP must be exactly 13 digits."))
+        if cnp and not (cnp.isdigit() and len(cnp) == CNP_LENGTH):
+            raise ValidationError(_("CNP must be exactly 13 digits."))
         return cnp
 
     def clean_customer_type(self) -> str:

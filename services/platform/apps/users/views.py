@@ -3,12 +3,10 @@ User management views for PRAHO Platform
 Romanian-localized authentication and profile forms.
 """
 
-import hashlib
 import logging
 import secrets
 import time
 from typing import Any, cast
-from uuid import uuid4
 
 import pyotp
 from django.conf import settings
@@ -16,7 +14,6 @@ from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.contrib.auth.tokens import default_token_generator
 from django.contrib.auth.views import (
     PasswordChangeView,
     PasswordResetCompleteView,
@@ -24,19 +21,14 @@ from django.contrib.auth.views import (
     PasswordResetDoneView,
     PasswordResetView,
 )
-from django.core.exceptions import ValidationError
-from django.core.mail import EmailMultiAlternatives
 from django.db import models
 from django.db.models import QuerySet
 from django.forms import Form
 from django.http import HttpRequest, HttpResponse, HttpResponseBase, JsonResponse
 from django.shortcuts import redirect, render, resolve_url
-from django.template.loader import render_to_string
 from django.urls import reverse, reverse_lazy
-from django.utils import timezone
 from django.utils.decorators import method_decorator
-from django.utils.encoding import force_bytes
-from django.utils.http import url_has_allowed_host_and_scheme, urlsafe_base64_encode
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods
 from django.views.generic import DetailView, ListView
@@ -49,7 +41,6 @@ from apps.common.request_ip import get_safe_client_ip
 from apps.common.validators import log_security_event
 
 from .forms import (
-    CustomerOnboardingRegistrationForm,
     LoginForm,
     TwoFactorSetupForm,
     TwoFactorVerifyForm,

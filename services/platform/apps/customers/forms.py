@@ -712,7 +712,7 @@ class CustomerCreationForm(forms.Form):
         )
 
         # Create tax profile
-        CustomerTaxProfile.objects.create(  # type: ignore[misc]
+        CustomerTaxProfile.objects.create(
             customer=customer,
             cui=data.get("cui", ""),
             is_vat_payer=data.get("is_vat_payer", False),
@@ -721,7 +721,7 @@ class CustomerCreationForm(forms.Form):
         )
 
         # Create billing profile
-        CustomerBillingProfile.objects.create(  # type: ignore[misc]
+        CustomerBillingProfile.objects.create(
             customer=customer,
             payment_terms=data["payment_terms"],
             credit_limit=data["credit_limit"],
@@ -729,7 +729,7 @@ class CustomerCreationForm(forms.Form):
         )
 
         # Create primary address
-        CustomerAddress.objects.create(  # type: ignore[misc]
+        CustomerAddress.objects.create(
             customer=customer,
             address_type="primary",
             address_line1=data["address_line1"],

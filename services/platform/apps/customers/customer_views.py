@@ -21,9 +21,12 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
 from django_ratelimit.decorators import ratelimit  # type: ignore[import-untyped]
 
+from apps.billing.models import Invoice
 from apps.common.constants import SEARCH_QUERY_MIN_LENGTH
 from apps.common.decorators import staff_required
 from apps.common.types import Err
+from apps.provisioning.models import Service
+from apps.tickets.models import Ticket
 from apps.users.models import User
 from apps.users.services import CustomerUserService, UserCreationRequest, UserLinkingRequest
 
@@ -151,7 +154,6 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
     services_summary = {'total': 0, 'active': 0, 'suspended': 0}
     try:
         # Import here to avoid circular imports
-        from apps.provisioning.models import Service
         services_qs = Service.objects.filter(customer=customer).select_related('service_plan').order_by('-created_at')[:5]
         services = list(services_qs)
         
@@ -171,7 +173,6 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
     invoices = []
     invoices_summary = {'total': 0, 'paid': 0, 'unpaid': 0}
     try:
-        from apps.billing.models import Invoice
         invoices_qs = Invoice.objects.filter(customer=customer).order_by('-created_at')[:5]
         invoices = list(invoices_qs)
         
@@ -191,7 +192,6 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
     tickets = []
     tickets_summary = {'total': 0, 'open': 0, 'closed': 0}
     try:
-        from apps.tickets.models import Ticket
         tickets_qs = Ticket.objects.filter(customer=customer).order_by('-created_at')[:5]
         tickets = list(tickets_qs)
         

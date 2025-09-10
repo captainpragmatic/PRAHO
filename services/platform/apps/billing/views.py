@@ -63,7 +63,6 @@ from .services import (
     # TODO: Add RefundService imports when implemented
 )
 
-
 # Customer access function removed - platform is staff-only
 
 
@@ -188,6 +187,18 @@ def _validate_pdf_access(request: HttpRequest, document: Invoice | ProformaInvoi
     # Provide a friendly message and redirect to a safe page
     messages.error(request, _("❌ You do not have permission to access this document."))
     return result
+
+
+def _get_accessible_customer_ids(user: User) -> list[int]:
+    """Helper to get customer IDs that user can access"""
+    accessible_customers = user.get_accessible_customers()
+
+    if isinstance(accessible_customers, QuerySet):
+        return list(accessible_customers.values_list("id", flat=True))
+    elif isinstance(accessible_customers, list):
+        return [customer.id for customer in accessible_customers]
+    else:
+        return []
 
 
 @billing_staff_required
