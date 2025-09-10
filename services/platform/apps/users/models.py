@@ -359,6 +359,11 @@ class CustomerMembership(models.Model):
         default=False, help_text=_("Primary customer for this user (used for default context)")
     )
 
+    # Active membership flag (allows deactivating without deleting)
+    is_active = models.BooleanField(
+        default=True, help_text=_("Whether this membership is currently active")
+    )
+
     # ===============================================================================
     # NOTIFICATION PREFERENCES (Enhanced CustomerMembership)
     # ===============================================================================
