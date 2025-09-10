@@ -3,7 +3,8 @@
 # ===============================================================================
 
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Any
+
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 
 logger = logging.getLogger(__name__)
@@ -21,7 +22,7 @@ class TicketAPIClient(PlatformAPIClient):
     - View ticket status
     """
     
-    def get_customer_tickets(self, customer_id: int, user_id: int, page: int = 1, status: str = '', priority: str = '', search: str = '') -> Dict[str, Any]:
+    def get_customer_tickets(self, customer_id: int, user_id: int, page: int = 1, status: str = '', priority: str = '', search: str = '') -> dict[str, Any]:
         """
         Get paginated list of tickets for a specific customer.
         
@@ -71,7 +72,7 @@ class TicketAPIClient(PlatformAPIClient):
             logger.error(f"🔥 [Tickets API] Error retrieving tickets for customer {customer_id}: {e}")
             raise
     
-    def get_ticket_detail(self, customer_id: int, user_id: int, ticket_id: int) -> Dict[str, Any]:
+    def get_ticket_detail(self, customer_id: int, user_id: int, ticket_id: int) -> dict[str, Any]:
         """
         Get detailed ticket information for customer view.
         
@@ -95,7 +96,7 @@ class TicketAPIClient(PlatformAPIClient):
             raise
     
     def create_ticket(self, customer_id: int, user_id: int, title: str, description: str, 
-                     priority: str = 'normal', category: str = '') -> Dict[str, Any]:
+                     priority: str = 'normal', category: str = '') -> dict[str, Any]:
         """
         Create a new support ticket for customer.
         
@@ -133,7 +134,7 @@ class TicketAPIClient(PlatformAPIClient):
             raise
     
     def add_ticket_reply(self, customer_id: int, user_id: int, ticket_id: int, message: str, 
-                        attachments: Optional[List] = None) -> Dict[str, Any]:
+                        attachments: list | None = None) -> dict[str, Any]:
         """
         Add customer reply to existing ticket.
         
@@ -167,7 +168,7 @@ class TicketAPIClient(PlatformAPIClient):
             logger.error(f"🔥 [Tickets API] Error adding reply to ticket {ticket_id} for customer {customer_id}: {e}")
             raise
     
-    def get_ticket_replies(self, customer_id: int, user_id: int, ticket_id: int) -> List[Dict[str, Any]]:
+    def get_ticket_replies(self, customer_id: int, user_id: int, ticket_id: int) -> list[dict[str, Any]]:
         """
         Get all replies for a ticket (customer view - excludes internal notes).
         
@@ -190,7 +191,7 @@ class TicketAPIClient(PlatformAPIClient):
             logger.error(f"🔥 [Tickets API] Error retrieving replies for ticket {ticket_id} for customer {customer_id}: {e}")
             raise
     
-    def get_tickets_summary(self, customer_id: int, user_id: int) -> Dict[str, Any]:
+    def get_tickets_summary(self, customer_id: int, user_id: int) -> dict[str, Any]:
         """
         Get ticket summary statistics for customer dashboard.
         

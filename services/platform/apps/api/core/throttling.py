@@ -2,7 +2,7 @@
 # API THROTTLING CLASSES 🚦
 # ===============================================================================
 
-from rest_framework.throttling import UserRateThrottle, AnonRateThrottle
+from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 
 
 class StandardAPIThrottle(UserRateThrottle):

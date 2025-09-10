@@ -2,19 +2,19 @@
 # API AUTHENTICATION UTILITIES - ANTI-ENUMERATION SECURITY 🔐
 # ===============================================================================
 
+import json
 import logging
-from typing import Tuple, Optional
 
 from django.http import HttpRequest
 from rest_framework.response import Response
 
 from apps.customers.models import Customer
-from apps.users.models import User, CustomerMembership
+from apps.users.models import CustomerMembership
 
 logger = logging.getLogger(__name__)
 
 
-def get_authenticated_customer_from_request(request: HttpRequest, required_customer_id: Optional[int] = None) -> Tuple[Optional[Customer], Optional[Response]]:
+def get_authenticated_customer_from_request(request: HttpRequest, required_customer_id: int | None = None) -> tuple[Customer | None, Response | None]:
     """
     🔒 Securely get authenticated customer from HMAC-authenticated request.
     
@@ -106,7 +106,7 @@ def get_authenticated_customer_from_request(request: HttpRequest, required_custo
         return membership.customer, None
 
 
-def get_customer_id_from_request(request: HttpRequest) -> Tuple[Optional[int], Optional[Response]]:
+def get_customer_id_from_request(request: HttpRequest) -> tuple[int | None, Response | None]:
     """
     DEPRECATED: Query parameter fallback for customer_id has been removed.
 
@@ -123,7 +123,7 @@ def get_customer_id_from_request(request: HttpRequest) -> Tuple[Optional[int], O
     }, status=400)
 
 
-def require_customer_access(request: HttpRequest, customer_id: Optional[int] = None) -> Tuple[Optional[Customer], Optional[Response]]:
+def require_customer_access(request: HttpRequest, customer_id: int | None = None) -> tuple[Customer | None, Response | None]:
     """
     Decorator-style helper for API views requiring customer access.
     
@@ -169,7 +169,7 @@ def _uniform_api_error(message: str = "Access denied", status_code: int = 403) -
     })
 
 
-def get_customer_from_hmac_context(request: HttpRequest) -> Tuple[Optional[Customer], Optional[Response]]:
+def get_customer_from_hmac_context(request: HttpRequest) -> tuple[Customer | None, Response | None]:
     """
     🔒 PREFERRED: Get customer from HMAC request body context (like session validation).
     
@@ -199,7 +199,6 @@ def get_customer_from_hmac_context(request: HttpRequest) -> Tuple[Optional[Custo
     
     # Parse HMAC-signed request body
     try:
-        import json
         request_data = request.data if hasattr(request, 'data') else json.loads(request.body)
         customer_id = request_data.get('customer_id')
         

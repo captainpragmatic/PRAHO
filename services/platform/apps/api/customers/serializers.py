@@ -2,15 +2,22 @@
 # CUSTOMER API SERIALIZERS 📊
 # ===============================================================================
 
-from rest_framework import serializers
+import logging
+import re
+
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from rest_framework import serializers
+
+from apps.common.types import Err, Ok
 from apps.customers.models import Customer
 from apps.users.services import SecureUserRegistrationService
-from apps.common.types import Result, Ok, Err
-import logging
 
 User = get_user_model()
+
+# Romanian validation constants
+MIN_VAT_DIGITS = 6  # Minimum number of digits in Romanian VAT number
+
 logger = logging.getLogger(__name__)
 
 
@@ -64,7 +71,6 @@ class UserRegistrationDataSerializer(serializers.Serializer):
     def validate_phone(self, value):
         """Validate Romanian phone format"""
         if value:
-            import re
             if not re.match(r"^(\+40[\s\.]?[0-9][\s\.0-9]{8,11}[0-9]|0[0-9]{9})$", value):
                 raise serializers.ValidationError("Invalid Romanian phone number format.")
         return value
@@ -98,13 +104,13 @@ class CustomerRegistrationDataSerializer(serializers.Serializer):
         if value:
             value = value.strip().upper()
             if not value.startswith('RO'):
-                if value.isdigit() and len(value) >= 6:
+                if value.isdigit() and len(value) >= MIN_VAT_DIGITS:
                     value = f'RO{value}'
                 else:
                     raise serializers.ValidationError("VAT number must start with RO followed by digits.")
             else:
                 vat_digits = value[2:]
-                if not vat_digits.isdigit() or len(vat_digits) < 6:
+                if not vat_digits.isdigit() or len(vat_digits) < MIN_VAT_DIGITS:
                     raise serializers.ValidationError("VAT number must start with RO followed by digits.")
         return value
     
@@ -250,7 +256,6 @@ class CustomerProfileSerializer(serializers.Serializer):
     def validate_phone(self, value):
         """Validate Romanian phone format"""
         if value:
-            import re
             if not re.match(r"^(\+40[\s\.]?[0-9][\s\.0-9]{8,11}[0-9]|0[0-9]{9})$", value):
                 raise serializers.ValidationError("Invalid Romanian phone number format.")
         return value

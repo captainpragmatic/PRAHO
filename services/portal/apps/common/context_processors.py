@@ -2,11 +2,12 @@
 Context processors for PRAHO Portal Service
 """
 
+from typing import Any
+
 from django.http import HttpRequest
-from typing import Dict, Any
 
 
-def portal_context(request: HttpRequest) -> Dict[str, Any]:
+def portal_context(request: HttpRequest) -> dict[str, Any]:
     """
     Add portal-specific context to templates.
     Stateless portal - no request.user available.

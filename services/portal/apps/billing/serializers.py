@@ -3,13 +3,13 @@ Portal Billing Serializers - API Response Conversion Functions
 Convert Platform API responses to portal dataclass instances.
 """
 
-from typing import Dict, Any, List
 from decimal import Decimal
+from typing import Any
 
-from .schemas import Currency, InvoiceLine, Invoice, InvoiceSummary, Proforma, ProformaLine
+from .schemas import Currency, Invoice, InvoiceLine, InvoiceSummary, Proforma, ProformaLine
 
 
-def create_currency_from_api(data: Dict[str, Any]) -> Currency:
+def create_currency_from_api(data: dict[str, Any]) -> Currency:
     """Create Currency dataclass from API response"""
     return Currency(
         id=data['id'],
@@ -21,7 +21,7 @@ def create_currency_from_api(data: Dict[str, Any]) -> Currency:
     )
 
 
-def create_invoice_line_from_api(data: Dict[str, Any]) -> InvoiceLine:
+def create_invoice_line_from_api(data: dict[str, Any]) -> InvoiceLine:
     """Create InvoiceLine dataclass from API response"""
     return InvoiceLine(
         id=data['id'],
@@ -36,7 +36,7 @@ def create_invoice_line_from_api(data: Dict[str, Any]) -> InvoiceLine:
     )
 
 
-def create_invoice_from_api(data: Dict[str, Any], lines: List[Dict[str, Any]] = None) -> Invoice:
+def create_invoice_from_api(data: dict[str, Any], lines: list[dict[str, Any]] = None) -> Invoice:
     """Create Invoice dataclass from API response"""
     from django.utils.dateparse import parse_datetime
     
@@ -86,7 +86,7 @@ def create_invoice_from_api(data: Dict[str, Any], lines: List[Dict[str, Any]] = 
     return invoice
 
 
-def create_invoice_summary_from_api(data: Dict[str, Any]) -> InvoiceSummary:
+def create_invoice_summary_from_api(data: dict[str, Any]) -> InvoiceSummary:
     """Create InvoiceSummary dataclass from API response"""
     return InvoiceSummary(
         total_invoices=data['total_invoices'],
@@ -100,7 +100,7 @@ def create_invoice_summary_from_api(data: Dict[str, Any]) -> InvoiceSummary:
     )
 
 
-def create_proforma_line_from_api(data: Dict[str, Any]) -> ProformaLine:
+def create_proforma_line_from_api(data: dict[str, Any]) -> ProformaLine:
     """Create ProformaLine dataclass from API response"""
     return ProformaLine(
         id=data['id'],
@@ -115,7 +115,7 @@ def create_proforma_line_from_api(data: Dict[str, Any]) -> ProformaLine:
     )
 
 
-def create_proforma_from_api(data: Dict[str, Any], lines: List[Dict[str, Any]] = None) -> Proforma:
+def create_proforma_from_api(data: dict[str, Any], lines: list[dict[str, Any]] = None) -> Proforma:
     """Create Proforma dataclass from API response"""
     from django.utils.dateparse import parse_datetime
     

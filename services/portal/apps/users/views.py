@@ -4,19 +4,26 @@ Customer-facing login/logout with Platform API validation using Django sessions.
 """
 
 import logging
+
 from django.conf import settings
-from django.http import HttpRequest, HttpResponse
-from django.shortcuts import render, redirect, resolve_url
-from django.views.decorators.http import require_http_methods
-from django.views.decorators.cache import never_cache
-from django.views.decorators.csrf import csrf_protect
-from django.utils.translation import gettext as _
 from django.contrib import messages
+from django.http import HttpRequest, HttpResponse
+from django.shortcuts import redirect, render, resolve_url
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.utils.translation import gettext as _
+from django.views.decorators.cache import never_cache
+from django.views.decorators.csrf import csrf_protect
+from django.views.decorators.http import require_http_methods
 
-from apps.api_client.services import api_client, PlatformAPIError
-from apps.users.forms import CustomerLoginForm, CustomerRegistrationForm, CustomerProfileForm, PasswordResetRequestForm, ChangePasswordForm
+from apps.api_client.services import PlatformAPIError, api_client
+from apps.users.forms import (
+    ChangePasswordForm,
+    CustomerLoginForm,
+    CustomerProfileForm,
+    CustomerRegistrationForm,
+    PasswordResetRequestForm,
+)
 
 logger = logging.getLogger(__name__)
 

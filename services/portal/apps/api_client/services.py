@@ -19,11 +19,14 @@ Security guidelines for all requests:
 import base64
 import hashlib
 import hmac
+import json
 import logging
 import secrets
 import time
+import urllib.parse
+from typing import Any
+
 import requests
-from typing import Any, Dict, Optional, List
 from django.conf import settings
 from django.core.cache import cache
 
@@ -32,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 class PlatformAPIError(Exception):
     """Exception raised when platform API calls fail"""
-    def __init__(self, message: str, status_code: Optional[int] = None, response_data: Optional[Dict] = None):
+    def __init__(self, message: str, status_code: int | None = None, response_data: dict | None = None):
         self.message = message
         self.status_code = status_code
         self.response_data = response_data
@@ -56,7 +59,7 @@ class PlatformAPIClient:
         self.portal_secret = settings.PLATFORM_API_SECRET  # Will be portal-specific secret
         self.timeout = settings.PLATFORM_API_TIMEOUT
         
-    def _generate_hmac_headers(self, method: str, path: str, body: bytes, fixed_timestamp: Optional[str] = None) -> Dict[str, str]:
+    def _generate_hmac_headers(self, method: str, path: str, body: bytes, fixed_timestamp: str | None = None) -> dict[str, str]:
         """
         Generate HMAC authentication headers for secure API communication.
         ✅ Implements canonical string signing with nonce deduplication.
@@ -72,7 +75,6 @@ class PlatformAPIClient:
         content_type = 'application/json'
         
         # Normalize path+query to match platform canonicalization
-        import urllib.parse
         parsed = urllib.parse.urlsplit(path)
         query_pairs = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
         query_pairs.sort(key=lambda kv: (kv[0], kv[1]))
@@ -107,8 +109,8 @@ class PlatformAPIClient:
             'Accept': 'application/json',
         }
     
-    def _make_request(self, method: str, endpoint: str, user_id: Optional[int] = None, 
-                     data: Optional[Dict] = None, params: Optional[Dict] = None) -> Dict[str, Any]:
+    def _make_request(self, method: str, endpoint: str, user_id: int | None = None, 
+                     data: dict | None = None, params: dict | None = None) -> dict[str, Any]:
         """Make HMAC-authenticated request to platform API"""
         url = f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
         
@@ -121,14 +123,12 @@ class PlatformAPIClient:
                 data['user_id'] = user_id
             if 'timestamp' not in data:
                 data['timestamp'] = time.time()
-            import json
             request_body = json.dumps(data).encode('utf-8')
         else:
             # Assume bytes-like already
             request_body = data  # type: ignore[assignment]
         
         # Generate HMAC headers - build normalized path+query for signature
-        import urllib.parse
         parsed_url = urllib.parse.urlsplit(url)
         existing_pairs = urllib.parse.parse_qsl(parsed_url.query, keep_blank_values=True)
         # Merge params into pairs
@@ -189,14 +189,13 @@ class PlatformAPIClient:
             
         except requests.exceptions.RequestException as e:
             logger.error(f"🔥 [API Client] Request error: {e}")
-            raise PlatformAPIError(f"Request failed: {str(e)}")
+            raise PlatformAPIError(f"Request failed: {e!s}")
     
-    def _make_binary_request(self, method: str, endpoint: str, params: Optional[Dict] = None, data: Optional[Dict] = None) -> bytes:
+    def _make_binary_request(self, method: str, endpoint: str, params: dict | None = None, data: dict | None = None) -> bytes:
         """Make HMAC-authenticated request and return binary response (for PDFs). Supports signed JSON body."""
         url = f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
         
         # Build normalized path for HMAC calculation
-        import urllib.parse
         parsed_url = urllib.parse.urlsplit(url)
         pairs = []
         if params:
@@ -218,8 +217,7 @@ class PlatformAPIClient:
             # Ensure signed body carries user_id/timestamp if provided
             if 'timestamp' not in data:
                 data['timestamp'] = time.time()
-            import json as _json
-            body_bytes = _json.dumps(data).encode('utf-8')
+            body_bytes = json.dumps(data).encode('utf-8')
         else:
             body_bytes = b''
 
@@ -266,13 +264,13 @@ class PlatformAPIClient:
             
         except requests.exceptions.RequestException as e:
             logger.error(f"🔥 [API Client Binary] Request error: {e}")
-            raise PlatformAPIError(f"Binary request failed: {str(e)}")
+            raise PlatformAPIError(f"Binary request failed: {e!s}")
     
     # ===============================================================================
     # AUTHENTICATION API ENDPOINTS
     # ===============================================================================
     
-    def authenticate_customer(self, email: str, password: str) -> Optional[Dict[str, Any]]:
+    def authenticate_customer(self, email: str, password: str) -> dict[str, Any] | None:
         """Authenticate customer with email and password via platform API"""
         try:
             # Use existing platform login endpoint
@@ -300,7 +298,7 @@ class PlatformAPIClient:
             logger.warning(f"⚠️ [API Client] Customer authentication failed for {email}: {e}")
             return None
     
-    def validate_session_secure(self, user_id: str, state_version: int = 1) -> Optional[Dict[str, Any]]:
+    def validate_session_secure(self, user_id: str, state_version: int = 1) -> dict[str, Any] | None:
         """
         🔒 SECURE session validation using HMAC-signed context (No JWT, No ID enumeration)
         
@@ -333,7 +331,7 @@ class PlatformAPIClient:
     # CUSTOMER API ENDPOINTS
     # ===============================================================================
     
-    def get_user_customers(self, user_id: int) -> List[Dict[str, Any]]:
+    def get_user_customers(self, user_id: int) -> list[dict[str, Any]]:
         """🔒 Get customers accessible to user - SECURE HMAC BODY"""
         cache_key = f"user_customers_{user_id}"
         cached_data = cache.get(cache_key)
@@ -351,7 +349,7 @@ class PlatformAPIClient:
         cache.set(cache_key, customers, 300)
         return customers
     
-    def get_customer_details(self, customer_id: int, user_id: int) -> Dict[str, Any]:
+    def get_customer_details(self, customer_id: int, user_id: int) -> dict[str, Any]:
         """Get customer details using secure HMAC authenticated endpoint"""
         return self._make_request(
             'POST', 
@@ -363,13 +361,13 @@ class PlatformAPIClient:
             }
         )
     
-    def search_customers(self, query: str, user_id: int) -> List[Dict[str, Any]]:
+    def search_customers(self, query: str, user_id: int) -> list[dict[str, Any]]:
         """Search customers"""
         params = {'q': query}
         data = self._make_request('GET', '/customers/search/', user_id=user_id, params=params)
         return data.get('results', [])
     
-    def get_customer_profile(self, user_id: int) -> Optional[Dict[str, Any]]:
+    def get_customer_profile(self, user_id: int) -> dict[str, Any] | None:
         """Get user profile data (user-scoped, HMAC body with user_id)"""
         try:
             payload = {'user_id': user_id, 'timestamp': time.time()}
@@ -388,11 +386,11 @@ class PlatformAPIClient:
             logger.warning(f"⚠️ [API Client] Failed to get customer profile: {e}")
             return None
     
-    def update_customer_profile(self, user_id: int, profile_data: Dict[str, Any]) -> bool:
+    def update_customer_profile(self, user_id: int, profile_data: dict[str, Any]) -> bool:
         """Update customer profile data (requires user_id in signed body for HMAC validation)."""
         try:
             # Ensure the signed body contains user identity for the HMAC validator
-            update_data: Dict[str, Any] = {**profile_data, 'user_id': user_id}
+            update_data: dict[str, Any] = {**profile_data, 'user_id': user_id}
 
             data = self._make_request(
                 'PUT',
@@ -430,7 +428,7 @@ class PlatformAPIClient:
     # MULTI-FACTOR AUTHENTICATION API ENDPOINTS
     # ===============================================================================
     
-    def get_mfa_status(self, customer_id: str) -> Optional[Dict[str, Any]]:
+    def get_mfa_status(self, customer_id: str) -> dict[str, Any] | None:
         """Get MFA status and methods for customer"""
         try:
             data = self._make_request(
@@ -443,7 +441,7 @@ class PlatformAPIClient:
             logger.warning(f"⚠️ [API Client] Failed to get MFA status: {e}")
             return None
     
-    def setup_totp_mfa(self, customer_id: str) -> Optional[Dict[str, Any]]:
+    def setup_totp_mfa(self, customer_id: str) -> dict[str, Any] | None:
         """Initialize TOTP MFA setup - returns QR code and secret"""
         try:
             data = self._make_request(
@@ -479,7 +477,7 @@ class PlatformAPIClient:
             logger.warning(f"⚠️ [API Client] Failed to verify TOTP: {e}")
             return False
     
-    def setup_webauthn_mfa(self, customer_id: str) -> Optional[Dict[str, Any]]:
+    def setup_webauthn_mfa(self, customer_id: str) -> dict[str, Any] | None:
         """Initialize WebAuthn/Passkey MFA setup"""
         try:
             data = self._make_request(
@@ -492,7 +490,7 @@ class PlatformAPIClient:
             logger.warning(f"⚠️ [API Client] Failed to setup WebAuthn MFA: {e}")
             return None
     
-    def get_backup_codes(self, customer_id: str) -> Optional[List[str]]:
+    def get_backup_codes(self, customer_id: str) -> list[str] | None:
         """Get backup codes for customer"""
         try:
             data = self._make_request(
@@ -505,7 +503,7 @@ class PlatformAPIClient:
             logger.warning(f"⚠️ [API Client] Failed to get backup codes: {e}")
             return None
     
-    def regenerate_backup_codes(self, customer_id: str) -> Optional[List[str]]:
+    def regenerate_backup_codes(self, customer_id: str) -> list[str] | None:
         """Regenerate backup codes for customer"""
         try:
             data = self._make_request(
@@ -539,19 +537,19 @@ class PlatformAPIClient:
     # GENERIC HTTP METHODS
     # ===============================================================================
     
-    def get(self, endpoint: str, params: Optional[Dict] = None, user_id: Optional[int] = None) -> Dict[str, Any]:
+    def get(self, endpoint: str, params: dict | None = None, user_id: int | None = None) -> dict[str, Any]:
         """Generic GET request"""
         return self._make_request('GET', endpoint, user_id=user_id, params=params)
     
-    def post(self, endpoint: str, data: Optional[Dict] = None, user_id: Optional[int] = None) -> Dict[str, Any]:
+    def post(self, endpoint: str, data: dict | None = None, user_id: int | None = None) -> dict[str, Any]:
         """Generic POST request"""
         return self._make_request('POST', endpoint, user_id=user_id, data=data)
     
-    def put(self, endpoint: str, data: Optional[Dict] = None, user_id: Optional[int] = None) -> Dict[str, Any]:
+    def put(self, endpoint: str, data: dict | None = None, user_id: int | None = None) -> dict[str, Any]:
         """Generic PUT request"""
         return self._make_request('PUT', endpoint, user_id=user_id, data=data)
     
-    def delete(self, endpoint: str, user_id: Optional[int] = None) -> Dict[str, Any]:
+    def delete(self, endpoint: str, user_id: int | None = None) -> dict[str, Any]:
         """Generic DELETE request"""
         return self._make_request('DELETE', endpoint, user_id=user_id)
     
@@ -559,7 +557,7 @@ class PlatformAPIClient:
     # BILLING API ENDPOINTS  
     # ===============================================================================
     
-    def get_invoice_details(self, invoice_id: int, user_id: int) -> Dict[str, Any]:
+    def get_invoice_details(self, invoice_id: int, user_id: int) -> dict[str, Any]:
         """Get invoice details"""
         return self._make_request('GET', f'/billing/invoices/{invoice_id}/', user_id=user_id)
     
@@ -569,15 +567,15 @@ class PlatformAPIClient:
     
     # (Legacy user-scoped GET ticket methods removed; use secure POST endpoints instead)
     
-    def get_ticket_details(self, ticket_id: int, user_id: int) -> Dict[str, Any]:
+    def get_ticket_details(self, ticket_id: int, user_id: int) -> dict[str, Any]:
         """Get ticket details"""
         return self._make_request('GET', f'/tickets/{ticket_id}/', user_id=user_id)
     
-    def create_ticket(self, ticket_data: Dict[str, Any], user_id: int) -> Dict[str, Any]:
+    def create_ticket(self, ticket_data: dict[str, Any], user_id: int) -> dict[str, Any]:
         """Create new support ticket"""
         return self._make_request('POST', '/tickets/', user_id=user_id, data=ticket_data)
     
-    def add_ticket_comment(self, ticket_id: int, comment_data: Dict[str, Any], user_id: int) -> Dict[str, Any]:
+    def add_ticket_comment(self, ticket_id: int, comment_data: dict[str, Any], user_id: int) -> dict[str, Any]:
         """Add comment to ticket"""
         return self._make_request('POST', f'/tickets/{ticket_id}/comments/', user_id=user_id, data=comment_data)
     
@@ -585,7 +583,7 @@ class PlatformAPIClient:
     # SERVICES API ENDPOINTS
     # ===============================================================================
     
-    def get_customer_services(self, customer_id: int, user_id: int) -> List[Dict[str, Any]]:
+    def get_customer_services(self, customer_id: int, user_id: int) -> list[dict[str, Any]]:
         """Get services for customer"""
         data = self._make_request('GET', f'/customers/{customer_id}/services/', user_id=user_id)
         return data if isinstance(data, list) else []
@@ -600,7 +598,7 @@ class PlatformAPIClient:
     # SECURE BILLING API ENDPOINTS 💳
     # ===============================================================================
     
-    def get_customer_invoices_secure(self, customer_id: int) -> Dict[str, Any]:
+    def get_customer_invoices_secure(self, customer_id: int) -> dict[str, Any]:
         """🔒 Get customer invoices - SECURE HMAC BODY"""
         request_data = {
             'customer_id': customer_id,
@@ -609,7 +607,7 @@ class PlatformAPIClient:
         }
         return self._make_request('POST', '/api/billing/invoices/', data=request_data)
     
-    def get_customer_proformas_secure(self, customer_id: int) -> Dict[str, Any]:
+    def get_customer_proformas_secure(self, customer_id: int) -> dict[str, Any]:
         """🔒 Get customer proformas - SECURE HMAC BODY"""
         request_data = {
             'customer_id': customer_id,
@@ -618,7 +616,7 @@ class PlatformAPIClient:
         }
         return self._make_request('POST', '/api/billing/proformas/', data=request_data)
     
-    def get_billing_summary_secure(self, customer_id: int) -> Dict[str, Any]:
+    def get_billing_summary_secure(self, customer_id: int) -> dict[str, Any]:
         """🔒 Get billing summary - SECURE HMAC BODY"""
         request_data = {
             'customer_id': customer_id,
@@ -627,7 +625,7 @@ class PlatformAPIClient:
         }
         return self._make_request('POST', '/api/billing/summary/', data=request_data)
     
-    def get_invoice_detail_secure(self, customer_id: int, invoice_number: str) -> Dict[str, Any]:
+    def get_invoice_detail_secure(self, customer_id: int, invoice_number: str) -> dict[str, Any]:
         """🔒 Get invoice detail - SECURE HMAC BODY"""
         request_data = {
             'customer_id': customer_id,
@@ -637,7 +635,7 @@ class PlatformAPIClient:
         }
         return self._make_request('POST', f'/api/billing/invoices/{invoice_number}/', data=request_data)
     
-    def get_proforma_detail_secure(self, customer_id: int, proforma_number: str) -> Dict[str, Any]:
+    def get_proforma_detail_secure(self, customer_id: int, proforma_number: str) -> dict[str, Any]:
         """🔒 Get proforma detail - SECURE HMAC BODY"""
         request_data = {
             'customer_id': customer_id,
@@ -651,7 +649,7 @@ class PlatformAPIClient:
     # SECURE TICKETS API ENDPOINTS 🎫
     # ===============================================================================
     
-    def get_customer_tickets_secure(self, customer_id: int) -> Dict[str, Any]:
+    def get_customer_tickets_secure(self, customer_id: int) -> dict[str, Any]:
         """🔒 Get customer tickets - SECURE HMAC BODY"""
         request_data = {
             'customer_id': customer_id,
@@ -660,7 +658,7 @@ class PlatformAPIClient:
         }
         return self._make_request('POST', '/api/tickets/', data=request_data)
     
-    def get_ticket_detail_secure(self, customer_id: int, ticket_number: str) -> Dict[str, Any]:
+    def get_ticket_detail_secure(self, customer_id: int, ticket_number: str) -> dict[str, Any]:
         """🔒 Get ticket detail - SECURE HMAC BODY"""
         request_data = {
             'customer_id': customer_id,
@@ -670,7 +668,7 @@ class PlatformAPIClient:
         }
         return self._make_request('POST', f'/api/tickets/{ticket_number}/', data=request_data)
     
-    def create_ticket_secure(self, customer_id: int, ticket_data: Dict[str, Any]) -> Dict[str, Any]:
+    def create_ticket_secure(self, customer_id: int, ticket_data: dict[str, Any]) -> dict[str, Any]:
         """🔒 Create ticket - SECURE HMAC BODY"""
         request_data = {
             'customer_id': customer_id,
@@ -680,7 +678,7 @@ class PlatformAPIClient:
         }
         return self._make_request('POST', '/api/tickets/create/', data=request_data)
     
-    def reply_to_ticket_secure(self, customer_id: int, ticket_number: str, reply_content: str) -> Dict[str, Any]:
+    def reply_to_ticket_secure(self, customer_id: int, ticket_number: str, reply_content: str) -> dict[str, Any]:
         """🔒 Reply to ticket - SECURE HMAC BODY"""
         request_data = {
             'customer_id': customer_id,
@@ -695,7 +693,7 @@ class PlatformAPIClient:
     # SECURE SERVICES API ENDPOINTS 📦
     # ===============================================================================
     
-    def get_customer_services_secure(self, customer_id: int) -> Dict[str, Any]:
+    def get_customer_services_secure(self, customer_id: int) -> dict[str, Any]:
         """🔒 Get customer services - SECURE HMAC BODY"""
         request_data = {
             'customer_id': customer_id,
@@ -704,7 +702,7 @@ class PlatformAPIClient:
         }
         return self._make_request('POST', '/api/services/', data=request_data)
     
-    def get_service_detail_secure(self, customer_id: int, service_id: int) -> Dict[str, Any]:
+    def get_service_detail_secure(self, customer_id: int, service_id: int) -> dict[str, Any]:
         """🔒 Get service detail - SECURE HMAC BODY"""
         request_data = {
             'customer_id': customer_id,
@@ -714,7 +712,7 @@ class PlatformAPIClient:
         }
         return self._make_request('POST', f'/api/services/{service_id}/', data=request_data)
     
-    def get_services_summary_secure(self, customer_id: int) -> Dict[str, Any]:
+    def get_services_summary_secure(self, customer_id: int) -> dict[str, Any]:
         """🔒 Get services summary - SECURE HMAC BODY"""
         request_data = {
             'customer_id': customer_id,
@@ -723,7 +721,7 @@ class PlatformAPIClient:
         }
         return self._make_request('POST', '/api/services/summary/', data=request_data)
     
-    def update_service_auto_renew_secure(self, customer_id: int, service_id: int, auto_renew: bool) -> Dict[str, Any]:
+    def update_service_auto_renew_secure(self, customer_id: int, service_id: int, auto_renew: bool) -> dict[str, Any]:
         """🔒 Update service auto-renew - SECURE HMAC BODY"""
         request_data = {
             'customer_id': customer_id,

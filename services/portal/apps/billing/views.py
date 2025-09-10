@@ -3,14 +3,14 @@
 # ===============================================================================
 
 import logging
-from typing import Optional, Dict, Any
-from django.http import HttpRequest, HttpResponse, JsonResponse
-from django.shortcuts import render, get_object_or_404
-from django.views.decorators.http import require_http_methods
-from django.contrib import messages
-from django.utils.translation import gettext as _
 
-from .services import InvoiceViewService, BillingDataSyncService
+from django.contrib import messages
+from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.shortcuts import render
+from django.utils.translation import gettext as _
+from django.views.decorators.http import require_http_methods
+
+from .services import BillingDataSyncService, InvoiceViewService
 
 logger = logging.getLogger(__name__)
 
@@ -70,9 +70,7 @@ def invoices_list_view(request: HttpRequest) -> HttpResponse:
         
         # Apply status filter if provided
         if status_filter:
-            if status_filter in ['draft', 'issued', 'paid', 'overdue', 'void', 'refunded']:
-                documents = [doc for doc in documents if doc.status == status_filter]
-            elif status_filter in ['sent', 'accepted', 'expired']:
+            if status_filter in ['draft', 'issued', 'paid', 'overdue', 'void', 'refunded'] or status_filter in ['sent', 'accepted', 'expired']:
                 documents = [doc for doc in documents if doc.status == status_filter]
         
         # Sort documents by creation date (newest first)

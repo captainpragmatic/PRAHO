@@ -3,25 +3,23 @@
 # ===============================================================================
 
 import logging
-from typing import cast, Dict, Any, List
-from django.db.models import Q, QuerySet, Avg, Count, Prefetch
-from django.http import HttpRequest, HttpResponse, Http404
-from django.shortcuts import get_object_or_404
-from django.utils import timezone
+
+from django.db.models import Prefetch, Q
+from django.http import Http404, HttpRequest, HttpResponse
 from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes, authentication_classes
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from apps.tickets.models import Ticket, TicketComment, SupportCategory, TicketAttachment
+from apps.tickets.models import SupportCategory, Ticket, TicketAttachment, TicketComment
+
 from ..secure_auth import require_customer_authentication
 from .serializers import (
-    TicketListSerializer,
-    TicketDetailSerializer,
-    TicketCreateSerializer,
     CommentCreateSerializer,
-    TicketsSummarySerializer,
-    SupportCategorySerializer
+    SupportCategorySerializer,
+    TicketCreateSerializer,
+    TicketDetailSerializer,
+    TicketListSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -127,8 +125,7 @@ def customer_tickets_api(request: HttpRequest, customer) -> Response:
             page = 1
             limit = 20
         
-        if page < 1:
-            page = 1
+        page = max(page, 1)
         
         offset = (page - 1) * limit
         paginated_tickets = tickets_qs[offset:offset + limit]

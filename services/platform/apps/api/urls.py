@@ -22,14 +22,14 @@
 #   - Future versioning ready
 #
 
-from django.urls import path, include
-from rest_framework.routers import DefaultRouter
+from django.urls import include, path
+
+from .billing import urls as billing_urls
 
 # Import domain-specific URL patterns
 from .customers import urls as customer_urls
-from .billing import urls as billing_urls  
-from .tickets import urls as ticket_urls
 from .services import urls as services_urls
+from .tickets import urls as ticket_urls
 
 app_name = 'api'
 

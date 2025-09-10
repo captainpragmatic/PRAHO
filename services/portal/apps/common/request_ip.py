@@ -2,8 +2,8 @@
 IP address utilities for PRAHO Portal Service
 """
 
+
 from django.http import HttpRequest
-from typing import Optional
 
 
 def get_safe_client_ip(request: HttpRequest) -> str:

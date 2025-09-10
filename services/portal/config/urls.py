@@ -3,9 +3,10 @@ URL configuration for PRAHO Portal Service
 Customer-facing URLs only - authentication handled via platform API.
 """
 
-from django.urls import include, path
 from django.http import JsonResponse
 from django.shortcuts import redirect
+from django.urls import include, path
+
 
 # Portal status endpoint
 def portal_status(request):

@@ -18,8 +18,9 @@ from .services import UserRegistrationService
 
 T = TypeVar("T")
 
-# Romanian VAT number validation constants
+# Romanian validation constants
 MIN_VAT_DIGITS = 6  # Minimum number of digits in Romanian VAT number
+CNP_LENGTH = 13  # Romanian CNP (Personal Numeric Code) is exactly 13 digits
 
 
 class LoginForm(forms.Form):
@@ -616,7 +617,7 @@ class CustomerOnboardingRegistrationForm(UserCreationForm):  # type: ignore[type
         """Validate CNP format (13 digits)."""
         cnp: str = (self.cleaned_data.get("cnp") or "").strip()
         if cnp:
-            if not (cnp.isdigit() and len(cnp) == 13):
+            if not (cnp.isdigit() and len(cnp) == CNP_LENGTH):
                 raise ValidationError(_("CNP must be exactly 13 digits."))
         return cnp
 

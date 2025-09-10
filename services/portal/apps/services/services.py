@@ -14,7 +14,8 @@ Security guidelines:
 # ===============================================================================
 
 import logging
-from typing import Dict, List, Any
+from typing import Any
+
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ class ServicesAPIClient(PlatformAPIClient):
     - Service management (limited customer actions)
     """
     
-    def get_customer_services(self, customer_id: int, user_id: int, page: int = 1, status: str = '', service_type: str = '') -> Dict[str, Any]:
+    def get_customer_services(self, customer_id: int, user_id: int, page: int = 1, status: str = '', service_type: str = '') -> dict[str, Any]:
         """
         Get paginated list of hosting services for a specific customer.
         
@@ -78,7 +79,7 @@ class ServicesAPIClient(PlatformAPIClient):
             logger.error(f"🔥 [Services API] Error retrieving services for customer {customer_id}: {e}")
             raise
     
-    def get_service_detail(self, customer_id: int, user_id: int, service_id: int) -> Dict[str, Any]:
+    def get_service_detail(self, customer_id: int, user_id: int, service_id: int) -> dict[str, Any]:
         """
         Get detailed service information for customer view.
         
@@ -101,7 +102,7 @@ class ServicesAPIClient(PlatformAPIClient):
             logger.error(f"🔥 [Services API] Error retrieving service {service_id} for customer {customer_id}: {e}")
             raise
     
-    def get_service_usage(self, customer_id: int, service_id: int, period: str = '30d') -> Dict[str, Any]:
+    def get_service_usage(self, customer_id: int, service_id: int, period: str = '30d') -> dict[str, Any]:
         """
         Get service usage statistics for customer view.
         
@@ -134,7 +135,7 @@ class ServicesAPIClient(PlatformAPIClient):
                 'period': period
             }
     
-    def get_services_summary(self, customer_id: int, user_id: int) -> Dict[str, Any]:
+    def get_services_summary(self, customer_id: int, user_id: int) -> dict[str, Any]:
         """
         Get services summary statistics for customer dashboard.
         
@@ -174,7 +175,7 @@ class ServicesAPIClient(PlatformAPIClient):
                 'by_type': {}
             }
     
-    def get_service_domains(self, customer_id: int, service_id: int) -> List[Dict[str, Any]]:
+    def get_service_domains(self, customer_id: int, service_id: int) -> list[dict[str, Any]]:
         """
         Get domains associated with a specific service.
         
@@ -196,7 +197,7 @@ class ServicesAPIClient(PlatformAPIClient):
             logger.error(f"🔥 [Services API] Error retrieving domains for service {service_id} for customer {customer_id}: {e}")
             return []
     
-    def request_service_action(self, customer_id: int, service_id: int, action: str, reason: str = '') -> Dict[str, Any]:
+    def request_service_action(self, customer_id: int, service_id: int, action: str, reason: str = '') -> dict[str, Any]:
         """
         Request service action (customer-available actions only).
         Creates a service request that staff must approve.
@@ -232,7 +233,7 @@ class ServicesAPIClient(PlatformAPIClient):
             logger.error(f"🔥 [Services API] Error requesting action '{action}' for service {service_id} by customer {customer_id}: {e}")
             raise
     
-    def get_available_plans(self, customer_id: int, service_type: str = '') -> List[Dict[str, Any]]:
+    def get_available_plans(self, customer_id: int, service_type: str = '') -> list[dict[str, Any]]:
         """
         Get available hosting plans for customer (for upgrades/downgrades).
         

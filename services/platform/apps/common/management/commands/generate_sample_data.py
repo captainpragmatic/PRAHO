@@ -13,10 +13,10 @@ from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.utils import timezone
 from faker import Faker
 
-from apps.billing.models import Currency, TaxRule, Invoice, ProformaInvoice, InvoiceLine, ProformaLine
 from apps.billing.invoice_models import InvoiceSequence
+from apps.billing.models import Currency, Invoice, InvoiceLine, ProformaInvoice, ProformaLine, TaxRule
 from apps.billing.proforma_models import ProformaSequence
-from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile, CustomerBillingProfile
+from apps.customers.models import Customer, CustomerAddress, CustomerBillingProfile, CustomerTaxProfile
 from apps.orders.models import Order, OrderItem
 from apps.products.models import Product
 from apps.provisioning.models import Server, Service, ServicePlan
@@ -397,8 +397,8 @@ class Command(BaseCommand):
         """Create base billing data and clean existing sample data"""
         # Clean existing sample data in proper order to avoid FK constraints
         # Delete orders first (and their items via CASCADE)
-        from apps.orders.models import Order
         from apps.billing.models import Invoice, ProformaInvoice
+        from apps.orders.models import Order
         from apps.tickets.models import Ticket
         
         # Delete in reverse dependency order

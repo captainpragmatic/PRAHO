@@ -3,27 +3,26 @@
 # ===============================================================================
 
 import logging
-from typing import cast
-from django.db.models import Q, QuerySet
+
 from django.http import HttpRequest
-from django.views.decorators.csrf import csrf_exempt
 from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes, authentication_classes
-from rest_framework.permissions import AllowAny
 from rest_framework.authentication import BaseAuthentication
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from apps.billing.models import Invoice, InvoiceLine, Currency
-from apps.billing.proforma_models import ProformaInvoice, ProformaLine
+from apps.billing.models import Currency, Invoice
 from apps.billing.pdf_generators import RomanianInvoicePDFGenerator, RomanianProformaPDFGenerator
+from apps.billing.proforma_models import ProformaInvoice
+
 from ..secure_auth import require_customer_authentication
 from .serializers import (
-    InvoiceListSerializer,
-    InvoiceDetailSerializer, 
-    InvoiceSummarySerializer,
     CurrencySerializer,
+    InvoiceDetailSerializer,
+    InvoiceListSerializer,
+    InvoiceSummarySerializer,
+    ProformaDetailSerializer,
     ProformaListSerializer,
-    ProformaDetailSerializer
 )
 
 logger = logging.getLogger(__name__)

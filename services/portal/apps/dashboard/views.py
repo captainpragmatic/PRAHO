@@ -4,15 +4,16 @@ Customer-facing dashboard with API integration - STATELESS ARCHITECTURE.
 """
 
 import logging
-from django.http import HttpRequest, HttpResponse
-from django.shortcuts import render, redirect
-from django.utils.translation import gettext as _
-from django.contrib import messages
 
-from apps.api_client.services import api_client, PlatformAPIError
+from django.contrib import messages
+from django.http import HttpRequest, HttpResponse
+from django.shortcuts import redirect, render
+from django.utils.translation import gettext as _
+
+from apps.api_client.services import PlatformAPIError, api_client
 from apps.billing.services import InvoiceViewService
-from apps.tickets.services import TicketAPIClient
 from apps.services.services import ServicesAPIClient
+from apps.tickets.services import TicketAPIClient
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +21,8 @@ logger = logging.getLogger(__name__)
 class DictAsObj:
     """Simple wrapper to allow dot notation access on dictionaries for Django templates"""
     def __init__(self, data):
-        from django.utils.dateparse import parse_datetime
         from django.utils import timezone
+        from django.utils.dateparse import parse_datetime
         
         for key, value in data.items():
             if isinstance(value, dict):

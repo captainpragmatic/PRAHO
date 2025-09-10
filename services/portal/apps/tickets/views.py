@@ -3,14 +3,14 @@
 # ===============================================================================
 
 import logging
-from django.shortcuts import render, redirect, get_object_or_404
+
 from django.contrib import messages
-from django.http import JsonResponse, HttpRequest
-from django.views.decorators.http import require_http_methods
-from django.views.decorators.csrf import csrf_exempt
-from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
+from django.http import HttpRequest, JsonResponse
+from django.shortcuts import redirect, render
 from django.utils.translation import gettext as _
-from .services import ticket_api, PlatformAPIError
+from django.views.decorators.http import require_http_methods
+
+from .services import PlatformAPIError, ticket_api
 
 logger = logging.getLogger(__name__)
 

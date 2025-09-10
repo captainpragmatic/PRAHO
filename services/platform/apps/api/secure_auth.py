@@ -4,21 +4,22 @@
 
 import json
 import logging
-import time
-from datetime import datetime, timezone, timedelta
-from typing import Tuple, Optional, Dict, Any
+from datetime import UTC, datetime
+from typing import Any
 
 from django.http import HttpRequest
-from django.views.decorators.csrf import csrf_exempt
 from rest_framework.response import Response
 
 from apps.customers.models import Customer
-from apps.users.models import User, CustomerMembership
+from apps.users.models import CustomerMembership, User
+
+# Security configuration constants
+HMAC_TIMESTAMP_WINDOW_SECONDS = 300  # 5 minutes
 
 logger = logging.getLogger(__name__)
 
 
-def _uniform_error_response(message: str = "Access denied", status_code: int = 403, extra_headers: Optional[Dict] = None) -> Response:
+def _uniform_error_response(message: str = "Access denied", status_code: int = 403, extra_headers: dict | None = None) -> Response:
     """
     🔒 Uniform error response to prevent information leakage.
     
@@ -39,7 +40,7 @@ def _uniform_error_response(message: str = "Access denied", status_code: int = 4
     }, status=status_code, headers=headers)
 
 
-def validate_hmac_authenticated_request(request: HttpRequest) -> Tuple[Optional[Dict[str, Any]], Optional[Response]]:
+def validate_hmac_authenticated_request(request: HttpRequest) -> tuple[dict[str, Any] | None, Response | None]:
     """
     🔒 Core HMAC authentication validation.
     
@@ -84,8 +85,8 @@ def validate_hmac_authenticated_request(request: HttpRequest) -> Tuple[Optional[
             return None, _uniform_error_response("Invalid request format", 400)
             
         # Timestamp freshness check (within 5 minutes)
-        current_time = datetime.now(timezone.utc).timestamp()
-        if abs(current_time - request_timestamp) > 300:  # 5 minutes
+        current_time = datetime.now(UTC).timestamp()
+        if abs(current_time - request_timestamp) > HMAC_TIMESTAMP_WINDOW_SECONDS:
             logger.warning(f"🚨 [API Security] Portal {portal_id} stale timestamp in HMAC context")
             return None, _uniform_error_response("Invalid request format", 400)
             
@@ -97,7 +98,7 @@ def validate_hmac_authenticated_request(request: HttpRequest) -> Tuple[Optional[
     return request_data, None
 
 
-def get_authenticated_customer(request: HttpRequest) -> Tuple[Optional[Customer], Optional[Response]]:
+def get_authenticated_customer(request: HttpRequest) -> tuple[Customer | None, Response | None]:
     """
     🔒 Get customer from HMAC-authenticated request with membership validation.
     
@@ -177,7 +178,7 @@ def get_authenticated_customer(request: HttpRequest) -> Tuple[Optional[Customer]
     return customer, None
 
 
-def get_authenticated_user(request: HttpRequest) -> Tuple[Optional[User], Optional[Response]]:
+def get_authenticated_user(request: HttpRequest) -> tuple[User | None, Response | None]:
     """
     🔒 Get user from HMAC-authenticated request for session validation.
     

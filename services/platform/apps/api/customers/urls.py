@@ -2,14 +2,15 @@
 # CUSTOMER API URLS 🔗
 # ===============================================================================
 
-from django.urls import path, include
+from django.urls import include, path
 from rest_framework.routers import DefaultRouter
+
 from .views import (
-    CustomerSearchViewSet, 
-    CustomerServicesViewSet,
-    customer_register_api,
     CustomerProfileAPIView,
-    customer_detail_api
+    CustomerSearchViewSet,
+    CustomerServicesViewSet,
+    customer_detail_api,
+    customer_register_api,
 )
 
 # Create router for customer API endpoints

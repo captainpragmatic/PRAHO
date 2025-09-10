@@ -2,11 +2,13 @@
 # BILLING API SERIALIZERS - CUSTOMER INVOICE AND PROFORMA DATA 💳
 # ===============================================================================
 
-from rest_framework import serializers
-from django.utils import timezone
-from apps.billing.models import Invoice, InvoiceLine, Currency
-from apps.billing.proforma_models import ProformaInvoice, ProformaLine
+from typing import ClassVar
 
+from django.utils import timezone
+from rest_framework import serializers
+
+from apps.billing.models import Currency, Invoice, InvoiceLine
+from apps.billing.proforma_models import ProformaInvoice, ProformaLine
 
 # ===============================================================================
 # CURRENCY SERIALIZERS 💱
@@ -17,7 +19,7 @@ class CurrencySerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Currency
-        fields = ['id', 'code', 'name', 'symbol', 'decimals']
+        fields: ClassVar = ['id', 'code', 'name', 'symbol', 'decimals']
 
 
 # ===============================================================================
@@ -33,7 +35,7 @@ class InvoiceListSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Invoice
-        fields = [
+        fields: ClassVar = [
             'id', 'number', 'status', 'total_cents', 'currency',
             'due_at', 'created_at', 'is_overdue', 'amount_due'
         ]
@@ -53,7 +55,7 @@ class InvoiceLineSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = InvoiceLine
-        fields = [
+        fields: ClassVar = [
             'description', 'kind', 'quantity', 'unit_price_cents',
             'tax_rate', 'line_total_cents', 'unit_price', 'line_total'
         ]
@@ -80,7 +82,7 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Invoice
-        fields = [
+        fields: ClassVar = [
             'id', 'number', 'status', 'subtotal_cents', 'tax_cents', 'total_cents',
             'currency', 'issued_at', 'due_at', 'created_at', 'sent_at', 'paid_at',
             'lines', 'subtotal', 'tax_amount', 'total', 'is_overdue', 'amount_due',
@@ -139,9 +141,8 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
 class InvoiceSummarySerializer(serializers.Serializer):
     """Serializer for customer invoice summary/dashboard widget"""
     
-    def to_representation(self, instance):
+    def to_representation(self, instance: dict) -> dict:
         """Build invoice summary from queryset"""
-        customer_id = instance['customer_id']
         invoices_qs = instance['invoices_queryset']
         
         # Calculate counts by status
@@ -160,17 +161,17 @@ class InvoiceSummarySerializer(serializers.Serializer):
         
         # Get recent invoices
         recent_invoices_qs = invoices_qs.order_by('-created_at')[:5]
-        recent_invoices = []
-        
-        for invoice in recent_invoices_qs:
-            recent_invoices.append({
+        recent_invoices = [
+            {
                 'number': invoice.number,
                 'status': invoice.status,
                 'total_cents': invoice.total_cents,
                 'due_at': invoice.due_at,
                 'is_overdue': invoice.is_overdue(),
                 'created_at': invoice.created_at
-            })
+            }
+            for invoice in recent_invoices_qs
+        ]
         
         return {
             'total_invoices': total_invoices,
@@ -196,7 +197,7 @@ class ProformaListSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = ProformaInvoice
-        fields = [
+        fields: ClassVar = [
             'id', 'number', 'status', 'total_cents', 'currency',
             'valid_until', 'created_at', 'is_expired'
         ]
@@ -213,7 +214,7 @@ class ProformaLineSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = ProformaLine
-        fields = [
+        fields: ClassVar = [
             'description', 'kind', 'quantity', 'unit_price_cents',
             'tax_rate', 'line_total_cents', 'unit_price', 'line_total'
         ]
@@ -239,7 +240,7 @@ class ProformaDetailSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = ProformaInvoice
-        fields = [
+        fields: ClassVar = [
             'id', 'number', 'status', 'subtotal_cents', 'tax_cents', 'total_cents',
             'currency', 'valid_until', 'created_at', 'lines', 'subtotal', 
             'tax_amount', 'total', 'is_expired', 'bill_to', 'pdf_url', 'notes'

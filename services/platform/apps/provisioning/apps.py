@@ -12,5 +12,5 @@ class ProvisioningConfig(AppConfig):
 
     def ready(self) -> None:
         """Import signals when the app is ready"""
-        import apps.provisioning.signals  # noqa: F401
+        import apps.provisioning.signals
         import apps.provisioning.virtualmin_signals  # noqa: F401

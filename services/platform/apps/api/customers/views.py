@@ -5,26 +5,27 @@
 import logging
 from typing import cast
 
+from django.contrib.auth import get_user_model
 from django.db.models import Q, QuerySet
 from django.http import HttpRequest
-from django.contrib.auth import get_user_model
 from rest_framework import status
-from rest_framework.decorators import action, api_view, permission_classes, throttle_classes, authentication_classes
+from rest_framework.decorators import action, api_view, authentication_classes, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.api.core import BaseAPIViewSet, ReadOnlyAPIViewSet
+from apps.api.core import ReadOnlyAPIViewSet
 from apps.api.core.throttling import AuthThrottle, BurstAPIThrottle
 from apps.api.secure_auth import require_customer_authentication
 from apps.customers.models import Customer
 from apps.users.models import User
+
 from .serializers import (
-    CustomerSearchSerializer, 
-    CustomerServiceSerializer,
-    CustomerRegistrationSerializer,
+    CustomerDetailSerializer,
     CustomerProfileSerializer,
-    CustomerDetailSerializer
+    CustomerRegistrationSerializer,
+    CustomerSearchSerializer,
+    CustomerServiceSerializer,
 )
 
 User = get_user_model()

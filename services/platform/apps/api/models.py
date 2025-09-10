@@ -11,7 +11,6 @@
 #   - Ticket data: apps.tickets.models
 #
 
-from django.db import models
 
 # Future API-specific models can be added here:
 # - APIKey model for API authentication

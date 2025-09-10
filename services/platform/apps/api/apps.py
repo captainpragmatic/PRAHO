@@ -27,4 +27,3 @@ class ApiConfig(AppConfig):
     def ready(self) -> None:
         """Initialize API app - register signals, etc."""
         # Future: API-specific signals, middleware registration, etc.
-        pass

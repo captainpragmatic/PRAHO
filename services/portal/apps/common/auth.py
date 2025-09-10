@@ -4,13 +4,13 @@ Authenticates users via Platform API without local User models.
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
+
 from django.contrib.auth.backends import BaseBackend
-from django.contrib.auth.base_user import AbstractBaseUser
 from django.contrib.auth.models import AnonymousUser
 from django.http import HttpRequest
 
-from apps.api_client.services import api_client, PlatformAPIError
+from apps.api_client.services import PlatformAPIError, api_client
 
 logger = logging.getLogger(__name__)
 
@@ -69,11 +69,11 @@ class PlatformAPIAuthenticationBackend(BaseBackend):
     
     def authenticate(
         self,
-        request: Optional[HttpRequest],
-        username: Optional[str] = None,
-        password: Optional[str] = None,
+        request: HttpRequest | None,
+        username: str | None = None,
+        password: str | None = None,
         **kwargs: Any
-    ) -> Optional[APIUser]:
+    ) -> APIUser | None:
         """
         Authenticate user via Platform API.
         
@@ -103,7 +103,7 @@ class PlatformAPIAuthenticationBackend(BaseBackend):
             logger.error(f"🔥 [Auth] Platform API error during authentication: {e}")
             return None
     
-    def get_user(self, user_id: Any) -> Optional[APIUser]:
+    def get_user(self, user_id: Any) -> APIUser | None:
         """
         Get user by ID from Platform API.
         Called by Django to refresh user data from session.

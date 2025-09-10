@@ -4,23 +4,22 @@
 
 import logging
 from decimal import Decimal
-from typing import Any, Dict, List
 
 from django.core.paginator import Paginator
-from django.db.models import Q, Count, Sum, Case, When, IntegerField
-from django.http import HttpRequest, JsonResponse
+from django.db.models import Count, Q
+from django.http import HttpRequest
 from django.utils import timezone
-from rest_framework.decorators import api_view, permission_classes, authentication_classes
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from apps.provisioning.service_models import Service, ServicePlan
+
 from ..secure_auth import require_customer_authentication
 from .serializers import (
-    ServiceListSerializer,
     ServiceDetailSerializer,
-    ServiceSummarySerializer,
-    ServicePlanAvailableSerializer
+    ServiceListSerializer,
+    ServicePlanAvailableSerializer,
 )
 
 logger = logging.getLogger(__name__)

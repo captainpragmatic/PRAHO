@@ -3,12 +3,13 @@
 # ===============================================================================
 
 import logging
-from django.shortcuts import render, redirect
+
 from django.contrib import messages
-from django.http import JsonResponse, HttpRequest
-from django.views.decorators.http import require_http_methods
+from django.http import HttpRequest
+from django.shortcuts import redirect, render
 from django.utils.translation import gettext as _
-from .services import services_api, PlatformAPIError
+
+from .services import PlatformAPIError, services_api
 
 logger = logging.getLogger(__name__)
 

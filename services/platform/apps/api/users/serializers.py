@@ -2,23 +2,28 @@
 # USER API SERIALIZERS 🔐
 # ===============================================================================
 
-from rest_framework import serializers
-from django.contrib.auth import get_user_model, authenticate
-from django.contrib.auth.tokens import default_token_generator
-from django.utils.encoding import force_bytes
-from django.utils.http import urlsafe_base64_encode
-from django.core.mail import send_mail
-from django.conf import settings
-from django.template.loader import render_to_string
-from django.utils.translation import gettext_lazy as _
+import io
+import logging
+
 import pyotp
 import qrcode
 import qrcode.image.svg
-import io
-import base64
-import logging
+from django.conf import settings
+from django.contrib.auth import get_user_model
+from django.contrib.auth.tokens import default_token_generator
+from django.core.mail import send_mail
+from django.template.loader import render_to_string
+from django.utils.encoding import force_bytes, force_str
+from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
+from django.utils.translation import gettext_lazy as _
+from rest_framework import serializers
 
 User = get_user_model()
+
+# 2FA Token length constants
+TOTP_TOKEN_LENGTH = 6  # Standard TOTP tokens are 6 digits
+BACKUP_CODE_LENGTH = 8  # Backup codes are 8 digits
+
 logger = logging.getLogger(__name__)
 
 
@@ -99,7 +104,7 @@ class TwoFactorVerifySerializer(serializers.Serializer):
         totp = pyotp.TOTP(user.two_factor_secret)
         
         # Check if it's a 6-digit TOTP token
-        if len(token) == 6:
+        if len(token) == TOTP_TOKEN_LENGTH:
             if totp.verify(token, valid_window=1):  # Allow 30 seconds window
                 # Enable 2FA
                 user.two_factor_enabled = True
@@ -119,7 +124,7 @@ class TwoFactorVerifySerializer(serializers.Serializer):
                 raise serializers.ValidationError("Invalid verification code. Please try again.")
         
         # Check if it's an 8-digit backup code
-        elif len(token) == 8:
+        elif len(token) == BACKUP_CODE_LENGTH:
             if user.verify_backup_code(token):
                 logger.info(f"✅ [2FA] Backup code used for user: {user.email}")
                 return {
@@ -158,9 +163,7 @@ class TwoFactorDisableSerializer(serializers.Serializer):
         totp = pyotp.TOTP(user.two_factor_secret)
         if not totp.verify(token, valid_window=1):
             # Try backup code if TOTP fails
-            if len(token) == 8 and not user.verify_backup_code(token):
-                raise serializers.ValidationError("Invalid verification code.")
-            elif len(token) != 8:
+            if (len(token) == BACKUP_CODE_LENGTH and not user.verify_backup_code(token)) or len(token) != BACKUP_CODE_LENGTH:
                 raise serializers.ValidationError("Invalid verification code.")
         
         return data
@@ -274,8 +277,6 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
     def validate_uid(self, value):
         """Validate UID and get user"""
         try:
-            from django.utils.encoding import force_str
-            from django.utils.http import urlsafe_base64_decode
             
             uid = force_str(urlsafe_base64_decode(value))
             user = User.objects.get(pk=uid, is_active=True)

@@ -2,28 +2,31 @@
 # AUTHENTICATION API VIEWS - PORTAL SERVICE INTEGRATION 🔐
 # ===============================================================================
 
+import json
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import cast
+
 from django.contrib.auth import authenticate
+from django.core.cache import cache
 from django.http import HttpRequest, JsonResponse
+from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
-from django.utils.decorators import method_decorator
-from rest_framework.decorators import api_view, permission_classes, throttle_classes, authentication_classes
-from rest_framework.permissions import AllowAny, IsAuthenticated
-from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.authtoken.models import Token
-from rest_framework.throttling import AnonRateThrottle
-import json
+from rest_framework.decorators import api_view, authentication_classes, permission_classes, throttle_classes
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.throttling import AnonRateThrottle, BaseThrottle
 
 from apps.users.models import User
-from ..secure_auth import require_user_authentication, require_customer_authentication
-import base64
-from datetime import datetime, timedelta, timezone
-from django.views.decorators.cache import never_cache
-from rest_framework.throttling import BaseThrottle
-from django.core.cache import cache
+
+from ..secure_auth import require_customer_authentication, require_user_authentication
+
+# Rate limiting and security constants
+SESSION_VALIDATION_RATE_LIMIT = 60  # requests per minute
+HMAC_TIMESTAMP_WINDOW_SECONDS = 300  # 5 minutes
 
 logger = logging.getLogger(__name__)
 
@@ -288,7 +291,7 @@ class SessionValidationThrottle(BaseThrottle):
         cache_key = f"session_validation_throttle:{portal_id}"
         
         current_count = cache.get(cache_key, 0)
-        if current_count >= 60:  # 60 requests per minute
+        if current_count >= SESSION_VALIDATION_RATE_LIMIT:
             logger.warning(f"🚨 [Security] Portal {portal_id} rate limited for session validation")
             return False
         
@@ -358,21 +361,21 @@ def validate_session_secure(request: HttpRequest) -> Response:
                 return _uniform_session_error(security_headers)
                 
             # Basic timestamp freshness check (within 5 minutes)
-            current_time = datetime.now(timezone.utc).timestamp()
-            if abs(current_time - request_timestamp) > 300:  # 5 minutes
+            current_time = datetime.now(UTC).timestamp()
+            if abs(current_time - request_timestamp) > HMAC_TIMESTAMP_WINDOW_SECONDS:
                 logger.warning(f"🚨 [Security] Portal {portal_id} stale timestamp in context")
                 return _uniform_session_error(security_headers)
                 
-        except (json.JSONDecodeError, TypeError, AttributeError) as e:
+        except (json.JSONDecodeError, TypeError, AttributeError):
             logger.warning(f"🚨 [Security] Portal {portal_id} invalid request body format")
             return _uniform_session_error(security_headers)
         
         # Validate user exists and is active
         try:
-            user = User.objects.get(id=user_id, is_active=True)
+            User.objects.get(id=user_id, is_active=True)
             
             # Success - calculate next validation time
-            next_validation = datetime.now(timezone.utc) + timedelta(minutes=10)
+            next_validation = datetime.now(UTC) + timedelta(minutes=10)
             
             logger.info(f"✅ [Security] Portal {portal_id} session validated (jti: {jti})")
             
@@ -433,8 +436,9 @@ def mfa_setup_api(request: HttpRequest, customer) -> Response:
         "manual_entry_key": "JBSWY3DPEHPK3PXP"
     }
     """
-    from .serializers import MFASetupSerializer
     from apps.users.models import CustomerMembership
+
+    from .serializers import MFASetupSerializer
     
     # Get the user from the customer context (since this is a customer-authenticated endpoint)
     # The customer parameter comes from @require_customer_authentication

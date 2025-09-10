@@ -3,13 +3,14 @@
 # ===============================================================================
 
 from django.urls import path
+
 from .views import (
-    customer_services_api,
-    customer_service_detail_api,
-    customer_services_summary_api,
     available_service_plans_api,
+    customer_service_detail_api,
+    customer_services_api,
+    customer_services_summary_api,
+    service_usage_stats_api,
     update_service_auto_renew_api,
-    service_usage_stats_api
 )
 
 app_name = 'services'

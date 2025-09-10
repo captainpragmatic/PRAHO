@@ -3,15 +3,15 @@ Portal Customer Forms
 Customer-facing forms with dark theme styling and Platform API integration.
 """
 
-import re
 import logging
-from typing import Any, Dict, Optional
+import re
+from typing import Any
+
 from django import forms
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
-from django.utils import timezone
 
-from apps.api_client.services import api_client, PlatformAPIError
+from apps.api_client.services import PlatformAPIError, api_client
 
 logger = logging.getLogger(__name__)
 
@@ -310,14 +310,13 @@ class CustomerRegistrationForm(forms.Form):
             if vat_number:
                 # Clear VAT number for individuals
                 cleaned_data['vat_number'] = ''
-        else:
-            # For companies, CNP should be cleared
-            if cnp:
-                cleaned_data['cnp'] = ''
+        # For companies, CNP should be cleared
+        elif cnp:
+            cleaned_data['cnp'] = ''
                 
         return cleaned_data
     
-    def register_customer(self) -> Optional[Dict[str, Any]]:
+    def register_customer(self) -> dict[str, Any] | None:
         """
         Register customer via Platform API.
         Returns customer data on success, None on failure.

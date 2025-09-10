@@ -2,14 +2,13 @@
 # SERVICES API SERIALIZERS - CUSTOMER HOSTING SERVICES 📦
 # ===============================================================================
 
-from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Any, Dict, List
+from typing import Any
 
 from django.utils import timezone
 from rest_framework import serializers
 
-from apps.provisioning.service_models import Service, ServicePlan, Server
+from apps.provisioning.service_models import Server, Service, ServicePlan
 
 
 class ServicePlanListSerializer(serializers.ModelSerializer):
@@ -246,7 +245,7 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
             return (timezone.now() - obj.activated_at).days
         return (timezone.now() - obj.created_at).days
     
-    def get_features(self, obj: Service) -> Dict[str, Any]:
+    def get_features(self, obj: Service) -> dict[str, Any]:
         """Get service plan features and limits"""
         plan = obj.service_plan
         return {
@@ -261,7 +260,7 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
             'auto_provision': plan.auto_provision
         }
     
-    def get_permissions(self, obj: Service) -> Dict[str, bool]:
+    def get_permissions(self, obj: Service) -> dict[str, bool]:
         """Get customer permissions for this service"""
         # For customer API, most management actions are limited
         return {
@@ -325,7 +324,7 @@ class ServicePlanAvailableSerializer(serializers.ModelSerializer):
             'is_active', 'is_public', 'sort_order'
         ]
     
-    def get_monthly_equivalent(self, obj: ServicePlan) -> Dict[str, Decimal]:
+    def get_monthly_equivalent(self, obj: ServicePlan) -> dict[str, Decimal]:
         """Get monthly equivalent prices for all cycles"""
         return {
             'monthly': obj.get_monthly_equivalent_price('monthly'),
@@ -349,7 +348,7 @@ class ServicePlanAvailableSerializer(serializers.ModelSerializer):
         monthly_cost_12months = obj.price_monthly * 12
         return monthly_cost_12months - obj.price_annual
     
-    def get_feature_summary(self, obj: ServicePlan) -> List[str]:
+    def get_feature_summary(self, obj: ServicePlan) -> list[str]:
         """Get feature summary list for display"""
         features = []
         

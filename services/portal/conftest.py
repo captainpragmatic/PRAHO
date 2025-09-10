@@ -4,12 +4,11 @@
 # Ensures portal service cannot access platform database during tests
 # This enforces the security boundary between services
 
-import pytest
-import warnings
 from unittest.mock import patch
-from django.core.exceptions import ImproperlyConfigured
-from django.db import connections, DEFAULT_DB_ALIAS
 
+import pytest
+from django.core.exceptions import ImproperlyConfigured
+from django.db import DEFAULT_DB_ALIAS, connections
 
 # ===============================================================================
 # DATABASE ACCESS PREVENTION 🚫

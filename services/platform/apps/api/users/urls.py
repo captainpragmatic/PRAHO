@@ -3,6 +3,7 @@ Authentication API URLs for platform service
 """
 
 from django.urls import path
+
 from . import views
 
 urlpatterns = [

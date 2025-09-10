@@ -15,12 +15,15 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 
 from django.conf import settings
-from django.core.cache import cache
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.http import HttpRequest, HttpResponse
 from django.utils import timezone
 
 from apps.common.constants import HTTP_CLIENT_ERROR_THRESHOLD
+
+# Security constants
+HMAC_TIMESTAMP_WINDOW_SECONDS = 300  # 5 minutes
 from apps.common.request_ip import get_safe_client_ip
 
 # Import for session security - handle potential circular import gracefully
@@ -387,7 +390,7 @@ class PortalServiceHMACMiddleware:
             try:
                 request_time = float(timestamp)
                 current_time = time.time()
-                if abs(current_time - request_time) > 300:  # 5 minutes
+                if abs(current_time - request_time) > HMAC_TIMESTAMP_WINDOW_SECONDS:
                     return False, "Request timestamp outside allowed window"
             except ValueError:
                 return False, "Invalid timestamp format"
@@ -466,7 +469,7 @@ class PortalServiceHMACMiddleware:
             
         except Exception as e:
             logger.error(f"🔥 [HMAC Auth] Signature validation error: {e}")
-            return False, f"Signature validation error: {str(e)}"
+            return False, f"Signature validation error: {e!s}"
     
     def __call__(self, request: HttpRequest) -> HttpResponse:
         # Only process API requests

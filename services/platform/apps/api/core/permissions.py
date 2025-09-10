@@ -2,9 +2,10 @@
 # API PERMISSIONS CLASSES 🔐
 # ===============================================================================
 
-from rest_framework import permissions
-from django.http import HttpRequest
 from typing import Any
+
+from django.http import HttpRequest
+from rest_framework import permissions
 
 
 class IsAuthenticatedAndAccessible(permissions.BasePermission):

@@ -3,9 +3,10 @@
 # ===============================================================================
 
 from rest_framework import viewsets
-from .permissions import IsAuthenticatedAndAccessible
+
 from .pagination import StandardResultsSetPagination
-from .throttling import StandardAPIThrottle, BurstAPIThrottle
+from .permissions import IsAuthenticatedAndAccessible
+from .throttling import BurstAPIThrottle, StandardAPIThrottle
 
 
 class BaseAPIViewSet(viewsets.ModelViewSet):

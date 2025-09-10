@@ -2,10 +2,14 @@
 # TICKETS API SERIALIZERS - CUSTOMER SUPPORT OPERATIONS <�
 # ===============================================================================
 
-from rest_framework import serializers
-from apps.tickets.models import Ticket, TicketComment, SupportCategory, TicketAttachment
-from apps.customers.models import Customer
+from typing import ClassVar
 
+from rest_framework import serializers
+
+from apps.tickets.models import SupportCategory, Ticket, TicketAttachment, TicketComment
+
+# Validation constants
+MIN_COMMENT_LENGTH = 2  # Minimum characters for ticket comments
 
 # ===============================================================================
 # SUPPORT CATEGORY SERIALIZERS =�
@@ -16,7 +20,7 @@ class SupportCategorySerializer(serializers.ModelSerializer):
     
     class Meta:
         model = SupportCategory
-        fields = [
+        fields: ClassVar = [
             'id',
             'name',
             'name_en', 
@@ -89,17 +93,17 @@ class TicketListSerializer(serializers.ModelSerializer):
             'updated_at'
         ]
     
-    def get_assigned_to_name(self, obj) -> str:
+    def get_assigned_to_name(self, obj: 'Ticket') -> str:
         """Get assigned staff member name"""
         if obj.assigned_to:
             return obj.assigned_to.get_full_name()
         return ""
     
-    def get_comments_count(self, obj) -> int:
+    def get_comments_count(self, obj: 'Ticket') -> int:
         """Get number of comments/replies"""
         return obj.comments.count()
     
-    def get_attachments_count(self, obj) -> int:
+    def get_attachments_count(self, obj: 'Ticket') -> int:
         """Get number of attachments"""
         return obj.attachments.count()
 
@@ -132,11 +136,11 @@ class TicketCommentSerializer(serializers.ModelSerializer):
             'updated_at'
         ]
     
-    def get_author_name(self, obj) -> str:
+    def get_author_name(self, obj: 'TicketComment') -> str:
         """Get comment author name"""
         return obj.get_author_name()
     
-    def get_author_role(self, obj) -> str:
+    def get_author_role(self, obj: 'TicketComment') -> str:
         """Get author role for display.
 
         Any Django staff user or a user with a non-empty staff_role is treated as Staff.
@@ -146,7 +150,7 @@ class TicketCommentSerializer(serializers.ModelSerializer):
             return 'Staff'
         return 'Customer'
     
-    def get_is_staff_reply(self, obj) -> bool:
+    def get_is_staff_reply(self, obj: 'TicketComment') -> bool:
         """Check if comment is from staff.
 
         Internal/support comment types are staff replies; otherwise infer from author flags.
@@ -182,14 +186,14 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
             'uploaded_at'
         ]
     
-    def get_file_url(self, obj) -> str:
+    def get_file_url(self, obj: 'TicketAttachment') -> str:
         """Get secure file download URL"""
         if obj.file:
             # Return relative URL for security (actual download handled by view)
             return f"/api/tickets/{obj.ticket_id}/attachments/{obj.id}/download/"
         return ""
     
-    def get_is_image(self, obj) -> bool:
+    def get_is_image(self, obj: 'TicketAttachment') -> bool:
         """Check if attachment is an image"""
         return obj.content_type.startswith('image/') if obj.content_type else False
 
@@ -268,32 +272,32 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             'updated_at'
         ]
     
-    def get_assigned_to_name(self, obj) -> str:
+    def get_assigned_to_name(self, obj: 'Ticket') -> str:
         """Get assigned staff member name"""
         if obj.assigned_to:
             return obj.assigned_to.get_full_name()
         return ""
     
-    def get_created_by_name(self, obj) -> str:
+    def get_created_by_name(self, obj: 'Ticket') -> str:
         """Get ticket creator name"""
         if obj.created_by:
             return obj.created_by.get_full_name()
         return ""
     
-    def get_related_service_name(self, obj) -> str:
+    def get_related_service_name(self, obj: 'Ticket') -> str:
         """Get related service name if any"""
         if obj.related_service:
             return str(obj.related_service)
         return ""
 
-    def get_comments(self, obj):
+    def get_comments(self, obj: 'Ticket') -> list[dict]:
         """Return comments, filtering out non-public ones for customer context."""
         qs = obj.comments.all()
         if self.context.get('for_customer'):
             qs = qs.filter(is_public=True)
         return TicketCommentSerializer(qs, many=True).data
 
-    def get_attachments(self, obj):
+    def get_attachments(self, obj: 'Ticket') -> list[dict]:
         """Return attachments linked to public comments only for customer context."""
         qs = obj.attachments.all()
         if self.context.get('for_customer'):
@@ -327,7 +331,7 @@ class TicketCreateSerializer(serializers.ModelSerializer):
             'priority': {'default': 'normal'}
         }
     
-    def validate_contact_email(self, value):
+    def validate_contact_email(self, value: str) -> str:
         """Validate contact email format"""
         if not value or '@' not in value:
             raise serializers.ValidationError("Valid email address is required")
@@ -350,9 +354,9 @@ class CommentCreateSerializer(serializers.ModelSerializer):
             'content': {'required': True}
         }
     
-    def validate_content(self, value):
+    def validate_content(self, value: str) -> str:
         """Validate comment content"""
-        if not value or len(value.strip()) < 2:
+        if not value or len(value.strip()) < MIN_COMMENT_LENGTH:
             raise serializers.ValidationError("Comment must be at least 2 characters long")
         return value.strip()
 

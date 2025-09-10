@@ -3,14 +3,15 @@
 # ===============================================================================
 
 from django.urls import path
+
 from .views import (
-    customer_tickets_api,
-    customer_ticket_detail_api,
     customer_ticket_create_api,
+    customer_ticket_detail_api,
     customer_ticket_reply_api,
+    customer_tickets_api,
     customer_tickets_summary_api,
     support_categories_api,
-    ticket_attachment_download_api
+    ticket_attachment_download_api,
 )
 
 app_name = 'tickets'

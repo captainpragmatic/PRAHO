@@ -13,14 +13,16 @@ Security guidelines:
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from apps.api_client.services import PlatformAPIClient
-from .schemas import Currency, Invoice, InvoiceLine, InvoiceSummary, Proforma, ProformaLine
+
+from .schemas import Currency, Invoice, Proforma
 from .serializers import (
-    create_currency_from_api, create_invoice_from_api, 
-    create_invoice_line_from_api, create_invoice_summary_from_api,
-    create_proforma_from_api, create_proforma_line_from_api
+    create_currency_from_api,
+    create_invoice_from_api,
+    create_invoice_summary_from_api,
+    create_proforma_from_api,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,7 +34,7 @@ class InvoiceViewService:
     def __init__(self):
         self.api_client = PlatformAPIClient()
     
-    def get_customer_invoices(self, customer_id: int, user_id: int, force_sync: bool = False) -> List[Invoice]:
+    def get_customer_invoices(self, customer_id: int, user_id: int, force_sync: bool = False) -> list[Invoice]:
         """Get invoices for a customer directly from Platform API"""
         try:
             # Debug logging reduced after stabilization
@@ -67,7 +69,7 @@ class InvoiceViewService:
             logger.error(f"🔥 [Invoice API] Error retrieving invoices for customer {customer_id}: {e}")
             return []
     
-    def get_invoice_detail(self, invoice_number: str, customer_id: int, user_id: int, force_sync: bool = False) -> Optional[Invoice]:
+    def get_invoice_detail(self, invoice_number: str, customer_id: int, user_id: int, force_sync: bool = False) -> Invoice | None:
         """Get invoice details by number directly from Platform API"""
         try:
             # Debug logging reduced after stabilization
@@ -99,7 +101,7 @@ class InvoiceViewService:
             logger.error(f"🔥 [Invoice API] Error retrieving invoice {invoice_number}: {e}")
             return None
     
-    def get_invoice_summary(self, customer_id: int, user_id: int) -> Dict[str, Any]:
+    def get_invoice_summary(self, customer_id: int, user_id: int) -> dict[str, Any]:
         """Get invoice summary statistics directly from Platform API"""
         try:
             # Debug logging reduced after stabilization
@@ -139,7 +141,7 @@ class InvoiceViewService:
             logger.error(f"🔥 [Invoice API] Error retrieving summary for customer {customer_id}: {e}")
             return self._empty_summary()
     
-    def get_customer_proformas(self, customer_id: int, user_id: int, force_sync: bool = False) -> List[Proforma]:
+    def get_customer_proformas(self, customer_id: int, user_id: int, force_sync: bool = False) -> list[Proforma]:
         """Get proformas for a customer directly from Platform API"""
         try:
             # Debug logging reduced after stabilization
@@ -174,7 +176,7 @@ class InvoiceViewService:
             logger.error(f"🔥 [Proforma API] Error retrieving proformas for customer {customer_id}: {e}")
             return []
     
-    def get_proforma_detail(self, proforma_number: str, customer_id: int, user_id: int, force_sync: bool = False) -> Optional[Proforma]:
+    def get_proforma_detail(self, proforma_number: str, customer_id: int, user_id: int, force_sync: bool = False) -> Proforma | None:
         """Get proforma details by number directly from Platform API"""
         try:
             # Call Platform API directly
@@ -239,7 +241,7 @@ class InvoiceViewService:
             logger.error(f"🔥 [Proforma PDF] Error retrieving PDF for proforma {proforma_number}: {e}")
             raise e
     
-    def _empty_summary(self) -> Dict[str, Any]:
+    def _empty_summary(self) -> dict[str, Any]:
         """Return empty summary in case of errors"""
         return {
             'total_invoices': 0,
@@ -258,7 +260,7 @@ class BillingDataSyncService:
     def __init__(self):
         self.api_client = PlatformAPIClient()
     
-    def sync_customer_invoices(self, customer_id: int, user_id: int) -> List[Invoice]:
+    def sync_customer_invoices(self, customer_id: int, user_id: int) -> list[Invoice]:
         """
         'Sync' invoices by fetching fresh data from Platform API
         No local storage - just returns fresh API data
@@ -275,7 +277,7 @@ class BillingDataSyncService:
             logger.error(f"🔥 [Billing Sync] Sync error for customer {customer_id}: {e}")
             return []
     
-    def get_currencies(self) -> List[Currency]:
+    def get_currencies(self) -> list[Currency]:
         """Get available currencies from Platform API"""
         try:
             response = self.api_client.get('/billing/currencies/')

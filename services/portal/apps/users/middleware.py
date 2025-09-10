@@ -6,15 +6,16 @@ Production-ready two-tier validation with jitter, single-flight locks, and stale
 import logging
 import random
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
+
 from django.conf import settings
-from django.shortcuts import redirect
 from django.core.cache import cache
 from django.http import HttpRequest, HttpResponse
+from django.shortcuts import redirect
 from django.utils import timezone as django_timezone
 from django.utils.http import urlencode
 
-from apps.api_client.services import api_client, PlatformAPIError
+from apps.api_client.services import PlatformAPIError, api_client
 
 logger = logging.getLogger(__name__)
 

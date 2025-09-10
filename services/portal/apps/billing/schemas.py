@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Optional
 from decimal import Decimal
 
 
@@ -29,7 +28,7 @@ class InvoiceLine:
     id: int
     invoice_id: int
     kind: str
-    service_id: Optional[int]
+    service_id: int | None
     description: str
     quantity: Decimal
     unit_price_cents: int
@@ -54,17 +53,17 @@ class Invoice:
     number: str
     status: str
     currency: Currency
-    exchange_to_ron: Optional[Decimal]
+    exchange_to_ron: Decimal | None
     subtotal_cents: int
     tax_cents: int
     total_cents: int
-    issued_at: Optional[datetime]
-    due_at: Optional[datetime]
+    issued_at: datetime | None
+    due_at: datetime | None
     created_at: datetime
     updated_at: datetime
-    locked_at: Optional[datetime]
-    sent_at: Optional[datetime] 
-    paid_at: Optional[datetime]
+    locked_at: datetime | None
+    sent_at: datetime | None 
+    paid_at: datetime | None
     
     # Billing information
     bill_to_name: str = ""
@@ -78,7 +77,7 @@ class Invoice:
     bill_to_country: str = ""
     
     # Optional field - not always provided by platform API
-    customer_id: Optional[int] = None
+    customer_id: int | None = None
     
     # E-factura integration
     efactura_id: str = ""
@@ -132,7 +131,7 @@ class InvoiceSummary:
     paid_invoices: int
     total_amount_due_cents: int
     currency_code: str
-    recent_invoices: List[dict]
+    recent_invoices: list[dict]
     
     @property
     def total_amount_due_display(self) -> str:
@@ -146,7 +145,7 @@ class ProformaLine:
     id: int
     proforma_id: int
     kind: str
-    service_id: Optional[int]
+    service_id: int | None
     description: str
     quantity: Decimal
     unit_price_cents: int
@@ -177,7 +176,7 @@ class Proforma:
     valid_until: datetime
     created_at: datetime
     notes: str = ""
-    lines: List[ProformaLine] = None
+    lines: list[ProformaLine] = None
     
     def __post_init__(self):
         if self.lines is None:

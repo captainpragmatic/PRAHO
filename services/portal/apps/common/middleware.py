@@ -4,6 +4,7 @@ Common middleware for PRAHO Portal Service
 
 import uuid
 from collections.abc import Callable
+
 from django.http import HttpRequest, HttpResponse
 
 
