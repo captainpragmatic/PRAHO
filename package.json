@@ -1,0 +1,30 @@
+{
+  "name": "praho",
+  "version": "1.0.0",
+  "description": "> **PRAHO - Pragmatic Hosting Automation**   > Built with Django 5.x for Romanian business compliance and hosting operations",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "build-css": "tailwindcss -i input.css -o services/portal/assets/css/tailwind.min.css --minify && tailwindcss -i input.css -o services/platform/static/css/tailwind.min.css --minify",
+    "watch-css": "tailwindcss -i input.css -o services/portal/assets/css/tailwind.min.css --watch",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/captainpragmatic/PRAHO.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/captainpragmatic/PRAHO/issues"
+  },
+  "homepage": "https://github.com/captainpragmatic/PRAHO#readme",
+  "devDependencies": {
+    "tailwindcss": "^4.1.13"
+  }
+}
