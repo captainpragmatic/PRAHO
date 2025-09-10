@@ -521,3 +521,7 @@ function confirmAccountDelete(button) {
 }
 </script>
 {% endblock %}
+
+{% block extra_modals %}
+{% include "components/dangerous_action_modal.html" %}
+{% endblock %}

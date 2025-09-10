@@ -47,6 +47,21 @@
       content: "🇷🇴";
       margin-right: 0.5rem;
     }
+
+    /* Custom scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #1e293b;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #475569;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #64748b;
+    }
   </style>
 </head>
 
@@ -211,8 +226,8 @@
 
   {% block extra_js %}{% endblock %}
   
-  <!-- Dangerous Action Confirmation Modal -->
-  {% include "components/dangerous_action_modal.html" %}
+  <!-- Page-specific modals -->
+  {% block extra_modals %}{% endblock %}
 </body>
 
 </html>
