@@ -6,12 +6,14 @@ import logging
 
 from django.db.models import Prefetch, Q
 from django.http import Http404, HttpRequest, HttpResponse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from apps.tickets.models import SupportCategory, Ticket, TicketAttachment, TicketComment
+from apps.tickets.services import TicketStatusService
 
 from ..secure_auth import require_customer_authentication
 from .serializers import (
@@ -108,13 +110,14 @@ def customer_tickets_api(request: HttpRequest, customer) -> Response:
                 Q(ticket_number__icontains=search_query)
             )
         
-        # Get statistics before pagination
+        # Get statistics before pagination (updated for new 4-status system)
         total_tickets = tickets_qs.count()
         stats = {
             'total': total_tickets,
-            'open': tickets_qs.filter(status__in=['new', 'open']).count(),
-            'pending': tickets_qs.filter(status='pending').count(),
-            'resolved': tickets_qs.filter(status__in=['resolved', 'closed']).count()
+            'open': tickets_qs.filter(status='open').count(),
+            'in_progress': tickets_qs.filter(status='in_progress').count(),
+            'waiting_on_customer': tickets_qs.filter(status='waiting_on_customer').count(),
+            'closed': tickets_qs.filter(status='closed').count()
         }
         
         # Pagination from request body
@@ -311,8 +314,10 @@ def customer_ticket_create_api(request: HttpRequest, customer) -> Response:
                       if k not in ['customer_id', 'action', 'timestamp']}
         
         # Validate request data
+        logger.debug(f"🔍 [Tickets API] Validating ticket data: {ticket_data}")
         serializer = TicketCreateSerializer(data=ticket_data)
         if not serializer.is_valid():
+            logger.error(f"🔥 [Tickets API] Validation failed: {serializer.errors}")
             return Response({
                 'success': False,
                 'errors': serializer.errors
@@ -322,7 +327,7 @@ def customer_ticket_create_api(request: HttpRequest, customer) -> Response:
         ticket = Ticket.objects.create(
             customer=customer,
             source='api',
-            status='new',
+            status='open',
             **serializer.validated_data
         )
         
@@ -433,7 +438,7 @@ def customer_ticket_reply_api(request: HttpRequest, customer, ticket_id: int) ->
                 'errors': serializer.errors
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Create comment
+        # Create customer comment
         comment = TicketComment.objects.create(
             ticket=ticket,
             content=serializer.validated_data['content'],
@@ -443,11 +448,16 @@ def customer_ticket_reply_api(request: HttpRequest, customer, ticket_id: int) ->
             is_public=True
         )
         
-        # Update ticket status if needed
-        if ticket.status == 'pending':
-            ticket.status = 'open'
-            ticket.requires_customer_response = False
-            ticket.save(update_fields=['status', 'requires_customer_response', 'updated_at'])
+        # Handle customer reply using TicketStatusService
+        try:
+            TicketStatusService.handle_customer_reply(ticket)
+        except ValueError as e:
+            # Log error but don't fail the comment creation
+            logger.warning(f"⚠️ [API] Error handling customer reply for ticket {ticket.ticket_number}: {e}")
+            # Fallback behavior for edge cases
+            ticket.has_customer_replied = True
+            ticket.customer_replied_at = timezone.now()
+            ticket.save(update_fields=['has_customer_replied', 'customer_replied_at'])
         
         response_data = {
             'success': True,

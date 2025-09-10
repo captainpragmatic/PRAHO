@@ -58,9 +58,7 @@ class TicketAttachmentTest(TestCase):
         # Create support category
         self.category = SupportCategory.objects.create(
             name='Technical Support',
-            name_en='Technical Support',
-            sla_response_hours=24,
-            sla_resolution_hours=72
+            name_en='Technical Support'
         )
 
         # Create test ticket

@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import logging
 import mimetypes
 import os
 from typing import cast
@@ -21,6 +22,9 @@ from django_ratelimit.decorators import ratelimit  # type: ignore[import-untyped
 from apps.users.models import User
 
 from .models import Ticket, TicketAttachment, TicketComment
+from .services import TicketStatusService
+
+logger = logging.getLogger(__name__)
 
 
 @login_required
@@ -68,6 +72,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     context = {
         "tickets": tickets_page,
         "open_count": tickets.filter(status__in=["open", "in_progress"]).count(),
+        "waiting_count": tickets.filter(status="waiting_on_customer").count(),
         "total_count": tickets.count(),
         "search_query": search_query,
         "status_filter": status_filter,
@@ -142,7 +147,9 @@ def ticket_detail(request: HttpRequest, pk: int) -> HttpResponse:
     context = {
         "ticket": ticket,
         "comments": comments,
-        "can_edit": ticket.status in ["open", "in_progress"],
+        "can_edit": ticket.status != "closed",
+        "is_waiting_on_customer": ticket.status == "waiting_on_customer",
+        "customer_replied_recently": ticket.customer_replied_recently,
     }
 
     return render(request, "tickets/detail.html", context)
@@ -180,12 +187,14 @@ def ticket_create(request: HttpRequest) -> HttpResponse:
                 messages.error(request, _("❌ You do not have permission to create tickets for this customer."))
                 return redirect("tickets:create")
 
-            ticket = Ticket.objects.create(
+            # Use TicketStatusService for proper ticket creation
+            ticket = TicketStatusService.create_ticket(
                 customer=customer,
-                title=subject,  # Changed from subject to title
+                title=subject,
                 description=description,
                 priority=priority,
-                status="open",
+                contact_email=user.email,
+                contact_person=user.get_full_name(),
                 created_by=user,
             )
 
@@ -296,10 +305,12 @@ def _process_ticket_attachments(request: HttpRequest, ticket: Ticket, comment: T
 
 
 def _handle_ticket_reply_post(request: HttpRequest, ticket: Ticket) -> HttpResponse:
-    """Handle POST request for ticket reply."""
+    """Handle POST request for ticket reply with new status system."""
     user = cast(User, request.user)  # Safe as this is only called from authenticated views
     reply_text = request.POST.get("reply")
     is_internal = request.POST.get("is_internal") == "on"
+    reply_action = request.POST.get("reply_action", "reply")  # New field for agent action
+    resolution_code = request.POST.get("resolution_code")  # For closing tickets
 
     # Validate internal note permission
     error_response = _validate_internal_note_permission(request, user, is_internal, ticket.pk)
@@ -312,7 +323,14 @@ def _handle_ticket_reply_post(request: HttpRequest, ticket: Ticket) -> HttpRespo
         messages.error(request, _("❌ The reply cannot be empty."))
         return redirect("tickets:detail", pk=ticket.pk)
 
-    # Create comment
+    # Validate resolution code if closing
+    if reply_action == "close_with_resolution" and not resolution_code:
+        if request.headers.get("HX-Request"):
+            return HttpResponse('<div class="text-red-500 text-sm">Resolution code required when closing ticket.</div>')
+        messages.error(request, _("❌ Resolution code is required when closing the ticket."))
+        return redirect("tickets:detail", pk=ticket.pk)
+
+    # Create comment with reply action
     comment_type = _determine_comment_type(user, is_internal)
     is_public = not (is_internal and (user.is_staff or getattr(user, "staff_role", None)))
 
@@ -324,18 +342,57 @@ def _handle_ticket_reply_post(request: HttpRequest, ticket: Ticket) -> HttpRespo
         author_name=user.get_full_name(),
         author_email=user.email,
         is_public=is_public,
+        reply_action=reply_action if user.is_staff_user else None,  # Only staff get reply actions
+        sets_waiting_on_customer=(reply_action == "reply_and_wait"),
     )
 
     # Process attachments
     _process_ticket_attachments(request, ticket, comment)
 
-    # Update ticket status if it was new
-    if ticket.status == "new":
-        ticket.status = "open"
-        ticket.save()
+    # Handle status transitions using TicketStatusService
+    try:
+        if user.is_staff_user:
+            # Staff replies with actions
+            if ticket.assigned_to is None:
+                # First agent reply
+                TicketStatusService.handle_first_agent_reply(
+                    ticket=ticket,
+                    agent=user,
+                    reply_action=reply_action,
+                    resolution_code=resolution_code
+                )
+            else:
+                # Subsequent agent reply  
+                TicketStatusService.handle_agent_reply(
+                    ticket=ticket,
+                    agent=user,
+                    reply_action=reply_action,
+                    resolution_code=resolution_code
+                )
+        else:
+            # Customer reply
+            TicketStatusService.handle_customer_reply(ticket)
+
+        success_messages = {
+            "reply": _("✅ Your reply has been added!"),
+            "reply_and_wait": _("✅ Reply added - ticket is now waiting for customer response."),
+            "internal_note": _("✅ Internal note has been added."),
+            "close_with_resolution": _("✅ Ticket has been closed with resolution: {resolution}").format(resolution=resolution_code),
+        }
+        
+        success_msg = success_messages.get(reply_action, _("✅ Your reply has been added!"))
+
+    except ValueError as e:
+        # Handle validation errors from TicketStatusService
+        if request.headers.get("HX-Request"):
+            return HttpResponse(f'<div class="text-red-500 text-sm">Error: {str(e)}</div>')
+        messages.error(request, _("❌ Error: {error}").format(error=str(e)))
+        return redirect("tickets:detail", pk=ticket.pk)
 
     # Handle HTMX response
     if request.headers.get("HX-Request"):
+        # Refresh ticket data and comments
+        ticket.refresh_from_db()
         comments = ticket.comments.all().order_by("created_at")
         return render(
             request,
@@ -346,7 +403,7 @@ def _handle_ticket_reply_post(request: HttpRequest, ticket: Ticket) -> HttpRespo
             },
         )
 
-    messages.success(request, _("✅ Your reply has been added!"))
+    messages.success(request, success_msg)
     return redirect("tickets:detail", pk=ticket.pk)
 
 
@@ -399,7 +456,7 @@ def ticket_comments_htmx(request: HttpRequest, pk: int) -> HttpResponse:
 
 @login_required
 def ticket_close(request: HttpRequest, pk: int) -> HttpResponse:
-    """✅ Close ticket"""
+    """✅ Close ticket with resolution code"""
     user = cast(User, request.user)  # Safe after @login_required
     ticket = get_object_or_404(Ticket, pk=pk)
 
@@ -410,10 +467,24 @@ def ticket_close(request: HttpRequest, pk: int) -> HttpResponse:
         messages.error(request, _("❌ You do not have permission to close this ticket."))
         return redirect("tickets:list")
 
-    ticket.status = "closed"
-    ticket.save()
-
-    messages.success(request, _("✅ Ticket #{ticket_pk} has been closed!").format(ticket_pk=ticket.pk))
+    if request.method == "POST":
+        resolution_code = request.POST.get("resolution_code")
+        if not resolution_code:
+            messages.error(request, _("❌ Resolution code is required to close the ticket."))
+            return redirect("tickets:detail", pk=pk)
+        
+        try:
+            # Use TicketStatusService for proper closing
+            TicketStatusService.close_ticket(ticket, resolution_code)
+            messages.success(request, _("✅ Ticket #{ticket_pk} has been closed with resolution: {resolution}").format(
+                ticket_pk=ticket.pk, resolution=resolution_code
+            ))
+            return redirect("tickets:detail", pk=pk)
+        except ValueError as e:
+            messages.error(request, _("❌ Error closing ticket: {error}").format(error=str(e)))
+            return redirect("tickets:detail", pk=pk)
+    
+    # For GET request, show the close form (handled by template)
     return redirect("tickets:detail", pk=pk)
 
 
@@ -430,11 +501,14 @@ def ticket_reopen(request: HttpRequest, pk: int) -> HttpResponse:
         messages.error(request, _("❌ You do not have permission to reopen this ticket."))
         return redirect("tickets:list")
 
-    ticket.status = "open"
-    ticket.save()
-
-    messages.success(request, _("✅ Ticket #{ticket_pk} has been reopened!").format(ticket_pk=ticket.pk))
-    return redirect("tickets:detail", pk=pk)
+    try:
+        # Use TicketStatusService for proper reopening
+        TicketStatusService.reopen_ticket(ticket)
+        messages.success(request, _("✅ Ticket #{ticket_pk} has been reopened!").format(ticket_pk=ticket.pk))
+        return redirect("tickets:detail", pk=pk)
+    except ValueError as e:
+        messages.error(request, _("❌ Error reopening ticket: {error}").format(error=str(e)))
+        return redirect("tickets:detail", pk=pk)
 
 
 @login_required

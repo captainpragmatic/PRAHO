@@ -20,21 +20,29 @@
             </div>
             <div>
                 <p class="text-slate-400 text-sm">{% trans 'Status' %}:</p>
-                {% if ticket.status == 'new' %}
-                  {% badge "New" variant="success" icon="🆕" %}
-                {% elif ticket.status == 'open' %}
-                  {% badge "Open" variant="info" icon="📂" %}
-                {% elif ticket.status == 'pending' %}
-                  {% badge "Pending" variant="warning" icon="⏳" %}
-                {% elif ticket.status == 'resolved' %}
-                  {% badge "Resolved" variant="primary" icon="✅" %}
-                {% elif ticket.status == 'closed' %}
-                  {% badge "Closed" variant="secondary" icon="📁" %}
-                {% elif ticket.status == 'cancelled' %}
-                  {% badge "Cancelled" variant="danger" icon="❌" %}
-                {% else %}
-                  {% badge ticket.get_status_display variant="default" %}
-                {% endif %}
+                <div class="flex items-center space-x-2">
+                  {% if ticket.status == 'open' %}
+                    {% badge "Open" variant="info" icon="📂" %}
+                  {% elif ticket.status == 'in_progress' %}
+                    {% badge "In Progress" variant="primary" icon="⚡" %}
+                  {% elif ticket.status == 'waiting_on_customer' %}
+                    {% badge "Waiting on Customer" variant="warning" icon="⏳" %}
+                  {% elif ticket.status == 'closed' %}
+                    {% badge "Closed" variant="secondary" icon="📁" %}
+                    {% if ticket.resolution_code %}
+                      <span class="text-xs text-slate-400">({{ ticket.get_resolution_code_display }})</span>
+                    {% endif %}
+                  {% else %}
+                    {% badge ticket.get_status_display variant="default" %}
+                  {% endif %}
+                  
+                  <!-- Customer replied badge -->
+                  {% if ticket.customer_replied_recently %}
+                    <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">
+                      💬 Customer replied
+                    </span>
+                  {% endif %}
+                </div>
             </div>
             <div>
                 <p class="text-slate-400 text-sm">{% trans 'Priority' %}:</p>
@@ -129,12 +137,33 @@
                                 <!-- File list display -->
                                 <div id="file-list" class="hidden"></div>
                                 
-                                <!-- Privacy Toggle - Staff Only -->
+                                <!-- Staff Reply Actions -->
                                 {% if user.is_staff or user.staff_role %}
-                                <label class="inline-flex items-center">
-                                    <input type="checkbox" name="is_internal" class="rounded border-slate-600 bg-slate-700 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-800">
-                                    <span class="ml-2 text-sm text-slate-400">{% trans 'Internal note' %}</span>
-                                </label>
+                                <div class="flex items-center space-x-4">
+                                    <!-- Reply Action Dropdown -->
+                                    <div class="relative">
+                                        <select name="reply_action" id="reply_action" class="block rounded border-slate-600 bg-slate-700 text-white text-sm px-3 py-1 focus:ring-blue-500 focus:border-blue-500" onchange="handleReplyActionChange()">
+                                            <option value="reply">{% trans 'Reply' %}</option>
+                                            <option value="reply_and_wait">{% trans 'Reply & set Waiting on Customer' %}</option>
+                                            <option value="internal_note">{% trans 'Internal note' %}</option>
+                                            <option value="close_with_resolution">{% trans 'Close with resolution' %}</option>
+                                        </select>
+                                    </div>
+                                    
+                                    <!-- Resolution Code (hidden by default) -->
+                                    <div id="resolution_code_container" class="hidden">
+                                        <select name="resolution_code" class="block rounded border-slate-600 bg-slate-700 text-white text-sm px-3 py-1 focus:ring-blue-500 focus:border-blue-500">
+                                            <option value="">{% trans 'Select resolution...' %}</option>
+                                            <option value="fixed">{% trans 'Fixed' %}</option>
+                                            <option value="invalid">{% trans 'Invalid' %}</option>
+                                            <option value="duplicate">{% trans 'Duplicate' %}</option>
+                                            <option value="by_design">{% trans 'By Design' %}</option>
+                                            <option value="refunded">{% trans 'Refunded' %}</option>
+                                            <option value="cancelled">{% trans 'Cancelled' %}</option>
+                                            <option value="other">{% trans 'Other' %}</option>
+                                        </select>
+                                    </div>
+                                </div>
                                 {% endif %}
                             </div>
                             
@@ -174,21 +203,14 @@
         <a href="{% url 'tickets:list' %}" class="inline-block align-baseline font-bold text-sm text-blue-400 hover:text-blue-300">
             ← {% trans 'Back to Tickets' %}
         </a>
-        {% if can_edit %}
-            <div class="space-x-2">
-                <form method="post" action="{% url 'tickets:close' pk=ticket.pk %}" class="inline-block">
-                    {% csrf_token %}
-                    <button type="submit" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
-                        {% trans 'Close Ticket' %} 
-                    </button>
-                </form>
-                <form method="post" action="{% url 'tickets:reopen' pk=ticket.pk %}" class="inline-block">
-                    {% csrf_token %}
-                    <button type="submit" class="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
-                        {% trans 'Reopen Ticket' %}
-                    </button>
-                </form>
-            </div>
+        {% if ticket.status == 'closed' and user.is_staff %}
+            <!-- Reopen button for closed tickets -->
+            <form method="post" action="{% url 'tickets:reopen' pk=ticket.pk %}" class="inline-block">
+                {% csrf_token %}
+                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
+                    🔄 {% trans 'Reopen Ticket' %}
+                </button>
+            </form>
         {% endif %}
     </div>
 </div>
@@ -335,6 +357,41 @@ document.addEventListener('htmx:beforeRequest', function(e) {
         if (submitText) submitText.textContent = 'Sending...';
         if (submitSpinner) submitSpinner.classList.remove('hidden');
     }
+});
+
+// Handle reply action changes
+window.handleReplyActionChange = function() {
+    const replyAction = document.getElementById('reply_action');
+    const resolutionContainer = document.getElementById('resolution_code_container');
+    const submitText = document.getElementById('submit-text');
+    
+    if (!replyAction || !submitText) return;
+    
+    const actionValue = replyAction.value;
+    
+    // Show/hide resolution code field
+    if (resolutionContainer) {
+        if (actionValue === 'close_with_resolution') {
+            resolutionContainer.classList.remove('hidden');
+        } else {
+            resolutionContainer.classList.add('hidden');
+        }
+    }
+    
+    // Update submit button text
+    const buttonTexts = {
+        'reply': '{% trans "Send Reply" %}',
+        'reply_and_wait': '{% trans "Reply & Set Waiting" %}',
+        'internal_note': '{% trans "Add Internal Note" %}',
+        'close_with_resolution': '{% trans "Reply & Close Ticket" %}'
+    };
+    
+    submitText.textContent = buttonTexts[actionValue] || '{% trans "Send Reply" %}';
+};
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    handleReplyActionChange();
 });
 
 document.addEventListener('htmx:afterRequest', function(e) {

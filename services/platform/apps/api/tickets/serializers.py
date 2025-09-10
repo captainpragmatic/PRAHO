@@ -27,8 +27,7 @@ class SupportCategorySerializer(serializers.ModelSerializer):
             'description',
             'icon',
             'color',
-            'sla_response_hours',
-            'sla_resolution_hours'
+            'auto_assign_to',
         ]
 
 
@@ -51,9 +50,11 @@ class TicketListSerializer(serializers.ModelSerializer):
     priority_color = serializers.CharField(source='get_priority_color', read_only=True)
     status_color = serializers.CharField(source='get_status_color', read_only=True)
     
-    # SLA tracking
-    is_sla_breach_response = serializers.BooleanField(read_only=True)
-    is_sla_breach_resolution = serializers.BooleanField(read_only=True)
+    # New status system fields
+    is_awaiting_customer = serializers.BooleanField(read_only=True)
+    customer_replied_recently = serializers.BooleanField(read_only=True)
+    resolution_code = serializers.CharField(read_only=True)
+    closed_at = serializers.DateTimeField(read_only=True)
     
     # Stats
     comments_count = serializers.SerializerMethodField()
@@ -80,13 +81,12 @@ class TicketListSerializer(serializers.ModelSerializer):
             'assigned_to_name',
             'is_escalated',
             'is_public',
-            'requires_customer_response',
-            'is_sla_breach_response',
-            'is_sla_breach_resolution',
-            'sla_response_due',
-            'sla_resolution_due',
-            'first_response_at',
-            'resolved_at',
+            'is_awaiting_customer',
+            'customer_replied_recently',
+            'resolution_code',
+            'closed_at',
+            'customer_replied_at',
+            'has_customer_replied',
             'comments_count',
             'attachments_count',
             'created_at',
@@ -218,9 +218,11 @@ class TicketDetailSerializer(serializers.ModelSerializer):
     priority_color = serializers.CharField(source='get_priority_color', read_only=True)
     status_color = serializers.CharField(source='get_status_color', read_only=True)
     
-    # SLA tracking
-    is_sla_breach_response = serializers.BooleanField(read_only=True)
-    is_sla_breach_resolution = serializers.BooleanField(read_only=True)
+    # New status system fields
+    is_awaiting_customer = serializers.BooleanField(read_only=True)
+    customer_replied_recently = serializers.BooleanField(read_only=True)
+    resolution_code = serializers.CharField(read_only=True)
+    closed_at = serializers.DateTimeField(read_only=True)
     
     # Related data
     # Filtered for customer context to avoid exposing internal notes/attachments
@@ -255,13 +257,12 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             'related_service_name',
             'is_escalated',
             'is_public',
-            'requires_customer_response',
-            'is_sla_breach_response',
-            'is_sla_breach_resolution',
-            'sla_response_due',
-            'sla_resolution_due',
-            'first_response_at',
-            'resolved_at',
+            'is_awaiting_customer',
+            'customer_replied_recently',
+            'resolution_code',
+            'closed_at',
+            'customer_replied_at',
+            'has_customer_replied',
             'estimated_hours',
             'actual_hours',
             'satisfaction_rating',

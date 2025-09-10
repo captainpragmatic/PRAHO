@@ -68,21 +68,26 @@
           </td>
           {% endif %}
           <td class="px-6 py-4 whitespace-nowrap">
-            {% if ticket.status == 'new' %}
-              {% badge "New" variant="success" icon="🆕" %}
-            {% elif ticket.status == 'open' %}
-              {% badge "Open" variant="info" icon="📂" %}
-            {% elif ticket.status == 'pending' %}
-              {% badge "Pending" variant="warning" icon="⏳" %}
-            {% elif ticket.status == 'resolved' %}
-              {% badge "Resolved" variant="primary" icon="✅" %}
-            {% elif ticket.status == 'closed' %}
-              {% badge "Closed" variant="secondary" icon="📁" %}
-            {% elif ticket.status == 'cancelled' %}
-              {% badge "Cancelled" variant="danger" icon="❌" %}
-            {% else %}
-              {% badge ticket.status|capfirst variant="default" %}
-            {% endif %}
+            <div class="flex items-center space-x-2">
+              {% if ticket.status == 'open' %}
+                {% badge "Open" variant="info" icon="📂" %}
+              {% elif ticket.status == 'in_progress' %}
+                {% badge "In Progress" variant="primary" icon="⚡" %}
+              {% elif ticket.status == 'waiting_on_customer' %}
+                {% badge "Waiting on Customer" variant="warning" icon="⏳" %}
+              {% elif ticket.status == 'closed' %}
+                {% badge "Closed" variant="secondary" icon="📁" %}
+              {% else %}
+                {% badge ticket.status|capfirst variant="default" %}
+              {% endif %}
+              
+              <!-- Customer replied badge -->
+              {% if ticket.customer_replied_recently %}
+                <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">
+                  💬
+                </span>
+              {% endif %}
+            </div>
           </td>
           <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
             {{ ticket.created_at|date:"j M Y" }}
