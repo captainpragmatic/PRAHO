@@ -118,6 +118,7 @@ class TicketCommentSerializer(serializers.ModelSerializer):
     author_name = serializers.SerializerMethodField()
     author_role = serializers.SerializerMethodField()
     is_staff_reply = serializers.SerializerMethodField()
+    attachments = serializers.SerializerMethodField()
     
     class Meta:
         model = TicketComment
@@ -133,7 +134,8 @@ class TicketCommentSerializer(serializers.ModelSerializer):
             'is_solution',
             'time_spent',
             'created_at',
-            'updated_at'
+            'updated_at',
+            'attachments'
         ]
     
     def get_author_name(self, obj: 'TicketComment') -> str:
@@ -159,6 +161,11 @@ class TicketCommentSerializer(serializers.ModelSerializer):
             return True
         author = getattr(obj, 'author', None)
         return bool(author and (getattr(author, 'is_staff', False) or getattr(author, 'staff_role', '') != ''))
+    
+    def get_attachments(self, obj: 'TicketComment') -> list[dict]:
+        """Get attachments for this comment"""
+        qs = obj.attachments.all()
+        return TicketAttachmentSerializer(qs, many=True).data
 
 
 # ===============================================================================
@@ -328,15 +335,9 @@ class TicketCreateSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             'title': {'required': True},
             'description': {'required': True},
-            'contact_email': {'required': True},
             'priority': {'default': 'normal'}
         }
     
-    def validate_contact_email(self, value: str) -> str:
-        """Validate contact email format"""
-        if not value or '@' not in value:
-            raise serializers.ValidationError("Valid email address is required")
-        return value
 
 
 # ===============================================================================
