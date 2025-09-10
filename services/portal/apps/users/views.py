@@ -6,18 +6,45 @@ Customer-facing login/logout with Platform API validation using Django sessions.
 import logging
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse
-from django.shortcuts import render, redirect
+from django.shortcuts import render, redirect, resolve_url
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_protect
 from django.utils.translation import gettext as _
 from django.contrib import messages
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 
 from apps.api_client.services import api_client, PlatformAPIError
 from apps.users.forms import CustomerLoginForm, CustomerRegistrationForm, CustomerProfileForm, PasswordResetRequestForm, ChangePasswordForm
 
 logger = logging.getLogger(__name__)
+
+
+def _get_safe_redirect_target(request: HttpRequest, fallback: str = "/dashboard/") -> str:
+    """
+    Validate and return a safe redirect target.
+    Accepts only URLs that are on this host and use the expected scheme,
+    otherwise returns the resolved fallback URL.
+    """
+    raw_next = request.GET.get("next") or request.POST.get("next") or ""
+    
+    # Resolve fallback first (can be a URL name or path)
+    fallback_url = resolve_url(fallback)
+    
+    if not raw_next:
+        return fallback_url
+    
+    # Allow only same-host redirects and proper scheme
+    if url_has_allowed_host_and_scheme(
+        raw_next,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure()
+    ):
+        return raw_next
+    
+    logger.warning(f"⚠️ [Portal Auth] Unsafe redirect target blocked: {raw_next}")
+    return fallback_url
 
 
 @never_cache
@@ -31,7 +58,8 @@ def login_view(request: HttpRequest) -> HttpResponse:
     
     # Redirect if already authenticated
     if request.session.get('customer_id'):
-        return redirect('/dashboard/')
+        next_url = _get_safe_redirect_target(request, fallback='/dashboard/')
+        return redirect(next_url)
     
     if request.method == 'GET':
         form = CustomerLoginForm()
@@ -77,7 +105,8 @@ def login_view(request: HttpRequest) -> HttpResponse:
                     request.session.set_expiry(session_age)
                     
                     messages.success(request, f"✅ Welcome back, {email}!")
-                    return redirect('/dashboard/')
+                    next_url = _get_safe_redirect_target(request, fallback='/dashboard/')
+                    return redirect(next_url)
                     
                 else:
                     logger.warning(f"⚠️ [Portal Auth] Invalid credentials for {email}")

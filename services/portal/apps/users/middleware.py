@@ -12,6 +12,7 @@ from django.shortcuts import redirect
 from django.core.cache import cache
 from django.http import HttpRequest, HttpResponse
 from django.utils import timezone as django_timezone
+from django.utils.http import urlencode
 
 from apps.api_client.services import api_client, PlatformAPIError
 
@@ -76,13 +77,13 @@ class PortalAuthenticationMiddleware:
         session_user_id = request.session.get('user_id') or request.session.get('customer_id')
         if not session_user_id:
             logger.debug("🔒 [Auth] No customer_id in session, redirecting to login")
-            return redirect('/login/')
+            return self.redirect_to_login(request)
             
         # Check if session has exceeded its intended lifetime
         if not self._is_session_age_valid(request):
             logger.warning(f"⏰ [Auth] Session for user {session_user_id} has exceeded lifetime, forcing logout")
             request.session.flush()
-            return redirect('/login/')
+            return self.redirect_to_login(request)
         
         # Tier 2: Sophisticated validation with timing controls
         validation_result = self.validate_customer_with_timing(request, str(session_user_id))
@@ -90,7 +91,7 @@ class PortalAuthenticationMiddleware:
         if not validation_result:
             logger.warning(f"⚠️ [Auth] User {session_user_id} validation failed, clearing session")
             request.session.flush()
-            return redirect('/login/')
+            return self.redirect_to_login(request)
         
         # Attach customer data to request for views
         # Resolve active customer context for this user (first accessible if not set)
@@ -137,6 +138,15 @@ class PortalAuthenticationMiddleware:
     def is_public_url(self, path: str) -> bool:
         """Check if path requires authentication."""
         return any(path.startswith(public_url) for public_url in self.PUBLIC_URLS)
+    
+    def redirect_to_login(self, request: HttpRequest) -> HttpResponse:
+        """Redirect to login preserving the originally requested URL."""
+        login_url = '/login/'
+        if request.path and request.path != '/':
+            # Add the current path as the next parameter
+            params = urlencode({'next': request.get_full_path()})
+            login_url = f'{login_url}?{params}'
+        return redirect(login_url)
     
     def validate_customer_with_timing(self, request: HttpRequest, customer_id: str) -> bool:
         """
