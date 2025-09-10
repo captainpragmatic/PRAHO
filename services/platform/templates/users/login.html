@@ -22,7 +22,7 @@
     </div>
 
     <!-- Login Form -->
-    <form class="mt-8 space-y-6" method="post" hx-post="{% url 'users:login' %}" hx-swap="outerHTML">
+    <form id="login-form" class="mt-8 space-y-6" method="post" action="{% url 'users:login' %}">
       {% csrf_token %}
 
       <div class="rounded-lg bg-slate-800 p-6 space-y-4">
@@ -98,14 +98,31 @@
 </div>
 
 <script>
-  document.body.addEventListener('htmx:afterRequest', function (event) {
-    if (event.detail.successful) {
-      // Show loading state
-      const spinner = document.querySelector('.login-spinner');
-      const text = document.querySelector('.login-text');
-      spinner.style.display = 'inline';
-      text.style.display = 'none';
-    }
+  // Submit handler for normal POST to disable button and show spinner
+  document.addEventListener('DOMContentLoaded', function () {
+    const form = document.getElementById('login-form');
+    if (!form) return;
+    form.addEventListener('submit', function (e) {
+      if (!form.dataset.submitting) {
+        e.preventDefault();
+        form.dataset.submitting = '1';
+        const submitBtn = form.querySelector('button[type="submit"], [type="submit"]');
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.setAttribute('aria-disabled', 'true');
+          submitBtn.classList.add('opacity-50', 'cursor-not-allowed', 'is-loading');
+        }
+        // Force paint, then submit
+        // eslint-disable-next-line no-unused-expressions
+        form.offsetHeight; // reflow
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => form.submit());
+        });
+        return;
+      }
+      const submitBtn = form.querySelector('button[type="submit"], [type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
+    });
   });
 </script>
 {% endblock %}

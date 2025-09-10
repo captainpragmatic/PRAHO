@@ -22,8 +22,11 @@
     </div>
 
     <!-- Login Form -->
-    <form class="mt-8 space-y-6" method="post" hx-post="{% url 'users:login' %}" hx-swap="outerHTML">
+    <form id="login-form" class="mt-8 space-y-6" method="post" action="{% url 'users:login' %}{% if request.GET.next %}?next={{ request.GET.next|urlencode }}{% endif %}">
       {% csrf_token %}
+      {% if request.GET.next %}
+      <input type="hidden" name="next" value="{{ request.GET.next }}">
+      {% endif %}
 
       <div class="rounded-lg bg-slate-800 p-6 space-y-4">
         <!-- Email Field -->
@@ -79,16 +82,7 @@
 
         <!-- Submit Button -->
         <div>
-          <button type="submit" 
-                  class="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all duration-200">
-            <span class="htmx-indicator">
-              <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-            </span>
-            <span class="login-text">{% trans 'Sign In' %}</span>
-          </button>
+          {% button "Sign In" variant="primary" type="submit" size="lg" loading=True class="w-full" %}
         </div>
 
         <!-- Register Link -->
@@ -111,19 +105,49 @@
 </div>
 
 <script>
-  // Add styling to form fields
+  // Add styling to form fields and handle submit loading state
   document.addEventListener('DOMContentLoaded', function() {
     const emailField = document.getElementById('id_email');
     const passwordField = document.getElementById('id_password');
-    
+
     if (emailField) {
       emailField.className = 'w-full px-3 py-2 border border-slate-600 rounded-md bg-slate-700 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500';
       emailField.placeholder = 'your@company.com';
     }
-    
+
     if (passwordField) {
       passwordField.className = 'w-full px-3 py-2 border border-slate-600 rounded-md bg-slate-700 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500';
       passwordField.placeholder = 'Enter your password';
+    }
+
+    // Submit handler to show spinner on normal POST
+    const form = document.getElementById('login-form');
+    if (form) {
+      form.addEventListener('submit', function (e) {
+        // Ensure spinner paints before navigation
+        if (!form.dataset.submitting) {
+          e.preventDefault();
+          form.dataset.submitting = '1';
+
+          const submitBtn = form.querySelector('button[type="submit"], .ui-btn[type="submit"]');
+          if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.setAttribute('aria-disabled', 'true');
+            submitBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            submitBtn.classList.add('is-loading');
+          }
+
+          // Force a paint, then submit
+          // eslint-disable-next-line no-unused-expressions
+          form.offsetHeight; // reflow
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => form.submit());
+          });
+          return;
+        }
+        const submitBtn = form.querySelector('button[type="submit"], .ui-btn[type="submit"]');
+        if (submitBtn) submitBtn.disabled = true;
+      });
     }
   });
 </script>
