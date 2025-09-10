@@ -139,7 +139,9 @@ def _handle_successful_login(request: HttpRequest, user: User, form: LoginForm) 
     # Update timeout policy based on context
     SessionSecurityService.update_session_timeout(request)
 
-    messages.success(request, _("Welcome, {user_full_name}!").format(user_full_name=user.get_full_name()))
+    # Only show welcome message for staff users since customers will be blocked by middleware
+    if user.is_staff or getattr(user, "staff_role", None):
+        messages.success(request, _("Welcome, {user_full_name}!").format(user_full_name=user.get_full_name()))
 
     next_url = _get_safe_redirect_target(request, fallback="dashboard")
 
@@ -210,83 +212,6 @@ def login_view(request: HttpRequest) -> HttpResponse:
 
     return render(request, "users/login.html", {"form": form})
 
-
-@ratelimit(key="ip", rate="5/h", method="POST", block=False)  # type: ignore[misc]
-@ratelimit(key="header:user-agent", rate="10/h", method="POST", block=False)  # type: ignore[misc]
-def register_view(request: HttpRequest) -> HttpResponse:
-    """Enhanced user registration with proper customer onboarding"""
-    if request.user.is_authenticated:
-        return redirect("dashboard")
-
-    if request.method == "POST":
-        if getattr(request, "limited", False) and not getattr(settings, "TESTING", False):
-            # Log rate limit event to audit system
-            rate_limit_data = RateLimitEventData(
-                endpoint="users:register",
-                ip_address=get_safe_client_ip(request),
-                user_agent=request.META.get("HTTP_USER_AGENT", ""),
-                rate_limit_key="ip,user-agent",
-                rate_limit_rate="5/h,10/h",
-            )
-            SecurityAuditService.log_rate_limit_event(
-                event_data=rate_limit_data,
-                user=None,  # User not registered yet
-            )
-            messages.error(request, _("Too many registration attempts. Please wait and try again."))
-            return render(
-                request, "users/register.html", {"form": CustomerOnboardingRegistrationForm(request.POST)}, status=429
-            )
-        form = CustomerOnboardingRegistrationForm(request.POST)
-        # Normalize email early and handle existing users with a neutral flow (prevents enumeration)
-        raw_email = (request.POST.get("email") or "").lower()
-        if raw_email and User.objects.filter(email=raw_email).exists():
-            _audit_registration_attempt(request, raw_email, "existing_user")
-            try:
-                user = User.objects.get(email=raw_email)
-                _send_password_reset_for_existing_user(user, request)
-            except User.DoesNotExist:
-                # Race condition: treat uniformly without leaking info
-                pass
-            _sleep_uniform()
-            return redirect("users:registration_submitted")
-
-        if form.is_valid():
-            email = form.cleaned_data.get("email", "").lower()
-            # Existing user path handled above; proceed with new user creation
-
-            # New user path
-            try:
-                form.save()
-                _audit_registration_attempt(request, email, "new_user")
-                _sleep_uniform()
-                return redirect("users:registration_submitted")
-            except ValidationError as e:
-                # Treat as validation failure
-                messages.error(request, str(e))
-                _audit_registration_attempt(request, email, "form_validation_error")
-            except Exception:
-                # Likely integrity or unexpected issue; treat as existing for uniformity
-                _audit_registration_attempt(request, email, "existing_user")
-                try:
-                    user = User.objects.get(email=email)
-                    _send_password_reset_for_existing_user(user, request)
-                except User.DoesNotExist:
-                    pass
-                _sleep_uniform()
-                return redirect("users:registration_submitted")
-        else:
-            # Form validation errors path (keep user on page, but audit attempt)
-            email = (request.POST.get("email") or "").lower()
-            _audit_registration_attempt(request, email, "form_validation_error")
-    else:
-        form = CustomerOnboardingRegistrationForm()
-
-    return render(request, "users/register.html", {"form": form})
-
-
-def registration_submitted_view(request: HttpRequest) -> HttpResponse:
-    """Neutral page shown after registration submission (prevents enumeration)."""
-    return render(request, "users/registration_submitted.html")
 
 
 def logout_view(request: HttpRequest) -> HttpResponse:
@@ -726,7 +651,9 @@ def mfa_verify(request: HttpRequest) -> HttpResponse:
                 if backup_code_valid:
                     _handle_backup_code_warnings(request, user)
 
-                messages.success(request, _("Welcome, {user_full_name}!").format(user_full_name=user.get_full_name()))
+                # Only show welcome message for staff users since customers will be blocked by middleware
+                if user.is_staff or getattr(user, "staff_role", None):
+                    messages.success(request, _("Welcome, {user_full_name}!").format(user_full_name=user.get_full_name()))
 
                 next_url = _get_safe_redirect_target(request, fallback="dashboard")
                 return redirect(next_url)
@@ -1032,52 +959,6 @@ def _log_user_login(request: HttpRequest, user: User, status: str) -> None:
         user.save(update_fields=["last_login_ip", "failed_login_attempts", "account_locked_until"])
 
 
-def _audit_registration_attempt(request: HttpRequest, email: str, result_type: str) -> dict[str, Any]:
-    """Audit a registration attempt with correlation and privacy-preserving details."""
-    # Ensure session key exists without assuming session middleware
-    session_key = None
-    try:
-        session = getattr(request, "session", None)
-        if session is not None:
-            session_key = session.session_key
-            if not session_key:
-                session.modified = True
-                session.save()
-                session_key = session.session_key
-    except Exception:  # pragma: no cover
-        session_key = None
-
-    details: dict[str, Any] = {
-        "correlation_id": str(uuid4()),
-        "timestamp": timezone.now().isoformat(),
-        "email_hash": hashlib.sha256(email.lower().encode()).hexdigest()[:16],
-        "result_type": result_type,
-        "session_key": session_key,
-    }
-    log_security_event(event_type="registration_attempt", details=details, request_ip=get_safe_client_ip(request))
-    return details
-
-
-def _send_password_reset_for_existing_user(user: User, request: HttpRequest) -> None:
-    """Send a neutral password-reset style email for existing users who re-register."""
-    uid = urlsafe_base64_encode(force_bytes(user.pk))
-    token = default_token_generator.make_token(user)
-
-    context = {
-        "user": user,
-        "uid": uid,
-        "token": token,
-        "protocol": "https" if getattr(settings, "USE_HTTPS", False) else "http",
-        "domain": getattr(settings, "DOMAIN_NAME", request.get_host() or "localhost"),
-    }
-
-    subject = str(_("Account Access - PRAHO Platform"))
-    text_body = render_to_string("users/emails/existing_user_registration.txt", context)
-    html_body = render_to_string("users/emails/existing_user_registration.html", context)
-
-    email = EmailMultiAlternatives(subject=subject, body=text_body, to=[user.email])
-    email.attach_alternative(html_body, "text/html")
-    email.send(fail_silently=False)
 
 
 def _get_safe_redirect_target(request: HttpRequest, fallback: str = "dashboard") -> str:

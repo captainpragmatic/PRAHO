@@ -627,3 +627,65 @@ class SessionSecurityMiddleware:
         # Add shared device mode indicator
         if request.session.get("shared_device_mode"):
             response["X-Shared-Device-Mode"] = "true"
+
+
+# ===============================================================================
+# STAFF-ONLY PLATFORM ACCESS MIDDLEWARE  
+# ===============================================================================
+
+
+class StaffOnlyPlatformMiddleware:
+    """
+    🛡️ Middleware to ensure only staff users can access the platform.
+    
+    - Staff users: Full access to platform
+    - Customer users: Logged out and redirected with error message
+    - Unauthenticated: Normal login flow continues
+    
+    Platform = Staff admin interface
+    Portal = Customer self-service interface
+    """
+
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        # Skip middleware for public paths that need to be accessible
+        public_paths = {
+            "/auth/login/",
+            "/auth/logout/", 
+            "/users/login/",
+            "/users/logout/",
+            "/admin/",      # Django admin has its own authentication
+            "/api/",        # API has its own authentication via portal service
+            "/i18n/",       # Language switching
+        }
+        
+        # Skip for public paths
+        if any(request.path.startswith(path) for path in public_paths):
+            return self.get_response(request)
+        
+        # Skip for unauthenticated users (let them reach login page)
+        if not request.user.is_authenticated:
+            return self.get_response(request)
+        
+        # Allow staff users full access
+        if request.user.is_staff or getattr(request.user, "staff_role", None):
+            return self.get_response(request)
+        
+        # Block customer users - they should use portal
+        if request.user.is_authenticated:
+            from django.contrib import messages
+            from django.contrib.auth import logout
+            from django.shortcuts import redirect
+            from django.utils.translation import gettext as _
+            
+            logout(request)
+            messages.error(
+                request, 
+                _("❌ Customers cannot access the platform. Please use the customer portal instead.")
+            )
+            return redirect("users:login")
+        
+        # Fallback - continue with request  
+        return self.get_response(request)
