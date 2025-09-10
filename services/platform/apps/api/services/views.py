@@ -13,9 +13,10 @@ from rest_framework.decorators import api_view, authentication_classes, permissi
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
+from apps.api.secure_auth import require_customer_authentication
+from apps.customers.models import Customer
 from apps.provisioning.service_models import Service, ServicePlan
 
-from ..secure_auth import require_customer_authentication
 from .serializers import (
     ServiceDetailSerializer,
     ServiceListSerializer,
@@ -29,7 +30,7 @@ logger = logging.getLogger(__name__)
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
-def customer_services_api(request: HttpRequest, customer) -> Response:
+def customer_services_api(request: HttpRequest, customer: Customer) -> Response:
     """
     📦 Customer Services List API
     
@@ -137,7 +138,7 @@ def customer_services_api(request: HttpRequest, customer) -> Response:
 @api_view(['POST'])
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
-def customer_service_detail_api(request: HttpRequest, customer, service_id: int) -> Response:
+def customer_service_detail_api(request: HttpRequest, customer: Customer, service_id: int) -> Response:
     """
     📦 Customer Service Detail API
     
@@ -205,7 +206,7 @@ def customer_service_detail_api(request: HttpRequest, customer, service_id: int)
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
-def customer_services_summary_api(request: HttpRequest, customer) -> Response:
+def customer_services_summary_api(request: HttpRequest, customer: Customer) -> Response:
     """
     📊 Customer Services Summary API
     
@@ -355,7 +356,7 @@ def available_service_plans_api(request: HttpRequest) -> Response:
 @api_view(['POST'])
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
-def update_service_auto_renew_api(request: HttpRequest, service_id: int, customer) -> Response:
+def update_service_auto_renew_api(request: HttpRequest, service_id: int, customer: Customer) -> Response:
     """
     🔄 Update Service Auto-Renew API
     
@@ -437,7 +438,7 @@ def update_service_auto_renew_api(request: HttpRequest, service_id: int, custome
 @api_view(['POST'])
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
-def service_usage_stats_api(request: HttpRequest, service_id: int, customer) -> Response:
+def service_usage_stats_api(request: HttpRequest, service_id: int, customer: Customer) -> Response:
     """
     📊 Service Usage Statistics API
     

@@ -11,11 +11,12 @@ from rest_framework.decorators import api_view, authentication_classes, permissi
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
+from apps.api.secure_auth import require_customer_authentication
 from apps.billing.models import Currency, Invoice
 from apps.billing.pdf_generators import RomanianInvoicePDFGenerator, RomanianProformaPDFGenerator
 from apps.billing.proforma_models import ProformaInvoice
+from apps.customers.models import Customer
 
-from ..secure_auth import require_customer_authentication
 from .serializers import (
     CurrencySerializer,
     InvoiceDetailSerializer,
@@ -35,7 +36,7 @@ class MiddlewareUserAuthentication(BaseAuthentication):
     This allows DRF to work with users set by our HMAC middleware
     without overriding them with AnonymousUser.
     """
-    def authenticate(self, request):
+    def authenticate(self, request: HttpRequest) -> tuple | None:
         # If middleware has set a user (not AnonymousUser), preserve it
         if hasattr(request, 'user') and request.user and not request.user.is_anonymous:
             return (request.user, None)
@@ -51,7 +52,7 @@ class MiddlewareUserAuthentication(BaseAuthentication):
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @require_customer_authentication  
-def customer_invoices_api(request: HttpRequest, customer) -> Response:
+def customer_invoices_api(request: HttpRequest, customer: Customer) -> Response:
     """
     📋 Customer Invoice List API
     
@@ -154,7 +155,7 @@ def customer_invoices_api(request: HttpRequest, customer) -> Response:
 @api_view(['POST'])
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
-def customer_invoice_detail_api(request: HttpRequest, customer, invoice_number: str) -> Response:
+def customer_invoice_detail_api(request: HttpRequest, customer: Customer, invoice_number: str) -> Response:
     """
     📄 Customer Invoice Detail API
     
@@ -251,7 +252,7 @@ def customer_invoice_detail_api(request: HttpRequest, customer, invoice_number: 
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
-def customer_invoice_summary_api(request: HttpRequest, customer) -> Response:
+def customer_invoice_summary_api(request: HttpRequest, customer: Customer) -> Response:
     """
     📊 Customer Invoice Summary API
     
@@ -372,7 +373,7 @@ def currencies_api(request: HttpRequest) -> Response:
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
-def customer_proformas_api(request: HttpRequest, customer) -> Response:
+def customer_proformas_api(request: HttpRequest, customer: Customer) -> Response:
     """
     📄 Customer Proforma List API
     
@@ -475,7 +476,7 @@ def customer_proformas_api(request: HttpRequest, customer) -> Response:
 @api_view(['POST'])
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
-def customer_proforma_detail_api(request: HttpRequest, customer, proforma_number: str) -> Response:
+def customer_proforma_detail_api(request: HttpRequest, customer: Customer, proforma_number: str) -> Response:
     """
     📄 Customer Proforma Detail API
     
@@ -571,7 +572,7 @@ def customer_proforma_detail_api(request: HttpRequest, customer, proforma_number
 @api_view(['POST'])
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
-def invoice_pdf_export(request: HttpRequest, invoice_number: str, customer) -> Response:
+def invoice_pdf_export(request: HttpRequest, invoice_number: str, customer: Customer) -> Response:
     """
     📄 Export Invoice as PDF
     
@@ -624,7 +625,7 @@ def invoice_pdf_export(request: HttpRequest, invoice_number: str, customer) -> R
 @api_view(['POST'])
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
-def proforma_pdf_export(request: HttpRequest, proforma_number: str, customer) -> Response:
+def proforma_pdf_export(request: HttpRequest, proforma_number: str, customer: Customer) -> Response:
     """
     📄 Export Proforma as PDF
     

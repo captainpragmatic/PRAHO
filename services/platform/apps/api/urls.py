@@ -54,8 +54,6 @@ urlpatterns = [
     path('services/', include((services_urls, 'services'))),
     
     # Future API endpoints can be added here:
-    # path('domains/', include((domain_urls, 'domains'))),
-    # path('provisioning/', include((provisioning_urls, 'provisioning'))),
 ]
 
 # ===============================================================================
@@ -63,7 +61,4 @@ urlpatterns = [
 # ===============================================================================
 
 # When API versioning is needed, add here:
-# urlpatterns += [
-#     path('v2/customers/', include((customer_v2_urls, 'customers-v2'))),
-#     ...
-# ]
+# urlpatterns += [...] for v2 endpoints

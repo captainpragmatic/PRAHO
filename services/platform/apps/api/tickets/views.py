@@ -12,10 +12,11 @@ from rest_framework.decorators import api_view, authentication_classes, permissi
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
+from apps.api.secure_auth import require_customer_authentication
+from apps.customers.models import Customer
 from apps.tickets.models import SupportCategory, Ticket, TicketAttachment, TicketComment
 from apps.tickets.services import TicketStatusService
 
-from ..secure_auth import require_customer_authentication
 from .serializers import (
     CommentCreateSerializer,
     SupportCategorySerializer,
@@ -35,7 +36,7 @@ logger = logging.getLogger(__name__)
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
-def customer_tickets_api(request: HttpRequest, customer) -> Response:
+def customer_tickets_api(request: HttpRequest, customer: Customer) -> Response:
     """
     📋 Customer Tickets List API
     
@@ -173,7 +174,7 @@ def customer_tickets_api(request: HttpRequest, customer) -> Response:
 @api_view(['POST'])
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
-def customer_ticket_detail_api(request: HttpRequest, customer, ticket_id: int) -> Response:
+def customer_ticket_detail_api(request: HttpRequest, customer: Customer, ticket_id: int) -> Response:
     """
     📄 Customer Ticket Detail API
     
@@ -272,7 +273,7 @@ def customer_ticket_detail_api(request: HttpRequest, customer, ticket_id: int) -
 @api_view(['POST'])
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
-def customer_ticket_create_api(request: HttpRequest, customer) -> Response:
+def customer_ticket_create_api(request: HttpRequest, customer: Customer) -> Response:
     """
     ✉️ Customer Ticket Creation API
     
@@ -385,7 +386,7 @@ def customer_ticket_create_api(request: HttpRequest, customer) -> Response:
 @api_view(['POST'])
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
-def customer_ticket_reply_api(request: HttpRequest, customer, ticket_id: int) -> Response:
+def customer_ticket_reply_api(request: HttpRequest, customer: Customer, ticket_id: int) -> Response:
     """
     💬 Customer Ticket Reply API
     
@@ -497,7 +498,7 @@ def customer_ticket_reply_api(request: HttpRequest, customer, ticket_id: int) ->
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
-def customer_tickets_summary_api(request: HttpRequest, customer) -> Response:
+def customer_tickets_summary_api(request: HttpRequest, customer: Customer) -> Response:
     """
     📊 Customer Tickets Summary API
     
@@ -635,7 +636,7 @@ def support_categories_api(request: HttpRequest) -> Response:
 @api_view(['POST'])
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
-def ticket_attachment_download_api(request: HttpRequest, customer, ticket_id: int, attachment_id: int) -> HttpResponse:
+def ticket_attachment_download_api(request: HttpRequest, customer: Customer, ticket_id: int, attachment_id: int) -> HttpResponse:
     """
     📎 Ticket Attachment Download API
     
@@ -664,7 +665,7 @@ def ticket_attachment_download_api(request: HttpRequest, customer, ticket_id: in
                 is_safe=True  # Only allow safe files
             )
         except TicketAttachment.DoesNotExist:
-            raise Http404("Attachment not found or access denied")
+            raise Http404("Attachment not found or access denied") from None
         
         # Security check
         if not attachment.file or not attachment.is_safe:
