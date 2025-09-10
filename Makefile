@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install dev dev-platform dev-portal dev-all test test-platform test-portal test-integration test-e2e test-security build-css migrate fixtures fixtures-light clean lint lint-platform lint-portal type-check pre-commit
+.PHONY: help install dev dev-platform dev-portal dev-all test test-platform test-portal test-integration test-e2e test-security install-frontend build-css watch-css migrate fixtures fixtures-light clean lint lint-platform lint-portal type-check pre-commit
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -45,7 +45,9 @@ help:
 	@echo "  make migrate         - Run platform database migrations"
 	@echo "  make fixtures        - Load comprehensive sample data (platform only)"
 	@echo "  make fixtures-light  - Load minimal sample data (fast, platform only)"
-	@echo "  make build-css       - Build Tailwind CSS assets"
+	@echo "  make install-frontend - Install Node.js dependencies"
+	@echo "  make build-css       - Build Tailwind CSS assets for all services"
+	@echo "  make watch-css       - Watch and rebuild CSS during development"
 	@echo ""
 	@echo "🧹 CODE QUALITY:"
 	@echo "  make lint            - Lint all services"
@@ -94,7 +96,7 @@ install:
 # DEVELOPMENT SERVERS 🚀
 # ===============================================================================
 
-dev-platform:
+dev-platform: build-css
 	@echo "🏗️ [Platform] Starting admin platform service..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "📍 PYTHONPATH: services/platform (scoped)"
@@ -112,7 +114,7 @@ dev-platform:
 	trap 'echo "🛑 Stopping Django-Q2 workers..."; kill $$QCLUSTER_PID 2>/dev/null || true' EXIT; \
 	$(PYTHON_PLATFORM_MANAGE) runserver 0.0.0.0:8700 --settings=config.settings.dev
 
-dev-portal:
+dev-portal: build-css
 	@echo "🌐 [Portal] Starting customer portal service..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "🔒 NO PYTHONPATH - portal cannot import platform code"
@@ -122,17 +124,17 @@ dev-portal:
 	@echo "🌐 Starting portal server on :8701..."
 	@$(PYTHON_PORTAL_MANAGE) runserver 0.0.0.0:8701
 
-dev-all:
+dev-all: build-css
 	@echo "🚀 [All Services] Starting platform + portal..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@$(MAKE) -j2 dev-platform dev-portal
 
-dev:
+dev: build-css
 	@$(MAKE) dev-all
 
 # Start both services and write logs to files via tee
 .PHONY: dev-with-logs
-dev-with-logs:
+dev-with-logs: build-css
 	@echo "🚀 [All Services] Starting platform + portal with logs..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@mkdir -p logs
@@ -310,9 +312,23 @@ pre-commit:
 # BUILD & ASSETS 🎨
 # ===============================================================================
 
+install-css:
+	@echo "📦 Installing frontend dependencies..."
+	npm install
+
 build-css:
-	@echo "🎨 Building Tailwind CSS assets..."
-	npx tailwindcss -i static/src/styles.css -o static/dist/styles.css --watch
+	@echo "🎨 Building Tailwind CSS assets for all services..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "🏗️  Building Portal CSS..."
+	npx @tailwindcss/cli -c services/portal/tailwind.config.js -i assets/css/input.css -o services/portal/static/css/tailwind.min.css --minify
+	@echo "🏗️  Building Platform CSS..."
+	npx @tailwindcss/cli -c services/platform/tailwind.config.js -i assets/css/input.css -o services/platform/static/css/tailwind.min.css --minify
+	@echo "✅ CSS build complete!"
+
+watch-css:
+	@echo "👀 Watching CSS changes for development..."
+	npx @tailwindcss/cli -c services/portal/tailwind.config.js -i assets/css/input.css -o services/portal/static/css/tailwind.min.css --watch &
+	npx @tailwindcss/cli -c services/platform/tailwind.config.js -i assets/css/input.css -o services/platform/static/css/tailwind.min.css --watch
 
 # ===============================================================================
 # DOCKER SERVICES DEPLOYMENT 🐳
