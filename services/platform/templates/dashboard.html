@@ -5,7 +5,7 @@
 {% block title %}{% trans 'Dashboard' %} - PRAHO Platform{% endblock %}
 
 {% block content %}
-<div class="pb-6">
+<div class="py-6">
   <!-- Header -->
   <div class="mb-8">
     <h1 class="text-3xl font-bold text-white">
@@ -195,7 +195,7 @@
                   {% endif %}
                 </div>
                 <div class="text-white font-medium text-sm leading-4">
-                  {{ document.total|floatformat:2 }} RON
+                  {{ document.total|floatformat:2 }} {{ document.currency.code }}
                 </div>
               </div>
             </div>

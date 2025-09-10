@@ -94,7 +94,7 @@
 
         <div class="space-y-3">
           {% for invoice in dashboard_data.recent_documents %}
-          <a href="{% url 'billing:invoice_detail' invoice.number %}" class="block group">
+          <a href="{% if invoice.document_type == 'proforma' %}{% url 'billing:proforma_detail' invoice.number %}{% else %}{% url 'billing:invoice_detail' invoice.number %}{% endif %}" class="block group">
             <div class="p-3 bg-slate-700 rounded-md hover:bg-slate-600 transition-colors border border-transparent hover:border-slate-500">
               <div class="flex items-center justify-between">
                 <div class="flex-1 min-w-0">
