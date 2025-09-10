@@ -323,12 +323,18 @@ def customer_ticket_create_api(request: HttpRequest, customer) -> Response:
                 'errors': serializer.errors
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Create ticket
+        # Create ticket with customer email if not provided
+        validated_data = serializer.validated_data
+        if not validated_data.get('contact_email'):
+            validated_data['contact_email'] = customer.primary_email
+        if not validated_data.get('contact_person'):
+            validated_data['contact_person'] = customer.name
+            
         ticket = Ticket.objects.create(
             customer=customer,
             source='api',
             status='open',
-            **serializer.validated_data
+            **validated_data
         )
         
         # Return created ticket details
@@ -674,7 +680,7 @@ def ticket_attachment_download_api(request: HttpRequest, customer, ticket_id: in
         response['Content-Disposition'] = f'attachment; filename="{attachment.filename}"'
         response['Content-Length'] = attachment.file_size
         
-        logger.info(f"✅ [API] Ticket attachment download: {attachment.filename}, ticket={ticket_number}")
+        logger.info(f"✅ [API] Ticket attachment download: {attachment.filename}, ticket={attachment.ticket.ticket_number}")
         return response
         
     except Http404:

@@ -291,6 +291,13 @@ def _process_ticket_attachments(request: HttpRequest, ticket: Ticket, comment: T
             messages.warning(request, f"❌ File type not allowed for {uploaded_file.name}.")
             continue
 
+        # TODO: Implement proper file security measures:
+        #   1. Encrypt files at rest using AES-256 encryption
+        #   2. Add virus scanning with ClamAV integration
+        #   3. Store files outside web-accessible directory
+        #   4. Implement secure file serving with access controls
+        #   5. Add file content validation beyond MIME type checking
+        
         # Create attachment with proper null handling
         file_size = uploaded_file.size or 0  # Default to 0 if None
         TicketAttachment.objects.create(
@@ -308,8 +315,8 @@ def _handle_ticket_reply_post(request: HttpRequest, ticket: Ticket) -> HttpRespo
     """Handle POST request for ticket reply with new status system."""
     user = cast(User, request.user)  # Safe as this is only called from authenticated views
     reply_text = request.POST.get("reply")
-    is_internal = request.POST.get("is_internal") == "on"
     reply_action = request.POST.get("reply_action", "reply")  # New field for agent action
+    is_internal = reply_action == "internal_note"  # Internal notes are determined by reply action
     resolution_code = request.POST.get("resolution_code")  # For closing tickets
 
     # Validate internal note permission
@@ -333,6 +340,8 @@ def _handle_ticket_reply_post(request: HttpRequest, ticket: Ticket) -> HttpRespo
     # Create comment with reply action
     comment_type = _determine_comment_type(user, is_internal)
     is_public = not (is_internal and (user.is_staff or getattr(user, "staff_role", None)))
+    
+    logger.debug(f"🔍 [Tickets] Reply processing: action={reply_action}, is_internal={is_internal}, comment_type={comment_type}, is_public={is_public}")
 
     comment = TicketComment.objects.create(
         ticket=ticket,
@@ -394,12 +403,14 @@ def _handle_ticket_reply_post(request: HttpRequest, ticket: Ticket) -> HttpRespo
         # Refresh ticket data and comments
         ticket.refresh_from_db()
         comments = ticket.comments.all().order_by("created_at")
+        can_edit = not ticket.status == "closed" or user.is_staff
         return render(
             request,
-            "tickets/partials/comments_list.html",
+            "tickets/partials/status_and_comments.html",
             {
                 "ticket": ticket,
                 "comments": comments,
+                "can_edit": can_edit,
             },
         )
 

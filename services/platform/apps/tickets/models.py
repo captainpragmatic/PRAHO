@@ -104,7 +104,7 @@ class Ticket(models.Model):
         "customers.Customer", on_delete=models.CASCADE, related_name="tickets", verbose_name=_("Customer")
     )
     contact_person = models.CharField(max_length=100, blank=True, verbose_name=_("Contact Person"))
-    contact_email = models.EmailField(verbose_name=_("Contact Email"))
+    contact_email = models.EmailField(blank=True, verbose_name=_("Contact Email"))
     contact_phone = models.CharField(max_length=20, blank=True, verbose_name=_("Contact Phone"))
 
     # Classification

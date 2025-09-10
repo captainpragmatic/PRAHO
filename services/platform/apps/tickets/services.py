@@ -231,8 +231,8 @@ class TicketStatusService:
         ticket.status = new_status
         ticket.resolution_code = None
         ticket.closed_at = None
-        ticket.has_customer_replied = True
-        ticket.customer_replied_at = timezone.now()
+        ticket.has_customer_replied = False
+        ticket.customer_replied_at = None
         ticket.save()
         
         logger.info(f"🔄 [TicketStatus] Reopened ticket {ticket.ticket_number} as {new_status}")
