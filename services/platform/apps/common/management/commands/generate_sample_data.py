@@ -4,8 +4,9 @@ Romanian hosting provider test data generation.
 """
 
 import random
+from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -23,7 +24,20 @@ from apps.provisioning.models import Server, Service, ServicePlan
 from apps.tickets.models import SupportCategory, Ticket
 from apps.users.models import CustomerMembership
 
-User = get_user_model()
+if TYPE_CHECKING:
+    from apps.users.models import User
+else:
+    User = get_user_model()
+
+
+@dataclass
+class SampleDataConfig:
+    """Configuration parameters for sample data generation"""
+    services_count: int
+    orders_count: int
+    invoices_count: int
+    proformas_count: int
+    tickets_count: int
 
 
 class Command(BaseCommand):
@@ -71,7 +85,14 @@ class Command(BaseCommand):
         users = self.create_users(fake, num_users)
 
         # Create the guaranteed test company first (will always have ID #1)
-        test_customer = self.create_test_company_customer(fake, users, services_per_customer, orders_per_customer, invoices_per_customer, proformas_per_customer, tickets_per_customer)
+        config = SampleDataConfig(
+            services_count=services_per_customer,
+            orders_count=orders_per_customer,
+            invoices_count=invoices_per_customer,
+            proformas_count=proformas_per_customer,
+            tickets_count=tickets_per_customer
+        )
+        test_customer = self.create_test_company_customer(fake, users, config)
         customers = [test_customer]
         self.stdout.write(f"  ✓ Created guaranteed test customer #1: {test_customer.get_display_name()}")
 
@@ -81,12 +102,7 @@ class Command(BaseCommand):
             self.stdout.write(f"Creating {remaining_customers} additional customers with complete data...")
             for i in range(remaining_customers):
                 customer = self.create_customer_with_data(
-                    fake, i + 1, users,  # i + 1 to continue numbering after test customer
-                    services_per_customer, 
-                    orders_per_customer,
-                    invoices_per_customer,
-                    proformas_per_customer,
-                    tickets_per_customer
+                    fake, i + 1, users, config  # i + 1 to continue numbering after test customer
                 )
                 customers.append(customer)
                 self.stdout.write(f"  ✓ Complete customer {i+2}/{num_customers}: {customer.get_display_name()}")
@@ -397,9 +413,6 @@ class Command(BaseCommand):
         """Create base billing data and clean existing sample data"""
         # Clean existing sample data in proper order to avoid FK constraints
         # Delete orders first (and their items via CASCADE)
-        from apps.billing.models import Invoice, ProformaInvoice
-        from apps.orders.models import Order
-        from apps.tickets.models import Ticket
         
         # Delete in reverse dependency order
         Order.objects.filter(customer__primary_email__contains='@example.').delete()
@@ -487,9 +500,7 @@ class Command(BaseCommand):
         return users
 
     def create_test_company_customer(
-        self, fake: Faker, users: list[User], 
-        services_count: int, orders_count: int, 
-        invoices_count: int, proformas_count: int, tickets_count: int
+        self, fake: Faker, users: list[User], config: SampleDataConfig
     ) -> Customer:
         """Create the guaranteed test company customer that should always have ID #1"""
         
@@ -577,18 +588,16 @@ class Command(BaseCommand):
             self.stdout.write(f"  ✓ Customer membership already exists for {test_user.email}")
         
         # Create services, orders, invoices, proformas, and tickets just like other customers
-        self.create_services_for_customer(customer, services_count)
-        self.create_orders_for_customer(fake, customer, orders_count) 
-        self.create_invoices_for_customer(fake, customer, invoices_count)
-        self.create_proformas_for_customer(fake, customer, proformas_count)
-        self.create_tickets_for_customer(fake, customer, tickets_count)
+        self.create_services_for_customer(customer, config.services_count)
+        self.create_orders_for_customer(fake, customer, config.orders_count) 
+        self.create_invoices_for_customer(fake, customer, config.invoices_count)
+        self.create_proformas_for_customer(fake, customer, config.proformas_count)
+        self.create_tickets_for_customer(fake, customer, config.tickets_count)
         
         return customer
 
     def create_customer_with_data(
-        self, fake: Faker, index: int, users: list[User], 
-        services_count: int, orders_count: int, 
-        invoices_count: int, proformas_count: int, tickets_count: int
+        self, fake: Faker, index: int, users: list[User], config: SampleDataConfig
     ) -> Customer:
         """Create a customer with all related data: profiles, services, orders, invoices, tickets"""
         
@@ -656,11 +665,11 @@ class Command(BaseCommand):
             )
             
         # Create related data
-        self.create_customer_services(fake, customer, services_count)
-        orders = self.create_customer_orders(fake, customer, orders_count)
-        self.create_customer_invoices(fake, customer, orders, invoices_count)
-        self.create_customer_proformas(fake, customer, orders, proformas_count) 
-        self.create_customer_tickets(fake, customer, tickets_count)
+        self.create_customer_services(fake, customer, config.services_count)
+        orders = self.create_customer_orders(fake, customer, config.orders_count)
+        self.create_customer_invoices(fake, customer, orders, config.invoices_count)
+        self.create_customer_proformas(fake, customer, orders, config.proformas_count) 
+        self.create_customer_tickets(fake, customer, config.tickets_count)
         
         return customer
 
@@ -768,9 +777,9 @@ class Command(BaseCommand):
         currency = Currency.objects.get(code="RON")
         tax_rule = TaxRule.objects.get(country_code="RO", tax_type="vat")
         
-        for i in range(count):
+        for _i in range(count):
             # Some invoices are linked to orders, some are standalone
-            order = random.choice(orders) if orders and random.choice([True, False]) else None
+            order = random.choice(orders) if orders and random.random() < 0.5 else None
             if order:
                 base_amount = Decimal(order.subtotal_cents) / 100  # Convert cents to decimal
                 tax_amount = Decimal(order.tax_cents) / 100
@@ -833,9 +842,9 @@ class Command(BaseCommand):
         currency = Currency.objects.get(code="RON") 
         tax_rule = TaxRule.objects.get(country_code="RO", tax_type="vat")
         
-        for i in range(count):
+        for _i in range(count):
             # Some proformas are linked to orders
-            order = random.choice(orders) if orders and random.choice([True, False]) else None
+            order = random.choice(orders) if orders and random.random() < 0.5 else None
             if order:
                 base_amount = Decimal(order.subtotal_cents) / 100  # Convert cents to decimal
                 tax_amount = Decimal(order.tax_cents) / 100
@@ -898,7 +907,7 @@ class Command(BaseCommand):
         categories = list(SupportCategory.objects.all())
         support_users = list(User.objects.filter(staff_role="support"))
         
-        for i in range(count):
+        for _i in range(count):
             category = random.choice(categories)
             assigned_to = random.choice(support_users) if random.choice([True, False]) and support_users else None
             
