@@ -96,11 +96,13 @@
           {% for invoice in dashboard_data.recent_documents %}
           <a href="{% url 'billing:invoice_detail' invoice.number %}" class="block group">
             <div class="p-3 bg-slate-700 rounded-md hover:bg-slate-600 transition-colors border border-transparent hover:border-slate-500">
-              <div class="flex items-center justify-between mb-1">
-                <p class="text-white font-medium group-hover:text-blue-400 transition-colors leading-5">
-                  {% if invoice.document_type == 'proforma' %}{% trans 'Proforma' %}{% else %}{% trans 'Invoice' %}{% endif %} #{{ invoice.number }}
-                </p>
-                <div class="text-xs ml-2 flex-shrink-0">
+              <div class="flex items-center justify-between">
+                <div class="flex-1 min-w-0">
+                  <p class="text-white font-medium group-hover:text-blue-400 transition-colors leading-5">
+                    {% if invoice.document_type == 'proforma' %}{% trans 'Proforma' %}{% else %}{% trans 'Invoice' %}{% endif %} #{{ invoice.number }}
+                  </p>
+                </div>
+                <div class="ml-2 flex-shrink-0">
                   {% if invoice.status == 'paid' %}
                     {% badge "Paid" variant="success" icon="✅" css_class="w-20 justify-center" %}
                   {% elif invoice.status == 'overdue' %}
@@ -112,9 +114,13 @@
                   {% endif %}
                 </div>
               </div>
-              <div class="flex items-center justify-between">
-                <p class="text-slate-400 text-sm leading-4">{{ invoice.created_at|date:"d.m.Y" }}</p>
-                <p class="text-white font-medium text-sm leading-4">{{ invoice.total_cents|cents_to_currency|floatformat:2 }} {{ invoice.currency.code }}</p>
+              <div class="flex items-center justify-between mt-1">
+                <div class="text-slate-400 text-sm leading-4">
+                  {{ invoice.created_at|date:"d.m.Y" }}
+                </div>
+                <div class="text-white font-medium text-sm leading-4">
+                  {{ invoice.total_cents|cents_to_currency|floatformat:2 }} {{ invoice.currency.code }}
+                </div>
               </div>
             </div>
           </a>
@@ -144,19 +150,25 @@
           {% for ticket in dashboard_data.recent_tickets %}
           <a href="{% url 'tickets:detail' ticket_id=ticket.id %}" class="block group">
             <div class="p-3 bg-slate-700 rounded-md hover:bg-slate-600 transition-colors border border-transparent hover:border-slate-500">
-              <div class="flex items-center justify-between mb-1">
-                <p class="text-white font-medium group-hover:text-blue-400 transition-colors leading-5 truncate">{{ ticket.title }}</p>
-                <div class="text-xs ml-2 flex-shrink-0">
-                  {% if ticket.status == 'closed' %}
-                    <span class="inline-flex items-center justify-center w-20 px-2.5 py-0.5 text-xs font-medium rounded-md bg-slate-100 text-slate-700 border border-slate-200 whitespace-nowrap">🔒 Closed</span>
+              <div class="flex items-center justify-between">
+                <div class="flex-1 min-w-0">
+                  <p class="text-white font-medium group-hover:text-blue-400 transition-colors leading-5 truncate">{{ ticket.title }}</p>
+                </div>
+                <div class="ml-2 flex-shrink-0">
+                  {% if ticket.status == 'closed' or ticket.status == 'resolved' %}
+                    {% badge "Closed" variant="secondary" icon="📁" css_class="w-20 justify-center" %}
                   {% else %}
-                    <span class="inline-flex items-center justify-center w-20 px-2.5 py-0.5 text-xs font-medium rounded-md bg-green-100 text-green-800 border border-green-200 whitespace-nowrap">📂 Open</span>
+                    {% badge "Open" variant="success" icon="📂" css_class="w-20 justify-center" %}
                   {% endif %}
                 </div>
               </div>
-              <div class="flex items-center justify-between">
-                <p class="text-slate-400 text-sm leading-4">{{ ticket.created_at|date:"d.m.Y" }}</p>
-                <p class="text-slate-400 text-sm leading-4">{{ ticket.ticket_number|default:ticket.id }}</p>
+              <div class="flex items-center justify-between mt-1">
+                <div class="text-slate-400 text-sm leading-4">
+                  {{ ticket.created_at|date:"d.m.Y" }}
+                </div>
+                <div class="text-slate-400 text-sm leading-4">
+                  #{{ ticket.ticket_number|default:ticket.id }}
+                </div>
               </div>
             </div>
           </a>
@@ -184,20 +196,16 @@
 
         <div class="grid grid-cols-2 gap-3">
           <a href="{% url 'tickets:create' %}" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-red-600 border border-red-600 rounded-lg hover:bg-red-700 focus:ring-4 focus:ring-red-300 transition-all duration-200">
-            <span class="text-base sm:text-lg mr-1">🎫</span>
-            <span>{% trans 'New Ticket' %}</span>
+            🎫 {% trans 'New Ticket' %}
           </a>
           <a href="{% url 'billing:invoices_list' %}" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-green-600 border border-green-600 rounded-lg hover:bg-green-700 focus:ring-4 focus:ring-green-300 transition-all duration-200">
-            <span class="text-base sm:text-lg mr-1">📄</span>
-            <span>{% trans 'View Invoices' %}</span>
+            📄 {% trans 'View Invoices' %}
           </a>
           <a href="{% url 'services:list' %}" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-slate-600 border border-slate-600 rounded-lg hover:bg-slate-700 focus:ring-4 focus:ring-slate-300 transition-all duration-200">
-            <span class="text-base sm:text-lg mr-1">🚀</span>
-            <span>{% trans 'My Services' %}</span>
+            🚀 {% trans 'My Services' %}
           </a>
           <a href="{% url 'users:profile' %}" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-yellow-500 border border-yellow-500 rounded-lg hover:bg-yellow-600 focus:ring-4 focus:ring-yellow-300 transition-all duration-200">
-            <span class="text-base sm:text-lg mr-1">👤</span>
-            <span>{% trans 'My Profile' %}</span>
+            👤 {% trans 'My Profile' %}
           </a>
         </div>
       </div>
