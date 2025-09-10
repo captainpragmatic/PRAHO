@@ -89,7 +89,7 @@
         <div class="flex justify-between h-16">
           <div class="flex items-center min-w-0 flex-1">
             <!-- Logo -->
-            <div class="w-64 flex-shrink-0">
+            <div class="w-52 flex-shrink-0">
               <a href="{% url 'dashboard' %}" class="flex items-center hover:opacity-80 transition-opacity">
                 <img src="{% static 'img/favicon.svg' %}" alt="PRAHO" class="h-8 w-8 mr-3">
                 <h1 class="text-xl font-bold text-blue-400 whitespace-nowrap">
@@ -99,11 +99,11 @@
             </div>
 
             <!-- Navigation Links -->
-            <div class="hidden lg:ml-6 lg:flex lg:space-x-4">
+            <div class="hidden lg:ml-6 lg:flex lg:space-x-2">
               <!-- Dashboard is always available -->
               <a href="{% url 'dashboard' %}"
-                class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
-                <span class="mr-2">📊</span> {% trans 'Dashboard' %}
+                class="text-slate-300 hover:text-white px-2 py-2 rounded-md text-sm font-medium flex items-center">
+                <span class="mr-1">📊</span> {% trans 'Dashboard' %}
               </a>
 
               <!-- Staff/Admin Navigation with Dropdowns -->
@@ -118,20 +118,20 @@
               
               <!-- My Invoices -->
               <a href="{% url 'billing:invoice_list' %}"
-                class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
-                <span class="mr-2">📄</span> {% trans 'My Invoices' %}
+                class="text-slate-300 hover:text-white px-2 py-2 rounded-md text-sm font-medium flex items-center">
+                <span class="mr-1">📄</span> {% trans 'My Invoices' %}
               </a>
 
               <!-- My Services -->
               <a href="{% url 'provisioning:services' %}"
-                class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
-                <span class="mr-2">🚀</span> {% trans 'My Services' %}
+                class="text-slate-300 hover:text-white px-2 py-2 rounded-md text-sm font-medium flex items-center">
+                <span class="mr-1">🚀</span> {% trans 'My Services' %}
               </a>
 
               <!-- My Tickets -->
               <a href="{% url 'tickets:list' %}"
-                class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
-                <span class="mr-2">🎫</span> {% trans 'My Tickets' %}
+                class="text-slate-300 hover:text-white px-2 py-2 rounded-md text-sm font-medium flex items-center">
+                <span class="mr-1">🎫</span> {% trans 'My Tickets' %}
               </a>
               
               {% else %}
@@ -145,7 +145,7 @@
           </div>
 
           <!-- User Menu -->
-          <div class="w-80 flex items-center justify-end space-x-3 flex-shrink-0">
+          <div class="w-72 flex items-center justify-end space-x-2 flex-shrink-0">
             <a href="{% url 'users:user_profile' %}"
               class="text-slate-300 hover:text-white flex items-center px-2 py-1 whitespace-nowrap">
               <span class="mr-1">⚙️</span> {% trans 'Profile' %}
