@@ -319,23 +319,41 @@ def ticket_reply(request: HttpRequest, ticket_id: int):
         messages.error(request, _('Reply text is required.'))
         return redirect('tickets:detail', ticket_id=ticket_id)
     
+    # Handle file attachments
+    attachments = []
+    uploaded_files = request.FILES.getlist('attachments')
+    if uploaded_files:
+        # Process uploaded files for API transmission
+        for uploaded_file in uploaded_files:
+            # Convert file to base64 for API transmission
+            import base64
+            file_content = uploaded_file.read()
+            file_data = {
+                'filename': uploaded_file.name,
+                'content': base64.b64encode(file_content).decode('utf-8'),
+                'content_type': uploaded_file.content_type or 'application/octet-stream',
+                'size': len(file_content)
+            }
+            attachments.append(file_data)
+    
     try:
         # Add reply via platform API
         reply = ticket_api.add_ticket_reply(
             customer_id=customer_id,
             user_id=user_id,
             ticket_id=ticket_id,
-            message=reply_text
+            message=reply_text,
+            attachments=attachments if attachments else None
         )
         
         logger.info(f"✅ [Tickets View] Added reply to ticket {ticket_id} for customer {customer_id}")
         
         if request.headers.get('HX-Request'):
-            # HTMX request - return updated replies partial
+            # HTMX request - return updated status and comments partial
             # Get updated ticket details with all comments/replies
             ticket_response = ticket_api.get_ticket_detail(customer_id, user_id, ticket_id)
             
-            # Extract replies from the ticket response
+            # Extract ticket and replies from the response
             if ticket_response.get('success') and 'data' in ticket_response:
                 ticket = ticket_response['data'].get('ticket', {})
                 replies = ticket.get('comments', [])
@@ -343,9 +361,9 @@ def ticket_reply(request: HttpRequest, ticket_id: int):
                 ticket = ticket_response
                 replies = ticket.get('comments', [])
                 
-            return render(request, 'tickets/partials/replies_list.html', {
+            return render(request, 'tickets/partials/status_and_comments.html', {
+                'ticket': ticket,
                 'replies': replies,
-                'ticket_id': ticket_id
             })
         
         messages.success(request, _('Reply added successfully.'))

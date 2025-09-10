@@ -51,6 +51,22 @@
                 </div>
             </div>
             
+            <!-- Attachments -->
+            {% if reply.attachments %}
+            <div class="mt-3 space-y-2">
+                {% for attachment in reply.attachments %}
+                <div class="flex items-center space-x-2 text-sm text-slate-400">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path>
+                    </svg>
+                    <a href="/api/tickets/{{ reply.ticket_id|default:ticket.id }}/attachments/{{ attachment.id }}/download/" class="text-blue-400 hover:text-blue-300">
+                        {{ attachment.filename }} ({{ attachment.file_size_display }})
+                    </a>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+            
         </div>
     </div>
 </div>
