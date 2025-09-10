@@ -4,10 +4,10 @@ Handles fetching billing data directly from the platform service via API.
 NO DATABASE QUERIES - Pure API-only communication.
 
 Security guidelines:
-- All customer/user‑scoped requests use POST with an HMAC‑signed JSON body
+- All customer/user-scoped requests use POST with an HMAC-signed JSON body
   that includes 'user_id' and 'customer_id'. Do not place identities in URL or
   query parameters (prevents ID enumeration).
-- GET is used only for public/non‑identity resources (e.g., currencies list).
+- GET is used only for public/non-identity resources (e.g., currencies list).
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 class InvoiceViewService:
     """Service for retrieving and displaying invoice data directly from Platform API"""
     
-    def __init__(self):
+    def __init__(self) -> None:
         self.api_client = PlatformAPIClient()
     
     def get_customer_invoices(self, customer_id: int, user_id: int, force_sync: bool = False) -> list[Invoice]:
@@ -257,7 +257,7 @@ class InvoiceViewService:
 class BillingDataSyncService:
     """Service for manual sync operations (simplified for API-only approach)"""
     
-    def __init__(self):
+    def __init__(self) -> None:
         self.api_client = PlatformAPIClient()
     
     def sync_customer_invoices(self, customer_id: int, user_id: int) -> list[Invoice]:

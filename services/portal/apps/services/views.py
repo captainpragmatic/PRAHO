@@ -5,7 +5,7 @@
 import logging
 
 from django.contrib import messages
-from django.http import HttpRequest
+from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.utils.translation import gettext as _
 
@@ -14,7 +14,7 @@ from .services import PlatformAPIError, services_api
 logger = logging.getLogger(__name__)
 
 
-def service_list(request: HttpRequest):
+def service_list(request: HttpRequest) -> HttpResponse:
     """
     Customer services list view - shows only customer's hosting services.
     Supports filtering by status and service type.
@@ -94,7 +94,7 @@ def service_list(request: HttpRequest):
     return render(request, 'services/service_list.html', context)
 
 
-def service_detail(request: HttpRequest, service_id: int):
+def service_detail(request: HttpRequest, service_id: int) -> HttpResponse:
     """
     Customer service detail view - shows service info, usage, and management options.
     Only accessible by service owner (customer).
@@ -134,7 +134,7 @@ def service_detail(request: HttpRequest, service_id: int):
     return render(request, 'services/service_detail.html', context)
 
 
-def service_usage(request: HttpRequest, service_id: int):
+def service_usage(request: HttpRequest, service_id: int) -> HttpResponse:
     # Check authentication via Django session
     customer_id = request.session.get('customer_id')
     if not customer_id:
@@ -168,7 +168,7 @@ def service_usage(request: HttpRequest, service_id: int):
         })
 
 
-def service_request_action(request: HttpRequest, service_id: int):
+def service_request_action(request: HttpRequest, service_id: int) -> HttpResponse:
     """
     Customer service action request (upgrade, suspend request, etc.).
     Creates requests that require staff approval.
@@ -246,7 +246,7 @@ def service_request_action(request: HttpRequest, service_id: int):
         return redirect('services:list')
 
 
-def services_dashboard_widget(request: HttpRequest):
+def services_dashboard_widget(request: HttpRequest) -> HttpResponse:
     """
     Dashboard widget showing services summary for customer.
     Used in main dashboard view.
@@ -280,7 +280,7 @@ def services_dashboard_widget(request: HttpRequest):
         })
 
 
-def service_plans(request: HttpRequest):
+def service_plans(request: HttpRequest) -> HttpResponse:
     # Check authentication via Django session
     customer_id = request.session.get('customer_id')
     if not customer_id:

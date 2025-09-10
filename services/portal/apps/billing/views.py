@@ -6,7 +6,7 @@ import logging
 
 from django.contrib import messages
 from django.http import HttpRequest, HttpResponse, JsonResponse
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods
 
@@ -32,7 +32,6 @@ def invoices_list_view(request: HttpRequest) -> HttpResponse:
     # Check authentication via middleware (customer_id is set by PortalAuthenticationMiddleware)
     customer_id = getattr(request, 'customer_id', None)
     if not customer_id:
-        from django.shortcuts import redirect
         return redirect('/login/')
     
     try:
@@ -69,9 +68,8 @@ def invoices_list_view(request: HttpRequest) -> HttpResponse:
             documents.extend(proformas)
         
         # Apply status filter if provided
-        if status_filter:
-            if status_filter in ['draft', 'issued', 'paid', 'overdue', 'void', 'refunded'] or status_filter in ['sent', 'accepted', 'expired']:
-                documents = [doc for doc in documents if doc.status == status_filter]
+        if status_filter and (status_filter in ['draft', 'issued', 'paid', 'overdue', 'void', 'refunded'] or status_filter in ['sent', 'accepted', 'expired']):
+            documents = [doc for doc in documents if doc.status == status_filter]
         
         # Sort documents by creation date (newest first)
         documents.sort(key=lambda x: x.created_at, reverse=True)
@@ -137,7 +135,6 @@ def invoice_detail_view(request: HttpRequest, invoice_number: str) -> HttpRespon
     customer_id = getattr(request, 'customer_id', None)
     user_id = getattr(request, 'user_id', None)
     if not customer_id or not user_id:
-        from django.shortcuts import redirect
         return redirect('/login/')
     
     try:
@@ -161,9 +158,11 @@ def invoice_detail_view(request: HttpRequest, invoice_number: str) -> HttpRespon
                 force_sync=force_sync,
             )
             if proforma:
-                from django.shortcuts import redirect
                 logger.info(f"➡️ [Portal Billing] {invoice_number} is a proforma; redirecting to proforma detail")
-                return redirect('billing:proforma_detail', proforma_number=invoice_number)
+                return redirect(
+                    'billing:proforma_detail', 
+                    proforma_number=invoice_number
+                )
 
             messages.error(request, _('Invoice not found or access denied.'))
             return render(request, 'billing/invoice_not_found.html', {
@@ -307,7 +306,6 @@ def invoice_pdf_export(request: HttpRequest, invoice_number: str) -> HttpRespons
     # Check authentication via middleware (customer_id is set by PortalAuthenticationMiddleware)
     customer_id = getattr(request, 'customer_id', None)
     if not customer_id:
-        from django.shortcuts import redirect
         return redirect('/login/')
     
     try:
@@ -341,7 +339,6 @@ def proforma_pdf_export(request: HttpRequest, proforma_number: str) -> HttpRespo
     # Check authentication via middleware (customer_id is set by PortalAuthenticationMiddleware)
     customer_id = getattr(request, 'customer_id', None)
     if not customer_id:
-        from django.shortcuts import redirect
         return redirect('/login/')
     
     try:
@@ -381,7 +378,6 @@ def proforma_detail_view(request: HttpRequest, proforma_number: str) -> HttpResp
     customer_id = getattr(request, 'customer_id', None)
     user_id = getattr(request, 'user_id', None)
     if not customer_id or not user_id:
-        from django.shortcuts import redirect
         return redirect('/login/')
     
     try:

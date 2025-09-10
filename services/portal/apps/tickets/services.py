@@ -3,6 +3,7 @@
 # ===============================================================================
 
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from django.utils import timezone
@@ -10,6 +11,24 @@ from django.utils import timezone
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class TicketFilters:
+    """Filter parameters for ticket listing"""
+    page: int = 1
+    status: str = ''
+    priority: str = ''
+    search: str = ''
+
+
+@dataclass
+class TicketCreateRequest:
+    """Parameters for creating a new ticket"""
+    title: str
+    description: str
+    priority: str = 'normal'
+    category: str = ''
 
 
 class TicketAPIClient(PlatformAPIClient):
@@ -24,34 +43,35 @@ class TicketAPIClient(PlatformAPIClient):
     - View ticket status
     """
     
-    def get_customer_tickets(self, customer_id: int, user_id: int, page: int = 1, status: str = '', priority: str = '', search: str = '') -> dict[str, Any]:
+    def get_customer_tickets(self, customer_id: int, user_id: int, filters: TicketFilters | None = None) -> dict[str, Any]:
         """
         Get paginated list of tickets for a specific customer.
         
         Args:
             customer_id: Customer ID for filtering tickets
-            page: Page number for pagination
-            status: Filter by ticket status (new, open, pending, resolved, closed)
-            priority: Filter by priority (critical, urgent, high, normal, low)
-            search: Search in ticket title/description
+            user_id: User ID making the request
+            filters: Optional filters for pagination and search
             
         Returns:
             Dict containing tickets list and pagination info
         """
+        if filters is None:
+            filters = TicketFilters()
+            
         try:
             request_data = {
                 'customer_id': customer_id,
                 'user_id': user_id,
-                'page': page,
+                'page': filters.page,
                 'page_size': 20,  # Customer portal pagination
             }
             
-            if status:
-                request_data['status'] = status
-            if priority:
-                request_data['priority'] = priority  
-            if search:
-                request_data['search'] = search
+            if filters.status:
+                request_data['status'] = filters.status
+            if filters.priority:
+                request_data['priority'] = filters.priority  
+            if filters.search:
+                request_data['search'] = filters.search
                 
             response = self._make_request('POST', '/tickets/', data=request_data)
             
@@ -97,18 +117,14 @@ class TicketAPIClient(PlatformAPIClient):
             logger.error(f"🔥 [Tickets API] Error retrieving ticket {ticket_id} for customer {customer_id}: {e}")
             raise
     
-    def create_ticket(self, customer_id: int, user_id: int, title: str, description: str, 
-                     priority: str = 'normal', category: str = '') -> dict[str, Any]:
+    def create_ticket(self, customer_id: int, user_id: int, request: TicketCreateRequest) -> dict[str, Any]:
         """
         Create a new support ticket for customer.
         
         Args:
             customer_id: Customer ID creating the ticket
             user_id: User ID for HMAC authentication
-            title: Ticket subject/title
-            description: Detailed description of the issue
-            priority: Priority level (critical, urgent, high, normal, low)
-            category: Optional category for ticket classification
+            request: Ticket creation parameters
             
         Returns:
             Dict containing created ticket information
@@ -122,14 +138,14 @@ class TicketAPIClient(PlatformAPIClient):
                 'action': 'create_ticket',   # Required for HMAC auth, filtered out by platform
                 'timestamp': int(timezone.now().timestamp()),  # Required for HMAC auth, filtered out by platform
                 # Actual ticket creation fields
-                'title': title,
-                'description': description,
-                'priority': priority,
+                'title': request.title,
+                'description': request.description,
+                'priority': request.priority,
                 # contact_email and contact_person will be automatically populated by platform from authenticated customer
             }
             
             # Map category strings to platform category IDs
-            if category:
+            if request.category:
                 category_mapping = {
                     'technical': 1,  # Technical Support
                     'billing': 3,    # Billing Question  
@@ -137,7 +153,7 @@ class TicketAPIClient(PlatformAPIClient):
                     'domain': 2,     # Technical Issue
                     'email': 2,      # Technical Issue
                 }
-                data['category'] = category_mapping.get(category, 1)  # Default to Technical Support
+                data['category'] = category_mapping.get(request.category, 1)  # Default to Technical Support
                 
             logger.debug(f"🔍 [Tickets API] Sending ticket data: {data}")
             response = self._make_request('POST', '/tickets/create/', data=data)

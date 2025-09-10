@@ -2,21 +2,38 @@
 # CUSTOMER SUPPORT TICKETS VIEWS - PORTAL SERVICE 🎫
 # ===============================================================================
 
+import base64
 import logging
 
 from django.contrib import messages
-from django.http import HttpRequest, JsonResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils.translation import gettext as _
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 
-from .services import PlatformAPIError, ticket_api
+from .services import PlatformAPIError, ticket_api, TicketFilters
 
 logger = logging.getLogger(__name__)
 
 
-def ticket_list(request: HttpRequest):
+def _handle_ticket_error_response(request: HttpRequest, ticket_id: int, error_msg: str, status: int = 400) -> HttpResponse:
+    """Helper to handle error responses for HTMX or regular requests"""
+    if request.headers.get('HX-Request'):
+        return JsonResponse({'error': error_msg}, status=status)
+    messages.error(request, error_msg)
+    return redirect('tickets:detail', ticket_id=ticket_id)
+
+
+def _handle_ticket_success_response(request: HttpRequest, ticket_id: int, success_msg: str, context: dict | None = None, template: str = '') -> HttpResponse:
+    """Helper to handle success responses for HTMX or regular requests"""
+    if request.headers.get('HX-Request') and context and template:
+        return render(request, template, context)
+    messages.success(request, success_msg)
+    return redirect('tickets:detail', ticket_id=ticket_id)
+
+
+def ticket_list(request: HttpRequest) -> HttpResponse:
     """
     Customer ticket list view - shows only customer's tickets.
     Supports filtering by status, priority, and search.
@@ -31,17 +48,22 @@ def ticket_list(request: HttpRequest):
     status_filter = request.GET.get('status', '')
     priority_filter = request.GET.get('priority', '')
     search_query = request.GET.get('search', '')
-    page = request.GET.get('page', 1)
+    page = int(request.GET.get('page', 1))
     
     try:
-        # Get tickets from platform API
-        response = ticket_api.get_customer_tickets(
-            customer_id=customer_id,
-            user_id=user_id,
+        # Create filters object
+        filters = TicketFilters(
             page=page,
             status=status_filter,
             priority=priority_filter,
             search=search_query
+        )
+        
+        # Get tickets from platform API
+        response = ticket_api.get_customer_tickets(
+            customer_id=customer_id,
+            user_id=user_id,
+            filters=filters
         )
         
         tickets = response.get('results', [])
@@ -154,7 +176,7 @@ def ticket_list(request: HttpRequest):
     return render(request, 'tickets/ticket_list.html', context)
 
 
-def ticket_detail(request: HttpRequest, ticket_id: int):
+def ticket_detail(request: HttpRequest, ticket_id: int) -> HttpResponse:
     """
     Customer ticket detail view - shows ticket info and conversation.
     Only accessible by ticket owner (customer).
@@ -194,7 +216,7 @@ def ticket_detail(request: HttpRequest, ticket_id: int):
 
 
 @csrf_protect
-def ticket_create(request: HttpRequest):
+def ticket_create(request: HttpRequest) -> HttpResponse:
     """
     Create new support ticket view.
     Only authenticated customers can create tickets.
@@ -300,7 +322,7 @@ def ticket_create(request: HttpRequest):
 
 
 @require_http_methods(["POST"])
-def ticket_reply(request: HttpRequest, ticket_id: int):
+def ticket_reply(request: HttpRequest, ticket_id: int) -> HttpResponse:
     """
     Add customer reply to existing ticket.
     HTMX endpoint for dynamic conversation updates.
@@ -314,10 +336,7 @@ def ticket_reply(request: HttpRequest, ticket_id: int):
     reply_text = request.POST.get('message', '').strip()
     
     if not reply_text:
-        if request.headers.get('HX-Request'):
-            return JsonResponse({'error': _('Reply text is required.')}, status=400)
-        messages.error(request, _('Reply text is required.'))
-        return redirect('tickets:detail', ticket_id=ticket_id)
+        return _handle_ticket_error_response(request, ticket_id, _('Reply text is required.'))
     
     # Handle file attachments
     attachments = []
@@ -326,7 +345,6 @@ def ticket_reply(request: HttpRequest, ticket_id: int):
         # Process uploaded files for API transmission
         for uploaded_file in uploaded_files:
             # Convert file to base64 for API transmission
-            import base64
             file_content = uploaded_file.read()
             file_data = {
                 'filename': uploaded_file.name,
@@ -338,7 +356,7 @@ def ticket_reply(request: HttpRequest, ticket_id: int):
     
     try:
         # Add reply via platform API
-        reply = ticket_api.add_ticket_reply(
+        ticket_api.add_ticket_reply(
             customer_id=customer_id,
             user_id=user_id,
             ticket_id=ticket_id,
@@ -348,38 +366,29 @@ def ticket_reply(request: HttpRequest, ticket_id: int):
         
         logger.info(f"✅ [Tickets View] Added reply to ticket {ticket_id} for customer {customer_id}")
         
+        # Get updated ticket details for HTMX response
         if request.headers.get('HX-Request'):
-            # HTMX request - return updated status and comments partial
-            # Get updated ticket details with all comments/replies
             ticket_response = ticket_api.get_ticket_detail(customer_id, user_id, ticket_id)
             
             # Extract ticket and replies from the response
             if ticket_response.get('success') and 'data' in ticket_response:
                 ticket = ticket_response['data'].get('ticket', {})
-                replies = ticket.get('comments', [])
             else:
                 ticket = ticket_response
-                replies = ticket.get('comments', [])
+            replies = ticket.get('comments', [])
                 
-            return render(request, 'tickets/partials/status_and_comments.html', {
-                'ticket': ticket,
-                'replies': replies,
-            })
+            context = {'ticket': ticket, 'replies': replies}
+            template = 'tickets/partials/status_and_comments.html'
+            return _handle_ticket_success_response(request, ticket_id, _('Reply added successfully.'), context, template)
         
-        messages.success(request, _('Reply added successfully.'))
-        return redirect('tickets:detail', ticket_id=ticket_id)
+        return _handle_ticket_success_response(request, ticket_id, _('Reply added successfully.'))
         
     except PlatformAPIError as e:
         logger.error(f"🔥 [Tickets View] Error adding reply to ticket {ticket_id} for customer {customer_id}: {e}")
-        
-        if request.headers.get('HX-Request'):
-            return JsonResponse({'error': _('Unable to add reply. Please try again.')}, status=500)
-        
-        messages.error(request, _('Unable to add reply. Please try again later.'))
-        return redirect('tickets:detail', ticket_id=ticket_id)
+        return _handle_ticket_error_response(request, ticket_id, _('Unable to add reply. Please try again later.'), status=500)
 
 
-def ticket_search_api(request: HttpRequest):
+def ticket_search_api(request: HttpRequest) -> JsonResponse:
     """
     HTMX search endpoint for live ticket filtering.
     Returns filtered ticket list partial.
@@ -488,7 +497,7 @@ def ticket_search_api(request: HttpRequest):
         })
 
 
-def tickets_dashboard_widget(request: HttpRequest):
+def tickets_dashboard_widget(request: HttpRequest) -> HttpResponse:
     """
     Dashboard widget showing ticket summary for customer.
     Used in main dashboard view.

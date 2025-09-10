@@ -1,11 +1,11 @@
 """
-Services API Client (customer‑facing "My Services")
+Services API Client (customer-facing "My Services")
 
 Security guidelines:
-- All customer/user‑scoped calls MUST use POST with an HMAC‑signed JSON body
+- All customer/user-scoped calls MUST use POST with an HMAC-signed JSON body
   that includes 'user_id' and 'customer_id'. Avoid putting identities in URL
   or query parameters to prevent ID enumeration.
-- GET is reserved for public/non‑identity endpoints (e.g., /api/services/plans/),
+- GET is reserved for public/non-identity endpoints (e.g., /api/services/plans/),
   which accept optional filters but no customer/user identity.
 """
 

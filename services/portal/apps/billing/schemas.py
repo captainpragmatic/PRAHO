@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
+from django.utils import timezone
+
 
 @dataclass
 class Currency:
@@ -104,7 +106,6 @@ class Invoice:
         """Check if invoice is overdue"""
         if not self.due_at or self.status in ['paid', 'void', 'refunded']:
             return False
-        from django.utils import timezone
         return timezone.now().date() > self.due_at.date()
     
     @property
@@ -178,14 +179,13 @@ class Proforma:
     notes: str = ""
     lines: list[ProformaLine] = None
     
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.lines is None:
             self.lines = []
     
     @property
     def is_expired(self) -> bool:
         """Check if proforma is expired"""
-        from django.utils import timezone
         return self.valid_until < timezone.now()
     
     @property

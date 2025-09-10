@@ -3,8 +3,11 @@ Portal Billing Serializers - API Response Conversion Functions
 Convert Platform API responses to portal dataclass instances.
 """
 
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
+
+from django.utils.dateparse import parse_datetime
 
 from .schemas import Currency, Invoice, InvoiceLine, InvoiceSummary, Proforma, ProformaLine
 
@@ -36,16 +39,15 @@ def create_invoice_line_from_api(data: dict[str, Any]) -> InvoiceLine:
     )
 
 
-def create_invoice_from_api(data: dict[str, Any], lines: list[dict[str, Any]] = None) -> Invoice:
+def create_invoice_from_api(data: dict[str, Any], lines: list[dict[str, Any]] | None = None) -> Invoice:
     """Create Invoice dataclass from API response"""
-    from django.utils.dateparse import parse_datetime
     
     # Parse currency
     currency_data = data.get('currency', {})
     currency = create_currency_from_api(currency_data) if currency_data else None
     
     # Parse dates
-    def parse_date_field(field_name):
+    def parse_date_field(field_name: str) -> datetime | None:
         date_str = data.get(field_name)
         return parse_datetime(date_str) if date_str else None
     
@@ -115,16 +117,15 @@ def create_proforma_line_from_api(data: dict[str, Any]) -> ProformaLine:
     )
 
 
-def create_proforma_from_api(data: dict[str, Any], lines: list[dict[str, Any]] = None) -> Proforma:
+def create_proforma_from_api(data: dict[str, Any], lines: list[dict[str, Any]] | None = None) -> Proforma:
     """Create Proforma dataclass from API response"""
-    from django.utils.dateparse import parse_datetime
     
     # Parse currency
     currency_data = data.get('currency', {})
     currency = create_currency_from_api(currency_data) if currency_data else None
     
     # Parse dates
-    def parse_date_field(field_name):
+    def parse_date_field(field_name: str) -> datetime | None:
         date_str = data.get(field_name)
         return parse_datetime(date_str) if date_str else None
     

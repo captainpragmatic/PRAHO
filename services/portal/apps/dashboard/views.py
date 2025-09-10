@@ -4,25 +4,26 @@ Customer-facing dashboard with API integration - STATELESS ARCHITECTURE.
 """
 
 import logging
+from typing import Any
 
 from django.contrib import messages
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.utils.translation import gettext as _
 
 from apps.api_client.services import PlatformAPIError, api_client
 from apps.billing.services import InvoiceViewService
 from apps.services.services import ServicesAPIClient
-from apps.tickets.services import TicketAPIClient
+from apps.tickets.services import TicketAPIClient, TicketFilters
 
 logger = logging.getLogger(__name__)
 
 
 class DictAsObj:
     """Simple wrapper to allow dot notation access on dictionaries for Django templates"""
-    def __init__(self, data):
-        from django.utils import timezone
-        from django.utils.dateparse import parse_datetime
+    def __init__(self, data: dict[str, Any]) -> None:
         
         for key, value in data.items():
             if isinstance(value, dict):
@@ -40,6 +41,81 @@ class DictAsObj:
                 setattr(self, key, value)
 
 
+
+
+def _get_billing_data(invoice_service: InvoiceViewService, customer_id: str, user_id: int) -> tuple[list[Any], dict[str, Any]]:
+    """Get billing documents and invoice summary"""
+    invoices = invoice_service.get_customer_invoices(customer_id, user_id)
+    proformas = invoice_service.get_customer_proformas(customer_id, user_id)
+    invoice_summary = invoice_service.get_invoice_summary(customer_id, user_id)
+    
+    # Recent documents (invoices and proformas combined): newest first, show 4
+    recent_documents = []
+    for invoice in invoices[:4]:
+        invoice.document_type = 'invoice'
+        recent_documents.append(invoice)
+    for proforma in proformas[:4]:
+        proforma.document_type = 'proforma'
+        recent_documents.append(proforma)
+    
+    recent_documents.sort(key=lambda x: x.created_at, reverse=True)
+    return recent_documents[:4], invoice_summary
+
+
+def _get_customer_data(customer_id: str, user_id: int) -> tuple[list[Any], str | None]:
+    """Get customer details and resolve greeting name"""
+    customers = []
+    greeting_name = None
+    
+    try:
+        response = api_client.get_customer_details(customer_id, user_id)
+        if response and response.get('success') and response.get('customer'):
+            customer_obj = DictAsObj(response['customer'])
+            customers = [customer_obj]
+    except PlatformAPIError as e:
+        logger.warning(f"⚠️ [Dashboard] Failed to load customer details: {e}")
+
+    # Resolve greeting name preference: profile.first_name > customer contact person > email
+    try:
+        profile = api_client.get_customer_profile(user_id)
+        if profile and profile.get('first_name'):
+            greeting_name = profile.get('first_name')
+    except Exception:
+        pass
+
+    if not greeting_name and customers:
+        try:
+            contact_first = customers[0].get('contact_person', {}).get('first_name')
+            if contact_first:
+                greeting_name = contact_first
+        except Exception:
+            pass
+    
+    return customers, greeting_name
+
+
+def _get_ticket_data(ticket_api: TicketAPIClient, customer_id: str, user_id: int) -> tuple[list[Any], int]:
+    """Get recent tickets and open tickets count"""
+    recent_tickets = []
+    try:
+        ticket_response = ticket_api.get_customer_tickets(customer_id, user_id, TicketFilters(page=1))
+        raw_tickets = ticket_response.get('results', [])[:4]
+        recent_tickets = [DictAsObj(ticket) for ticket in raw_tickets]
+        tickets_summary = ticket_api.get_tickets_summary(customer_id, user_id)
+        open_tickets_count = tickets_summary.get('open_tickets', len(recent_tickets))
+    except Exception:
+        open_tickets_count = len(recent_tickets)
+    
+    return recent_tickets, open_tickets_count
+
+
+def _get_services_data(services_api: ServicesAPIClient, customer_id: str, user_id: int) -> int:
+    """Get active services count"""
+    try:
+        services_summary = services_api.get_services_summary(customer_id, user_id)
+        return services_summary.get('active_services', 0)
+    except Exception:
+        return 0
 
 
 def dashboard_view(request: HttpRequest) -> HttpResponse:
@@ -71,86 +147,22 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
         'platform_available': True,
     }
     
-    # Get dashboard data from platform API using billing/tickets/services clients
+    # Get dashboard data from platform API using helper functions
     try:
         invoice_service = InvoiceViewService()
         ticket_api = TicketAPIClient()
         services_api = ServicesAPIClient()
-        
-        # Get both invoices and proformas to match platform dashboard
         user_id = request.user.id
-        invoices = invoice_service.get_customer_invoices(customer_id, user_id)
-        proformas = invoice_service.get_customer_proformas(customer_id, user_id)
-        invoice_summary = invoice_service.get_invoice_summary(customer_id, user_id)
         
-        # Recent documents (invoices and proformas combined): newest first, show 4 to match platform dashboard  
-        recent_documents = []
-        for invoice in invoices[:4]:  # Limit invoices to 4
-            invoice.document_type = 'invoice'
-            recent_documents.append(invoice)
-        for proforma in proformas[:4]:  # Limit proformas to 4
-            proforma.document_type = 'proforma'
-            recent_documents.append(proforma)
+        # Get all data using helper functions
+        recent_documents, invoice_summary = _get_billing_data(invoice_service, customer_id, user_id)
+        customers, greeting_name = _get_customer_data(customer_id, user_id)
+        recent_tickets, open_tickets_count = _get_ticket_data(ticket_api, customer_id, user_id)
+        active_services = _get_services_data(services_api, customer_id, user_id)
         
-        # Sort combined list by created_at and limit to 4
-        recent_documents.sort(key=lambda x: x.created_at, reverse=True)
-        recent_documents = recent_documents[:4]
-
-        # Customer details for Account Information card
-        customers = []
-        greeting_name = None
-        try:
-            response = api_client.get_customer_details(customer_id, user_id)
-            if response and response.get('success') and response.get('customer'):
-                # Wrap customer data for dot notation access in templates
-                customer_obj = DictAsObj(response['customer'])
-                customers = [customer_obj]
-            else:
-                customers = []
-        except PlatformAPIError as e:
-            logger.warning(f"⚠️ [Dashboard] Failed to load customer details: {e}")
-            customers = []
-
-        # Resolve greeting name preference: profile.first_name > customer contact person > email
-        try:
-            profile = api_client.get_customer_profile(user_id)
-            if profile and profile.get('first_name'):
-                greeting_name = profile.get('first_name')
-        except Exception:
-            greeting_name = None
-
-        if not greeting_name:
-            try:
-                contact_first = (
-                    customers and customers[0].get('contact_person', {}).get('first_name')
-                )
-                if contact_first:
-                    greeting_name = contact_first
-            except Exception:
-                greeting_name = None
-
+        # Fallback for greeting name if not resolved
         if not greeting_name:
             greeting_name = context.get('customer_email') or ''
-
-        # Tickets: recent + summary
-        recent_tickets = []
-        try:
-            ticket_response = ticket_api.get_customer_tickets(customer_id, user_id, page=1)
-            raw_tickets = ticket_response.get('results', [])[:4]
-            # Wrap tickets with DictAsObj for date parsing and dot notation access
-            recent_tickets = [DictAsObj(ticket) for ticket in raw_tickets]
-            tickets_summary = ticket_api.get_tickets_summary(customer_id, user_id)
-            open_tickets_count = tickets_summary.get('open_tickets', len(recent_tickets))
-        except Exception:
-            open_tickets_count = len(recent_tickets)
-
-        # Services summary for active count
-        active_services = 0
-        try:
-            services_summary = services_api.get_services_summary(customer_id, user_id)
-            active_services = services_summary.get('active_services', 0)
-        except Exception:
-            active_services = 0
         
         dashboard_data = {
             'customers': customers,
@@ -163,9 +175,8 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
                 'total_invoices': invoice_summary.get('total_invoices', 0),
             }
         }
-        # Pass greeting name for header
-        context['greeting_name'] = greeting_name
         
+        context['greeting_name'] = greeting_name
         context['dashboard_data'] = dashboard_data
         
         logger.debug(f"✅ [Dashboard] Loaded data for customer {customer_id}")
