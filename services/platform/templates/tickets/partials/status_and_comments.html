@@ -1,0 +1,205 @@
+{% load i18n %}
+{% load ui_components %}
+
+<!-- Status Card -->
+<div class="bg-slate-800 rounded-lg p-6 border border-slate-700 mb-6">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+            <p class="text-slate-400 text-sm">{% trans 'Subject' %}:</p>
+            <p class="text-white font-medium text-lg">{{ ticket.title }}</p>
+        </div>
+        <div>
+            <p class="text-slate-400 text-sm">{% trans 'Customer' %}:</p>
+            <p class="text-white font-medium text-lg">{{ ticket.customer.get_display_name }}</p>
+        </div>
+        <div>
+            <p class="text-slate-400 text-sm">{% trans 'Status' %}:</p>
+            <div class="flex items-center space-x-2">
+              {% if ticket.status == 'open' %}
+                {% badge "Open" variant="info" icon="📂" %}
+              {% elif ticket.status == 'in_progress' %}
+                {% badge "In Progress" variant="primary" icon="⚡" %}
+              {% elif ticket.status == 'waiting_on_customer' %}
+                {% badge "Waiting on Customer" variant="warning" icon="⏳" %}
+              {% elif ticket.status == 'closed' %}
+                {% badge "Closed" variant="secondary" icon="📁" %}
+                {% if ticket.resolution_code %}
+                  {% badge ticket.get_resolution_code_display variant="outline" size="xs" %}
+                {% endif %}
+              {% else %}
+                {% badge ticket.get_status_display variant="default" %}
+              {% endif %}
+              
+              <!-- Customer replied badge -->
+              {% if ticket.customer_replied_recently %}
+                <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">
+                  💬 Customer replied
+                </span>
+              {% endif %}
+            </div>
+        </div>
+        <div>
+            <p class="text-slate-400 text-sm">{% trans 'Priority' %}:</p>
+            {% if ticket.priority == 'critical' %}
+              {% badge "Critical" variant="danger" icon="🚨" %}
+            {% elif ticket.priority == 'urgent' %}
+              {% badge "Urgent" variant="danger" icon="🔴" %}
+            {% elif ticket.priority == 'high' %}
+              {% badge "High" variant="warning" icon="🟡" %}
+            {% elif ticket.priority == 'normal' %}
+              {% badge "Normal" variant="info" icon="🔵" %}
+            {% elif ticket.priority == 'low' %}
+              {% badge "Low" variant="success" icon="🟢" %}
+            {% else %}
+              {% badge ticket.get_priority_display variant="default" %}
+            {% endif %}
+        </div>
+        <div>
+            <p class="text-slate-400 text-sm">{% trans 'Created At' %}:</p>
+            <p class="text-white font-medium">{{ ticket.created_at|date:"d.m.Y H:i" }}</p>
+        </div>
+        <div>
+            <p class="text-slate-400 text-sm">{% trans 'Created By' %}:</p>
+            <p class="text-white font-medium">
+                {% if ticket.created_by %}
+                    {{ ticket.created_by.get_full_name }}
+                {% else %}
+                    {% trans 'System' %}
+                {% endif %}
+            </p>
+        </div>
+    </div>
+
+    <!-- Description -->
+    <div class="mt-4 pt-4 border-t border-slate-700">
+        <p class="text-slate-400 text-sm mb-2">{% trans 'Description' %}:</p>
+        <div class="prose prose-invert prose-sm max-w-none">
+            <div class="text-slate-300 leading-relaxed">
+                {{ ticket.description|linebreaksbr }}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Ticket Replies/Comments -->
+<div class="bg-slate-800 rounded-lg border border-slate-700 mb-6" id="replies-section">
+    <div class="px-6 py-4 border-b border-slate-700">
+        <h3 class="text-lg font-medium text-white flex items-center">
+            <svg class="w-5 h-5 mr-2 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-3.582 8-8 8a8.955 8.955 0 01-1.946-.228A18.89 18.89 0 0111 22l-1-1 1-1c.636-.636 1-1.5 1-2.4 0-1.778 1.44-3.22 3.22-3.22M21 12c0-4.418-3.582-8-8-8s-8 3.582-8 8"></path>
+            </svg>
+            {% trans 'Conversation' %}
+            <span class="ml-2 text-sm font-normal text-slate-400">({{ ticket.comments.count }} {% trans 'replies' %})</span>
+        </h3>
+    </div>
+    
+    <div class="px-6 py-4 max-h-96 overflow-y-auto" id="comments-container">
+        {% include 'tickets/partials/comments_list.html' with comments=comments %}
+    </div>
+
+    {% if can_edit %}
+    <div class="border-t border-slate-700 px-6 py-4">
+        <form method="post" action="{% url 'tickets:reply' pk=ticket.pk %}" enctype="multipart/form-data" class="space-y-4" id="reply-form" hx-post="{% url 'tickets:reply' pk=ticket.pk %}" hx-target="#ticket-status-and-comments" hx-swap="innerHTML" hx-on::after-request="this.reset(); updateReplyCount();">
+            {% csrf_token %}
+            <div class="flex items-start space-x-3 sm:space-x-4">
+                <!-- User Avatar -->
+                <div class="flex-shrink-0">
+                    <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-sm font-medium text-blue-800">
+                        {{ request.user.get_full_name|first|upper }}
+                    </div>
+                </div>
+                
+                <!-- Reply Form -->
+                <div class="flex-1">
+                    <div class="relative">
+                        <textarea 
+                            name="reply" 
+                            rows="3" 
+                            class="block w-full rounded-lg border-0 bg-slate-700 py-3 px-4 text-white placeholder-slate-400 ring-1 ring-inset ring-slate-600 focus:ring-2 focus:ring-inset focus:ring-blue-500 resize-none" 
+                            placeholder="{% trans 'Write a reply...' %}" 
+                            required></textarea>
+                        
+                        <!-- Character Counter -->
+                        <div class="absolute bottom-2 right-2">
+                            <span class="text-xs text-slate-400" id="char-counter">0</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Form Actions -->
+                    <div class="mt-3 space-y-3">
+                        <div class="flex flex-wrap items-center gap-3">
+                            <!-- File Upload -->
+                            <input type="file" name="attachments" multiple class="hidden" id="file-input" accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg,.zip,.rar">
+                            <button type="button" id="attach-btn" class="inline-flex items-center px-3 py-1 text-sm text-slate-400 hover:text-slate-300" title="{% trans 'Attach file' %}">
+                                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path>
+                                </svg>
+                                {% trans 'Attach' %}
+                            </button>
+                            
+                            <!-- File list display -->
+                            <div id="file-list" class="hidden"></div>
+                        </div>
+                        
+                        <!-- Staff Reply Actions -->
+                        {% if user.is_staff or user.staff_role %}
+                        <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+                            <!-- Reply Action Dropdown -->
+                            <div class="flex-1 min-w-0">
+                                <select name="reply_action" id="reply_action" class="block w-full rounded border-slate-600 bg-slate-700 text-white text-sm px-3 py-2 focus:ring-blue-500 focus:border-blue-500" onchange="handleReplyActionChange()">
+                                    <option value="reply">{% trans 'Reply' %}</option>
+                                    <option value="reply_and_wait">{% trans 'Reply & set Waiting on Customer' %}</option>
+                                    <option value="internal_note">{% trans 'Internal note' %}</option>
+                                    <option value="close_with_resolution">{% trans 'Close with resolution' %}</option>
+                                </select>
+                            </div>
+                            
+                            <!-- Resolution Code (hidden by default) -->
+                            <div id="resolution_code_container" class="hidden flex-1 min-w-0">
+                                <select name="resolution_code" class="block w-full rounded border-slate-600 bg-slate-700 text-white text-sm px-3 py-2 focus:ring-blue-500 focus:border-blue-500">
+                                    <option value="">{% trans 'Select resolution...' %}</option>
+                                    <option value="fixed">{% trans 'Fixed' %}</option>
+                                    <option value="invalid">{% trans 'Invalid' %}</option>
+                                    <option value="duplicate">{% trans 'Duplicate' %}</option>
+                                    <option value="by_design">{% trans 'By Design' %}</option>
+                                    <option value="refunded">{% trans 'Refunded' %}</option>
+                                    <option value="cancelled">{% trans 'Cancelled' %}</option>
+                                    <option value="other">{% trans 'Other' %}</option>
+                                </select>
+                            </div>
+                        </div>
+                        {% endif %}
+                        
+                        <!-- Submit Button -->
+                        <div class="flex flex-col-reverse sm:flex-row sm:justify-end items-stretch sm:items-center gap-2">
+                            <button type="button" class="px-3 py-2 text-sm text-slate-400 hover:text-slate-300 text-center sm:text-left" onclick="document.getElementById('reply-form').reset();">
+                                {% trans 'Cancel' %}
+                            </button>
+                            <button type="submit" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 focus:ring-offset-slate-800 disabled:opacity-50 disabled:cursor-not-allowed">
+                                <svg class="w-4 h-4 mr-2 hidden" id="submit-spinner" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                                </svg>
+                                <span id="submit-text">{% trans 'Send Reply' %}</span>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Help Text -->
+                    <div class="mt-2 flex items-center space-x-1 text-xs text-slate-500">
+                        <svg class="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        <p>
+                            {% if user.is_staff or user.staff_role %}
+                                {% trans 'Your reply will be visible to the customer unless marked as internal.' %}
+                            {% else %}
+                                {% trans 'Your reply will be visible to both you and the customer.' %}
+                            {% endif %}
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </form>
+    </div>
+    {% endif %}
+</div>
