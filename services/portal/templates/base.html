@@ -86,7 +86,7 @@
     </style>
 </head>
 <body class="h-full bg-slate-900 text-slate-100">
-    <div class="min-h-full">
+    <div class="min-h-screen flex flex-col">
         <!-- Mobile Header & Navigation -->
         {% include 'components/mobile_header.html' %}
         
@@ -165,11 +165,29 @@
         {% endif %}
 
         <!-- Main Content -->
-        <div id="main-content" class="min-h-full pt-4">
+        <div id="main-content" class="flex-1 pt-4">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 {% block content %}{% endblock %}
             </div>
         </div>
+        
+        <!-- Footer -->
+        <footer class="bg-slate-800 border-t border-slate-700 mt-8 sm:mt-12 lg:mt-16 xl:mt-20">
+          <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+            <div class="text-center text-slate-400 text-sm">
+              <p>
+                © {% now "Y" %} PRAHO Portal - {% trans 'PRAHO Really Automates Hosting Operations' %}
+              </p>
+              <p class="mt-2 text-xs">
+                <span class="text-blue-400">Django 5.2</span> | 
+                <span class="text-green-400">Python 3.13</span> | 
+                <span class="text-purple-400">PostgreSQL 16+</span> | 
+                <span class="text-yellow-400">HTMX</span> | 
+                <span class="text-cyan-400">{% trans 'Version' %} 1.0.0</span>
+              </p>
+            </div>
+          </div>
+        </footer>
     </div>
     
     <!-- Toast Messages -->
@@ -210,24 +228,6 @@
         {% endfor %}
     </div>
     {% endif %}
-    
-    <!-- Footer -->
-    <footer class="bg-slate-800 border-t border-slate-700 mt-8 sm:mt-12 lg:mt-16 xl:mt-20">
-      <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-        <div class="text-center text-slate-400 text-sm">
-          <p>
-            © {% now "Y" %} PRAHO Portal - {% trans 'PRAHO Really Automates Hosting Operations' %}
-          </p>
-          <p class="mt-2 text-xs">
-            <span class="text-blue-400">Django 5.2</span> | 
-            <span class="text-green-400">Python 3.13</span> | 
-            <span class="text-purple-400">PostgreSQL 16+</span> | 
-            <span class="text-yellow-400">HTMX</span> | 
-            <span class="text-cyan-400">{% trans 'Version' %} 1.0.0</span>
-          </p>
-        </div>
-      </div>
-    </footer>
     
     <!-- Loading overlay -->
     <div id="loading-overlay" 

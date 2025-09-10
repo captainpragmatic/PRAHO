@@ -8,6 +8,7 @@ from django.contrib import messages
 from django.http import HttpRequest, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils.translation import gettext as _
+from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 
 from .services import PlatformAPIError, ticket_api
@@ -192,6 +193,7 @@ def ticket_detail(request: HttpRequest, ticket_id: int):
     return render(request, 'tickets/ticket_detail.html', context)
 
 
+@csrf_protect
 def ticket_create(request: HttpRequest):
     """
     Create new support ticket view.
@@ -221,6 +223,7 @@ def ticket_create(request: HttpRequest):
         
         try:
             # Create ticket via platform API
+            # contact_email and contact_person are automatically populated from authenticated customer
             ticket = ticket_api.create_ticket(
                 customer_id=customer_id,
                 user_id=user_id,
@@ -230,17 +233,49 @@ def ticket_create(request: HttpRequest):
                 category=category
             )
             
+            # Extract ticket identifier for redirect and messages
+            ticket_id = ticket.get('id') or ticket.get('pk') 
+            ticket_number = ticket.get('ticket_number') or ticket_id
+            
             messages.success(request, _('Support ticket created successfully. Ticket #{}.').format(
-                ticket.get('ticket_number', ticket.get('id'))
+                ticket_number
             ))
             
-            logger.info(f"✅ [Tickets View] Created ticket {ticket.get('id')} for customer {customer_id}")
+            logger.info(f"✅ [Tickets View] Created ticket {ticket_id} for customer {customer_id}")
             
-            return redirect('tickets:detail', ticket_id=ticket['id'])
+            # Handle missing ticket ID gracefully
+            if ticket_id:
+                return redirect('tickets:detail', ticket_id=ticket_id)
+            else:
+                logger.error(f"🔥 [Tickets View] No ticket ID returned from platform API: {ticket}")
+                messages.error(request, _('Ticket created but unable to redirect to details. Please check your tickets list.'))
+                return redirect('tickets:list')
             
         except PlatformAPIError as e:
             logger.error(f"🔥 [Tickets View] Error creating ticket for customer {customer_id}: {e}")
             messages.error(request, _('Unable to create support ticket. Please try again later.'))
+            # Preserve form data on API error
+            return render(request, 'tickets/ticket_create.html', {
+                'title': title,
+                'description': description,
+                'priority': priority,
+                'category': category,
+                'priorities': [
+                    ('low', _('Low')),
+                    ('normal', _('Normal')),
+                    ('high', _('High')),
+                    ('urgent', _('Urgent')),
+                    ('critical', _('Critical')),
+                ],
+                'categories': [
+                    ('', _('General Support')),
+                    ('technical', _('Technical Issue')),
+                    ('billing', _('Billing Question')),
+                    ('hosting', _('Hosting Services')),
+                    ('domain', _('Domain Management')),
+                    ('email', _('Email Services')),
+                ]
+            })
     
     # GET request - show create form
     context = {

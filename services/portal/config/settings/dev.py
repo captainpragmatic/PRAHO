@@ -75,6 +75,13 @@ PLATFORM_API_TIMEOUT = 10  # seconds
 # No session configuration - portal is stateless
 CSRF_COOKIE_SECURE = False
 
+# CSRF trusted origins for development
+CSRF_TRUSTED_ORIGINS += [
+    "http://localhost:8701",
+    "http://127.0.0.1:8701", 
+    "http://claudius-imac:8701",
+]
+
 # Cache (use local memory cache for development)
 CACHES = {
     'default': {

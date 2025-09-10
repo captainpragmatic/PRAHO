@@ -5,6 +5,8 @@
 import logging
 from typing import Any
 
+from django.utils import timezone
+
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 
 logger = logging.getLogger(__name__)
@@ -112,22 +114,42 @@ class TicketAPIClient(PlatformAPIClient):
             Dict containing created ticket information
         """
         try:
+            # Get user info for contact fields (portal should have user session data)
+            # For now, we'll use basic fallback values
             data = {
-                'customer_id': customer_id,
-                'user_id': user_id,
+                'customer_id': customer_id,  # Required for HMAC auth, filtered out by platform
+                'user_id': user_id,         # Required for HMAC auth, filtered out by platform  
+                'action': 'create_ticket',   # Required for HMAC auth, filtered out by platform
+                'timestamp': int(timezone.now().timestamp()),  # Required for HMAC auth, filtered out by platform
+                # Actual ticket creation fields
                 'title': title,
                 'description': description,
                 'priority': priority,
-                'status': 'new',  # Customer-created tickets start as 'new'
+                # contact_email and contact_person will be automatically populated by platform from authenticated customer
             }
             
+            # Map category strings to platform category IDs
             if category:
-                data['category'] = category
+                category_mapping = {
+                    'technical': 1,  # Technical Support
+                    'billing': 3,    # Billing Question  
+                    'hosting': 2,    # Technical Issue
+                    'domain': 2,     # Technical Issue
+                    'email': 2,      # Technical Issue
+                }
+                data['category'] = category_mapping.get(category, 1)  # Default to Technical Support
                 
-            response = self._make_request('POST', '/tickets/', data=data)
+            logger.debug(f"🔍 [Tickets API] Sending ticket data: {data}")
+            response = self._make_request('POST', '/tickets/create/', data=data)
             
-            logger.info(f"✅ [Tickets API] Created ticket {response.get('id')} for customer {customer_id}")
-            return response
+            # Extract ticket data from platform API response format
+            if response.get('success') and 'data' in response and 'ticket' in response['data']:
+                ticket_data = response['data']['ticket']
+                logger.info(f"✅ [Tickets API] Created ticket {ticket_data.get('id')} for customer {customer_id}")
+                return ticket_data
+            else:
+                logger.error(f"🔥 [Tickets API] Unexpected response format: {response}")
+                raise PlatformAPIError(f"Unexpected response format: {response}")
             
         except PlatformAPIError as e:
             logger.error(f"🔥 [Tickets API] Error creating ticket for customer {customer_id}: {e}")

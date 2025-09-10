@@ -36,7 +36,8 @@
           </div>
           <!-- New Ticket Button -->
           <div class="htmx-stable">
-            {% button "New Ticket" variant="primary" href="tickets:create" responsive_text="New" size="sm" class="min-w-[80px] whitespace-nowrap" %}
+            {% url 'tickets:create' as create_ticket_url %}
+            {% button "New Ticket" variant="primary" href=create_ticket_url responsive_text="New" size="sm" class="min-w-[80px] whitespace-nowrap" %}
           </div>
         </div>
       </div>
@@ -58,7 +59,8 @@
         </div>
         <!-- New Ticket Button -->
         <div class="htmx-stable">
-          {% button "New Ticket" variant="primary" href="tickets:create" responsive_text="New" size="sm" class="min-w-[60px] flex-shrink-0 whitespace-nowrap" %}
+          {% url 'tickets:create' as create_ticket_url %}
+          {% button "New Ticket" variant="primary" href=create_ticket_url responsive_text="New" size="sm" class="min-w-[60px] flex-shrink-0 whitespace-nowrap" %}
         </div>
       </div>
       
@@ -117,10 +119,9 @@
         hx-indicator="#tickets-skeleton"
         class="px-3 py-2 border border-slate-600 rounded-lg bg-slate-700 text-white focus:outline-none focus:ring-2 focus:ring-primary">
         <option value="">{% trans 'All statuses' %}</option>
-        <option value="new" {% if status_filter == 'new' %}selected{% endif %}>{% trans 'New' %}</option>
         <option value="open" {% if status_filter == 'open' %}selected{% endif %}>{% trans 'Open' %}</option>
-        <option value="pending" {% if status_filter == 'pending' %}selected{% endif %}>{% trans 'Pending' %}</option>
-        <option value="resolved" {% if status_filter == 'resolved' %}selected{% endif %}>{% trans 'Resolved' %}</option>
+        <option value="in_progress" {% if status_filter == 'in_progress' %}selected{% endif %}>{% trans 'In Progress' %}</option>
+        <option value="waiting_on_customer" {% if status_filter == 'waiting_on_customer' %}selected{% endif %}>{% trans 'Waiting on You' %}</option>
         <option value="closed" {% if status_filter == 'closed' %}selected{% endif %}>{% trans 'Closed' %}</option>
       </select>
     </div>
