@@ -42,6 +42,7 @@ MIDDLEWARE: list[str] = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",   # Cache-only sessions
     "django.middleware.locale.LocaleMiddleware",              # After sessions
+    "apps.users.middleware.SessionLanguageMiddleware",        # Activate session language
     "django.middleware.common.CommonMiddleware",              # After locale
     "django.middleware.csrf.CsrfViewMiddleware",              # CSRF protection
     "django.contrib.messages.middleware.MessageMiddleware",   # Messages support

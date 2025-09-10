@@ -4,13 +4,13 @@ Customer-facing URLs only - authentication handled via platform API.
 """
 
 from django.conf import settings
-from django.http import JsonResponse
+from django.http import HttpRequest, JsonResponse
 from django.shortcuts import redirect
 from django.urls import include, path
 
 
 # Portal status endpoint
-def portal_status(request):
+def portal_status(request: HttpRequest) -> JsonResponse:
     return JsonResponse({'status': 'healthy', 'service': 'portal'})
 
 urlpatterns = [
@@ -46,9 +46,7 @@ urlpatterns = [
 # DEVELOPMENT URLS (Debug toolbar)
 # ===============================================================================
 
-if settings.DEBUG:
-    # Debug toolbar
-    if "debug_toolbar" in settings.INSTALLED_APPS:
+if settings.DEBUG and "debug_toolbar" in settings.INSTALLED_APPS:
         import debug_toolbar  # type: ignore[import-untyped]
 
         urlpatterns = [path("__debug__/", include(debug_toolbar.urls)), *urlpatterns]

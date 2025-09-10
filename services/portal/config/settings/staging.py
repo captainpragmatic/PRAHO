@@ -2,8 +2,9 @@
 Staging settings for PRAHO Portal Service
 """
 
-from .base import *
 import os
+
+from .base import *  # noqa: F403
 
 # Security - similar to production but with debug info
 DEBUG = False

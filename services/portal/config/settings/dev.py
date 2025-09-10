@@ -5,7 +5,7 @@ Development settings for PRAHO Portal Service
 import os
 import sys
 
-from .base import *
+from .base import *  # noqa: F403
 
 # Debug mode
 DEBUG = True
@@ -80,6 +80,8 @@ CSRF_TRUSTED_ORIGINS += [
     "http://localhost:8701",
     "http://127.0.0.1:8701", 
     "http://claudius-imac:8701",
+    "http://100.73.13.8:8700",  # Tailscale IP - Platform
+    "http://100.73.13.8:8701",  # Tailscale IP - Portal
 ]
 
 # Cache (use local memory cache for development)
