@@ -9,30 +9,34 @@
   <div class="max-w-md w-full space-y-8">
     <!-- Header -->
     <div class="text-center">
-      {% load static %}
       <div class="mx-auto h-16 w-16 mb-4">
-        <img src="{% static 'img/favicon.svg' %}" alt="PRAHO" class="h-full w-full">
+        <div class="h-full w-full bg-blue-600 rounded-lg flex items-center justify-center text-white text-2xl font-bold">
+          P
+        </div>
       </div>
       <h2 class="mt-6 text-3xl font-extrabold text-white">
         {% trans 'PRAHO Platform Login' %}
       </h2>
       <p class="mt-2 text-sm text-slate-400">
-        {% trans 'PRAHO Really Automates Hosting Operations' %}
+        {% trans 'Staff Portal Access' %}
       </p>
     </div>
 
     <!-- Login Form -->
-    <form id="login-form" class="mt-8 space-y-6" method="post" action="{% url 'users:login' %}">
+    <form id="login-form" class="mt-8 space-y-6" method="post" action="{% url 'users:login' %}{% if request.GET.next %}?next={{ request.GET.next|urlencode }}{% endif %}">
       {% csrf_token %}
+      {% if request.GET.next %}
+      <input type="hidden" name="next" value="{{ request.GET.next }}">
+      {% endif %}
 
       <div class="rounded-lg bg-slate-800 p-6 space-y-4">
         <!-- Email Field -->
         <div>
-          <label for="email" class="block text-sm font-medium text-slate-300">
+          <label for="id_email" class="block text-sm font-medium text-slate-300">
             📧 {% trans 'Email Address' %}
           </label>
           <div class="mt-1">
-            {% input_field name="email" input_type="email" placeholder="example@pragmatichost.com" required=True %}
+            {{ form.email }}
           </div>
           {% if form.email.errors %}
           <p class="mt-1 text-sm text-red-400">{{ form.email.errors.0 }}</p>
@@ -41,11 +45,11 @@
 
         <!-- Password Field -->
         <div>
-          <label for="password" class="block text-sm font-medium text-slate-300">
+          <label for="id_password" class="block text-sm font-medium text-slate-300">
             🔐 {% trans 'Password' %}
           </label>
           <div class="mt-1">
-            {% input_field name="password" input_type="password" placeholder="Enter password" required=True %}
+            {{ form.password }}
           </div>
           {% if form.password.errors %}
           <p class="mt-1 text-sm text-red-400">{{ form.password.errors.0 }}</p>
@@ -54,13 +58,17 @@
 
         <!-- Remember Me -->
         <div class="flex items-center justify-between">
-          {# Use underscore to match form field name and tests #}
-          {% checkbox_field name="remember_me" label="Keep me logged in" variant="primary" container_class="flex items-center" %}
+          <div class="flex items-center">
+            {{ form.remember_me }}
+            <label for="id_remember_me" class="ml-2 block text-sm text-slate-300">
+              {% trans 'Keep me logged in' %}
+            </label>
+          </div>
 
           <div class="text-sm">
-            <a href="{% url 'users:password_reset' %}" class="text-blue-400 hover:text-blue-300">
-              {% trans 'Forgot password?' %}
-            </a>
+            <span class="text-slate-500">
+              {% trans 'Forgot password? Contact IT support.' %}
+            </span>
           </div>
         </div>
 
@@ -75,16 +83,21 @@
 
         <!-- Submit Button -->
         <div>
-          {% button "Login" variant="primary" type="submit" size="lg" loading=True %}
+          <button type="submit" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed">
+            <span class="inline-flex items-center">
+              <span class="btn-text">{% trans "Sign In" %}</span>
+              <svg class="btn-spinner animate-spin -mr-1 ml-3 h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            </span>
+          </button>
         </div>
 
-        <!-- Register Link -->
+        <!-- Staff Access Note -->
         <div class="text-center pt-4 border-t border-slate-700">
           <p class="text-slate-400 text-sm">
-            {% trans 'Don\'t have an account?' %}
-            <a href="{% url 'users:register' %}" class="text-blue-400 hover:text-blue-300 font-medium">
-              {% trans 'Register here' %}
-            </a>
+            {% trans 'Staff access only. Contact IT for account setup.' %}
           </p>
         </div>
       </div>
@@ -92,37 +105,60 @@
 
     <!-- Security Notice -->
     <div class="text-center text-xs text-slate-500">
-      <p>🔒 {% trans 'Secure Connection' %} | {% trans 'GDPR Compliance' %} | {% trans 'MFA Available' %}</p>
+      <p>🔒 {% trans 'Secure Connection' %} | {% trans 'GDPR Compliance' %}</p>
     </div>
   </div>
 </div>
 
 <script>
-  // Submit handler for normal POST to disable button and show spinner
-  document.addEventListener('DOMContentLoaded', function () {
+  // Add styling to form fields and handle submit loading state
+  document.addEventListener('DOMContentLoaded', function() {
+    const emailField = document.getElementById('id_email');
+    const passwordField = document.getElementById('id_password');
+
+    if (emailField) {
+      emailField.className = 'w-full px-3 py-2 border border-slate-600 rounded-md bg-slate-700 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500';
+      emailField.placeholder = 'staff@pragmatichost.com';
+    }
+
+    if (passwordField) {
+      passwordField.className = 'w-full px-3 py-2 border border-slate-600 rounded-md bg-slate-700 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500';
+      passwordField.placeholder = 'Enter your password';
+    }
+
+    // Submit handler to show spinner on normal POST
     const form = document.getElementById('login-form');
-    if (!form) return;
-    form.addEventListener('submit', function (e) {
-      if (!form.dataset.submitting) {
-        e.preventDefault();
-        form.dataset.submitting = '1';
-        const submitBtn = form.querySelector('button[type="submit"], [type="submit"]');
-        if (submitBtn) {
-          submitBtn.disabled = true;
-          submitBtn.setAttribute('aria-disabled', 'true');
-          submitBtn.classList.add('opacity-50', 'cursor-not-allowed', 'is-loading');
+    if (form) {
+      form.addEventListener('submit', function (e) {
+        // Ensure spinner paints before navigation
+        if (!form.dataset.submitting) {
+          e.preventDefault();
+          form.dataset.submitting = '1';
+
+          const submitBtn = form.querySelector('button[type="submit"]');
+          if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.setAttribute('aria-disabled', 'true');
+            submitBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            // Show spinner and hide text
+            const btnText = submitBtn.querySelector('.btn-text');
+            const btnSpinner = submitBtn.querySelector('.btn-spinner');
+            if (btnText) btnText.classList.add('hidden');
+            if (btnSpinner) btnSpinner.classList.remove('hidden');
+          }
+
+          // Force a paint, then submit
+          // eslint-disable-next-line no-unused-expressions
+          form.offsetHeight; // reflow
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => form.submit());
+          });
+          return;
         }
-        // Force paint, then submit
-        // eslint-disable-next-line no-unused-expressions
-        form.offsetHeight; // reflow
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => form.submit());
-        });
-        return;
-      }
-      const submitBtn = form.querySelector('button[type="submit"], [type="submit"]');
-      if (submitBtn) submitBtn.disabled = true;
-    });
+        const submitBtn = form.querySelector('button[type="submit"]');
+        if (submitBtn) submitBtn.disabled = true;
+      });
+    }
   });
 </script>
 {% endblock %}
