@@ -5,6 +5,7 @@ PRAHO PLATFORM - Database Backup Script
 Automated backup system for Romanian hosting provider data
 """
 
+import argparse
 import gzip
 import logging
 import os
@@ -17,12 +18,12 @@ from pathlib import Path
 import boto3
 import django
 from botocore.exceptions import ClientError
+from django.conf import settings
+from django.core.mail import mail_admins
 
 # Setup Django environment
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.prod")
 django.setup()
-
-from django.conf import settings
 
 # Configure logging
 logging.basicConfig(
@@ -164,7 +165,7 @@ class PragmaticHostBackup:
                 env = os.environ.copy()
                 env["PGPASSWORD"] = db_config["PASSWORD"]
 
-                result = subprocess.run(cmd, check=False, env=env, capture_output=True, text=True)
+                result = subprocess.run(cmd, check=False, env=env, capture_output=True, text=True)  # noqa: S603
 
                 if result.returncode != 0:
                     logger.error(f"PostgreSQL backup failed: {result.stderr}")
@@ -218,7 +219,7 @@ class PragmaticHostBackup:
             # Use rsync for efficient copying
             cmd = ["rsync", "-av", "--progress", f"{media_root}/", f"{media_backup_path}/"]
 
-            result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+            result = subprocess.run(cmd, check=False, capture_output=True, text=True)  # noqa: S603
 
             if result.returncode != 0:
                 logger.error(f"Media backup failed: {result.stderr}")
@@ -276,7 +277,7 @@ class PragmaticHostBackup:
 
             cmd = ["tar", "-czf", str(archive_path), "-C", str(backup_path.parent), backup_path.name]
 
-            result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+            result = subprocess.run(cmd, check=False, capture_output=True, text=True)  # noqa: S603
 
             if result.returncode != 0:
                 logger.error(f"Archive creation failed: {result.stderr}")
@@ -313,7 +314,7 @@ class PragmaticHostBackup:
             logger.error(f"S3 upload failed: {e}")
             return False
 
-    def _cleanup_old_backups(self):
+    def _cleanup_old_backups(self) -> None:
         """Remove old backup files"""
         try:
             logger.info("Cleaning up old backups...")
@@ -348,7 +349,6 @@ class PragmaticHostBackup:
     def _send_backup_notification(self, success: bool, backup_name: str, details: str) -> None:
         """Send backup notification email"""
         try:
-            from django.core.mail import mail_admins
 
             if success:
                 subject = f"PragmaticHost: Backup Successful - {backup_name}"
@@ -433,9 +433,8 @@ class PragmaticHostBackup:
         return sorted(backups, key=lambda x: x["created"], reverse=True)
 
 
-def main():
+def main() -> None:
     """Main backup script entry point"""
-    import argparse
 
     parser = argparse.ArgumentParser(description="PragmaticHost Backup System")
     parser.add_argument("--backup-dir", default="/backups/pragmatichost", help="Local backup directory")

@@ -16,7 +16,7 @@ def run_mypy_check(target_path: str, description: str) -> tuple[int, str]:
     cmd = [sys.executable, "-m", "mypy", "--config-file=pyproject.toml", target_path]
 
     try:
-        result = subprocess.run(cmd, check=False, capture_output=True, text=True, cwd=Path(__file__).parent.parent)
+        result = subprocess.run(cmd, check=False, capture_output=True, text=True, cwd=Path(__file__).parent.parent)  # noqa: S603
 
         output = result.stdout + result.stderr
         error_count = output.count(" error: ")

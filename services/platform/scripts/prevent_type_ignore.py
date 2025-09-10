@@ -127,7 +127,7 @@ class TypeIgnoreChecker:
             message_parts.append(f"\n📁 {file_path}:")
 
             for v in file_violations:
-                icon = "🚨" if v["is_strict"] else ("⚠️" if not v["is_legacy"] else "ℹ️")
+                icon = "🚨" if v["is_strict"] else ("⚠️" if not v["is_legacy"] else "i")
                 message_parts.append(f"  {icon} Line {v['line']}: {v['content']}")
 
                 if v["is_strict"]:
@@ -224,7 +224,7 @@ Examples:
         files_to_check = args.files
 
     if not files_to_check:
-        print("ℹ️  No files to check")
+        print("i  No files to check")
         return 0
 
     # Initialize checker
