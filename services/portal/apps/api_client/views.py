@@ -3,8 +3,10 @@ API Client Views - Proxy views for platform API access
 """
 
 import logging
+import re
+import time
 
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.shortcuts import redirect
 
 from .services import platform_api
@@ -12,7 +14,7 @@ from .services import platform_api
 logger = logging.getLogger(__name__)
 
 
-def download_attachment(request: HttpRequest, ticket_id: int, attachment_id: int):
+def download_attachment(request: HttpRequest, ticket_id: int, attachment_id: int) -> HttpResponse | HttpResponseRedirect:
     """
     Proxy attachment download requests to platform service.
     """
@@ -24,7 +26,6 @@ def download_attachment(request: HttpRequest, ticket_id: int, attachment_id: int
     
     try:
         # Build request data for HMAC authentication
-        import time
         
         request_data = {
             'customer_id': customer_id,
@@ -46,8 +47,6 @@ def download_attachment(request: HttpRequest, ticket_id: int, attachment_id: int
         
         if content_disposition:
             # Parse Content-Disposition header to extract filename
-            # Format: attachment; filename="original_filename.ext"
-            import re
             filename_match = re.search(r'filename="([^"]+)"', content_disposition)
             if filename_match:
                 filename = filename_match.group(1)

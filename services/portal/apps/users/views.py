@@ -11,6 +11,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render, resolve_url
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.utils.translation import activate
 from django.utils.translation import gettext as _
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_protect
@@ -26,6 +27,65 @@ from apps.users.forms import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _handle_mfa_error_redirect(request: HttpRequest, target_view: str, error_msg: str) -> HttpResponse:
+    """Helper to handle MFA error responses with consistent redirect"""
+    messages.error(request, error_msg)
+    return redirect(target_view)
+
+
+def _handle_mfa_success_redirect(request: HttpRequest, target_view: str, success_msg: str) -> HttpResponse:
+    """Helper to handle MFA success responses with consistent redirect"""
+    messages.success(request, success_msg)
+    return redirect(target_view)
+
+
+def _check_authentication_or_redirect(request: HttpRequest) -> HttpResponse | None:
+    """Check authentication and return redirect if not authenticated, None if authenticated"""
+    if not request.session.get('customer_id'):
+        return redirect('/login/')
+    return None
+
+
+def _handle_totp_setup_get(request: HttpRequest, customer_id: str, customer_email: str) -> HttpResponse:
+    """Handle GET request for TOTP setup"""
+    try:
+        totp_data = api_client.setup_totp_mfa(customer_id)
+        if not totp_data:
+            return _handle_mfa_error_redirect(request, 'users:mfa_management', _("Failed to initialize MFA setup. Please try again."))
+        
+        context = {
+            'qr_code': totp_data.get('qr_code'),
+            'secret': totp_data.get('secret'),
+            'customer_email': customer_email,
+            'customer_id': customer_id,
+            'page_title': _('Set Up Authenticator App'),
+            'brand_name': 'PRAHO Portal',
+        }
+        return render(request, 'users/mfa_setup_totp.html', context)
+                
+    except Exception as e:
+        logger.error(f"🔥 [Portal MFA] Error initializing TOTP setup: {e}")
+        return _handle_mfa_error_redirect(request, 'users:mfa_management', _("An error occurred. Please try again."))
+
+
+def _handle_totp_setup_post(request: HttpRequest, customer_id: str, token: str) -> HttpResponse:
+    """Handle POST request for TOTP setup verification"""
+    if not token:
+        return _handle_mfa_error_redirect(request, 'users:mfa_setup_totp', _("Please enter the verification code."))
+    
+    try:
+        success = api_client.verify_totp_mfa(customer_id, token)
+        if success:
+            logger.info(f"✅ [Portal 2FA] TOTP enabled successfully for customer {customer_id}")
+            return _handle_mfa_success_redirect(request, 'users:mfa_management', _("Two-factor authentication has been enabled successfully!"))
+        else:
+            return _handle_mfa_error_redirect(request, 'users:mfa_setup_totp', _("Invalid verification code. Please try again."))
+            
+    except Exception as e:
+        logger.error(f"🔥 [Portal 2FA] Error verifying TOTP: {e}")
+        return _handle_mfa_error_redirect(request, 'users:mfa_setup_totp', _("An error occurred. Please try again."))
 
 
 def _get_safe_redirect_target(request: HttpRequest, fallback: str = "/dashboard/") -> str:
@@ -222,6 +282,72 @@ def register_view(request: HttpRequest) -> HttpResponse:
     return render(request, 'users/register.html', context)
 
 
+def _load_profile_form_data(request: HttpRequest, user_id: int) -> CustomerProfileForm:
+    """Load and initialize profile form with existing data"""
+    try:
+        profile_data = api_client.get_customer_profile(user_id)
+        
+        if profile_data:
+            return CustomerProfileForm(initial={
+                'first_name': profile_data.get('first_name', ''),
+                'last_name': profile_data.get('last_name', ''),
+                'phone': profile_data.get('phone', ''),
+                'preferred_language': profile_data.get('profile', {}).get('preferred_language', 'en'),
+                'timezone': profile_data.get('profile', {}).get('timezone', 'Europe/Bucharest'),
+            })
+        else:
+            return CustomerProfileForm()
+            
+    except Exception as e:
+        logger.error(f"🔥 [Portal Profile] Error loading profile: {e}")
+        messages.error(request, _("Error loading profile data."))
+        return CustomerProfileForm()
+
+
+def _handle_profile_update(request: HttpRequest, form: CustomerProfileForm, user_id: int, customer_id: str) -> HttpResponse | None:
+    """Handle profile update and return redirect response if successful"""
+    if not form.is_valid():
+        return None
+        
+    try:
+        update_data = {
+            'first_name': form.cleaned_data['first_name'],
+            'last_name': form.cleaned_data['last_name'],
+            'phone': form.cleaned_data['phone'],
+            'preferred_language': form.cleaned_data.get('preferred_language', 'en'),
+            'timezone': form.cleaned_data.get('timezone', 'Europe/Bucharest'),
+        }
+        
+        result = api_client.update_customer_profile(user_id, update_data)
+        
+        if result:
+            logger.info(f"✅ [Portal Profile] Profile updated for customer {customer_id}")
+            
+            # Handle language change
+            new_language = form.cleaned_data.get('preferred_language', 'en')
+            current_language = request.session.get('_language', 'en')
+            
+            if new_language != current_language:
+                request.session['_language'] = new_language
+                # Activate language immediately for this request (same as /i18n/setlang/)
+                activate(new_language)
+                logger.info(f"✅ [Portal Profile] Language changed from {current_language} to {new_language} for customer {customer_id}")
+                logger.info(f"🌐 [Portal Profile] Language activated: {new_language}, Test translation: {_('Language')}")
+                messages.success(request, _("Profile and language updated successfully!"))
+            else:
+                messages.success(request, _("Profile updated successfully!"))
+            
+            return redirect('users:profile')
+        else:
+            messages.error(request, _("Error updating profile. Please try again."))
+        
+    except Exception as e:
+        logger.error(f"🔥 [Portal Profile] Error updating profile: {e}")
+        messages.error(request, _("Error updating profile. Please try again."))
+    
+    return None
+
+
 @never_cache
 @csrf_protect
 @require_http_methods(["GET", "POST"])
@@ -241,66 +367,22 @@ def profile_view(request: HttpRequest) -> HttpResponse:
     customer_email = request.session.get('email')
     
     if request.method == 'GET':
-        # Load current profile data from Platform API
-        try:
-            # Call Platform API to get current profile data
-            from apps.api_client.services import api_client
-            profile_data = api_client.get_customer_profile(user_id)
-            
-            if profile_data:
-                # Initialize form with existing data
-                form = CustomerProfileForm(initial={
-                    'first_name': profile_data.get('first_name', ''),
-                    'last_name': profile_data.get('last_name', ''),
-                    'phone': profile_data.get('phone', ''),
-                    'preferred_language': profile_data.get('profile', {}).get('preferred_language', 'en'),
-                    'timezone': profile_data.get('profile', {}).get('timezone', 'Europe/Bucharest'),
-                })
-            else:
-                form = CustomerProfileForm()
-                
-        except Exception as e:
-            logger.error(f"🔥 [Portal Profile] Error loading profile: {e}")
-            messages.error(request, _("Error loading profile data."))
-            form = CustomerProfileForm()
+        form = _load_profile_form_data(request, user_id)
     else:  # POST
         form = CustomerProfileForm(request.POST)
         
-        if form.is_valid():
-            try:
-                # Update profile via Platform API
-                from apps.api_client.services import api_client
-                update_data = {
-                    'first_name': form.cleaned_data['first_name'],
-                    'last_name': form.cleaned_data['last_name'],
-                    'phone': form.cleaned_data['phone'],
-                    'preferred_language': form.cleaned_data.get('preferred_language', 'en'),
-                    'timezone': form.cleaned_data.get('timezone', 'Europe/Bucharest'),
-                }
-                
-                result = api_client.update_customer_profile(user_id, update_data)
-                
-                if result:
-                    logger.info(f"✅ [Portal Profile] Profile updated for customer {customer_id}")
-                    messages.success(request, _("Profile updated successfully!"))
-                    # Redirect to prevent duplicate form submissions
-                    return redirect('users:profile')
-                else:
-                    messages.error(request, _("Error updating profile. Please try again."))
-                
-            except Exception as e:
-                logger.error(f"🔥 [Portal Profile] Error updating profile: {e}")
-                messages.error(request, _("Error updating profile. Please try again."))
+        # Handle profile update
+        redirect_response = _handle_profile_update(request, form, user_id, customer_id)
+        if redirect_response:
+            return redirect_response
     
-    # Get profile data from Platform API
+    # Get profile data from Platform API for context
     profile_data = {}
     try:
-        from apps.api_client.services import api_client
         profile_data = api_client.get_customer_profile(user_id) or {}
     except Exception as e:
         logger.debug(f"Could not load profile data from Platform API: {e}")
     
-    # Prepare context with direct API data - no mock objects
     context = {
         'form': form,
         'profile': profile_data,
@@ -578,55 +660,18 @@ def mfa_setup_totp_view(request: HttpRequest) -> HttpResponse:
     """
     
     # Check authentication - redirect to login if not authenticated
-    if not request.session.get('customer_id'):
-        return redirect('/login/')
+    auth_redirect = _check_authentication_or_redirect(request)
+    if auth_redirect:
+        return auth_redirect
     
-    customer_id = request.session.get('customer_id')
+    customer_id = str(request.session.get('customer_id'))
     customer_email = request.session.get('email')
     
     if request.method == 'GET':
-        # Initialize TOTP setup
-        try:
-            totp_data = api_client.setup_totp_mfa(str(customer_id))
-            if totp_data:
-                context = {
-                    'qr_code': totp_data.get('qr_code'),
-                    'secret': totp_data.get('secret'),
-                    'customer_email': customer_email,
-                    'customer_id': customer_id,
-                    'page_title': _('Set Up Authenticator App'),
-                    'brand_name': 'PRAHO Portal',
-                }
-                return render(request, 'users/mfa_setup_totp.html', context)
-            else:
-                messages.error(request, _("Failed to initialize MFA setup. Please try again."))
-                return redirect('users:mfa_management')
-                
-        except Exception as e:
-            logger.error(f"🔥 [Portal MFA] Error initializing TOTP setup: {e}")
-            messages.error(request, _("An error occurred. Please try again."))
-            return redirect('users:mfa_management')
-    
+        return _handle_totp_setup_get(request, customer_id, customer_email)
     else:  # POST - verify TOTP token
         token = request.POST.get('token', '').strip()
-        if not token:
-            messages.error(request, _("Please enter the verification code."))
-            return redirect('users:mfa_setup_totp')
-        
-        try:
-            success = api_client.verify_totp_mfa(str(customer_id), token)
-            if success:
-                logger.info(f"✅ [Portal 2FA] TOTP enabled successfully for customer {customer_id}")
-                messages.success(request, _("Two-factor authentication has been enabled successfully!"))
-                return redirect('users:mfa_management')
-            else:
-                messages.error(request, _("Invalid verification code. Please try again."))
-                return redirect('users:mfa_setup_totp')
-                
-        except Exception as e:
-            logger.error(f"🔥 [Portal 2FA] Error verifying TOTP: {e}")
-            messages.error(request, _("An error occurred. Please try again."))
-            return redirect('users:mfa_setup_totp')
+        return _handle_totp_setup_post(request, customer_id, token)
 
 
 @never_cache

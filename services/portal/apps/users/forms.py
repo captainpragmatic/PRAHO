@@ -15,8 +15,13 @@ from apps.api_client.services import PlatformAPIError, api_client
 
 logger = logging.getLogger(__name__)
 
-# Romanian VAT number validation constants
+# Romanian validation constants
 MIN_VAT_DIGITS = 6
+CNP_LENGTH = 13  # Romanian Personal Numeric Code length
+
+# Password validation constants  
+REGISTRATION_PASSWORD_MIN_LENGTH = 12
+CHANGE_PASSWORD_MIN_LENGTH = 8
 
 
 class CustomerLoginForm(forms.Form):
@@ -250,7 +255,7 @@ class CustomerRegistrationForm(forms.Form):
         if password1 and password2 and password1 != password2:
             raise ValidationError(_("The two password fields didn't match."))
         
-        if password1 and len(password1) < 12:
+        if password1 and len(password1) < REGISTRATION_PASSWORD_MIN_LENGTH:
             raise ValidationError(_("Password must be at least 12 characters long."))
             
         return password2 or ''
@@ -258,10 +263,9 @@ class CustomerRegistrationForm(forms.Form):
     def clean_phone(self) -> str:
         """Validate Romanian phone number format"""
         phone = self.cleaned_data.get('phone', '').strip()
-        if phone:
-            # Romanian phone patterns: +40.XX.XXX.XXXX, +40 XXX XXX XXX, 07XXXXXXXX
-            if not re.match(r"^(\+40[\.\s]*[0-9][\.\s0-9]{8,11}[0-9]|0[0-9]{9})$", phone):
-                raise ValidationError(_("Invalid phone number format. Use Romanian format: +40.XX.XXX.XXXX"))
+        # Romanian phone patterns: +40.XX.XXX.XXXX, +40 XXX XXX XXX, 07XXXXXXXX
+        if phone and not re.match(r"^(\+40[\.\s]*[0-9][\.\s0-9]{8,11}[0-9]|0[0-9]{9})$", phone):
+            raise ValidationError(_("Invalid phone number format. Use Romanian format: +40.XX.XXX.XXXX"))
         return phone
     
     def clean_vat_number(self) -> str:
@@ -284,7 +288,7 @@ class CustomerRegistrationForm(forms.Form):
         cnp = self.cleaned_data.get('cnp', '').strip()
         if cnp:
             # CNP must be exactly 13 digits
-            if not cnp.isdigit() or len(cnp) != 13:
+            if not cnp.isdigit() or len(cnp) != CNP_LENGTH:
                 raise ValidationError(_("CNP must be exactly 13 digits."))
             
             # Basic CNP checksum validation (simplified)
@@ -294,7 +298,7 @@ class CustomerRegistrationForm(forms.Form):
                 
         return cnp
     
-    def clean(self):
+    def clean(self) -> dict[str, Any]:
         """Custom validation that depends on multiple fields"""
         cleaned_data = super().clean()
         customer_type = cleaned_data.get('customer_type')
@@ -440,9 +444,8 @@ class CustomerProfileForm(forms.Form):
     def clean_phone(self) -> str:
         """Validate Romanian phone number format"""
         phone = self.cleaned_data.get('phone', '').strip()
-        if phone:
-            if not re.match(r"^(\+40[\.\s]*[0-9][\.\s0-9]{8,11}[0-9]|0[0-9]{9})$", phone):
-                raise ValidationError(_("Invalid phone number format. Use Romanian format: +40.XX.XXX.XXXX"))
+        if phone and not re.match(r"^(\+40[\.\s]*[0-9][\.\s0-9]{8,11}[0-9]|0[0-9]{9})$", phone):
+            raise ValidationError(_("Invalid phone number format. Use Romanian format: +40.XX.XXX.XXXX"))
         return phone
 
 
@@ -542,16 +545,15 @@ class ChangePasswordForm(forms.Form):
         help_text=_("Re-enter your new password to confirm."),
     )
     
-    def clean(self):
+    def clean(self) -> dict[str, Any]:
         cleaned_data = super().clean()
         new_password = cleaned_data.get('new_password')
         confirm_password = cleaned_data.get('confirm_password')
         
-        if new_password and confirm_password:
-            if new_password != confirm_password:
-                raise ValidationError(_("New password and confirmation don't match."))
+        if new_password and confirm_password and new_password != confirm_password:
+            raise ValidationError(_("New password and confirmation don't match."))
                 
-        if new_password and len(new_password) < 8:
+        if new_password and len(new_password) < CHANGE_PASSWORD_MIN_LENGTH:
             raise ValidationError(_("Password must be at least 8 characters long."))
             
         return cleaned_data

@@ -1,12 +1,14 @@
 """
-Portal Authentication Middleware
+Portal Authentication and Language Middleware
 Production-ready two-tier validation with jitter, single-flight locks, and stale-while-revalidate.
+Also handles language activation from session for i18n.
 """
 
 import logging
 import random
 import time
 from datetime import datetime, timedelta
+from typing import Any, ClassVar
 
 from django.conf import settings
 from django.core.cache import cache
@@ -14,6 +16,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
 from django.utils import timezone as django_timezone
 from django.utils.http import urlencode
+from django.utils.translation import activate, get_language
 
 from apps.api_client.services import PlatformAPIError, api_client
 
@@ -33,7 +36,7 @@ class PortalAuthenticationMiddleware:
     """
     
     # Public URLs that don't require authentication
-    PUBLIC_URLS = [
+    PUBLIC_URLS: ClassVar[list[str]] = [
         '/login/',
         '/logout/', 
         '/register/',
@@ -51,7 +54,7 @@ class PortalAuthenticationMiddleware:
     SOFT_TTL_GRACE = 300   # 5 minutes soft grace period (stale-while-revalidate)
     HARD_TTL_GRACE = 21600   # 6 hours hard grace period (force logout after this)
     
-    def __init__(self, get_response):
+    def __init__(self, get_response: Any) -> None:
         self.get_response = get_response
     
     def __call__(self, request: HttpRequest) -> HttpResponse:
@@ -66,7 +69,7 @@ class PortalAuthenticationMiddleware:
                 is_staff = False
                 is_superuser = False
                 
-                def __str__(self):
+                def __str__(self) -> str:
                     return "AnonymousUser"
             
             request.user = AnonymousUser()
@@ -129,7 +132,7 @@ class PortalAuthenticationMiddleware:
                 self.is_staff = False
                 self.is_superuser = False
             
-            def __str__(self):
+            def __str__(self) -> str:
                 return self.email or f"customer_{self.id}"
         
         request.user = PortalUser(str(session_user_id), request.session.get('email', ''))
@@ -198,7 +201,7 @@ class PortalAuthenticationMiddleware:
         logger.warning(f"🚨 [Auth] Customer {customer_id} past hard TTL deadline, forcing logout")
         return False
     
-    def _get_session_datetime(self, request: HttpRequest, key: str, default=None) -> datetime:
+    def _get_session_datetime(self, request: HttpRequest, key: str, default: datetime | None = None) -> datetime:
         """Get datetime from session, handling ISO format conversion."""
         value = request.session.get(key)
         if value:
@@ -210,7 +213,7 @@ class PortalAuthenticationMiddleware:
     
     def _calculate_next_validation_time(self, now: datetime) -> datetime:
         """Calculate next validation time with jitter to prevent thundering herd."""
-        jitter_seconds = random.randint(0, self.JITTER_MAX)
+        jitter_seconds = random.randint(0, self.JITTER_MAX)  # noqa: S311
         return now + timedelta(seconds=self.REVALIDATE_EVERY + jitter_seconds)
     
     def _should_revalidate_async(self, customer_id: str) -> bool:
@@ -306,3 +309,33 @@ class PortalAuthenticationMiddleware:
         logger.debug(f"✅ [Auth] {session_type} session is within valid lifetime "
                     f"({session_age:.0f}s / {max_age_seconds:.0f}s)")
         return True
+
+
+class SessionLanguageMiddleware:
+    """
+    Middleware to activate language from Django session.
+    
+    This ensures that when users select a language in the profile page,
+    it persists across all pages by activating the session language
+    for every request.
+    
+    Must be placed AFTER Django's LocaleMiddleware in MIDDLEWARE setting.
+    """
+    
+    def __init__(self, get_response) -> None:
+        self.get_response = get_response
+    
+    def __call__(self, request):
+        # Check if there's a language stored in session
+        session_language = request.session.get('_language')
+        
+        if session_language:
+            current_language = get_language()
+            
+            # If session language differs from current, activate it
+            if session_language != current_language:
+                activate(session_language)
+                logger.debug(f"🌐 [Language Middleware] Activated {session_language} from session (was {current_language})")
+        
+        response = self.get_response(request)
+        return response
