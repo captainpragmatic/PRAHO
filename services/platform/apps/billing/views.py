@@ -64,21 +64,7 @@ from .services import (
 )
 
 
-def _get_accessible_customer_ids(user: User | None) -> list[int]:
-    """Helper to get customer IDs that user can access"""
-    if user is None:
-        return []
-
-    try:
-        accessible_customers = user.get_accessible_customers()
-    except AttributeError:
-        # Handle cases where user doesn't have get_accessible_customers method
-        return []
-
-    if isinstance(accessible_customers, QuerySet):
-        return list(accessible_customers.values_list("id", flat=True))
-    else:
-        return [c.id for c in accessible_customers] if accessible_customers else []
+# Customer access function removed - platform is staff-only
 
 
 def _validate_financial_document_access(
@@ -204,7 +190,7 @@ def _validate_pdf_access(request: HttpRequest, document: Invoice | ProformaInvoi
     return result
 
 
-@login_required
+@billing_staff_required
 @rate_limit(requests_per_minute=60, per_user=True)
 def billing_list(request: HttpRequest) -> HttpResponse:
     """
@@ -215,8 +201,8 @@ def billing_list(request: HttpRequest) -> HttpResponse:
         return redirect("users:login")
 
     try:
-        # Get accessible customers
-        customer_ids = _get_accessible_customer_ids(request.user)
+        # Staff can access all customers
+        customer_ids = list(Customer.objects.values_list('id', flat=True))
 
         # Filter by type
         doc_type = request.GET.get("type", "all")  # all, proforma, invoice
@@ -260,7 +246,7 @@ def billing_list(request: HttpRequest) -> HttpResponse:
                     "total": proforma.total,
                     "currency": proforma.currency,
                     "created_at": proforma.created_at,
-                    "status": "valid" if not proforma.is_expired else "expired",
+                    "status": proforma.status,
                     "can_edit": (request.user.is_staff or getattr(request.user, "staff_role", None))
                     and not proforma.is_expired,
                     "can_convert": (request.user.is_staff or getattr(request.user, "staff_role", None))
@@ -310,8 +296,8 @@ def billing_list(request: HttpRequest) -> HttpResponse:
         proforma_total = proformas_qs.aggregate(total=Sum("total_cents"))["total"] or 0
         invoice_total = invoices_qs.aggregate(total=Sum("total_cents"))["total"] or 0
 
-        # Check if user is staff for different context
-        is_staff_user = request.user.is_staff or getattr(request.user, "staff_role", None)
+        # Platform is staff-only
+        is_staff_user = True
 
         context = {
             "documents": pagination_context["page_obj"],  # ✅ Use paginated documents
@@ -366,8 +352,8 @@ def proforma_list(request: HttpRequest) -> HttpResponse:
         return redirect("users:login")
 
     try:
-        # Get accessible customers
-        customer_ids = _get_accessible_customer_ids(request.user)
+        # Staff can access all customers
+        customer_ids = list(Customer.objects.values_list('id', flat=True))
 
         # ✅ Get search context for template
         search_context = get_search_context(request, "search")
@@ -422,8 +408,8 @@ def proforma_list(request: HttpRequest) -> HttpResponse:
         # Statistics
         proforma_total = proformas_qs.aggregate(total=Sum("total_cents"))["total"] or 0
 
-        # Check if user is staff for different context
-        is_staff_user = request.user.is_staff or getattr(request.user, "staff_role", None)
+        # Platform is staff-only
+        is_staff_user = True
 
         context = {
             "documents": pagination_context["page_obj"],
@@ -466,7 +452,7 @@ def proforma_list(request: HttpRequest) -> HttpResponse:
         return render(request, "billing/billing_list.html", context)
 
 
-@login_required
+@billing_staff_required
 def billing_list_htmx(request: HttpRequest) -> HttpResponse:
     """
     🚀 HTMX endpoint for billing documents list with dynamic loading
@@ -477,8 +463,8 @@ def billing_list_htmx(request: HttpRequest) -> HttpResponse:
         return redirect("users:login")
 
     try:
-        # Get accessible customers
-        customer_ids = _get_accessible_customer_ids(request.user)
+        # Staff can access all customers
+        customer_ids = list(Customer.objects.values_list('id', flat=True))
 
         # Filter by type
         doc_type = request.GET.get("type", "all")  # all, proforma, invoice
@@ -518,7 +504,7 @@ def billing_list_htmx(request: HttpRequest) -> HttpResponse:
                     "total": proforma.total,
                     "currency": proforma.currency,
                     "created_at": proforma.created_at,
-                    "status": "valid" if not proforma.is_expired else "expired",
+                    "status": proforma.status,
                     "can_edit": (request.user.is_staff or getattr(request.user, "staff_role", None))
                     and not proforma.is_expired,
                     "can_convert": (request.user.is_staff or getattr(request.user, "staff_role", None))
@@ -597,10 +583,7 @@ def invoice_detail(request: HttpRequest, pk: int) -> HttpResponse:
     """
     invoice = get_object_or_404(Invoice, pk=pk)
 
-    # Security check - type guard for authenticated user
-    if not isinstance(request.user, User) or not request.user.can_access_customer(invoice.customer):
-        messages.error(request, _("❌ You do not have permission to access this invoice."))
-        return redirect("billing:invoice_list")
+    # Staff access - no customer restrictions needed
 
     # Get invoice items and payments
     items = invoice.lines.all()
@@ -715,10 +698,7 @@ def proforma_detail(request: HttpRequest, pk: int) -> HttpResponse:
     """
     proforma = get_object_or_404(ProformaInvoice, pk=pk)
 
-    # Security check - type guard for authenticated user
-    if not isinstance(request.user, User) or not request.user.can_access_customer(proforma.customer):
-        messages.error(request, _("❌ You do not have permission to access this proforma."))
-        return redirect("billing:invoice_list")
+    # Staff access - no customer restrictions needed
 
     # Get proforma lines
     lines = proforma.lines.all()
