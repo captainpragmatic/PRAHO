@@ -12,6 +12,17 @@
         <h1 class="text-3xl font-bold text-white">🌐 {% trans 'My Services' %}</h1>
         <p class="mt-2 text-slate-400">{% trans 'Manage your hosting services and resources' %}</p>
       </div>
+      
+      <!-- Order Service Button -->
+      <div class="hidden sm:block">
+        {% load ui_components %}
+        {% button "🛒 Order New Service" variant="success" size="lg" href="/order/" icon="plus" class="shadow-lg hover:shadow-xl transition-shadow" %}
+      </div>
+    </div>
+    
+    <!-- Mobile Order Button -->
+    <div class="sm:hidden mt-4">
+      {% button "🛒 Order Service" variant="success" size="md" href="/order/" icon="plus" class="w-full" %}
     </div>
   </div>
 

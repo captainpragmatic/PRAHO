@@ -16,6 +16,13 @@
       <p class="mt-2 text-slate-400">
         {% trans "Order details, items, and status history" %}
       </p>
+      {% if is_staff and order.status == 'draft' %}
+        {% if preflight_ok %}
+          <div class="mt-2 text-green-400 text-sm">✅ {% trans "Validation passed" %}</div>
+        {% else %}
+          <div class="mt-2 text-yellow-400 text-sm">⚠️ {% trans "Validation required before promoting to Pending" %}</div>
+        {% endif %}
+      {% endif %}
     </div>
     <div class="mt-4 sm:mt-0 sm:ml-16 sm:flex-none space-x-3">
       <!-- Back Button -->
@@ -34,6 +41,15 @@
         {% endif %}
         
         {% if order.status not in "cancelled,refunded,completed" %}
+          {% if order.status == "draft" %}
+            <button 
+              hx-get="{% url 'orders:order_validate' pk=order.id %}"
+              hx-target="#preflight-container"
+              hx-swap="innerHTML"
+              class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-green-600 text-white bg-green-700 hover:bg-green-600 focus:ring-2 focus:ring-green-500">
+              ✅ {% trans "Run Validation" %}
+            </button>
+          {% endif %}
           <button 
             type="button"
             onclick="showStatusModal()"
@@ -207,6 +223,13 @@
       <!-- Financial Summary Card - Using HTMX-powered partial -->
       {% include 'orders/partials/financial_summary.html' %}
 
+      {% if is_staff and order.status == 'draft' %}
+      <!-- Preflight Validation Card -->
+      <div id="preflight-container" class="mt-6">
+        {% include 'orders/partials/preflight_results.html' with preflight_ok=preflight_ok preflight_errors=preflight_errors preflight_warnings=preflight_warnings %}
+      </div>
+      {% endif %}
+
       <!-- Status History Card -->
       <div class="bg-slate-800 rounded-lg border border-slate-700">
         <div class="px-6 py-4 border-b border-slate-700">
@@ -273,6 +296,37 @@
         {% csrf_token %}
         <div class="px-6 pt-6 pb-4">
           <h3 class="text-lg font-medium text-white mb-4">🔄 {% trans "Change Order Status" %}</h3>
+          {% if order.status == 'draft' %}
+          <!-- Inline validation summary -->
+          <div id="modal-preflight" class="mb-4">
+            {% if preflight_ok %}
+              <div class="bg-green-900/30 border border-green-700/50 text-green-300 text-sm rounded-lg p-3">
+                ✅ {% trans "Validation passed — you may promote to Pending" %}
+              </div>
+            {% else %}
+              {% if preflight_errors %}
+              <div class="bg-red-900/30 border border-red-700/50 text-red-300 text-sm rounded-lg p-3 mb-3">
+                <div class="font-semibold mb-1">{% trans "Blocking issues" %}</div>
+                <ul class="list-disc pl-5 space-y-1">
+                  {% for err in preflight_errors %}
+                  <li>{{ err }}</li>
+                  {% endfor %}
+                </ul>
+              </div>
+              {% endif %}
+              {% if preflight_warnings %}
+              <div class="bg-yellow-900/30 border border-yellow-700/50 text-yellow-300 text-sm rounded-lg p-3">
+                <div class="font-semibold mb-1">{% trans "Warnings" %}</div>
+                <ul class="list-disc pl-5 space-y-1">
+                  {% for warn in preflight_warnings %}
+                  <li>{{ warn }}</li>
+                  {% endfor %}
+                </ul>
+              </div>
+              {% endif %}
+            {% endif %}
+          </div>
+          {% endif %}
           
           <div class="mb-4">
             <label for="new_status" class="block text-sm font-medium text-slate-400 mb-2">
@@ -282,7 +336,7 @@
                     class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500">
               <option value="">{% trans "Select new status..." %}</option>
               {% if order.status == "draft" %}
-                <option value="pending">⏳ {% trans "Pending" %}</option>
+                <option value="pending" {% if not preflight_ok %}disabled{% endif %}>⏳ {% trans "Pending" %}</option>
                 <option value="cancelled">❌ {% trans "Cancelled" %}</option>
               {% elif order.status == "pending" %}
                 <option value="processing">⚙️ {% trans "Processing" %}</option>
@@ -330,6 +384,16 @@
 </div>
 
 <script>
+// Simple toast helper used by status change
+function showToast(message, variant) {
+  const bg = variant === 'success' ? 'bg-green-600' : (variant === 'warning' ? 'bg-yellow-600' : 'bg-red-600');
+  const toast = document.createElement('div');
+  toast.className = `fixed top-4 right-4 z-50 ${bg} text-white px-4 py-2 rounded-lg shadow-lg`;
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'opacity 0.3s'; }, 2000);
+  setTimeout(() => { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 2400);
+}
 function showStatusModal() {
     document.getElementById('statusModal').classList.remove('hidden');
 }
@@ -354,10 +418,10 @@ document.getElementById('statusForm').addEventListener('submit', function(e) {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            // Reload page to show updated status
-            window.location.reload();
+            showToast('Status changed to ' + (data.new_status || ''), 'success');
+            setTimeout(() => window.location.reload(), 600);
         } else {
-            alert('Error: ' + data.error);
+            showToast('Error: ' + (data.error || 'Unknown error'), 'error');
         }
     })
     .catch(error => {

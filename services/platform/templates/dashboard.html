@@ -12,7 +12,11 @@
       {% if user.is_staff %}
       🚀 {% trans 'Dashboard PragmaticHost' %}
       {% else %}
-      {% blocktrans with first_name=user.first_name|default:user.username %}👋 Welcome {{ first_name }}{% endblocktrans %}
+      {% if user.first_name %}
+        {% blocktrans with first_name=user.first_name %}👋 Welcome {{ first_name }}{% endblocktrans %}
+      {% else %}
+        👋 {% trans 'Welcome' %}
+      {% endif %}
       {% endif %}
     </h1>
     <p class="mt-2 text-slate-400">
