@@ -381,11 +381,12 @@ def cart_review(request: HttpRequest) -> HttpResponse:
     
     # Calculate totals
     customer_id = request.session.get('customer_id')
+    user_id = request.session.get('user_id')
     calculation_result = None
     calculation_error = None
     
     try:
-        calculation_result = CartCalculationService.calculate_cart_totals(cart, customer_id)
+        calculation_result = CartCalculationService.calculate_cart_totals(cart, customer_id, user_id)
     except ValidationError as e:
         calculation_error = str(e)
         logger.error(f"🔥 [Cart] Calculation error: {e}")
@@ -439,15 +440,22 @@ def calculate_totals_htmx(request: HttpRequest) -> HttpResponse:
     try:
         cart = GDPRCompliantCartSession(request.session)
         customer_id = request.session.get('customer_id')
+        user_id = request.session.get('user_id')
         
-        # Debug logging for customer_id issue
-        logger.info(f"🔍 [Cart] Calculate totals - customer_id: {customer_id}, session_keys: {list(request.session.keys())}")
+        # Debug logging for authentication parameters
+        logger.info(f"🔍 [Cart] Calculate totals - customer_id: {customer_id}, user_id: {user_id}")
+        
+        if not customer_id or not user_id:
+            logger.error(f"🔥 [Cart] Missing authentication parameters - customer_id: {customer_id}, user_id: {user_id}")
+            return render(request, 'orders/partials/error_message.html', {
+                'error': _('Authentication error. Please refresh the page.')
+            }, status=400)
         
         if not cart.has_items():
             return render(request, 'orders/partials/cart_empty.html')
         
         # Calculate totals
-        calculation_result = CartCalculationService.calculate_cart_totals(cart, customer_id)
+        calculation_result = CartCalculationService.calculate_cart_totals(cart, customer_id, user_id)
         
         # 🔒 SECURITY: Record successful operation with IP tracking
         CartRateLimiter.record_operation(session_key, client_ip)
@@ -486,11 +494,12 @@ def checkout(request: HttpRequest) -> HttpResponse:
     
     # Calculate totals for display
     customer_id = request.session.get('customer_id')
+    user_id = request.session.get('user_id')
     calculation_result = None
     preflight_result = None
     
     try:
-        calculation_result = CartCalculationService.calculate_cart_totals(cart, customer_id)
+        calculation_result = CartCalculationService.calculate_cart_totals(cart, customer_id, user_id)
         
         # 🔎 SECURITY: Run preflight validation to check for issues
         preflight_result = OrderCreationService.preflight_order(cart, customer_id)

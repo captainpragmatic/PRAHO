@@ -467,7 +467,7 @@ class CartCalculationService:
     """Service for calculating cart totals via platform API"""
     
     @staticmethod
-    def calculate_cart_totals(cart: GDPRCompliantCartSession, customer_id: str) -> Dict[str, Any]:
+    def calculate_cart_totals(cart: GDPRCompliantCartSession, customer_id: str, user_id: int) -> Dict[str, Any]:
         """Calculate cart totals using platform API"""
         
         if not cart.has_items():
@@ -491,7 +491,7 @@ class CartCalculationService:
             }
             
             # Call platform calculation API
-            result = platform_api.post('api/orders/calculate/', payload)
+            result = platform_api.post('api/orders/calculate/', payload, user_id=user_id)
             
             # Update cart with any warnings
             if result.get('warnings'):
