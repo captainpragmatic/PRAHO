@@ -1,0 +1,52 @@
+{% load i18n %}
+
+<!-- Updated Cart Widget (HTMX Response) -->
+<div id="cart-widget" class="relative">
+  <button onclick="toggleMiniCart()" 
+          class="flex items-center space-x-2 bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg transition-colors"
+          aria-label="{% trans 'Shopping cart' %}">
+    <span>🛒</span>
+    <span class="hidden sm:inline">{% trans "Cart" %}</span>
+    {% if cart_count > 0 %}
+    <span id="cart-count" class="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full animate-pulse">
+      {{ cart_count }}
+    </span>
+    {% endif %}
+  </button>
+  
+  <!-- Mini Cart Dropdown -->
+  <div id="mini-cart" class="hidden absolute right-0 mt-2 w-80 z-50">
+    <div hx-get="{% url 'orders:mini_cart_content' %}" 
+         hx-trigger="load, cartUpdated from:body"
+         hx-target="this"
+         hx-swap="innerHTML">
+      <!-- Loading content -->
+      <div class="bg-slate-800 rounded-lg shadow-xl border border-slate-700 p-4">
+        <div class="animate-pulse">
+          <div class="h-4 bg-slate-700 rounded w-3/4 mb-2"></div>
+          <div class="h-4 bg-slate-700 rounded w-1/2"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Success notification (if provided) -->
+{% if success_message %}
+<div id="cart-success-message" class="fixed top-4 right-4 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg z-50 transform transition-transform duration-300"
+     x-data="{ show: true }"
+     x-init="setTimeout(() => show = false, 3000)"
+     x-show="show"
+     x-transition:enter="translate-x-full"
+     x-transition:enter-end="translate-x-0"
+     x-transition:leave="translate-x-0"
+     x-transition:leave-end="translate-x-full">
+  <div class="flex items-center">
+    <span class="mr-2">✅</span>
+    <span>{{ success_message }}</span>
+    {% if product_name %}
+    <div class="text-xs opacity-90 ml-2">({{ product_name }})</div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}

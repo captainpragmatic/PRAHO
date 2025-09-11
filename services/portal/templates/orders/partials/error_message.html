@@ -1,0 +1,29 @@
+{% load i18n %}
+
+<!-- Error Message Component (HTMX Response) -->
+<div class="fixed top-4 right-4 bg-red-600 text-white px-4 py-3 rounded-lg shadow-lg z-50 max-w-sm"
+     id="error-notification"
+     x-data="{ show: true }"
+     x-init="setTimeout(() => show = false, 5000)"
+     x-show="show"
+     x-transition:enter="transform transition-transform duration-300"
+     x-transition:enter-start="translate-x-full"
+     x-transition:enter-end="translate-x-0"
+     x-transition:leave="transform transition-transform duration-300"
+     x-transition:leave-start="translate-x-0"
+     x-transition:leave-end="translate-x-full">
+  
+  <div class="flex items-start">
+    <span class="mr-2 flex-shrink-0" aria-hidden="true">❌</span>
+    <div class="flex-1">
+      <p class="font-medium">{% trans "Eroare" %}</p>
+      <p class="text-sm opacity-90 mt-1">{{ error }}</p>
+    </div>
+    <button onclick="document.getElementById('error-notification').style.display='none'"
+            class="ml-2 text-white hover:text-gray-300 transition-colors"
+            aria-label="{% trans 'Închide notificarea' %}">
+      <span class="text-lg leading-none">×</span>
+    </button>
+  </div>
+  
+</div>

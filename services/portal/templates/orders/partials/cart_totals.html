@@ -1,0 +1,78 @@
+{% load i18n ui_components formatting %}
+
+<!-- Cart Totals with Romanian VAT Breakdown -->
+<div id="cart-totals" class="p-6">
+  <h3 class="text-lg font-medium text-white mb-4">{% trans "Order Summary" %}</h3>
+  
+  {% if calculation %}
+  <!-- Order Summary -->
+  <div class="space-y-3 mb-6">
+    
+    <!-- Subtotal -->
+    <div class="flex justify-between items-center">
+      <span class="text-slate-400">{% trans "Subtotal" %}</span>
+      <span class="text-white font-mono">
+        {{ calculation.subtotal_cents|cents_to_currency|romanian_currency:calculation.currency }}
+      </span>
+    </div>
+    
+  <!-- VAT (21% Romanian) -->
+    <div class="flex justify-between items-center">
+      <span class="text-slate-400">{% trans "TVA (21%)" %}</span>
+      <span class="text-white font-mono">
+        {{ calculation.tax_cents|cents_to_currency|romanian_currency:calculation.currency }}
+      </span>
+    </div>
+    
+    <!-- Divider -->
+    <div class="border-t border-slate-600 pt-3">
+      
+      <!-- Total -->
+      <div class="flex justify-between items-center">
+        <span class="text-lg font-medium text-white">{% trans "Total" %}</span>
+        <span class="text-lg font-bold text-green-400 font-mono">
+          {{ calculation.total_cents|cents_to_currency|romanian_currency:calculation.currency }}
+        </span>
+      </div>
+    </div>
+    
+  </div>
+  
+  <!-- VAT Information -->
+  <div class="bg-slate-700/50 rounded-lg p-3 mb-6 text-xs text-slate-400">
+    <p class="flex items-center">
+      <span class="mr-2">ℹ️</span>
+      {% trans "Prețurile includ TVA conform legislației române" %}
+    </p>
+  </div>
+  
+  <!-- Proceed to Checkout Button -->
+  {% if calculation.total_cents > 0 %}
+  <a href="{% url 'orders:checkout' %}" class="w-full inline-flex items-center justify-center px-6 py-3 text-base font-medium text-white bg-green-600 border border-green-600 rounded-lg hover:bg-green-700 focus:ring-4 focus:ring-green-300 transition-all duration-200" data-cart-version="{{ cart.get_cart_version }}">
+    💳 {% trans "Continue to checkout" %}
+  </a>
+  {% else %}
+  <button disabled class="w-full inline-flex items-center justify-center px-6 py-3 text-base font-medium text-slate-300 bg-slate-700 border border-slate-600 rounded-lg cursor-not-allowed opacity-50">
+    💳 {% trans "Continue to checkout" %}
+  </button>
+  {% endif %}
+  
+  {% else %}
+  <!-- Calculation Error State -->
+  <div class="text-center py-6">
+    <div class="text-red-400 mb-3">
+      <span class="text-2xl">⚠️</span>
+    </div>
+    <p class="text-sm text-red-400 mb-4">
+      {% trans "Eroare la calcularea totalurilor" %}
+    </p>
+    <button hx-post="{% url 'orders:calculate_totals' %}"
+            hx-target="#cart-totals"
+            hx-swap="outerHTML"
+            class="text-blue-400 hover:text-blue-300 text-sm transition-colors">
+      {% trans "Încearcă din nou" %}
+    </button>
+  </div>
+  {% endif %}
+  
+</div>
