@@ -31,6 +31,9 @@ DISABLE_ACCOUNT_LOCKOUT = True
 # Insert debug toolbar middleware into existing MIDDLEWARE list
 MIDDLEWARE.insert(1, "debug_toolbar.middleware.DebugToolbarMiddleware")
 
+# Disable CSRF middleware for API development (allows Portal login)
+MIDDLEWARE = [mw for mw in MIDDLEWARE if 'CsrfViewMiddleware' not in mw]
+
 # ===============================================================================
 # DEVELOPMENT APPS
 # ===============================================================================

@@ -265,6 +265,12 @@ REST_FRAMEWORK = {
         "anon": "100/hour",     # Anonymous users (very limited)
         "user": "1000/hour",    # Authenticated users (generous for portal)
         "burst": "60/min",      # Search/autocomplete endpoints
+        
+        # 🔒 SECURITY: Order-specific throttling to prevent abuse
+        "order_create": "10/min",      # Order creation (expensive operations)
+        "order_calculate": "30/min",   # Cart calculations (less expensive)
+        "order_list": "100/min",       # Order listing (read operations)
+        "product_catalog": "200/min",  # Product browsing (public-ish)
     },
 }
 
@@ -272,8 +278,8 @@ REST_FRAMEWORK = {
 # ROMANIAN BUSINESS CONFIGURATION
 # ===============================================================================
 
-# Romanian VAT rate (19% standard)
-ROMANIA_VAT_RATE = "0.19"
+# Romanian VAT rate (21% standard)
+ROMANIA_VAT_RATE = "0.21"
 
 # Romanian company information
 ROMANIAN_BUSINESS_CONTEXT = {
@@ -282,7 +288,7 @@ ROMANIAN_BUSINESS_CONTEXT = {
     "email": os.environ.get("COMPANY_EMAIL", "contact@pragmatichost.com"),
     "phone": os.environ.get("COMPANY_PHONE", "+40.21.123.4567"),
     "address": os.environ.get("COMPANY_ADDRESS", "Str. Exemplu Nr. 1, Bucuresti, Romania"),
-    "vat_rate": 0.19,
+    "vat_rate": 0.21,
     "currency": "RON",
 }
 
@@ -356,7 +362,7 @@ COMPANY_PHONE = os.environ.get("COMPANY_PHONE", "+40 21 000 0000")
 COMPANY_WEBSITE = os.environ.get("COMPANY_WEBSITE", "https://praho.ro")
 
 # VAT settings for Romanian compliance
-VAT_RATE = 0.19  # 19% Romanian VAT rate
+VAT_RATE = 0.21  # 21% Romanian VAT rate
 VAT_ENABLED = True
 
 # ===============================================================================

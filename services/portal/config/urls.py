@@ -29,6 +29,9 @@ urlpatterns = [
     # Hosting services - customer service management
     path('services/', include('apps.services.urls')),
     
+    # Order flow - product catalog and cart management
+    path('order/', include('apps.orders.urls')),
+    
     # API client health check
     path('status/', portal_status, name='portal_status'),
     

@@ -82,6 +82,7 @@ INSTALLED_APPS = [
     'apps.billing',      # Dataclasses + serializers only (NO models)
     'apps.tickets',      # Customer tickets (API-only)
     'apps.services',     # Customer services (API-only)
+    'apps.orders',       # Order flow and cart (session-based, NO models)
     'apps.common',       # Shared utilities only
     'apps.ui',          # Template tags only
 ]
