@@ -9,7 +9,7 @@
 {% else %}bg-slate-50 border-slate-200 text-slate-800 dark:bg-slate-950 dark:border-slate-800 dark:text-slate-200
 {% endif %}{% if css_class %} {{ css_class }}{% endif %}"
 {% if html_id %}id="{{ html_id }}"{% endif %}
-{% if dismissible %}x-data="{ show: true }" x-show="show" x-transition{% endif %} 
+{% if dismissible %}x-data="{ show: true }" x-show="show" x-init="setTimeout(() => show = false, 5000)"{% endif %} 
 role="alert">
   
   <div class="flex">
