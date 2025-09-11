@@ -19,7 +19,7 @@ from typing import Final
 # ===============================================================================
 
 # Romanian VAT (TVA) regulations - used in billing, orders, customers
-ROMANIAN_VAT_RATE: Final[Decimal] = Decimal("0.19")  # 19% standard VAT rate
+ROMANIAN_VAT_RATE: Final[Decimal] = Decimal("0.21")  # 21% standard VAT rate
 
 # Romanian CUI (Unique Registration Code) validation rules
 CUI_MIN_LENGTH: Final[int] = 2  # Minimum CUI length

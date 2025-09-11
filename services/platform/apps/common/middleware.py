@@ -479,6 +479,19 @@ class PortalServiceHMACMiddleware:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         # Only process API requests
         if request.path.startswith('/api/'):
+            # Skip HMAC validation for authentication endpoints (can't be pre-authenticated)
+            auth_exempt_paths = [
+                '/api/users/login/',
+                '/api/users/register/',  
+                '/api/users/password/reset/',
+                '/api/users/health/',
+                '/api/orders/products/'  # Public product catalog access
+            ]
+            
+            if any(request.path.startswith(path) for path in auth_exempt_paths):
+                logger.debug(f"🔓 [HMAC Auth] Skipping HMAC validation for auth endpoint: {request.path}")
+                return self.get_response(request)
+            
             # Global rate limiting keyed by portal and IP
             portal_id_for_rl = request.META.get('HTTP_X_PORTAL_ID', 'unknown')
             client_ip = get_safe_client_ip(request)

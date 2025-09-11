@@ -115,7 +115,9 @@ class PlatformAPIClient:
     
     # ---- Small helpers to reduce branching/complexity in _make_request ----
     def _build_url(self, endpoint: str) -> str:
-        return f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
+        built_url = f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
+        logger.debug(f"🔍 [API Client] Building URL: base='{self.base_url}' endpoint='{endpoint}' -> '{built_url}'")
+        return built_url
 
     def _prepare_json_body(self, data: dict | None, user_id: int | None) -> tuple[bytes, dict]:
         payload: dict[str, Any] = {} if data is None else dict(data)
