@@ -171,7 +171,19 @@ def login_view(request: HttpRequest) -> HttpResponse:
                     
                     request.session.set_expiry(session_age)
                     
-                    messages.success(request, f"✅ Welcome back, {email}!")
+                    # Get customer name for personalized message
+                    try:
+                        profile_data = api_client.get_customer_profile(user_id)
+                        if profile_data and profile_data.get('first_name'):
+                            customer_name = profile_data.get('first_name')
+                            messages.success(request, f"Sign in confirmed, {customer_name}!")
+                        else:
+                            # Fallback to email if name not available
+                            messages.success(request, f"Sign in confirmed!")
+                    except Exception as e:
+                        logger.warning(f"⚠️ [Portal Auth] Could not fetch profile for personalized message: {e}")
+                        messages.success(request, f"Sign in confirmed!")
+                    
                     next_url = _get_safe_redirect_target(request, fallback='/dashboard/')
                     return redirect(next_url)
                     

@@ -160,9 +160,9 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
         recent_tickets, open_tickets_count = _get_ticket_data(ticket_api, customer_id, user_id)
         active_services = _get_services_data(services_api, customer_id, user_id)
         
-        # Fallback for greeting name if not resolved
+        # Fallback for greeting name if not resolved - use generic greeting instead of email
         if not greeting_name:
-            greeting_name = context.get('customer_email') or ''
+            greeting_name = None  # Template will handle showing just "Welcome" without name
         
         dashboard_data = {
             'customers': customers,
