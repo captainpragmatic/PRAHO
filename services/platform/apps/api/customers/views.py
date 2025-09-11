@@ -257,28 +257,32 @@ def customer_register_api(request: HttpRequest) -> Response:
 
 class CustomerProfileAPIView(APIView):
     """
-    👤 Customer Profile Management API
+    👤 Customer Profile Management API - 🔒 SECURITY: POST-only with customer authentication
     
-    Handles GET (retrieve) and PUT/PATCH (update) for customer profile data.
-    Integrates user fields and profile preferences in a single API.
+    🚨 SECURITY FIX: Converted from GET to POST with require_customer_authentication
+    to prevent customer enumeration and unauthorized profile access.
     """
     
     permission_classes: ClassVar = [IsAuthenticated]
     throttle_classes: ClassVar = [BurstAPIThrottle]
     
-    def get(self, request: HttpRequest) -> Response:
+    @require_customer_authentication
+    def post(self, request: HttpRequest, customer) -> Response:
         """
-        GET /api/customers/profile/
+        🔒 POST /api/customers/profile/ (SECURITY: Changed from GET)
         
-        Retrieve current user's profile data including:
-        - User basic info (name, phone)
+        Retrieve customer profile data with proper authentication:
+        - Customer-scoped authentication required
+        - User basic info (name, phone) 
         - Profile preferences (language, timezone)
         - Notification settings
+        
+        Request Body: { "action": "get_profile" }
         
         Response:
         {
             "first_name": "Ion",
-            "last_name": "Popescu",
+            "last_name": "Popescu", 
             "phone": "+40.21.123.4567",
             "preferred_language": "ro",
             "timezone": "Europe/Bucharest",
@@ -287,18 +291,20 @@ class CustomerProfileAPIView(APIView):
             "marketing_emails": false
         }
         """
+        # 🔒 SECURITY: customer parameter injected by require_customer_authentication
         user = cast(User, request.user)
         serializer = CustomerProfileSerializer()
         data = serializer.to_representation(user)
         
-        logger.info(f"📋 [Profile API] Profile retrieved for user: {user.email}")
+        logger.info(f"🔒 [Profile API] Profile retrieved for customer {customer.id}, user: {user.email}")
         
         return Response({
             'success': True,
             'profile': data
         })
     
-    def put(self, request: HttpRequest) -> Response:
+    @require_customer_authentication
+    def put(self, request: HttpRequest, customer) -> Response:
         """
         PUT /api/customers/profile/
         
@@ -324,7 +330,7 @@ class CustomerProfileAPIView(APIView):
                 updated_user = serializer.update(user, serializer.validated_data)
                 response_data = serializer.to_representation(updated_user)
                 
-                logger.info(f"✅ [Profile API] Profile updated for user: {user.email}")
+                logger.info(f"🔒 [Profile API] Profile updated for customer {customer.id}, user: {user.email}")
                 
                 return Response({
                     'success': True,
@@ -349,7 +355,8 @@ class CustomerProfileAPIView(APIView):
                 'errors': serializer.errors
             }, status=status.HTTP_400_BAD_REQUEST)
     
-    def patch(self, request: HttpRequest) -> Response:
+    @require_customer_authentication
+    def patch(self, request: HttpRequest, customer) -> Response:
         """
         PATCH /api/customers/profile/
         
@@ -364,7 +371,7 @@ class CustomerProfileAPIView(APIView):
                 updated_user = serializer.update(user, serializer.validated_data)
                 response_data = serializer.to_representation(updated_user)
                 
-                logger.info(f"✅ [Profile API] Profile partially updated for user: {user.email}")
+                logger.info(f"🔒 [Profile API] Profile partially updated for customer {customer.id}, user: {user.email}")
                 
                 return Response({
                     'success': True,

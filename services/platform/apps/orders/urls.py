@@ -14,6 +14,8 @@ urlpatterns = [
     path("", views.order_list, name="list"),
     path("list/", views.order_list_htmx, name="order_list_htmx"),  # HTMX endpoint
     path("create/", views.order_create, name="order_create"),
+    path("create/with-item/", views.order_create_with_item, name="order_create_with_item"),
+    path("create/preview/", views.order_create_preview, name="order_create_preview"),  # HTMX preview
     # Order detail and lifecycle management
     path("<uuid:pk>/", views.order_detail, name="order_detail"),
     path("<uuid:pk>/", views.order_detail, name="detail"),
@@ -24,6 +26,7 @@ urlpatterns = [
     path("<uuid:pk>/status/", views.order_change_status, name="order_change_status"),
     path("<uuid:pk>/cancel/", views.order_cancel, name="order_cancel"),
     path("<uuid:pk>/refund/", views.order_refund, name="order_refund"),
+    # path("<uuid:pk>/validate/", views.order_validate, name="order_validate"),  # Temporarily disabled
     path("<uuid:pk>/refund-request/", views.order_refund_request, name="order_refund_request"),
     path("<uuid:pk>/provision/", views.order_provision, name="order_provision"),
     # Order items management (HTMX powered)

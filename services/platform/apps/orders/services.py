@@ -46,13 +46,15 @@ class OrderFilters(TypedDict, total=False):
     search: str
 
 
-class OrderItemData(TypedDict):
+class OrderItemData(TypedDict, total=False):
     """Type definition for order item data"""
 
     product_id: uuid.UUID | None
     service_id: uuid.UUID | None
     quantity: int
     unit_price_cents: int
+    setup_cents: int
+    billing_period: str
     description: str
     meta: dict[str, Any]
 
@@ -113,7 +115,7 @@ class StatusChangeData:
 class OrderCalculationService:
     """Service for order financial calculations with Romanian VAT compliance"""
 
-    VAT_RATE: ClassVar[Decimal] = Decimal("0.19")  # 19% Romanian VAT
+    VAT_RATE: ClassVar[Decimal] = Decimal("0.21")  # 21% Romanian VAT (default; per-item rules may override)
 
     @staticmethod
     def calculate_vat(amount_cents: int) -> int:
@@ -125,7 +127,12 @@ class OrderCalculationService:
     @staticmethod
     def calculate_order_totals(items: list[OrderItemData]) -> dict[str, int]:
         """Calculate order subtotal, VAT, and total in cents"""
-        subtotal_cents = sum(item["quantity"] * item["unit_price_cents"] for item in items)
+        subtotal_cents = 0
+        for item in items:
+            unit = int(item["unit_price_cents"]) if item.get("unit_price_cents") is not None else 0
+            qty = int(item["quantity"]) if item.get("quantity") is not None else 0
+            setup = int(item.get("setup_cents", 0))
+            subtotal_cents += (qty * unit) + setup
 
         tax_cents = OrderCalculationService.calculate_vat(subtotal_cents)
         total_cents = subtotal_cents + tax_cents
@@ -218,9 +225,34 @@ class OrderService:
 
             # Create order items
             for item_data in data.items:
-                # Calculate line totals
-                subtotal_cents = item_data["quantity"] * item_data["unit_price_cents"]
-                tax_cents = OrderCalculationService.calculate_vat(subtotal_cents)
+                # Calculate line totals (include setup fee if provided) with VAT rules
+                subtotal_cents = item_data["quantity"] * item_data["unit_price_cents"] + int(item_data.get("setup_cents", 0))
+
+                # Determine VAT using comprehensive VAT rules (per customer country/business)
+                try:
+                    from .vat_rules import OrderVATCalculator  # noqa: PLC0415
+
+                    # Extract customer VAT context from billing address snapshot
+                    customer_country = (data.billing_address.get("country") or "RO").upper()
+                    vat_number = data.billing_address.get("vat_number") or data.billing_address.get("vat_id") or ""
+                    is_business = bool(data.billing_address.get("company_name")) or bool(vat_number)
+
+                    vat_result = OrderVATCalculator.calculate_vat(
+                        subtotal_cents=subtotal_cents,
+                        customer_country=customer_country,
+                        is_business=is_business,
+                        vat_number=vat_number,
+                        customer_id=str(data.customer.id),
+                        order_id=None,
+                    )
+                    # Convert percent to decimal rate with 4 places for storage
+                    tax_rate_decimal = (vat_result.vat_rate / Decimal("100")).quantize(Decimal("0.0001"))
+                    tax_cents = int(vat_result.vat_cents)
+                except Exception:
+                    # Fallback to default VAT rate if VAT rules fail
+                    tax_rate_decimal = OrderCalculationService.VAT_RATE
+                    tax_cents = OrderCalculationService.calculate_vat(subtotal_cents)
+
                 line_total_cents = subtotal_cents + tax_cents
 
                 # Handle optional product_id - if None, skip this item or handle appropriately
@@ -233,14 +265,22 @@ class OrderService:
                     product_id=product_id,
                     quantity=item_data["quantity"],
                     unit_price_cents=item_data["unit_price_cents"],
-                    tax_rate=OrderCalculationService.VAT_RATE,
+                    setup_cents=int(item_data.get("setup_cents", 0)),
+                    tax_rate=tax_rate_decimal,
                     tax_cents=tax_cents,
                     line_total_cents=line_total_cents,
                     product_name=item_data["description"],
                     product_type="hosting",  # Default type
-                    billing_period="monthly",  # Default period
+                    billing_period=item_data.get("billing_period", "monthly"),
                     config=item_data.get("meta", {}),
                 )
+
+            # After creating items, ensure order totals are consistent with item data (includes setup fees)
+            try:
+                order.calculate_totals()
+            except Exception:
+                # Fallback to previously computed totals if calculation fails
+                logger.warning("⚠️ [Orders] Failed to recalc totals after item creation; using precomputed totals")
 
             # Create status history entry
             OrderService._create_status_history(order, None, "draft", "Order created", created_by)
@@ -274,6 +314,24 @@ class OrderService:
             # Validate status transition
             if not OrderService._is_valid_status_transition(old_status, status_data.new_status):
                 return Err(f"Invalid status transition from {old_status} to {status_data.new_status}")
+
+            # Enforce preflight validation on draft → pending
+            if old_status == "draft" and status_data.new_status == "pending":
+                try:
+                    from .preflight import OrderPreflightValidationService  # noqa: PLC0415
+
+                    OrderPreflightValidationService.assert_valid(order)
+                    logger.info(
+                        "✅ [Orders] Preflight validation passed for %s before pending",
+                        order.order_number,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "⛔ [Orders] Preflight validation failed for %s: %s",
+                        order.order_number,
+                        e,
+                    )
+                    return Err(f"Preflight validation failed: {e!s}")
 
             # Update order status
             order.status = status_data.new_status

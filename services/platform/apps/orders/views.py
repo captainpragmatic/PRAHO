@@ -42,6 +42,7 @@ from .services import (
     OrderService,
     StatusChangeData,
 )
+from .preflight import OrderPreflightValidationService
 
 logger = logging.getLogger(__name__)
 
@@ -358,15 +359,64 @@ def order_detail(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
         and order.status not in ["completed", "cancelled", "refunded"]  # Terminal states
     )
 
+    # Preflight validation (only for draft orders)
+    preflight_errors: list[str] = []
+    preflight_warnings: list[str] = []
+    preflight_ok = True
+    if order.status == "draft":
+        try:
+            preflight_errors, preflight_warnings = OrderPreflightValidationService.validate(order)
+            preflight_ok = len(preflight_errors) == 0
+        except Exception as e:
+            logger.warning(f"⚠️ [Orders] Preflight computation failed for {order.order_number}: {e}")
+            preflight_ok = False
+
     context = {
         "order": order,
         "is_staff": is_staff,
         "can_edit": can_edit,
         "editable_fields": editable_fields,
         "can_edit_all": editable_fields == ["*"],
+        # Preflight
+        "preflight_ok": preflight_ok,
+        "preflight_errors": preflight_errors,
+        "preflight_warnings": preflight_warnings,
     }
 
     return render(request, "orders/order_detail.html", context)
+
+
+@staff_required_strict
+def order_validate(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
+    """
+    🧪 Run preflight validation for an order (HTMX/partial)
+    Returns a partial with errors/warnings and a JS hint to enable UI.
+    """
+    order = get_object_or_404(Order, id=pk)
+
+    # Validate access
+    if access_denied := _validate_order_access(request, order):
+        return access_denied
+
+    errors: list[str] = []
+    warnings: list[str] = []
+    ok = False
+    try:
+        errors, warnings = OrderPreflightValidationService.validate(order)
+        ok = len(errors) == 0
+    except Exception as e:
+        logger.error(f"🔥 [Orders] Preflight validation error for {order.order_number}: {e}")
+        errors = ["Validation failed to run"]
+        ok = False
+
+    context = {
+        "order": order,
+        "preflight_ok": ok,
+        "preflight_errors": errors,
+        "preflight_warnings": warnings,
+    }
+
+    return render(request, "orders/partials/preflight_results.html", context)
 
 
 @staff_required_strict
@@ -482,6 +532,186 @@ def order_create(request: HttpRequest) -> HttpResponse:
     }
 
     return render(request, "orders/order_form.html", context)
+
+
+@staff_required_strict
+@require_POST
+def order_create_preview(request: HttpRequest) -> HttpResponse:
+    """
+    🧮 HTMX endpoint: Preview first item + VAT totals during order creation (staff UI)
+    No persistence. Uses OrderVATCalculator for authoritative VAT rules.
+    """
+    try:
+        customer_id = request.POST.get("customer")
+        currency_code = request.POST.get("currency", "RON")
+        product_id = request.POST.get("first_product")
+        billing_period = request.POST.get("first_billing_period", "monthly")
+        quantity = int(request.POST.get("first_quantity", 1) or 1)
+        domain_name = (request.POST.get("first_domain_name") or "").strip()
+
+        if not (customer_id and product_id):
+            return render(request, "orders/partials/create_preview_totals.html", {
+                "error": True,
+                "message": "Select a customer and product to preview totals",
+            })
+
+        customer = get_object_or_404(Customer, id=customer_id)
+        product = get_object_or_404(Product, id=product_id)
+
+        # Resolve price for selected period + currency
+        price = product.get_price_for_period(currency_code, billing_period)
+        if price is None:
+            return render(request, "orders/partials/create_preview_totals.html", {
+                "error": True,
+                "message": f"No price for {currency_code} / {billing_period}",
+            })
+
+        unit_cents = int(price.effective_price_cents)
+        setup_cents = int(price.setup_cents)
+        subtotal_cents = (unit_cents * quantity) + setup_cents
+
+        # VAT calc per rules
+        from .vat_rules import OrderVATCalculator
+
+        billing = customer.get_billing_address()
+        tax_profile = customer.get_tax_profile()
+        country = (billing.country if billing and billing.country else "RO").upper()
+        vat_number = getattr(tax_profile, "vat_number", None) or getattr(tax_profile, "cui", None)
+        is_business = bool(getattr(customer, "company_name", ""))
+
+        vat_result = OrderVATCalculator.calculate_vat(
+            subtotal_cents=subtotal_cents,
+            customer_country=country,
+            is_business=is_business,
+            vat_number=vat_number,
+            customer_id=str(customer.id),
+            order_id=None,
+        )
+
+        context = {
+            "error": False,
+            "currency": currency_code,
+            "quantity": quantity,
+            "product": product,
+            "billing_period": billing_period,
+            "unit_cents": unit_cents,
+            "setup_cents": setup_cents,
+            "subtotal_cents": subtotal_cents,
+            "vat_cents": int(vat_result.vat_cents),
+            "total_cents": int(vat_result.total_cents),
+            "vat_reasoning": vat_result.reasoning,
+        }
+        return render(request, "orders/partials/create_preview_totals.html", context)
+
+    except Exception as e:
+        logger.error(f"🔥 [Orders] Preview error: {e}")
+        return render(request, "orders/partials/create_preview_totals.html", {
+            "error": True,
+            "message": "Failed to calculate preview",
+        })
+
+
+@staff_required_strict
+@require_POST
+def order_create_with_item(request: HttpRequest) -> HttpResponse:
+    """
+    ✨ Create order and first item in one transaction (staff UI).
+    Uses server-side price resolution and VAT rules.
+    """
+    # Base order form
+    order_form = modelform_factory(Order, fields=["customer", "currency", "payment_method", "notes", "customer_notes"])
+    form = order_form(request.POST)
+    if not form.is_valid():
+        messages.error(request, _("❌ Please correct the errors below."))
+        return redirect("orders:order_create")
+
+    try:
+        with transaction.atomic():
+            # Create order (reuse logic from order_create)
+            order = form.save(commit=False)
+            customer = order.customer
+            tax_profile = customer.get_tax_profile()
+            billing_address = customer.get_billing_address()
+
+            order.customer_email = customer.primary_email
+            order.customer_name = customer.get_display_name()
+            order.customer_company = customer.company_name
+            order.customer_vat_id = tax_profile.cui if tax_profile else ""
+
+            if billing_address:
+                order.billing_address = {
+                    "company_name": customer.company_name,
+                    "line1": billing_address.address_line1,
+                    "line2": billing_address.address_line2,
+                    "city": billing_address.city,
+                    "county": billing_address.county,
+                    "postal_code": billing_address.postal_code,
+                    "country": billing_address.country,
+                    "vat_id": tax_profile.cui if tax_profile else "",
+                    "contact_person": customer.get_display_name(),
+                    "contact_email": customer.primary_email,
+                    "contact_phone": customer.primary_phone,
+                }
+            else:
+                order.billing_address = {
+                    "company_name": customer.company_name,
+                    "line1": "",
+                    "line2": "",
+                    "city": "",
+                    "county": "",
+                    "postal_code": "",
+                    "country": "România",
+                    "vat_id": tax_profile.cui if tax_profile else "",
+                    "contact_person": customer.get_display_name(),
+                    "contact_email": customer.primary_email,
+                    "contact_phone": customer.primary_phone,
+                }
+
+            order.subtotal_cents = 0
+            order.tax_cents = 0
+            order.total_cents = 0
+            order.save()
+
+            # First item fields
+            product_id = request.POST.get("first_product")
+            billing_period = request.POST.get("first_billing_period", "monthly")
+            quantity = int(request.POST.get("first_quantity", 1) or 1)
+            domain_name = (request.POST.get("first_domain_name") or "").strip()
+
+            if product_id:
+                product = get_object_or_404(Product, id=product_id)
+                price = product.get_price_for_period(order.currency.code, billing_period)
+                if not price:
+                    raise ValueError(f"No price for {order.currency.code} / {billing_period}")
+
+                # Build item
+                from .models import OrderItem  # noqa: PLC0415
+                item = OrderItem(
+                    order=order,
+                    product=product,
+                    product_name=product.name,
+                    product_type=product.product_type,
+                    billing_period=billing_period,
+                    quantity=quantity,
+                    unit_price_cents=int(price.effective_price_cents),
+                    setup_cents=int(price.setup_cents),
+                    config={"product_price_id": str(price.id)},
+                    domain_name=domain_name,
+                )
+                # Save triggers total calc in model; but recalc order totals afterward too
+                item.save()
+                order.calculate_totals()
+
+            messages.success(
+                request,
+                _(f"✅ Order '{order.order_number}' created successfully. You can now add products."),
+            )
+            return redirect("orders:order_detail", pk=order.id)
+
+    except Exception as e:
+        logger.error(f"🔥 [Orders] Error creating order with item: {e}")
+        messages.error(request, _("❌ Error creating order with first item. Please try again."))
+        return redirect("orders:order_create")
 
 
 @staff_required_strict

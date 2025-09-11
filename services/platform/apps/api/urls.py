@@ -28,6 +28,7 @@ from .billing import urls as billing_urls
 
 # Import domain-specific URL patterns
 from .customers import urls as customer_urls
+from .orders import urls as order_urls
 from .services import urls as services_urls
 from .tickets import urls as ticket_urls
 
@@ -52,6 +53,9 @@ urlpatterns = [
     
     # Services & Hosting APIs
     path('services/', include((services_urls, 'services'))),
+    
+    # Orders & Product Catalog APIs
+    path('orders/', include((order_urls, 'orders'))),
     
     # Future API endpoints can be added here:
 ]
