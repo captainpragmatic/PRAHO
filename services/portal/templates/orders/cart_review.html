@@ -61,7 +61,7 @@
                 {% if item.config %}
                 <details class="mb-4">
                   <summary class="text-sm text-blue-400 cursor-pointer hover:text-blue-300">
-                    {% trans "Vezi configurația" %}
+                    {% trans "View configuration" %}
                   </summary>
                   <div class="mt-2 pl-4 border-l-2 border-slate-600">
                     <dl class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
@@ -172,7 +172,8 @@
         <div class="px-6 pb-4">
           {% for warning in warnings %}
           {% if warning.type == 'price_change' %}
-          {% alert warning.message variant="warning" title="Preț actualizat" %}
+          {% trans "Price updated" as price_updated_title %}
+          {% alert warning.message variant="warning" title=price_updated_title %}
           {% endif %}
           {% endfor %}
         </div>

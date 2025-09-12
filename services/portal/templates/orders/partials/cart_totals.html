@@ -18,7 +18,7 @@
     
   <!-- VAT (21% Romanian) -->
     <div class="flex justify-between items-center">
-      <span class="text-slate-400">{% trans "TVA (21%)" %}</span>
+      <span class="text-slate-400">{% trans "VAT (21%)" %}</span>
       <span class="text-white font-mono">
         {{ calculation.tax_cents|cents_to_currency|romanian_currency:calculation.currency }}
       </span>
@@ -42,7 +42,7 @@
   <div class="bg-slate-700/50 rounded-lg p-3 mb-6 text-xs text-slate-400">
     <p class="flex items-center">
       <span class="mr-2">ℹ️</span>
-      {% trans "Prețurile includ TVA conform legislației române" %}
+      {% trans "Prices include VAT according to Romanian legislation" %}
     </p>
   </div>
   
@@ -64,13 +64,13 @@
       <span class="text-2xl">⚠️</span>
     </div>
     <p class="text-sm text-red-400 mb-4">
-      {% trans "Eroare la calcularea totalurilor" %}
+      {% trans "Error calculating totals" %}
     </p>
     <button hx-post="{% url 'orders:calculate_totals' %}"
             hx-target="#cart-totals"
             hx-swap="outerHTML"
             class="text-blue-400 hover:text-blue-300 text-sm transition-colors">
-      {% trans "Încearcă din nou" %}
+      {% trans "Try again" %}
     </button>
   </div>
   {% endif %}
