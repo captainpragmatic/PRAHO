@@ -7,19 +7,21 @@
 {% block content %}
 <div class="px-4 py-6">
   <!-- Header with Search and Actions -->
-  <div class="flex justify-between items-center mb-6">
+  <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6">
     <div>
       <h1 class="text-2xl font-bold text-white">👥 {% trans 'Customers' %}</h1>
       <p class="text-slate-400 mt-1">{% trans 'Manage your companies and contacts.' %}</p>
     </div>
 
     {% url 'customers:create' as create_url %}
-    {% button "New Customer" variant="primary" href=create_url icon="plus" %}
+    <div class="sm:flex-shrink-0">
+      {% button "New Customer" variant="primary" href=create_url icon="plus" %}
+    </div>
   </div>
 
   <!-- Search and Filters -->
   <div class="bg-slate-800 rounded-lg p-4 mb-6 border border-slate-700">
-    <form method="get" class="flex gap-4 items-end">
+    <form method="get" class="flex flex-col sm:flex-row gap-3 sm:gap-4 sm:items-end">
       <div class="flex-1">
         <label for="search" class="block text-sm font-medium text-slate-300 mb-1">
           🔍 {% trans 'Search' %}
@@ -27,12 +29,14 @@
         {% input_field name="search" value=search_query placeholder="Name, CNP/CUI, email..." %}
       </div>
 
-      {% button "Search" variant="primary" type="submit" %}
+      <div class="flex gap-2 sm:gap-4">
+        {% button "Search" variant="primary" type="submit" %}
 
-      {% if search_query %}
-      {% url 'customers:list' as list_url %}
-      {% button "Reset" variant="secondary" href=list_url %}
-      {% endif %}
+        {% if search_query %}
+        {% url 'customers:list' as list_url %}
+        {% button "Reset" variant="secondary" href=list_url %}
+        {% endif %}
+      </div>
     </form>
   </div>
 
@@ -56,7 +60,8 @@
   </div>
 
   <!-- Customers List -->
-  <div class="bg-slate-800 rounded-lg border border-slate-700">
+  <!-- Desktop Table View (hidden on mobile) -->
+  <div class="hidden lg:block bg-slate-800 rounded-lg border border-slate-700">
     <div class="overflow-x-auto">
       <table class="w-full">
         <thead class="bg-slate-700">
@@ -183,39 +188,160 @@
         </tbody>
       </table>
     </div>
+  </div>
 
-    <!-- Pagination -->
-    {% if customers.has_other_pages %}
-    <div class="bg-slate-700 px-6 py-3 border-t border-slate-600">
-      <div class="flex items-center justify-between">
-        <div class="text-sm text-slate-400">
-          {% blocktrans with page_obj.number as page_number and paginator.num_pages as num_pages %}
-          Page {{ page_number }} of {{ num_pages }}
-          {% endblocktrans %}
+  <!-- Mobile Card View (visible on mobile and tablet) -->
+  <div class="lg:hidden space-y-4">
+    {% for customer in customers %}
+    <div class="bg-slate-800 rounded-lg border border-slate-700 p-4">
+      <!-- Customer Header -->
+      <div class="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-3">
+        <div class="flex-1">
+          <div class="flex flex-col sm:flex-row sm:items-center gap-2 mb-2">
+            <a href="{% url 'customers:detail' customer.pk %}" class="text-white font-medium hover:text-blue-400 text-lg">
+              {{ customer.get_display_name }}
+            </a>
+            
+            <!-- Customer Type Badge -->
+            {% if customer.customer_type %}
+              {% if customer.customer_type == "individual" %}
+                {% badge customer.get_customer_type_display variant="secondary" size="sm" %}
+              {% elif customer.customer_type == "company" %}
+                {% badge customer.get_customer_type_display variant="primary" size="sm" %}
+              {% elif customer.customer_type == "pfa" %}
+                {% badge customer.get_customer_type_display variant="info" size="sm" %}
+              {% elif customer.customer_type == "ngo" %}
+                {% badge customer.get_customer_type_display variant="success" size="sm" %}
+              {% else %}
+                {% badge customer.get_customer_type_display variant="secondary" size="sm" %}
+              {% endif %}
+            {% endif %}
+          </div>
+
+          <!-- Address -->
+          {% if customer.legal_address %}
+          <div class="text-slate-400 text-sm mb-2">
+            📍 {{ customer.legal_address|truncatechars:50 }}
+          </div>
+          {% endif %}
         </div>
 
-        <div class="flex space-x-1">
-          {% if customers.has_previous %}
-          {% if search_query %}
-          {% button "Previous" variant="secondary" href="?page={{ customers.previous_page_number }}&search={{
-          search_query }}" size="sm" %}
+        <!-- Status Badge -->
+        <div class="sm:flex-shrink-0">
+          {% if customer.status == 'active' %}
+            {% badge customer.get_status_display variant="success" icon="✅" %}
+          {% elif customer.status == 'suspended' %}
+            {% badge customer.get_status_display variant="warning" icon="⏸️" %}
+          {% elif customer.status == 'inactive' %}
+            {% badge customer.get_status_display variant="secondary" icon="⚪" %}
+          {% elif customer.status == 'prospect' %}
+            {% badge customer.get_status_display variant="info" icon="🕓" %}
           {% else %}
-          {% button "Previous" variant="secondary" href="?page={{ customers.previous_page_number }}" size="sm" %}
-          {% endif %}
-          {% endif %}
-
-          {% if customers.has_next %}
-          {% if search_query %}
-          {% button "Next" variant="secondary" href="?page={{ customers.next_page_number }}&search={{ search_query }}"
-          size="sm" %}
-          {% else %}
-          {% button "Next" variant="secondary" href="?page={{ customers.next_page_number }}" size="sm" %}
-          {% endif %}
+            {% badge customer.get_status_display variant="secondary" %}
           {% endif %}
         </div>
       </div>
+
+      <!-- Customer Details Grid -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+        <!-- Contact Information -->
+        <div>
+          <h4 class="text-slate-300 font-medium text-sm mb-2">{% trans 'Contact' %}</h4>
+          <div class="space-y-1 text-sm">
+            {% if customer.contact_person %}
+            <div class="text-white">👤 {{ customer.contact_person }}</div>
+            {% endif %}
+            {% if customer.contact_email %}
+            <div class="text-slate-400">📧 {{ customer.contact_email|truncatechars:30 }}</div>
+            {% endif %}
+            {% if customer.contact_phone %}
+            <div class="text-slate-400">📞 {{ customer.contact_phone }}</div>
+            {% endif %}
+          </div>
+        </div>
+
+        <!-- Tax Information -->
+        <div>
+          <h4 class="text-slate-300 font-medium text-sm mb-2">{% trans 'Tax Information' %}</h4>
+          <div class="space-y-1 text-sm">
+            {% if customer.customer_type == 'individual' %}
+              {% if customer.tax_profile and customer.tax_profile.cnp %}
+                <div class="text-white font-mono">🧾 {{ customer.tax_profile.cnp|slice:':8' }}</div>
+              {% else %}
+                <div class="text-slate-400">—</div>
+              {% endif %}
+            {% else %}
+              {% if customer.tax_profile and customer.tax_profile.cui %}
+                <div class="text-white font-mono">🇷🇴 {{ customer.tax_profile.cui }}</div>
+              {% endif %}
+              {% if customer.tax_profile and customer.tax_profile.vat_number %}
+                <div class="text-slate-400">💰 {{ customer.tax_profile.vat_number }}</div>
+              {% endif %}
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="flex flex-col sm:flex-row gap-2 pt-3 border-t border-slate-700">
+        {% url 'customers:detail' customer.pk as detail_url %}
+        {% url 'customers:edit' customer.pk as edit_url %}
+        <div class="flex gap-2">
+          {% button "View Details" variant="info" href=detail_url size="sm" %}
+          {% button "Edit" variant="success" href=edit_url size="sm" %}
+        </div>
+      </div>
     </div>
-    {% endif %}
+    {% empty %}
+    <!-- Empty State -->
+    <div class="bg-slate-800 rounded-lg border border-slate-700 p-8 text-center">
+      <div class="text-slate-400">
+        {% if search_query %}
+        <div class="text-4xl mb-4">🔍</div>
+        <p>{% blocktrans %}No customers found for search "{{ search_query }}"{% endblocktrans %}</p>
+        {% else %}
+        <div class="text-4xl mb-4">👥</div>
+        <p>{% trans 'No customers yet' %}</p>
+        <p class="mt-4">
+          <a href="{% url 'customers:create' %}" class="inline-block bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors">
+            {% trans 'Create the first customer' %}
+          </a>
+        </p>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
   </div>
+
+  <!-- Pagination -->
+  {% if customers.has_other_pages %}
+  <div class="mt-6 bg-slate-800 rounded-lg border border-slate-700 p-4">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div class="text-sm text-slate-400 text-center sm:text-left">
+        {% blocktrans with page_obj.number as page_number and paginator.num_pages as num_pages %}
+        Page {{ page_number }} of {{ num_pages }}
+        {% endblocktrans %}
+      </div>
+
+      <div class="flex justify-center sm:justify-end space-x-2">
+        {% if customers.has_previous %}
+        {% if search_query %}
+        {% button "← Previous" variant="secondary" href="?page={{ customers.previous_page_number }}&search={{ search_query }}" size="sm" %}
+        {% else %}
+        {% button "← Previous" variant="secondary" href="?page={{ customers.previous_page_number }}" size="sm" %}
+        {% endif %}
+        {% endif %}
+
+        {% if customers.has_next %}
+        {% if search_query %}
+        {% button "Next →" variant="secondary" href="?page={{ customers.next_page_number }}&search={{ search_query }}" size="sm" %}
+        {% else %}
+        {% button "Next →" variant="secondary" href="?page={{ customers.next_page_number }}" size="sm" %}
+        {% endif %}
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
 </div>
 {% endblock %}

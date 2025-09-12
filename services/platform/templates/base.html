@@ -150,21 +150,6 @@
               class="text-slate-300 hover:text-white flex items-center px-2 py-1 whitespace-nowrap">
               <span class="mr-1">⚙️</span> {% trans 'Profile' %}
             </a>
-            <form action="/i18n/setlang/" method="post" class="inline">
-              {% csrf_token %}
-              <input name="next" type="hidden" value="{{ request.get_full_path|slice:':-1' }}" />
-              <select name="language" onchange="this.form.submit()"
-                class="bg-slate-700 text-slate-300 hover:text-white hover:bg-slate-600 rounded-md font-medium px-2 py-1 text-sm transition-colors cursor-pointer flex items-center whitespace-nowrap">
-                {% get_current_language as LANGUAGE_CODE %}
-                {% get_available_languages as LANGUAGES %}
-                {% get_language_info_list for LANGUAGES as languages %}
-                {% for language in languages %}
-                <option value="{{ language.code }}" {% if language.code == LANGUAGE_CODE %}selected{% endif %}>
-                  {% if language.code == 'en' %}🇬🇧 {{ language.name_local }}{% elif language.code == 'ro' %}🇷🇴 {{ language.name_local }}{% else %}{{ language.name_local }}{% endif %}
-                </option>
-                {% endfor %}
-              </select>
-            </form>
             {% url 'users:logout' as logout_url %}
             {% button "Logout" variant="danger" href=logout_url size="sm" %}
           </div>
