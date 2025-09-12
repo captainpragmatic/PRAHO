@@ -229,6 +229,43 @@ class CustomerDetailSerializer(serializers.ModelSerializer):
 # CUSTOMER PROFILE SERIALIZERS 👤
 # ===============================================================================
 
+class CustomerBillingAddressUpdateSerializer(serializers.Serializer):
+    """
+    Serializer for updating customer billing address during checkout validation.
+    Used by the inline profile editing feature for seamless checkout UX.
+    """
+    # Company details
+    company_name = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    contact_name = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    email = serializers.EmailField(required=False, allow_blank=True)
+    phone = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    
+    # Address fields
+    address_line1 = serializers.CharField(max_length=200, required=False, allow_blank=True)
+    address_line2 = serializers.CharField(max_length=200, required=False, allow_blank=True)
+    city = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    county = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    postal_code = serializers.CharField(max_length=10, required=False, allow_blank=True)
+    country = serializers.CharField(max_length=100, default='România', required=False)
+    
+    # Romanian business compliance fields
+    fiscal_code = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    registration_number = serializers.CharField(max_length=50, required=False, allow_blank=True)
+    vat_number = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    
+    def validate_postal_code(self, value: str) -> str:
+        """Validate Romanian postal code format"""
+        if value and not re.match(r'^\d{6}$', value):
+            raise serializers.ValidationError("Postal code must be 6 digits for Romanian addresses")
+        return value
+    
+    def validate_fiscal_code(self, value: str) -> str:
+        """Basic CUI validation for Romanian fiscal codes"""
+        if value and not re.match(r'^(RO)?\d{6,10}$', value.upper()):
+            raise serializers.ValidationError("Invalid Romanian CUI format")
+        return value.upper() if value else value
+
+
 class CustomerProfileSerializer(serializers.Serializer):
     """
     Serializer for customer profile data.

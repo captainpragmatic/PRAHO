@@ -148,7 +148,7 @@ class CartItemInputSerializer(serializers.Serializer):
 class CartCalculationInputSerializer(serializers.Serializer):
     """Input serializer for cart total calculations"""
     
-    customer_id = serializers.UUIDField()
+    customer_id = serializers.IntegerField()
     currency = serializers.CharField(max_length=3, default='RON')
     items = CartItemInputSerializer(many=True)
 
@@ -169,7 +169,7 @@ class CartCalculationOutputSerializer(serializers.Serializer):
 class OrderCreateInputSerializer(serializers.Serializer):
     """Input serializer for order creation"""
     
-    customer_id = serializers.UUIDField()
+    customer_id = serializers.IntegerField()
     currency = serializers.CharField(max_length=3, default='RON')
     items = CartItemInputSerializer(many=True)
     notes = serializers.CharField(max_length=500, required=False, allow_blank=True)

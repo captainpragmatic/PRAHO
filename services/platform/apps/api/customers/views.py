@@ -5,11 +5,13 @@
 import logging
 from typing import Any, ClassVar, cast
 
+from django.db import transaction
 from django.db.models import Q, QuerySet
 from django.http import HttpRequest
 from rest_framework import status
 from rest_framework.decorators import action, api_view, authentication_classes, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -20,6 +22,7 @@ from apps.customers.models import Customer
 from apps.users.models import CustomerMembership, User
 
 from .serializers import (
+    CustomerBillingAddressUpdateSerializer,
     CustomerDetailSerializer,
     CustomerProfileSerializer,
     CustomerRegistrationSerializer,
@@ -551,4 +554,141 @@ def customer_detail_api(request: HttpRequest, customer: Customer) -> Response:
         return Response({
             'success': False,
             'error': 'Internal server error'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ===============================================================================
+# CUSTOMER BILLING ADDRESS UPDATE API 🏠 (CHECKOUT UX ENHANCEMENT)
+# ===============================================================================
+
+@api_view(['POST'])
+@throttle_classes([BurstAPIThrottle])
+@require_customer_authentication
+def update_customer_billing_address(request: Request, customer) -> Response:
+    """
+    🏠 Update customer billing address during checkout validation failures.
+    
+    This endpoint enables seamless inline editing of customer profile data
+    when checkout validation fails, providing a smooth UX without navigation disruption.
+    
+    POST /api/customers/billing-address/
+    
+    Request Body:
+    {
+        "timestamp": 1234567890,
+        "user_id": 123,
+        "company_name": "Test Company SRL",
+        "contact_name": "Ion Popescu",
+        "email": "contact@testcompany.com",
+        "phone": "+40722123456",
+        "address_line1": "Str. Revolutiei nr. 1",
+        "city": "Bucharest",
+        "county": "Bucharest", 
+        "postal_code": "010000",
+        "country": "România",
+        "fiscal_code": "RO12345678",
+        "vat_number": "RO12345678"
+    }
+    
+    Response:
+    {
+        "success": true,
+        "message": "Billing address updated successfully"
+    }
+    
+    Security:
+    - HMAC authentication required
+    - Customer scoped access only
+    - Validation with Romanian business compliance
+    - Rate limited (burst protection)
+    """
+    
+    logger.info(f"🏠 [Billing Address API] Update request for customer {customer.id}")
+    
+    # Validate input using our custom serializer
+    serializer = CustomerBillingAddressUpdateSerializer(data=request.data)
+    if not serializer.is_valid():
+        logger.warning(f"⚠️ [Billing Address API] Validation failed for customer {customer.id}")
+        return Response({
+            'success': False,
+            'error': 'Validation failed',
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    validated_data = serializer.validated_data
+    
+    try:
+        # Import models locally to avoid circular imports
+        from apps.customers.models import CustomerAddress, CustomerTaxProfile
+        
+        with transaction.atomic():
+            # Update customer basic info
+            if 'company_name' in validated_data and validated_data['company_name']:
+                customer.company_name = validated_data['company_name']
+            if 'contact_name' in validated_data and validated_data['contact_name']:
+                customer.name = validated_data['contact_name'] 
+            if 'email' in validated_data and validated_data['email']:
+                customer.primary_email = validated_data['email']
+            if 'phone' in validated_data and validated_data['phone']:
+                customer.primary_phone = validated_data['phone']
+            
+            customer.save(update_fields=['company_name', 'name', 'primary_email', 'primary_phone'])
+            
+            # Update or create customer address
+            address_fields = {
+                'address_line1': validated_data.get('address_line1', ''),
+                'address_line2': validated_data.get('address_line2', ''),
+                'city': validated_data.get('city', ''),
+                'county': validated_data.get('county', ''),
+                'postal_code': validated_data.get('postal_code', ''),
+                'country': validated_data.get('country', 'România'),
+            }
+            
+            # Get existing address or create new one
+            address, created = CustomerAddress.objects.get_or_create(
+                customer=customer,
+                address_type='primary',
+                is_current=True,
+                defaults=address_fields
+            )
+            
+            # Update address if it already existed
+            if not created:
+                for field, value in address_fields.items():
+                    if value:  # Only update non-empty values
+                        setattr(address, field, value)
+                address.save()
+            
+            # Update or create tax profile for Romanian compliance
+            tax_fields = {}
+            if 'fiscal_code' in validated_data and validated_data['fiscal_code']:
+                tax_fields['cui'] = validated_data['fiscal_code']
+            if 'vat_number' in validated_data and validated_data['vat_number']:
+                tax_fields['vat_number'] = validated_data['vat_number']
+            if 'registration_number' in validated_data and validated_data['registration_number']:
+                tax_fields['registration_number'] = validated_data['registration_number']
+            
+            if tax_fields:
+                tax_profile, created = CustomerTaxProfile.objects.get_or_create(
+                    customer=customer,
+                    defaults=tax_fields
+                )
+                
+                if not created:
+                    for field, value in tax_fields.items():
+                        setattr(tax_profile, field, value)
+                    tax_profile.save()
+        
+        logger.info(f"✅ [Billing Address API] Successfully updated billing address for customer {customer.id}")
+        
+        return Response({
+            'success': True,
+            'message': 'Billing address updated successfully'
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        logger.error(f"🔥 [Billing Address API] Update failed for customer {customer.id}: {e}")
+        return Response({
+            'success': False,
+            'error': 'Failed to update billing address. Please try again.'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

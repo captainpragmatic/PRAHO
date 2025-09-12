@@ -11,6 +11,7 @@ from .views import (
     CustomerServicesViewSet,
     customer_detail_api,
     customer_register_api,
+    update_customer_billing_address,
 )
 
 # Create router for customer API endpoints
@@ -26,6 +27,9 @@ urlpatterns = [
     
     # Customer profile management (authenticated)
     path('profile/', CustomerProfileAPIView.as_view(), name='customer-profile'),
+    
+    # Customer billing address update for checkout UX (HMAC authenticated)
+    path('billing-address/', update_customer_billing_address, name='customer-billing-address'),
     
     # Customer detail endpoint (HMAC authenticated)
     path('details/', customer_detail_api, name='customer-detail'),

@@ -105,6 +105,7 @@ def product_detail(request: Request, slug: str) -> Response:
 
 
 @api_view(['POST'])
+@permission_classes([AllowAny])
 @throttle_classes([OrderCalculateThrottle])
 @require_customer_authentication
 def calculate_cart_totals(request: Request, customer) -> Response:
@@ -112,6 +113,9 @@ def calculate_cart_totals(request: Request, customer) -> Response:
     Calculate cart totals with Romanian VAT compliance.
     Server-authoritative pricing - never trust client input.
     """
+    
+    logger.info(f"🛒 [Orders API] Cart calculation request from customer {customer.id}")
+    logger.debug(f"🛒 [Orders API] Request data: {request.data}")
     
     # Validate input
     input_serializer = CartCalculationInputSerializer(data=request.data)
@@ -257,6 +261,7 @@ def calculate_cart_totals(request: Request, customer) -> Response:
 
 
 @api_view(['POST'])
+@permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([OrderCalculateThrottle])
 @require_customer_authentication
 def preflight_order(request: Request, customer) -> Response:
@@ -264,84 +269,137 @@ def preflight_order(request: Request, customer) -> Response:
     🔎 Preflight validation for portal checkout.
     Validates customer profile, product/price availability, VAT scenario, and returns errors/warnings + totals preview.
     """
+    logger.info(f"🔎 [API] Running preflight validation for customer {customer.id}")
+    
     try:
-        data = request.data or {}
-        currency_code = data.get('currency', 'RON')
-        items = data.get('items', [])
-
-        errors: list[str] = []
-        warnings: list[str] = []
-
-        # Basic customer profile checks (using customer entity)
-        billing_address = getattr(customer, 'get_billing_address', lambda: None)()
-        contact_email = getattr(customer, 'primary_email', '')
-        contact_name = getattr(customer, 'name', '')
-        if not contact_email:
-            errors.append('Contact email is required')
-        if not contact_name:
-            errors.append('Contact name is required')
-        if not billing_address:
-            errors.append('Billing address is required')
-
-        # Validate products/prices; compute subtotal
+        # Parse cart items from request
+        cart_items = request.data.get('items', [])
+        if not cart_items:
+            return Response({
+                'success': False,
+                'errors': ['Cart is empty'],
+                'warnings': [],
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Create a preview order data structure (without saving to DB)
+        from apps.orders.services import OrderService, OrderCreateData, OrderItemData
+        from apps.orders.preflight import OrderPreflightValidationService
+        from apps.orders.models import Currency
+        from decimal import Decimal
+        import uuid
+        
+        # Get currency (default to RON)
+        currency = Currency.objects.get(code='RON')
+        
+        # Build billing address from customer profile  
+        billing_address = OrderService.build_billing_address_from_customer(customer)
+        
+        # Process cart items and create preview order items
+        preview_items = []
         subtotal_cents = 0
-        for item in items:
+        
+        for cart_item in cart_items:
+            # Get product and pricing
+            from apps.products.models import Product
             try:
-                product = Product.objects.get(id=item['product_id'], is_active=True)
+                product = Product.objects.get(slug=cart_item['product_slug'])
+                price = product.get_price_for_period(currency.code, cart_item['billing_period'])
+                if not price:
+                    return Response({
+                        'success': False,
+                        'errors': [f"No price available for {product.name} - {cart_item['billing_period']}"],
+                        'warnings': [],
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                
+                quantity = int(cart_item.get('quantity', 1))
+                unit_price_cents = int(price.price_cents)
+                setup_cents = int(price.setup_cents or 0)
+                
+                # Calculate line total
+                line_total = (unit_price_cents * quantity) + setup_cents
+                subtotal_cents += line_total
+                
+                preview_items.append({
+                    'product_name': product.name,
+                    'product_slug': product.slug,
+                    'billing_period': cart_item['billing_period'],
+                    'quantity': quantity,
+                    'unit_price_cents': unit_price_cents,
+                    'setup_cents': setup_cents,
+                })
+                
             except Product.DoesNotExist:
-                errors.append(f"Product not found: {item.get('product_id')}")
-                continue
-            billing_period = item.get('billing_period', 'monthly')
-            quantity = int(item.get('quantity', 1))
-            price = product.get_price_for_period(currency_code, billing_period)
-            if not price:
-                errors.append(f"No price for {product.slug} in {currency_code}/{billing_period}")
-                continue
-            if quantity < 1:
-                errors.append(f"Invalid quantity for {product.name}")
-                continue
-            subtotal_cents += (int(price.effective_price_cents) * quantity) + int(price.setup_cents)
-
-        # VAT preview using rules
-        vat_cents = 0
-        total_cents = subtotal_cents
-        vat_reasoning = ''
-        if subtotal_cents > 0:
-            from apps.orders.vat_rules import OrderVATCalculator
-            tax_profile = getattr(customer, 'get_tax_profile', lambda: None)()
-            vat_number = getattr(tax_profile, 'vat_number', None) or getattr(tax_profile, 'cui', None)
-            country = (billing_address.country if billing_address else 'RO').upper()
-            is_business = bool(getattr(customer, 'company_name', ''))
-            vat_result = OrderVATCalculator.calculate_vat(
-                subtotal_cents=subtotal_cents,
-                customer_country=country,
-                is_business=is_business,
-                vat_number=vat_number,
-                customer_id=str(customer.id),
-                order_id=None,
-            )
-            vat_cents = int(vat_result.vat_cents)
-            total_cents = int(vat_result.total_cents)
-            vat_reasoning = vat_result.reasoning
-
+                return Response({
+                    'success': False,
+                    'errors': [f"Product not found: {cart_item['product_slug']}"],
+                    'warnings': [],
+                }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Calculate VAT using the VAT calculator
+        from apps.orders.vat_rules import OrderVATCalculator
+        
+        company_name = billing_address.get('company_name', '')
+        vat_number = billing_address.get('vat_number', '')
+        country = billing_address.get('country', 'RO')
+        is_business = bool(company_name)
+        
+        vat_result = OrderVATCalculator.calculate_vat(
+            subtotal_cents=subtotal_cents,
+            customer_country=country,
+            is_business=is_business,
+            vat_number=vat_number or None,
+            customer_id=str(customer.id),
+            order_id="preflight-preview",
+        )
+        
+        # Create a temporary order object for validation (not saved to DB)
+        from apps.orders.models import Order
+        temp_order = Order(
+            id=uuid.uuid4(),
+            customer=customer,
+            currency=currency,
+            status='draft',
+            billing_address=dict(billing_address),
+            subtotal_cents=subtotal_cents,
+            tax_cents=int(vat_result.vat_cents),
+            total_cents=int(vat_result.total_cents),
+        )
+        
+        # Run preflight validation on the temporary order
+        errors, warnings = OrderPreflightValidationService.validate(temp_order)
+        
+        # Convert errors to strings
+        error_messages = [str(error) for error in errors]
+        warning_messages = [str(warning) for warning in warnings]
+        
+        success = len(error_messages) == 0
+        
+        logger.info(f"🔎 [API] Preflight validation complete: success={success}, errors={len(error_messages)}, warnings={len(warning_messages)}")
+        
         return Response({
-            'success': len(errors) == 0,
-            'errors': errors,
-            'warnings': warnings,
+            'success': success,
+            'errors': error_messages,
+            'warnings': warning_messages,
             'preview': {
-                'currency': currency_code,
+                'currency': currency.code,
                 'subtotal_cents': subtotal_cents,
-                'vat_cents': vat_cents,
-                'total_cents': total_cents,
-                'vat_reasoning': vat_reasoning,
+                'vat_cents': int(vat_result.vat_cents),
+                'total_cents': int(vat_result.total_cents),
+                'vat_reasoning': vat_result.reasoning,
             }
         })
+        
     except Exception as e:
-        logger.exception(f"🔥 [API] Preflight failed: {e}")
-        return Response({'error': 'Preflight failed'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        logger.exception(f"🔥 [API] Preflight validation failed: {e}")
+        return Response({
+            'success': False,
+            'errors': [f'Preflight validation failed: {str(e)}'],
+            'warnings': [],
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['POST'])
+@permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([OrderCreateThrottle])
 @require_customer_authentication
 def create_order(request: Request, customer) -> Response:
@@ -396,22 +454,8 @@ def create_order(request: Request, customer) -> Response:
     
     try:
         # Convert input to OrderCreateData
-        # Build billing address from customer data
-        billing_address_data = BillingAddressData(
-            company_name=customer.company_name or '',
-            contact_name=customer.name,
-            email=customer.primary_email,
-            phone=getattr(customer, 'phone', ''),
-            address_line1=getattr(customer, 'address_line1', ''),
-            address_line2=getattr(customer, 'address_line2', ''),
-            city=getattr(customer, 'city', ''),
-            county=getattr(customer, 'county', ''),
-            postal_code=getattr(customer, 'postal_code', ''),
-            country=getattr(customer, 'country', 'RO'),
-            fiscal_code=getattr(customer.tax_profile, 'cui', '') if hasattr(customer, 'tax_profile') else '',
-            registration_number=getattr(customer, 'registration_number', ''),
-            vat_number=getattr(customer.tax_profile, 'vat_number', '') if hasattr(customer, 'tax_profile') else ''
-        )
+        # Build billing address from customer data (fetched from database)
+        billing_address_data = OrderService.build_billing_address_from_customer(customer)
         
         # 🔒 SECURITY: Resolve product pricing with sealed token validation
         order_items = []
@@ -562,6 +606,7 @@ def create_order(request: Request, customer) -> Response:
 
 
 @api_view(['POST'])
+@permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([OrderListThrottle])
 @require_customer_authentication  
 def order_list(request: Request, customer) -> Response:
@@ -599,6 +644,7 @@ def order_list(request: Request, customer) -> Response:
 
 
 @api_view(['POST'])
+@permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([OrderListThrottle])
 @require_customer_authentication
 def order_detail(request: Request, customer, order_id: str) -> Response:
