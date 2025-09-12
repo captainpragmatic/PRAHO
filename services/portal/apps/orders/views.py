@@ -11,6 +11,7 @@ from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.http import HttpRequest, HttpResponse, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import redirect, render
+from django.utils import timezone
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods
 
@@ -29,8 +30,9 @@ logger = logging.getLogger(__name__)
 def require_customer_authentication(view_func):
     """Decorator to ensure customer is authenticated"""
     def wrapper(request: HttpRequest, *args, **kwargs):
-        customer_id = request.session.get('customer_id')
-        user_id = request.session.get('user_id')
+        # Try request attributes first (set by middleware), fallback to session
+        customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
+        user_id = getattr(request, 'user_id', None) or request.session.get('user_id')
         
         if not customer_id or not user_id:
             messages.error(request, _('Pentru a plasa o comandă, trebuie să fiți autentificat.'))
@@ -380,8 +382,9 @@ def cart_review(request: HttpRequest) -> HttpResponse:
         return redirect('orders:catalog')
     
     # Calculate totals
-    customer_id = request.session.get('customer_id')
-    user_id = request.session.get('user_id')
+    # Try request attributes first (set by middleware), fallback to session
+    customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
+    user_id = getattr(request, 'user_id', None) or request.session.get('user_id')
     calculation_result = None
     calculation_error = None
     
@@ -439,8 +442,9 @@ def calculate_totals_htmx(request: HttpRequest) -> HttpResponse:
     
     try:
         cart = GDPRCompliantCartSession(request.session)
-        customer_id = request.session.get('customer_id')
-        user_id = request.session.get('user_id')
+        # Try request attributes first (set by middleware), fallback to session
+        customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
+        user_id = getattr(request, 'user_id', None) or request.session.get('user_id')
         
         # Debug logging for authentication parameters
         logger.info(f"🔍 [Cart] Calculate totals - customer_id: {customer_id}, user_id: {user_id}")
@@ -484,6 +488,7 @@ def calculate_totals_htmx(request: HttpRequest) -> HttpResponse:
 def checkout(request: HttpRequest) -> HttpResponse:
     """
     Checkout page with preflight validation before order creation.
+    Enforces company profile completeness before allowing order submission.
     """
     
     cart = GDPRCompliantCartSession(request.session)
@@ -493,8 +498,9 @@ def checkout(request: HttpRequest) -> HttpResponse:
         return redirect('orders:catalog')
     
     # Calculate totals for display
-    customer_id = request.session.get('customer_id')
-    user_id = request.session.get('user_id')
+    # Try request attributes first (set by middleware), fallback to session
+    customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
+    user_id = getattr(request, 'user_id', None) or request.session.get('user_id')
     calculation_result = None
     preflight_result = None
     
@@ -502,7 +508,31 @@ def checkout(request: HttpRequest) -> HttpResponse:
         calculation_result = CartCalculationService.calculate_cart_totals(cart, customer_id, user_id)
         
         # 🔎 SECURITY: Run preflight validation to check for issues
-        preflight_result = OrderCreationService.preflight_order(cart, customer_id)
+        preflight_result = OrderCreationService.preflight_order(cart, customer_id, user_id)
+        
+        # 🔒 CRITICAL: Check if preflight validation failed with profile-related errors
+        if preflight_result and not preflight_result.get('valid', False):
+            errors = preflight_result.get('errors', [])
+            
+            # Look for company profile completeness errors
+            profile_related_errors = []
+            for error in errors:
+                error_str = str(error).lower()
+                if any(keyword in error_str for keyword in [
+                    'contact', 'email', 'address', 'billing', 'city', 'county', 'postal', 'country'
+                ]):
+                    profile_related_errors.append(error)
+            
+            # If we have profile-related errors, add contextual user guidance
+            if profile_related_errors:
+                logger.warning(
+                    f"🔒 [Orders] Blocking checkout for customer {customer_id} due to incomplete profile: {profile_related_errors}"
+                )
+                # Add user-friendly message explaining what needs to be fixed
+                messages.warning(request, _(
+                    'Your company profile information needs to be completed before placing orders. '
+                    'Please ensure your billing address, contact details, and VAT information (if applicable) are filled out completely.'
+                ))
         
     except ValidationError:
         messages.error(request, _('Error calculating order totals.'))
@@ -526,12 +556,14 @@ def checkout(request: HttpRequest) -> HttpResponse:
 def create_order(request: HttpRequest) -> HttpResponse:
     """
     Create draft order from cart (MVP: self-serve order creation).
-    🔒 SECURITY: Validates cart version to prevent stale mutations.
+    🔒 SECURITY: Validates cart version to prevent stale mutations and enforces profile completeness.
     """
     
     try:
         cart = GDPRCompliantCartSession(request.session)
-        customer_id = request.session.get('customer_id')
+        # Try request attributes first (set by middleware), fallback to session
+        customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
+        user_id = getattr(request, 'user_id', None) or request.session.get('user_id')
         
         if not cart.has_items():
             messages.error(request, _('Cannot create order with empty cart.'))
@@ -546,11 +578,39 @@ def create_order(request: HttpRequest) -> HttpResponse:
             )
             return redirect('orders:cart_review')
         
+        # 🔒 CRITICAL: Re-run preflight validation before order creation to prevent bypassing validation
+        preflight_result = OrderCreationService.preflight_order(cart, customer_id, user_id)
+        
+        if not preflight_result.get('valid', False):
+            errors = preflight_result.get('errors', [])
+            logger.warning(f"🔒 [Orders] Blocking order creation for customer {customer_id} - validation failed: {errors}")
+            
+            # Check if these are profile-related errors
+            profile_related_errors = []
+            for error in errors:
+                error_str = str(error).lower()
+                if any(keyword in error_str for keyword in [
+                    'contact', 'email', 'address', 'billing', 'city', 'county', 'postal', 'country'
+                ]):
+                    profile_related_errors.append(error)
+            
+            if profile_related_errors:
+                messages.error(request, _(
+                    'Order cannot be created because your company profile information is incomplete. '
+                    'Please complete your billing address, contact details, and VAT information before ordering.'
+                ))
+            else:
+                # Generic validation error message
+                error_details = ' '.join(str(error) for error in errors[:3])  # Show first 3 errors
+                messages.error(request, _('Order validation failed: {}').format(error_details))
+            
+            return redirect('orders:checkout')
+        
         # Get optional notes
         notes = request.POST.get('notes', '').strip()
         
         # Create order with auto-pending (promotes to pending if validation passes)
-        result = OrderCreationService.create_draft_order(cart, customer_id, notes, auto_pending=True)
+        result = OrderCreationService.create_draft_order(cart, customer_id, user_id, notes, auto_pending=True)
         
         if result.get('error'):
             messages.error(request, result['error'])
@@ -590,20 +650,23 @@ def order_confirmation(request: HttpRequest, order_id: str) -> HttpResponse:
     
     try:
         platform_api = PlatformAPIClient()
-        customer_id = request.session.get('customer_id')
+        # Try request attributes first (set by middleware), fallback to session
+        customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
+        user_id = getattr(request, 'user_id', None) or request.session.get('user_id')
         
-        # Fetch order details (scoped to customer)
-        order = platform_api.post(f'api/orders/{order_id}/', data={
+        # Fetch order details from Platform API with HMAC authentication
+        order_data = platform_api.post(f'orders/{order_id}/', data={
             'customer_id': customer_id,
+            'timestamp': int(timezone.now().timestamp()),
             'action': 'get_order_detail'
-        })
+        }, user_id=int(user_id))
         
-        if not order:
+        if not order_data or order_data.get('error'):
             messages.error(request, _('Comanda nu a fost găsită.'))
             return redirect('orders:catalog')
         
         context = {
-            'order': order,
+            'order': order_data,
             'breadcrumb_current': 'confirm',
         }
         

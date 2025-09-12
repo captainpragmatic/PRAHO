@@ -20,6 +20,8 @@ from django.views.decorators.http import require_http_methods
 from apps.api_client.services import PlatformAPIError, api_client
 from apps.users.forms import (
     ChangePasswordForm,
+    CompanyCreationForm,
+    CompanyProfileForm,
     CustomerLoginForm,
     CustomerProfileForm,
     CustomerRegistrationForm,
@@ -46,6 +48,62 @@ def _check_authentication_or_redirect(request: HttpRequest) -> HttpResponse | No
     if not request.session.get('customer_id'):
         return redirect('/login/')
     return None
+
+
+def _get_user_customer_memberships(request: HttpRequest) -> list[dict] | None:
+    """Get user's customer memberships from Platform API"""
+    user_id = request.session.get('user_id')
+    if not user_id:
+        return None
+        
+    try:
+        response = api_client.post('users/customers/', data={
+            'customer_id': user_id,  # Note: Platform expects customer_id field, not user_id
+            'action': 'get_user_customers',
+            'timestamp': int(timezone.now().timestamp()),
+        }, user_id=user_id)
+        
+        if response and response.get('success') and 'results' in response:
+            # Transform the response to match expected format
+            memberships = []
+            for customer in response['results']:
+                memberships.append({
+                    'customer_id': customer.get('id'),
+                    'customer_name': customer.get('name', customer.get('company_name', f"Customer {customer.get('id')}")),
+                    'role': 'owner',  # Default role - we'll need to enhance this later
+                    'company_name': customer.get('company_name', ''),
+                })
+            return memberships
+        return None
+        
+    except PlatformAPIError as e:
+        logger.error(f"🔥 [Portal] Failed to fetch user customers: {e}")
+        return None
+
+
+def _get_selected_customer_id(request: HttpRequest) -> str | None:
+    """Get the currently selected customer ID, fallback to session customer_id"""
+    selected_customer_id = request.session.get('selected_customer_id')
+    if selected_customer_id:
+        return selected_customer_id
+    
+    # Fallback to login customer_id for backward compatibility
+    return request.session.get('customer_id')
+
+
+def _get_user_role_for_customer(request: HttpRequest, customer_id: str) -> str | None:
+    """Get user's role for specific customer from cached memberships"""
+    memberships = request.session.get('user_memberships', [])
+    for membership in memberships:
+        if str(membership.get('customer_id')) == str(customer_id):
+            return membership.get('role')
+    return None
+
+
+def _can_edit_company_profile(request: HttpRequest, customer_id: str) -> bool:
+    """Check if user can edit company profile for given customer"""
+    role = _get_user_role_for_customer(request, customer_id)
+    return role in ['owner', 'billing']
 
 
 def _handle_totp_setup_get(request: HttpRequest, customer_id: str, customer_email: str) -> HttpResponse:
@@ -395,6 +453,21 @@ def profile_view(request: HttpRequest) -> HttpResponse:
     except Exception as e:
         logger.debug(f"Could not load profile data from Platform API: {e}")
     
+    # Load user memberships for customer selector
+    if not request.session.get('user_memberships'):
+        memberships = _get_user_customer_memberships(request)
+        if memberships:
+            request.session['user_memberships'] = memberships
+            # Set default selected customer if not set
+            if not request.session.get('selected_customer_id'):
+                request.session['selected_customer_id'] = customer_id
+                # Find the customer name and role for the default customer
+                for membership in memberships:
+                    if str(membership.get('customer_id')) == str(customer_id):
+                        request.session['selected_customer_name'] = membership.get('customer_name', f'Customer {customer_id}')
+                        request.session['selected_customer_role'] = membership.get('role', 'viewer')
+                        break
+    
     context = {
         'form': form,
         'profile': profile_data,
@@ -402,6 +475,10 @@ def profile_view(request: HttpRequest) -> HttpResponse:
         'customer_id': customer_id,
         'page_title': _('Account Settings'),
         'brand_name': 'PRAHO Portal',
+        'user_memberships': request.session.get('user_memberships', []),
+        'selected_customer_id': request.session.get('selected_customer_id', customer_id),
+        'selected_customer_name': request.session.get('selected_customer_name', ''),
+        'selected_customer_role': request.session.get('selected_customer_role', ''),
     }
     
     return render(request, 'users/profile.html', context)
@@ -756,3 +833,382 @@ def mfa_disable_view(request: HttpRequest) -> HttpResponse:
         messages.error(request, _("An error occurred. Please try again."))
     
     return redirect('users:mfa_management')
+
+
+@never_cache
+@require_http_methods(["GET"])
+def company_profile_view(request: HttpRequest) -> HttpResponse:
+    """
+    Company profile view - displays current company information.
+    Shows company details including billing address, VAT number, contact information.
+    """
+    
+    # Check authentication
+    auth_redirect = _check_authentication_or_redirect(request)
+    if auth_redirect:
+        return auth_redirect
+    
+    # Get selected customer context
+    customer_id = _get_selected_customer_id(request)
+    if not customer_id:
+        messages.error(request, _("Please select a customer to view profile."))
+        return redirect('/profile/')
+        
+    user_id = request.session.get('user_id')
+    
+    # Load user memberships if not cached
+    if not request.session.get('user_memberships'):
+        memberships = _get_user_customer_memberships(request)
+        if memberships:
+            request.session['user_memberships'] = memberships
+    
+    # Fetch company profile data from Platform API
+    company_data = {}
+    try:
+        response = api_client.post('customers/details/', data={
+            'customer_id': customer_id,
+            'user_id': user_id,
+            'action': 'get_customer_details',
+            'timestamp': int(timezone.now().timestamp()),
+            'include': ['billing_profile', 'tax_profile']
+        }, user_id=user_id)
+        
+        if response.get('success'):
+            customer = response.get('customer', {})
+            billing_profile = customer.get('billing_profile', {})
+            tax_profile = customer.get('tax_profile', {})
+            
+            company_data = {
+                'company_name': customer.get('company_name', ''),
+                'vat_number': tax_profile.get('vat_number', ''),
+                'trade_registry_number': customer.get('trade_registry_number', ''),
+                'primary_email': customer.get('primary_email', ''),
+                'primary_phone': customer.get('primary_phone', ''),
+                'website': customer.get('website', ''),
+                'industry': customer.get('industry', ''),
+                'billing_street': billing_profile.get('address_street', ''),
+                'billing_city': billing_profile.get('address_city', ''),
+                'billing_state': billing_profile.get('address_state', ''),
+                'billing_postal_code': billing_profile.get('address_postal_code', ''),
+                'billing_country': billing_profile.get('address_country', 'RO'),
+                'status': customer.get('status', ''),
+                'customer_type': customer.get('customer_type', ''),
+            }
+        else:
+            messages.error(request, _("Unable to load company profile data."))
+            
+    except PlatformAPIError as e:
+        logger.error(f"🔥 [Portal] Company profile API error: {e}")
+        messages.error(request, _("Error loading company profile. Please try again."))
+    except Exception as e:
+        logger.error(f"🔥 [Portal] Unexpected error loading company profile: {e}")
+        messages.error(request, _("An unexpected error occurred."))
+    
+    context = {
+        'company_data': company_data,
+        'customer_email': request.session.get('email'),
+        'page_title': _('Company Profile'),
+        'brand_name': 'PRAHO Portal',
+        'selected_customer_id': customer_id,
+        'selected_customer_name': request.session.get('selected_customer_name', ''),
+        'selected_customer_role': request.session.get('selected_customer_role', ''),
+        'can_edit_profile': _can_edit_company_profile(request, customer_id),
+    }
+    
+    return render(request, 'users/company_profile.html', context)
+
+
+@never_cache
+@require_http_methods(["GET", "POST"])
+def company_profile_edit_view(request: HttpRequest) -> HttpResponse:
+    """
+    Company profile edit view - allows editing company information.
+    Updates company details via Platform API with form validation.
+    """
+    
+    # Check authentication
+    auth_redirect = _check_authentication_or_redirect(request)
+    if auth_redirect:
+        return auth_redirect
+    
+    # Get selected customer context
+    customer_id = _get_selected_customer_id(request)
+    if not customer_id:
+        messages.error(request, _("Please select a customer to edit profile."))
+        return redirect('/profile/')
+        
+    user_id = request.session.get('user_id')
+    
+    # Check if user can edit company profile for this customer
+    if not _can_edit_company_profile(request, customer_id):
+        role = _get_user_role_for_customer(request, customer_id)
+        messages.error(request, _("You don't have permission to edit this company profile. Your role: {role}").format(role=role or 'Unknown'))
+        return redirect('users:company_profile')
+    
+    if request.method == 'GET':
+        # Load current data and populate form
+        form = CompanyProfileForm()
+        
+        try:
+            response = api_client.post('customers/details/', data={
+                'customer_id': customer_id,
+                'user_id': user_id,
+                'action': 'get_customer_details',
+                'timestamp': int(timezone.now().timestamp()),
+                'include': ['billing_profile', 'tax_profile']
+            }, user_id=user_id)
+            
+            if response.get('success'):
+                customer = response.get('customer', {})
+                billing_profile = customer.get('billing_profile', {})
+                tax_profile = customer.get('tax_profile', {})
+                
+                initial_data = {
+                    'company_name': customer.get('company_name', ''),
+                    'vat_number': tax_profile.get('vat_number', ''),
+                    'trade_registry_number': customer.get('trade_registry_number', ''),
+                    'primary_email': customer.get('primary_email', ''),
+                    'primary_phone': customer.get('primary_phone', ''),
+                    'website': customer.get('website', ''),
+                    'industry': customer.get('industry', ''),
+                    'billing_street': billing_profile.get('address_street', ''),
+                    'billing_city': billing_profile.get('address_city', ''),
+                    'billing_state': billing_profile.get('address_state', ''),
+                    'billing_postal_code': billing_profile.get('address_postal_code', ''),
+                    'billing_country': billing_profile.get('address_country', 'RO'),
+                }
+                form = CompanyProfileForm(initial=initial_data)
+            else:
+                messages.error(request, _("Unable to load current company data."))
+                
+        except Exception as e:
+            logger.error(f"🔥 [Portal] Error loading company data for edit: {e}")
+            messages.error(request, _("Error loading company data. Please try again."))
+    
+    else:  # POST - handle form submission
+        form = CompanyProfileForm(request.POST)
+        
+        if form.is_valid():
+            try:
+                # Update company profile via Platform API using existing billing-address endpoint
+                update_data = {
+                    'customer_id': customer_id,
+                    'user_id': user_id,
+                    'timestamp': int(timezone.now().timestamp()),
+                    'company_name': form.cleaned_data['company_name'],
+                    'vat_number': form.cleaned_data['vat_number'],
+                    'trade_registry_number': form.cleaned_data['trade_registry_number'],
+                    'primary_email': form.cleaned_data['primary_email'],
+                    'primary_phone': form.cleaned_data['primary_phone'],
+                    'website': form.cleaned_data['website'],
+                    'industry': form.cleaned_data['industry'],
+                    'billing_address': {
+                        'street': form.cleaned_data['billing_street'],
+                        'city': form.cleaned_data['billing_city'],
+                        'state': form.cleaned_data['billing_state'],
+                        'postal_code': form.cleaned_data['billing_postal_code'],
+                        'country': form.cleaned_data['billing_country'],
+                    },
+                }
+                
+                response = api_client.post('customers/billing-address/', data=update_data, user_id=user_id)
+                
+                if response.get('success'):
+                    logger.info(f"✅ [Portal] Company profile updated successfully for customer {customer_id}")
+                    messages.success(request, _("Company profile updated successfully!"))
+                    
+                    # Handle redirect based on 'next' parameter for order flow continuity
+                    next_url = request.GET.get('next') or request.POST.get('next')
+                    if next_url and url_has_allowed_host_and_scheme(
+                        url=next_url,
+                        allowed_hosts={request.get_host()},
+                        require_https=request.is_secure(),
+                    ):
+                        logger.info(f"✅ [Portal] Redirecting to next URL after profile update: {next_url}")
+                        return redirect(next_url)
+                    
+                    return redirect('users:company_profile')
+                else:
+                    error_msg = response.get('error', 'Unknown error occurred')
+                    messages.error(request, _("Failed to update profile: {}").format(error_msg))
+                    
+            except PlatformAPIError as e:
+                logger.error(f"🔥 [Portal] Company profile update API error: {e}")
+                messages.error(request, _("Error updating company profile. Please try again."))
+            except Exception as e:
+                logger.error(f"🔥 [Portal] Unexpected error updating company profile: {e}")
+                messages.error(request, _("An unexpected error occurred while updating profile."))
+        else:
+            messages.error(request, _("Please correct the errors below."))
+    
+    context = {
+        'form': form,
+        'customer_email': request.session.get('email'),
+        'page_title': _('Edit Company Profile'),
+        'brand_name': 'PRAHO Portal',
+        'selected_customer_id': customer_id,
+        'selected_customer_name': request.session.get('selected_customer_name', ''),
+        'selected_customer_role': request.session.get('selected_customer_role', ''),
+    }
+    
+    return render(request, 'users/company_profile_edit.html', context)
+
+
+@never_cache
+@require_http_methods(["POST"])
+def switch_customer_view(request: HttpRequest) -> HttpResponse:
+    """
+    Switch active customer context for multi-customer users.
+    Updates session with selected customer and refreshes customer data.
+    """
+    
+    # Check authentication
+    auth_redirect = _check_authentication_or_redirect(request)
+    if auth_redirect:
+        return auth_redirect
+        
+    customer_id = request.POST.get('customer_id')
+    if not customer_id:
+        messages.error(request, _("Please select a valid customer."))
+        return redirect(request.META.get('HTTP_REFERER', '/profile/'))
+    
+    # Verify user has access to this customer
+    memberships = _get_user_customer_memberships(request)
+    if not memberships:
+        messages.error(request, _("Unable to verify customer access."))
+        return redirect('/profile/')
+        
+    # Check if customer_id is in user's memberships
+    has_access = False
+    selected_customer_name = None
+    selected_role = None
+    
+    for membership in memberships:
+        if str(membership.get('customer_id')) == str(customer_id):
+            has_access = True
+            selected_customer_name = membership.get('customer_name', f'Customer {customer_id}')
+            selected_role = membership.get('role', 'viewer')
+            break
+    
+    if not has_access:
+        messages.error(request, _("You don't have access to this customer."))
+        return redirect('/profile/')
+    
+    # Update session with selected customer
+    request.session['selected_customer_id'] = customer_id
+    request.session['selected_customer_name'] = selected_customer_name
+    request.session['selected_customer_role'] = selected_role
+    request.session['user_memberships'] = memberships  # Cache memberships
+    
+    logger.info(f"🔄 [Portal] User switched to customer {customer_id} ({selected_customer_name}) with role {selected_role}")
+    
+    # Success message with customer context
+    role_display = {
+        'owner': _('Owner'),
+        'billing': _('Billing Manager'), 
+        'tech': _('Technical Manager'),
+        'viewer': _('Viewer')
+    }.get(selected_role, selected_role.title())
+    
+    messages.success(request, _("Switched to {customer} ({role})").format(
+        customer=selected_customer_name,
+        role=role_display
+    ))
+    
+    # Redirect to the page they came from, or profile by default
+    next_url = request.POST.get('next', request.META.get('HTTP_REFERER', '/profile/'))
+    return redirect(next_url)
+
+
+@never_cache
+@csrf_protect
+@require_http_methods(["GET", "POST"])
+def create_company_view(request: HttpRequest) -> HttpResponse:
+    """
+    Create new company profile for authenticated user.
+    User becomes owner of the new company.
+    """
+    
+    # Check authentication
+    auth_redirect = _check_authentication_or_redirect(request)
+    if auth_redirect:
+        return auth_redirect
+        
+    user_id = request.session.get('user_id')
+    
+    if request.method == 'GET':
+        # Show empty form
+        form = CompanyCreationForm()
+    else:  # POST - handle form submission
+        form = CompanyCreationForm(request.POST)
+        
+        if form.is_valid():
+            try:
+                # Prepare data for Platform API
+                company_data = {
+                    'user_id': user_id,
+                    'action': 'create_company',
+                    'timestamp': int(timezone.now().timestamp()),
+                    'company_data': {
+                        'name': form.cleaned_data['company_name'],
+                        'company_name': form.cleaned_data['company_name'],
+                        'vat_number': form.cleaned_data.get('vat_number', ''),
+                        'trade_registry_number': form.cleaned_data.get('trade_registry_number', ''),
+                        'industry': form.cleaned_data.get('industry', ''),
+                        
+                        # Billing address
+                        'billing_address': {
+                            'street_address': form.cleaned_data['street_address'],
+                            'city': form.cleaned_data['city'],
+                            'state': form.cleaned_data.get('state', ''),
+                            'postal_code': form.cleaned_data.get('postal_code', ''),
+                            'country': form.cleaned_data.get('country', 'România'),
+                        },
+                        
+                        # Business contact
+                        'contact': {
+                            'primary_email': form.cleaned_data['primary_email'],
+                            'primary_phone': form.cleaned_data.get('primary_phone', ''),
+                            'website': form.cleaned_data.get('website', ''),
+                        }
+                    }
+                }
+                
+                # Call Platform API to create company
+                response = api_client.post('customers/create/', data=company_data, user_id=user_id)
+                
+                if response.get('success'):
+                    new_customer_id = response.get('customer_id')
+                    company_name = form.cleaned_data['company_name']
+                    
+                    logger.info(f"✅ [Portal] Company '{company_name}' created successfully with ID {new_customer_id}")
+                    messages.success(request, _("Company '{}' created successfully! You are now the owner.").format(company_name))
+                    
+                    # Clear cached memberships to refresh the list
+                    if 'user_memberships' in request.session:
+                        del request.session['user_memberships']
+                    
+                    # Set the new company as the selected customer
+                    if new_customer_id:
+                        request.session['selected_customer_id'] = str(new_customer_id)
+                        request.session['selected_customer_name'] = company_name
+                        request.session['selected_customer_role'] = 'owner'
+                    
+                    # Redirect to profile to see the new company
+                    return redirect('users:profile')
+                else:
+                    error_msg = response.get('error', 'Unknown error occurred')
+                    logger.error(f"🔥 [Portal] Company creation failed: {error_msg}")
+                    messages.error(request, _("Failed to create company: {}").format(error_msg))
+                    
+            except PlatformAPIError as e:
+                logger.error(f"🔥 [Portal] Company creation API error: {e}")
+                messages.error(request, _("Error creating company. Please try again."))
+    
+    context = {
+        'form': form,
+        'page_title': _('Create Company'),
+        'brand_name': 'PRAHO Portal',
+    }
+    
+    return render(request, 'users/create_company.html', context)

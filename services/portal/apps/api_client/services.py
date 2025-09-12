@@ -125,7 +125,14 @@ class PlatformAPIClient:
             payload['user_id'] = user_id
         if 'timestamp' not in payload:
             payload['timestamp'] = time.time()
-        return json.dumps(payload).encode('utf-8'), payload
+        
+        # Serialize to JSON first to ensure we get the exact representation
+        body_bytes = json.dumps(payload).encode('utf-8')
+        
+        # Parse it back to get the exact timestamp as it appears in JSON
+        serialized_payload = json.loads(body_bytes.decode('utf-8'))
+        
+        return body_bytes, serialized_payload
 
     def _normalized_path_with_query(self, url: str, params: dict | None) -> str:
         parsed_url = urllib.parse.urlsplit(url)

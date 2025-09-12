@@ -557,3 +557,400 @@ class ChangePasswordForm(forms.Form):
             raise ValidationError(_("Password must be at least 8 characters long."))
             
         return cleaned_data
+
+
+class CompanyProfileForm(forms.Form):
+    """
+    Company profile management form with Romanian business compliance.
+    Handles company name, billing address, CUI/VAT, and business contact information.
+    """
+    
+    company_name = forms.CharField(
+        label=_("Company Name"),
+        max_length=200,
+        widget=forms.TextInput(attrs={
+            'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400',
+            'placeholder': _('e.g. Test Company SRL'),
+        }),
+        help_text=_("Official company name as registered"),
+    )
+    
+    vat_number = forms.CharField(
+        label=_("VAT Number / CUI"),
+        max_length=50,
+        widget=forms.TextInput(attrs={
+            'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400',
+            'placeholder': _('RO12345678'),
+        }),
+        help_text=_("Romanian VAT number or CUI"),
+    )
+    
+    trade_registry_number = forms.CharField(
+        label=_("Trade Registry Number"),
+        max_length=50,
+        required=False,
+        widget=forms.TextInput(attrs={
+            'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400',
+            'placeholder': _('J40/1234/2023'),
+        }),
+        help_text=_("Trade registry number (optional)"),
+    )
+    
+    # Billing Address
+    billing_street = forms.CharField(
+        label=_("Street Address"),
+        max_length=200,
+        widget=forms.TextInput(attrs={
+            'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400',
+            'placeholder': _('Strada Exemple nr. 123'),
+        }),
+        help_text=_("Street name and number"),
+    )
+    
+    billing_city = forms.CharField(
+        label=_("City"),
+        max_length=100,
+        widget=forms.TextInput(attrs={
+            'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400',
+            'placeholder': _('București'),
+        }),
+    )
+    
+    billing_state = forms.CharField(
+        label=_("County/State"),
+        max_length=100,
+        widget=forms.TextInput(attrs={
+            'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400',
+            'placeholder': _('București'),
+        }),
+    )
+    
+    billing_postal_code = forms.CharField(
+        label=_("Postal Code"),
+        max_length=20,
+        widget=forms.TextInput(attrs={
+            'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400',
+            'placeholder': _('010101'),
+        }),
+    )
+    
+    billing_country = forms.CharField(
+        label=_("Country"),
+        initial='RO',
+        widget=forms.TextInput(attrs={
+            'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-700 text-slate-300 rounded-lg cursor-not-allowed',
+            'readonly': True,
+        }),
+        help_text=_("Currently only Romania (RO) is supported"),
+    )
+    
+    # Business Contact Information
+    primary_email = forms.EmailField(
+        label=_("Primary Email"),
+        widget=forms.EmailInput(attrs={
+            'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400',
+            'placeholder': _('contact@company.ro'),
+        }),
+        help_text=_("Main business email address"),
+    )
+    
+    primary_phone = forms.CharField(
+        label=_("Primary Phone"),
+        max_length=20,
+        widget=forms.TextInput(attrs={
+            'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400',
+            'placeholder': _('+40.21.123.4567'),
+        }),
+        help_text=_("Primary business phone number"),
+    )
+    
+    website = forms.URLField(
+        label=_("Website"),
+        required=False,
+        widget=forms.URLInput(attrs={
+            'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400',
+            'placeholder': _('https://company.ro'),
+        }),
+        help_text=_("Company website (optional)"),
+    )
+    
+    industry = forms.CharField(
+        label=_("Industry"),
+        max_length=100,
+        required=False,
+        widget=forms.TextInput(attrs={
+            'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400',
+            'placeholder': _('Technology, Retail, Manufacturing, etc.'),
+        }),
+        help_text=_("Business industry (optional)"),
+    )
+    
+    def clean_vat_number(self) -> str:
+        """Validate Romanian VAT number format"""
+        vat_number = self.cleaned_data.get('vat_number', '').strip().upper()
+        
+        if not vat_number:
+            raise ValidationError(_("VAT number / CUI is required"))
+            
+        # Remove RO prefix for validation
+        clean_vat = vat_number.replace('RO', '').strip()
+        
+        # Check if it's numeric and has appropriate length
+        if not clean_vat.isdigit():
+            raise ValidationError(_("VAT number must contain only digits (optionally prefixed with RO)"))
+            
+        if len(clean_vat) < MIN_VAT_DIGITS:
+            raise ValidationError(_("VAT number must have at least 6 digits"))
+            
+        # Return with RO prefix
+        return f"RO{clean_vat}"
+    
+    def clean_primary_phone(self) -> str:
+        """Validate Romanian phone number format"""
+        phone = self.cleaned_data.get('primary_phone', '').strip()
+        if phone and not re.match(r"^(\+40[\.\s]*[0-9][\.\s0-9]{8,11}[0-9]|0[0-9]{9})$", phone):
+            raise ValidationError(_("Invalid phone number format. Use Romanian format: +40.XX.XXX.XXXX"))
+        return phone
+
+
+class CompanyCreationForm(forms.Form):
+    """
+    Company creation form with comprehensive Romanian business validation.
+    Creates a new customer with complete business profile information.
+    """
+    
+    # Company Basic Information
+    company_name = forms.CharField(
+        label=_("Company Name"),
+        max_length=200,
+        widget=forms.TextInput(attrs={
+            'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400',
+            'placeholder': _('e.g. Innovative Solutions SRL'),
+        }),
+        help_text=_("Official company name as registered with ONRC"),
+    )
+    
+    vat_number = forms.CharField(
+        label=_("VAT Number / CUI"),
+        max_length=20,
+        required=False,
+        widget=forms.TextInput(attrs={
+            'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400',
+            'placeholder': _('e.g. RO12345678'),
+        }),
+        help_text=_("Romanian VAT number (CUI) - required for invoicing"),
+    )
+    
+    trade_registry_number = forms.CharField(
+        label=_("Trade Registry Number"),
+        max_length=50,
+        required=False,
+        widget=forms.TextInput(attrs={
+            'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400',
+            'placeholder': _('e.g. J40/1234/2023'),
+        }),
+        help_text=_("Trade registry number from ONRC"),
+    )
+    
+    industry = forms.CharField(
+        label=_("Industry"),
+        max_length=100,
+        required=False,
+        widget=forms.TextInput(attrs={
+            'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400',
+            'placeholder': _('e.g. Information Technology'),
+        }),
+        help_text=_("Primary business industry"),
+    )
+    
+    # Billing Address
+    street_address = forms.CharField(
+        label=_("Street Address"),
+        max_length=255,
+        widget=forms.TextInput(attrs={
+            'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400',
+            'placeholder': _('e.g. Strada Victoriei nr. 123, sector 1'),
+        }),
+        help_text=_("Complete street address with number"),
+    )
+    
+    city = forms.CharField(
+        label=_("City"),
+        max_length=100,
+        widget=forms.TextInput(attrs={
+            'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400',
+            'placeholder': _('e.g. București'),
+        }),
+        help_text=_("City name"),
+    )
+    
+    state = forms.CharField(
+        label=_("County / State"),
+        max_length=100,
+        required=False,
+        widget=forms.TextInput(attrs={
+            'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400',
+            'placeholder': _('e.g. București'),
+        }),
+        help_text=_("County or state"),
+    )
+    
+    postal_code = forms.CharField(
+        label=_("Postal Code"),
+        max_length=20,
+        required=False,
+        widget=forms.TextInput(attrs={
+            'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400',
+            'placeholder': _('e.g. 010001'),
+        }),
+        help_text=_("Romanian postal code"),
+    )
+    
+    country = forms.CharField(
+        label=_("Country"),
+        initial="România",
+        widget=forms.TextInput(attrs={
+            'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400',
+        }),
+        help_text=_("Country name"),
+    )
+    
+    # Business Contact Information
+    primary_email = forms.EmailField(
+        label=_("Primary Business Email"),
+        widget=forms.EmailInput(attrs={
+            'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400',
+            'placeholder': _('contact@company.com'),
+        }),
+        help_text=_("Main business email address"),
+    )
+    
+    primary_phone = forms.CharField(
+        label=_("Primary Phone Number"),
+        max_length=20,
+        required=False,
+        widget=forms.TextInput(attrs={
+            'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400',
+            'placeholder': _('+40 21 XXX XXXX'),
+        }),
+        help_text=_("Business phone number with country code"),
+    )
+    
+    website = forms.URLField(
+        label=_("Company Website"),
+        required=False,
+        widget=forms.URLInput(attrs={
+            'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400',
+            'placeholder': _('https://www.company.com'),
+        }),
+        help_text=_("Company website URL"),
+    )
+    
+    # Terms and Agreements
+    agree_terms = forms.BooleanField(
+        label=_("I agree to the Terms of Service and Privacy Policy"),
+        widget=forms.CheckboxInput(attrs={
+            'class': 'rounded border-slate-600 bg-slate-800 text-blue-600 focus:ring-blue-500 focus:ring-2',
+        }),
+        help_text=_("You must agree to create a company profile"),
+    )
+    
+    def clean_company_name(self):
+        """Validate company name"""
+        company_name = self.cleaned_data.get('company_name', '').strip()
+        
+        if not company_name:
+            raise forms.ValidationError(_("Company name is required"))
+            
+        if len(company_name) < 3:
+            raise forms.ValidationError(_("Company name must be at least 3 characters long"))
+            
+        # Check for common Romanian business suffixes
+        valid_suffixes = ['SRL', 'SA', 'PFA', 'II', 'IF', 'SNC', 'SCS', 'ONG']
+        has_valid_suffix = any(company_name.upper().endswith(suffix) for suffix in valid_suffixes)
+        
+        if not has_valid_suffix:
+            logger.warning(f"Company name '{company_name}' doesn't end with common Romanian business suffix")
+            
+        return company_name
+    
+    def clean_vat_number(self):
+        """Validate Romanian VAT number (CUI)"""
+        vat_number = self.cleaned_data.get('vat_number', '').strip()
+        
+        if not vat_number:
+            return vat_number
+            
+        # Remove spaces and common prefixes
+        vat_number = vat_number.replace(' ', '').upper()
+        if vat_number.startswith('RO'):
+            vat_number = vat_number[2:]
+            
+        # Check if it's numeric and has valid length
+        if not vat_number.isdigit():
+            raise forms.ValidationError(_("VAT number must contain only numbers (after RO prefix)"))
+            
+        if len(vat_number) < 2 or len(vat_number) > 10:
+            raise forms.ValidationError(_("Romanian VAT number must be between 2-10 digits"))
+            
+        return f"RO{vat_number}"
+    
+    def clean_primary_phone(self):
+        """Validate Romanian phone number"""
+        phone = self.cleaned_data.get('primary_phone', '').strip()
+        
+        if not phone:
+            return phone
+            
+        # Remove common separators
+        phone_clean = phone.replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
+        
+        # Romanian phone number patterns
+        if phone_clean.startswith('+40'):
+            phone_clean = phone_clean[3:]
+        elif phone_clean.startswith('0040'):
+            phone_clean = phone_clean[4:]
+        elif phone_clean.startswith('40'):
+            phone_clean = phone_clean[2:]
+            
+        # Remove leading 0 if present
+        if phone_clean.startswith('0'):
+            phone_clean = phone_clean[1:]
+            
+        # Check if it's a valid Romanian mobile/landline
+        if not phone_clean.isdigit() or len(phone_clean) != 9:
+            raise forms.ValidationError(_("Please enter a valid Romanian phone number"))
+            
+        # Check if it starts with valid prefixes
+        valid_prefixes = ['2', '3', '7']  # landline, landline, mobile
+        if not any(phone_clean.startswith(prefix) for prefix in valid_prefixes):
+            raise forms.ValidationError(_("Phone number must start with a valid Romanian prefix"))
+            
+        return f"+40{phone_clean}"
+    
+    def clean_postal_code(self):
+        """Validate Romanian postal code"""
+        postal_code = self.cleaned_data.get('postal_code', '').strip()
+        
+        if not postal_code:
+            return postal_code
+            
+        # Romanian postal codes are 6 digits
+        if not postal_code.isdigit() or len(postal_code) != 6:
+            raise forms.ValidationError(_("Romanian postal code must be exactly 6 digits"))
+            
+        return postal_code
+    
+    def clean(self):
+        """Cross-field validation"""
+        cleaned_data = super().clean()
+        
+        # If VAT number is provided, trade registry should also be provided
+        vat_number = cleaned_data.get('vat_number')
+        trade_registry = cleaned_data.get('trade_registry_number')
+        
+        if vat_number and not trade_registry:
+            self.add_error('trade_registry_number', 
+                         _("Trade registry number is recommended when VAT number is provided"))
+        
+        return cleaned_data

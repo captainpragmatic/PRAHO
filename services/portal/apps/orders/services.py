@@ -483,15 +483,28 @@ class CartCalculationService:
         try:
             platform_api = PlatformAPIClient()
             
-            # Prepare API payload
+            # Prepare API payload - match pattern from working billing APIs
             payload = {
                 'customer_id': customer_id,
+                'action': 'calculate_cart_totals',
                 'currency': cart.currency,
                 'items': cart.get_api_items()
             }
             
+            # Debug: Write payload to file for inspection
+            import json
+            debug_data = {
+                'payload': payload,
+                'user_id': user_id,
+                'customer_id_type': type(customer_id).__name__,
+                'user_id_type': type(user_id).__name__
+            }
+            with open('/tmp/cart_api_payload.json', 'w') as f:
+                json.dump(debug_data, f, indent=2, default=str)
+            logger.info(f"💾 [Cart] Saved debug data - customer_id: {customer_id} ({type(customer_id)}), user_id: {user_id} ({type(user_id)})")
+            
             # Call platform calculation API
-            result = platform_api.post('api/orders/calculate/', payload, user_id=user_id)
+            result = platform_api.post('orders/calculate/', payload, user_id=user_id)
             
             # Update cart with any warnings
             if result.get('warnings'):
@@ -502,6 +515,11 @@ class CartCalculationService:
             
         except PlatformAPIError as e:
             logger.error(f"🔥 [Cart] Calculation failed: {e}")
+            logger.error(f"🔥 [Cart] PlatformAPIError details - status_code: {e.status_code}, response_data: {e.response_data}")
+            raise ValidationError(_("Error calculating totals"))
+        except Exception as e:
+            logger.error(f"🔥 [Cart] Unexpected error: {e}")
+            logger.error(f"🔥 [Cart] Exception type: {type(e)}")
             raise ValidationError(_("Error calculating totals"))
 
 
@@ -510,7 +528,7 @@ class OrderCreationService:
     
     @staticmethod
     def preflight_order(cart: GDPRCompliantCartSession, customer_id: str, 
-                       notes: str = '') -> Dict[str, Any]:
+                       user_id: str, notes: str = '') -> Dict[str, Any]:
         """
         🔎 Preflight order validation before creation.
         Calls platform API to validate order without creating it.
@@ -553,13 +571,32 @@ class OrderCreationService:
             
             logger.info(f"🔎 [Orders] Running preflight validation for customer {customer_id}")
             
-            # Call preflight API endpoint
-            result = platform_api.post('/api/orders/preflight/', preflight_data)
+            # Debug: Write preflight payload to file for inspection
+            debug_preflight = {
+                'preflight_data': preflight_data,
+                'customer_id': customer_id,
+                'customer_id_type': type(customer_id).__name__
+            }
+            with open('/tmp/preflight_api_payload.json', 'w') as f:
+                json.dump(debug_preflight, f, indent=2, default=str)
+            logger.info(f"💾 [Preflight] Saved debug data - customer_id: {customer_id} ({type(customer_id)})")
+            
+            # Call preflight API endpoint with user_id for HMAC authentication
+            result = platform_api.post('orders/preflight/', preflight_data, user_id=int(user_id))
+            
+            # Log the full API response for debugging
+            logger.info(f"🔎 [Orders] Platform API preflight response: {result}")
             
             # Extract validation results
-            is_valid = result.get('valid', False)
+            is_valid = result.get('success', False)  # Platform API returns 'success', not 'valid'
             errors = result.get('errors', [])
             warnings = result.get('warnings', [])
+            
+            # Log detailed results
+            if errors:
+                logger.error(f"🔥 [Orders] Preflight validation errors: {errors}")
+            if warnings:
+                logger.warning(f"⚠️ [Orders] Preflight validation warnings: {warnings}")
             
             # Update cart warnings if any
             if warnings:
@@ -583,7 +620,7 @@ class OrderCreationService:
             }
     
     @staticmethod
-    def create_draft_order(cart: GDPRCompliantCartSession, customer_id: str, 
+    def create_draft_order(cart: GDPRCompliantCartSession, customer_id: str, user_id: str,
                           notes: str = '', auto_pending: bool = False) -> Dict[str, Any]:
         """Create draft order from cart items"""
         
@@ -621,8 +658,8 @@ class OrderCreationService:
             
             logger.info(f"🛡️ [Orders] Creating order with idempotency key: {idempotency_key[:8]}... (auto_pending={auto_pending})")
             
-            # Create order via platform API
-            result = platform_api.post('/api/orders/create/', order_data)
+            # Create order via platform API with user_id for HMAC authentication
+            result = platform_api.post('orders/create/', order_data, user_id=int(user_id))
             
             if result.get('error'):
                 raise ValidationError(result['error'])
