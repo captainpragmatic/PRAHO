@@ -26,7 +26,7 @@ urlpatterns = [
     path("<uuid:pk>/status/", views.order_change_status, name="order_change_status"),
     path("<uuid:pk>/cancel/", views.order_cancel, name="order_cancel"),
     path("<uuid:pk>/refund/", views.order_refund, name="order_refund"),
-    # path("<uuid:pk>/validate/", views.order_validate, name="order_validate"),  # Temporarily disabled
+    path("<uuid:pk>/validate/", views.order_validate, name="order_validate"),
     path("<uuid:pk>/refund-request/", views.order_refund_request, name="order_refund_request"),
     path("<uuid:pk>/provision/", views.order_provision, name="order_provision"),
     # Order items management (HTMX powered)
@@ -39,6 +39,11 @@ urlpatterns = [
     # Order duplication and conversion
     path("<uuid:pk>/duplicate/", views.order_duplicate, name="order_duplicate"),
     path("<uuid:pk>/convert-to-invoice/", views.order_to_invoice, name="order_to_invoice"),
+    # Cart operations (HTMX powered)
+    path("cart/", views.cart_view, name="cart_view"),
+    path("cart/calculate/", views.cart_calculate, name="cart_calculate"),
+    path("cart/update/", views.cart_update, name="cart_update"),
+    path("cart/remove/", views.cart_remove, name="cart_remove"),
     # Reports and analytics
     path("reports/", views.order_reports, name="reports"),
     path("reports/export/", views.order_export, name="export"),
