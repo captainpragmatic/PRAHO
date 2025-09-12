@@ -1,0 +1,365 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Edit Company Profile" %} - PRAHO{% endblock %}
+
+{% block content %}
+<div class="min-h-screen bg-slate-900 py-8">
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+        
+        <!-- Header -->
+        <div class="mb-8">
+            <h1 class="text-3xl font-bold text-white mb-2">{% trans "Edit Company Profile" %}</h1>
+            <p class="text-slate-400">{% trans "Update your company information and billing details" %}</p>
+        </div>
+
+        <!-- Action Bar -->
+        <div class="mb-6">
+            {% if request.GET.next %}
+            <a href="{{ request.GET.next }}" 
+               class="inline-flex items-center px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+                </svg>
+                {% trans "Back to Checkout" %}
+            </a>
+            {% else %}
+            <a href="{% url 'users:company_profile' %}" 
+               class="inline-flex items-center px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+                </svg>
+                {% trans "Back to Company Profile" %}
+            </a>
+            {% endif %}
+        </div>
+
+        <!-- Form -->
+        <form method="post" class="space-y-8">
+            {% csrf_token %}
+            {% if request.GET.next %}
+            <input type="hidden" name="next" value="{{ request.GET.next }}">
+            {% endif %}
+            
+            <!-- Company Information Section -->
+            <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+                <div class="px-6 py-4 border-b border-slate-700">
+                    <h2 class="text-xl font-semibold text-white flex items-center">
+                        <svg class="w-5 h-5 mr-2 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+                        </svg>
+                        {% trans "Company Information" %}
+                    </h2>
+                </div>
+                <div class="p-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        
+                        <!-- Company Name -->
+                        <div class="md:col-span-2">
+                            <label for="{{ form.company_name.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                {{ form.company_name.label }}
+                                {% if form.company_name.field.required %}
+                                    <span class="text-red-400">*</span>
+                                {% endif %}
+                            </label>
+                            {{ form.company_name }}
+                            {% if form.company_name.help_text %}
+                                <p class="mt-1 text-sm text-slate-400">{{ form.company_name.help_text }}</p>
+                            {% endif %}
+                            {% if form.company_name.errors %}
+                                {% for error in form.company_name.errors %}
+                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
+                                {% endfor %}
+                            {% endif %}
+                        </div>
+
+                        <!-- VAT Number -->
+                        <div>
+                            <label for="{{ form.vat_number.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                {{ form.vat_number.label }}
+                                {% if form.vat_number.field.required %}
+                                    <span class="text-red-400">*</span>
+                                {% endif %}
+                            </label>
+                            {{ form.vat_number }}
+                            {% if form.vat_number.help_text %}
+                                <p class="mt-1 text-sm text-slate-400">{{ form.vat_number.help_text }}</p>
+                            {% endif %}
+                            {% if form.vat_number.errors %}
+                                {% for error in form.vat_number.errors %}
+                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
+                                {% endfor %}
+                            {% endif %}
+                        </div>
+
+                        <!-- Trade Registry Number -->
+                        <div>
+                            <label for="{{ form.trade_registry_number.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                {{ form.trade_registry_number.label }}
+                                {% if form.trade_registry_number.field.required %}
+                                    <span class="text-red-400">*</span>
+                                {% endif %}
+                            </label>
+                            {{ form.trade_registry_number }}
+                            {% if form.trade_registry_number.help_text %}
+                                <p class="mt-1 text-sm text-slate-400">{{ form.trade_registry_number.help_text }}</p>
+                            {% endif %}
+                            {% if form.trade_registry_number.errors %}
+                                {% for error in form.trade_registry_number.errors %}
+                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
+                                {% endfor %}
+                            {% endif %}
+                        </div>
+
+                        <!-- Industry -->
+                        <div class="md:col-span-2">
+                            <label for="{{ form.industry.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                {{ form.industry.label }}
+                                {% if form.industry.field.required %}
+                                    <span class="text-red-400">*</span>
+                                {% endif %}
+                            </label>
+                            {{ form.industry }}
+                            {% if form.industry.help_text %}
+                                <p class="mt-1 text-sm text-slate-400">{{ form.industry.help_text }}</p>
+                            {% endif %}
+                            {% if form.industry.errors %}
+                                {% for error in form.industry.errors %}
+                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
+                                {% endfor %}
+                            {% endif %}
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+            <!-- Billing Address Section -->
+            <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+                <div class="px-6 py-4 border-b border-slate-700">
+                    <h2 class="text-xl font-semibold text-white flex items-center">
+                        <svg class="w-5 h-5 mr-2 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+                        </svg>
+                        {% trans "Billing Address" %}
+                    </h2>
+                </div>
+                <div class="p-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        
+                        <!-- Street Address -->
+                        <div class="md:col-span-2">
+                            <label for="{{ form.street_address.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                {{ form.street_address.label }}
+                                {% if form.street_address.field.required %}
+                                    <span class="text-red-400">*</span>
+                                {% endif %}
+                            </label>
+                            {{ form.street_address }}
+                            {% if form.street_address.help_text %}
+                                <p class="mt-1 text-sm text-slate-400">{{ form.street_address.help_text }}</p>
+                            {% endif %}
+                            {% if form.street_address.errors %}
+                                {% for error in form.street_address.errors %}
+                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
+                                {% endfor %}
+                            {% endif %}
+                        </div>
+
+                        <!-- City -->
+                        <div>
+                            <label for="{{ form.city.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                {{ form.city.label }}
+                                {% if form.city.field.required %}
+                                    <span class="text-red-400">*</span>
+                                {% endif %}
+                            </label>
+                            {{ form.city }}
+                            {% if form.city.help_text %}
+                                <p class="mt-1 text-sm text-slate-400">{{ form.city.help_text }}</p>
+                            {% endif %}
+                            {% if form.city.errors %}
+                                {% for error in form.city.errors %}
+                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
+                                {% endfor %}
+                            {% endif %}
+                        </div>
+
+                        <!-- State/County -->
+                        <div>
+                            <label for="{{ form.state.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                {{ form.state.label }}
+                                {% if form.state.field.required %}
+                                    <span class="text-red-400">*</span>
+                                {% endif %}
+                            </label>
+                            {{ form.state }}
+                            {% if form.state.help_text %}
+                                <p class="mt-1 text-sm text-slate-400">{{ form.state.help_text }}</p>
+                            {% endif %}
+                            {% if form.state.errors %}
+                                {% for error in form.state.errors %}
+                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
+                                {% endfor %}
+                            {% endif %}
+                        </div>
+
+                        <!-- Postal Code -->
+                        <div>
+                            <label for="{{ form.postal_code.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                {{ form.postal_code.label }}
+                                {% if form.postal_code.field.required %}
+                                    <span class="text-red-400">*</span>
+                                {% endif %}
+                            </label>
+                            {{ form.postal_code }}
+                            {% if form.postal_code.help_text %}
+                                <p class="mt-1 text-sm text-slate-400">{{ form.postal_code.help_text }}</p>
+                            {% endif %}
+                            {% if form.postal_code.errors %}
+                                {% for error in form.postal_code.errors %}
+                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
+                                {% endfor %}
+                            {% endif %}
+                        </div>
+
+                        <!-- Country -->
+                        <div>
+                            <label for="{{ form.country.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                {{ form.country.label }}
+                                {% if form.country.field.required %}
+                                    <span class="text-red-400">*</span>
+                                {% endif %}
+                            </label>
+                            {{ form.country }}
+                            {% if form.country.help_text %}
+                                <p class="mt-1 text-sm text-slate-400">{{ form.country.help_text }}</p>
+                            {% endif %}
+                            {% if form.country.errors %}
+                                {% for error in form.country.errors %}
+                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
+                                {% endfor %}
+                            {% endif %}
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+            <!-- Business Contact Section -->
+            <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+                <div class="px-6 py-4 border-b border-slate-700">
+                    <h2 class="text-xl font-semibold text-white flex items-center">
+                        <svg class="w-5 h-5 mr-2 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                        </svg>
+                        {% trans "Business Contact" %}
+                    </h2>
+                </div>
+                <div class="p-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        
+                        <!-- Primary Email -->
+                        <div>
+                            <label for="{{ form.primary_email.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                {{ form.primary_email.label }}
+                                {% if form.primary_email.field.required %}
+                                    <span class="text-red-400">*</span>
+                                {% endif %}
+                            </label>
+                            {{ form.primary_email }}
+                            {% if form.primary_email.help_text %}
+                                <p class="mt-1 text-sm text-slate-400">{{ form.primary_email.help_text }}</p>
+                            {% endif %}
+                            {% if form.primary_email.errors %}
+                                {% for error in form.primary_email.errors %}
+                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
+                                {% endfor %}
+                            {% endif %}
+                        </div>
+
+                        <!-- Primary Phone -->
+                        <div>
+                            <label for="{{ form.primary_phone.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                {{ form.primary_phone.label }}
+                                {% if form.primary_phone.field.required %}
+                                    <span class="text-red-400">*</span>
+                                {% endif %}
+                            </label>
+                            {{ form.primary_phone }}
+                            {% if form.primary_phone.help_text %}
+                                <p class="mt-1 text-sm text-slate-400">{{ form.primary_phone.help_text }}</p>
+                            {% endif %}
+                            {% if form.primary_phone.errors %}
+                                {% for error in form.primary_phone.errors %}
+                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
+                                {% endfor %}
+                            {% endif %}
+                        </div>
+
+                        <!-- Website -->
+                        <div class="md:col-span-2">
+                            <label for="{{ form.website.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                {{ form.website.label }}
+                                {% if form.website.field.required %}
+                                    <span class="text-red-400">*</span>
+                                {% endif %}
+                            </label>
+                            {{ form.website }}
+                            {% if form.website.help_text %}
+                                <p class="mt-1 text-sm text-slate-400">{{ form.website.help_text }}</p>
+                            {% endif %}
+                            {% if form.website.errors %}
+                                {% for error in form.website.errors %}
+                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
+                                {% endfor %}
+                            {% endif %}
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+            <!-- Form Actions -->
+            <div class="flex items-center justify-between space-x-4">
+                <div class="text-sm text-slate-400">
+                    <span class="text-red-400">*</span> {% trans "Required fields" %}
+                </div>
+                
+                <div class="flex items-center space-x-4">
+                    <a href="{% url 'users:company_profile' %}" 
+                       class="px-6 py-3 border border-slate-600 text-slate-300 font-medium rounded-lg hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 focus:ring-offset-slate-900 transition-colors">
+                        {% trans "Cancel" %}
+                    </a>
+                    
+                    <button type="submit" 
+                            class="px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900 transition-colors">
+                        {% trans "Save Changes" %}
+                    </button>
+                </div>
+            </div>
+
+        </form>
+
+        <!-- Help Text -->
+        <div class="mt-8 p-4 bg-slate-800/50 rounded-lg border border-slate-700">
+            <div class="flex items-start">
+                <svg class="w-5 h-5 text-blue-400 mr-3 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                <div class="text-sm text-slate-400">
+                    <p class="font-medium text-slate-300 mb-2">{% trans "Important Notes:" %}</p>
+                    <ul class="list-disc list-inside space-y-1 ml-4">
+                        <li>{% trans "Changes to VAT number and legal information may require verification" %}</li>
+                        <li>{% trans "Billing address changes will apply to future invoices" %}</li>
+                        <li>{% trans "Contact information updates will be reflected in all business communications" %}</li>
+                        <li>{% trans "All information is encrypted and stored securely" %}</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endblock %}

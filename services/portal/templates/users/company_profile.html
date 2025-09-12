@@ -1,0 +1,294 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Company Profile" %} - PRAHO{% endblock %}
+
+{% block content %}
+<div class="min-h-screen bg-slate-900 py-8">
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+        
+        <!-- Header -->
+        <div class="mb-8">
+            <h1 class="text-3xl font-bold text-white mb-2">{% trans "Company Profile" %}</h1>
+            <p class="text-slate-400">{% trans "View and manage your company information and billing details" %}</p>
+            
+            <!-- Current Customer Context -->
+            {% if selected_customer_name %}
+            <div class="mt-4 flex items-center space-x-3">
+              <span class="text-sm text-slate-400">{% trans "Viewing:" %}</span>
+              <div class="bg-slate-700 rounded-lg px-3 py-1 flex items-center space-x-2">
+                <span class="text-blue-400">🏢</span>
+                <span class="text-sm font-medium text-white">{{ selected_customer_name }}</span>
+                <span class="text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full">
+                  {% if selected_customer_role == "owner" %}👑 {% trans "Owner" %}
+                  {% elif selected_customer_role == "billing" %}💳 {% trans "Billing" %}
+                  {% elif selected_customer_role == "tech" %}⚙️ {% trans "Technical" %}  
+                  {% elif selected_customer_role == "viewer" %}👁️ {% trans "Viewer" %}
+                  {% else %}{{ selected_customer_role|title }}{% endif %}
+                </span>
+              </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Action Bar -->
+        <div class="mb-6 flex justify-between items-center">
+            <a href="{% url 'users:profile' %}" 
+               class="inline-flex items-center px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+                </svg>
+                {% trans "Back to Profile" %}
+            </a>
+            
+            {% if can_edit_profile %}
+            <a href="{% url 'users:company_profile_edit' %}" 
+               class="inline-flex items-center px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900 transition-colors">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                </svg>
+                {% trans "Edit Company Profile" %}
+            </a>
+            {% else %}
+            <div class="inline-flex items-center px-6 py-3 bg-gray-600 text-gray-300 font-medium rounded-lg cursor-not-allowed">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                </svg>
+                {% trans "View Only" %} ({{ selected_customer_role|title }})
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Company Information Card -->
+        <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden mb-6">
+            <div class="px-6 py-4 border-b border-slate-700">
+                <h2 class="text-xl font-semibold text-white flex items-center">
+                    <svg class="w-5 h-5 mr-2 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+                    </svg>
+                    {% trans "Company Information" %}
+                </h2>
+            </div>
+            <div class="p-6">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    
+                    <!-- Company Name -->
+                    <div>
+                        <dt class="text-sm font-medium text-slate-400 mb-1">{% trans "Company Name" %}</dt>
+                        <dd class="text-lg text-white">
+                            {% if company_data.name %}
+                                {{ company_data.name }}
+                            {% else %}
+                                <span class="text-slate-500 italic">{% trans "Not specified" %}</span>
+                            {% endif %}
+                        </dd>
+                    </div>
+
+                    <!-- VAT Number -->
+                    <div>
+                        <dt class="text-sm font-medium text-slate-400 mb-1">{% trans "VAT Number / CUI" %}</dt>
+                        <dd class="text-lg text-white">
+                            {% if company_data.vat_number %}
+                                <span class="font-mono">{{ company_data.vat_number }}</span>
+                            {% else %}
+                                <span class="text-slate-500 italic">{% trans "Not specified" %}</span>
+                            {% endif %}
+                        </dd>
+                    </div>
+
+                    <!-- Trade Registry Number -->
+                    <div>
+                        <dt class="text-sm font-medium text-slate-400 mb-1">{% trans "Trade Registry Number" %}</dt>
+                        <dd class="text-lg text-white">
+                            {% if company_data.trade_registry_number %}
+                                <span class="font-mono">{{ company_data.trade_registry_number }}</span>
+                            {% else %}
+                                <span class="text-slate-500 italic">{% trans "Not specified" %}</span>
+                            {% endif %}
+                        </dd>
+                    </div>
+
+                    <!-- Industry -->
+                    <div>
+                        <dt class="text-sm font-medium text-slate-400 mb-1">{% trans "Industry" %}</dt>
+                        <dd class="text-lg text-white">
+                            {% if company_data.industry %}
+                                {{ company_data.industry }}
+                            {% else %}
+                                <span class="text-slate-500 italic">{% trans "Not specified" %}</span>
+                            {% endif %}
+                        </dd>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <!-- Billing Address Card -->
+        <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden mb-6">
+            <div class="px-6 py-4 border-b border-slate-700">
+                <h2 class="text-xl font-semibold text-white flex items-center">
+                    <svg class="w-5 h-5 mr-2 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+                    </svg>
+                    {% trans "Billing Address" %}
+                </h2>
+            </div>
+            <div class="p-6">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    
+                    <!-- Street Address -->
+                    <div class="md:col-span-2">
+                        <dt class="text-sm font-medium text-slate-400 mb-1">{% trans "Street Address" %}</dt>
+                        <dd class="text-lg text-white">
+                            {% if company_data.billing_address.street_address %}
+                                {{ company_data.billing_address.street_address }}
+                            {% else %}
+                                <span class="text-slate-500 italic">{% trans "Not specified" %}</span>
+                            {% endif %}
+                        </dd>
+                    </div>
+
+                    <!-- City -->
+                    <div>
+                        <dt class="text-sm font-medium text-slate-400 mb-1">{% trans "City" %}</dt>
+                        <dd class="text-lg text-white">
+                            {% if company_data.billing_address.city %}
+                                {{ company_data.billing_address.city }}
+                            {% else %}
+                                <span class="text-slate-500 italic">{% trans "Not specified" %}</span>
+                            {% endif %}
+                        </dd>
+                    </div>
+
+                    <!-- State/County -->
+                    <div>
+                        <dt class="text-sm font-medium text-slate-400 mb-1">{% trans "State/County" %}</dt>
+                        <dd class="text-lg text-white">
+                            {% if company_data.billing_address.state %}
+                                {{ company_data.billing_address.state }}
+                            {% else %}
+                                <span class="text-slate-500 italic">{% trans "Not specified" %}</span>
+                            {% endif %}
+                        </dd>
+                    </div>
+
+                    <!-- Postal Code -->
+                    <div>
+                        <dt class="text-sm font-medium text-slate-400 mb-1">{% trans "Postal Code" %}</dt>
+                        <dd class="text-lg text-white">
+                            {% if company_data.billing_address.postal_code %}
+                                <span class="font-mono">{{ company_data.billing_address.postal_code }}</span>
+                            {% else %}
+                                <span class="text-slate-500 italic">{% trans "Not specified" %}</span>
+                            {% endif %}
+                        </dd>
+                    </div>
+
+                    <!-- Country -->
+                    <div>
+                        <dt class="text-sm font-medium text-slate-400 mb-1">{% trans "Country" %}</dt>
+                        <dd class="text-lg text-white">
+                            {% if company_data.billing_address.country %}
+                                {{ company_data.billing_address.country }}
+                            {% else %}
+                                <span class="text-slate-500 italic">{% trans "Not specified" %}</span>
+                            {% endif %}
+                        </dd>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <!-- Business Contact Card -->
+        <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-700">
+                <h2 class="text-xl font-semibold text-white flex items-center">
+                    <svg class="w-5 h-5 mr-2 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                    </svg>
+                    {% trans "Business Contact" %}
+                </h2>
+            </div>
+            <div class="p-6">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    
+                    <!-- Primary Email -->
+                    <div>
+                        <dt class="text-sm font-medium text-slate-400 mb-1">{% trans "Primary Email" %}</dt>
+                        <dd class="text-lg text-white">
+                            {% if company_data.contact.primary_email %}
+                                <a href="mailto:{{ company_data.contact.primary_email }}" class="text-blue-400 hover:text-blue-300 transition-colors">
+                                    {{ company_data.contact.primary_email }}
+                                </a>
+                            {% else %}
+                                <span class="text-slate-500 italic">{% trans "Not specified" %}</span>
+                            {% endif %}
+                        </dd>
+                    </div>
+
+                    <!-- Primary Phone -->
+                    <div>
+                        <dt class="text-sm font-medium text-slate-400 mb-1">{% trans "Primary Phone" %}</dt>
+                        <dd class="text-lg text-white">
+                            {% if company_data.contact.primary_phone %}
+                                <a href="tel:{{ company_data.contact.primary_phone }}" class="text-blue-400 hover:text-blue-300 transition-colors font-mono">
+                                    {{ company_data.contact.primary_phone }}
+                                </a>
+                            {% else %}
+                                <span class="text-slate-500 italic">{% trans "Not specified" %}</span>
+                            {% endif %}
+                        </dd>
+                    </div>
+
+                    <!-- Website -->
+                    <div class="md:col-span-2">
+                        <dt class="text-sm font-medium text-slate-400 mb-1">{% trans "Website" %}</dt>
+                        <dd class="text-lg text-white">
+                            {% if company_data.contact.website %}
+                                <a href="{{ company_data.contact.website }}" target="_blank" rel="noopener noreferrer" 
+                                   class="text-blue-400 hover:text-blue-300 transition-colors inline-flex items-center">
+                                    {{ company_data.contact.website }}
+                                    <svg class="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                                    </svg>
+                                </a>
+                            {% else %}
+                                <span class="text-slate-500 italic">{% trans "Not specified" %}</span>
+                            {% endif %}
+                        </dd>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <!-- Help Text -->
+        <div class="mt-8 p-4 bg-slate-800/50 rounded-lg border border-slate-700">
+            <div class="flex items-start">
+                <svg class="w-5 h-5 text-blue-400 mr-3 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                <div class="text-sm text-slate-400">
+                    <p class="mb-2">{% trans "Your company profile information is used for:" %}</p>
+                    <ul class="list-disc list-inside space-y-1 ml-4">
+                        <li>{% trans "Generating invoices and tax documents" %}</li>
+                        <li>{% trans "Business correspondence and notifications" %}</li>
+                        <li>{% trans "Legal compliance and VAT reporting" %}</li>
+                        <li>{% trans "Service provisioning and billing" %}</li>
+                    </ul>
+                    <p class="mt-2">
+                        {% trans "Keep your information up-to-date to ensure smooth operations." %}
+                        <a href="{% url 'users:company_profile_edit' %}" class="text-blue-400 hover:text-blue-300 font-medium transition-colors">
+                            {% trans "Update now" %}
+                        </a>
+                    </p>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endblock %}
