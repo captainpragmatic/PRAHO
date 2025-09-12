@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2025-09-10 23:32+0300\n"
+"POT-Creation-Date: 2025-09-12 13:59+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -98,41 +98,272 @@ msgstr ""
 msgid "Could not load account information. Please try again later."
 msgstr ""
 
-#: apps/services/views.py:64 templates/services/service_list.html:25
-#: templates/services/service_list.html:54
+#: apps/orders/security.py:66
+msgid "Serviciul este temporar indisponibil. Vă rugăm încercați din nou."
+msgstr ""
+
+#: apps/orders/security.py:93
+msgid "Cererea este prea mare."
+msgstr ""
+
+#: apps/orders/security.py:100
+msgid "Cererea este invalidă."
+msgstr ""
+
+#: apps/orders/security.py:123
+msgid "Cererea conține prea multe câmpuri."
+msgstr ""
+
+#: apps/orders/security.py:135
+msgid "Un câmp din cerere este prea lung."
+msgstr ""
+
+#: apps/orders/services.py:225
+#, fuzzy
+#| msgid "Proforma Not Available"
+msgid "Product is not available"
+msgstr "Proforma nu este disponibilă"
+
+#: apps/orders/services.py:229
+#, fuzzy
+#| msgid "Error loading profile data."
+msgid "Error validating product"
+msgstr "Eroare la încărcarea datelor profilului."
+
+#: apps/orders/services.py:233
+msgid "This product requires a domain name"
+msgstr ""
+
+#: apps/orders/services.py:291 apps/orders/services.py:301
+msgid "Produsul nu a fost găsit în coș"
+msgstr ""
+
+#: apps/orders/services.py:519 apps/orders/services.py:523
+#: templates/orders/partials/cart_totals.html:67
+msgid "Error calculating totals"
+msgstr ""
+
+#: apps/orders/services.py:542 apps/orders/services.py:628
+msgid "Cart is empty"
+msgstr ""
+
+#: apps/orders/services.py:618
+msgid "Error validating order"
+msgstr ""
+
+#: apps/orders/services.py:675
+msgid "Error creating order"
+msgstr ""
+
+#: apps/orders/validators.py:57
+msgid "Cantitatea trebuie să fie cel puțin 1"
+msgstr ""
+
+#: apps/orders/validators.py:59
+msgid "Cantitatea nu poate depăși 50"
+msgstr ""
+
+#: apps/orders/validators.py:62
+msgid "Cantitate nevalidă"
+msgstr ""
+
+#: apps/orders/validators.py:68
+msgid "Perioada de facturare nevalidă"
+msgstr ""
+
+#: apps/orders/validators.py:82
+msgid "Nume de domeniu conține caractere nevalide"
+msgstr ""
+
+#: apps/orders/validators.py:86
+msgid "Nume de domeniu prea lung"
+msgstr ""
+
+#: apps/orders/validators.py:90
+msgid "Format nume de domeniu nevalid"
+msgstr ""
+
+#: apps/orders/validators.py:98
+msgid "Identificator produs lipsă"
+msgstr ""
+
+#: apps/orders/validators.py:102
+msgid "Identificator produs nevalid"
+msgstr ""
+
+#: apps/orders/validators.py:105
+msgid "Identificator produs prea lung"
+msgstr ""
+
+#: apps/orders/validators.py:156
+msgid "Notele nu pot depăși 500 de caractere"
+msgstr ""
+
+#: apps/orders/validators.py:160
+msgid "Notele conțin conținut nevalid"
+msgstr ""
+
+#: apps/orders/views.py:37
+msgid "Pentru a plasa o comandă, trebuie să fiți autentificat."
+msgstr ""
+
+#: apps/orders/views.py:78
+#, fuzzy
+#| msgid "All Documents"
+msgid "All Products"
+msgstr "Toate documentele"
+
+#: apps/orders/views.py:79 apps/services/views.py:72 apps/services/views.py:302
+msgid "Shared Hosting"
+msgstr ""
+
+#: apps/orders/views.py:80 apps/services/views.py:303
+msgid "VPS Hosting"
+msgstr ""
+
+#: apps/orders/views.py:81 apps/services/views.py:74
+msgid "Dedicated Server"
+msgstr ""
+
+#: apps/orders/views.py:82
+msgid "Domains"
+msgstr ""
+
+#: apps/orders/views.py:83
+msgid "SSL Certificates"
+msgstr ""
+
+#: apps/orders/views.py:84
+msgid "Email Hosting"
+msgstr ""
+
+#: apps/orders/views.py:101
+msgid "Eroare la încărcarea produselor. Vă rugăm încercați din nou."
+msgstr ""
+
+#: apps/orders/views.py:126 apps/orders/views.py:150
+msgid "Produsul nu a fost găsit."
+msgstr ""
+
+#: apps/orders/views.py:189 apps/orders/views.py:273 apps/orders/views.py:338
+#: apps/orders/views.py:439
+msgid "Prea multe operații. Vă rugăm încetiniți."
+msgstr ""
+
+#: apps/orders/views.py:226
+#, fuzzy
+#| msgid "Profile updated successfully!"
+msgid "Product added to cart successfully!"
+msgstr "Profil actualizat cu succes!"
+
+#: apps/orders/views.py:238
+msgid "Eroare la adăugarea în coș. Vă rugăm încercați din nou."
+msgstr ""
+
+#: apps/orders/views.py:293
+msgid "Cantitate actualizată cu succes!"
+msgstr ""
+
+#: apps/orders/views.py:303
+msgid "Eroare la actualizarea coșului."
+msgstr ""
+
+#: apps/orders/views.py:357
+msgid "Produs eliminat din coș!"
+msgstr ""
+
+#: apps/orders/views.py:367
+msgid "Eroare la eliminarea din coș."
+msgstr ""
+
+#: apps/orders/views.py:380
+msgid "Coșul dumneavoastră este gol."
+msgstr ""
+
+#: apps/orders/views.py:454
+msgid "Authentication error. Please refresh the page."
+msgstr ""
+
+#: apps/orders/views.py:482
+msgid "Eroare la calcularea totalurilor."
+msgstr ""
+
+#: apps/orders/views.py:495
+msgid "Cannot proceed with empty cart."
+msgstr ""
+
+#: apps/orders/views.py:512
+#, fuzzy
+#| msgid "Error loading profile data."
+msgid "Error calculating order totals."
+msgstr "Eroare la încărcarea datelor profilului."
+
+#: apps/orders/views.py:542
+msgid "Cannot create order with empty cart."
+msgstr ""
+
+#: apps/orders/views.py:550
+msgid "Cart was modified by another session. Please review and try again."
+msgstr ""
+
+#: apps/orders/views.py:572
+#, python-brace-format
+msgid "Order #{} was created successfully and is ready for payment!"
+msgstr ""
+
+#: apps/orders/views.py:576
+#, python-brace-format
+msgid ""
+"Order #{} was created successfully! You can view it in your orders list."
+msgstr ""
+
+#: apps/orders/views.py:586
+msgid "Eroare la crearea comenzii. Vă rugăm încercați din nou."
+msgstr ""
+
+#: apps/orders/views.py:608
+msgid "Comanda nu a fost găsită."
+msgstr ""
+
+#: apps/orders/views.py:620
+msgid "Eroare la încărcarea detaliilor comenzii."
+msgstr ""
+
+#: apps/services/views.py:64 templates/services/service_list.html:36
+#: templates/services/service_list.html:65
 msgid "All Services"
 msgstr "Toate serviciile"
 
-#: apps/services/views.py:65 templates/dashboard/dashboard.html:67
-#: templates/services/service_list.html:30
-#: templates/services/service_list.html:59
-#: templates/services/service_list.html:189
-#: templates/services/service_list.html:246
+#: apps/services/views.py:65 templates/dashboard/dashboard.html:71
+#: templates/services/service_list.html:41
+#: templates/services/service_list.html:70
+#: templates/services/service_list.html:200
+#: templates/services/service_list.html:257
 #: templates/users/consent_history.html:35
 #: templates/users/privacy_dashboard.html:42
 msgid "Active"
 msgstr "Activ"
 
-#: apps/services/views.py:66 templates/services/service_list.html:35
-#: templates/services/service_list.html:64
-#: templates/services/service_list.html:193
-#: templates/services/service_list.html:250
+#: apps/services/views.py:66 templates/services/service_list.html:46
+#: templates/services/service_list.html:75
+#: templates/services/service_list.html:204
+#: templates/services/service_list.html:261
 msgid "Suspended"
 msgstr "Suspendat"
 
 #: apps/services/views.py:67 templates/billing/invoices_list.html:37
 #: templates/billing/invoices_list.html:72
-#: templates/services/service_list.html:40
-#: templates/services/service_list.html:69
-#: templates/services/service_list.html:197
-#: templates/services/service_list.html:254
+#: templates/services/service_list.html:51
+#: templates/services/service_list.html:80
+#: templates/services/service_list.html:208
+#: templates/services/service_list.html:265
 msgid "Pending"
 msgstr "În așteptare"
 
-#: apps/services/views.py:68 templates/services/service_list.html:45
-#: templates/services/service_list.html:74
-#: templates/services/service_list.html:201
-#: templates/services/service_list.html:258
+#: apps/services/views.py:68 templates/services/service_list.html:56
+#: templates/services/service_list.html:85
+#: templates/services/service_list.html:212
+#: templates/services/service_list.html:269
 msgid "Cancelled"
 msgstr "Anulat"
 
@@ -140,16 +371,8 @@ msgstr "Anulat"
 msgid "All Types"
 msgstr ""
 
-#: apps/services/views.py:72 apps/services/views.py:302
-msgid "Shared Hosting"
-msgstr ""
-
 #: apps/services/views.py:73
 msgid "VPS"
-msgstr ""
-
-#: apps/services/views.py:74
-msgid "Dedicated Server"
 msgstr ""
 
 #: apps/services/views.py:75 apps/services/views.py:305
@@ -220,10 +443,6 @@ msgstr ""
 
 #: apps/services/views.py:301
 msgid "All Plan Types"
-msgstr ""
-
-#: apps/services/views.py:303
-msgid "VPS Hosting"
 msgstr ""
 
 #: apps/services/views.py:304
@@ -650,7 +869,7 @@ msgstr ""
 msgid "Set Up Authenticator App"
 msgstr ""
 
-#: apps/users/views.py:70 apps/users/views.py:88 apps/users/views.py:744
+#: apps/users/views.py:70 apps/users/views.py:88 apps/users/views.py:756
 msgid "An error occurred. Please try again."
 msgstr ""
 
@@ -666,152 +885,152 @@ msgstr ""
 msgid "Invalid verification code. Please try again."
 msgstr ""
 
-#: apps/users/views.py:180
+#: apps/users/views.py:192
 msgid "Invalid email address or password. Please try again."
 msgstr ""
 
-#: apps/users/views.py:184 apps/users/views.py:482
+#: apps/users/views.py:196 apps/users/views.py:494
 msgid ""
 "Authentication service is temporarily unavailable. Please try again later."
 msgstr ""
 
-#: apps/users/views.py:188 apps/users/views.py:486
+#: apps/users/views.py:200 apps/users/views.py:498
 msgid "An unexpected error occurred. Please try again."
 msgstr ""
 
-#: apps/users/views.py:192
+#: apps/users/views.py:204
 msgid "Customer Login"
 msgstr ""
 
-#: apps/users/views.py:213
+#: apps/users/views.py:225
 msgid "You have been logged out successfully."
 msgstr ""
 
-#: apps/users/views.py:267
+#: apps/users/views.py:279
 msgid "Registration successful! You can now login with your credentials."
 msgstr ""
 
-#: apps/users/views.py:270
+#: apps/users/views.py:282
 msgid "Registration failed. Please check your information and try again."
 msgstr ""
 
-#: apps/users/views.py:274
+#: apps/users/views.py:286
 msgid "An unexpected error occurred during registration. Please try again."
 msgstr ""
 
-#: apps/users/views.py:278
+#: apps/users/views.py:290
 msgid "Customer Registration"
 msgstr ""
 
-#: apps/users/views.py:303
+#: apps/users/views.py:315
 msgid "Error loading profile data."
 msgstr "Eroare la încărcarea datelor profilului."
 
-#: apps/users/views.py:335 templates/users/profile.html:90
+#: apps/users/views.py:347 templates/users/profile.html:90
 msgid "Language"
 msgstr "Limbă"
 
-#: apps/users/views.py:336
+#: apps/users/views.py:348
 #, fuzzy
 #| msgid "Profile updated successfully!"
 msgid "Profile and language updated successfully!"
 msgstr "Profil actualizat cu succes!"
 
-#: apps/users/views.py:338
+#: apps/users/views.py:350
 msgid "Profile updated successfully!"
 msgstr "Profil actualizat cu succes!"
 
-#: apps/users/views.py:342 apps/users/views.py:346
+#: apps/users/views.py:354 apps/users/views.py:358
 msgid "Error updating profile. Please try again."
 msgstr "Eroare la actualizarea profilului. Te rugăm să încerci din nou."
 
-#: apps/users/views.py:391 templates/users/profile.html:5
+#: apps/users/views.py:403 templates/users/profile.html:5
 #: templates/users/profile.html:12
 msgid "Account Settings"
 msgstr "Setări Cont"
 
-#: apps/users/views.py:419
+#: apps/users/views.py:431
 msgid ""
 "If an account with that email exists, you will receive password reset "
 "instructions."
 msgstr ""
 
-#: apps/users/views.py:424
+#: apps/users/views.py:436
 msgid "Error processing password reset request. Please try again."
 msgstr ""
 
-#: apps/users/views.py:428
+#: apps/users/views.py:440
 msgid "Password Reset"
 msgstr ""
 
-#: apps/users/views.py:467
+#: apps/users/views.py:479
 msgid "Current password is incorrect."
 msgstr ""
 
-#: apps/users/views.py:474
+#: apps/users/views.py:486
 msgid "Password changed successfully!"
 msgstr ""
 
-#: apps/users/views.py:478
+#: apps/users/views.py:490
 msgid "Error updating password. Please try again."
 msgstr ""
 
-#: apps/users/views.py:491 templates/users/change_password.html:4
+#: apps/users/views.py:503 templates/users/change_password.html:4
 #: templates/users/change_password.html:11
 #: templates/users/change_password.html:108 templates/users/profile.html:191
 msgid "Change Password"
 msgstr ""
 
-#: apps/users/views.py:524 templates/users/privacy_dashboard.html:4
+#: apps/users/views.py:536 templates/users/privacy_dashboard.html:4
 #: templates/users/privacy_dashboard.html:11 templates/users/profile.html:262
 msgid "Privacy Dashboard"
 msgstr "Panoul de confidențialitate"
 
-#: apps/users/views.py:551
+#: apps/users/views.py:563
 msgid ""
 "Data export request submitted successfully. You will receive an email with "
 "download instructions within 48 hours."
 msgstr ""
 
-#: apps/users/views.py:556
+#: apps/users/views.py:568
 msgid "Error processing your data export request. Please try again."
 msgstr ""
 
-#: apps/users/views.py:561 templates/users/data_export.html:4
+#: apps/users/views.py:573 templates/users/data_export.html:4
 #: templates/users/data_export.html:11
 #: templates/users/privacy_dashboard.html:82 templates/users/profile.html:275
 msgid "Export My Data"
 msgstr "Exportă datele mele"
 
-#: apps/users/views.py:611 templates/users/consent_history.html:4
+#: apps/users/views.py:623 templates/users/consent_history.html:4
 #: templates/users/consent_history.html:11
 #: templates/users/privacy_dashboard.html:95 templates/users/profile.html:288
 msgid "Consent History"
 msgstr "Istoricul consimțămintelor"
 
-#: apps/users/views.py:648
+#: apps/users/views.py:660
 msgid "Multi-Factor Authentication"
 msgstr ""
 
-#: apps/users/views.py:699
+#: apps/users/views.py:711
 msgid "You need to enable 2FA first before accessing backup codes."
 msgstr ""
 
-#: apps/users/views.py:708
+#: apps/users/views.py:720
 msgid "Error loading backup codes."
 msgstr ""
 
-#: apps/users/views.py:714 templates/users/mfa_backup_codes.html:5
+#: apps/users/views.py:726 templates/users/mfa_backup_codes.html:5
 #: templates/users/mfa_backup_codes.html:12
 #: templates/users/mfa_management.html:224
 msgid "Backup Codes"
 msgstr ""
 
-#: apps/users/views.py:738
+#: apps/users/views.py:750
 msgid "Two-factor authentication has been disabled."
 msgstr ""
 
-#: apps/users/views.py:740
+#: apps/users/views.py:752
 msgid "Failed to disable 2FA. Please try again."
 msgstr ""
 
@@ -883,11 +1102,11 @@ msgid "My Invoices"
 msgstr "Facturile mele"
 
 #: templates/base.html:128 templates/components/mobile_header.html:97
-#: templates/dashboard/dashboard.html:40 templates/dashboard/dashboard.html:211
+#: templates/dashboard/dashboard.html:44 templates/dashboard/dashboard.html:215
 #: templates/services/service_list.html:4
 #: templates/services/service_list.html:12
-#: templates/services/service_list.html:88
-#: templates/services/service_list.html:120
+#: templates/services/service_list.html:99
+#: templates/services/service_list.html:131
 msgid "My Services"
 msgstr "Serviciile mele"
 
@@ -899,18 +1118,18 @@ msgstr "Tichetele mele"
 msgid "Profile"
 msgstr "Profil"
 
-#: templates/base.html:179
+#: templates/base.html:170
 msgid "PRAHO Really Automates Hosting Operations"
 msgstr ""
 
-#: templates/base.html:186
+#: templates/base.html:177
 msgid "Version"
 msgstr ""
 
 #: templates/billing/invoice_detail.html:6
 #: templates/billing/invoice_detail.html:14
 #: templates/billing/invoices_list.html:243
-#: templates/dashboard/dashboard.html:102
+#: templates/dashboard/dashboard.html:106
 msgid "Invoice"
 msgstr "Factură"
 
@@ -941,7 +1160,7 @@ msgstr "Client"
 #: templates/billing/invoice_detail.html:58
 #: templates/billing/invoices_list.html:110
 #: templates/billing/invoices_list.html:162
-#: templates/services/service_list.html:161
+#: templates/services/service_list.html:172
 #: templates/tickets/partials/status_and_comments.html:14
 #: templates/tickets/partials/tickets_table.html:19
 msgid "Status"
@@ -984,6 +1203,7 @@ msgid "Type"
 msgstr "Tip"
 
 #: templates/billing/invoice_detail.html:127
+#: templates/orders/product_detail.html:44
 msgid "Quantity"
 msgstr "Cantitate"
 
@@ -996,6 +1216,9 @@ msgstr "Preț unitar"
 #: templates/billing/invoices_list.html:68
 #: templates/billing/invoices_list.html:159
 #: templates/billing/proforma_detail.html:144
+#: templates/orders/checkout.html:200
+#: templates/orders/order_confirmation.html:115
+#: templates/orders/partials/cart_totals.html:32
 #: templates/tickets/ticket_list.html:80
 msgid "Total"
 msgstr ""
@@ -1259,7 +1482,7 @@ msgstr "Data"
 #: templates/billing/invoices_list.html:239
 #: templates/billing/proforma_detail.html:6
 #: templates/billing/proforma_detail.html:14
-#: templates/dashboard/dashboard.html:102
+#: templates/dashboard/dashboard.html:106
 msgid "Proforma"
 msgstr "Proformă"
 
@@ -1274,7 +1497,7 @@ msgstr ""
 #: templates/billing/invoices_list.html:302
 #: templates/components/pagination.html:70
 #: templates/components/pagination.html:79
-#: templates/services/service_list.html:332
+#: templates/services/service_list.html:343
 msgid "Previous"
 msgstr "Anterior"
 
@@ -1286,7 +1509,7 @@ msgstr "Ant"
 #: templates/billing/invoices_list.html:311
 #: templates/components/pagination.html:171
 #: templates/components/pagination.html:180
-#: templates/services/service_list.html:339
+#: templates/services/service_list.html:350
 msgid "Next"
 msgstr "Următorul"
 
@@ -1570,7 +1793,7 @@ msgid "Back to"
 msgstr ""
 
 #: templates/components/table_enhanced.html:38
-#: templates/services/service_list.html:167
+#: templates/services/service_list.html:178
 msgid "Actions"
 msgstr "Acțiuni"
 
@@ -1586,90 +1809,606 @@ msgstr ""
 msgid "Platform service temporarily unavailable. Some features may be limited."
 msgstr ""
 
-#: templates/dashboard/dashboard.html:24
+#: templates/dashboard/dashboard.html:25
 #, python-format
 msgid "👋 Welcome %(name)s"
 msgstr "👋 Bun venit %(name)s"
 
 #: templates/dashboard/dashboard.html:27
+msgid "Welcome"
+msgstr ""
+
+#: templates/dashboard/dashboard.html:31
 msgid "Here is an overview of your hosting services and account."
 msgstr ""
 "Aceasta este o prezentare generală a serviciilor de hosting și a contului "
 "dvs."
 
-#: templates/dashboard/dashboard.html:53
+#: templates/dashboard/dashboard.html:57
 msgid "My Open Tickets"
 msgstr "Tichetele mele deschise"
 
-#: templates/dashboard/dashboard.html:66 templates/users/profile.html:135
+#: templates/dashboard/dashboard.html:70 templates/users/profile.html:135
 msgid "Account Status"
 msgstr "Starea contului"
 
-#: templates/dashboard/dashboard.html:79
+#: templates/dashboard/dashboard.html:83
 #: templates/services/service_detail.html:91
-#: templates/services/service_list.html:164
-#: templates/services/service_list.html:281
+#: templates/services/service_list.html:175
+#: templates/services/service_list.html:292
 msgid "Next Billing"
 msgstr "Următoarea facturare"
 
-#: templates/dashboard/dashboard.html:80
+#: templates/dashboard/dashboard.html:84
 msgid "End of Month"
 msgstr "Sfârșitul lunii"
 
-#: templates/dashboard/dashboard.html:92
+#: templates/dashboard/dashboard.html:96
 msgid "My Recent Invoices & Proformas"
 msgstr "Facturile și Proformele Mele Recente"
 
-#: templates/dashboard/dashboard.html:129
+#: templates/dashboard/dashboard.html:133
 msgid "No recent documents found"
 msgstr "Nu au fost găsite documente recente"
 
-#: templates/dashboard/dashboard.html:136
-#: templates/dashboard/dashboard.html:190
+#: templates/dashboard/dashboard.html:140
+#: templates/dashboard/dashboard.html:194
 msgid "View all"
 msgstr "Vezi toate"
 
-#: templates/dashboard/dashboard.html:146
+#: templates/dashboard/dashboard.html:150
 msgid "My Recent Tickets"
 msgstr "Tichetele mele recente"
 
-#: templates/dashboard/dashboard.html:183
+#: templates/dashboard/dashboard.html:187
 msgid "No recent support tickets"
 msgstr "Nu există tichete de suport recente"
 
-#: templates/dashboard/dashboard.html:200
+#: templates/dashboard/dashboard.html:204
 #: templates/users/privacy_dashboard.html:75
 msgid "Quick Actions"
 msgstr "Acțiuni rapide"
 
-#: templates/dashboard/dashboard.html:205 templates/tickets/ticket_list.html:41
+#: templates/dashboard/dashboard.html:209 templates/tickets/ticket_list.html:41
 msgid "New Ticket"
 msgstr "Tichet nou"
 
-#: templates/dashboard/dashboard.html:208
+#: templates/dashboard/dashboard.html:212
 msgid "View Invoices"
 msgstr "Vezi facturile"
 
-#: templates/dashboard/dashboard.html:214
+#: templates/dashboard/dashboard.html:218
 msgid "My Profile"
 msgstr "Profilul meu"
 
-#: templates/dashboard/dashboard.html:224 templates/users/data_export.html:30
+#: templates/dashboard/dashboard.html:228 templates/users/data_export.html:30
 #: templates/users/data_export.html:107 templates/users/profile.html:129
 msgid "Account Information"
 msgstr "Informații despre cont"
 
-#: templates/dashboard/dashboard.html:231
+#: templates/dashboard/dashboard.html:235
 msgid "Customer name"
 msgstr "Numele clientului"
 
-#: templates/dashboard/dashboard.html:237
+#: templates/dashboard/dashboard.html:241
 msgid "VAT Number (CNP if Individual)"
 msgstr "Număr TVA (CNP pentru persoane fizice)"
 
-#: templates/dashboard/dashboard.html:243
+#: templates/dashboard/dashboard.html:247
 msgid "Customer Since"
 msgstr "Client din"
+
+#: templates/orders/cart_review.html:4 templates/orders/cart_review.html:14
+#: templates/orders/partials/order_breadcrumbs.html:47
+msgid "Cart Review"
+msgstr ""
+
+#: templates/orders/cart_review.html:15
+msgid "Review selected products and proceed to checkout"
+msgstr ""
+
+#: templates/orders/cart_review.html:28
+#, python-format
+msgid ""
+"\n"
+"              %(counter)s product in cart\n"
+"            "
+msgid_plural ""
+"\n"
+"              %(counter)s products in cart\n"
+"            "
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+
+#: templates/orders/cart_review.html:64
+#, fuzzy
+#| msgid "Conversation"
+msgid "View configuration"
+msgstr "Vezi configurația"
+
+#: templates/orders/cart_review.html:86
+#, fuzzy
+#| msgid "Quantity"
+msgid "Quantity:"
+msgstr "Cantitate"
+
+#: templates/orders/cart_review.html:114
+#: templates/orders/partials/mini_cart_content.html:46
+msgid "Remove from cart"
+msgstr ""
+
+#: templates/orders/cart_review.html:116
+msgid "Remove"
+msgstr ""
+
+#: templates/orders/cart_review.html:126
+msgid "Your cart is empty"
+msgstr ""
+
+#: templates/orders/cart_review.html:129
+msgid "Add products to continue"
+msgstr ""
+
+#: templates/orders/cart_review.html:132
+msgid "Explore Products"
+msgstr ""
+
+#: templates/orders/cart_review.html:142
+msgid "Continue Shopping"
+msgstr ""
+
+#: templates/orders/cart_review.html:161
+#: templates/orders/partials/cart_totals.html:5
+#, fuzzy
+#| msgid "Summary"
+msgid "Order Summary"
+msgstr "Rezumat"
+
+#: templates/orders/cart_review.html:175
+#, fuzzy
+#| msgid "Last updated:"
+msgid "Price updated"
+msgstr "Ultima actualizare:"
+
+#: templates/orders/checkout.html:4 templates/orders/checkout.html:14
+#: templates/orders/partials/order_breadcrumbs.html:71
+msgid "Checkout"
+msgstr ""
+
+#: templates/orders/checkout.html:15
+msgid "Final step - validate and create order ready for payment"
+msgstr ""
+
+#: templates/orders/checkout.html:29
+#, fuzzy
+#| msgid "Ticket Details"
+msgid "Order Details"
+msgstr "Detalii tichet"
+
+#: templates/orders/checkout.html:31
+msgid "Order will be validated and created ready for payment"
+msgstr ""
+
+#: templates/orders/checkout.html:48
+msgid "Order Validated"
+msgstr ""
+
+#: templates/orders/checkout.html:50
+msgid ""
+"Order has been validated and can be created. It will be ready for payment "
+"immediately after confirmation."
+msgstr ""
+
+#: templates/orders/checkout.html:60
+msgid "Validation Errors"
+msgstr ""
+
+#: templates/orders/checkout.html:62
+msgid "Order cannot be processed for the following reasons:"
+msgstr ""
+
+#: templates/orders/checkout.html:81
+#, fuzzy
+#| msgid "In Progress"
+msgid "Validation in Progress"
+msgstr "În progres"
+
+#: templates/orders/checkout.html:83
+msgid "Order validation is currently in progress..."
+msgstr ""
+
+#: templates/orders/checkout.html:93
+#, fuzzy
+#| msgid "Ticket Details"
+msgid "Order notes"
+msgstr "Note pentru comandă"
+
+#: templates/orders/checkout.html:94 templates/tickets/ticket_create.html:72
+msgid "optional"
+msgstr "opțional"
+
+#: templates/orders/checkout.html:100
+#, fuzzy
+#| msgid "Please provide detailed information about your request or issue..."
+msgid "Any additional information about your order..."
+msgstr "Orice informații suplimentare despre comandă..."
+
+#: templates/orders/checkout.html:103
+msgid "Maximum 500 characters"
+msgstr "Maxim 500 de caractere"
+
+#: templates/orders/checkout.html:109
+#, fuzzy
+#| msgid "View all"
+msgid "Ordered products"
+msgstr "Produse comandate"
+
+#: templates/orders/checkout.html:131
+msgid "Attention - Price updated"
+msgstr "Atenție - Preț actualizat"
+
+#: templates/orders/checkout.html:141
+#, fuzzy
+#| msgid "terms and conditions"
+msgid "I agree to the terms and conditions of use"
+msgstr "Sunt de acord cu termenii și condițiile de utilizare"
+
+#: templates/orders/checkout.html:145
+msgid "By continuing, you confirm that you accept our"
+msgstr "Prin continuare, confirmați că acceptați"
+
+#: templates/orders/checkout.html:146
+msgid "terms and conditions"
+msgstr "termenii și condițiile"
+
+#: templates/orders/checkout.html:147
+#, fuzzy
+#| msgid "Hosting & services"
+msgid "for hosting services."
+msgstr "serviciilor noastre de hosting."
+
+#: templates/orders/checkout.html:155
+#, fuzzy
+#| msgid "Back to Tickets"
+msgid "Back to cart"
+msgstr "Înapoi la coș"
+
+#: templates/orders/checkout.html:159 templates/orders/checkout.html:165
+#, fuzzy
+#| msgid "Created"
+msgid "Create order"
+msgstr "Creează comanda"
+
+#: templates/orders/checkout.html:180
+#, fuzzy
+#| msgid "Summary"
+msgid "Final summary"
+msgstr "Rezumat final"
+
+#: templates/orders/checkout.html:185
+#: templates/orders/order_confirmation.html:106
+#: templates/orders/partials/cart_totals.html:13
+#, fuzzy
+#| msgid "Subtotal:"
+msgid "Subtotal"
+msgstr "Subtotal:"
+
+#: templates/orders/checkout.html:192
+#: templates/orders/partials/cart_totals.html:21
+#, python-format
+msgid "VAT (21%%)"
+msgstr "TVA (21%%)"
+
+#: templates/orders/checkout.html:210
+msgid "Next steps"
+msgstr "Pașii următori"
+
+#: templates/orders/checkout.html:212
+msgid "Order will be validated and created"
+msgstr "Comanda va fi validată și creată"
+
+#: templates/orders/checkout.html:213
+msgid "You will receive confirmation by email"
+msgstr "Veți primi confirmarea pe email"
+
+#: templates/orders/checkout.html:214
+msgid "Order will be ready for payment"
+msgstr "Comanda va fi gata pentru plată"
+
+#: templates/orders/checkout.html:215
+msgid "Services will be activated after payment"
+msgstr "Serviciile vor fi activate după plată"
+
+#: templates/orders/checkout.html:224
+#, fuzzy
+#| msgid "Error loading profile data."
+msgid "Error loading totals"
+msgstr "Eroare la încărcarea totalurilor"
+
+#: templates/orders/order_confirmation.html:4
+msgid "Comandă Confirmată"
+msgstr ""
+
+#: templates/orders/order_confirmation.html:16
+msgid "Comandă confirmată cu succes!"
+msgstr ""
+
+#: templates/orders/order_confirmation.html:19
+msgid "Comanda dumneavoastră a fost înregistrată și va fi procesată în curând."
+msgstr ""
+
+#: templates/orders/order_confirmation.html:31
+msgid "Comandă"
+msgstr ""
+
+#: templates/orders/order_confirmation.html:34
+#, fuzzy
+#| msgid "Created on"
+msgid "Creată la"
+msgstr "Creat la"
+
+#: templates/orders/order_confirmation.html:46
+msgid "Produse comandate"
+msgstr ""
+
+#: templates/orders/order_confirmation.html:70
+msgid "Vezi configurația"
+msgstr ""
+
+#: templates/orders/order_confirmation.html:110
+#, python-format
+msgid "TVA (21%%)"
+msgstr ""
+
+#: templates/orders/order_confirmation.html:132
+msgid "Ce urmează?"
+msgstr ""
+
+#: templates/orders/order_confirmation.html:139
+msgid "Procesare comandă"
+msgstr ""
+
+#: templates/orders/order_confirmation.html:140
+msgid "Echipa noastră va verifica și procesa comanda în maxim 24 ore."
+msgstr ""
+
+#: templates/orders/order_confirmation.html:147
+msgid "Confirmare și facturare"
+msgstr ""
+
+#: templates/orders/order_confirmation.html:148
+msgid "Veți primi detalii despre plată și factura proforma pe email."
+msgstr ""
+
+#: templates/orders/order_confirmation.html:155
+msgid "Activare servicii"
+msgstr ""
+
+#: templates/orders/order_confirmation.html:156
+msgid "După confirmarea plății, serviciile vor fi activate automat."
+msgstr ""
+
+#: templates/orders/order_confirmation.html:166
+msgid "Aveți întrebări?"
+msgstr ""
+
+#: templates/orders/order_confirmation.html:171
+#, fuzzy
+#| msgid "Support Tickets"
+msgid "Suport clienți"
+msgstr "Tichete de suport"
+
+#: templates/orders/order_confirmation.html:172
+msgid "Echipa noastră este disponibilă 24/7"
+msgstr ""
+
+#: templates/orders/order_confirmation.html:184
+msgid "Chat live pe website"
+msgstr ""
+
+#: templates/orders/order_confirmation.html:188
+msgid "Sistem de ticketing în portal"
+msgstr ""
+
+#: templates/orders/order_confirmation.html:204
+msgid "Un email de confirmare a fost trimis la"
+msgstr ""
+
+#: templates/orders/partials/cart_item_updated.html:7
+#: templates/orders/partials/cart_updated.html:7
+msgid "Shopping cart"
+msgstr ""
+
+#: templates/orders/partials/cart_item_updated.html:9
+#: templates/orders/partials/cart_updated.html:9
+#: templates/orders/product_catalog.html:27
+msgid "Cart"
+msgstr ""
+
+#: templates/orders/partials/cart_totals.html:45
+msgid "Prices include VAT according to Romanian legislation"
+msgstr "Prețurile includ TVA conform legislației române"
+
+#: templates/orders/partials/cart_totals.html:52
+#: templates/orders/partials/cart_totals.html:56
+msgid "Continue to checkout"
+msgstr ""
+
+#: templates/orders/partials/cart_totals.html:73
+msgid "Try again"
+msgstr "Încearcă din nou"
+
+#: templates/orders/partials/error_message.html:19
+msgid "Eroare"
+msgstr ""
+
+#: templates/orders/partials/error_message.html:24
+msgid "Închide notificarea"
+msgstr ""
+
+#: templates/orders/partials/mini_cart_content.html:10
+#, fuzzy
+#| msgid "Your last name"
+msgid "Your Cart"
+msgstr "Numele tău de familie"
+
+#: templates/orders/partials/mini_cart_content.html:13
+#, python-format
+msgid ""
+"\n"
+"        %(counter)s product\n"
+"      "
+msgid_plural ""
+"\n"
+"        %(counter)s products\n"
+"      "
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+
+#: templates/orders/partials/mini_cart_content.html:55
+msgid "... și alte produse"
+msgstr ""
+
+#: templates/orders/partials/mini_cart_content.html:64
+#, fuzzy
+#| msgid "View all"
+msgid "View full cart"
+msgstr "Vezi toate"
+
+#: templates/orders/partials/mini_cart_content.html:67
+msgid "Finish order"
+msgstr ""
+
+#: templates/orders/partials/mini_cart_content.html:78
+msgid "Coșul dumneavoastră este gol"
+msgstr ""
+
+#: templates/orders/partials/mini_cart_content.html:81
+msgid "Explore products"
+msgstr ""
+
+#: templates/orders/partials/order_breadcrumbs.html:4
+msgid "Order process steps"
+msgstr ""
+
+#: templates/orders/partials/order_breadcrumbs.html:21
+msgid "Product Selection"
+msgstr ""
+
+#: templates/orders/partials/order_breadcrumbs.html:25
+#: templates/orders/partials/order_breadcrumbs.html:51
+#: templates/orders/partials/order_breadcrumbs.html:75
+msgid "(current step)"
+msgstr ""
+
+#: templates/orders/partials/order_breadcrumbs.html:95
+#, fuzzy
+#| msgid "Conversation"
+msgid "Confirmation"
+msgstr "Conversație"
+
+#: templates/orders/partials/order_breadcrumbs.html:99
+msgid "(completed)"
+msgstr ""
+
+#: templates/orders/partials/trust_signals.html:10
+msgid "SSL Secured"
+msgstr ""
+
+#: templates/orders/partials/trust_signals.html:16
+msgid "Instant Setup"
+msgstr ""
+
+#: templates/orders/partials/trust_signals.html:22
+msgid "VAT Included"
+msgstr ""
+
+#: templates/orders/partials/trust_signals.html:28
+msgid "24/7 Support"
+msgstr ""
+
+#: templates/orders/partials/trust_signals.html:34
+msgid "Romanian Data Center"
+msgstr ""
+
+#: templates/orders/product_catalog.html:4
+#: templates/orders/product_catalog.html:16
+msgid "Product Catalog"
+msgstr ""
+
+#: templates/orders/product_catalog.html:17
+msgid "Choose from our complete range of hosting services"
+msgstr ""
+
+#: templates/orders/product_catalog.html:25
+msgid "Shopping Cart"
+msgstr ""
+
+#: templates/orders/product_catalog.html:110
+msgid "setup"
+msgstr ""
+
+#: templates/orders/product_catalog.html:129
+msgid "mai multe funcții"
+msgstr ""
+
+#: templates/orders/product_catalog.html:162
+#, fuzzy
+#| msgid "Ticket Details"
+msgid "View Details"
+msgstr "Detalii tichet"
+
+#: templates/orders/product_catalog.html:174
+msgid "No products found for selected filter"
+msgstr ""
+
+#: templates/orders/product_catalog.html:176
+#, fuzzy
+#| msgid "Live chat available"
+msgid "No products available"
+msgstr "Chat live disponibil"
+
+#: templates/orders/product_catalog.html:180
+msgid "Please try modifying the filters or check back later."
+msgstr ""
+
+#: templates/orders/product_catalog.html:185
+#, fuzzy
+#| msgid "View all"
+msgid "View all products"
+msgstr "Vezi toate"
+
+#: templates/orders/product_catalog.html:196
+#, python-format
+msgid ""
+"\n"
+"          You have %(counter)s product in cart\n"
+"        "
+msgid_plural ""
+"\n"
+"          You have %(counter)s products in cart\n"
+"        "
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+
+#: templates/orders/product_catalog.html:203
+msgid "Review cart"
+msgstr ""
+
+#: templates/orders/product_detail.html:19
+msgid "Caracteristici"
+msgstr ""
+
+#: templates/orders/product_detail.html:36
+msgid "Perioadă de facturare"
+msgstr ""
+
+#: templates/orders/product_detail.html:61
+msgid "Înapoi la catalog"
+msgstr ""
 
 #: templates/services/service_detail.html:5
 #: templates/services/service_detail.html:249
@@ -1827,71 +2566,71 @@ msgstr ""
 msgid "Manage your hosting services and resources"
 msgstr "Gestionează serviciile de hosting și resursele"
 
-#: templates/services/service_list.html:93
-#: templates/services/service_list.html:123
+#: templates/services/service_list.html:104
+#: templates/services/service_list.html:134
 msgid "service"
 msgstr ""
 
-#: templates/services/service_list.html:95
-#: templates/services/service_list.html:125
+#: templates/services/service_list.html:106
+#: templates/services/service_list.html:136
 msgid "services"
 msgstr "servicii"
 
-#: templates/services/service_list.html:101
+#: templates/services/service_list.html:112
 msgid "Filter:"
 msgstr "Filtru:"
 
-#: templates/services/service_list.html:109
-#: templates/services/service_list.html:132
+#: templates/services/service_list.html:120
+#: templates/services/service_list.html:143
 msgid "active"
 msgstr ""
 
-#: templates/services/service_list.html:112
-#: templates/services/service_list.html:133
+#: templates/services/service_list.html:123
+#: templates/services/service_list.html:144
 msgid "total"
 msgstr ""
 
-#: templates/services/service_list.html:152
+#: templates/services/service_list.html:163
 msgid "Service Name"
 msgstr "Nume serviciu"
 
-#: templates/services/service_list.html:155
-#: templates/services/service_list.html:270
+#: templates/services/service_list.html:166
+#: templates/services/service_list.html:281
 msgid "Plan"
 msgstr "Plan"
 
-#: templates/services/service_list.html:158
-#: templates/services/service_list.html:274
+#: templates/services/service_list.html:169
+#: templates/services/service_list.html:285
 msgid "Price"
 msgstr "Preț"
 
-#: templates/services/service_list.html:216
-#: templates/services/service_list.html:287
+#: templates/services/service_list.html:227
+#: templates/services/service_list.html:298
 msgid "View"
 msgstr ""
 
-#: templates/services/service_list.html:221
-#: templates/services/service_list.html:292
+#: templates/services/service_list.html:232
+#: templates/services/service_list.html:303
 msgid "Reactivate"
 msgstr ""
 
-#: templates/services/service_list.html:305
+#: templates/services/service_list.html:316
 msgid "No services found for the selected filter"
 msgstr ""
 
-#: templates/services/service_list.html:307
+#: templates/services/service_list.html:318
 msgid "No services yet"
 msgstr ""
 
-#: templates/services/service_list.html:312
+#: templates/services/service_list.html:323
 msgid "Contact our sales team to get started with hosting services."
 msgstr ""
 
-#: templates/services/service_list.html:324
+#: templates/services/service_list.html:335
 msgid "Page"
 msgstr ""
 
-#: templates/services/service_list.html:352
+#: templates/services/service_list.html:363
 msgid "Request reactivation for service?"
 msgstr ""
 
@@ -2099,10 +2838,6 @@ msgstr "Titlu"
 #: templates/tickets/ticket_create.html:72
 msgid "Related Service"
 msgstr "Serviciu asociat"
-
-#: templates/tickets/ticket_create.html:72
-msgid "optional"
-msgstr "opțional"
 
 #: templates/tickets/ticket_create.html:76
 msgid "Select a service (if applicable)"
@@ -3160,6 +3895,11 @@ msgstr ""
 #: templates/users/register.html:300
 msgid "Sign in here"
 msgstr ""
+
+#, fuzzy
+#~| msgid "optional"
+#~ msgid "opțional"
+#~ msgstr "opțional"
 
 #~ msgid "Welcome to PragmaticHost"
 #~ msgstr "Bun venit la PragmaticHost"
