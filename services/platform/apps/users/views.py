@@ -753,6 +753,26 @@ def user_profile(request: HttpRequest) -> HttpResponse:
     profile, created = UserProfile.objects.get_or_create(user=user)
 
     if request.method == "POST":
+        # Handle language change if present
+        if 'language' in request.POST:
+            selected_language = request.POST.get('language')
+            from django.conf import settings
+            from django.utils import translation
+            
+            # Set the language in session
+            session_key = getattr(settings, 'LANGUAGE_SESSION_KEY', 'django_language')
+            request.session[session_key] = selected_language
+            
+            # Also set the cookie for future requests
+            cookie_name = getattr(settings, 'LANGUAGE_COOKIE_NAME', 'django_language')
+            response = redirect("users:user_profile")
+            response.set_cookie(
+                cookie_name, 
+                selected_language,
+                max_age=365 * 24 * 60 * 60  # 1 year
+            )
+            return response
+        
         form = UserProfileForm(request.POST, instance=profile)
         if form.is_valid():
             form.save()

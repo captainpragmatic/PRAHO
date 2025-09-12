@@ -1421,3 +1421,189 @@ def order_export(request: HttpRequest) -> HttpResponse:
     """📤 Export orders (to be implemented)"""
     messages.info(request, _("Order export will be implemented next."))
     return redirect("orders:order_list")
+
+
+# ===============================================================================
+# CART OPERATIONS - CUSTOMER SHOPPING CART 🛒
+# ===============================================================================
+
+@login_required
+def cart_view(request: HttpRequest) -> HttpResponse:
+    """
+    🛒 Display customer shopping cart with items and totals
+    Multi-tenant: Users only see their own cart items
+    """
+    # Type guard for authenticated user
+    if not isinstance(request.user, User):
+        return redirect("users:login")
+
+    # Get or create current customer context
+    try:
+        customer = request.user.get_primary_customer()
+        if not customer:
+            messages.error(request, _("❌ No customer profile found. Please contact support."))
+            return redirect("dashboard")
+    except Exception as e:
+        logger.error(f"🔥 [Cart] Error getting customer for user {request.user.id}: {e}")
+        messages.error(request, _("❌ Error accessing cart. Please try again."))
+        return redirect("dashboard")
+
+    # Get current cart order (draft)
+    cart_order = Order.objects.filter(
+        customer=customer,
+        status=Order.Status.DRAFT
+    ).first()
+
+    context = {
+        "cart_order": cart_order,
+        "cart_items": cart_order.items.select_related("product") if cart_order else [],
+        "customer": customer,
+    }
+
+    return render(request, "orders/cart/cart_view.html", context)
+
+
+@login_required
+def cart_calculate(request: HttpRequest) -> HttpResponse:
+    """
+    🧮 Calculate cart totals via HTMX
+    Returns order summary HTML partial
+    """
+    # Type guard for authenticated user
+    if not isinstance(request.user, User):
+        return HttpResponse("Authentication required", status=401)
+
+    try:
+        customer = request.user.get_primary_customer()
+        if not customer:
+            return HttpResponse("No customer profile", status=400)
+
+        # Get current cart order
+        cart_order = Order.objects.filter(
+            customer=customer,
+            status=Order.Status.DRAFT
+        ).first()
+
+        if not cart_order:
+            return HttpResponse("Empty cart", status=400)
+
+        # Recalculate totals
+        cart_order.calculate_totals()
+        cart_order.save()
+
+        # Return order summary partial
+        context = {
+            "cart_order": cart_order,
+            "customer": customer,
+        }
+
+        return render(request, "orders/cart/cart_summary_partial.html", context)
+
+    except Exception as e:
+        logger.error(f"🔥 [Cart] Error calculating cart totals: {e}")
+        return HttpResponse("Calculation error", status=500)
+
+
+@login_required
+def cart_update(request: HttpRequest) -> HttpResponse:
+    """
+    📝 Update cart item quantity via HTMX
+    """
+    if request.method != "POST":
+        return HttpResponse("Method not allowed", status=405)
+
+    # Type guard for authenticated user
+    if not isinstance(request.user, User):
+        return HttpResponse("Authentication required", status=401)
+
+    try:
+        customer = request.user.get_primary_customer()
+        if not customer:
+            return HttpResponse("No customer profile", status=400)
+
+        item_id = request.POST.get("item_id")
+        quantity = int(request.POST.get("quantity", 1))
+
+        if not item_id or quantity < 1:
+            return HttpResponse("Invalid parameters", status=400)
+
+        # Get cart order and item
+        cart_order = Order.objects.filter(
+            customer=customer,
+            status=Order.Status.DRAFT
+        ).first()
+
+        if not cart_order:
+            return HttpResponse("Cart not found", status=404)
+
+        cart_item = get_object_or_404(OrderItem, id=item_id, order=cart_order)
+
+        # Update quantity
+        cart_item.quantity = quantity
+        cart_item.save()
+
+        # Recalculate totals
+        cart_order.calculate_totals()
+        cart_order.save()
+
+        # Return updated cart partial
+        context = {
+            "cart_order": cart_order,
+            "customer": customer,
+        }
+        return render(request, "orders/cart/cart_items_partial.html", context)
+
+    except Exception as e:
+        logger.error(f"🔥 [Cart] Error updating cart item: {e}")
+        return HttpResponse("Update error", status=500)
+
+
+@login_required
+def cart_remove(request: HttpRequest) -> HttpResponse:
+    """
+    🗑️ Remove item from cart via HTMX
+    """
+    if request.method != "POST":
+        return HttpResponse("Method not allowed", status=405)
+
+    # Type guard for authenticated user
+    if not isinstance(request.user, User):
+        return HttpResponse("Authentication required", status=401)
+
+    try:
+        customer = request.user.get_primary_customer()
+        if not customer:
+            return HttpResponse("No customer profile", status=400)
+
+        item_id = request.POST.get("item_id")
+        if not item_id:
+            return HttpResponse("Invalid parameters", status=400)
+
+        # Get cart order and item
+        cart_order = Order.objects.filter(
+            customer=customer,
+            status=Order.Status.DRAFT
+        ).first()
+
+        if not cart_order:
+            return HttpResponse("Cart not found", status=404)
+
+        cart_item = get_object_or_404(OrderItem, id=item_id, order=cart_order)
+        
+        # Remove item
+        cart_item.delete()
+
+        # Recalculate totals
+        cart_order.calculate_totals()
+        cart_order.save()
+
+        # Return updated cart partial
+        context = {
+            "cart_order": cart_order,
+            "customer": customer,
+        }
+        return render(request, "orders/cart/cart_items_partial.html", context)
+
+    except Exception as e:
+        logger.error(f"🔥 [Cart] Error removing cart item: {e}")
+        return HttpResponse("Remove error", status=500)

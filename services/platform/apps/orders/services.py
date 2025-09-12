@@ -188,6 +188,61 @@ class OrderService:
     """Main service for order management operations"""
 
     @staticmethod
+    def build_billing_address_from_customer(customer) -> "BillingAddressData":
+        """
+        Build billing address data from customer profile (database lookup).
+        This ensures we always use the most current customer data.
+        """
+        from apps.customers.models import CustomerAddress  # noqa: PLC0415
+        
+        # Get current address from CustomerAddress model - try multiple strategies
+        address = None
+        
+        # First, try to get billing address marked as current
+        address = CustomerAddress.objects.filter(
+            customer=customer, 
+            address_type='billing', 
+            is_current=True
+        ).first()
+        
+        # If no billing address, try primary address marked as current  
+        if not address:
+            address = CustomerAddress.objects.filter(
+                customer=customer, 
+                address_type='primary', 
+                is_current=True
+            ).first()
+        
+        # If still no address, get any current address
+        if not address:
+            address = CustomerAddress.objects.filter(
+                customer=customer, 
+                is_current=True
+            ).first()
+            
+        # Last resort: get the most recent address for this customer
+        if not address:
+            address = CustomerAddress.objects.filter(
+                customer=customer
+            ).order_by('-created_at').first()
+        
+        return BillingAddressData(
+            company_name=customer.company_name or '',
+            contact_name=customer.name,
+            email=customer.primary_email,
+            phone=customer.primary_phone if customer.primary_phone != '+40712345678' else '',  # Skip default phone
+            address_line1=address.address_line1 if address else '',
+            address_line2=address.address_line2 if address else '',
+            city=address.city if address else '',
+            county=address.county if address else '',
+            postal_code=address.postal_code if address else '',
+            country=address.country if address else 'România',
+            fiscal_code=getattr(customer.tax_profile, 'cui', '') if hasattr(customer, 'tax_profile') else '',
+            registration_number=getattr(customer, 'registration_number', ''),
+            vat_number=getattr(customer.tax_profile, 'vat_number', '') if hasattr(customer, 'tax_profile') else ''
+        )
+
+    @staticmethod
     @transaction.atomic
     def create_order(data: OrderCreateData, created_by: User | None = None) -> Result[Order, str]:
         """Create new order with validation and audit trail"""

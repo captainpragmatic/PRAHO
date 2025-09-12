@@ -48,7 +48,7 @@ class OrderVATCalculator:
     
     # VAT rates by country (as of 2024)
     VAT_RATES = {
-        'RO': Decimal('21.0'),    # Romania - home country (updated)
+        'RO': Decimal('19.0'),    # Romania - home country (corrected to 19%)
         'AT': Decimal('20.0'),    # Austria
         'BE': Decimal('21.0'),    # Belgium
         'BG': Decimal('20.0'),    # Bulgaria
@@ -225,7 +225,7 @@ class OrderVATCalculator:
         """🔒 Log VAT calculation for compliance audit"""
         
         try:
-            AuditService.log_event(
+            AuditService.log_event_legacy(
                 event_type='order_vat_calculation',
                 object_type='order',
                 object_id=result.audit_data.get('order_id'),

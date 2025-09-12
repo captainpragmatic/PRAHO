@@ -44,6 +44,7 @@ urlpatterns = [
     path("customers/", include("apps.customers.urls")),
     path("products/", include("apps.products.urls")),
     path("orders/", include("apps.orders.urls")),
+    path("order/", include("apps.orders.urls")),  # Singular alias for cart operations
     path("billing/", include("apps.billing.urls")),
     path("tickets/", include("apps.tickets.urls")),
     path("provisioning/", include("apps.provisioning.urls")),

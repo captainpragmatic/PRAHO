@@ -31,7 +31,7 @@ from apps.users.models import User
 from apps.users.services import CustomerUserService, UserCreationRequest, UserLinkingRequest
 
 from .customer_models import Customer
-from .forms import CustomerCreationForm, CustomerForm, CustomerUserAssignmentForm
+from .forms import CustomerCreationForm, CustomerEditForm, CustomerForm, CustomerUserAssignmentForm
 
 logger = logging.getLogger(__name__)
 security_logger = logging.getLogger("security")
@@ -359,8 +359,8 @@ def customer_create(request: HttpRequest) -> HttpResponse:
 @staff_required
 def customer_edit(request: HttpRequest, customer_id: int) -> HttpResponse:
     """
-    ✏️ Edit customer core information
-    Separate views for tax/billing/address profiles
+    ✏️ Comprehensive customer edit with all profiles
+    Edits core customer, tax profile, billing profile, and primary address
     """
     # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
     user = cast(User, request.user)  # Safe due to @staff_required
@@ -372,28 +372,40 @@ def customer_edit(request: HttpRequest, customer_id: int) -> HttpResponse:
         if accessible_customers
         else Customer.objects.none()
     )
-    customer = get_object_or_404(accessible_qs, id=customer_id)
+    # Prefetch related profiles for efficiency
+    customer = get_object_or_404(
+        accessible_qs.select_related("tax_profile", "billing_profile").prefetch_related("addresses"),
+        id=customer_id
+    )
 
     if request.method == "POST":
-        form = CustomerForm(request.POST, instance=customer)
-        if form.is_valid():
-            form.save()
-            messages.success(
-                request, _('✅ Customer "{customer_name}" updated').format(customer_name=customer.get_display_name())
-            )
-            return redirect("customers:detail", customer_id=customer.id)
-        else:
-            messages.error(request, _("❌ Please correct the errors below"))
+        try:
+            form = CustomerEditForm(customer, request.POST)
+            if form.is_valid():
+                updated_customer = form.save(user=user)
+                messages.success(
+                    request, 
+                    _('✅ Customer "{customer_name}" updated successfully').format(
+                        customer_name=updated_customer.get_display_name()
+                    )
+                )
+                return redirect("customers:detail", customer_id=updated_customer.id)
+            else:
+                messages.error(request, _("❌ Please correct the errors below"))
+        except Exception as e:
+            _handle_secure_error(request, e, "customer_edit", user.id)
+            # Form will be re-rendered with error messages
     else:
-        form = CustomerForm(instance=customer)
+        form = CustomerEditForm(customer)
 
     context = {
         "form": form,
         "customer": customer,
-        "action": _("Edit"),
+        "title": _("Edit Customer"),
+        "submit_text": _("Update Customer"),
     }
 
-    return render(request, "customers/form.html", context)
+    return render(request, "customers/edit.html", context)
 
 
 @staff_required
