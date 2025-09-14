@@ -121,7 +121,7 @@ def service_detail(request: HttpRequest, service_id: int) -> HttpResponse:
         service = services_api.get_service_detail(customer_id, user_id, service_id)
         
         # Get service usage statistics
-        usage = services_api.get_service_usage(customer_id, service_id, period='30d')
+        usage = services_api.get_service_usage(customer_id, user_id, service_id, period='30d')
         
         # Get associated domains
         domains = services_api.get_service_domains(customer_id, service_id)
@@ -240,6 +240,7 @@ def service_request_action(request: HttpRequest, service_id: int) -> HttpRespons
         
         context = {
             'service': service,
+            'service_id': service_id,  # Add service_id explicitly for URL reversing
             'available_plans': available_plans,
             'action_types': [
                 ('upgrade_request', _('Request Service Upgrade')),

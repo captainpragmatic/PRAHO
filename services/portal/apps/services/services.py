@@ -94,20 +94,27 @@ class ServicesAPIClient(PlatformAPIClient):
         try:
             data = {'customer_id': customer_id, 'user_id': user_id}
             response = self._make_request('POST', f'/services/{service_id}/', user_id=user_id, data=data)
-            
-            logger.info(f"✅ [Services API] Retrieved service {service_id} details for customer {customer_id}")
-            return response
-            
+
+            # Extract service data from nested platform API response
+            if response.get('success') and 'data' in response and 'service' in response['data']:
+                service_data = response['data']['service']
+                logger.info(f"✅ [Services API] Retrieved service {service_id} details for customer {customer_id}")
+                return service_data
+            else:
+                logger.warning(f"⚠️ [Services API] Unexpected service detail response format: {response}")
+                return {}
+
         except PlatformAPIError as e:
             logger.error(f"🔥 [Services API] Error retrieving service {service_id} for customer {customer_id}: {e}")
             raise
     
-    def get_service_usage(self, customer_id: int, service_id: int, period: str = '30d') -> dict[str, Any]:
+    def get_service_usage(self, customer_id: int, user_id: int, service_id: int, period: str = '30d') -> dict[str, Any]:
         """
         Get service usage statistics for customer view.
         
         Args:
             customer_id: Customer ID for authorization
+            user_id: User ID for HMAC authentication
             service_id: Service ID to get usage for
             period: Usage period (7d, 30d, 90d)
             
@@ -117,13 +124,26 @@ class ServicesAPIClient(PlatformAPIClient):
         try:
             data = {
                 'customer_id': customer_id,
+                'user_id': user_id,
                 'period': period
             }
-            response = self._make_request('POST', f'/services/{service_id}/usage/', data=data)
-            
-            logger.info(f"✅ [Services API] Retrieved usage for service {service_id} for customer {customer_id}")
-            return response
-            
+            response = self._make_request('POST', f'/services/{service_id}/usage/', user_id=user_id, data=data)
+
+            # Extract usage data from nested platform API response
+            if response.get('success') and 'data' in response and 'usage' in response['data']:
+                usage_data = response['data']['usage']
+                logger.info(f"✅ [Services API] Retrieved usage for service {service_id} for customer {customer_id}")
+                return usage_data
+            else:
+                logger.warning(f"⚠️ [Services API] Unexpected usage response format: {response}")
+                return {
+                    'bandwidth_used': 0,
+                    'bandwidth_limit': 0,
+                    'storage_used': 0,
+                    'storage_limit': 0,
+                    'period': period
+                }
+
         except PlatformAPIError as e:
             logger.error(f"🔥 [Services API] Error retrieving usage for service {service_id} for customer {customer_id}: {e}")
             # Return empty usage on error to avoid breaking UI

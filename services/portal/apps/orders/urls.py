@@ -28,4 +28,7 @@ urlpatterns = [
     
     # HTMX partials
     path('partials/mini-cart/', views.mini_cart_content, name='mini_cart_content'),
+
+    # Payment webhooks
+    path('payment/webhook/', views.payment_success_webhook, name='payment_webhook'),
 ]

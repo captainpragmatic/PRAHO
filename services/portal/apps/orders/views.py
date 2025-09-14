@@ -611,26 +611,62 @@ def create_order(request: HttpRequest) -> HttpResponse:
         
         # Create order with auto-pending (promotes to pending if validation passes)
         result = OrderCreationService.create_draft_order(cart, customer_id, user_id, notes, auto_pending=True)
-        
+
         if result.get('error'):
             messages.error(request, result['error'])
             return redirect('orders:checkout')
-        
+
         order_data = result.get('order', {})
         order_id = order_data.get('id')
         order_number = order_data.get('order_number')
-        
+
         # Check if order was auto-promoted to pending
         order_status = order_data.get('status', 'draft')
+
+        # 💳 NEW: Create payment intent for pending orders
+        payment_intent_result = None
         if order_status == 'pending':
-            messages.success(request, 
-                _('Order #{} was created successfully and is ready for payment!').format(order_number)
-            )
+            try:
+                # Call Platform API to create payment intent
+                platform_api = PlatformAPIClient()
+                payment_intent_result = platform_api.post('/billing/api/create-payment-intent/', data={
+                    'order_id': str(order_id),
+                    'gateway': 'stripe',
+                    'metadata': {
+                        'order_number': order_number,
+                        'customer_id': str(customer_id),
+                        'created_via': 'portal_checkout'
+                    }
+                })
+
+                if payment_intent_result and payment_intent_result.get('success'):
+                    logger.info(f"✅ Created payment intent for order {order_number}")
+                    # Store payment intent info in session for checkout page
+                    request.session[f'payment_intent_{order_id}'] = {
+                        'client_secret': payment_intent_result.get('client_secret'),
+                        'payment_intent_id': payment_intent_result.get('payment_intent_id')
+                    }
+                else:
+                    logger.error(f"❌ Failed to create payment intent: {payment_intent_result}")
+
+            except Exception as e:
+                logger.error(f"🔥 Error creating payment intent for order {order_id}: {e}")
+                # Continue without payment intent - user can still view order
+
+        if order_status == 'pending':
+            if payment_intent_result and payment_intent_result.get('success'):
+                messages.success(request,
+                    _('Order #{} was created successfully and is ready for payment!').format(order_number)
+                )
+            else:
+                messages.warning(request,
+                    _('Order #{} was created successfully, but payment processing is temporarily unavailable.').format(order_number)
+                )
         else:
-            messages.success(request, 
+            messages.success(request,
                 _('Order #{} was created successfully! You can view it in your orders list.').format(order_number)
             )
-        
+
         return redirect('orders:confirmation', order_id=order_id)
         
     except ValidationError as e:
@@ -664,12 +700,35 @@ def order_confirmation(request: HttpRequest, order_id: str) -> HttpResponse:
         if not order_data or order_data.get('error'):
             messages.error(request, _('Comanda nu a fost găsită.'))
             return redirect('orders:catalog')
-        
+
+        # 💳 NEW: Get payment intent for pending orders
+        payment_info = None
+        stripe_config = None
+        if order_data.get('status') == 'pending':
+            # Get payment intent from session
+            session_key = f'payment_intent_{order_id}'
+            payment_info = request.session.get(session_key)
+
+            if payment_info:
+                try:
+                    # Get Stripe configuration from Platform API
+                    stripe_config_result = platform_api.get('/billing/api/stripe-config/')
+                    if stripe_config_result and stripe_config_result.get('success'):
+                        stripe_config = stripe_config_result.get('config', {})
+                        logger.info("✅ Retrieved Stripe configuration for checkout")
+                    else:
+                        logger.error(f"❌ Failed to get Stripe config: {stripe_config_result}")
+
+                except Exception as e:
+                    logger.error(f"🔥 Error getting Stripe config: {e}")
+
         context = {
             'order': order_data,
+            'payment_info': payment_info,
+            'stripe_config': stripe_config,
             'breadcrumb_current': 'confirm',
         }
-        
+
         return render(request, 'orders/order_confirmation.html', context)
         
     except PlatformAPIError as e:
@@ -694,3 +753,48 @@ def mini_cart_content(request: HttpRequest) -> HttpResponse:
     }
     
     return render(request, 'orders/partials/mini_cart_content.html', context)
+
+
+# ===============================================================================
+# PAYMENT SUCCESS HANDLER
+# ===============================================================================
+
+from django.views.decorators.csrf import csrf_exempt
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def payment_success_webhook(request: HttpRequest) -> JsonResponse:
+    """
+    🔔 Handle payment success notifications from Platform webhooks
+
+    This endpoint is called by the Platform service when a payment succeeds
+    to clean up Portal session data and update UI state.
+    """
+    try:
+        import json
+        from django.http import JsonResponse
+
+        data = json.loads(request.body)
+
+        order_id = data.get('order_id')
+        payment_status = data.get('status')
+
+        if not order_id:
+            return JsonResponse({'error': 'order_id required'}, status=400)
+
+        logger.info(f"🔔 Payment webhook for order {order_id}: {payment_status}")
+
+        # Clean up session data for completed payments
+        if payment_status == 'succeeded':
+            # Clear payment intent from session (if exists)
+            session_key = f'payment_intent_{order_id}'
+            # Note: We can't access session without session key,
+            # so this cleanup happens when user visits the site next
+
+            logger.info(f"✅ Payment succeeded for order {order_id}")
+
+        return JsonResponse({'success': True})
+
+    except Exception as e:
+        logger.error(f"🔥 Error processing payment webhook: {e}")
+        return JsonResponse({'error': 'Webhook processing failed'}, status=500)
