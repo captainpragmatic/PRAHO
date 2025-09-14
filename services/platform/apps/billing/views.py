@@ -1590,3 +1590,327 @@ This ticket was automatically created from a customer refund request.
     except Exception as e:
         logger.exception(f"Failed to create invoice refund request ticket: {e}")
         return json_error("An unexpected error occurred while submitting your refund request")
+
+
+# ===============================================================================
+# PAYMENT API ENDPOINTS FOR PORTAL CONSUMPTION
+# ===============================================================================
+
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
+from django.utils.decorators import method_decorator
+import json
+
+from .payment_service import PaymentService
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_create_payment_intent(request: HttpRequest) -> JsonResponse:
+    """
+    🔐 API: Create payment intent for Portal checkout
+
+    Expected payload:
+    {
+        "order_id": "uuid-string",
+        "gateway": "stripe",
+        "metadata": {...}
+    }
+    """
+    try:
+        # Parse request data
+        data = json.loads(request.body)
+        order_id = data.get('order_id')
+        gateway = data.get('gateway', 'stripe')
+        metadata = data.get('metadata', {})
+
+        # Validate required fields
+        if not order_id:
+            return JsonResponse({
+                'success': False,
+                'error': 'order_id is required'
+            }, status=400)
+
+        # Create payment intent using PaymentService
+        result = PaymentService.create_payment_intent(
+            order_id=order_id,
+            gateway=gateway,
+            metadata=metadata
+        )
+
+        if result['success']:
+            logger.info(f"✅ API: Created payment intent for order {order_id}")
+            return JsonResponse({
+                'success': True,
+                'payment_intent_id': result['payment_intent_id'],
+                'client_secret': result['client_secret']
+            })
+        else:
+            logger.error(f"❌ API: Failed to create payment intent: {result['error']}")
+            return JsonResponse({
+                'success': False,
+                'error': result['error']
+            }, status=400)
+
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'error': 'Invalid JSON payload'
+        }, status=400)
+    except Exception as e:
+        logger.error(f"🔥 API: Unexpected error creating payment intent: {e}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Internal server error'
+        }, status=500)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_confirm_payment(request: HttpRequest) -> JsonResponse:
+    """
+    🔐 API: Confirm payment status
+
+    Expected payload:
+    {
+        "payment_intent_id": "pi_...",
+        "gateway": "stripe"
+    }
+    """
+    try:
+        # Parse request data
+        data = json.loads(request.body)
+        payment_intent_id = data.get('payment_intent_id')
+        gateway = data.get('gateway', 'stripe')
+
+        # Validate required fields
+        if not payment_intent_id:
+            return JsonResponse({
+                'success': False,
+                'error': 'payment_intent_id is required'
+            }, status=400)
+
+        # Confirm payment using PaymentService
+        result = PaymentService.confirm_payment(
+            payment_intent_id=payment_intent_id,
+            gateway=gateway
+        )
+
+        if result['success']:
+            logger.info(f"✅ API: Confirmed payment {payment_intent_id} - status: {result['status']}")
+            return JsonResponse({
+                'success': True,
+                'status': result['status']
+            })
+        else:
+            logger.error(f"❌ API: Failed to confirm payment: {result['error']}")
+            return JsonResponse({
+                'success': False,
+                'error': result['error']
+            }, status=400)
+
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'error': 'Invalid JSON payload'
+        }, status=400)
+    except Exception as e:
+        logger.error(f"🔥 API: Unexpected error confirming payment: {e}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Internal server error'
+        }, status=500)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_create_subscription(request: HttpRequest) -> JsonResponse:
+    """
+    🔐 API: Create recurring subscription
+
+    Expected payload:
+    {
+        "customer_id": "uuid-string",
+        "price_id": "price_...",
+        "gateway": "stripe",
+        "metadata": {...}
+    }
+    """
+    try:
+        # Parse request data
+        data = json.loads(request.body)
+        customer_id = data.get('customer_id')
+        price_id = data.get('price_id')
+        gateway = data.get('gateway', 'stripe')
+        metadata = data.get('metadata', {})
+
+        # Validate required fields
+        if not customer_id or not price_id:
+            return JsonResponse({
+                'success': False,
+                'error': 'customer_id and price_id are required'
+            }, status=400)
+
+        # Create subscription using PaymentService
+        result = PaymentService.create_subscription(
+            customer_id=customer_id,
+            price_id=price_id,
+            gateway=gateway,
+            metadata=metadata
+        )
+
+        if result['success']:
+            logger.info(f"✅ API: Created subscription {result['subscription_id']} for customer {customer_id}")
+            return JsonResponse({
+                'success': True,
+                'subscription_id': result['subscription_id'],
+                'status': result['status']
+            })
+        else:
+            logger.error(f"❌ API: Failed to create subscription: {result['error']}")
+            return JsonResponse({
+                'success': False,
+                'error': result['error']
+            }, status=400)
+
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'error': 'Invalid JSON payload'
+        }, status=400)
+    except Exception as e:
+        logger.error(f"🔥 API: Unexpected error creating subscription: {e}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Internal server error'
+        }, status=500)
+
+
+@require_http_methods(["GET"])
+def api_payment_methods(request: HttpRequest, customer_id: str) -> JsonResponse:
+    """
+    🔐 API: Get available payment methods for customer
+
+    URL: /api/billing/payment-methods/{customer_id}/
+    """
+    try:
+        # Get available payment methods
+        methods = PaymentService.get_available_payment_methods(customer_id)
+
+        logger.info(f"✅ API: Retrieved {len(methods)} payment methods for customer {customer_id}")
+        return JsonResponse({
+            'success': True,
+            'payment_methods': methods
+        })
+
+    except Exception as e:
+        logger.error(f"🔥 API: Unexpected error getting payment methods: {e}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Internal server error'
+        }, status=500)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_process_refund(request: HttpRequest) -> JsonResponse:
+    """
+    🔐 API: Process payment refund
+
+    Expected payload:
+    {
+        "payment_id": "uuid-string",
+        "amount_cents": 2999,
+        "reason": "Customer request"
+    }
+    """
+    try:
+        # Parse request data
+        data = json.loads(request.body)
+        payment_id = data.get('payment_id')
+        amount_cents = data.get('amount_cents')
+        reason = data.get('reason', 'API refund request')
+
+        # Validate required fields
+        if not payment_id:
+            return JsonResponse({
+                'success': False,
+                'error': 'payment_id is required'
+            }, status=400)
+
+        # TODO: Implement refund processing via PaymentService
+        # result = PaymentService.process_refund(payment_id, amount_cents, reason)
+
+        logger.info(f"📝 API: Refund request for payment {payment_id} - not yet implemented")
+        return JsonResponse({
+            'success': False,
+            'error': 'Refund processing not yet implemented'
+        }, status=501)
+
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'error': 'Invalid JSON payload'
+        }, status=400)
+    except Exception as e:
+        logger.error(f"🔥 API: Unexpected error processing refund: {e}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Internal server error'
+        }, status=500)
+
+
+@require_http_methods(["GET"])
+def api_stripe_config(request: HttpRequest) -> JsonResponse:
+    """
+    🔐 API: Get Stripe configuration for Portal frontend
+
+    Returns only public keys and configuration safe for client-side use.
+    """
+    try:
+        from apps.settings.services import SettingsService
+
+        # Check if Stripe integration is enabled
+        stripe_enabled = SettingsService.get("integrations.stripe_enabled", default=False)
+        if not stripe_enabled:
+            logger.warning("⚠️ API: Stripe integration is disabled")
+            return JsonResponse({
+                'success': False,
+                'error': 'Stripe integration disabled'
+            }, status=503)
+
+        # Get public configuration from settings system
+        publishable_key = SettingsService.get("integrations.stripe_publishable_key")
+
+        config = {
+            'publishable_key': publishable_key,
+            'currency': 'RON',
+            'country': 'RO',
+            'supported_payment_methods': ['card'],
+            'appearance': {
+                'theme': 'stripe',
+                'variables': {
+                    'colorPrimary': '#0570de',
+                }
+            }
+        }
+
+        if not config['publishable_key']:
+            logger.error("❌ API: Stripe publishable key not configured in settings system")
+            return JsonResponse({
+                'success': False,
+                'error': 'Stripe not configured'
+            }, status=500)
+
+        logger.info("✅ API: Retrieved Stripe configuration from settings system")
+        return JsonResponse({
+            'success': True,
+            'config': config
+        })
+
+    except Exception as e:
+        logger.error(f"🔥 API: Unexpected error getting Stripe config: {e}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Internal server error'
+        }, status=500)
