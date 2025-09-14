@@ -86,6 +86,11 @@ class SettingsService:
         "virtualmin.request_timeout_seconds": 30,
         "virtualmin.max_retries": 3,
         "virtualmin.rate_limit_qps": 10,
+        # Stripe payment integration settings
+        "integrations.stripe_secret_key": "",
+        "integrations.stripe_publishable_key": "",
+        "integrations.stripe_webhook_secret": "",
+        "integrations.stripe_enabled": False,
         "virtualmin.connection_pool_size": 10,
         "virtualmin.rate_limit_max_calls_per_hour": 100,
         "virtualmin.auth_health_check_interval_seconds": 3600,
