@@ -193,15 +193,33 @@ class InvoiceViewService:
             if not proforma_data:
                 logger.warning(f"⚠️ [Proforma API] No proforma data for {proforma_number}")
                 return None
-            
+
+            # DEBUG: Log the actual data structure to understand the issue
+            logger.debug(f"🔍 [Proforma API] Received proforma_data keys: {list(proforma_data.keys()) if proforma_data else 'None'}")
+            logger.debug(f"🔍 [Proforma API] Proforma data: {proforma_data}")
+
             # Get line items if included
             lines_data = proforma_data.get('lines', [])
-            
+
             # Convert API response to dataclass instance
-            proforma = create_proforma_from_api(proforma_data, lines_data)
-            
-            logger.info(f"✅ [Proforma API] Retrieved proforma {proforma_number} for customer {customer_id}")
-            return proforma
+            try:
+                # DEBUG: Check data before calling serializer
+                logger.debug(f"🔍 [Proforma API] About to call create_proforma_from_api with keys: {list(proforma_data.keys()) if proforma_data else 'None'}")
+                logger.debug(f"🔍 [Proforma API] ID field check: {'id' in proforma_data if proforma_data else 'No data'}")
+                if proforma_data and 'id' in proforma_data:
+                    logger.debug(f"🔍 [Proforma API] ID value type: {type(proforma_data['id'])}, value: {proforma_data['id']}")
+                
+                proforma = create_proforma_from_api(proforma_data, lines_data)
+                
+                logger.info(f"✅ [Proforma API] Retrieved proforma {proforma_number} for customer {customer_id}")
+                return proforma
+            except KeyError as e:
+                logger.error(f"🔥 [Proforma API] KeyError in create_proforma_from_api: {e}")
+                logger.error(f"🔍 [Proforma API] Available keys: {list(proforma_data.keys()) if proforma_data else 'None'}")
+                raise e
+            except Exception as e:
+                logger.error(f"🔥 [Proforma API] Unexpected error in create_proforma_from_api: {e}")
+                raise e
             
         except Exception as e:
             logger.error(f"🔥 [Proforma API] Error retrieving proforma {proforma_number}: {e}")

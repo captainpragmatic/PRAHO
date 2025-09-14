@@ -27,7 +27,7 @@ def create_currency_from_api(data: dict[str, Any]) -> Currency:
 def create_invoice_line_from_api(data: dict[str, Any]) -> InvoiceLine:
     """Create InvoiceLine dataclass from API response"""
     return InvoiceLine(
-        id=data['id'],
+        id=data.get('id'),
         invoice_id=data.get('invoice_id', data.get('invoice')),
         kind=data['kind'],
         service_id=data.get('service_id'),
@@ -105,7 +105,7 @@ def create_invoice_summary_from_api(data: dict[str, Any]) -> InvoiceSummary:
 def create_proforma_line_from_api(data: dict[str, Any]) -> ProformaLine:
     """Create ProformaLine dataclass from API response"""
     return ProformaLine(
-        id=data['id'],
+        id=data.get('id'),  # Line items may not have IDs in detail API responses
         proforma_id=data.get('proforma_id', data.get('proforma')),
         kind=data['kind'],
         service_id=data.get('service_id'),
