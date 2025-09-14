@@ -206,8 +206,7 @@ class ProductViewCSRFProtectionTests(TestCase):
         # Test POST without CSRF token
         response = self.client.post(url, {
             'currency': self.currency.id,
-            'billing_period': 'monthly',
-            'amount_cents': 10000
+            'monthly_price_cents': 10000
         })
         self.assertEqual(response.status_code, 403)
 
@@ -343,10 +342,10 @@ class ProductViewSecurityLoggingTests(TestCase):
         
         response = self.client.post(url, {
             'currency': self.currency.id,
-            'billing_period': 'monthly',
-            'amount_cents': 10000,
+            'monthly_price_cents': 10000,
             'setup_cents': 0,
-            'discount_percent': 0,
+            'semiannual_discount_percent': 0,
+            'annual_discount_percent': 0,
             'minimum_quantity': 1,
             'is_active': True,
             'csrfmiddlewaretoken': csrf_token
@@ -420,8 +419,7 @@ class ProductViewValidationTests(TestCase):
         # Try to create price with negative amount
         response = self.client.post(url, {
             'currency': self.currency.id,
-            'billing_period': 'monthly',
-            'amount_cents': -1000,  # Negative price
+            'monthly_price_cents': -1000,  # Negative price
             'csrfmiddlewaretoken': csrf_token,
         })
 
@@ -465,10 +463,10 @@ class ProductViewValidationTests(TestCase):
 
         response = self.client.post(url, {
             'currency': self.currency.id,
-            'billing_period': 'monthly',
-            'amount_cents': 2999,  # 29.99
+            'monthly_price_cents': 2999,  # 29.99
             'setup_cents': 500,    # 5.00
-            'discount_percent': 10,
+            'semiannual_discount_percent': 10,
+            'annual_discount_percent': 15,
             'minimum_quantity': 1,
             'maximum_quantity': 10,
             'is_active': True,

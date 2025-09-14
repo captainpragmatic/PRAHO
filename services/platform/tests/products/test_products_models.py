@@ -163,8 +163,7 @@ class ProductPriceSecurityTests(TestCase):
         price = ProductPrice(
             product=self.product,
             currency=self.currency,
-            billing_period="monthly",
-            amount_cents=-1000  # Negative price
+            monthly_price_cents=-1000  # Negative price
         )
         
         with self.assertRaises(ValidationError):
@@ -175,8 +174,7 @@ class ProductPriceSecurityTests(TestCase):
         price = ProductPrice(
             product=self.product,
             currency=self.currency,
-            billing_period="monthly",
-            amount_cents=200000000  # 2 million - too large
+            monthly_price_cents=200000000  # 2 million - too large
         )
         
         with self.assertRaises(ValidationError):
@@ -184,21 +182,37 @@ class ProductPriceSecurityTests(TestCase):
     
     def test_invalid_discount_percentage_blocked(self):
         """🔒 Test that invalid discount percentages are blocked"""
-        # Test negative discount
+        # Test negative semiannual discount
         price = ProductPrice(
             product=self.product,
             currency=self.currency,
-            billing_period="monthly",
-            amount_cents=10000,
-            discount_percent=Decimal("-5.00")
+            monthly_price_cents=10000,
+            semiannual_discount_percent=Decimal("-5.00")
         )
-        
+
         with self.assertRaises(ValidationError):
             price.clean()
-            
-        # Test over 100% discount
-        price.discount_percent = Decimal("150.00")
-        
+
+        # Test over 100% semiannual discount
+        price.semiannual_discount_percent = Decimal("150.00")
+
+        with self.assertRaises(ValidationError):
+            price.clean()
+
+        # Test negative annual discount
+        price = ProductPrice(
+            product=self.product,
+            currency=self.currency,
+            monthly_price_cents=10000,
+            annual_discount_percent=Decimal("-5.00")
+        )
+
+        with self.assertRaises(ValidationError):
+            price.clean()
+
+        # Test over 100% annual discount
+        price.annual_discount_percent = Decimal("150.00")
+
         with self.assertRaises(ValidationError):
             price.clean()
     
@@ -207,8 +221,7 @@ class ProductPriceSecurityTests(TestCase):
         price = ProductPrice(
             product=self.product,
             currency=self.currency,
-            billing_period="monthly",
-            amount_cents=10000,
+            monthly_price_cents=10000,
             minimum_quantity=0  # Less than 1
         )
         
@@ -226,13 +239,12 @@ class ProductPriceSecurityTests(TestCase):
         """🔒 Test that promotional pricing logic is validated"""
         from django.utils import timezone
         from datetime import timedelta
-        
+
         # Test promo price without valid until date
         price = ProductPrice(
             product=self.product,
             currency=self.currency,
-            billing_period="monthly",
-            amount_cents=10000,
+            monthly_price_cents=10000,
             promo_price_cents=8000
             # Missing promo_valid_until
         )
@@ -250,14 +262,14 @@ class ProductPriceSecurityTests(TestCase):
         """✅ Test that safe price passes validation"""
         from django.utils import timezone
         from datetime import timedelta
-        
+
         price = ProductPrice(
             product=self.product,
             currency=self.currency,
-            billing_period="monthly",
-            amount_cents=2999,  # 29.99
+            monthly_price_cents=2999,  # 29.99
             setup_cents=500,    # 5.00 setup fee
-            discount_percent=Decimal("10.00"),
+            semiannual_discount_percent=Decimal("10.00"),
+            annual_discount_percent=Decimal("15.00"),
             minimum_quantity=1,
             maximum_quantity=10,
             promo_price_cents=2499,  # 24.99 promo
@@ -275,8 +287,7 @@ class ProductPriceSecurityTests(TestCase):
         price = ProductPrice(
             product=self.product,
             currency=self.currency,
-            billing_period="monthly",
-            amount_cents=10000
+            monthly_price_cents=10000
         )
         
         price.clean()
@@ -285,6 +296,78 @@ class ProductPriceSecurityTests(TestCase):
         mock_logger.info.assert_called()
         call_args = str(mock_logger.info.call_args)
         self.assertIn("product_price_validation", call_args)
+
+    def test_pricing_calculations(self):
+        """✅ Test simplified pricing model calculations"""
+        from django.utils import timezone
+        from datetime import timedelta
+
+        price = ProductPrice(
+            product=self.product,
+            currency=self.currency,
+            monthly_price_cents=3000,  # 30.00 per month
+            semiannual_discount_percent=Decimal("10.00"),  # 10% off
+            annual_discount_percent=Decimal("20.00"),  # 20% off
+        )
+
+        # Test monthly price calculation
+        self.assertEqual(price.monthly_price, Decimal("30.00"))
+
+        # Test semiannual calculation (30.00 × 6 = 180.00, 10% off = 162.00)
+        expected_semiannual = Decimal("30.00") * 6 * Decimal("0.90")  # 10% discount
+        self.assertEqual(price.semiannual_price, expected_semiannual)
+
+        # Test annual calculation (30.00 × 12 = 360.00, 20% off = 288.00)
+        expected_annual = Decimal("30.00") * 12 * Decimal("0.80")  # 20% discount
+        self.assertEqual(price.annual_price, expected_annual)
+
+        # Test discount detection
+        self.assertTrue(price.has_semiannual_discount)
+        self.assertTrue(price.has_annual_discount)
+
+    def test_pricing_calculations_without_discounts(self):
+        """✅ Test pricing calculations without discounts"""
+        price = ProductPrice(
+            product=self.product,
+            currency=self.currency,
+            monthly_price_cents=2500,  # 25.00 per month
+            semiannual_discount_percent=Decimal("0.00"),  # No discount
+            annual_discount_percent=Decimal("0.00"),  # No discount
+        )
+
+        # Test calculations without discounts
+        self.assertEqual(price.monthly_price, Decimal("25.00"))
+        self.assertEqual(price.semiannual_price, Decimal("25.00") * 6)  # 150.00
+        self.assertEqual(price.annual_price, Decimal("25.00") * 12)  # 300.00
+
+        # Test discount detection
+        self.assertFalse(price.has_semiannual_discount)
+        self.assertFalse(price.has_annual_discount)
+
+    def test_get_price_for_period(self):
+        """✅ Test get_price_for_period method"""
+        price = ProductPrice(
+            product=self.product,
+            currency=self.currency,
+            monthly_price_cents=4000,  # 40.00 per month
+            semiannual_discount_percent=Decimal("15.00"),  # 15% off
+            annual_discount_percent=Decimal("25.00"),  # 25% off
+        )
+
+        # Test different billing periods
+        self.assertEqual(price.get_price_for_period("monthly"), Decimal("40.00"))
+
+        # Semiannual: 40 × 6 = 240, 15% off = 204.00
+        expected_semiannual = Decimal("240.00") * Decimal("0.85")
+        self.assertEqual(price.get_price_for_period("semiannual"), expected_semiannual)
+
+        # Annual: 40 × 12 = 480, 25% off = 360.00
+        expected_annual = Decimal("480.00") * Decimal("0.75")
+        self.assertEqual(price.get_price_for_period("annual"), expected_annual)
+
+        # Test unsupported period
+        with self.assertRaises(ValueError):
+            price.get_price_for_period("quarterly")
 
 
 class SecurityValidationFunctionTests(TestCase):
