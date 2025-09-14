@@ -1,0 +1,184 @@
+{% extends 'common/base.html' %}
+{% load i18n %}
+{% load ui_tags %}
+
+{% block title %}{% trans "Product Catalog" %} - PRAHO Portal{% endblock %}
+
+{% block content %}
+<div class="min-h-screen bg-slate-900 py-8">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+
+        <!-- Header Section -->
+        <div class="text-center mb-12">
+            <h1 class="text-4xl font-bold text-white mb-4">
+                {% trans "Choose Your Hosting Plan" %}
+            </h1>
+            <p class="text-xl text-slate-300 max-w-3xl mx-auto">
+                {% trans "Select from our reliable hosting solutions designed for Romanian businesses" %}
+            </p>
+        </div>
+
+        <!-- Product Type Filters -->
+        {% if product_type_options %}
+        <div class="mb-8">
+            <div class="flex flex-wrap justify-center gap-3">
+                {% for type_value, type_label in product_type_options %}
+                <a href="?{% if type_value %}type={{ type_value }}{% endif %}{% if featured_only %}&featured=true{% endif %}"
+                   class="px-4 py-2 rounded-lg text-sm font-medium transition-colors
+                          {% if product_type_filter == type_value %}
+                              bg-green-600 text-white
+                          {% else %}
+                              bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white
+                          {% endif %}">
+                    {{ type_label }}
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Error Message -->
+        {% if error %}
+        <div class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-8">
+            <div class="flex items-center">
+                <span class="text-red-400 mr-2">⚠️</span>
+                <p class="text-red-300">
+                    {% trans "Unable to load products. Please try again later." %}
+                </p>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Products Grid -->
+        {% if products %}
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-12">
+            {% for product in products %}
+            <div class="bg-slate-800 rounded-xl p-6 border border-slate-700 hover:border-green-500 transition-all duration-300 relative">
+
+                <!-- Featured Badge -->
+                {% if product.is_featured %}
+                <div class="absolute -top-3 left-1/2 transform -translate-x-1/2">
+                    <span class="bg-green-600 text-white text-xs font-bold px-3 py-1 rounded-full">
+                        {% trans "FEATURED" %}
+                    </span>
+                </div>
+                {% endif %}
+
+                <!-- Product Header -->
+                <div class="text-center mb-6">
+                    <h3 class="text-xl font-bold text-white mb-2">{{ product.name }}</h3>
+                    <p class="text-slate-400 text-sm">{{ product.product_type_display }}</p>
+                    {% if product.short_description %}
+                    <p class="text-slate-300 text-sm mt-2">{{ product.short_description }}</p>
+                    {% endif %}
+                </div>
+
+                <!-- Pricing Section -->
+                {% if product.prices %}
+                    {% for price in product.prices %}
+                    <div class="mb-6">
+                        <!-- Monthly Price (Primary) -->
+                        <div class="text-center mb-4">
+                            <div class="text-3xl font-bold text-green-400 mb-1">
+                                {{ price.monthly_price }} RON
+                            </div>
+                            <div class="text-slate-400 text-sm">{% trans "per month" %}</div>
+                        </div>
+
+                        <!-- Multi-period pricing -->
+                        {% if price.has_semiannual_discount or price.has_annual_discount %}
+                        <div class="space-y-2 mb-4">
+
+                            <!-- Semi-annual option -->
+                            {% if price.has_semiannual_discount %}
+                            <div class="flex justify-between items-center text-sm bg-slate-700/50 rounded-lg p-3">
+                                <span class="text-slate-300">{% trans "6 months" %}</span>
+                                <span class="text-green-400 font-medium">{{ price.semiannual_price }} RON</span>
+                            </div>
+                            {% endif %}
+
+                            <!-- Annual option -->
+                            {% if price.has_annual_discount %}
+                            <div class="flex justify-between items-center text-sm bg-slate-700/50 rounded-lg p-3">
+                                <span class="text-slate-300">{% trans "12 months" %}</span>
+                                <span class="text-green-400 font-medium">{{ price.annual_price }} RON</span>
+                            </div>
+                            {% endif %}
+
+                        </div>
+                        {% endif %}
+
+                        <!-- Setup Fee -->
+                        {% if price.setup_fee and price.setup_fee != "0.00" %}
+                        <div class="text-center text-sm text-slate-400 mb-4">
+                            + {{ price.setup_fee }} RON {% trans "setup fee" %}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="text-center mb-6">
+                        <div class="text-slate-400">{% trans "Pricing not available" %}</div>
+                    </div>
+                {% endif %}
+
+                <!-- Domain Required Notice -->
+                {% if product.requires_domain %}
+                <div class="bg-blue-900/30 border border-blue-700 rounded-lg p-3 mb-4">
+                    <div class="flex items-center text-blue-300 text-sm">
+                        <span class="mr-2">🌐</span>
+                        {% trans "Domain required" %}
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Action Buttons -->
+                <div class="space-y-3">
+                    <a href="{% url 'orders:product_detail' product.slug %}"
+                       class="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-3 px-4 rounded-lg transition-colors text-center block">
+                        {% trans "Choose Plan" %}
+                    </a>
+                    <a href="{% url 'orders:product_detail' product.slug %}"
+                       class="w-full bg-transparent border border-slate-600 hover:border-slate-500 text-slate-300 hover:text-white font-medium py-2 px-4 rounded-lg transition-colors text-center block text-sm">
+                        {% trans "View Details" %}
+                    </a>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-center py-12">
+            <div class="text-slate-400 mb-4">
+                <span class="text-6xl">📦</span>
+            </div>
+            <h3 class="text-xl font-medium text-white mb-2">
+                {% trans "No products found" %}
+            </h3>
+            <p class="text-slate-400">
+                {% trans "Try adjusting your filters or check back later." %}
+            </p>
+        </div>
+        {% endif %}
+
+        <!-- Cart Summary (if items in cart) -->
+        {% if cart_count > 0 %}
+        <div class="fixed bottom-4 right-4 z-50">
+            <a href="{% url 'orders:cart_review' %}"
+               class="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-full font-medium shadow-lg transition-colors flex items-center space-x-2">
+                <span>🛒</span>
+                <span>{% trans "Cart" %} ({{ cart_count }})</span>
+            </a>
+        </div>
+        {% endif %}
+
+    </div>
+</div>
+
+<script>
+// Add any JavaScript needed for enhanced UX
+document.addEventListener('DOMContentLoaded', function() {
+    // Add hover effects or other interactivity if needed
+    console.log('✅ Product catalog loaded with {{ products|length }} products');
+});
+</script>
+{% endblock %}

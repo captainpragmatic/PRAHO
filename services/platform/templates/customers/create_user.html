@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans 'Create User for' %} {{ customer.name }} - {% trans 'Customer Management' %}{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 max-w-4xl mx-auto">
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <h1 class="text-2xl font-bold text-white">
+                {% trans 'Create New User' %}
+            </h1>
+            <p class="mt-1 text-sm text-slate-400">
+                🏢 {% trans 'For customer:' %} {{ customer.name }}
+            </p>
+        </div>
+        <div>
+            <a href="{% url 'customers:detail' customer.id %}" class="bg-slate-600 hover:bg-slate-700 text-white px-4 py-2 rounded-md font-medium transition-colors">
+                ← {% trans 'Back to Customer' %}
+            </a>
+        </div>
+    </div>
+
+    <!-- Create User Form -->
+    <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg">
+        <div class="p-6">
+            <form method="post" class="space-y-6">
+                {% csrf_token %}
+                
+                <!-- User Details -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- Email Address -->
+                    <div class="md:col-span-2">
+                        <label for="email" class="block text-sm font-medium text-slate-300 mb-2">
+                            📧 {% trans 'Email Address' %} <span class="text-red-400">*</span>
+                        </label>
+                        <input type="email" name="email" id="email" required
+                               class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                               placeholder="user@example.com">
+                        <p class="mt-1 text-xs text-slate-500">
+                            {% trans 'The user will use this email address to log in to their account.' %}
+                        </p>
+                    </div>
+
+                    <!-- First Name -->
+                    <div>
+                        <label for="first_name" class="block text-sm font-medium text-slate-300 mb-2">
+                            👤 {% trans 'First Name' %}
+                        </label>
+                        <input type="text" name="first_name" id="first_name"
+                               class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                               placeholder="{% trans 'First name' %}">
+                    </div>
+
+                    <!-- Last Name -->
+                    <div>
+                        <label for="last_name" class="block text-sm font-medium text-slate-300 mb-2">
+                            👤 {% trans 'Last Name' %}
+                        </label>
+                        <input type="text" name="last_name" id="last_name"
+                               class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                               placeholder="{% trans 'Last name' %}">
+                    </div>
+                </div>
+
+                <!-- Role Selection -->
+                <div>
+                    <label for="role" class="block text-sm font-medium text-slate-300 mb-2">
+                        🎭 {% trans 'User Role' %}
+                    </label>
+                    <select name="role" id="role" required
+                            class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        {% for role_value, role_display in role_choices %}
+                        <option value="{{ role_value }}" {% if role_value == 'viewer' %}selected{% endif %}>
+                            {% if role_value == 'owner' %}👑
+                            {% elif role_value == 'billing' %}💳
+                            {% elif role_value == 'tech' %}🔧
+                            {% else %}👁️{% endif %}
+                            {{ role_display }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                    
+                    <!-- Role Descriptions -->
+                    <div class="mt-3 bg-slate-700/50 rounded-lg p-4 border border-slate-600">
+                        <h4 class="text-sm font-medium text-slate-300 mb-2">ℹ️ {% trans "Role Permissions" %}</h4>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-slate-400">
+                            <div>
+                                <span class="text-purple-400">👑 Owner:</span> Full control, manage users, billing
+                            </div>
+                            <div>
+                                <span class="text-green-400">💳 Billing:</span> View/pay invoices, update payment methods
+                            </div>
+                            <div>
+                                <span class="text-blue-400">🔧 Technical:</span> Manage services, create support tickets
+                            </div>
+                            <div>
+                                <span class="text-slate-300">👁️ Viewer:</span> Read-only access to customer data
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Important Notice -->
+                <div class="bg-yellow-900/30 border border-yellow-700 rounded-lg p-4">
+                    <div class="flex">
+                        <div class="flex-shrink-0">
+                            <svg class="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                            </svg>
+                        </div>
+                        <div class="ml-3">
+                            <h3 class="text-sm font-medium text-yellow-400">
+                                {% trans 'Account Setup Required' %}
+                            </h3>
+                            <div class="mt-2 text-sm text-yellow-300">
+                                <p>{% trans 'The new user will need to:' %}</p>
+                                <ul class="list-disc list-inside mt-1 space-y-1">
+                                    <li>{% trans 'Set up their password using the password reset link' %}</li>
+                                    <li>{% trans 'Enable two-factor authentication (recommended)' %}</li>
+                                    <li>{% trans 'Complete their profile information' %}</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="flex flex-col sm:flex-row gap-3 pt-4 border-t border-slate-700">
+                    {% button "🆕 Create User Account" type="submit" variant="primary" %}
+                    
+                    <a href="{% url 'customers:add_user' customer.id %}" 
+                       class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-blue-400 hover:text-blue-300 border border-blue-600 rounded-lg hover:border-blue-500 transition-colors">
+                        👥 {% trans 'Add Existing User Instead' %}
+                    </a>
+                    
+                    <a href="{% url 'customers:detail' customer.id %}" 
+                       class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-slate-400 hover:text-white border border-slate-600 rounded-lg hover:border-slate-500 transition-colors">
+                        ❌ {% trans 'Cancel' %}
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
