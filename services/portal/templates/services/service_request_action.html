@@ -7,7 +7,7 @@
 <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
   <!-- Back Navigation -->
   <div class="mb-6">
-    <a href="{% url 'services:detail' service_id=service.id %}"
+    <a href="{% url 'services:detail' service_id=service_id %}"
        class="inline-flex items-center text-slate-400 hover:text-white transition-colors">
       <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
@@ -39,7 +39,7 @@
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
         <h2 class="text-xl font-semibold text-white mb-6">{% trans "Select Action Type" %}</h2>
 
-        <form method="post" action="{% url 'services:request_action' service_id=service.id %}">
+        <form method="post" action="{% url 'services:request_action' service_id=service_id %}">
           {% csrf_token %}
 
           <!-- Action Type Selection -->
@@ -120,8 +120,8 @@
                 </div>
 
                 <!-- Selection Indicator -->
-                <div class="w-5 h-5 border-2 border-slate-600 rounded-full flex items-center justify-center peer-checked:border-blue-500 peer-checked:bg-blue-500 transition-all">
-                  <div class="w-2 h-2 bg-transparent rounded-full peer-checked:bg-white transition-all"></div>
+                <div class="selection-indicator w-5 h-5 border-2 border-slate-600 rounded-full flex items-center justify-center bg-transparent transition-all">
+                  <div class="w-2 h-2 bg-transparent rounded-full transition-all"></div>
                 </div>
               </label>
             </div>
@@ -197,7 +197,7 @@
               {% trans "Submit Request" %}
             </button>
 
-            <a href="{% url 'services:detail' service_id=service.id %}"
+            <a href="{% url 'services:detail' service_id=service_id %}"
                class="flex-1 border border-slate-600 hover:border-slate-500 text-slate-300 hover:text-white
                       font-medium py-3 px-6 rounded-lg transition-colors text-center">
               {% trans "Cancel" %}
@@ -317,16 +317,6 @@
   </div>
 </div>
 
-<!-- CSS for peer-checked icon transitions -->
-<style>
-.peer:checked ~ label .action-icon {
-  @apply bg-blue-600;
-}
-.peer:checked ~ label .action-icon svg {
-  @apply text-white;
-}
-</style>
-
 <!-- JavaScript for dynamic form behavior -->
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -336,17 +326,52 @@ document.addEventListener('DOMContentLoaded', function() {
   const upgradeSection = document.getElementById('upgrade-plans');
 
   function updateForm() {
-    const selectedAction = document.querySelector('input[name="action"]:checked').value;
+    const selectedAction = document.querySelector('input[name="action"]:checked');
+    if (!selectedAction) return;
+
+    const actionValue = selectedAction.value;
+
+    // Update all radio button visual states
+    actionRadios.forEach(radio => {
+      const label = document.querySelector(`label[for="${radio.id}"]`);
+      const icon = label.querySelector('.action-icon');
+      const iconSvg = icon.querySelector('svg');
+      const selectionIndicator = label.querySelector('.selection-indicator');
+
+      if (radio.checked) {
+        // Selected state
+        label.classList.remove('border-slate-700');
+        label.classList.add('border-blue-500', 'bg-blue-500/10');
+        icon.classList.remove('bg-slate-600');
+        icon.classList.add('bg-blue-600');
+        iconSvg.classList.remove('text-slate-300');
+        iconSvg.classList.add('text-white');
+        selectionIndicator.classList.remove('border-slate-600', 'bg-transparent');
+        selectionIndicator.classList.add('border-blue-500', 'bg-blue-500');
+        selectionIndicator.querySelector('div').classList.add('bg-white');
+      } else {
+        // Unselected state
+        label.classList.remove('border-blue-500', 'bg-blue-500/10');
+        label.classList.add('border-slate-700');
+        icon.classList.remove('bg-blue-600');
+        icon.classList.add('bg-slate-600');
+        iconSvg.classList.remove('text-white');
+        iconSvg.classList.add('text-slate-300');
+        selectionIndicator.classList.remove('border-blue-500', 'bg-blue-500');
+        selectionIndicator.classList.add('border-slate-600', 'bg-transparent');
+        selectionIndicator.querySelector('div').classList.remove('bg-white');
+      }
+    });
 
     // Show/hide upgrade plans
-    if (selectedAction === 'upgrade_request') {
+    if (actionValue === 'upgrade_request') {
       upgradeSection.classList.remove('hidden');
     } else {
       upgradeSection.classList.add('hidden');
     }
 
     // Update reason field requirement
-    if (selectedAction === 'suspend_request' || selectedAction === 'cancel_request') {
+    if (actionValue === 'suspend_request' || actionValue === 'cancel_request') {
       reasonRequired.classList.remove('hidden');
       reasonField.required = true;
       reasonField.placeholder = '{% trans "Please provide a detailed reason for this request (required)..." %}';
@@ -360,6 +385,7 @@ document.addEventListener('DOMContentLoaded', function() {
   // Update form when action changes
   actionRadios.forEach(radio => {
     radio.addEventListener('change', updateForm);
+    radio.addEventListener('click', updateForm);
   });
 
   // Initial form update
@@ -367,10 +393,17 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // Form validation
   document.querySelector('form').addEventListener('submit', function(e) {
-    const selectedAction = document.querySelector('input[name="action"]:checked').value;
+    const selectedAction = document.querySelector('input[name="action"]:checked');
+    if (!selectedAction) {
+      e.preventDefault();
+      alert('{% trans "Please select an action type." %}');
+      return;
+    }
+
+    const actionValue = selectedAction.value;
     const reason = reasonField.value.trim();
 
-    if ((selectedAction === 'suspend_request' || selectedAction === 'cancel_request') && !reason) {
+    if ((actionValue === 'suspend_request' || actionValue === 'cancel_request') && !reason) {
       e.preventDefault();
       reasonField.focus();
       reasonField.classList.add('border-red-500');

@@ -121,7 +121,102 @@
       </div>
     </div>
   </div>
-  
+
+  <!-- Payment Section for Pending Orders -->
+  {% if order.status == 'pending' and payment_info and stripe_config %}
+  <div class="bg-gradient-to-r from-blue-900/40 to-green-900/40 border border-blue-700/50 rounded-lg mb-8">
+    <div class="px-6 py-4 border-b border-blue-700/50">
+      <h3 class="text-xl font-medium text-white flex items-center">
+        <span class="mr-2">💳</span>
+        {% trans "Complete Payment" %}
+      </h3>
+      <p class="text-blue-200 text-sm mt-1">
+        {% trans "Complete your payment to activate your services immediately" %}
+      </p>
+    </div>
+
+    <div class="p-6">
+      <div class="grid md:grid-cols-2 gap-8">
+
+        <!-- Payment Form -->
+        <div>
+          <h4 class="text-lg font-medium text-white mb-4">{% trans "Payment Details" %}</h4>
+
+          <form id="payment-form" class="space-y-4">
+            {% csrf_token %}
+
+            <!-- Stripe Elements Container -->
+            <div id="payment-element" class="p-4 bg-white rounded-lg border border-slate-300">
+              <!-- Stripe Elements will be inserted here -->
+            </div>
+
+            <!-- Payment Button -->
+            <button
+              id="submit"
+              class="w-full bg-green-600 hover:bg-green-500 text-white font-medium py-3 px-6 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled
+            >
+              <span id="button-text">
+                💳 {% trans "Pay" %} {{ order.total }} {{ order.currency_code }}
+              </span>
+              <div id="spinner" class="hidden inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin ml-2"></div>
+            </button>
+
+            <!-- Error messages -->
+            <div id="payment-errors" class="hidden bg-red-900/50 border border-red-700 rounded-lg p-3">
+              <p class="text-red-300 text-sm"></p>
+            </div>
+
+            <!-- Success message -->
+            <div id="payment-success" class="hidden bg-green-900/50 border border-green-700 rounded-lg p-3">
+              <p class="text-green-300 text-sm">
+                ✅ {% trans "Payment successful! Your services are being activated..." %}
+              </p>
+            </div>
+          </form>
+        </div>
+
+        <!-- Payment Summary -->
+        <div>
+          <h4 class="text-lg font-medium text-white mb-4">{% trans "Payment Summary" %}</h4>
+
+          <div class="bg-slate-800 rounded-lg p-4 space-y-3">
+            <div class="flex justify-between text-slate-300">
+              <span>{% trans "Order" %}</span>
+              <span class="font-mono">#{{ order.order_number }}</span>
+            </div>
+            <div class="flex justify-between text-slate-300">
+              <span>{% trans "Subtotal" %}</span>
+              <span class="font-mono">{{ order.subtotal }} {{ order.currency_code }}</span>
+            </div>
+            <div class="flex justify-between text-slate-300">
+              <span>{% trans "VAT (21%)" %}</span>
+              <span class="font-mono">{{ order.tax_amount }} {{ order.currency_code }}</span>
+            </div>
+            <div class="border-t border-slate-600 pt-3">
+              <div class="flex justify-between text-xl font-bold text-white">
+                <span>{% trans "Total" %}</span>
+                <span class="font-mono text-green-400">{{ order.total }} {{ order.currency_code }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Security Features -->
+          <div class="mt-4 p-3 bg-slate-700/30 rounded-lg">
+            <h5 class="text-sm font-medium text-white mb-2">🔒 {% trans "Secure Payment" %}</h5>
+            <ul class="text-xs text-slate-400 space-y-1">
+              <li>✅ {% trans "256-bit SSL encryption" %}</li>
+              <li>✅ {% trans "PCI DSS compliant" %}</li>
+              <li>✅ {% trans "Powered by Stripe" %}</li>
+              <li>✅ {% trans "Romanian VAT compliance" %}</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   <!-- Next Steps -->
   <div class="grid md:grid-cols-2 gap-6 mb-8">
     
@@ -207,4 +302,146 @@
     </div>
   </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<!-- Stripe Elements Integration -->
+{% if order.status == 'pending' and payment_info and stripe_config %}
+<script src="https://js.stripe.com/v3/"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  // Initialize Stripe
+  const stripe = Stripe('{{ stripe_config.publishable_key }}');
+
+  // Configure Stripe Elements
+  const options = {
+    clientSecret: '{{ payment_info.client_secret }}',
+    appearance: {
+      theme: '{{ stripe_config.appearance.theme }}',
+      variables: {
+        colorPrimary: '{{ stripe_config.appearance.variables.colorPrimary }}',
+        colorBackground: '#ffffff',
+        colorText: '#1a202c',
+        fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+        borderRadius: '8px',
+      },
+      rules: {
+        '.Input': {
+          backgroundColor: '#ffffff',
+          border: '1px solid #d1d5db',
+        },
+        '.Input:focus': {
+          border: '2px solid #3b82f6',
+          outline: 'none',
+          boxShadow: '0 0 0 1px #3b82f6',
+        },
+      }
+    }
+  };
+
+  const elements = stripe.elements(options);
+
+  // Create and mount the Payment Element
+  const paymentElement = elements.create('payment');
+  paymentElement.mount('#payment-element');
+
+  // Get form elements
+  const form = document.getElementById('payment-form');
+  const submitButton = document.getElementById('submit');
+  const buttonText = document.getElementById('button-text');
+  const spinner = document.getElementById('spinner');
+  const errorsElement = document.getElementById('payment-errors');
+  const successElement = document.getElementById('payment-success');
+
+  // Enable the submit button when the payment element is ready
+  paymentElement.on('ready', function() {
+    submitButton.disabled = false;
+    console.log('💳 Stripe Elements ready');
+  });
+
+  // Handle real-time validation errors from the Payment Element
+  paymentElement.on('change', function(event) {
+    if (event.error) {
+      showError(event.error.message);
+    } else {
+      hideError();
+    }
+  });
+
+  // Handle form submission
+  form.addEventListener('submit', async function(event) {
+    event.preventDefault();
+
+    // Disable submit button and show loading
+    submitButton.disabled = true;
+    buttonText.classList.add('hidden');
+    spinner.classList.remove('hidden');
+    hideError();
+
+    try {
+      // Confirm the payment using Stripe
+      const {error, paymentIntent} = await stripe.confirmPayment({
+        elements,
+        redirect: 'if_required',
+        confirmParams: {
+          return_url: window.location.href,
+        }
+      });
+
+      if (error) {
+        // Payment failed
+        console.error('💥 Payment failed:', error);
+        showError(error.message);
+        resetButton();
+      } else {
+        // Payment succeeded
+        console.log('✅ Payment succeeded:', paymentIntent);
+        showSuccess();
+
+        // Optional: Redirect to success page after delay
+        setTimeout(() => {
+          window.location.reload();
+        }, 3000);
+      }
+    } catch (err) {
+      console.error('💥 Unexpected error:', err);
+      showError('{% trans "An unexpected error occurred. Please try again." %}');
+      resetButton();
+    }
+  });
+
+  // Helper functions
+  function showError(message) {
+    errorsElement.querySelector('p').textContent = message;
+    errorsElement.classList.remove('hidden');
+    successElement.classList.add('hidden');
+  }
+
+  function hideError() {
+    errorsElement.classList.add('hidden');
+  }
+
+  function showSuccess() {
+    successElement.classList.remove('hidden');
+    errorsElement.classList.add('hidden');
+    form.style.opacity = '0.6';
+    form.style.pointerEvents = 'none';
+  }
+
+  function resetButton() {
+    submitButton.disabled = false;
+    buttonText.classList.remove('hidden');
+    spinner.classList.add('hidden');
+  }
+
+  // Log configuration for debugging
+  console.log('🔧 Stripe configuration:', {
+    publishable_key: '{{ stripe_config.publishable_key }}' ? 'configured' : 'missing',
+    client_secret: '{{ payment_info.client_secret }}' ? 'configured' : 'missing',
+    currency: '{{ stripe_config.currency }}',
+    country: '{{ stripe_config.country }}'
+  });
+});
+</script>
+{% endif %}
 {% endblock %}
