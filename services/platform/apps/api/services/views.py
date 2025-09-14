@@ -258,7 +258,10 @@ def customer_services_summary_api(request: HttpRequest, customer: Customer) -> R
             service.service_plan.get_monthly_equivalent_price(service.billing_cycle)
             for service in active_services
         )
-        total_monthly_cost_with_vat = total_monthly_cost * Decimal('1.19')  # Romanian VAT 19%
+        # Calculate cost with current Romanian VAT rate
+        from apps.common.tax_service import TaxService
+        vat_multiplier = Decimal('1') + TaxService.get_vat_rate('RO', as_decimal=True)
+        total_monthly_cost_with_vat = total_monthly_cost * vat_multiplier  # Romanian VAT (current rate)
         
         # Calculate usage statistics
         total_disk_usage_gb = sum(service.disk_usage_mb / 1024 for service in services)

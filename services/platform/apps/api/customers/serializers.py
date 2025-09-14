@@ -183,6 +183,135 @@ class CustomerRegistrationSerializer(serializers.Serializer):
 
 
 # ===============================================================================
+# CUSTOMER CREATION SERIALIZERS 🏗️
+# ===============================================================================
+
+class CustomerCreationSerializer(serializers.Serializer):
+    """
+    Serializer for creating new customer companies for existing users.
+    Used by Portal when logged-in users want to create additional companies.
+    """
+
+    name = serializers.CharField(max_length=255)
+    company_name = serializers.CharField(max_length=255)
+    vat_number = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    trade_registry_number = serializers.CharField(max_length=50, required=False, allow_blank=True)
+    industry = serializers.CharField(max_length=100, required=False, allow_blank=True)
+
+    # Nested billing address
+    billing_address = serializers.DictField(required=False, allow_null=True)
+
+    # Nested contact information
+    contact = serializers.DictField(required=False, allow_null=True)
+
+    def validate_vat_number(self, value: str) -> str:
+        """Validate Romanian VAT number format."""
+        if value and value.strip():
+            # Remove spaces and convert to uppercase
+            vat_clean = re.sub(r'[^\w]', '', value.upper())
+
+            # Check if it starts with RO
+            if not vat_clean.startswith('RO'):
+                vat_clean = 'RO' + vat_clean
+
+            # Basic format validation
+            if len(vat_clean) < MIN_VAT_DIGITS + 2:  # RO + minimum digits
+                raise serializers.ValidationError("Invalid VAT number format")
+
+            return vat_clean
+        return value
+
+    def validate_billing_address(self, value: dict) -> dict:
+        """Validate billing address structure."""
+        if value:
+            required_fields = ['street_address', 'city']
+            for field in required_fields:
+                if field not in value or not value.get(field):
+                    raise serializers.ValidationError(f"Missing required field: {field}")
+        return value or {}
+
+    def validate_contact(self, value: dict) -> dict:
+        """Validate contact information."""
+        if value:
+            # Validate email format if provided
+            email = value.get('primary_email')
+            if email:
+                email_validator = serializers.EmailField()
+                email_validator.run_validation(email)
+        return value or {}
+
+    def create(self, validated_data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Create new customer company for existing user.
+        """
+        user = self.context['user']
+        billing_address_data = validated_data.pop('billing_address', {})
+        contact_data = validated_data.pop('contact', {})
+
+        try:
+            with transaction.atomic():
+                # Create the customer
+                customer = Customer.objects.create(
+                    name=validated_data['name'],
+                    company_name=validated_data['company_name'],
+                    customer_type='company',
+                    industry=validated_data.get('industry', ''),
+                    primary_email=contact_data.get('primary_email', ''),
+                    primary_phone=contact_data.get('primary_phone', ''),
+                    website=contact_data.get('website', ''),
+                    status='active',
+                )
+
+                # Create tax profile if VAT number provided
+                if validated_data.get('vat_number'):
+                    from apps.customers.models import CustomerTaxProfile
+                    CustomerTaxProfile.objects.create(
+                        customer=customer,
+                        vat_number=validated_data['vat_number'],
+                        cui=validated_data['vat_number'],  # Same as VAT for simplicity
+                        registration_number=validated_data.get('trade_registry_number', ''),
+                        is_vat_payer=True if validated_data.get('vat_number') else False,
+                    )
+
+                # Create billing address if provided
+                if billing_address_data:
+                    from apps.customers.models import CustomerAddress
+                    CustomerAddress.objects.create(
+                        customer=customer,
+                        address_type='primary',
+                        is_current=True,
+                        address_line1=billing_address_data.get('street_address', ''),
+                        city=billing_address_data.get('city', ''),
+                        county=billing_address_data.get('state', ''),
+                        postal_code=billing_address_data.get('postal_code', ''),
+                        country=billing_address_data.get('country', 'România'),
+                    )
+
+                # Create owner membership for the user
+                from apps.users.models import CustomerMembership
+                CustomerMembership.objects.create(
+                    user=user,
+                    customer=customer,
+                    role='owner',
+                    is_active=True,
+                )
+
+                logger.info(f"✅ [Customer Creation] Created company '{customer.company_name}' for user {user.email}")
+
+                return {
+                    'customer': {
+                        'id': customer.id,
+                        'company_name': customer.company_name,
+                        'customer_type': customer.customer_type,
+                    }
+                }
+
+        except Exception as e:
+            logger.error(f"🔥 [Customer Creation] Failed to create customer: {e}")
+            raise serializers.ValidationError({"non_field_errors": ["Failed to create company"]}) from e
+
+
+# ===============================================================================
 # CUSTOMER DETAIL SERIALIZERS 🏢
 # ===============================================================================
 

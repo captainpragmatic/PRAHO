@@ -3,43 +3,64 @@ Order API Serializers for PRAHO Platform
 DRF serializers for order and product catalog endpoints with Romanian compliance.
 """
 
-from decimal import Decimal
 from rest_framework import serializers
-from apps.orders.models import Order, OrderItem, OrderStatusHistory
-from apps.products.models import Product, ProductPrice
+
+from apps.orders.models import Order, OrderItem
 from apps.orders.price_sealing import create_sealed_price_for_product_price
+from apps.products.models import Product, ProductPrice
 
 
 class ProductPriceSerializer(serializers.ModelSerializer):
-    """Slim pricing info for product lists with sealed price tokens"""
-    
-    effective_price = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
-    billing_period_display = serializers.CharField(source='get_billing_period_display', read_only=True)
+    """Slim pricing info for product lists with sealed price tokens (Simplified Model)"""
+
+    monthly_price = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    semiannual_price = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    annual_price = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     setup_fee = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    has_semiannual_discount = serializers.BooleanField(read_only=True)
+    has_annual_discount = serializers.BooleanField(read_only=True)
     sealed_price_token = serializers.SerializerMethodField()
-    
+
     class Meta:
         model = ProductPrice
         fields = [
-            'id', 'billing_period', 'billing_period_display', 
-            'effective_price', 'setup_fee', 'is_active', 'sealed_price_token'
+            'id', 'monthly_price', 'semiannual_price', 'annual_price',
+            'setup_fee', 'has_semiannual_discount', 'has_annual_discount',
+            'is_active', 'sealed_price_token'
         ]
     
     def get_sealed_price_token(self, obj):
-        """🔒 Generate sealed price token to prevent price manipulation"""
+        """🔒 Generate sealed price tokens for all billing periods"""
+        import logging
+        logger = logging.getLogger(__name__)
+
         try:
             # Get client IP from request context
             request = self.context.get('request')
             if not request:
+                logger.warning("🚨 [Sealing] No request context available for sealed price tokens")
                 return None
-                
+
             from apps.orders.price_sealing import get_client_ip
             client_ip = get_client_ip(request)
-            
-            return create_sealed_price_for_product_price(obj, client_ip)
-        except Exception:
-            # If sealing fails, don't expose the error - just return None
-            # The order creation will fail safely if no sealed token provided
+
+            # Generate tokens for all billing periods
+            tokens = {}
+            for period in ['monthly', 'semiannual', 'annual']:
+                try:
+                    token = create_sealed_price_for_product_price(obj, client_ip, period)
+                    tokens[period] = token
+                except Exception as e:
+                    # If individual period fails, skip it but continue with others
+                    logger.warning(f"🚨 [Sealing] Failed to create token for {period}: {e}")
+                    tokens[period] = None
+
+            return tokens
+        except Exception as e:
+            # If sealing fails completely, return None
+            logger.error(f"🔥 [Sealing] Complete failure in sealed price token generation: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return None
 
 
@@ -86,7 +107,7 @@ class OrderItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = OrderItem
         fields = [
-            'id', 'product_name', 'product_type', 'quantity', 'billing_period',
+            'id', 'product_name', 'product_type', 'quantity',
             'unit_price', 'setup_fee', 'tax_rate', 'tax_amount', 'subtotal',
             'line_total', 'domain_name', 'config', 'provisioning_status'
         ]
@@ -134,11 +155,14 @@ class OrderDetailSerializer(serializers.ModelSerializer):
 # Input Serializers for Order Creation and Calculation
 
 class CartItemInputSerializer(serializers.Serializer):
-    """Input serializer for cart items in calculations and order creation"""
-    
+    """Input serializer for cart items in calculations and order creation (Simplified Model)"""
+
     product_id = serializers.UUIDField()
     quantity = serializers.IntegerField(min_value=1, max_value=50)
-    billing_period = serializers.CharField(max_length=20)
+    billing_period = serializers.ChoiceField(
+        choices=[('monthly', 'Monthly'), ('semiannual', 'Semi-Annual'), ('annual', 'Annual')],
+        help_text="Simplified billing periods: monthly, semiannual, annual"
+    )
     config = serializers.JSONField(default=dict, required=False)
     domain_name = serializers.CharField(max_length=255, required=False, allow_blank=True)
     sealed_price_token = serializers.CharField(max_length=2000, required=False, allow_blank=True,

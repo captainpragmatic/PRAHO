@@ -118,18 +118,23 @@ def health_check(request: HttpRequest) -> Response:
 
 
 @api_view(['GET'])
-def user_info_api(request: HttpRequest) -> Response:
+@permission_classes([AllowAny])  # HMAC auth handled by secure_auth
+@require_customer_authentication
+def user_info_api(request: HttpRequest, customer: Customer) -> Response:
     """
     Get current user information.
-    Requires portal service authentication.
+    Requires customer authentication via HMAC.
     """
-    user = cast(User, request.user)
-    
-    if not user.is_authenticated:
+    # Get the user from the customer context (since this is a customer-authenticated endpoint)
+    membership = CustomerMembership.objects.filter(customer=customer).first()
+    if not membership:
         return Response({
-            'error': 'Authentication required'
-        }, status=401)
-    
+            'success': False,
+            'error': 'No user associated with this customer'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    user = membership.user
+
     user_data = {
         'id': user.id,
         'email': user.email,
@@ -139,7 +144,7 @@ def user_info_api(request: HttpRequest) -> Response:
         'is_staff': user.is_staff,
         'is_active': user.is_active,
     }
-    
+
     return Response({
         'success': True,
         'user': user_data
@@ -252,34 +257,44 @@ def revoke_token(request: HttpRequest) -> Response:
 
 
 @api_view(['GET'])
-def verify_token(request: HttpRequest) -> Response:
+@permission_classes([AllowAny])  # HMAC auth handled by secure_auth
+@require_customer_authentication
+def verify_token(request: HttpRequest, customer: Customer) -> Response:
     """
     ✅ Verify token is valid and get user info
-    
+
     GET /api/users/token/verify/
-    Headers: Authorization: Token 9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b
-    
+    Requires customer authentication via HMAC.
+
     Response:
     {
         "user_id": 123,
-        "email": "user@example.com", 
+        "email": "user@example.com",
         "is_staff": false,
         "accessible_customers": [1, 2, 3]
     }
     """
-    user = cast(User, request.user)  # Safe due to IsAuthenticated
-    
+    # Get the user from the customer context (since this is a customer-authenticated endpoint)
+    membership = CustomerMembership.objects.filter(customer=customer).first()
+    if not membership:
+        return Response({
+            'success': False,
+            'error': 'No user associated with this customer'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    user = membership.user
+
     # Get accessible customers for this user
     accessible_customers = user.get_accessible_customers()
     customer_ids = []
-    
+
     if hasattr(accessible_customers, 'values_list'):  # QuerySet
         customer_ids = list(accessible_customers.values_list('id', flat=True))
     elif accessible_customers:  # List
         customer_ids = [c.id for c in accessible_customers]
-    
+
     logger.info(f"✅ [Auth] Token verified for user: {user.email}")
-    
+
     return Response({
         'user_id': user.id,
         'email': user.email,
@@ -598,23 +613,33 @@ def mfa_disable_api(request: HttpRequest) -> Response:
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def mfa_status_api(request: HttpRequest) -> Response:
+@permission_classes([AllowAny])  # HMAC auth handled by secure_auth
+@require_customer_authentication
+def mfa_status_api(request: HttpRequest, customer: Customer) -> Response:
     """
     📊 Get MFA Status
-    
+
     GET /api/users/mfa/status/
-    
+    Requires customer authentication via HMAC.
+
     Returns current MFA status and backup codes count.
-    
+
     Response:
     {
         "enabled": true,
         "backup_codes_remaining": 5
     }
     """
-    user = cast(User, request.user)
-    
+    # Get the user from the customer context (since this is a customer-authenticated endpoint)
+    membership = CustomerMembership.objects.filter(customer=customer).first()
+    if not membership:
+        return Response({
+            'success': False,
+            'error': 'No user associated with this customer'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    user = membership.user
+
     return Response({
         'enabled': user.mfa_enabled,
         'backup_codes_remaining': len(user.backup_tokens) if user.mfa_enabled else 0,
@@ -915,14 +940,21 @@ def user_customers_api(request: HttpRequest, user: User) -> Response:
     }
     """
     try:
-        customers = user.get_accessible_customers()
-        # Handle both QuerySet and list
-        iterable = customers.all() if hasattr(customers, 'all') else customers or []
-        results = [{
-            'id': c.id,
-            'company_name': getattr(c, 'company_name', ''),
-            'name': getattr(c, 'name', ''),
-        } for c in iterable]
+        # Get customer memberships with role information
+        from apps.users.models import CustomerMembership
+        memberships = CustomerMembership.objects.filter(user=user).select_related('customer')
+
+        results = []
+        for membership in memberships:
+            customer = membership.customer
+            results.append({
+                'id': customer.id,
+                'company_name': getattr(customer, 'company_name', ''),
+                'name': getattr(customer, 'name', ''),
+                'role': membership.role,  # Include the actual role
+                'is_primary': membership.is_primary,
+            })
+
         return Response({'success': True, 'results': results})
     except Exception as e:
         logger.error(f"🔥 [User Customers API] Error fetching customers for {getattr(user, 'email', 'unknown')}: {e}")

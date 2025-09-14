@@ -23,6 +23,7 @@ from apps.users.models import CustomerMembership, User
 
 from .serializers import (
     CustomerBillingAddressUpdateSerializer,
+    CustomerCreationSerializer,
     CustomerDetailSerializer,
     CustomerProfileSerializer,
     CustomerRegistrationSerializer,
@@ -160,6 +161,116 @@ class CustomerServicesViewSet(ReadOnlyAPIViewSet):
         # For now, return empty services list
         logger.info(f"🔗 [API] Customer services requested for customer {customer_id}")
         return Response([])  # Empty list for now
+
+
+# ===============================================================================
+# CUSTOMER CREATION API 🏢
+# ===============================================================================
+
+@api_view(['POST'])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware
+@permission_classes([AllowAny])  # HMAC auth handled by secure_auth
+def customer_create_api(request: HttpRequest) -> Response:
+    """
+    🏢 Customer Creation API (for existing users to create companies)
+
+    POST /api/customers/create/
+
+    This endpoint allows existing authenticated users to create new companies
+    through the Portal. Unlike registration, this is for users who already have
+    accounts and want to create additional companies.
+
+    Request Body:
+    {
+        "user_id": 123,
+        "action": "create_company",
+        "timestamp": 1234567890,
+        "company_data": {
+            "name": "Test Company SRL",
+            "company_name": "Test Company SRL",
+            "vat_number": "RO12345678",
+            "trade_registry_number": "J40/12345/2023",
+            "industry": "Technology",
+            "billing_address": {
+                "street_address": "Str. Revolutiei Nr. 123",
+                "city": "București",
+                "state": "București",
+                "postal_code": "010001",
+                "country": "România"
+            },
+            "contact": {
+                "primary_email": "contact@testcompany.ro",
+                "primary_phone": "+40.21.123.4567",
+                "website": "https://testcompany.ro"
+            }
+        }
+    }
+
+    Response:
+    {
+        "success": true,
+        "customer_id": 456,
+        "message": "Company created successfully"
+    }
+
+    Security Features:
+    - HMAC authentication required
+    - User validation (user must exist)
+    - Romanian business validation
+    - Automatic owner membership creation
+    """
+    try:
+        # HMAC authentication is handled by middleware
+        # Validate the request data structure
+        user_id = request.data.get('user_id')
+        action = request.data.get('action')
+        company_data = request.data.get('company_data', {})
+
+        if not user_id or action != 'create_company':
+            return Response({
+                'success': False,
+                'error': 'Invalid request format'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Validate user exists
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': 'User not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Use CustomerCreationSerializer to validate and create customer
+        serializer = CustomerCreationSerializer(
+            data=company_data,
+            context={'request': request, 'user': user}
+        )
+
+        if serializer.is_valid():
+            result = serializer.save()
+
+            logger.info(f"✅ [Customer Creation] Company '{result['customer']['company_name']}' created by user {user.email}")
+
+            return Response({
+                'success': True,
+                'customer_id': result['customer']['id'],
+                'message': 'Company created successfully'
+            }, status=status.HTTP_201_CREATED)
+        else:
+            logger.warning(f"⚠️ [Customer Creation] Validation failed for user {user.email}: {list(serializer.errors.keys())}")
+            return Response({
+                'success': False,
+                'error': 'Validation failed',
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+    except Exception as e:
+        logger.error(f"🔥 [Customer Creation] Unexpected error: {e}")
+        return Response({
+            'success': False,
+            'error': 'Internal server error'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # ===============================================================================
@@ -623,13 +734,13 @@ def update_customer_billing_address(request: Request, customer) -> Response:
         
         with transaction.atomic():
             # Update customer basic info
-            if 'company_name' in validated_data and validated_data['company_name']:
+            if validated_data.get('company_name'):
                 customer.company_name = validated_data['company_name']
-            if 'contact_name' in validated_data and validated_data['contact_name']:
+            if validated_data.get('contact_name'):
                 customer.name = validated_data['contact_name'] 
-            if 'email' in validated_data and validated_data['email']:
+            if validated_data.get('email'):
                 customer.primary_email = validated_data['email']
-            if 'phone' in validated_data and validated_data['phone']:
+            if validated_data.get('phone'):
                 customer.primary_phone = validated_data['phone']
             
             customer.save(update_fields=['company_name', 'name', 'primary_email', 'primary_phone'])
@@ -661,11 +772,11 @@ def update_customer_billing_address(request: Request, customer) -> Response:
             
             # Update or create tax profile for Romanian compliance
             tax_fields = {}
-            if 'fiscal_code' in validated_data and validated_data['fiscal_code']:
+            if validated_data.get('fiscal_code'):
                 tax_fields['cui'] = validated_data['fiscal_code']
-            if 'vat_number' in validated_data and validated_data['vat_number']:
+            if validated_data.get('vat_number'):
                 tax_fields['vat_number'] = validated_data['vat_number']
-            if 'registration_number' in validated_data and validated_data['registration_number']:
+            if validated_data.get('registration_number'):
                 tax_fields['registration_number'] = validated_data['registration_number']
             
             if tax_fields:

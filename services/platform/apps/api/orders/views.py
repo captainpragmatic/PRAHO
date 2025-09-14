@@ -4,9 +4,10 @@ DRF views for product catalog, order management, and cart calculations.
 """
 
 import logging
-from typing import Any, Dict
+
+from django.utils import timezone
 from rest_framework import status
-from rest_framework.decorators import api_view, throttle_classes, permission_classes
+from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -14,15 +15,17 @@ from rest_framework.throttling import ScopedRateThrottle
 
 from apps.api.secure_auth import require_customer_authentication
 from apps.common.types import Ok
-from apps.customers.models import Customer
-from apps.orders.services import OrderService, OrderCreateData, BillingAddressData
+from apps.orders.services import OrderCreateData, OrderService
 from apps.products.models import Product
-from apps.orders.preflight import OrderPreflightValidationService
+
 from .serializers import (
-    ProductListSerializer, ProductDetailSerializer, 
-    OrderListSerializer, OrderDetailSerializer,
-    CartCalculationInputSerializer, CartCalculationOutputSerializer,
-    OrderCreateInputSerializer, CartItemInputSerializer
+    CartCalculationInputSerializer,
+    CartCalculationOutputSerializer,
+    OrderCreateInputSerializer,
+    OrderDetailSerializer,
+    OrderListSerializer,
+    ProductDetailSerializer,
+    ProductListSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -74,8 +77,8 @@ def product_list(request: Request) -> Response:
     # Order by sort_order, then by name
     queryset = queryset.prefetch_related('prices').order_by('sort_order', 'name')
     
-    # Serialize and return
-    serializer = ProductListSerializer(queryset, many=True)
+    # Serialize and return (pass request context for sealed price tokens)
+    serializer = ProductListSerializer(queryset, many=True, context={'request': request})
     
     return Response({
         'results': serializer.data,
@@ -100,7 +103,7 @@ def product_detail(request: Request, slug: str) -> Response:
             'error': 'Product not found'
         }, status=status.HTTP_404_NOT_FOUND)
     
-    serializer = ProductDetailSerializer(product)
+    serializer = ProductDetailSerializer(product, context={'request': request})
     return Response(serializer.data)
 
 
@@ -133,7 +136,6 @@ def calculate_cart_totals(request: Request, customer) -> Response:
     
     try:
         # Import here to avoid circular imports
-        from apps.orders.services import OrderCalculationService
         from apps.billing.models import Currency
         
         # Get currency
@@ -168,14 +170,13 @@ def calculate_cart_totals(request: Request, customer) -> Response:
                     product_price = ProductPrice.objects.get(
                         product=product,
                         currency=currency,
-                        billing_period=item_data['billing_period'],
                         is_active=True
                     )
                 except ProductPrice.DoesNotExist:
                     warnings.append({
                         'type': 'pricing_unavailable',
                         'product_name': product.name,
-                        'message': f'Pricing not available for {product.name} - {item_data["billing_period"]}'
+                        'message': f'Pricing not available for {product.name}'
                     })
                     continue
                 
@@ -183,7 +184,7 @@ def calculate_cart_totals(request: Request, customer) -> Response:
                 order_items.append({
                     'product_id': product.id,
                     'quantity': item_data['quantity'],
-                    'unit_price_cents': int(product_price.effective_price_cents),
+                    'unit_price_cents': int(product_price.effective_monthly_price_cents),
                     'setup_cents': int(product_price.setup_cents),
                     'description': product.name,
                     'meta': item_data.get('config', {})
@@ -196,17 +197,21 @@ def calculate_cart_totals(request: Request, customer) -> Response:
                 })
         
         # 🔒 SECURITY: Calculate totals with proper VAT compliance
-        from apps.orders.vat_rules import OrderVATCalculator
         from apps.customers.models import Customer
+        from apps.orders.vat_rules import OrderVATCalculator
         
-        # Get customer for VAT calculation
+        # Get customer for VAT calculation - DEFAULT TO ROMANIAN SETTINGS for compliance
         try:
             customer_obj = Customer.objects.get(id=customer_id)
-            customer_country = getattr(customer_obj, 'country', 'RO')
+            customer_country = getattr(customer_obj, 'country', 'RO') or 'RO'
             is_business = bool(getattr(customer_obj, 'company_name', ''))
             vat_number = getattr(customer_obj.tax_profile, 'vat_number', '') if hasattr(customer_obj, 'tax_profile') else ''
+
+            # Normalize country - default to RO for compliance if unclear
+            if not customer_country or customer_country.strip() == '':
+                customer_country = 'RO'
         except Customer.DoesNotExist:
-            # Default to Romanian consumer
+            # Default to Romanian consumer for compliance
             customer_country = 'RO'
             is_business = False
             vat_number = ''
@@ -274,6 +279,7 @@ def preflight_order(request: Request, customer) -> Response:
     try:
         # Parse cart items from request
         cart_items = request.data.get('items', [])
+        logger.info(f"🔎 [API] Cart items structure: {cart_items}")
         if not cart_items:
             return Response({
                 'success': False,
@@ -282,18 +288,19 @@ def preflight_order(request: Request, customer) -> Response:
             }, status=status.HTTP_400_BAD_REQUEST)
         
         # Create a preview order data structure (without saving to DB)
-        from apps.orders.services import OrderService, OrderCreateData, OrderItemData
-        from apps.orders.preflight import OrderPreflightValidationService
-        from apps.orders.models import Currency
-        from decimal import Decimal
         import uuid
+
+        from apps.billing.models import Currency
+        from apps.orders.preflight import OrderPreflightValidationService
+        from apps.orders.services import OrderService
         
         # Get currency (default to RON)
         currency = Currency.objects.get(code='RON')
         
-        # Build billing address from customer profile  
+        # Build billing address from customer profile
         billing_address = OrderService.build_billing_address_from_customer(customer)
-        
+        logger.info(f"🔎 [API] Billing address data: {dict(billing_address)}")
+
         # Process cart items and create preview order items
         preview_items = []
         subtotal_cents = 0
@@ -302,8 +309,19 @@ def preflight_order(request: Request, customer) -> Response:
             # Get product and pricing
             from apps.products.models import Product
             try:
-                product = Product.objects.get(slug=cart_item['product_slug'])
+                product_id = cart_item.get('product_id')
+                if not product_id:
+                    return Response({
+                        'success': False,
+                        'errors': [f"Missing product_id in cart item: {cart_item}"],
+                        'warnings': [],
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+                product = Product.objects.get(id=product_id)
+                logger.info(f"🔎 [API] Found product: {product.name} (id={product.id})")
+
                 price = product.get_price_for_period(currency.code, cart_item['billing_period'])
+                logger.info(f"🔎 [API] Price lookup: {price} for {currency.code}/{cart_item['billing_period']}")
                 if not price:
                     return Response({
                         'success': False,
@@ -312,16 +330,18 @@ def preflight_order(request: Request, customer) -> Response:
                     }, status=status.HTTP_400_BAD_REQUEST)
                 
                 quantity = int(cart_item.get('quantity', 1))
-                unit_price_cents = int(price.price_cents)
+                unit_price_cents = int(price.effective_monthly_price_cents)
                 setup_cents = int(price.setup_cents or 0)
-                
+
                 # Calculate line total
                 line_total = (unit_price_cents * quantity) + setup_cents
                 subtotal_cents += line_total
+
+                logger.info(f"🔎 [API] Line calculation: {unit_price_cents}¢ x {quantity} + {setup_cents}¢ = {line_total}¢ (subtotal now: {subtotal_cents}¢)")
                 
                 preview_items.append({
                     'product_name': product.name,
-                    'product_slug': product.slug,
+                    'product_id': product.id,
                     'billing_period': cart_item['billing_period'],
                     'quantity': quantity,
                     'unit_price_cents': unit_price_cents,
@@ -331,7 +351,7 @@ def preflight_order(request: Request, customer) -> Response:
             except Product.DoesNotExist:
                 return Response({
                     'success': False,
-                    'errors': [f"Product not found: {cart_item['product_slug']}"],
+                    'errors': [f"Product not found: {cart_item['product_id']}"],
                     'warnings': [],
                 }, status=status.HTTP_400_BAD_REQUEST)
         
@@ -340,9 +360,20 @@ def preflight_order(request: Request, customer) -> Response:
         
         company_name = billing_address.get('company_name', '')
         vat_number = billing_address.get('vat_number', '')
-        country = billing_address.get('country', 'RO')
+        country_raw = billing_address.get('country', 'România')
+
+        # Normalize country name to ISO code for VAT calculation - DEFAULT TO RO for compliance
+        if country_raw in ['România', 'Romania', 'RO', ''] or not country_raw:
+            country = 'RO'
+        else:
+            country = country_raw.upper().strip()
+            # If country code looks invalid, default to RO for compliance
+            if len(country) != 2:
+                country = 'RO'
         is_business = bool(company_name)
         
+        logger.info(f"🔎 [API] VAT calculation inputs: subtotal={subtotal_cents}¢, country={country}, is_business={is_business}, vat_number={vat_number}")
+
         vat_result = OrderVATCalculator.calculate_vat(
             subtotal_cents=subtotal_cents,
             customer_country=country,
@@ -351,21 +382,32 @@ def preflight_order(request: Request, customer) -> Response:
             customer_id=str(customer.id),
             order_id="preflight-preview",
         )
+
+        logger.info(f"🔎 [API] VAT calculation result: subtotal={vat_result.subtotal_cents}¢, vat={vat_result.vat_cents}¢, total={vat_result.total_cents}¢, reasoning={vat_result.reasoning}")
         
         # Create a temporary order object for validation (not saved to DB)
         from apps.orders.models import Order
+
+        # Normalize billing address for validation (ensure country is ISO code)
+        normalized_billing_address = dict(billing_address)
+        normalized_billing_address['country'] = country  # Use the normalized country code
+
         temp_order = Order(
             id=uuid.uuid4(),
             customer=customer,
             currency=currency,
             status='draft',
-            billing_address=dict(billing_address),
+            billing_address=normalized_billing_address,
             subtotal_cents=subtotal_cents,
             tax_cents=int(vat_result.vat_cents),
             total_cents=int(vat_result.total_cents),
         )
+
+        # Mark as preflight order so validation uses our computed subtotal
+        temp_order._preflight_subtotal_cents = subtotal_cents
         
         # Run preflight validation on the temporary order
+        logger.info(f"🔎 [API] Running validation with subtotal={subtotal_cents}¢, tax={temp_order.tax_cents}¢, total={temp_order.total_cents}¢")
         errors, warnings = OrderPreflightValidationService.validate(temp_order)
         
         # Convert errors to strings
@@ -393,7 +435,7 @@ def preflight_order(request: Request, customer) -> Response:
         logger.exception(f"🔥 [API] Preflight validation failed: {e}")
         return Response({
             'success': False,
-            'errors': [f'Preflight validation failed: {str(e)}'],
+            'errors': [f'Preflight validation failed: {e!s}'],
             'warnings': [],
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -520,7 +562,6 @@ def create_order(request: Request, customer) -> Response:
                     logger.error(f"🔥 [API] Price token validation failed for {product.slug}: {e}")
                     # For now, continue with current pricing but log the issue
                     # In production, you might want to reject the order
-                    pass
 
             # Build order item with price snapshot in meta
             item_meta = item_data.get('config', {})
@@ -536,7 +577,7 @@ def create_order(request: Request, customer) -> Response:
                 'product_id': product.id,
                 'service_id': None,  # Not used for new orders
                 'quantity': item_data['quantity'],
-                'unit_price_cents': int(price.effective_price_cents),
+                'unit_price_cents': int(price.effective_monthly_price_cents),
                 'setup_cents': int(price.setup_cents),
                 'billing_period': billing_period,
                 'description': product.name,

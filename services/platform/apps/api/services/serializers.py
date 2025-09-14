@@ -226,13 +226,17 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
     
     def get_total_monthly_cost(self, obj: Service) -> Decimal:
         """Get total monthly cost including VAT"""
+        from apps.common.tax_service import TaxService
         base_price = self.get_monthly_price(obj)
-        return round(base_price * Decimal('1.19'), 2)  # Romanian VAT 19%
+        vat_multiplier = Decimal('1') + TaxService.get_vat_rate('RO', as_decimal=True)
+        return round(base_price * vat_multiplier, 2)  # Romanian VAT (current rate)
     
     def get_vat_amount(self, obj: Service) -> Decimal:
         """Get VAT amount"""
+        from apps.common.tax_service import TaxService
         base_price = self.get_monthly_price(obj)
-        return round(base_price * Decimal('0.19'), 2)  # Romanian VAT 19%
+        vat_rate = TaxService.get_vat_rate('RO', as_decimal=True)
+        return round(base_price * vat_rate, 2)  # Romanian VAT (current rate)
     
     def get_next_billing_date(self, obj: Service) -> str | None:
         """Get next billing date"""
