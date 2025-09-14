@@ -30,8 +30,10 @@
 
       <!-- Quick Stats -->
       <div class="flex items-center space-x-4 text-sm">
-        <div class="text-green-400">
-          ✅ {{ active_count }} {% trans 'active' %}
+        <div class="{% if display_status == 'active' %}text-green-400{% elif display_status == 'suspended' %}text-red-400{% elif display_status == 'pending' %}text-yellow-400{% elif display_status == 'provisioning' %}text-blue-400{% elif display_status == 'terminated' %}text-gray-400{% elif display_status == 'expired' %}text-orange-400{% else %}text-blue-400{% endif %}">
+          {% if display_status == 'active' %}✅{% elif display_status == 'suspended' %}⏸️{% elif display_status == 'pending' %}⏳{% elif display_status == 'provisioning' %}🔄{% elif display_status == 'terminated' %}💀{% elif display_status == 'expired' %}⏰{% else %}📊{% endif %}
+          {{ active_count }}
+          {% if display_status == 'active' %}{% trans 'active' %}{% elif display_status == 'suspended' %}{% trans 'suspended' %}{% elif display_status == 'pending' %}{% trans 'pending' %}{% elif display_status == 'provisioning' %}{% trans 'provisioning' %}{% elif display_status == 'terminated' %}{% trans 'terminated' %}{% elif display_status == 'expired' %}{% trans 'expired' %}{% else %}{% trans 'services' %}{% endif %}
         </div>
         <div class="text-slate-400">
           📊 {{ total_count }} {% trans 'total' %}
@@ -54,7 +56,11 @@
       
       <div class="flex items-center justify-between">
         <div class="flex items-center space-x-3 text-sm">
-          <div class="text-green-400">✅ {{ active_count }} {% trans 'active' %}</div>
+          <div class="{% if display_status == 'active' %}text-green-400{% elif display_status == 'suspended' %}text-red-400{% elif display_status == 'pending' %}text-yellow-400{% elif display_status == 'provisioning' %}text-blue-400{% elif display_status == 'terminated' %}text-gray-400{% elif display_status == 'expired' %}text-orange-400{% else %}text-blue-400{% endif %}">
+            {% if display_status == 'active' %}✅{% elif display_status == 'suspended' %}⏸️{% elif display_status == 'pending' %}⏳{% elif display_status == 'provisioning' %}🔄{% elif display_status == 'terminated' %}💀{% elif display_status == 'expired' %}⏰{% else %}📊{% endif %}
+            {{ active_count }}
+            {% if display_status == 'active' %}{% trans 'active' %}{% elif display_status == 'suspended' %}{% trans 'suspended' %}{% elif display_status == 'pending' %}{% trans 'pending' %}{% elif display_status == 'provisioning' %}{% trans 'provisioning' %}{% elif display_status == 'terminated' %}{% trans 'terminated' %}{% elif display_status == 'expired' %}{% trans 'expired' %}{% else %}{% trans 'services' %}{% endif %}
+          </div>
           <div class="text-slate-400">📊 {{ total_count }} {% trans 'total' %}</div>
         </div>
         

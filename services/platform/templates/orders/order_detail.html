@@ -50,9 +50,9 @@
               ✅ {% trans "Run Validation" %}
             </button>
           {% endif %}
-          <button 
+          <button
             type="button"
-            onclick="showStatusModal()"
+            id="changeStatusBtn"
             class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-slate-600 text-white bg-slate-700 hover:bg-slate-600 focus:ring-2 focus:ring-blue-500">
             🔄 {% trans "Change Status" %}
           </button>
@@ -62,9 +62,9 @@
         {% button "🎫 Request Refund" onclick="showOrderRefundRequestModal()" variant="primary" %}
         
         {% if order.status not in "cancelled,refunded,completed" %}
-          <button 
+          <button
             type="button"
-            onclick="showStatusModal()"
+            id="changeStatusBtn"
             class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-slate-600 text-white bg-slate-700 hover:bg-slate-600 focus:ring-2 focus:ring-blue-500">
             🔄 {% trans "Change Status" %}
           </button>
@@ -286,12 +286,16 @@
 <!-- Status Change Modal (for staff) -->
 {% if is_staff and order.status not in "cancelled,refunded,completed" %}
 <div id="statusModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
-  <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-    <div class="fixed inset-0 transition-opacity" aria-hidden="true">
-      <div class="absolute inset-0 bg-slate-900 opacity-75" onclick="hideStatusModal()"></div>
-    </div>
+  <!-- Backdrop -->
+  <div class="fixed inset-0 bg-slate-900 opacity-75 transition-opacity" aria-hidden="true" onclick="hideStatusModal()"></div>
 
-    <div class="inline-block align-bottom bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+  <!-- Modal Content Container -->
+  <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+    <!-- This empty span helps vertically center the modal -->
+    <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+
+    <!-- Modal Content -->
+    <div class="inline-block align-bottom bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full relative z-10" onclick="event.stopPropagation()">
       <form id="statusForm" method="post" action="{% url 'orders:order_change_status' pk=order.id %}">
         {% csrf_token %}
         <div class="px-6 pt-6 pb-4">
@@ -395,39 +399,79 @@ function showToast(message, variant) {
   setTimeout(() => { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 2400);
 }
 function showStatusModal() {
-    document.getElementById('statusModal').classList.remove('hidden');
+    const modal = document.getElementById('statusModal');
+    if (modal) {
+        modal.classList.remove('hidden');
+        // Ensure modal is properly displayed
+        modal.style.display = 'block';
+        document.body.style.overflow = 'hidden'; // Prevent background scrolling
+    }
 }
 
 function hideStatusModal() {
-    document.getElementById('statusModal').classList.add('hidden');
+    const modal = document.getElementById('statusModal');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.style.display = 'none';
+        document.body.style.overflow = ''; // Restore scrolling
+    }
 }
 
-// Handle form submission with AJAX
-document.getElementById('statusForm').addEventListener('submit', function(e) {
-    e.preventDefault();
-    
-    const formData = new FormData(this);
-    
-    fetch(this.action, {
-        method: 'POST',
-        body: formData,
-        headers: {
-            'X-Requested-With': 'XMLHttpRequest'
-        }
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            showToast('Status changed to ' + (data.new_status || ''), 'success');
-            setTimeout(() => window.location.reload(), 600);
-        } else {
-            showToast('Error: ' + (data.error || 'Unknown error'), 'error');
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        alert('An error occurred while updating the status.');
-    });
+// Event listeners - wait for DOM to be ready
+document.addEventListener('DOMContentLoaded', function() {
+    // Change status button listener
+    const changeStatusBtn = document.getElementById('changeStatusBtn');
+    if (changeStatusBtn) {
+        changeStatusBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            console.log('🔄 Change Status button clicked'); // Debug log
+            showStatusModal();
+        });
+    }
+
+    // Handle form submission with AJAX
+    const statusForm = document.getElementById('statusForm');
+    if (statusForm) {
+        statusForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            console.log('Status form submitted'); // Debug log
+            const formData = new FormData(this);
+
+            // Log form data for debugging
+            for (let [key, value] of formData.entries()) {
+                console.log(`${key}: ${value}`);
+            }
+
+            fetch(this.action, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+            .then(response => {
+                console.log('Response status:', response.status);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('Response data:', data);
+                if (data.success) {
+                    showToast('Status changed to ' + (data.new_status || ''), 'success');
+                    setTimeout(() => window.location.reload(), 600);
+                } else {
+                    showToast('Error: ' + (data.error || 'Unknown error'), 'error');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('An error occurred while updating the status.');
+            });
+        });
+    }
 });
 </script>
 {% endif %}
