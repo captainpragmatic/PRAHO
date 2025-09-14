@@ -252,7 +252,7 @@
                   {% elif ticket.status == 'in_progress' %}
                     {% badge "In Progress" variant="primary" icon="⚡" css_class="w-32 justify-center" %}
                   {% elif ticket.status == 'waiting_on_customer' %}
-                    {% badge "Waiting on Customer" variant="warning" icon="⏳" css_class="w-40 justify-center text-xs" %}
+                    {% badge "Waiting on Customer" variant="warning" icon="⏳" css_class="w-44 justify-center text-xs whitespace-nowrap" %}
                   {% elif ticket.status == 'closed' %}
                     {% badge "Closed" variant="secondary" icon="📁" css_class="w-32 justify-center" %}
                   {% else %}

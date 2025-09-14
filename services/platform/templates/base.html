@@ -289,9 +289,9 @@
       alert('{% trans "An error occurred. Please try again." %}');
     });
 
-    // Auto-hide flash messages
+    // Auto-hide flash messages (more specific selector to avoid removing pricing cards)
     setTimeout(function () {
-      const messages = document.querySelectorAll('.max-w-7xl .mb-4[class*="bg-"][class*="border"]');
+      const messages = document.querySelectorAll('.alert, .message, .flash-message, [data-dismiss-after]');
       messages.forEach(function (msg) {
         msg.style.transition = 'opacity 0.5s';
         msg.style.opacity = '0';
