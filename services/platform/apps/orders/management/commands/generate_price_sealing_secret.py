@@ -4,14 +4,14 @@ Django management command to generate secure PRICE_SEALING_SECRET keys.
 """
 
 import secrets
-import string
+
 from django.core.management.base import BaseCommand
 
 
 class Command(BaseCommand):
     help = '🔒 Generate secure PRICE_SEALING_SECRET for price token HMAC signing'
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser) -> None:
         parser.add_argument(
             '--length',
             type=int,
@@ -25,7 +25,7 @@ class Command(BaseCommand):
             help='Output format: env variable or raw key'
         )
 
-    def handle(self, *args, **options):
+    def handle(self, *args, **options) -> None:
         length = options['length']
         output_format = options['format']
         

@@ -259,26 +259,23 @@ class Command(BaseCommand):
             {
                 "name": "Problemă tehnică",
                 "name_en": "Technical Issue",
-                "sla_response_hours": 2,
-                "sla_resolution_hours": 24,
                 "icon": "alert-circle",
                 "color": "#EF4444",
+                "description": "Issues with hosting services, servers, or technical problems",
             },
             {
                 "name": "Întrebare facturare",
                 "name_en": "Billing Question",
-                "sla_response_hours": 4,
-                "sla_resolution_hours": 24,
                 "icon": "credit-card",
                 "color": "#3B82F6",
+                "description": "Questions about invoices, payments, or billing concerns",
             },
             {
                 "name": "Cerere serviciu nou",
                 "name_en": "New Service Request",
-                "sla_response_hours": 8,
-                "sla_resolution_hours": 48,
                 "icon": "plus-circle",
                 "color": "#10B981",
+                "description": "Requests for new services or service upgrades",
             },
         ]
 
@@ -413,38 +410,91 @@ class Command(BaseCommand):
         """Create base billing data and clean existing sample data"""
         # Clean existing sample data in proper order to avoid FK constraints
         # Delete orders first (and their items via CASCADE)
-        
+
         # Delete in reverse dependency order
         Order.objects.filter(customer__primary_email__contains='@example.').delete()
-        Invoice.objects.filter(customer__primary_email__contains='@example.').delete() 
+        Invoice.objects.filter(customer__primary_email__contains='@example.').delete()
         ProformaInvoice.objects.filter(customer__primary_email__contains='@example.').delete()
         Ticket.objects.filter(customer__primary_email__contains='@example.').delete()
-        
+
         # Delete services (which may be referenced by orders)
         Service.objects.filter(customer__primary_email__contains='@example.').delete()
-        
+
         # Delete customer memberships
         CustomerMembership.objects.filter(customer__primary_email__contains='@example.').delete()
-        
+
         # Now delete customers and their profiles
         Customer.objects.filter(primary_email__contains='@example.').delete()
-        
+
         # Delete users
         User.objects.filter(email__contains='@example.').delete()
-        
+
         print("✓ Cleaned existing sample data")
-        
+
+        # Create essential billing components
+        self.create_billing_essentials()
+
         # Create Products from ServicePlans if they don't exist
         self.create_products_from_service_plans()
 
+    def create_billing_essentials(self) -> None:
+        """Create essential billing components like currencies and tax rules"""
+        from apps.billing.models import Currency
+        from apps.billing.tax_models import TaxRule
+
+        # Create RON currency if it doesn't exist
+        ron_currency, created = Currency.objects.get_or_create(
+            code="RON",
+            defaults={
+                "name": "Romanian Leu",
+                "symbol": "RON",
+                "decimals": 2
+            }
+        )
+        if created:
+            print("✓ Created RON currency")
+
+        # Create Romanian VAT tax rule
+        tax_rule, created = TaxRule.objects.get_or_create(
+            country_code="RO",
+            tax_type="vat",
+            valid_from=timezone.now().date(),
+            defaults={
+                "rate": Decimal("0.19"),  # 19% VAT for Romania
+                "applies_to_b2b": True,
+                "applies_to_b2c": True,
+                "reverse_charge_eligible": True,
+                "is_eu_member": True,
+                "vies_required": True,
+            }
+        )
+        if created:
+            print("✓ Created Romanian VAT tax rule")
+
     def create_products_from_service_plans(self) -> None:
-        """Create Product objects based on existing ServicePlans"""
+        """Create Product objects and ProductPrice objects based on existing ServicePlans with new pricing model"""
+        from apps.products.models import ProductPrice  # Import here to avoid circular imports
+        from apps.billing.models import Currency
+
         service_plans = ServicePlan.objects.all()
-        
+
+        # Get RON currency (should exist from billing foundation)
+        try:
+            ron_currency = Currency.objects.get(code="RON")
+        except Currency.DoesNotExist:
+            # Create RON currency if it doesn't exist
+            ron_currency = Currency.objects.create(
+                code="RON",
+                name="Romanian Leu",
+                symbol="RON",
+                is_active=True
+            )
+            print("✓ Created RON currency")
+
         # Map ServicePlan types to Product types
         type_mapping = {
             'shared_hosting': 'shared_hosting',
-            'vps': 'vps', 
+            'vps': 'vps',
             'dedicated': 'dedicated',
             'cloud': 'shared_hosting',  # Map to shared hosting
             'domain': 'domain',
@@ -453,10 +503,13 @@ class Command(BaseCommand):
             'backup': 'backup',
             'maintenance': 'addon'  # Map to addon
         }
-        
+
+        products_created = 0
+        prices_created = 0
+
         for plan in service_plans:
             # Check if Product already exists for this plan
-            product, created = Product.objects.get_or_create(
+            product, product_created = Product.objects.get_or_create(
                 slug=f"product-{plan.id}",
                 defaults={
                     'name': plan.name,
@@ -469,8 +522,34 @@ class Command(BaseCommand):
                     'includes_vat': plan.includes_vat,
                 }
             )
-            
+
+            if product_created:
+                products_created += 1
+
+            # Create ProductPrice with new simplified pricing model
+            # Convert monthly price to cents
+            monthly_price_cents = int(plan.price_monthly * 100) if plan.price_monthly else 2999  # Default to 29.99 RON
+
+            # Create/update ProductPrice for this product
+            price, price_created = ProductPrice.objects.get_or_create(
+                product=product,
+                currency=ron_currency,
+                defaults={
+                    'monthly_price_cents': monthly_price_cents,
+                    'setup_cents': 0,  # No setup fee by default
+                    'semiannual_discount_percent': Decimal('5.00'),  # 5% discount for 6-month billing
+                    'annual_discount_percent': Decimal('10.00'),   # 10% discount for 12-month billing
+                    'minimum_quantity': 1,
+                    'maximum_quantity': None,  # Unlimited
+                    'is_active': True,
+                }
+            )
+
+            if price_created:
+                prices_created += 1
+
         print(f"✓ Created/verified {service_plans.count()} products from service plans")
+        print(f"✓ Created {products_created} new products, {prices_created} new product prices")
 
     def create_users(self, fake: Faker, count: int) -> list[User]:
         """Create users that will be attached to customers"""
@@ -506,12 +585,12 @@ class Command(BaseCommand):
         
         # Check if test company already exists
         test_company_email = "contact@testcompany.com"
+        customer = None
         try:
-            existing_customer = Customer.objects.get(primary_email=test_company_email)
-            self.stdout.write(f"  ✓ Test company already exists: {existing_customer.get_display_name()} (ID: {existing_customer.id})")
-            return existing_customer
+            customer = Customer.objects.get(primary_email=test_company_email)
+            self.stdout.write(f"  ✓ Test company already exists: {customer.get_display_name()} (ID: {customer.id})")
         except Customer.DoesNotExist:
-            pass
+            customer = None
         
         # Create the specific test user first if it doesn't exist
         test_user_email = "customer@pragmatichost.com"
@@ -531,46 +610,47 @@ class Command(BaseCommand):
             users.append(test_user)
             self.stdout.write(f"  ✓ Created test user: {test_user_email}")
         
-        # Create the specific test company
-        customer_data = {
-            "customer_type": "company",
-            "name": "Test Company SRL",
-            "company_name": "Test Company SRL", 
-            "primary_email": test_company_email,
-            "primary_phone": "+40722123456",
-            "status": "active",
-        }
-            
-        customer = Customer.objects.create(**customer_data)
-        self.stdout.write(f"  ✓ Created test company: {customer.get_display_name()} (ID: {customer.id})")
-        
-        # Create customer address with specific data
-        address = CustomerAddress.objects.create(
-            customer=customer,
-            address_type="billing",
-            address_line1="Str. Revolutiei nr. 1",
-            city="Bucharest", 
-            county="Bucharest",
-            postal_code="010000",
-            country="România"
-        )
-        
-        # Create tax profile with specific CUI
-        tax_profile = CustomerTaxProfile.objects.create(
-            customer=customer,
-            cui="RO12345678",
-            is_vat_payer=True,
-            vat_number="RO12345678", 
-            reverse_charge_eligible=True
-        )
-            
-        # Create billing profile
-        billing_profile = CustomerBillingProfile.objects.create(
-            customer=customer,
-            payment_terms=30,
-            preferred_currency="RON",
-            invoice_delivery_method="email"
-        )
+        # Create test company if it doesn't exist
+        if customer is None:
+            customer_data = {
+                "customer_type": "company",
+                "name": "Test Company SRL",
+                "company_name": "Test Company SRL",
+                "primary_email": test_company_email,
+                "primary_phone": "+40722123456",
+                "status": "active",
+            }
+
+            customer = Customer.objects.create(**customer_data)
+            self.stdout.write(f"  ✓ Created test company: {customer.get_display_name()} (ID: {customer.id})")
+
+            # Create customer address with specific data
+            address = CustomerAddress.objects.create(
+                customer=customer,
+                address_type="billing",
+                address_line1="Str. Revolutiei nr. 1",
+                city="Bucharest",
+                county="Bucharest",
+                postal_code="010000",
+                country="România"
+            )
+
+            # Create tax profile with specific CUI
+            tax_profile = CustomerTaxProfile.objects.create(
+                customer=customer,
+                cui="RO12345678",
+                is_vat_payer=True,
+                vat_number="RO12345678",
+                reverse_charge_eligible=True
+            )
+
+            # Create billing profile
+            billing_profile = CustomerBillingProfile.objects.create(
+                customer=customer,
+                payment_terms=30,
+                preferred_currency="RON",
+                invoice_delivery_method="email"
+            )
         
         # Create customer membership for the test user (if it doesn't exist)
         membership, created = CustomerMembership.objects.get_or_create(
@@ -578,7 +658,7 @@ class Command(BaseCommand):
             user=test_user,
             defaults={
                 "role": "owner",
-                "status": "active"
+                "is_primary": True
             }
         )
         
@@ -587,12 +667,23 @@ class Command(BaseCommand):
         else:
             self.stdout.write(f"  ✓ Customer membership already exists for {test_user.email}")
         
-        # Create services, orders, invoices, proformas, and tickets just like other customers
-        self.create_services_for_customer(customer, config.services_count)
-        self.create_orders_for_customer(fake, customer, config.orders_count) 
-        self.create_invoices_for_customer(fake, customer, config.invoices_count)
-        self.create_proformas_for_customer(fake, customer, config.proformas_count)
-        self.create_tickets_for_customer(fake, customer, config.tickets_count)
+        # Clear existing test data for Test Company to ensure fresh comprehensive test data
+        self.stdout.write(f"  ✓ Clearing existing test data for Test Company...")
+        Service.objects.filter(customer=customer).delete()
+        Order.objects.filter(customer=customer).delete()
+        from apps.billing.models import Invoice, ProformaInvoice
+        Invoice.objects.filter(customer=customer).delete()
+        ProformaInvoice.objects.filter(customer=customer).delete()
+        Ticket.objects.filter(customer=customer).delete()
+
+        # Create services, orders, invoices, proformas, and tickets with comprehensive test data
+        services = self.create_customer_services(fake, customer, 7)  # 7 services with different statuses
+        orders = self.create_customer_orders(fake, customer, 7)      # 7 orders with different statuses
+        self.create_customer_invoices(fake, customer, orders, 10)    # 10 invoices with different statuses
+        self.create_customer_proformas(fake, customer, orders, 5)    # 5 proformas with different statuses
+        self.create_customer_tickets(fake, customer, 10)             # 10 tickets with different statuses
+
+        self.stdout.write(f"  ✅ Created comprehensive test data: 7 services, 7 orders, 10 invoices, 5 proformas, 10 tickets")
         
         return customer
 
@@ -674,50 +765,62 @@ class Command(BaseCommand):
         return customer
 
     def create_customer_services(self, fake: Faker, customer: Customer, count: int) -> list[Service]:
-        """Create services for a customer"""
+        """Create services for a customer with diverse statuses"""
         services = []
         plans = list(ServicePlan.objects.all())
         servers = list(Server.objects.all())
-        
+
+        # Service statuses: pending, provisioning, active, suspended, terminated, expired
+        service_statuses = ["pending", "provisioning", "active", "suspended", "terminated", "expired", "active"]
+
         for i in range(count):
             plan = random.choice(plans)
             server = random.choice(servers) if servers else None
-            
+
+            # Use specific statuses for comprehensive testing (Test Company gets all statuses)
+            status = service_statuses[i % len(service_statuses)]
+
             service_data = {
                 "customer": customer,
                 "service_plan": plan,
                 "server": server,
-                "service_name": f"{plan.name} - {customer.get_display_name()}",
+                "service_name": f"{plan.name} - {customer.get_display_name()} [{status.title()}]",
                 "domain": fake.domain_name(),
                 "username": f"user{customer.id:04d}{i:03d}{random.randint(100, 999)}",  # Unique username
-                "billing_cycle": random.choice(["monthly", "annual"]),
+                "billing_cycle": random.choice(["monthly", "quarterly", "annual"]),
                 "price": plan.price_monthly,
-                "status": random.choice(["active", "pending", "suspended", "active", "active"]),  # More active
-                "auto_renew": random.choice([True, False]),
+                "status": status,
+                "auto_renew": status == "active",  # Only active services auto-renew
             }
-            
+
             service = Service.objects.create(**service_data)
             services.append(service)
-            
+
         return services
 
     def create_customer_orders(self, fake: Faker, customer: Customer, count: int) -> list[Order]:
-        """Create orders for a customer"""
+        """Create orders for a customer with diverse statuses"""
         orders = []
         services = list(Service.objects.filter(customer=customer))
         currency = Currency.objects.get(code="RON")
-        
+
+        # Order statuses: draft, pending, confirmed, processing, completed, cancelled, failed, refunded, partially_refunded
+        order_statuses = ["draft", "pending", "confirmed", "processing", "completed", "cancelled", "failed"]
+
         for i in range(count):
             # Generate amounts in cents for precision
             base_amount = Decimal(str(random.uniform(50.0, 500.0))).quantize(Decimal("0.01"))
             subtotal_cents = int(base_amount * 100)  # Convert to cents
             tax_cents = int(subtotal_cents * Decimal("0.19"))  # 19% VAT
             total_cents = subtotal_cents + tax_cents
-            
+
+            # Use specific statuses for comprehensive testing
+            status = order_statuses[i % len(order_statuses)]
+
             order_data = {
                 "customer": customer,
-                "order_number": f"ORD-{customer.id:04d}-{i+1:03d}",
-                "status": random.choice(["pending", "processing", "completed", "cancelled", "completed"]),  # More completed
+                "order_number": f"ORD-{customer.id:04d}-{i+1:03d}-{status.upper()}",
+                "status": status,
                 "currency": currency,
                 "subtotal_cents": subtotal_cents,
                 "tax_cents": tax_cents,
@@ -758,7 +861,6 @@ class Command(BaseCommand):
                         product=product,
                         product_name=service.service_plan.name,
                         product_type=service.service_plan.plan_type,
-                        billing_period=service.billing_cycle,
                         quantity=1,
                         unit_price_cents=unit_price_cents,
                         tax_rate=Decimal('0.1900'),
@@ -775,9 +877,24 @@ class Command(BaseCommand):
         """Create invoices for a customer linked to orders"""
         invoices = []
         currency = Currency.objects.get(code="RON")
-        tax_rule = TaxRule.objects.get(country_code="RO", tax_type="vat")
+        tax_rule, _ = TaxRule.objects.get_or_create(
+            country_code="RO",
+            tax_type="vat",
+            valid_from=timezone.now().date(),
+            defaults={
+                "rate": Decimal("0.19"),  # 19% VAT for Romania
+                "applies_to_b2b": True,
+                "applies_to_b2c": True,
+                "reverse_charge_eligible": True,
+                "is_eu_member": True,
+                "vies_required": True,
+            }
+        )
         
-        for _i in range(count):
+        # Invoice statuses: draft, issued, paid, overdue, void, refunded
+        invoice_statuses = ["draft", "issued", "paid", "overdue", "void", "refunded", "paid", "issued", "paid", "overdue"]
+
+        for i in range(count):
             # Some invoices are linked to orders, some are standalone
             order = random.choice(orders) if orders and random.random() < 0.5 else None
             if order:
@@ -788,14 +905,17 @@ class Command(BaseCommand):
                 base_amount = Decimal(str(random.uniform(100.0, 1000.0))).quantize(Decimal("0.01"))
                 tax_amount = base_amount * tax_rule.rate
                 total_amount = base_amount + tax_amount
-            # Generate amounts in cents for precision  
+            # Generate amounts in cents for precision
             base_amount_cents = int(base_amount * 100)
             tax_amount_cents = int(tax_amount * 100)
             total_amount_cents = int(total_amount * 100)
-            
+
+            # Use specific statuses for comprehensive testing (includes extra paid/issued for realism)
+            status = invoice_statuses[i % len(invoice_statuses)]
+
             invoice_data = {
                 "customer": customer,
-                "status": random.choice(["draft", "issued", "paid", "overdue", "paid", "paid"]),  # More paid
+                "status": status,
                 "issued_at": fake.date_between(start_date="-1y", end_date="today"),
                 "due_at": fake.date_between(start_date="today", end_date="+30d"),
                 "subtotal_cents": base_amount_cents,
@@ -839,10 +959,25 @@ class Command(BaseCommand):
     def create_customer_proformas(self, fake: Faker, customer: Customer, orders: list[Order], count: int) -> list[ProformaInvoice]:
         """Create proforma invoices for a customer"""
         proformas = []
-        currency = Currency.objects.get(code="RON") 
-        tax_rule = TaxRule.objects.get(country_code="RO", tax_type="vat")
+        currency = Currency.objects.get(code="RON")
+        tax_rule, _ = TaxRule.objects.get_or_create(
+            country_code="RO",
+            tax_type="vat",
+            valid_from=timezone.now().date(),
+            defaults={
+                "rate": Decimal("0.19"),  # 19% VAT for Romania
+                "applies_to_b2b": True,
+                "applies_to_b2c": True,
+                "reverse_charge_eligible": True,
+                "is_eu_member": True,
+                "vies_required": True,
+            }
+        )
         
-        for _i in range(count):
+        # Proforma statuses: draft, sent, accepted, expired
+        proforma_statuses = ["draft", "sent", "accepted", "expired"]
+
+        for i in range(count):
             # Some proformas are linked to orders
             order = random.choice(orders) if orders and random.random() < 0.5 else None
             if order:
@@ -853,15 +988,18 @@ class Command(BaseCommand):
                 base_amount = Decimal(str(random.uniform(100.0, 1000.0))).quantize(Decimal("0.01"))
                 tax_amount = base_amount * tax_rule.rate
                 total_amount = base_amount + tax_amount
-            
+
             # Generate amounts in cents for precision
             base_amount_cents = int(base_amount * 100)
             tax_amount_cents = int(tax_amount * 100)
             total_amount_cents = int(total_amount * 100)
-            
+
+            # Use specific statuses for comprehensive testing
+            status = proforma_statuses[i % len(proforma_statuses)]
+
             proforma_data = {
                 "customer": customer,
-                "status": random.choice(["draft", "sent", "accepted", "expired"]),
+                "status": status,
                 "valid_until": fake.date_between(start_date="today", end_date="+30d"),
                 "subtotal_cents": base_amount_cents,
                 "tax_cents": tax_amount_cents,
@@ -902,28 +1040,36 @@ class Command(BaseCommand):
         return proformas
 
     def create_customer_tickets(self, fake: Faker, customer: Customer, count: int) -> list[Ticket]:
-        """Create support tickets for a customer"""
+        """Create support tickets for a customer with diverse statuses"""
         tickets = []
         categories = list(SupportCategory.objects.all())
         support_users = list(User.objects.filter(staff_role="support"))
-        
-        for _i in range(count):
+
+        # Ticket statuses: open, in_progress, waiting_on_customer, closed
+        ticket_statuses = ["open", "in_progress", "waiting_on_customer", "closed"]
+        ticket_priorities = ["low", "normal", "high", "urgent"]
+
+        for i in range(count):
             category = random.choice(categories)
             assigned_to = random.choice(support_users) if random.choice([True, False]) and support_users else None
-            
+
+            # Use specific statuses and priorities for comprehensive testing
+            status = ticket_statuses[i % len(ticket_statuses)]
+            priority = ticket_priorities[i % len(ticket_priorities)]
+
             ticket_data = {
-                "title": fake.sentence(nb_words=6),
-                "description": fake.text(max_nb_chars=500),
+                "title": f"[{status.upper()}] {fake.sentence(nb_words=4)} - {priority.title()} Priority",
+                "description": f"Status: {status}, Priority: {priority}. {fake.text(max_nb_chars=400)}",
                 "customer": customer,
                 "contact_email": customer.primary_email,
                 "category": category,
-                "priority": random.choice(["low", "normal", "high", "normal"]),  # More normal priority
-                "status": random.choice(["open", "in_progress", "waiting_on_customer", "closed", "closed"]),  # More closed
+                "priority": priority,
+                "status": status,
                 "source": random.choice(["web", "email", "phone"]),
-                "assigned_to": assigned_to,
+                "assigned_to": assigned_to if status in ["in_progress", "waiting_on_customer"] else None,
             }
-            
+
             ticket = Ticket.objects.create(**ticket_data)
             tickets.append(ticket)
-            
+
         return tickets
