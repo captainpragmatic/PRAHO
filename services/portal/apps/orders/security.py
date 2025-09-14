@@ -6,7 +6,6 @@ DoS protection and uniform response timing for order endpoints.
 import logging
 import random
 import time
-from typing import Optional
 
 from django.core.cache import cache
 from django.http import JsonResponse
@@ -38,7 +37,7 @@ class OrderSecurityHardening:
         time.sleep(delay)
     
     @staticmethod  
-    def fail_closed_on_cache_failure(cache_key: str, operation: str) -> Optional[JsonResponse]:
+    def fail_closed_on_cache_failure(cache_key: str, operation: str) -> JsonResponse | None:
         """
         🔒 SECURITY: Fail closed when cache is unavailable.
         Prevents unlimited traffic when rate limiting fails.
@@ -68,7 +67,7 @@ class OrderSecurityHardening:
             }, status=503)
     
     @staticmethod
-    def validate_request_size(request, max_size_bytes: int = 10240) -> Optional[JsonResponse]:
+    def validate_request_size(request, max_size_bytes: int = 10240) -> JsonResponse | None:
         """
         🔒 SECURITY: Validate request body size to prevent DoS via large payloads.
         
@@ -103,7 +102,7 @@ class OrderSecurityHardening:
         return None
     
     @staticmethod
-    def check_suspicious_patterns(request) -> Optional[JsonResponse]:
+    def check_suspicious_patterns(request) -> JsonResponse | None:
         """
         🔒 SECURITY: Check for suspicious request patterns that might indicate attacks.
         

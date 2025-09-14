@@ -98,26 +98,37 @@ class PortalAuthenticationMiddleware:
             return self.redirect_to_login(request)
         
         # Attach customer data to request for views
-        # Resolve active customer context for this user (first accessible if not set)
+        # Priority: selected_customer_id (company switcher) > active_customer_id > customer_id (fallback)
+        selected_customer_id = request.session.get('selected_customer_id')
         active_customer_id = request.session.get('active_customer_id')
+
         try:
             user_id_int = int(session_user_id)
         except (TypeError, ValueError):
             user_id_int = None
 
-        if user_id_int and not active_customer_id:
-            try:
-                customers = api_client.get_user_customers(user_id_int)
-                if customers:
-                    active_customer_id = customers[0].get('id')
-                    request.session['active_customer_id'] = active_customer_id
-                else:
-                    # No accessible customers for this user; leave active_customer_id unset
-                    active_customer_id = None
-            except Exception as e:
-                logger.error(f"🔥 [Auth] Failed to fetch accessible customers for user {session_user_id}: {e}")
-
-        request.customer_id = active_customer_id or request.session.get('customer_id')
+        # If user has selected a specific customer via company switcher, use that
+        if selected_customer_id:
+            request.customer_id = int(selected_customer_id)
+        elif active_customer_id:
+            request.customer_id = active_customer_id
+        else:
+            # Fallback: resolve active customer context for this user (first accessible)
+            if user_id_int:
+                try:
+                    customers = api_client.get_user_customers(user_id_int)
+                    if customers:
+                        active_customer_id = customers[0].get('id')
+                        request.session['active_customer_id'] = active_customer_id
+                        request.customer_id = active_customer_id
+                    else:
+                        # No accessible customers for this user; use legacy customer_id
+                        request.customer_id = request.session.get('customer_id')
+                except Exception as e:
+                    logger.error(f"🔥 [Auth] Failed to fetch accessible customers for user {session_user_id}: {e}")
+                    request.customer_id = request.session.get('customer_id')
+            else:
+                request.customer_id = request.session.get('customer_id')
         request.user_id = session_user_id
         request.customer_email = request.session.get('email')
         request.is_authenticated = True

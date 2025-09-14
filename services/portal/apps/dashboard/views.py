@@ -123,9 +123,9 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
     Protected customer dashboard view with data from platform API.
     Uses Django sessions for authentication.
     """
-    
-    # Check authentication via Django session
-    customer_id = request.session.get('customer_id')
+
+    # Check authentication and get selected customer ID (respects company switcher)
+    customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
     if not customer_id:
         return redirect('/login/')
     
@@ -195,11 +195,11 @@ def account_overview_view(request: HttpRequest) -> HttpResponse:
     Uses Django sessions for authentication.
     """
     
-    # Check authentication via Django session
-    customer_id = request.session.get('customer_id')
+    # Check authentication and get selected customer ID (respects company switcher)
+    customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
     if not customer_id:
         return redirect('/login/')
-    
+
     context = {
         'customer_id': customer_id,
         'customer_email': request.session.get('email'),

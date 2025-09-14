@@ -12,7 +12,7 @@ from django.utils.translation import gettext as _
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 
-from .services import PlatformAPIError, ticket_api, TicketFilters
+from .services import PlatformAPIError, TicketFilters, ticket_api
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     Supports filtering by status, priority, and search.
     """
     # Check authentication via Django session
-    customer_id = request.session.get('customer_id')
+    customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
     user_id = request.session.get('user_id')
     if not customer_id or not user_id:
         return redirect('/login/')
@@ -182,7 +182,7 @@ def ticket_detail(request: HttpRequest, ticket_id: int) -> HttpResponse:
     Only accessible by ticket owner (customer).
     """
     # Check authentication via Django session
-    customer_id = request.session.get('customer_id')
+    customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
     user_id = request.session.get('user_id')
     if not customer_id or not user_id:
         return redirect('/login/')
@@ -222,7 +222,7 @@ def ticket_create(request: HttpRequest) -> HttpResponse:
     Only authenticated customers can create tickets.
     """
     # Check authentication via Django session
-    customer_id = request.session.get('customer_id')
+    customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
     user_id = request.session.get('user_id')
     if not customer_id or not user_id:
         return redirect('/login/')
@@ -246,14 +246,14 @@ def ticket_create(request: HttpRequest) -> HttpResponse:
         try:
             # Create ticket via platform API
             # contact_email and contact_person are automatically populated from authenticated customer
-            ticket = ticket_api.create_ticket(
-                customer_id=customer_id,
-                user_id=user_id,
-                title=title,
-                description=description,
-                priority=priority,
-                category=category
-            )
+            ticket_data = {
+                'customer_id': customer_id,
+                'title': title,
+                'description': description,
+                'priority': priority,
+                'category': category
+            }
+            ticket = ticket_api.create_ticket(ticket_data, user_id)
             
             # Extract ticket identifier for redirect and messages
             ticket_id = ticket.get('id') or ticket.get('pk') 
@@ -328,7 +328,7 @@ def ticket_reply(request: HttpRequest, ticket_id: int) -> HttpResponse:
     HTMX endpoint for dynamic conversation updates.
     """
     # Check authentication via Django session
-    customer_id = request.session.get('customer_id')
+    customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
     user_id = request.session.get('user_id')
     if not customer_id or not user_id:
         return redirect('/login/')
@@ -394,7 +394,7 @@ def ticket_search_api(request: HttpRequest) -> JsonResponse:
     Returns filtered ticket list partial.
     """
     # Check authentication via Django session
-    customer_id = request.session.get('customer_id')
+    customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
     user_id = request.session.get('user_id')
     if not customer_id or not user_id:
         return redirect('/login/')
@@ -503,7 +503,7 @@ def tickets_dashboard_widget(request: HttpRequest) -> HttpResponse:
     Used in main dashboard view.
     """
     # Check authentication via Django session
-    customer_id = request.session.get('customer_id')
+    customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
     user_id = request.session.get('user_id')
     if not customer_id or not user_id:
         return redirect('/login/')

@@ -6,9 +6,8 @@ Session-based cart management with platform API integration.
 import hashlib
 import json
 import logging
-import uuid
 from datetime import timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -16,6 +15,7 @@ from django.utils import timezone
 from django.utils.translation import gettext as _
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
+
 from .validators import OrderInputValidator
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ class CartRateLimiter:
     IP_TIME_WINDOW_HOUR = 3600       # 1 hour window
     
     @staticmethod
-    def check_rate_limit(session_key: str, client_ip: str = None) -> bool:
+    def check_rate_limit(session_key: str, client_ip: str | None = None) -> bool:
         """
         🔒 SECURITY: Check both session and IP-based rate limits
         
@@ -82,7 +82,7 @@ class CartRateLimiter:
         return True
     
     @staticmethod
-    def record_operation(session_key: str, client_ip: str = None) -> None:
+    def record_operation(session_key: str, client_ip: str | None = None) -> None:
         """
         🔒 SECURITY: Record cart operation with both session and IP tracking
         
@@ -142,7 +142,7 @@ class GDPRCompliantCartSession:
     SESSION_KEY = 'praho_portal_cart_v1'
     CART_EXPIRY_HOURS = 24
     
-    def __init__(self, session):
+    def __init__(self, session) -> None:
         self.session = session
         self._load_cart()
     
@@ -172,7 +172,7 @@ class GDPRCompliantCartSession:
         if 'currency' not in self.cart:
             self.cart['currency'] = 'RON'  # Romanian default
     
-    def _create_empty_cart(self) -> Dict[str, Any]:
+    def _create_empty_cart(self) -> dict[str, Any]:
         """Create an empty cart with proper structure and versioning"""
         expires_at = timezone.now() + timedelta(hours=self.CART_EXPIRY_HOURS)
         
@@ -207,7 +207,7 @@ class GDPRCompliantCartSession:
         logger.debug(f"💾 [Cart] Cart saved with {len(self.cart['items'])} items, version: {self.cart['version'][:8]}...")
     
     def add_item(self, product_slug: str, quantity: int, billing_period: str, 
-                 domain_name: str = '', config: Optional[Dict[str, Any]] = None) -> None:
+                 domain_name: str = '', config: dict[str, Any] | None = None) -> None:
         """Add item to cart with comprehensive validation"""
         
         # Validate inputs
@@ -240,31 +240,53 @@ class GDPRCompliantCartSession:
         # 🔒 SECURITY: Find and store sealed price token for selected billing period
         sealed_price_token = None
         selected_price_data = None
-        
-        for price_info in product_data.get('prices', []):
-            if price_info.get('billing_period') == billing_period:
-                sealed_price_token = price_info.get('sealed_price_token')
-                selected_price_data = price_info
-                break
-        
+
+        # New structure: sealed tokens are in a dictionary for all billing periods
+        prices = product_data.get('prices', [])
+        if prices and len(prices) > 0:
+            price_info = prices[0]  # Take first price (simplified model has one price per product)
+            selected_price_data = price_info
+            sealed_tokens = price_info.get('sealed_price_token', {})
+
+            if isinstance(sealed_tokens, dict):
+                sealed_price_token = sealed_tokens.get(billing_period)
+
+                # If no sealed token found for requested period, try fallbacks
+                if not sealed_price_token:
+                    logger.info(f"🔄 [Cart] No {billing_period} pricing token for {product_slug}, trying fallbacks")
+                    for fallback_period in ['annual', 'semiannual', 'monthly']:
+                        if fallback_period != billing_period and fallback_period in sealed_tokens:
+                            sealed_price_token = sealed_tokens[fallback_period]
+                            if sealed_price_token:
+                                logger.info(f"✅ [Cart] Using {fallback_period} pricing for {product_slug}")
+                                billing_period = fallback_period  # Update billing period to match the token
+                                break
+
         if not sealed_price_token:
             logger.warning(f"⚠️ [Cart] No sealed price token found for {product_slug} - {billing_period}")
+            return  # Silently skip products without pricing
         
         # Create cart item with sealed price token
-        item = {
-            'product_slug': product_slug,
-            'product_id': product_data['id'],  # Store UUID for API calls
-            'product_name': product_data['name'],  # Cache for display
-            'product_type': product_data['product_type'],
-            'quantity': quantity,
-            'billing_period': billing_period,
-            'domain_name': domain_name,
-            'config': clean_config,
-            'added_at': timezone.now().isoformat(),
-            'requires_domain': product_data.get('requires_domain', False),
-            'sealed_price_token': sealed_price_token,  # 🔒 SECURITY: Store sealed price token
-            'cached_price_data': selected_price_data  # Cache for display (not used for calculations)
-        }
+        try:
+            item = {
+                'product_slug': product_slug,
+                'product_id': product_data.get('id'),  # Store UUID for API calls (use .get() for safety)
+                'product_name': product_data.get('name'),  # Cache for display
+                'product_type': product_data.get('product_type'),
+                'quantity': quantity,
+                'billing_period': billing_period,
+                'domain_name': domain_name,
+                'config': clean_config,
+                'added_at': timezone.now().isoformat(),
+                'requires_domain': product_data.get('requires_domain', False),
+                'sealed_price_token': sealed_price_token,  # 🔒 SECURITY: Store sealed price token
+                'cached_price_data': selected_price_data  # Cache for display (not used for calculations)
+            }
+            logger.debug(f"🔧 [Cart] Created item dict for {product_slug}")
+        except Exception as e:
+            logger.error(f"🔥 [Cart] Failed to create item dict for {product_slug}: {e}")
+            logger.error(f"🔍 [Cart] Product data keys: {list(product_data.keys()) if product_data else 'None'}")
+            raise
         
         # Update or add item (same product + billing period = update quantity)
         existing_index = self._find_item_index(product_slug, billing_period)
@@ -307,7 +329,7 @@ class GDPRCompliantCartSession:
         self._save_cart()
         logger.info(f"🧹 [Cart] Cart cleared ({old_item_count} items removed)")
     
-    def get_items(self) -> List[Dict[str, Any]]:
+    def get_items(self) -> list[dict[str, Any]]:
         """Get all cart items"""
         return self.cart.get('items', [])
     
@@ -331,7 +353,7 @@ class GDPRCompliantCartSession:
                 return index
         return -1
     
-    def get_api_items(self) -> List[Dict[str, Any]]:
+    def get_api_items(self) -> list[dict[str, Any]]:
         """Get cart items formatted for platform API calls with sealed price tokens"""
         api_items = []
         for item in self.cart.get('items', []):
@@ -352,12 +374,12 @@ class GDPRCompliantCartSession:
         
         return api_items
     
-    def set_warnings(self, warnings: List[Dict[str, Any]]) -> None:
+    def set_warnings(self, warnings: list[dict[str, Any]]) -> None:
         """Set cart warnings (price changes, etc.)"""
         self.cart['warnings'] = warnings
         self._save_cart()
     
-    def get_warnings(self) -> List[Dict[str, Any]]:
+    def get_warnings(self) -> list[dict[str, Any]]:
         """Get cart warnings"""
         return self.cart.get('warnings', [])
     
@@ -399,7 +421,7 @@ class GDPRCompliantCartSession:
         self._save_cart()
         logger.debug("🕒 [Cart] Cart expiry extended")
     
-    def _generate_cart_version(self, cart: Dict[str, Any]) -> str:
+    def _generate_cart_version(self, cart: dict[str, Any]) -> str:
         """
         🔒 SECURITY: Generate cart version hash for mutation detection.
         Version changes when cart contents, quantities, or configuration changes.
@@ -467,7 +489,7 @@ class CartCalculationService:
     """Service for calculating cart totals via platform API"""
     
     @staticmethod
-    def calculate_cart_totals(cart: GDPRCompliantCartSession, customer_id: str, user_id: int) -> Dict[str, Any]:
+    def calculate_cart_totals(cart: GDPRCompliantCartSession, customer_id: str, user_id: int) -> dict[str, Any]:
         """Calculate cart totals using platform API"""
         
         if not cart.has_items():
@@ -491,17 +513,8 @@ class CartCalculationService:
                 'items': cart.get_api_items()
             }
             
-            # Debug: Write payload to file for inspection
-            import json
-            debug_data = {
-                'payload': payload,
-                'user_id': user_id,
-                'customer_id_type': type(customer_id).__name__,
-                'user_id_type': type(user_id).__name__
-            }
-            with open('/tmp/cart_api_payload.json', 'w') as f:
-                json.dump(debug_data, f, indent=2, default=str)
-            logger.info(f"💾 [Cart] Saved debug data - customer_id: {customer_id} ({type(customer_id)}), user_id: {user_id} ({type(user_id)})")
+            # Debug logging (no file writing for security)
+            logger.info(f"💾 [Cart] API payload - customer_id: {customer_id} ({type(customer_id)}), user_id: {user_id} ({type(user_id)}), items: {len(payload.get('items', []))}")
             
             # Call platform calculation API
             result = platform_api.post('orders/calculate/', payload, user_id=user_id)
@@ -528,7 +541,7 @@ class OrderCreationService:
     
     @staticmethod
     def preflight_order(cart: GDPRCompliantCartSession, customer_id: str, 
-                       user_id: str, notes: str = '') -> Dict[str, Any]:
+                       user_id: str, notes: str = '') -> dict[str, Any]:
         """
         🔎 Preflight order validation before creation.
         Calls platform API to validate order without creating it.
@@ -572,14 +585,8 @@ class OrderCreationService:
             logger.info(f"🔎 [Orders] Running preflight validation for customer {customer_id}")
             
             # Debug: Write preflight payload to file for inspection
-            debug_preflight = {
-                'preflight_data': preflight_data,
-                'customer_id': customer_id,
-                'customer_id_type': type(customer_id).__name__
-            }
-            with open('/tmp/preflight_api_payload.json', 'w') as f:
-                json.dump(debug_preflight, f, indent=2, default=str)
-            logger.info(f"💾 [Preflight] Saved debug data - customer_id: {customer_id} ({type(customer_id)})")
+            # Debug logging (no file writing for security)
+            logger.info(f"💾 [Preflight] API payload - customer_id: {customer_id} ({type(customer_id)}), items: {len(preflight_data.get('items', []))}")
             
             # Call preflight API endpoint with user_id for HMAC authentication
             result = platform_api.post('orders/preflight/', preflight_data, user_id=int(user_id))
@@ -613,15 +620,40 @@ class OrderCreationService:
             
         except PlatformAPIError as e:
             logger.error(f"🔥 [Orders] Preflight validation failed: {e}")
+
+            # Try to extract specific error message from the exception
+            str(e)
+
+            # Check if this is an API response with error details
+            if hasattr(e, 'response') and e.response:
+                try:
+                    # Try to parse JSON response for specific errors
+                    if isinstance(e.response, dict):
+                        api_errors = e.response.get('errors', [])
+                        if api_errors:
+                            return {
+                                'valid': False,
+                                'errors': api_errors,
+                                'warnings': []
+                            }
+                except:
+                    pass
+
+            # If we can't get specific errors, provide a more helpful generic message
             return {
                 'valid': False,
-                'errors': [_("Error validating order")],
+                'errors': [
+                    _("Unable to validate your order. Please ensure your company profile is complete with:"),
+                    _("Company name and VAT number"),
+                    _("Complete billing address"),
+                    _("Contact email and phone number")
+                ],
                 'warnings': []
             }
     
     @staticmethod
     def create_draft_order(cart: GDPRCompliantCartSession, customer_id: str, user_id: str,
-                          notes: str = '', auto_pending: bool = False) -> Dict[str, Any]:
+                          notes: str = '', auto_pending: bool = False) -> dict[str, Any]:
         """Create draft order from cart items"""
         
         if not cart.has_items():

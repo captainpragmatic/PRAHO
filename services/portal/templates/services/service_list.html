@@ -116,11 +116,13 @@
 
         <!-- Quick Stats -->
         <div class="flex items-center space-x-4 text-sm">
-          <div class="text-green-400">
-            ✅ {{ active_count }} {% trans 'active' %}
+          <div class="{% if display_status == 'active' %}text-green-400{% elif display_status == 'suspended' %}text-red-400{% elif display_status == 'pending' %}text-yellow-400{% else %}text-blue-400{% endif %}">
+            {% if display_status == 'active' %}✅{% elif display_status == 'suspended' %}⏸️{% elif display_status == 'pending' %}⏳{% elif display_status == 'cancelled' %}❌{% else %}📊{% endif %}
+            {{ active_count }}
+            {% if display_status == 'active' %}{% trans 'active' %}{% elif display_status == 'suspended' %}{% trans 'suspended' %}{% elif display_status == 'pending' %}{% trans 'pending' %}{% elif display_status == 'cancelled' %}{% trans 'cancelled' %}{% else %}{% trans 'services' %}{% endif %}
           </div>
           <div class="text-slate-400">
-            📊 {{ total_count }} {% trans 'total' %}
+            📊 {% if status_filter %}{{ summary.total_services }}{% else %}{{ total_count }}{% endif %} {% trans 'total' %}
           </div>
         </div>
       </div>
@@ -140,8 +142,12 @@
         
         <div class="flex items-center justify-between">
           <div class="flex items-center space-x-3 text-sm">
-            <div class="text-green-400">✅ {{ active_count }} {% trans 'active' %}</div>
-            <div class="text-slate-400">📊 {{ total_count }} {% trans 'total' %}</div>
+            <div class="{% if display_status == 'active' %}text-green-400{% elif display_status == 'suspended' %}text-red-400{% elif display_status == 'pending' %}text-yellow-400{% else %}text-blue-400{% endif %}">
+              {% if display_status == 'active' %}✅{% elif display_status == 'suspended' %}⏸️{% elif display_status == 'pending' %}⏳{% elif display_status == 'cancelled' %}❌{% else %}📊{% endif %}
+              {{ active_count }}
+              {% if display_status == 'active' %}{% trans 'active' %}{% elif display_status == 'suspended' %}{% trans 'suspended' %}{% elif display_status == 'pending' %}{% trans 'pending' %}{% elif display_status == 'cancelled' %}{% trans 'cancelled' %}{% else %}{% trans 'services' %}{% endif %}
+            </div>
+            <div class="text-slate-400">📊 {% if status_filter %}{{ summary.total_services }}{% else %}{{ total_count }}{% endif %} {% trans 'total' %}</div>
           </div>
           
           {% if status_filter %}
@@ -174,25 +180,22 @@
             <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
               {% trans 'Next Billing' %}
             </th>
-            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Actions' %}
-            </th>
           </tr>
         </thead>
         <tbody class="bg-slate-800 divide-y divide-slate-700">
           {% for service in services %}
-          <tr class="hover:bg-slate-700 transition-colors">
+          <tr class="hover:bg-slate-700 transition-colors cursor-pointer" onclick="window.location.href='{% url 'services:detail' service_id=service.id %}'">
             <td class="px-6 py-4 whitespace-nowrap">
-              <div class="text-sm font-medium text-white">{{ service.name }}</div>
+              <div class="text-sm font-medium text-white">{{ service.service_name }}</div>
               {% if service.domain %}
               <div class="text-sm text-slate-400">{{ service.domain }}</div>
               {% endif %}
             </td>
             <td class="px-6 py-4 whitespace-nowrap">
-              <div class="text-sm text-slate-300">{{ service.service_type|title }}</div>
+              <div class="text-sm text-slate-300">{{ service.service_plan_name|default:service.service_plan_type_display }}</div>
             </td>
             <td class="px-6 py-4 whitespace-nowrap">
-              <div class="text-sm font-mono text-green-400">€{{ service.monthly_cost|floatformat:2 }}</div>
+              <div class="text-sm font-mono text-green-400">{{ service.monthly_price|floatformat:2 }} RON/mo</div>
             </td>
             <td class="px-6 py-4 whitespace-nowrap">
               {% if service.status == 'active' %}
@@ -220,20 +223,6 @@
             <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
               {{ service.next_billing_date|date:"M d, Y"|default:"N/A" }}
             </td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-              <div class="flex space-x-2">
-                <a href="{% url 'services:detail' service_id=service.id %}" 
-                   class="text-blue-400 hover:text-blue-300 transition-colors">
-                  👁️ {% trans 'View' %}
-                </a>
-                {% if service.status == 'suspended' %}
-                <button onclick="requestReactivation({{ service.id }}, '{{ service.name }}')"
-                        class="text-green-400 hover:text-green-300 transition-colors">
-                  ▶️ {% trans 'Reactivate' %}
-                </button>
-                {% endif %}
-              </div>
-            </td>
           </tr>
           {% endfor %}
         </tbody>
@@ -243,10 +232,10 @@
     <!-- Mobile Card View -->
     <div class="sm:hidden divide-y divide-slate-700">
       {% for service in services %}
-      <div class="p-4 hover:bg-slate-750 transition-colors">
+      <div class="p-4 hover:bg-slate-750 transition-colors cursor-pointer" onclick="window.location.href='{% url 'services:detail' service_id=service.id %}'">
         <div class="flex items-start justify-between mb-3">
           <div class="flex-1">
-            <div class="text-sm font-medium text-white">{{ service.name }}</div>
+            <div class="text-sm font-medium text-white">{{ service.service_name }}</div>
             {% if service.domain %}
             <div class="text-xs text-slate-400 mt-1">{{ service.domain }}</div>
             {% endif %}
@@ -279,11 +268,11 @@
         <div class="grid grid-cols-2 gap-3 mb-3">
           <div>
             <div class="text-xs text-slate-400 uppercase tracking-wide">{% trans 'Plan' %}</div>
-            <div class="text-sm text-slate-300">{{ service.service_type|title }}</div>
+            <div class="text-sm text-slate-300">{{ service.service_plan_name|default:service.service_plan_type_display }}</div>
           </div>
           <div>
             <div class="text-xs text-slate-400 uppercase tracking-wide">{% trans 'Price' %}</div>
-            <div class="text-sm font-mono text-green-400">€{{ service.monthly_cost|floatformat:2 }}</div>
+            <div class="text-sm font-mono text-green-400">{{ service.monthly_price|floatformat:2 }} RON/mo</div>
           </div>
         </div>
 
@@ -292,17 +281,11 @@
             <div class="text-xs text-slate-400 uppercase tracking-wide">{% trans 'Next Billing' %}</div>
             <div class="text-sm text-slate-300">{{ service.next_billing_date|date:"M d, Y"|default:"N/A" }}</div>
           </div>
-          <div class="flex space-x-2">
-            <a href="{% url 'services:detail' service_id=service.id %}" 
-               class="text-blue-400 hover:text-blue-300 transition-colors text-sm">
-              👁️ {% trans 'View' %}
-            </a>
-            {% if service.status == 'suspended' %}
-            <button onclick="requestReactivation({{ service.id }}, '{{ service.name }}')"
-                    class="text-green-400 hover:text-green-300 transition-colors text-sm">
-              ▶️ {% trans 'Reactivate' %}
-            </button>
-            {% endif %}
+          <div class="flex items-center text-blue-400">
+            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+            </svg>
+            <span class="text-sm">{% trans 'View Details' %}</span>
           </div>
         </div>
       </div>
@@ -357,32 +340,4 @@
   </div>
 </div>
 
-<!-- Service Actions JavaScript -->
-<script>
-function requestReactivation(serviceId, serviceName) {
-  if (confirm('{% trans "Request reactivation for service?" %} ' + serviceName)) {
-    // Create form and submit
-    const form = document.createElement('form');
-    form.method = 'POST';
-    form.action = `/services/${serviceId}/request-action/`;
-    
-    // CSRF token
-    const csrfInput = document.createElement('input');
-    csrfInput.type = 'hidden';
-    csrfInput.name = 'csrfmiddlewaretoken';
-    csrfInput.value = '{{ csrf_token }}';
-    form.appendChild(csrfInput);
-    
-    // Action input
-    const actionInput = document.createElement('input');
-    actionInput.type = 'hidden';
-    actionInput.name = 'action';
-    actionInput.value = 'reactivate_request';
-    form.appendChild(actionInput);
-    
-    document.body.appendChild(form);
-    form.submit();
-  }
-}
-</script>
 {% endblock %}

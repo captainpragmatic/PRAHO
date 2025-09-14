@@ -70,8 +70,9 @@ def _get_user_customer_memberships(request: HttpRequest) -> list[dict] | None:
                 memberships.append({
                     'customer_id': customer.get('id'),
                     'customer_name': customer.get('name', customer.get('company_name', f"Customer {customer.get('id')}")),
-                    'role': 'owner',  # Default role - we'll need to enhance this later
+                    'role': customer.get('role', 'viewer'),  # Use actual role from Platform API
                     'company_name': customer.get('company_name', ''),
+                    'is_primary': customer.get('is_primary', False),
                 })
             return memberships
         return None
@@ -237,10 +238,10 @@ def login_view(request: HttpRequest) -> HttpResponse:
                             messages.success(request, f"Sign in confirmed, {customer_name}!")
                         else:
                             # Fallback to email if name not available
-                            messages.success(request, f"Sign in confirmed!")
+                            messages.success(request, "Sign in confirmed!")
                     except Exception as e:
                         logger.warning(f"⚠️ [Portal Auth] Could not fetch profile for personalized message: {e}")
-                        messages.success(request, f"Sign in confirmed!")
+                        messages.success(request, "Sign in confirmed!")
                     
                     next_url = _get_safe_redirect_target(request, fallback='/dashboard/')
                     return redirect(next_url)

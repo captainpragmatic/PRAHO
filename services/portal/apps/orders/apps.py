@@ -16,4 +16,3 @@ class OrdersConfig(AppConfig):
     def ready(self) -> None:
         """Initialize app-specific configurations"""
         # Import any signal handlers or initialization code
-        pass

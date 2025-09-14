@@ -201,7 +201,7 @@ def billing_dashboard_widget(request: HttpRequest) -> JsonResponse:
     Used via HTMX for dynamic dashboard updates.
     """
     # Check authentication via session
-    customer_id = request.session.get('customer_id')
+    customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
     if not customer_id:
         return JsonResponse({
             'success': False,
@@ -259,7 +259,7 @@ def sync_invoices_action(request: HttpRequest) -> JsonResponse:
     Used via HTMX for manual refresh functionality.
     """
     # Check authentication via session
-    customer_id = request.session.get('customer_id')
+    customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
     if not customer_id:
         return JsonResponse({
             'success': False,

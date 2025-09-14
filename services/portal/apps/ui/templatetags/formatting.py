@@ -25,6 +25,7 @@ from apps.common.constants import (
     ROMANIAN_POSTAL_CODE_LENGTH,
     ROMANIAN_TIME_HOUR_PLURAL_THRESHOLD,
     ROMANIAN_TIME_MINUTE_PLURAL_THRESHOLD,
+    ROMANIAN_VAT_RATE,
     SECONDS_PER_DAY,
     SECONDS_PER_HOUR,
     SECONDS_PER_MINUTE,
@@ -98,24 +99,27 @@ def romanian_currency(value: TemplateNumeric, currency: str = "RON") -> str:
 
 
 @register.filter
-def romanian_vat(value: TemplateNumeric, vat_rate: float = 0.19) -> str:
+def romanian_vat(value: TemplateNumeric, vat_rate: float = None) -> str:
     """
     Calculate and format VAT amount in Romanian style
 
     Usage:
-        {{ subtotal|romanian_vat }}        -> "95,22 RON TVA"
-        {{ amount|romanian_vat:0.05 }}     -> "25,00 RON TVA"
+        {{ subtotal|romanian_vat }}        -> "105,00 RON TVA" (21% rate)
+        {{ amount|romanian_vat:0.05 }}     -> "25,00 RON TVA" (custom rate)
 
     Args:
         value: Base amount for VAT calculation
-        vat_rate: VAT rate (default 19% for Romania)
+        vat_rate: VAT rate (defaults to Romanian standard rate from constants)
     """
     if value is None:
         return "0,00 RON TVA"
 
     try:
+        # Use Romanian VAT rate from constants if not specified
+        effective_vat_rate = vat_rate if vat_rate is not None else float(ROMANIAN_VAT_RATE)
+
         decimal_value = Decimal(str(value))
-        vat_amount = decimal_value * Decimal(str(vat_rate))
+        vat_amount = decimal_value * Decimal(str(effective_vat_rate))
         formatted_vat = romanian_currency(vat_amount).replace(" RON", "")
         return f"{formatted_vat} RON TVA"
     except (ValueError, TypeError):

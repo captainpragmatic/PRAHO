@@ -8,11 +8,9 @@ import logging
 import time
 import uuid
 from collections.abc import Callable
-from typing import Optional
 
 from django.contrib.auth import logout
-from django.core.cache import cache
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
 from django.utils.deprecation import MiddlewareMixin
 
@@ -58,7 +56,7 @@ class SessionSecurityMiddleware(MiddlewareMixin):
         self.get_response = get_response
         super().__init__(get_response)
     
-    def process_request(self, request: HttpRequest) -> Optional[HttpResponse]:
+    def process_request(self, request: HttpRequest) -> HttpResponse | None:
         """🔒 Process incoming request for session security validation"""
         
         # Skip security checks for certain paths
@@ -163,10 +161,7 @@ class SessionSecurityMiddleware(MiddlewareMixin):
         # Check absolute session age
         fingerprint = session.get('security_fingerprint', {})
         created_at = fingerprint.get('created_at', current_time)
-        if current_time - created_at > self.MAX_SESSION_AGE_SECONDS:
-            return True
-        
-        return False
+        return current_time - created_at > self.MAX_SESSION_AGE_SECONDS
     
     def _update_session_activity(self, request: HttpRequest) -> None:
         """Update session last activity timestamp"""

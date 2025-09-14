@@ -3,9 +3,9 @@ Order Input Validators for PRAHO Portal
 Comprehensive validation for order inputs with Romanian compliance.
 """
 
-import re
 import logging
-from typing import Any, Dict
+import re
+from typing import Any
 
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext as _
@@ -107,7 +107,7 @@ class OrderInputValidator:
         return slug.lower()
     
     @staticmethod
-    def validate_config(config: Dict[str, Any], product_type: str) -> Dict[str, Any]:
+    def validate_config(config: dict[str, Any], product_type: str) -> dict[str, Any]:
         """Validate product configuration based on type with security filtering"""
         if not config:
             return {}
@@ -124,7 +124,7 @@ class OrderInputValidator:
                     # Validate version strings (PHP, MySQL, etc.)
                     if not re.match(r'^[a-zA-Z0-9\.\-_]+$', value):
                         continue  # Skip invalid versions
-                elif key.endswith('_gb') and isinstance(value, (int, str)):
+                elif key.endswith('_gb') and isinstance(value, int | str):
                     # Validate numeric values for GB configs
                     try:
                         numeric_value = int(value)

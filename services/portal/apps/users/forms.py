@@ -657,6 +657,7 @@ class CompanyProfileForm(forms.Form):
     primary_phone = forms.CharField(
         label=_("Primary Phone"),
         max_length=20,
+        required=False,
         widget=forms.TextInput(attrs={
             'class': 'w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400',
             'placeholder': _('+40.21.123.4567'),

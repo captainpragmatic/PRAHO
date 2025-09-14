@@ -5,24 +5,19 @@ Product catalog, cart management, and order creation with Romanian compliance.
 
 import json
 import logging
-from typing import Any, Dict
 
 from django.contrib import messages
 from django.core.exceptions import ValidationError
-from django.http import HttpRequest, HttpResponse, HttpResponseNotAllowed, JsonResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
-from .services import (
-    CartCalculationService, 
-    CartRateLimiter, 
-    GDPRCompliantCartSession, 
-    OrderCreationService
-)
+
 from .security import OrderSecurityHardening
+from .services import CartCalculationService, CartRateLimiter, GDPRCompliantCartSession, OrderCreationService
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +156,7 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:
     HTMX endpoint to add product to cart with validation.
     🔒 SECURITY: Enhanced with DoS hardening and uniform response timing.
     """
-    
+
     # 🔒 SECURITY: Check cache availability and fail closed if needed
     cache_check = OrderSecurityHardening.fail_closed_on_cache_failure('cart_ops', 'add_to_cart')
     if cache_check:
@@ -221,12 +216,23 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:
         OrderSecurityHardening.uniform_response_delay()
         
         # Return updated cart widget
-        return render(request, 'orders/partials/cart_updated.html', {
-            'cart_count': cart.get_item_count(),
-            'cart_total_quantity': cart.get_total_quantity(),
-            'success_message': _('Product added to cart successfully!'),
-            'product_name': cart.get_items()[-1]['product_name']  # Last added item
-        })
+        cart_items = cart.get_items()
+        if cart_items:
+            # Item was successfully added
+            return render(request, 'orders/partials/cart_updated.html', {
+                'cart_count': cart.get_item_count(),
+                'cart_total_quantity': cart.get_total_quantity(),
+                'success_message': _('Product added to cart successfully!'),
+                'product_name': cart_items[-1]['product_name']  # Last added item
+            })
+        else:
+            # No item was added (likely due to pricing issues)
+            # Return with status 200 so HTMX processes it, but with error content
+            return render(request, 'orders/partials/cart_error_notification.html', {
+                'error': _('Product is currently not available for purchase.'),
+                'cart_count': cart.get_item_count(),
+                'cart_total_quantity': cart.get_total_quantity(),
+            }, status=200)
         
     except ValidationError as e:
         logger.warning(f"⚠️ [Cart] Validation error: {e}")
@@ -529,10 +535,7 @@ def checkout(request: HttpRequest) -> HttpResponse:
                     f"🔒 [Orders] Blocking checkout for customer {customer_id} due to incomplete profile: {profile_related_errors}"
                 )
                 # Add user-friendly message explaining what needs to be fixed
-                messages.warning(request, _(
-                    'Your company profile information needs to be completed before placing orders. '
-                    'Please ensure your billing address, contact details, and VAT information (if applicable) are filled out completely.'
-                ))
+                messages.warning(request, _('We need more information to complete your order.'))
         
     except ValidationError:
         messages.error(request, _('Error calculating order totals.'))
@@ -595,10 +598,7 @@ def create_order(request: HttpRequest) -> HttpResponse:
                     profile_related_errors.append(error)
             
             if profile_related_errors:
-                messages.error(request, _(
-                    'Order cannot be created because your company profile information is incomplete. '
-                    'Please complete your billing address, contact details, and VAT information before ordering.'
-                ))
+                messages.error(request, _('We need more information to complete your order.'))
             else:
                 # Generic validation error message
                 error_details = ' '.join(str(error) for error in errors[:3])  # Show first 3 errors

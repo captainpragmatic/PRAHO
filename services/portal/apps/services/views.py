@@ -20,7 +20,7 @@ def service_list(request: HttpRequest) -> HttpResponse:
     Supports filtering by status and service type.
     """
     # Check authentication via Django session
-    customer_id = request.session.get('customer_id')
+    customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
     user_id = request.session.get('user_id')
     if not customer_id or not user_id:
         return redirect('/login/')
@@ -42,15 +42,25 @@ def service_list(request: HttpRequest) -> HttpResponse:
         
         services = response.get('results', [])
         total_count = response.get('count', 0)
-        
-        # Get summary for header stats
+
+        # Get summary for header stats - use filtered count for display
         summary = services_api.get_services_summary(customer_id, user_id)
-        active_count = summary.get('active_services', 0)
+
+        # For filtered views, show filtered count as "active" count in header
+        if status_filter:
+            # When filtering, show filtered count instead of active count
+            active_count = total_count
+            display_status = status_filter
+        else:
+            # For "All Services", show actual active count
+            active_count = summary.get('active_services', 0)
+            display_status = 'active'
         
         context = {
             'services': services,
             'total_count': total_count,
             'active_count': active_count,
+            'display_status': display_status,
             'status_filter': status_filter,
             'service_type_filter': service_type_filter,
             'page': page,
@@ -86,6 +96,7 @@ def service_list(request: HttpRequest) -> HttpResponse:
             'services': [],
             'total_count': 0,
             'active_count': 0,
+            'display_status': 'active',
             'status_filter': status_filter,
             'service_type_filter': service_type_filter,
             'error': True
@@ -100,7 +111,7 @@ def service_detail(request: HttpRequest, service_id: int) -> HttpResponse:
     Only accessible by service owner (customer).
     """
     # Check authentication via Django session
-    customer_id = request.session.get('customer_id')
+    customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
     user_id = request.session.get('user_id')
     if not customer_id or not user_id:
         return redirect('/login/')
@@ -136,13 +147,13 @@ def service_detail(request: HttpRequest, service_id: int) -> HttpResponse:
 
 def service_usage(request: HttpRequest, service_id: int) -> HttpResponse:
     # Check authentication via Django session
-    customer_id = request.session.get('customer_id')
+    customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
     if not customer_id:
         return redirect('/login/')
     """
     HTMX endpoint for service usage data with different time periods.
     """
-    customer_id = request.session.get('customer_id')
+    customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
     period = request.GET.get('period', '30d')
     
     # Validate period
@@ -174,7 +185,7 @@ def service_request_action(request: HttpRequest, service_id: int) -> HttpRespons
     Creates requests that require staff approval.
     """
     # Check authentication via Django session
-    customer_id = request.session.get('customer_id')
+    customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
     user_id = request.session.get('user_id')
     if not customer_id or not user_id:
         return redirect('/login/')
@@ -252,7 +263,7 @@ def services_dashboard_widget(request: HttpRequest) -> HttpResponse:
     Used in main dashboard view.
     """
     # Check authentication via Django session
-    customer_id = request.session.get('customer_id')
+    customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
     user_id = request.session.get('user_id')
     if not customer_id or not user_id:
         return redirect('/login/')
@@ -282,13 +293,13 @@ def services_dashboard_widget(request: HttpRequest) -> HttpResponse:
 
 def service_plans(request: HttpRequest) -> HttpResponse:
     # Check authentication via Django session
-    customer_id = request.session.get('customer_id')
+    customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
     if not customer_id:
         return redirect('/login/')
     """
     View available hosting plans for customer (for new orders or upgrades).
     """
-    customer_id = request.session.get('customer_id')
+    customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
     service_type = request.GET.get('type', '')
     
     try:
