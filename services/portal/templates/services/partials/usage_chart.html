@@ -1,0 +1,230 @@
+{% load i18n %}
+
+<!-- Usage Chart Partial for HTMX Loading -->
+<div class="space-y-6">
+  {% if usage.error %}
+    <!-- Error State -->
+    <div class="text-center py-8">
+      <div class="text-red-400 mb-2">
+        <svg class="w-12 h-12 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+        </svg>
+      </div>
+      <p class="text-slate-400">{% trans "Unable to load usage data" %}</p>
+    </div>
+  {% else %}
+    <!-- Current Usage Summary -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <!-- Disk Usage -->
+      {% if usage.current_usage.disk_usage_gb is not None %}
+      <div class="bg-slate-700/30 rounded-lg p-4">
+        <div class="flex items-center justify-between mb-2">
+          <h4 class="text-xs font-medium text-slate-400 uppercase tracking-wide">{% trans "Disk Usage" %}</h4>
+          <span class="text-xs text-slate-500">{{ period|upper }}</span>
+        </div>
+        <div class="text-2xl font-bold text-blue-400 mb-1">{{ usage.current_usage.disk_usage_gb|floatformat:1 }}</div>
+        <div class="text-xs text-slate-400">GB {% trans "used" %}</div>
+
+        <!-- Progress Bar -->
+        {% if usage.current_usage.disk_limit_gb %}
+        <div class="mt-3">
+          <div class="flex justify-between text-xs text-slate-500 mb-1">
+            <span>{{ usage.current_usage.disk_usage_gb|floatformat:1 }} GB</span>
+            <span>{{ usage.current_usage.disk_limit_gb }} GB</span>
+          </div>
+          <div class="w-full bg-slate-600 rounded-full h-1.5">
+            <div class="bg-blue-500 h-1.5 rounded-full transition-all duration-500"
+                 style="width: {{ usage.current_usage.disk_usage_percentage|default:0 }}%"></div>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      <!-- Bandwidth Usage -->
+      {% if usage.current_usage.bandwidth_usage_gb is not None %}
+      <div class="bg-slate-700/30 rounded-lg p-4">
+        <div class="flex items-center justify-between mb-2">
+          <h4 class="text-xs font-medium text-slate-400 uppercase tracking-wide">{% trans "Bandwidth" %}</h4>
+          <span class="text-xs text-slate-500">{{ period|upper }}</span>
+        </div>
+        <div class="text-2xl font-bold text-green-400 mb-1">{{ usage.current_usage.bandwidth_usage_gb|floatformat:1 }}</div>
+        <div class="text-xs text-slate-400">GB {% trans "used" %}</div>
+
+        <!-- Progress Bar -->
+        {% if usage.current_usage.bandwidth_limit_gb %}
+        <div class="mt-3">
+          <div class="flex justify-between text-xs text-slate-500 mb-1">
+            <span>{{ usage.current_usage.bandwidth_usage_gb|floatformat:1 }} GB</span>
+            <span>{{ usage.current_usage.bandwidth_limit_gb }} GB</span>
+          </div>
+          <div class="w-full bg-slate-600 rounded-full h-1.5">
+            <div class="bg-green-500 h-1.5 rounded-full transition-all duration-500"
+                 style="width: {{ usage.current_usage.bandwidth_usage_percentage|default:0 }}%"></div>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      <!-- Email Accounts -->
+      {% if usage.current_usage.email_accounts_used is not None %}
+      <div class="bg-slate-700/30 rounded-lg p-4">
+        <div class="flex items-center justify-between mb-2">
+          <h4 class="text-xs font-medium text-slate-400 uppercase tracking-wide">{% trans "Email Accounts" %}</h4>
+          <span class="text-xs text-slate-500">{% trans "Current" %}</span>
+        </div>
+        <div class="text-2xl font-bold text-purple-400 mb-1">{{ usage.current_usage.email_accounts_used|default:0 }}</div>
+        <div class="text-xs text-slate-400">{% trans "active accounts" %}</div>
+
+        <!-- Progress Bar -->
+        {% if usage.current_usage.email_accounts_limit %}
+        <div class="mt-3">
+          <div class="flex justify-between text-xs text-slate-500 mb-1">
+            <span>{{ usage.current_usage.email_accounts_used|default:0 }}</span>
+            <span>{{ usage.current_usage.email_accounts_limit }}</span>
+          </div>
+          <div class="w-full bg-slate-600 rounded-full h-1.5">
+            <div class="bg-purple-500 h-1.5 rounded-full transition-all duration-500"
+                 style="width: {% if usage.current_usage.email_accounts_limit %}{% widthratio usage.current_usage.email_accounts_used|default:0 usage.current_usage.email_accounts_limit 100 %}{% else %}0{% endif %}%"></div>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      <!-- Databases -->
+      {% if usage.current_usage.databases_used is not None %}
+      <div class="bg-slate-700/30 rounded-lg p-4">
+        <div class="flex items-center justify-between mb-2">
+          <h4 class="text-xs font-medium text-slate-400 uppercase tracking-wide">{% trans "Databases" %}</h4>
+          <span class="text-xs text-slate-500">{% trans "Current" %}</span>
+        </div>
+        <div class="text-2xl font-bold text-yellow-400 mb-1">{{ usage.current_usage.databases_used|default:0 }}</div>
+        <div class="text-xs text-slate-400">{% trans "databases" %}</div>
+
+        <!-- Progress Bar -->
+        {% if usage.current_usage.databases_limit %}
+        <div class="mt-3">
+          <div class="flex justify-between text-xs text-slate-500 mb-1">
+            <span>{{ usage.current_usage.databases_used|default:0 }}</span>
+            <span>{{ usage.current_usage.databases_limit }}</span>
+          </div>
+          <div class="w-full bg-slate-600 rounded-full h-1.5">
+            <div class="bg-yellow-500 h-1.5 rounded-full transition-all duration-500"
+                 style="width: {% if usage.current_usage.databases_limit %}{% widthratio usage.current_usage.databases_used|default:0 usage.current_usage.databases_limit 100 %}{% else %}0{% endif %}%"></div>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Usage Alerts -->
+    {% if usage.alerts %}
+    <div class="space-y-2">
+      {% for alert in usage.alerts %}
+      <div class="flex items-center p-3 rounded-lg
+                  {% if alert.type == 'warning' %}bg-yellow-500/10 border border-yellow-500/20{% endif %}
+                  {% if alert.type == 'error' %}bg-red-500/10 border border-red-500/20{% endif %}
+                  {% if alert.type == 'info' %}bg-blue-500/10 border border-blue-500/20{% endif %}">
+        <div class="flex-shrink-0">
+          {% if alert.type == 'warning' %}
+            <svg class="w-5 h-5 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
+            </svg>
+          {% elif alert.type == 'error' %}
+            <svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+          {% else %}
+            <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+          {% endif %}
+        </div>
+        <div class="ml-3">
+          <p class="text-sm
+                   {% if alert.type == 'warning' %}text-yellow-300{% endif %}
+                   {% if alert.type == 'error' %}text-red-300{% endif %}
+                   {% if alert.type == 'info' %}text-blue-300{% endif %}">
+            {{ alert.message }}
+          </p>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Historical Usage Chart Placeholder -->
+    <div class="bg-slate-700/30 rounded-lg p-6">
+      <h4 class="text-lg font-medium text-white mb-4">{% trans "Usage Trends" %}</h4>
+
+      <!-- Chart Placeholder -->
+      <div class="h-64 flex items-center justify-center text-slate-400 border-2 border-dashed border-slate-600 rounded-lg">
+        <div class="text-center">
+          <svg class="w-16 h-16 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"></path>
+          </svg>
+          <p class="text-lg font-medium">{% trans "Historical Charts" %}</p>
+          <p class="text-sm mt-1">{% trans "Coming Soon - Interactive usage trends" %}</p>
+          <div class="mt-4 text-xs text-slate-500">
+            {% trans "Period:" %} {{ period|upper }} | {% trans "Last Updated:" %} {% now "M d, H:i" %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Uptime Information -->
+    {% if usage.historical_usage.uptime_percentage %}
+    <div class="bg-slate-700/30 rounded-lg p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h4 class="text-lg font-medium text-white">{% trans "Service Uptime" %}</h4>
+        <div class="flex items-center space-x-2">
+          <span class="w-2 h-2 bg-green-400 rounded-full"></span>
+          <span class="text-sm text-slate-400">{% trans "Online" %}</span>
+        </div>
+      </div>
+
+      <div class="text-center">
+        <div class="text-4xl font-bold text-green-400 mb-2">{{ usage.historical_usage.uptime_percentage }}%</div>
+        <div class="text-slate-400">{% trans "uptime for" %} {{ period }}</div>
+      </div>
+
+      <!-- Uptime Progress Ring -->
+      <div class="flex justify-center mt-6">
+        <div class="relative w-32 h-32">
+          <svg class="w-32 h-32 transform -rotate-90" viewBox="0 0 100 100">
+            <!-- Background circle -->
+            <circle cx="50" cy="50" r="45" fill="none" stroke="#374151" stroke-width="8"/>
+            <!-- Progress circle -->
+            <circle cx="50" cy="50" r="45" fill="none" stroke="#10B981" stroke-width="8"
+                    stroke-linecap="round"
+                    stroke-dasharray="{{ usage.historical_usage.uptime_percentage|floatformat:1 }} 100"
+                    stroke-dashoffset="0"
+                    class="transition-all duration-1000 ease-out"/>
+          </svg>
+          <div class="absolute inset-0 flex items-center justify-center">
+            <div class="text-center">
+              <div class="text-lg font-bold text-white">{{ usage.historical_usage.uptime_percentage }}%</div>
+              <div class="text-xs text-slate-400">{% trans "uptime" %}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+  {% endif %}
+</div>
+
+<!-- Auto-refresh every 5 minutes -->
+<script>
+setTimeout(function() {
+  // Auto-refresh usage data every 5 minutes
+  htmx.ajax('GET', window.location.pathname.replace('/services/', '/services/').replace('/', '/usage/'), {
+    values: {'period': '{{ period }}'},
+    target: '#usage-charts',
+    swap: 'innerHTML'
+  });
+}, 300000); // 5 minutes
+</script>

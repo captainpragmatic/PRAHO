@@ -1,313 +1,613 @@
 {% extends "base.html" %}
 {% load i18n %}
-{% load ui_components %}
 
-{% block title %}{% trans "Service Details" %} - {{ service.name }}{% endblock %}
+{% block title %}{{ service.service_name }} - {% trans "Service Details" %}{% endblock %}
 
 {% block content %}
-<div class="container mx-auto px-4 py-8">
-    <!-- Header -->
-    <div class="mb-8">
-        <div class="flex items-center justify-between">
-            <div>
-                <div class="flex items-center space-x-3 mb-2">
-                    <h1 class="text-3xl font-bold text-gray-900 dark:text-white">
-                        {{ service.name }}
-                    </h1>
-                    {% if service.status == "active" %}
-                        {% badge "Active" variant="success" icon="🟢" %}
-                    {% elif service.status == "suspended" %}
-                        {% badge "Suspended" variant="warning" icon="⏸️" %}
-                    {% elif service.status == "pending" %}
-                        {% badge "Pending Setup" variant="info" icon="🔄" %}
-                    {% elif service.status == "cancelled" %}
-                        {% badge "Cancelled" variant="secondary" icon="❌" %}
-                    {% else %}
-                        {% badge service.status|title variant="secondary" %}
-                    {% endif %}
-                    
-                    {% if service.service_type == "shared_hosting" %}
-                        {% badge "Shared Hosting" variant="info" icon="🌐" %}
-                    {% elif service.service_type == "vps" %}
-                        {% badge "VPS" variant="primary" icon="🖥️" %}
-                    {% elif service.service_type == "dedicated" %}
-                        {% badge "Dedicated Server" variant="primary" icon="🏢" %}
-                    {% elif service.service_type == "domain" %}
-                        {% badge "Domain" variant="secondary" icon="🌍" %}
-                    {% endif %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+  <!-- Hero Section -->
+  <div class="mb-8">
+    <!-- Back Button -->
+    <div class="mb-4">
+      <a href="{% url 'services:list' %}"
+         class="inline-flex items-center text-slate-400 hover:text-white transition-colors">
+        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+        </svg>
+        {% trans "Back to Services" %}
+      </a>
+    </div>
+
+    <!-- Service Header -->
+    <div class="bg-gradient-to-r from-slate-800 to-slate-900 rounded-lg p-6 border border-slate-700">
+      <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center space-x-3 mb-3">
+            <!-- Service Type Icon -->
+            <div class="flex-shrink-0">
+              {% if service.service_plan.plan_type == "shared_hosting" %}
+                <div class="w-12 h-12 bg-blue-600/20 rounded-lg flex items-center justify-center">
+                  <span class="text-2xl">🌐</span>
                 </div>
-                {% if service.description %}
-                    <p class="text-gray-600 dark:text-gray-400">
-                        {{ service.description }}
-                    </p>
+              {% elif service.service_plan.plan_type == "vps" %}
+                <div class="w-12 h-12 bg-purple-600/20 rounded-lg flex items-center justify-center">
+                  <span class="text-2xl">🖥️</span>
+                </div>
+              {% elif service.service_plan.plan_type == "dedicated" %}
+                <div class="w-12 h-12 bg-red-600/20 rounded-lg flex items-center justify-center">
+                  <span class="text-2xl">🏢</span>
+                </div>
+              {% else %}
+                <div class="w-12 h-12 bg-slate-600/20 rounded-lg flex items-center justify-center">
+                  <span class="text-2xl">📦</span>
+                </div>
+              {% endif %}
+            </div>
+
+            <!-- Service Info -->
+            <div class="flex-1 min-w-0">
+              <h1 class="text-2xl sm:text-3xl font-bold text-white truncate">
+                {{ service.service_name }}
+              </h1>
+              <div class="flex items-center space-x-2 mt-1">
+                <!-- Service Plan -->
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                  {{ service.service_plan.name }}
+                </span>
+
+                <!-- Status Badge -->
+                {% if service.status == 'active' %}
+                  <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                    <span class="w-2 h-2 bg-green-400 rounded-full mr-1"></span>
+                    {% trans 'Active' %}
+                  </span>
+                {% elif service.status == 'suspended' %}
+                  <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                    <span class="w-2 h-2 bg-red-400 rounded-full mr-1"></span>
+                    {% trans 'Suspended' %}
+                  </span>
+                {% elif service.status == 'pending' %}
+                  <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                    <span class="w-2 h-2 bg-yellow-400 rounded-full mr-1"></span>
+                    {% trans 'Pending' %}
+                  </span>
+                {% else %}
+                  <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                    <span class="w-2 h-2 bg-gray-400 rounded-full mr-1"></span>
+                    {{ service.status_display }}
+                  </span>
                 {% endif %}
-            </div>
-            <div>
-                {% button text=_("Back to Services") href="services:list" variant="outline" icon="arrow-left" %}
-            </div>
-        </div>
-    </div>
+              </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <!-- Main Content -->
-        <div class="lg:col-span-2 space-y-6">
-            <!-- Service Information -->
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-                <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-4">
-                    {% trans "Service Information" %}
-                </h2>
-                
+              {% if service.domain %}
+                <p class="text-slate-400 text-sm mt-1">
+                  🌍 {{ service.domain }}
+                </p>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick Actions (Desktop) -->
+        <div class="flex-shrink-0 mt-4 lg:mt-0 lg:ml-6">
+          <div class="flex space-x-3">
+            {% if service.status == 'active' %}
+              <!-- Control Panel Access -->
+              <a href="#"
+                 class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-colors">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                </svg>
+                {% trans "Control Panel" %}
+              </a>
+            {% endif %}
+
+            <!-- Contact Support -->
+            <a href="#"
+               class="inline-flex items-center px-4 py-2 border border-slate-600 text-sm font-medium rounded-md text-slate-300 hover:text-white hover:border-slate-500 transition-colors">
+              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+              </svg>
+              {% trans "Support" %}
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Stats Bar -->
+      <div class="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <!-- Monthly Cost -->
+        <div class="bg-slate-700/50 rounded-lg p-3">
+          <div class="text-xs text-slate-400 uppercase tracking-wide">{% trans "Monthly Cost" %}</div>
+          <div class="text-lg font-semibold text-white">
+            {% if service.monthly_price %}
+              {{ service.monthly_price|floatformat:2 }} RON
+            {% else %}
+              <span class="text-slate-500">{% trans "N/A" %}</span>
+            {% endif %}
+          </div>
+        </div>
+
+        <!-- Next Billing -->
+        <div class="bg-slate-700/50 rounded-lg p-3">
+          <div class="text-xs text-slate-400 uppercase tracking-wide">{% trans "Next Billing" %}</div>
+          <div class="text-lg font-semibold text-white">
+            {% if service.next_billing_date %}
+              {{ service.next_billing_date|date:"M d" }}
+            {% else %}
+              <span class="text-slate-500">{% trans "N/A" %}</span>
+            {% endif %}
+          </div>
+        </div>
+
+        <!-- Service Age -->
+        <div class="bg-slate-700/50 rounded-lg p-3">
+          <div class="text-xs text-slate-400 uppercase tracking-wide">{% trans "Service Age" %}</div>
+          <div class="text-lg font-semibold text-white">
+            {% if service.service_age_days %}
+              {{ service.service_age_days }} {% trans "days" %}
+            {% else %}
+              <span class="text-slate-500">{% trans "N/A" %}</span>
+            {% endif %}
+          </div>
+        </div>
+
+        <!-- Auto Renew -->
+        <div class="bg-slate-700/50 rounded-lg p-3">
+          <div class="text-xs text-slate-400 uppercase tracking-wide">{% trans "Auto Renew" %}</div>
+          <div class="text-lg font-semibold text-white">
+            {% if service.auto_renew %}
+              <span class="text-green-400">{% trans "Enabled" %}</span>
+            {% elif service.auto_renew == False %}
+              <span class="text-red-400">{% trans "Disabled" %}</span>
+            {% else %}
+              <span class="text-slate-500">{% trans "N/A" %}</span>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <div class="grid grid-cols-1 xl:grid-cols-3 gap-8">
+    <!-- Left Column - Main Content -->
+    <div class="xl:col-span-2 space-y-8">
+      <!-- Navigation Tabs -->
+      <div class="bg-slate-800 rounded-lg border border-slate-700">
+        <div class="border-b border-slate-700">
+          <nav class="-mb-px flex" x-data="{ activeTab: 'overview' }">
+            <button @click="activeTab = 'overview'"
+                    :class="activeTab === 'overview' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-slate-300'"
+                    class="whitespace-nowrap border-b-2 py-3 px-6 text-sm font-medium transition-colors">
+              {% trans "Overview" %}
+            </button>
+            {% if service.status == 'active' %}
+            <button @click="activeTab = 'usage'"
+                    :class="activeTab === 'usage' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-slate-300'"
+                    class="whitespace-nowrap border-b-2 py-3 px-6 text-sm font-medium transition-colors">
+              {% trans "Usage & Performance" %}
+            </button>
+            {% endif %}
+            <button @click="activeTab = 'billing'"
+                    :class="activeTab === 'billing' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-slate-300'"
+                    class="whitespace-nowrap border-b-2 py-3 px-6 text-sm font-medium transition-colors">
+              {% trans "Billing" %}
+            </button>
+            {% if domains %}
+            <button @click="activeTab = 'domains'"
+                    :class="activeTab === 'domains' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-slate-300'"
+                    class="whitespace-nowrap border-b-2 py-3 px-6 text-sm font-medium transition-colors">
+              {% trans "Domains" %}
+            </button>
+            {% endif %}
+          </nav>
+        </div>
+
+        <!-- Tab Content -->
+        <div class="p-6">
+          <!-- Overview Tab -->
+          <div x-show="activeTab === 'overview'" x-cloak>
+            <div class="space-y-6">
+              <!-- Service Information -->
+              <div>
+                <h3 class="text-lg font-semibold text-white mb-4">{% trans "Service Information" %}</h3>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div class="space-y-3">
                     <div>
-                        <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">
-                            {% trans "Basic Information" %}
-                        </h3>
-                        <dl class="space-y-2">
-                            <div>
-                                <dt class="text-sm font-medium text-gray-700 dark:text-gray-300">{% trans "Service ID" %}</dt>
-                                <dd class="text-sm text-gray-900 dark:text-white">#{{ service_id }}</dd>
-                            </div>
-                            <div>
-                                <dt class="text-sm font-medium text-gray-700 dark:text-gray-300">{% trans "Created" %}</dt>
-                                <dd class="text-sm text-gray-900 dark:text-white">{{ service.created_at|date:"M j, Y H:i" }}</dd>
-                            </div>
-                            <div>
-                                <dt class="text-sm font-medium text-gray-700 dark:text-gray-300">{% trans "Last Updated" %}</dt>
-                                <dd class="text-sm text-gray-900 dark:text-white">{{ service.updated_at|date:"M j, Y H:i" }}</dd>
-                            </div>
-                        </dl>
+                      <dt class="text-sm font-medium text-slate-400">{% trans "Service ID" %}</dt>
+                      <dd class="text-sm text-white font-mono">#{{ service.id }}</dd>
                     </div>
-                    
                     <div>
-                        <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">
-                            {% trans "Billing Information" %}
-                        </h3>
-                        <dl class="space-y-2">
-                            <div>
-                                <dt class="text-sm font-medium text-gray-700 dark:text-gray-300">{% trans "Monthly Cost" %}</dt>
-                                <dd class="text-sm text-gray-900 dark:text-white">{{ service.monthly_cost|floatformat:2 }}€</dd>
-                            </div>
-                            <div>
-                                <dt class="text-sm font-medium text-gray-700 dark:text-gray-300">{% trans "Next Billing" %}</dt>
-                                <dd class="text-sm text-gray-900 dark:text-white">{{ service.next_billing_date|date:"M j, Y"|default:_("N/A") }}</dd>
-                            </div>
-                            <div>
-                                <dt class="text-sm font-medium text-gray-700 dark:text-gray-300">{% trans "Billing Cycle" %}</dt>
-                                <dd class="text-sm text-gray-900 dark:text-white">{{ service.billing_cycle|default:_("Monthly") }}</dd>
-                            </div>
-                        </dl>
+                      <dt class="text-sm font-medium text-slate-400">{% trans "Username" %}</dt>
+                      <dd class="text-sm text-white font-mono">{{ service.username|default:"N/A" }}</dd>
                     </div>
-                </div>
-            </div>
-
-            <!-- Service Specifications -->
-            {% if service.specifications %}
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-                    <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-4">
-                        {% trans "Specifications" %}
-                    </h2>
-                    
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {% for spec_key, spec_value in service.specifications.items %}
-                            <div class="flex justify-between py-2 border-b border-gray-200 dark:border-gray-700 last:border-b-0">
-                                <dt class="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                    {{ spec_key|title }}
-                                </dt>
-                                <dd class="text-sm text-gray-900 dark:text-white">
-                                    {{ spec_value }}
-                                </dd>
-                            </div>
-                        {% endfor %}
+                    <div>
+                      <dt class="text-sm font-medium text-slate-400">{% trans "Server Location" %}</dt>
+                      <dd class="text-sm text-white">{{ service.server.location|default:"Romania" }}</dd>
                     </div>
-                </div>
-            {% endif %}
-
-            <!-- Usage Charts -->
-            {% if service.status == "active" %}
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-                    <div class="flex items-center justify-between mb-4">
-                        <h2 class="text-xl font-semibold text-gray-900 dark:text-white">
-                            {% trans "Resource Usage" %}
-                        </h2>
-                        <select onchange="loadUsageData(this.value)" class="text-sm rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white">
-                            <option value="24h">{% trans "Last 24 Hours" %}</option>
-                            <option value="7d">{% trans "Last 7 Days" %}</option>
-                            <option value="30d">{% trans "Last 30 Days" %}</option>
-                        </select>
+                  </div>
+                  <div class="space-y-3">
+                    <div>
+                      <dt class="text-sm font-medium text-slate-400">{% trans "Created" %}</dt>
+                      <dd class="text-sm text-white">{{ service.created_at|date:"M d, Y H:i" }}</dd>
                     </div>
-                    
-                    <div id="usage-charts" hx-get="{% url 'services:usage' service_id=service_id %}" hx-trigger="load" hx-vals="{'period': '24h'}">
-                        <!-- Usage charts will be loaded here -->
-                        <div class="flex items-center justify-center h-48">
-                            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                        </div>
+                    {% if service.activated_at %}
+                    <div>
+                      <dt class="text-sm font-medium text-slate-400">{% trans "Activated" %}</dt>
+                      <dd class="text-sm text-white">{{ service.activated_at|date:"M d, Y H:i" }}</dd>
                     </div>
-                </div>
-            {% endif %}
-
-            <!-- Recent Activity -->
-            {% if service.recent_activity %}
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-                    <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-4">
-                        {% trans "Recent Activity" %}
-                    </h2>
-                    
-                    <div class="space-y-4">
-                        {% for activity in service.recent_activity %}
-                            <div class="flex items-start space-x-3">
-                                <div class="flex-shrink-0 mt-1">
-                                    <div class="w-2 h-2 bg-blue-500 rounded-full"></div>
-                                </div>
-                                <div class="flex-1">
-                                    <p class="text-sm text-gray-900 dark:text-white">
-                                        {{ activity.description }}
-                                    </p>
-                                    <p class="text-xs text-gray-500 dark:text-gray-400">
-                                        {{ activity.timestamp|date:"M j, Y H:i" }}
-                                    </p>
-                                </div>
-                            </div>
-                        {% endfor %}
-                    </div>
-                </div>
-            {% endif %}
-        </div>
-
-        <!-- Sidebar -->
-        <div class="lg:col-span-1 space-y-6">
-            <!-- Service Actions -->
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                    {% trans "Service Actions" %}
-                </h3>
-                
-                {% url 'services:request_action' service_id=service_id as action_url %}
-                <div class="space-y-3">
-                    {% if service.status == "active" %}
-                        {% button text=_("Request Upgrade") hx_post=action_url hx_vals="{'action': 'upgrade_request'}" variant="primary" full_width=True %}
-                        {% button text=_("Request Suspension") hx_post=action_url hx_vals="{'action': 'suspend_request'}" variant="warning" full_width=True hx_confirm=_("Are you sure you want to request suspension?") %}
-                    {% elif service.status == "suspended" %}
-                        {% button text=_("Request Reactivation") hx_post=action_url hx_vals="{'action': 'reactivate_request'}" variant="primary" full_width=True %}
                     {% endif %}
-                    
-                    {% url 'services:usage' service_id=service_id as usage_url %}
-                    {% button text=_("View Usage History") href=usage_url variant="outline" full_width=True %}
-                    {% button text=_("Contact Support") href="#" variant="outline" full_width=True %}
+                    <div>
+                      <dt class="text-sm font-medium text-slate-400">{% trans "Last Updated" %}</dt>
+                      <dd class="text-sm text-white">{{ service.updated_at|date:"M d, Y H:i" }}</dd>
+                    </div>
+                  </div>
                 </div>
+              </div>
+
+              <!-- Plan Specifications -->
+              <div>
+                <h3 class="text-lg font-semibold text-white mb-4">{% trans "Plan Specifications" %}</h3>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {% if service.service_plan.disk_space_gb %}
+                  <div class="bg-slate-700/30 rounded-lg p-4 text-center">
+                    <div class="text-2xl font-bold text-blue-400">{{ service.service_plan.disk_space_gb }}</div>
+                    <div class="text-xs text-slate-400 uppercase tracking-wide">GB {% trans "Storage" %}</div>
+                  </div>
+                  {% endif %}
+
+                  {% if service.service_plan.bandwidth_gb %}
+                  <div class="bg-slate-700/30 rounded-lg p-4 text-center">
+                    <div class="text-2xl font-bold text-green-400">{{ service.service_plan.bandwidth_gb }}</div>
+                    <div class="text-xs text-slate-400 uppercase tracking-wide">GB {% trans "Bandwidth" %}</div>
+                  </div>
+                  {% endif %}
+
+                  {% if service.service_plan.email_accounts %}
+                  <div class="bg-slate-700/30 rounded-lg p-4 text-center">
+                    <div class="text-2xl font-bold text-purple-400">{{ service.service_plan.email_accounts }}</div>
+                    <div class="text-xs text-slate-400 uppercase tracking-wide">{% trans "Email Accounts" %}</div>
+                  </div>
+                  {% endif %}
+
+                  {% if service.service_plan.databases %}
+                  <div class="bg-slate-700/30 rounded-lg p-4 text-center">
+                    <div class="text-2xl font-bold text-yellow-400">{{ service.service_plan.databases }}</div>
+                    <div class="text-xs text-slate-400 uppercase tracking-wide">{% trans "Databases" %}</div>
+                  </div>
+                  {% endif %}
+                </div>
+              </div>
             </div>
+          </div>
 
-            <!-- Quick Stats -->
-            {% if service.status == "active" %}
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                        {% trans "Current Usage" %}
-                    </h3>
-                    
-                    <div class="space-y-4">
-                        {% if service.current_usage.disk %}
-                            <div>
-                                <div class="flex justify-between text-sm mb-1">
-                                    <span class="text-gray-700 dark:text-gray-300">{% trans "Disk Space" %}</span>
-                                    <span class="text-gray-900 dark:text-white">{{ service.current_usage.disk.used }} / {{ service.current_usage.disk.total }}</span>
-                                </div>
-                                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                                    <div class="bg-blue-600 h-2 rounded-full" style="width: {{ service.current_usage.disk.percentage }}%"></div>
-                                </div>
-                            </div>
-                        {% endif %}
-                        
-                        {% if service.current_usage.bandwidth %}
-                            <div>
-                                <div class="flex justify-between text-sm mb-1">
-                                    <span class="text-gray-700 dark:text-gray-300">{% trans "Bandwidth" %}</span>
-                                    <span class="text-gray-900 dark:text-white">{{ service.current_usage.bandwidth.used }} / {{ service.current_usage.bandwidth.total }}</span>
-                                </div>
-                                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                                    <div class="bg-green-600 h-2 rounded-full" style="width: {{ service.current_usage.bandwidth.percentage }}%"></div>
-                                </div>
-                            </div>
-                        {% endif %}
-                        
-                        {% if service.current_usage.cpu %}
-                            <div>
-                                <div class="flex justify-between text-sm mb-1">
-                                    <span class="text-gray-700 dark:text-gray-300">{% trans "CPU Usage" %}</span>
-                                    <span class="text-gray-900 dark:text-white">{{ service.current_usage.cpu }}%</span>
-                                </div>
-                                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                                    <div class="bg-yellow-600 h-2 rounded-full" style="width: {{ service.current_usage.cpu }}%"></div>
-                                </div>
-                            </div>
-                        {% endif %}
-                    </div>
+          <!-- Usage Tab -->
+          {% if service.status == 'active' %}
+          <div x-show="activeTab === 'usage'" x-cloak>
+            <div class="space-y-6">
+              <h3 class="text-lg font-semibold text-white">{% trans "Current Usage" %}</h3>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Disk Usage -->
+                {% if service.service_plan.disk_space_gb %}
+                <div class="bg-slate-700/30 rounded-lg p-6">
+                  <div class="flex items-center justify-between mb-2">
+                    <h4 class="text-sm font-medium text-slate-300">{% trans "Disk Space" %}</h4>
+                    <span class="text-sm text-slate-400">{{ service.disk_usage_gb|floatformat:1 }} GB / {{ service.service_plan.disk_space_gb }} GB</span>
+                  </div>
+                  <div class="w-full bg-slate-600 rounded-full h-2.5">
+                    <div class="bg-blue-500 h-2.5 rounded-full transition-all duration-500"
+                         style="width: {{ service.disk_usage_percentage|default:0 }}%"></div>
+                  </div>
+                  <div class="text-xs text-slate-400 mt-1">{{ service.disk_usage_percentage|default:0|floatformat:1 }}% {% trans "used" %}</div>
                 </div>
-            {% endif %}
+                {% endif %}
 
-            <!-- Service Information -->
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                    {% trans "Service Details" %}
-                </h3>
-                
-                <dl class="space-y-3">
+                <!-- Bandwidth Usage -->
+                {% if service.service_plan.bandwidth_gb %}
+                <div class="bg-slate-700/30 rounded-lg p-6">
+                  <div class="flex items-center justify-between mb-2">
+                    <h4 class="text-sm font-medium text-slate-300">{% trans "Bandwidth" %}</h4>
+                    <span class="text-sm text-slate-400">{{ service.bandwidth_usage_gb|floatformat:1 }} GB / {{ service.service_plan.bandwidth_gb }} GB</span>
+                  </div>
+                  <div class="w-full bg-slate-600 rounded-full h-2.5">
+                    <div class="bg-green-500 h-2.5 rounded-full transition-all duration-500"
+                         style="width: {{ service.bandwidth_usage_percentage|default:0 }}%"></div>
+                  </div>
+                  <div class="text-xs text-slate-400 mt-1">{{ service.bandwidth_usage_percentage|default:0|floatformat:1 }}% {% trans "used" %}</div>
+                </div>
+                {% endif %}
+
+                <!-- Email Accounts -->
+                {% if service.service_plan.email_accounts %}
+                <div class="bg-slate-700/30 rounded-lg p-6">
+                  <div class="flex items-center justify-between mb-2">
+                    <h4 class="text-sm font-medium text-slate-300">{% trans "Email Accounts" %}</h4>
+                    <span class="text-sm text-slate-400">{{ service.email_accounts_used|default:0 }} / {{ service.service_plan.email_accounts }}</span>
+                  </div>
+                  <div class="w-full bg-slate-600 rounded-full h-2.5">
+                    <div class="bg-purple-500 h-2.5 rounded-full transition-all duration-500"
+                         style="width: {% widthratio service.email_accounts_used|default:0 service.service_plan.email_accounts 100 %}%"></div>
+                  </div>
+                </div>
+                {% endif %}
+
+                <!-- Databases -->
+                {% if service.service_plan.databases %}
+                <div class="bg-slate-700/30 rounded-lg p-6">
+                  <div class="flex items-center justify-between mb-2">
+                    <h4 class="text-sm font-medium text-slate-300">{% trans "Databases" %}</h4>
+                    <span class="text-sm text-slate-400">{{ service.databases_used|default:0 }} / {{ service.service_plan.databases }}</span>
+                  </div>
+                  <div class="w-full bg-slate-600 rounded-full h-2.5">
+                    <div class="bg-yellow-500 h-2.5 rounded-full transition-all duration-500"
+                         style="width: {% widthratio service.databases_used|default:0 service.service_plan.databases 100 %}%"></div>
+                  </div>
+                </div>
+                {% endif %}
+              </div>
+
+              <!-- Usage History -->
+              <div class="bg-slate-700/30 rounded-lg p-6">
+                <div class="flex items-center justify-between mb-4">
+                  <h4 class="text-lg font-medium text-white">{% trans "Usage History" %}</h4>
+                  <select class="bg-slate-700 border border-slate-600 text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 px-3 py-1">
+                    <option value="7d">{% trans "Last 7 days" %}</option>
+                    <option value="30d">{% trans "Last 30 days" %}</option>
+                    <option value="90d">{% trans "Last 90 days" %}</option>
+                  </select>
+                </div>
+                <div class="h-64 flex items-center justify-center text-slate-400">
+                  <div class="text-center">
+                    <svg class="w-12 h-12 mx-auto mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                    </svg>
+                    <p>{% trans "Usage charts will be available soon" %}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          {% endif %}
+
+          <!-- Billing Tab -->
+          <div x-show="activeTab === 'billing'" x-cloak>
+            <div class="space-y-6">
+              <h3 class="text-lg font-semibold text-white">{% trans "Billing Information" %}</h3>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="space-y-4">
+                  <div>
+                    <dt class="text-sm font-medium text-slate-400">{% trans "Plan Price" %}</dt>
+                    <dd class="text-lg font-semibold text-white">
+                      {% if service.monthly_price %}
+                        {{ service.monthly_price|floatformat:2 }} RON/{% trans "month" %}
+                      {% else %}
+                        <span class="text-slate-500">{% trans "N/A" %}</span>
+                      {% endif %}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt class="text-sm font-medium text-slate-400">{% trans "Total with VAT" %}</dt>
+                    <dd class="text-lg font-semibold text-green-400">
+                      {% if service.total_monthly_cost %}
+                        {{ service.total_monthly_cost|floatformat:2 }} RON/{% trans "month" %}
+                      {% else %}
+                        <span class="text-slate-500">{% trans "N/A" %}</span>
+                      {% endif %}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt class="text-sm font-medium text-slate-400">{% trans "VAT Amount" %}</dt>
+                    <dd class="text-sm text-slate-300">
+                      {% if service.vat_amount %}
+                        {{ service.vat_amount|floatformat:2 }} RON (19%)
+                      {% else %}
+                        <span class="text-slate-500">{% trans "N/A" %}</span>
+                      {% endif %}
+                    </dd>
+                  </div>
+                </div>
+
+                <div class="space-y-4">
+                  <div>
+                    <dt class="text-sm font-medium text-slate-400">{% trans "Billing Cycle" %}</dt>
+                    <dd class="text-sm text-white">{{ service.billing_cycle_display|default:"Monthly" }}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-sm font-medium text-slate-400">{% trans "Next Billing Date" %}</dt>
+                    <dd class="text-sm text-white">
+                      {% if service.next_billing_date %}
+                        {{ service.next_billing_date|date:"F d, Y" }}
+                      {% else %}
+                        <span class="text-slate-500">{% trans "N/A" %}</span>
+                      {% endif %}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt class="text-sm font-medium text-slate-400">{% trans "Setup Fee Paid" %}</dt>
+                    <dd class="text-sm text-white">
+                      {% if service.setup_fee_paid %}
+                        <span class="text-green-400">✅ {% trans "Yes" %}</span>
+                      {% elif service.setup_fee_paid == False %}
+                        <span class="text-red-400">❌ {% trans "No" %}</span>
+                      {% else %}
+                        <span class="text-slate-500">{% trans "N/A" %}</span>
+                      {% endif %}
+                    </dd>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Domains Tab -->
+          {% if domains %}
+          <div x-show="activeTab === 'domains'" x-cloak>
+            <div class="space-y-6">
+              <h3 class="text-lg font-semibold text-white">{% trans "Associated Domains" %}</h3>
+
+              <div class="space-y-3">
+                {% for domain in domains %}
+                <div class="flex items-center justify-between p-4 bg-slate-700/30 rounded-lg">
+                  <div class="flex items-center space-x-3">
+                    <span class="text-lg">🌐</span>
                     <div>
-                        <dt class="text-sm font-medium text-gray-500 dark:text-gray-400">{% trans "Server Location" %}</dt>
-                        <dd class="text-sm text-gray-900 dark:text-white">{{ service.server_location|default:_("Romania") }}</dd>
+                      <div class="text-white font-medium">{{ domain.name }}</div>
+                      {% if domain.status %}
+                      <div class="text-xs text-slate-400">{{ domain.status|title }}</div>
+                      {% endif %}
                     </div>
-                    
-                    <div>
-                        <dt class="text-sm font-medium text-gray-500 dark:text-gray-400">{% trans "IP Address" %}</dt>
-                        <dd class="text-sm text-gray-900 dark:text-white font-mono">{{ service.ip_address|default:_("Not assigned") }}</dd>
-                    </div>
-                    
-                    <div>
-                        <dt class="text-sm font-medium text-gray-500 dark:text-gray-400">{% trans "Control Panel" %}</dt>
-                        <dd class="text-sm text-gray-900 dark:text-white">
-                            {% if service.control_panel_url %}
-                                <a href="{{ service.control_panel_url }}" target="_blank" class="text-blue-600 hover:text-blue-800 dark:text-blue-400">
-                                    {% trans "Access Control Panel" %} ↗
-                                </a>
-                            {% else %}
-                                {% trans "Not available" %}
-                            {% endif %}
-                        </dd>
-                    </div>
-                    
-                    {% if service.domain_name %}
-                        <div>
-                            <dt class="text-sm font-medium text-gray-500 dark:text-gray-400">{% trans "Primary Domain" %}</dt>
-                            <dd class="text-sm text-gray-900 dark:text-white">{{ service.domain_name }}</dd>
-                        </div>
+                  </div>
+                  <div class="flex space-x-2">
+                    {% if domain.status == 'active' %}
+                      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                        {% trans "Active" %}
+                      </span>
+                    {% else %}
+                      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                        {{ domain.status|title }}
+                      </span>
                     {% endif %}
-                </dl>
+                  </div>
+                </div>
+                {% endfor %}
+              </div>
             </div>
+          </div>
+          {% endif %}
         </div>
+      </div>
     </div>
+
+    <!-- Right Sidebar -->
+    <div class="xl:col-span-1 space-y-6">
+      <!-- Quick Actions -->
+      <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+        <h3 class="text-lg font-semibold text-white mb-4">{% trans "Service Actions" %}</h3>
+
+        <div class="space-y-3">
+          {% if service.status == 'active' %}
+            <a href="{% url 'services:request_action' service_id=service_id %}"
+               class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors text-center block">
+              {% trans "Request Upgrade" %}
+            </a>
+            <a href="{% url 'services:request_action' service_id=service_id %}"
+               class="w-full bg-yellow-600 hover:bg-yellow-700 text-white font-medium py-2 px-4 rounded-lg transition-colors text-center block">
+              {% trans "Request Suspension" %}
+            </a>
+          {% elif service.status == 'suspended' %}
+            <a href="{% url 'services:request_action' service_id=service_id %}"
+               class="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-lg transition-colors text-center block">
+              {% trans "Request Reactivation" %}
+            </a>
+          {% endif %}
+
+          <a href="#" class="w-full border border-slate-600 hover:border-slate-500 text-slate-300 hover:text-white font-medium py-2 px-4 rounded-lg transition-colors text-center block">
+            {% trans "View Invoices" %}
+          </a>
+
+          <a href="#" class="w-full border border-slate-600 hover:border-slate-500 text-slate-300 hover:text-white font-medium py-2 px-4 rounded-lg transition-colors text-center block">
+            {% trans "Download Reports" %}
+          </a>
+        </div>
+      </div>
+
+      <!-- Server Information -->
+      {% if service.server %}
+      <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+        <h3 class="text-lg font-semibold text-white mb-4">{% trans "Server Information" %}</h3>
+
+        <div class="space-y-3">
+          <div>
+            <dt class="text-sm font-medium text-slate-400">{% trans "Server Name" %}</dt>
+            <dd class="text-sm text-white">{{ service.server.name }}</dd>
+          </div>
+          <div>
+            <dt class="text-sm font-medium text-slate-400">{% trans "Hostname" %}</dt>
+            <dd class="text-sm text-white font-mono">{{ service.server.hostname }}</dd>
+          </div>
+          {% if service.server.primary_ip %}
+          <div>
+            <dt class="text-sm font-medium text-slate-400">{% trans "IP Address" %}</dt>
+            <dd class="text-sm text-white font-mono">{{ service.server.primary_ip }}</dd>
+          </div>
+          {% endif %}
+          <div>
+            <dt class="text-sm font-medium text-slate-400">{% trans "Location" %}</dt>
+            <dd class="text-sm text-white">{{ service.server.location|default:"Romania" }}</dd>
+          </div>
+          <div>
+            <dt class="text-sm font-medium text-slate-400">{% trans "Status" %}</dt>
+            <dd class="text-sm text-white">
+              {% if service.server.status == 'online' %}
+                <span class="text-green-400">🟢 {% trans "Online" %}</span>
+              {% elif service.server.status == 'offline' %}
+                <span class="text-red-400">🔴 {% trans "Offline" %}</span>
+              {% else %}
+                <span class="text-yellow-400">🟡 {{ service.server.status|title }}</span>
+              {% endif %}
+            </dd>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Support Contact -->
+      <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+        <h3 class="text-lg font-semibold text-white mb-4">{% trans "Need Help?" %}</h3>
+
+        <div class="space-y-3">
+          <a href="#" class="flex items-center space-x-3 text-slate-300 hover:text-white transition-colors">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+            </svg>
+            <span>{% trans "Open Support Ticket" %}</span>
+          </a>
+
+          <a href="#" class="flex items-center space-x-3 text-slate-300 hover:text-white transition-colors">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+            </svg>
+            <span>{% trans "View Documentation" %}</span>
+          </a>
+
+          <a href="mailto:support@pragmatichost.com" class="flex items-center space-x-3 text-slate-300 hover:text-white transition-colors">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+            </svg>
+            <span>{% trans "Email Support" %}</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
-<!-- Usage Data Loading Script -->
-<script>
-function loadUsageData(period) {
-    htmx.ajax('GET', '{% url "services:usage" service_id=service_id %}', {
-        values: {'period': period},
-        target: '#usage-charts',
-        swap: 'innerHTML'
-    });
-}
+<!-- Mobile Quick Actions Bar -->
+<div class="xl:hidden fixed bottom-0 left-0 right-0 bg-slate-800 border-t border-slate-700 p-4 z-10">
+  <div class="flex space-x-3">
+    {% if service.status == 'active' %}
+    <a href="#" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-lg transition-colors text-center">
+      {% trans "Control Panel" %}
+    </a>
+    {% endif %}
+    <a href="{% url 'services:request_action' service_id=service.id %}" class="flex-1 border border-slate-600 hover:border-slate-500 text-slate-300 hover:text-white font-medium py-3 px-4 rounded-lg transition-colors text-center">
+      {% trans "Actions" %}
+    </a>
+  </div>
+</div>
 
-// Handle service action responses
-document.body.addEventListener('htmx:afterRequest', function(evt) {
-    if (evt.detail.xhr.status === 200 && evt.detail.requestConfig.verb === 'post') {
-        // Show success message
-        const response = JSON.parse(evt.detail.xhr.responseText);
-        if (response.success) {
-            alert(response.message || 'Action completed successfully');
-            // Optionally reload the page to reflect changes
-            location.reload();
-        } else {
-            alert(response.error || 'An error occurred');
-        }
-    }
-});
-</script>
+<!-- Add padding bottom on mobile to account for fixed action bar -->
+<div class="xl:hidden h-20"></div>
+
+<!-- Alpine.js for tab functionality -->
+<script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+
+<style>
+[x-cloak] { display: none !important; }
+</style>
+
 {% endblock %}
