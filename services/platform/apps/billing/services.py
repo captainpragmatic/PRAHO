@@ -89,8 +89,9 @@ class InvoiceService:
             # Get invoice sequence
             sequence, created = InvoiceSequence.objects.get_or_create(scope="default")
 
-            # Calculate totals (assuming 19% VAT for Romania)
-            vat_rate = Decimal("0.19")
+            # Calculate totals using current Romanian VAT rate (21%)
+            from apps.common.tax_service import TaxService
+            vat_rate = TaxService.get_vat_rate('RO', as_decimal=True)
             subtotal_amount = Decimal(order.total_cents) / 100
             tax_amount = subtotal_amount * vat_rate
             total_amount = subtotal_amount + tax_amount

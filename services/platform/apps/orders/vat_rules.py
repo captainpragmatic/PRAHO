@@ -6,11 +6,11 @@ Comprehensive EU VAT compliance for Romanian hosting provider.
 
 import logging
 from dataclasses import dataclass
-from decimal import Decimal
-from typing import Dict, List, Optional, Tuple
+from decimal import Decimal, ROUND_HALF_EVEN
 from enum import Enum
 
 from django.utils import timezone
+
 from apps.audit.services import AuditService
 
 logger = logging.getLogger(__name__)
@@ -35,9 +35,9 @@ class VATCalculationResult:
     total_cents: int
     country_code: str
     is_business: bool
-    vat_number: Optional[str]
+    vat_number: str | None
     reasoning: str
-    audit_data: Dict
+    audit_data: dict
 
 
 class OrderVATCalculator:
@@ -46,39 +46,20 @@ class OrderVATCalculator:
     Implements Romanian hosting provider VAT rules with EU compliance.
     """
     
-    # VAT rates by country (as of 2024)
-    VAT_RATES = {
-        'RO': Decimal('19.0'),    # Romania - home country (corrected to 19%)
-        'AT': Decimal('20.0'),    # Austria
-        'BE': Decimal('21.0'),    # Belgium
-        'BG': Decimal('20.0'),    # Bulgaria
-        'CY': Decimal('19.0'),    # Cyprus
-        'CZ': Decimal('21.0'),    # Czech Republic
-        'DE': Decimal('19.0'),    # Germany
-        'DK': Decimal('25.0'),    # Denmark
-        'EE': Decimal('20.0'),    # Estonia
-        'ES': Decimal('21.0'),    # Spain
-        'FI': Decimal('24.0'),    # Finland
-        'FR': Decimal('20.0'),    # France
-        'GR': Decimal('24.0'),    # Greece
-        'HR': Decimal('25.0'),    # Croatia
-        'HU': Decimal('27.0'),    # Hungary
-        'IE': Decimal('23.0'),    # Ireland
-        'IT': Decimal('22.0'),    # Italy
-        'LT': Decimal('21.0'),    # Lithuania
-        'LU': Decimal('17.0'),    # Luxembourg
-        'LV': Decimal('21.0'),    # Latvia
-        'MT': Decimal('18.0'),    # Malta
-        'NL': Decimal('21.0'),    # Netherlands
-        'PL': Decimal('23.0'),    # Poland
-        'PT': Decimal('23.0'),    # Portugal
-        'SE': Decimal('25.0'),    # Sweden
-        'SI': Decimal('22.0'),    # Slovenia
-        'SK': Decimal('20.0'),    # Slovakia
-    }
-    
-    # EU member states
-    EU_COUNTRIES = set(VAT_RATES.keys())
+    # IMPORTANT: VAT rates are now managed centrally via TaxService
+    # This provides a single source of truth for all tax calculations
+
+    @classmethod
+    def _get_vat_rate(cls, country_code: str) -> Decimal:
+        """Get VAT rate from centralized TaxService."""
+        from apps.common.tax_service import TaxService
+        return TaxService.get_vat_rate(country_code, as_decimal=False)
+
+    @classmethod
+    def _get_eu_countries(cls) -> set[str]:
+        """Get EU countries from centralized TaxService."""
+        from apps.common.tax_service import TaxService
+        return TaxService.get_eu_countries()
     
     @classmethod
     def calculate_vat(
@@ -86,9 +67,9 @@ class OrderVATCalculator:
         subtotal_cents: int,
         customer_country: str,
         is_business: bool = False,
-        vat_number: Optional[str] = None,
-        customer_id: Optional[str] = None,
-        order_id: Optional[str] = None
+        vat_number: str | None = None,
+        customer_id: str | None = None,
+        order_id: str | None = None
     ) -> VATCalculationResult:
         """
         🔒 Calculate VAT for order with full compliance and audit logging.
@@ -118,7 +99,8 @@ class OrderVATCalculator:
         else:
             # VAT = subtotal * (vat_rate / 100)
             vat_amount = Decimal(subtotal_cents) * (vat_rate / Decimal('100'))
-            vat_cents = int(vat_amount.quantize(Decimal('1')))  # Round to nearest cent
+            # Use banker's rounding (round half to even) for financial consistency
+            vat_cents = int(vat_amount.quantize(Decimal('1'), rounding=ROUND_HALF_EVEN))
         
         total_cents = subtotal_cents + vat_cents
         
@@ -164,31 +146,43 @@ class OrderVATCalculator:
         cls,
         country_code: str,
         is_business: bool,
-        vat_number: Optional[str]
-    ) -> Tuple[VATScenario, Decimal]:
-        """Determine VAT scenario and rate"""
-        
+        vat_number: str | None
+    ) -> tuple[VATScenario, Decimal]:
+        """
+        Determine VAT scenario and rate - CONSERVATIVE APPROACH
+        Default to Romanian VAT when uncertain for compliance
+        """
+
+        # Normalize and validate country code
+        country_code = country_code.upper().strip() if country_code else 'RO'
+
         # Romania (home country) - always apply Romanian VAT
-        if country_code == 'RO':
-            vat_rate = cls.VAT_RATES['RO']
+        if country_code == 'RO' or country_code in ['ROMANIA', 'ROMÂNIA']:
+            vat_rate = cls._get_vat_rate('RO')
             if is_business:
                 return VATScenario.ROMANIA_B2B, vat_rate
             else:
                 return VATScenario.ROMANIA_B2C, vat_rate
-        
-        # EU member states
-        elif country_code in cls.EU_COUNTRIES:
+
+        # EU member states with valid codes
+        elif country_code in cls._get_eu_countries():
             if is_business and vat_number:
                 # B2B EU: Reverse charge (0% VAT, customer pays in their country)
                 return VATScenario.EU_B2B_REVERSE_CHARGE, Decimal('0.0')
             else:
                 # B2C EU: Apply customer country VAT rate
-                vat_rate = cls.VAT_RATES.get(country_code, Decimal('20.0'))  # Default 20%
+                vat_rate = cls._get_vat_rate(country_code)
                 return VATScenario.EU_B2C, vat_rate
-        
-        # Non-EU countries
+
+        # Unknown/Invalid country codes - DEFAULT TO ROMANIAN VAT for compliance
+        elif not country_code or len(country_code) != 2:
+            # Apply Romanian VAT when country is unclear
+            vat_rate = cls._get_vat_rate('RO')
+            return VATScenario.ROMANIA_B2C, vat_rate  # Treat as consumer for safety
+
+        # Non-EU countries with valid codes
         else:
-            # Non-EU: 0% VAT (export)
+            # Non-EU: 0% VAT (export) - only for clearly identified non-EU countries
             return VATScenario.NON_EU_ZERO_VAT, Decimal('0.0')
     
     @classmethod
@@ -197,18 +191,21 @@ class OrderVATCalculator:
         scenario: VATScenario,
         country_code: str,
         is_business: bool,
-        vat_number: Optional[str]
+        vat_number: str | None
     ) -> str:
         """Generate human-readable reasoning for VAT calculation"""
         
         if scenario == VATScenario.ROMANIA_B2C:
-            return f"Romanian consumer - apply Romanian VAT {cls.VAT_RATES['RO']}%"
-        
+            if country_code in ['RO', 'ROMANIA', 'ROMÂNIA']:
+                return f"Romanian consumer - apply Romanian VAT {cls._get_vat_rate('RO')}%"
+            else:
+                return f"Unknown/Invalid country ({country_code}) - default to Romanian VAT {cls._get_vat_rate('RO')}% for compliance"
+
         elif scenario == VATScenario.ROMANIA_B2B:
-            return f"Romanian business - apply Romanian VAT {cls.VAT_RATES['RO']}%"
-        
+            return f"Romanian business - apply Romanian VAT {cls._get_vat_rate('RO')}%"
+
         elif scenario == VATScenario.EU_B2C:
-            vat_rate = cls.VAT_RATES.get(country_code, Decimal('20.0'))
+            vat_rate = cls._get_vat_rate(country_code)
             return f"EU consumer ({country_code}) - apply destination country VAT {vat_rate}%"
         
         elif scenario == VATScenario.EU_B2B_REVERSE_CHARGE:
@@ -227,12 +224,9 @@ class OrderVATCalculator:
         try:
             AuditService.log_event_legacy(
                 event_type='order_vat_calculation',
-                object_type='order',
-                object_id=result.audit_data.get('order_id'),
-                user_id=None,  # System calculation
-                customer_id=result.audit_data.get('customer_id'),
-                data=result.audit_data,
-                description=f"VAT calculated: {result.scenario.value} - {result.reasoning}"
+                user=None,  # System calculation
+                description=f"VAT calculated: {result.scenario.value} - {result.reasoning}",
+                metadata=result.audit_data,
             )
             
             logger.info(
@@ -276,14 +270,14 @@ class OrderVATCalculator:
         return len(vat_clean) >= 4 and len(vat_clean) <= 15
     
     @classmethod
-    def get_vat_rates_for_country(cls, country_code: str) -> Dict[str, any]:
+    def get_vat_rates_for_country(cls, country_code: str) -> dict[str, any]:
         """Get VAT information for a specific country"""
         
         country_code = country_code.upper()
         
         return {
             'country_code': country_code,
-            'is_eu': country_code in cls.EU_COUNTRIES,
-            'vat_rate': cls.VAT_RATES.get(country_code, Decimal('0.0')),
-            'requires_vat_number_for_reverse_charge': country_code in cls.EU_COUNTRIES and country_code != 'RO'
+            'is_eu': country_code in cls._get_eu_countries(),
+            'vat_rate': cls._get_vat_rate(country_code),
+            'requires_vat_number_for_reverse_charge': country_code in cls._get_eu_countries() and country_code != 'RO'
         }

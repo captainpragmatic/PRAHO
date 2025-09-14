@@ -189,6 +189,20 @@ class ProformaInvoice(models.Model):
     def total(self) -> Decimal:
         return Decimal(self.total_cents) / 100
 
+    def recalculate_totals(self) -> None:
+        """
+        Recalculate document totals from line items.
+        Ensures end-to-end consistency: subtotal = Σ(line subtotals), tax = Σ(line taxes)
+        """
+        lines = self.lines.all()
+
+        # Calculate subtotals and tax amounts by summing line items
+        self.subtotal_cents = sum(line.subtotal_cents for line in lines)
+        self.tax_cents = sum(line.tax_cents for line in lines)
+
+        # Total = subtotal + tax (no discount handling for now)
+        self.total_cents = self.subtotal_cents + self.tax_cents
+
     def clean(self) -> None:
         """🔒 Validate proforma data and log security events"""
         super().clean()
@@ -265,6 +279,7 @@ class ProformaLine(models.Model):
     quantity = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal("1.000"))
     unit_price_cents = models.BigIntegerField(default=0)
     tax_rate = models.DecimalField(max_digits=5, decimal_places=4, default=Decimal("0.0000"))
+    tax_cents = models.BigIntegerField(default=0, help_text=_("Tax amount in cents"))
     line_total_cents = models.BigIntegerField(default=0)
 
     class Meta:
@@ -278,3 +293,24 @@ class ProformaLine(models.Model):
     @property
     def line_total(self) -> Decimal:
         return Decimal(self.line_total_cents) / 100
+
+    @property
+    def subtotal_cents(self) -> int:
+        """Calculate subtotal (quantity × unit_price) in cents"""
+        return int(self.quantity * self.unit_price_cents)
+
+    @property
+    def subtotal(self) -> Decimal:
+        """Return subtotal in currency units"""
+        return Decimal(self.subtotal_cents) / 100
+
+    def calculate_totals(self) -> int:
+        """Calculate tax and line total with proper banker's rounding for Romanian VAT compliance"""
+        from decimal import ROUND_HALF_EVEN
+
+        subtotal = self.subtotal_cents
+        # Use banker's rounding for VAT compliance (same as OrderItem)
+        vat_amount = Decimal(subtotal) * Decimal(str(self.tax_rate))
+        self.tax_cents = int(vat_amount.quantize(Decimal('1'), rounding=ROUND_HALF_EVEN))
+        self.line_total_cents = subtotal + self.tax_cents
+        return self.line_total_cents

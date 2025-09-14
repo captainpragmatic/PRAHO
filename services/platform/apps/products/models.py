@@ -216,6 +216,16 @@ class Product(models.Model):
         validators=[validate_product_config],
     )
 
+    # Service plan mapping for order-to-service creation
+    default_service_plan = models.ForeignKey(
+        "provisioning.ServicePlan",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="products",
+        help_text=_("Default service plan to use when creating services from orders"),
+    )
+
     # Status and availability
     is_active = models.BooleanField(default=True, help_text=_("Whether product is available for purchase"))
     is_featured = models.BooleanField(default=False, help_text=_("Show prominently on website"))
@@ -303,18 +313,28 @@ class Product(models.Model):
         """Get all active prices for this product"""
         return self.prices.filter(is_active=True)
 
-    def get_price_for_period(self, currency_code: str, billing_period: str) -> ProductPrice | None:
-        """Get price for specific currency and billing period"""
+    def get_price_for_currency(self, currency_code: str) -> ProductPrice | None:
+        """Get price for specific currency (simplified - no billing period needed)"""
         try:
-            return self.prices.get(currency__code=currency_code, billing_period=billing_period, is_active=True)
+            return self.prices.get(currency__code=currency_code, is_active=True)
         except ProductPrice.DoesNotExist:
             return None
+
+    def get_price_for_period(self, currency_code: str, billing_period: str) -> ProductPrice | None:
+        """
+        Get ProductPrice for specific currency and billing period (compatibility method for order API).
+
+        Since simplified model has one price per product per currency,
+        this returns the ProductPrice object which can calculate pricing for any billing period.
+        """
+        return self.get_price_for_currency(currency_code)
 
 
 class ProductPrice(models.Model):
     """
-    Multi-currency, multi-period pricing for products.
-    Supports one-time and recurring billing with Romanian specifics.
+    Simplified single-currency pricing for products.
+    Based on monthly price with automatic calculation for longer terms.
+    Romanian hosting provider focused with discount support.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -325,33 +345,35 @@ class ProductPrice(models.Model):
     # Currency
     currency = models.ForeignKey("billing.Currency", on_delete=models.PROTECT, help_text=_("Currency for this price"))
 
-    # Billing configuration
+    # Simplified billing periods - only these three supported
     BILLING_PERIODS: ClassVar[tuple[tuple[str, Any], ...]] = (
-        ("once", _("One Time")),
         ("monthly", _("Monthly")),
-        ("quarterly", _("Quarterly")),
-        ("semiannual", _("Semi-Annual")),
-        ("annual", _("Annual")),
-        ("biennial", _("Biennial")),
-        ("triennial", _("Triennial")),
+        ("semiannual", _("Semi-Annual (6 months)")),
+        ("annual", _("Annual (12 months)")),
     )
-    billing_period = models.CharField(max_length=20, choices=BILLING_PERIODS, help_text=_("Billing frequency"))
 
-    # Pricing in cents to avoid float precision issues
-    amount_cents = models.BigIntegerField(
-        validators=[MinValueValidator(0)], help_text=_("Recurring price in cents (e.g., 2999 for 29.99 RON)")
+    # Monthly base pricing in cents
+    monthly_price_cents = models.BigIntegerField(
+        validators=[MinValueValidator(0)], help_text=_("Monthly base price in cents (e.g., 2999 for 29.99 RON)")
     )
     setup_cents = models.BigIntegerField(
         default=0, validators=[MinValueValidator(0)], help_text=_("One-time setup fee in cents")
     )
 
-    # Optional pricing features
-    discount_percent = models.DecimalField(
+    # Discount configuration for longer billing periods
+    semiannual_discount_percent = models.DecimalField(
         max_digits=5,
         decimal_places=2,
         default=Decimal("0.00"),
         validators=[MinValueValidator(0), MaxValueValidator(100)],
-        help_text=_("Percentage discount (0-100)"),
+        help_text=_("Percentage discount for 6-month billing (0-100)"),
+    )
+    annual_discount_percent = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        help_text=_("Percentage discount for 12-month billing (0-100)"),
     )
 
     # Minimum commitment
@@ -377,58 +399,109 @@ class ProductPrice(models.Model):
         db_table = "product_prices"
         verbose_name = _("Product Price")
         verbose_name_plural = _("Product Prices")
-        unique_together: ClassVar[tuple[tuple[str, ...], ...]] = (("product", "currency", "billing_period"),)
-        ordering: ClassVar[tuple[str, ...]] = ("billing_period", "amount_cents")
+        unique_together: ClassVar[tuple[tuple[str, ...], ...]] = (("product", "currency"),)
+        ordering: ClassVar[tuple[str, ...]] = ("currency__code", "monthly_price_cents")
         indexes: ClassVar[tuple[models.Index, ...]] = (
-            models.Index(fields=["currency", "billing_period"]),
+            models.Index(fields=["currency"]),
             models.Index(fields=["is_active"]),
         )
 
     def __str__(self) -> str:
-        return f"{self.product.name} - {self.currency.code} {self.amount} {self.billing_period}"
+        return f"{self.product.name} - {self.currency.code} {self.monthly_price} monthly"
 
     @property
-    def amount(self) -> Decimal:
-        """Return amount in currency units (e.g., 29.99)"""
-        return Decimal(self.amount_cents) / 100
+    def monthly_price(self) -> Decimal:
+        """Return monthly price in currency units (e.g., 29.99)"""
+        return Decimal(self.monthly_price_cents) / 100
 
     @property
     def setup_fee(self) -> Decimal:
         """Return setup fee in currency units"""
         return Decimal(self.setup_cents) / 100
 
-    @property
-    def effective_price_cents(self) -> int:
-        """Get effective price considering promotions"""
-        if self.promo_price_cents and self.promo_valid_until and timezone.now() <= self.promo_valid_until:
-            return self.promo_price_cents
-        return self.amount_cents
+    def get_price_for_period(self, billing_period: str) -> Decimal:
+        """Calculate price for a specific billing period with discounts applied"""
+        if billing_period == "monthly":
+            return self.monthly_price
+        elif billing_period == "semiannual":
+            base_price = self.monthly_price * 6
+            if self.semiannual_discount_percent > 0:
+                discount_amount = base_price * (self.semiannual_discount_percent / 100)
+                return base_price - discount_amount
+            return base_price
+        elif billing_period == "annual":
+            base_price = self.monthly_price * 12
+            if self.annual_discount_percent > 0:
+                discount_amount = base_price * (self.annual_discount_percent / 100)
+                return base_price - discount_amount
+            return base_price
+        else:
+            raise ValueError(f"Unsupported billing period: {billing_period}")
+
+    def get_price_cents_for_period(self, billing_period: str) -> int:
+        """Calculate price in cents for a specific billing period with discounts applied"""
+        return int(self.get_price_for_period(billing_period) * 100)
 
     @property
-    def effective_price(self) -> Decimal:
-        """Get effective price in currency units"""
-        return Decimal(self.effective_price_cents) / 100
+    def semiannual_price(self) -> Decimal:
+        """Calculate semiannual price with discount"""
+        return self.get_price_for_period("semiannual")
+
+    @property
+    def annual_price(self) -> Decimal:
+        """Calculate annual price with discount"""
+        return self.get_price_for_period("annual")
+
+    @property
+    def has_semiannual_discount(self) -> bool:
+        """Check if semiannual discount is active"""
+        return self.semiannual_discount_percent > 0
+
+    @property
+    def has_annual_discount(self) -> bool:
+        """Check if annual discount is active"""
+        return self.annual_discount_percent > 0
+
+    @property
+    def effective_monthly_price_cents(self) -> int:
+        """Get effective monthly price considering promotions"""
+        if self.promo_price_cents and self.promo_valid_until and timezone.now() <= self.promo_valid_until:
+            return self.promo_price_cents
+        return self.monthly_price_cents
+
+    @property
+    def effective_monthly_price(self) -> Decimal:
+        """Get effective monthly price in currency units"""
+        return Decimal(self.effective_monthly_price_cents) / 100
 
     def clean(self) -> None:
         """🔒 Validate pricing constraints and log security validation"""
         super().clean()
 
-        # Amount constraints
-        if self.amount_cents is None or int(self.amount_cents) < 0:
-            raise ValidationError("Amount cannot be negative")
+        # Monthly price constraints
+        if self.monthly_price_cents is None or int(self.monthly_price_cents) < 0:
+            raise ValidationError("Monthly price cannot be negative")
 
         # Reject unrealistic prices (> 1,000,000.00 in major units)
-        if int(self.amount_cents) > MAX_PRICE_CENTS:
-            raise ValidationError("Amount too large")
+        if int(self.monthly_price_cents) > MAX_PRICE_CENTS:
+            raise ValidationError("Monthly price too large")
 
-        # Discount range 0..100
-        if self.discount_percent is not None:
+        # Discount range validation
+        if self.semiannual_discount_percent is not None:
             try:
-                dp = Decimal(self.discount_percent)
+                sdp = Decimal(self.semiannual_discount_percent)
             except Exception as e:
-                raise ValidationError("Invalid discount percent") from e
-            if dp < Decimal("0") or dp > Decimal("100"):
-                raise ValidationError("Invalid discount percent")
+                raise ValidationError("Invalid semiannual discount percent") from e
+            if sdp < Decimal("0") or sdp > Decimal("100"):
+                raise ValidationError("Semiannual discount percent must be between 0 and 100")
+
+        if self.annual_discount_percent is not None:
+            try:
+                adp = Decimal(self.annual_discount_percent)
+            except Exception as e:
+                raise ValidationError("Invalid annual discount percent") from e
+            if adp < Decimal("0") or adp > Decimal("100"):
+                raise ValidationError("Annual discount percent must be between 0 and 100")
 
         # Quantity limits
         if self.minimum_quantity is not None and int(self.minimum_quantity) < 1:

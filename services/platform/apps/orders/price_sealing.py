@@ -9,11 +9,10 @@ import hmac
 import json
 import time
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.utils import timezone
 
 
 def get_client_ip(request) -> str:
@@ -71,14 +70,24 @@ class PriceSealingService:
         price_sealing_secret = getattr(settings, 'PRICE_SEALING_SECRET', None)
         
         if not price_sealing_secret:
-            # Fall back to Django secret key but log warning for production
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(
-                "🚨 [Security] Using Django SECRET_KEY for price sealing. "
-                "Configure PRICE_SEALING_SECRET environment variable for production."
-            )
-            return settings.SECRET_KEY
+            # Check if we're in production (based on DEBUG setting)
+            if not getattr(settings, 'DEBUG', True):
+                # Production mode - require dedicated secret
+                from django.core.exceptions import ImproperlyConfigured
+                raise ImproperlyConfigured(
+                    "🚨 [Security] PRICE_SEALING_SECRET environment variable is required for production. "
+                    "Generate a secure 64-character secret key using: "
+                    "python manage.py generate_price_sealing_secret"
+                )
+            else:
+                # Development mode - allow fallback with warning
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    "🚨 [Security] Using Django SECRET_KEY for price sealing in development. "
+                    "Configure PRICE_SEALING_SECRET environment variable for production deployment."
+                )
+                return settings.SECRET_KEY
         
         # Validate secret key length for security
         if len(price_sealing_secret) < 32:
@@ -97,7 +106,7 @@ class PriceSealingService:
         billing_period: str,
         product_slug: str,
         client_ip: str,
-        timestamp: Optional[float] = None
+        timestamp: float | None = None
     ) -> str:
         """
         🔒 Create a sealed price token that cannot be tampered with.
@@ -147,7 +156,7 @@ class PriceSealingService:
         return sealed_token
     
     @staticmethod
-    def unseal_price(sealed_token: str, client_ip: str) -> Dict[str, Any]:
+    def unseal_price(sealed_token: str, client_ip: str) -> dict[str, Any]:
         """
         🔒 Validate and extract price data from a sealed token.
         
@@ -211,9 +220,9 @@ class PriceSealingService:
     
     @staticmethod
     def validate_price_against_database(
-        unsealed_data: Dict[str, Any],
-        expected_product_price_id: Optional[uuid.UUID] = None
-    ) -> Dict[str, Any]:
+        unsealed_data: dict[str, Any],
+        expected_product_price_id: uuid.UUID | None = None
+    ) -> dict[str, Any]:
         """
         🔒 Validate that unsealed price data matches current database prices.
         This prevents stale/outdated prices from being used.
@@ -228,8 +237,7 @@ class PriceSealingService:
         Raises:
             ValidationError: If prices don't match database or other validation fails
         """
-        from apps.products.models import ProductPrice, Product
-        from apps.billing.models import Currency
+        from apps.products.models import ProductPrice
         
         try:
             product_price_id = uuid.UUID(unsealed_data['product_price_id'])
@@ -251,14 +259,17 @@ class PriceSealingService:
             if not product_price.product.is_active or not product_price.product.is_public:
                 raise ValidationError("Product no longer available")
             
-            # Get current effective prices (considering promotions)
-            current_amount_cents = product_price.effective_price_cents
+            # Get billing period from sealed token to calculate correct price
+            billing_period = unsealed_data.get('billing_period', 'monthly')
+
+            # Get current effective prices (considering promotions and billing period)
+            current_amount_cents = product_price.get_price_cents_for_period(billing_period)
             current_setup_cents = product_price.setup_cents
-            
+
             # Compare sealed prices with current database prices
             sealed_amount_cents = int(unsealed_data['amount_cents'])
             sealed_setup_cents = int(unsealed_data['setup_cents'])
-            
+
             price_changed = False
             if sealed_amount_cents != current_amount_cents:
                 price_changed = True
@@ -268,10 +279,9 @@ class PriceSealingService:
             # Validate other attributes match
             if unsealed_data['currency_code'] != product_price.currency.code:
                 raise ValidationError("Currency mismatch - please refresh your cart")
-            
-            if unsealed_data['billing_period'] != product_price.billing_period:
-                raise ValidationError("Billing period mismatch - please refresh your cart")
-            
+
+            # Note: billing_period validation removed - in simplified model, billing periods are calculated, not stored
+
             if unsealed_data['product_slug'] != product_price.product.slug:
                 raise ValidationError("Product mismatch - please refresh your cart")
             
@@ -292,23 +302,28 @@ class PriceSealingService:
             raise ValidationError(f"Price validation failed: {e}")
 
 
-def create_sealed_price_for_product_price(product_price, client_ip: str) -> str:
+def create_sealed_price_for_product_price(product_price, client_ip: str, billing_period: str = 'monthly') -> str:
     """
     🔒 Convenience function to create sealed price token from ProductPrice instance.
-    
+    Updated for simplified pricing model.
+
     Args:
         product_price: ProductPrice model instance
         client_ip: Client IP address for token binding
-        
+        billing_period: Billing period ('monthly', 'semiannual', 'annual')
+
     Returns:
         Sealed price token string
     """
+    # Get the price for the specified billing period
+    amount_cents = product_price.get_price_cents_for_period(billing_period)
+
     return PriceSealingService.seal_price(
         product_price_id=product_price.id,
-        amount_cents=product_price.effective_price_cents,
+        amount_cents=amount_cents,
         setup_cents=product_price.setup_cents,
         currency_code=product_price.currency.code,
-        billing_period=product_price.billing_period,
+        billing_period=billing_period,
         product_slug=product_price.product.slug,
         client_ip=client_ip
     )

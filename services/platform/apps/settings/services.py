@@ -69,7 +69,7 @@ class SettingsService:
         "billing.proforma_validity_days": 30,
         "billing.payment_grace_period_days": 5,
         "billing.invoice_due_days": 30,
-        "billing.vat_rate": "0.19",
+        "billing.vat_rate": "0.21",
         "users.session_timeout_minutes": 120,
         "users.mfa_required_for_staff": True,
         "users.password_reset_timeout_hours": 24,

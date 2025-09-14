@@ -9,12 +9,9 @@ product state, currency and totals consistency.
 from __future__ import annotations
 
 import logging
-from decimal import Decimal
-from typing import Any, Tuple
 
 from django.utils.translation import gettext_lazy as _
 
-from apps.products.models import Product
 from .models import Order
 from .vat_rules import OrderVATCalculator
 
@@ -25,7 +22,7 @@ class OrderPreflightValidationService:
     """Run comprehensive checks before an order becomes payable."""
 
     @staticmethod
-    def validate(order: Order) -> Tuple[list[str], list[str]]:
+    def validate(order: Order) -> tuple[list[str], list[str]]:
         """Return (errors, warnings) for the given order."""
         errors: list[str] = []
         warnings: list[str] = []
@@ -33,16 +30,18 @@ class OrderPreflightValidationService:
         # 1) Customer and billing snapshot completeness
         billing = order.billing_address or {}
         required_fields = [
-            ("contact_name", _("Contact name is required")),
-            ("contact_email", _("Contact email is required")),
-            ("line1", _("Billing address line1 is required")),
-            ("city", _("Billing city is required")),
-            ("county", _("Billing county is required")),
-            ("postal_code", _("Billing postal code is required")),
-            ("country", _("Billing country is required")),
+            ("contact_name", _("Please provide a contact name for your order")),
+            ("email", _("Please provide a contact email address")),  # Fixed: was "contact_email"
+            ("address_line1", _("Please provide your street address")),  # Fixed: was "line1"
+            ("city", _("Please provide your city")),
+            ("county", _("Please provide your county/state")),
+            ("postal_code", _("Please provide your postal/ZIP code")),
+            ("country", _("Please provide your country")),
         ]
         for field, message in required_fields:
-            if not str(billing.get(field, "")).strip():
+            field_value = str(billing.get(field, "")).strip()
+            if not field_value:
+                logger.warning(f"🔎 [Validation] Missing field '{field}': '{field_value}' from billing data: {list(billing.keys())}")
                 errors.append(str(message))
 
         # Basic email presence – format validation is assumed upstream
@@ -57,39 +56,40 @@ class OrderPreflightValidationService:
 
         # 2) Pricing snapshots and product state per item
         for item in order.items.select_related("product"):
-            # Billing period required
-            if not item.billing_period:
-                errors.append(_(f"Item '{item.product_name}': missing billing period"))
-
             # Non-negative prices
             if int(item.unit_price_cents) < 0 or int(item.setup_cents) < 0:
-                errors.append(_(f"Item '{item.product_name}': invalid pricing (negative values)"))
+                errors.append(str(_("Item '{}': invalid pricing (negative values)").format(item.product_name)))
 
             # Product state
             product = item.product
             if product is None:
-                errors.append(_(f"Item '{item.product_name}': missing product reference"))
+                errors.append(str(_("Item '{}': missing product reference").format(item.product_name)))
             else:
                 if not product.is_active:
-                    warnings.append(_(f"Item '{item.product_name}': product is inactive"))
+                    warnings.append(str(_("Item '{}': product is inactive").format(item.product_name)))
 
-                # Price availability in catalog for snapshot period/currency
-                price = product.get_price_for_period(order.currency.code, item.billing_period)
+                # Price availability in catalog for the order currency
+                price = product.get_price_for_currency(order.currency.code)
                 if price is None:
                     errors.append(
-                        _(f"Item '{item.product_name}': no current price for {order.currency.code} / {item.billing_period}")
+                        str(_("Item '{}': no current price for {}").format(item.product_name, order.currency.code))
                     )
 
                 # Snapshot presence (optional warn for legacy)
                 if not isinstance(item.config, dict) or not str(item.config.get("product_price_id", "")):
-                    warnings.append(_(f"Item '{item.product_name}': missing price snapshot metadata"))
+                    warnings.append(str(_("Item '{}': missing price snapshot metadata").format(item.product_name)))
 
         # 3) VAT and totals consistency – recompute
         try:
-            # Compute subtotal from items (unit * qty + setup)
-            subtotal_cents = 0
-            for item in order.items.all():
-                subtotal_cents += (int(item.unit_price_cents) * int(item.quantity)) + int(item.setup_cents)
+            # For preflight validation (temporary orders), use the provided subtotal
+            # For real orders, recompute from items
+            if hasattr(order, '_preflight_subtotal_cents'):
+                subtotal_cents = order._preflight_subtotal_cents
+            else:
+                # Compute subtotal from items (unit * qty + setup)
+                subtotal_cents = 0
+                for item in order.items.all():
+                    subtotal_cents += (int(item.unit_price_cents) * int(item.quantity)) + int(item.setup_cents)
 
             vat_result = OrderVATCalculator.calculate_vat(
                 subtotal_cents=subtotal_cents,
@@ -105,11 +105,15 @@ class OrderPreflightValidationService:
 
             if int(order.tax_cents) != expected_tax_cents:
                 errors.append(
-                    _(f"VAT mismatch: order={order.tax_cents}¢ vs computed={expected_tax_cents}¢ ({vat_result.reasoning})")
+                    str(_("VAT mismatch: order={}¢ vs computed={}¢ ({})").format(
+                        order.tax_cents, expected_tax_cents, vat_result.reasoning
+                    ))
                 )
             if int(order.total_cents) != expected_total_cents:
                 errors.append(
-                    _(f"Total mismatch: order={order.total_cents}¢ vs computed={expected_total_cents}¢ (subtotal={subtotal_cents}¢)")
+                    str(_("Total mismatch: order={}¢ vs computed={}¢ (subtotal={}¢)").format(
+                        order.total_cents, expected_total_cents, subtotal_cents
+                    ))
                 )
         except Exception as exc:
             logger.exception("Order VAT validation failed: %s", exc)
