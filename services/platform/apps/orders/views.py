@@ -38,11 +38,11 @@ from apps.tickets.models import SupportCategory, Ticket
 from apps.users.models import User
 
 from .models import Order, OrderItem
+from .preflight import OrderPreflightValidationService
 from .services import (
     OrderService,
     StatusChangeData,
 )
-from .preflight import OrderPreflightValidationService
 
 logger = logging.getLogger(__name__)
 
@@ -156,30 +156,31 @@ def _validate_manual_price_override(
 
 def _get_vat_rate_for_customer(customer: Customer) -> Decimal:
     """
-    Calculate VAT rate for customer based on Romanian tax rules.
-    Romanian customers: 19% VAT
-    EU customers with valid VAT ID: 0% (reverse charge)
-    EU customers without VAT ID: 19%
-    Non-EU customers: 0%
+    Calculate VAT rate for customer using centralized TaxService.
+    DEPRECATED: Use OrderVATCalculator.calculate_vat() instead for full compliance.
     """
     try:
+        from apps.common.tax_service import TaxService
+
         tax_profile = customer.get_tax_profile()
 
-        # Romanian customers always pay 19% VAT
-        if tax_profile and tax_profile.cui and tax_profile.cui.startswith("RO"):
-            return Decimal("0.19")  # 19%
+        # Determine customer country
+        country_code = 'RO'  # Default to Romania
+        if tax_profile and tax_profile.cui:
+            if tax_profile.cui.startswith("RO"):
+                country_code = 'RO'
 
-        # For now, default to 19% VAT for all customers with tax profile
-        # TODO: Implement EU/non-EU logic based on customer address or VAT ID format
-        if tax_profile and tax_profile.is_vat_payer:
-            return Decimal("0.19")  # 19%
+        # Get VAT rate as decimal (0.21 for 21%)
+        vat_rate = TaxService.get_vat_rate(country_code, as_decimal=True)
 
-        # No tax profile or not VAT payer: 0%
-        return Decimal("0.00")  # 0%
+        logger.info(f"💰 [Orders] VAT rate for customer {customer.id}: {vat_rate} ({country_code})")
+        return vat_rate
 
     except Exception as e:
         logger.warning(f"⚠️ [Orders] Could not determine VAT rate for customer {customer.id}: {e}")
-        return Decimal("0.19")  # Default to 19% for safety
+        # Fall back to centralized Romanian VAT rate
+        from apps.common.tax_service import TaxService
+        return TaxService.get_vat_rate('RO', as_decimal=True)
 
 
 def _get_accessible_customer_ids(user: User) -> list[int]:
@@ -547,7 +548,7 @@ def order_create_preview(request: HttpRequest) -> HttpResponse:
         product_id = request.POST.get("first_product")
         billing_period = request.POST.get("first_billing_period", "monthly")
         quantity = int(request.POST.get("first_quantity", 1) or 1)
-        domain_name = (request.POST.get("first_domain_name") or "").strip()
+        (request.POST.get("first_domain_name") or "").strip()
 
         if not (customer_id and product_id):
             return render(request, "orders/partials/create_preview_totals.html", {
@@ -1108,7 +1109,7 @@ def order_item_create(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     # Dynamic form creation for OrderItem
     order_item_form = modelform_factory(
         OrderItem,
-        fields=["product", "quantity", "unit_price_cents", "setup_cents", "billing_period", "config", "domain_name"],
+        fields=["product", "quantity", "unit_price_cents", "setup_cents", "config", "domain_name"],
     )
 
     if request.method == "POST":
@@ -1328,7 +1329,7 @@ def order_item_edit(request: HttpRequest, pk: uuid.UUID, item_pk: uuid.UUID) -> 
     # Dynamic form creation for OrderItem
     order_item_form = modelform_factory(
         OrderItem,
-        fields=["product", "quantity", "unit_price_cents", "setup_cents", "billing_period", "config", "domain_name"],
+        fields=["product", "quantity", "unit_price_cents", "setup_cents", "config", "domain_name"],
     )
 
     if request.method == "POST":

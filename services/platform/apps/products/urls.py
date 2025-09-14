@@ -22,4 +22,6 @@ urlpatterns = [
     # Pricing management
     path("<slug:slug>/prices/", views.product_prices, name="product_prices"),
     path("<slug:slug>/prices/create/", views.product_price_create, name="product_price_create"),
+    path("<slug:slug>/prices/<uuid:price_id>/edit/", views.product_price_edit, name="product_price_edit"),
+    path("<slug:slug>/prices/<uuid:price_id>/delete/", views.product_price_delete, name="product_price_delete"),
 ]

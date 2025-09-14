@@ -108,9 +108,14 @@ def _handle_order_status_change(order: Order, old_status: str, new_status: str) 
         )
 
         # Trigger different actions based on status transitions
-        if new_status == "processing" and old_status == "pending":
-            # Payment received - generate invoice
+        if new_status == "pending" and old_status == "draft":
+            # Order becomes payable - create pending services (industry standard)
+            _create_pending_services_for_order(order)
+
+        elif new_status == "processing" and old_status == "pending":
+            # Payment received - generate invoice and update services to provisioning
             _trigger_invoice_generation(order)
+            _update_services_to_provisioning(order)
 
         elif new_status == "completed" and old_status == "processing":
             # Order completed - start provisioning
@@ -127,6 +132,41 @@ def _handle_order_status_change(order: Order, old_status: str, new_status: str) 
 
     except Exception as e:
         logger.exception(f"🔥 [Order Signal] Failed to handle status change: {e}")
+
+
+def _create_pending_services_for_order(order: Order) -> None:
+    """Create pending Service records when order becomes payable (industry standard)"""
+    try:
+        from .services import OrderServiceCreationService  # noqa: PLC0415
+
+        result = OrderServiceCreationService.create_pending_services(order)
+        if result.is_ok():
+            services_created = result.unwrap()
+            if services_created:
+                logger.info(f"✅ [Order Signal] Created {len(services_created)} pending services for order {order.order_number}")
+            else:
+                logger.info(f"ℹ️ [Order Signal] No new services created for order {order.order_number}")
+        else:
+            logger.error(f"🔥 [Order Signal] Service creation failed: {result.error}")
+
+    except Exception as e:
+        logger.exception(f"🔥 [Order Signal] Service creation failed: {e}")
+
+
+def _update_services_to_provisioning(order: Order) -> None:
+    """Update service status from pending to provisioning when payment confirmed"""
+    try:
+        from .services import OrderServiceCreationService  # noqa: PLC0415
+
+        result = OrderServiceCreationService.update_service_status_on_payment(order)
+        if result.is_ok():
+            updated_services = result.unwrap()
+            logger.info(f"🔄 [Order Signal] Updated {len(updated_services)} services to provisioning status")
+        else:
+            logger.error(f"🔥 [Order Signal] Service status update failed: {result.error}")
+
+    except Exception as e:
+        logger.exception(f"🔥 [Order Signal] Service status update failed: {e}")
 
 
 def _trigger_invoice_generation(order: Order) -> None:

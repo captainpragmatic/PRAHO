@@ -17,7 +17,7 @@ from .models import Product, ProductPrice
 logger = logging.getLogger(__name__)
 
 # Romanian business constants for hosting products
-ROMANIAN_VAT_RATE = Decimal("0.19")  # 19% VAT rate for Romanian hosting services
+ROMANIAN_VAT_RATE = Decimal("0.21")  # 21% VAT rate for Romanian hosting services (updated Aug 2025)
 PRICING_THRESHOLDS: dict[str, Any] = {
     "significant_change_percent": 15,  # Alert when price changes by more than 15%
     "high_value_product_ron": 500,  # Products over 500 RON need approval tracking
@@ -118,30 +118,34 @@ def log_product_lifecycle_events(sender: type[Product], instance: Product, creat
 def capture_price_changes(sender: type[ProductPrice], instance: ProductPrice, **kwargs: Any) -> None:
     """
     Capture price changes for Romanian VAT compliance and billing transparency.
+    Updated for simplified pricing model.
     """
     try:
         if instance.pk:
             # Get the old instance from database to compare pricing
             old_instance = ProductPrice.objects.get(pk=instance.pk)
-            instance._old_amount_cents = old_instance.amount_cents  # type: ignore[attr-defined]
+            instance._old_monthly_price_cents = old_instance.monthly_price_cents  # type: ignore[attr-defined]
             instance._old_setup_cents = old_instance.setup_cents  # type: ignore[attr-defined]
             instance._old_promo_price_cents = old_instance.promo_price_cents  # type: ignore[attr-defined]
             instance._old_is_active = old_instance.is_active  # type: ignore[attr-defined]
-            instance._old_discount_percent = old_instance.discount_percent  # type: ignore[attr-defined]
+            instance._old_semiannual_discount_percent = old_instance.semiannual_discount_percent  # type: ignore[attr-defined]
+            instance._old_annual_discount_percent = old_instance.annual_discount_percent  # type: ignore[attr-defined]
         else:
             # New price - no old values
-            instance._old_amount_cents = None  # type: ignore[attr-defined]
+            instance._old_monthly_price_cents = None  # type: ignore[attr-defined]
             instance._old_setup_cents = None  # type: ignore[attr-defined]
             instance._old_promo_price_cents = None  # type: ignore[attr-defined]
             instance._old_is_active = None  # type: ignore[attr-defined]
-            instance._old_discount_percent = None  # type: ignore[attr-defined]
+            instance._old_semiannual_discount_percent = None  # type: ignore[attr-defined]
+            instance._old_annual_discount_percent = None  # type: ignore[attr-defined]
     except ProductPrice.DoesNotExist:
         logger.warning("🚨 [Products] ProductPrice %s not found in pre_save", instance.pk)
-        instance._old_amount_cents = None  # type: ignore[attr-defined]
+        instance._old_monthly_price_cents = None  # type: ignore[attr-defined]
         instance._old_setup_cents = None  # type: ignore[attr-defined]
         instance._old_promo_price_cents = None  # type: ignore[attr-defined]
         instance._old_is_active = None  # type: ignore[attr-defined]
-        instance._old_discount_percent = None  # type: ignore[attr-defined]
+        instance._old_semiannual_discount_percent = None  # type: ignore[attr-defined]
+        instance._old_annual_discount_percent = None  # type: ignore[attr-defined]
     except Exception as e:
         logger.error("🔥 [Products] Error capturing price changes: %s", e)
 
@@ -162,21 +166,23 @@ def log_price_changes(sender: type[ProductPrice], instance: ProductPrice, create
             # New price created - log initial pricing setup
             romanian_context = {
                 "currency": instance.currency.code,
-                "billing_period": instance.billing_period,
+                "billing_model": "simplified_monthly",  # New simplified model
                 "includes_vat": instance.product.includes_vat,
                 "vat_rate_applied": float(ROMANIAN_VAT_RATE * 100),
-                "high_value_product": instance.amount_cents > (PRICING_THRESHOLDS["high_value_product_ron"] * 100),
+                "high_value_product": instance.monthly_price_cents > (PRICING_THRESHOLDS["high_value_product_ron"] * 100),
+                "semiannual_discount": float(instance.semiannual_discount_percent),
+                "annual_discount": float(instance.annual_discount_percent),
             }
 
             # We don't log every new price creation as it's too verbose
             # Only log if it's for a high-attention category or high-value product
-            if instance.product.product_type in HIGH_ATTENTION_CATEGORIES or instance.amount_cents > (
+            if instance.product.product_type in HIGH_ATTENTION_CATEGORIES or instance.monthly_price_cents > (
                 PRICING_THRESHOLDS["high_value_product_ron"] * 100
             ):
                 ProductsAuditService.log_product_pricing_changed(
                     product_price=instance,
                     change_type="price_created",
-                    changes={"new_price_cents": instance.amount_cents},
+                    changes={"new_monthly_price_cents": instance.monthly_price_cents},
                     romanian_business_context=romanian_context,
                     context=None,
                 )
@@ -186,10 +192,14 @@ def log_price_changes(sender: type[ProductPrice], instance: ProductPrice, create
             if pricing_changes:
                 romanian_context = {
                     "currency": instance.currency.code,
-                    "billing_period": instance.billing_period,
+                    "billing_model": "simplified_monthly",
                     "vat_compliance_verified": True,
                     "grandfathered_customers_affected": pricing_changes.get("price_increased", False),
                     "promotional_pricing_active": bool(instance.promo_price_cents),
+                    "discount_adjustments": {
+                        "semiannual": float(instance.semiannual_discount_percent),
+                        "annual": float(instance.annual_discount_percent),
+                    },
                 }
 
                 ProductsAuditService.log_product_pricing_changed(
@@ -252,26 +262,27 @@ def _check_availability_changes(instance: Product) -> dict[str, Any] | None:
 def _check_pricing_changes(instance: ProductPrice) -> dict[str, Any] | None:
     """
     Check what pricing fields changed and calculate impact.
+    Updated for simplified pricing model.
 
     Returns dictionary of changes or None if no significant changes.
     """
     changes = {}
 
-    # Check main price changes
+    # Check monthly price changes (main price in simplified model)
     if (
-        hasattr(instance, "_old_amount_cents")
-        and instance._old_amount_cents != instance.amount_cents
-        and instance._old_amount_cents
+        hasattr(instance, "_old_monthly_price_cents")
+        and instance._old_monthly_price_cents != instance.monthly_price_cents
+        and instance._old_monthly_price_cents
     ):
-        old_amount = Decimal(instance._old_amount_cents) / 100
-        new_amount = Decimal(instance.amount_cents) / 100
+        old_amount = Decimal(instance._old_monthly_price_cents) / 100
+        new_amount = Decimal(instance.monthly_price_cents) / 100
         percent_change = abs((new_amount - old_amount) / old_amount * 100)
 
         # Only log if change is significant
         if percent_change >= PRICING_THRESHOLDS["significant_change_percent"]:
-            changes["price_changed"] = {
-                "from_cents": instance._old_amount_cents,
-                "to_cents": instance.amount_cents,
+            changes["monthly_price_changed"] = {
+                "from_cents": instance._old_monthly_price_cents,
+                "to_cents": instance.monthly_price_cents,
                 "from_amount": float(old_amount),
                 "to_amount": float(new_amount),
                 "percent_change": float(percent_change),
@@ -297,12 +308,26 @@ def _check_pricing_changes(instance: ProductPrice) -> dict[str, Any] | None:
             "promotion_removed": not instance.promo_price_cents and instance._old_promo_price_cents,
         }
 
-    # Check discount changes
-    if hasattr(instance, "_old_discount_percent") and instance._old_discount_percent != instance.discount_percent:
-        changes["discount_changed"] = {
-            "from_percent": float(instance._old_discount_percent or 0),
-            "to_percent": float(instance.discount_percent),
-            "discount_increased": instance.discount_percent > (instance._old_discount_percent or 0),
+    # Check semiannual discount changes
+    if (
+        hasattr(instance, "_old_semiannual_discount_percent")
+        and instance._old_semiannual_discount_percent != instance.semiannual_discount_percent
+    ):
+        changes["semiannual_discount_changed"] = {
+            "from_percent": float(instance._old_semiannual_discount_percent or 0),
+            "to_percent": float(instance.semiannual_discount_percent),
+            "discount_increased": instance.semiannual_discount_percent > (instance._old_semiannual_discount_percent or 0),
+        }
+
+    # Check annual discount changes
+    if (
+        hasattr(instance, "_old_annual_discount_percent")
+        and instance._old_annual_discount_percent != instance.annual_discount_percent
+    ):
+        changes["annual_discount_changed"] = {
+            "from_percent": float(instance._old_annual_discount_percent or 0),
+            "to_percent": float(instance.annual_discount_percent),
+            "discount_increased": instance.annual_discount_percent > (instance._old_annual_discount_percent or 0),
         }
 
     # Check availability changes

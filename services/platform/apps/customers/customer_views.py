@@ -31,7 +31,7 @@ from apps.users.models import User
 from apps.users.services import CustomerUserService, UserCreationRequest, UserLinkingRequest
 
 from .customer_models import Customer
-from .forms import CustomerCreationForm, CustomerEditForm, CustomerForm, CustomerUserAssignmentForm
+from .forms import CustomerCreationForm, CustomerEditForm, CustomerUserAssignmentForm
 
 logger = logging.getLogger(__name__)
 security_logger = logging.getLogger("security")
@@ -207,6 +207,10 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
         # Tickets app not available
         pass
 
+    # User management context for safeguards
+    total_users = customer.memberships.count()
+    owner_count = customer.memberships.filter(role="owner").count()
+    
     context = {
         "customer": customer,
         "tax_profile": customer.get_tax_profile(),
@@ -221,6 +225,11 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
         "invoices_summary": invoices_summary,
         "tickets": tickets,
         "tickets_summary": tickets_summary,
+        # User management context
+        "total_users": total_users,
+        "owner_count": owner_count,
+        "is_last_user": total_users <= 1,
+        "is_last_owner": owner_count <= 1,
     }
 
     return render(request, "customers/detail.html", context)

@@ -1123,7 +1123,7 @@ class CustomerEditForm(forms.Form):
             tax_profile = customer.get_tax_profile()
             billing_profile = customer.get_billing_profile()
             primary_address = customer.get_primary_address()
-            billing_address = customer.get_billing_address()
+            customer.get_billing_address()
 
             # Core customer fields
             self.initial.update({
