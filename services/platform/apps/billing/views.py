@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import decimal
+import json
 import logging
 import uuid
 from datetime import datetime, timedelta
@@ -36,7 +37,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
-from django.views.decorators.http import require_POST
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods, require_POST
 
 from apps.billing.pdf_generators import RomanianInvoicePDFGenerator, RomanianProformaPDFGenerator
 from apps.common.decorators import billing_staff_required, can_edit_proforma, rate_limit, staff_required
@@ -58,6 +60,7 @@ from .models import (
     ProformaLine,
     ProformaSequence,
 )
+from .payment_service import PaymentService
 from .services import (
     log_security_event,
     # TODO: Add RefundService imports when implemented
@@ -1596,13 +1599,6 @@ This ticket was automatically created from a customer refund request.
 # PAYMENT API ENDPOINTS FOR PORTAL CONSUMPTION
 # ===============================================================================
 
-from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_http_methods
-from django.utils.decorators import method_decorator
-import json
-
-from .payment_service import PaymentService
-
 
 @csrf_exempt
 @require_http_methods(["POST"])
@@ -1617,6 +1613,7 @@ def api_create_payment_intent(request: HttpRequest) -> JsonResponse:
         "metadata": {...}
     }
     """
+    logger = logging.getLogger(__name__)
     try:
         # Parse request data
         data = json.loads(request.body)
@@ -1677,6 +1674,7 @@ def api_confirm_payment(request: HttpRequest) -> JsonResponse:
         "gateway": "stripe"
     }
     """
+    logger = logging.getLogger(__name__)
     try:
         # Parse request data
         data = json.loads(request.body)
@@ -1736,6 +1734,7 @@ def api_create_subscription(request: HttpRequest) -> JsonResponse:
         "metadata": {...}
     }
     """
+    logger = logging.getLogger(__name__)
     try:
         # Parse request data
         data = json.loads(request.body)
@@ -1793,6 +1792,7 @@ def api_payment_methods(request: HttpRequest, customer_id: str) -> JsonResponse:
 
     URL: /api/billing/payment-methods/{customer_id}/
     """
+    logger = logging.getLogger(__name__)
     try:
         # Get available payment methods
         methods = PaymentService.get_available_payment_methods(customer_id)
@@ -1824,12 +1824,13 @@ def api_process_refund(request: HttpRequest) -> JsonResponse:
         "reason": "Customer request"
     }
     """
+    logger = logging.getLogger(__name__)
     try:
         # Parse request data
         data = json.loads(request.body)
         payment_id = data.get('payment_id')
-        amount_cents = data.get('amount_cents')
-        reason = data.get('reason', 'API refund request')
+        data.get('amount_cents')
+        data.get('reason', 'API refund request')
 
         # Validate required fields
         if not payment_id:
@@ -1839,7 +1840,6 @@ def api_process_refund(request: HttpRequest) -> JsonResponse:
             }, status=400)
 
         # TODO: Implement refund processing via PaymentService
-        # result = PaymentService.process_refund(payment_id, amount_cents, reason)
 
         logger.info(f"📝 API: Refund request for payment {payment_id} - not yet implemented")
         return JsonResponse({
@@ -1867,6 +1867,7 @@ def api_stripe_config(request: HttpRequest) -> JsonResponse:
 
     Returns only public keys and configuration safe for client-side use.
     """
+    logger = logging.getLogger(__name__)
     try:
         from apps.settings.services import SettingsService
 

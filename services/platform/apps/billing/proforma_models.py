@@ -296,7 +296,7 @@ class ProformaLine(models.Model):
 
     @property
     def subtotal_cents(self) -> int:
-        """Calculate subtotal (quantity × unit_price) in cents"""
+        """Calculate subtotal (quantity x unit_price) in cents"""
         return int(self.quantity * self.unit_price_cents)
 
     @property

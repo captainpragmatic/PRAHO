@@ -8,8 +8,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from django.conf import settings
-
 from .base import (
     BasePaymentGateway,
     PaymentConfirmResult,
@@ -46,6 +44,7 @@ class StripeGateway(BasePaymentGateway):
         """Initialize Stripe SDK with API keys from settings system"""
         try:
             import stripe
+
             from apps.settings.services import SettingsService
 
             # Get encrypted Stripe secret key from settings system
@@ -61,8 +60,8 @@ class StripeGateway(BasePaymentGateway):
 
             self.logger.info("✅ Stripe SDK initialized successfully from settings system")
 
-        except ImportError:
-            raise ImportError("Stripe library not installed. Run: pip install stripe")
+        except ImportError as e:
+            raise ImportError("Stripe library not installed. Run: pip install stripe") from e
         except Exception as e:
             self.logger.error(f"🔥 Failed to initialize Stripe: {e}")
             raise
@@ -291,7 +290,7 @@ class StripeGateway(BasePaymentGateway):
             True if cancelled successfully
         """
         try:
-            subscription = self._stripe.Subscription.cancel(subscription_id)
+            self._stripe.Subscription.cancel(subscription_id)
 
             self.logger.info(f"✅ Cancelled Stripe subscription {subscription_id}")
             return True

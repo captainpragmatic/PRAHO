@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, TypedDict
+from typing import Any, ClassVar, TypedDict
 
 from django.conf import settings
 
@@ -65,7 +65,6 @@ class BasePaymentGateway(ABC):
     @abstractmethod
     def gateway_name(self) -> str:
         """Gateway identifier (e.g., 'stripe', 'paypal')"""
-        pass
 
     @abstractmethod
     def create_payment_intent(
@@ -89,7 +88,6 @@ class BasePaymentGateway(ABC):
         Returns:
             PaymentIntentResult with success status and client_secret
         """
-        pass
 
     @abstractmethod
     def confirm_payment(self, payment_intent_id: str) -> PaymentConfirmResult:
@@ -102,7 +100,6 @@ class BasePaymentGateway(ABC):
         Returns:
             PaymentConfirmResult with payment status
         """
-        pass
 
     @abstractmethod
     def create_subscription(
@@ -122,7 +119,6 @@ class BasePaymentGateway(ABC):
         Returns:
             SubscriptionResult with subscription details
         """
-        pass
 
     @abstractmethod
     def cancel_subscription(self, subscription_id: str) -> bool:
@@ -135,7 +131,6 @@ class BasePaymentGateway(ABC):
         Returns:
             True if cancelled successfully
         """
-        pass
 
     @abstractmethod
     def handle_webhook_event(self, event_type: str, event_data: dict[str, Any]) -> tuple[bool, str]:
@@ -149,7 +144,6 @@ class BasePaymentGateway(ABC):
         Returns:
             (success, message) tuple
         """
-        pass
 
     def validate_configuration(self) -> bool:
         """
@@ -174,7 +168,7 @@ class PaymentGatewayFactory:
     Supports dynamic gateway selection based on configuration.
     """
 
-    _gateways: dict[str, type[BasePaymentGateway]] = {}
+    _gateways: ClassVar[dict[str, type[BasePaymentGateway]]] = {}
 
     @classmethod
     def register_gateway(cls, gateway_name: str, gateway_class: type[BasePaymentGateway]) -> None:

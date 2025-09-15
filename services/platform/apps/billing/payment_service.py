@@ -12,10 +12,11 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
+from apps.orders.models import Order
+
 from .gateways import PaymentGatewayFactory
 from .gateways.base import PaymentConfirmResult, PaymentIntentResult, SubscriptionResult
 from .models import Payment
-from ..orders.models import Order
 
 logger = logging.getLogger(__name__)
 
@@ -200,7 +201,7 @@ class PaymentService:
             SubscriptionResult with subscription details
         """
         try:
-            from ..customers.models import Customer
+            from apps.customers.models import Customer
 
             customer = Customer.objects.get(id=customer_id)
 

@@ -358,15 +358,10 @@ class InvoiceLine(models.Model):
             models.Index(fields=["invoice", "kind"]),
         )
 
-    @property
-    def subtotal_cents(self) -> int:
-        """Calculate subtotal (quantity × unit_price) in cents"""
-        return int(self.quantity * self.unit_price_cents)
-
-    @property
-    def subtotal(self) -> Decimal:
-        """Return subtotal in currency units"""
-        return Decimal(self.subtotal_cents) / 100
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        # Calculate totals before saving
+        self.calculate_totals()
+        super().save(*args, **kwargs)
 
     def calculate_totals(self) -> int:
         """Calculate tax and line total with proper banker's rounding for Romanian VAT compliance"""
@@ -379,10 +374,15 @@ class InvoiceLine(models.Model):
         self.line_total_cents = subtotal + self.tax_cents
         return self.line_total_cents
 
-    def save(self, *args: Any, **kwargs: Any) -> None:
-        # Calculate totals before saving
-        self.calculate_totals()
-        super().save(*args, **kwargs)
+    @property
+    def subtotal_cents(self) -> int:
+        """Calculate subtotal (quantity x unit_price) in cents"""
+        return int(self.quantity * self.unit_price_cents)
+
+    @property
+    def subtotal(self) -> Decimal:
+        """Return subtotal in currency units"""
+        return Decimal(self.subtotal_cents) / 100
 
     @property
     def unit_price(self) -> Decimal:

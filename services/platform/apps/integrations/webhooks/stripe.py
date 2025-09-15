@@ -3,7 +3,6 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from django.conf import settings
 from django.utils import timezone
 
 from apps.billing.models import Payment
@@ -275,7 +274,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             # Check if this payment was created via Portal
             created_via = payment.meta.get('created_via')
             if created_via != 'portal_checkout':
-                logger.info(f"⏭️ Payment not from Portal checkout - skipping notification")
+                logger.info("⏭️ Payment not from Portal checkout - skipping notification")
                 return
 
             # Prepare notification data
