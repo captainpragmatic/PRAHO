@@ -10,6 +10,8 @@ from django.shortcuts import redirect, render
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods
 
+from apps.common.decorators import log_access_attempt, require_billing_access
+
 from .services import BillingDataSyncService, InvoiceViewService
 
 logger = logging.getLogger(__name__)
@@ -20,19 +22,19 @@ logger = logging.getLogger(__name__)
 # ===============================================================================
 
 @require_http_methods(["GET"])
+@require_billing_access()
+@log_access_attempt
 def invoices_list_view(request: HttpRequest) -> HttpResponse:
     """
-    📋 Customer Billing Documents List View
-    
+    🔒 Customer Billing Documents List View
+
     GET /billing/invoices/
-    
+
     Displays paginated list of customer's invoices and proformas with filtering options.
-    Integrates with platform API for real-time data.
+    Integrates with platform API for real-time data. Requires billing access.
     """
-    # Check authentication via middleware (customer_id is set by PortalAuthenticationMiddleware)
-    customer_id = getattr(request, 'customer_id', None)
-    if not customer_id:
-        return redirect('/login/')
+    # Customer ID is available from decorator via request.current_customer_id
+    customer_id = getattr(request, 'current_customer_id', None)
     
     try:
         invoice_service = InvoiceViewService()

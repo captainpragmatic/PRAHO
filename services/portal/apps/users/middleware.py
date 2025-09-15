@@ -112,23 +112,22 @@ class PortalAuthenticationMiddleware:
             request.customer_id = int(selected_customer_id)
         elif active_customer_id:
             request.customer_id = active_customer_id
-        else:
-            # Fallback: resolve active customer context for this user (first accessible)
-            if user_id_int:
-                try:
-                    customers = api_client.get_user_customers(user_id_int)
-                    if customers:
-                        active_customer_id = customers[0].get('id')
-                        request.session['active_customer_id'] = active_customer_id
-                        request.customer_id = active_customer_id
-                    else:
-                        # No accessible customers for this user; use legacy customer_id
-                        request.customer_id = request.session.get('customer_id')
-                except Exception as e:
-                    logger.error(f"🔥 [Auth] Failed to fetch accessible customers for user {session_user_id}: {e}")
+        # Fallback: resolve active customer context for this user (first accessible)
+        elif user_id_int:
+            try:
+                customers = api_client.get_user_customers(user_id_int)
+                if customers:
+                    active_customer_id = customers[0].get('id')
+                    request.session['active_customer_id'] = active_customer_id
+                    request.customer_id = active_customer_id
+                else:
+                    # No accessible customers for this user; use legacy customer_id
                     request.customer_id = request.session.get('customer_id')
-            else:
+            except Exception as e:
+                logger.error(f"🔥 [Auth] Failed to fetch accessible customers for user {session_user_id}: {e}")
                 request.customer_id = request.session.get('customer_id')
+        else:
+            request.customer_id = request.session.get('customer_id')
         request.user_id = session_user_id
         request.customer_email = request.session.get('email')
         request.is_authenticated = True

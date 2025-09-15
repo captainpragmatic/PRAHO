@@ -761,6 +761,7 @@ def mini_cart_content(request: HttpRequest) -> HttpResponse:
 
 from django.views.decorators.csrf import csrf_exempt
 
+
 @csrf_exempt
 @require_http_methods(["POST"])
 def payment_success_webhook(request: HttpRequest) -> JsonResponse:
@@ -772,6 +773,7 @@ def payment_success_webhook(request: HttpRequest) -> JsonResponse:
     """
     try:
         import json
+
         from django.http import JsonResponse
 
         data = json.loads(request.body)

@@ -18,6 +18,12 @@ from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 
 from apps.api_client.services import PlatformAPIError, api_client
+from apps.common.decorators import (
+    log_access_attempt,
+    require_any_role,
+    require_authentication,
+    require_billing_access,
+)
 from apps.users.forms import (
     ChangePasswordForm,
     CompanyCreationForm,
@@ -422,15 +428,13 @@ def _handle_profile_update(request: HttpRequest, form: CustomerProfileForm, user
 @never_cache
 @csrf_protect
 @require_http_methods(["GET", "POST"])
+@require_authentication
+@log_access_attempt
 def profile_view(request: HttpRequest) -> HttpResponse:
     """
-    Customer profile management view.
-    Updates customer profile via Platform API.
+    🔒 Customer profile management view.
+    Updates customer profile via Platform API with proper access control.
     """
-    
-    # Check authentication
-    if not request.session.get('customer_id'):
-        return redirect('/login/')
     
     # Get IDs from session
     customer_id = request.session.get('customer_id')
@@ -838,16 +842,14 @@ def mfa_disable_view(request: HttpRequest) -> HttpResponse:
 
 @never_cache
 @require_http_methods(["GET"])
+@require_any_role()
+@log_access_attempt
 def company_profile_view(request: HttpRequest) -> HttpResponse:
     """
-    Company profile view - displays current company information.
+    🔒 Company profile view - displays current company information.
     Shows company details including billing address, VAT number, contact information.
+    Requires valid customer role access.
     """
-    
-    # Check authentication
-    auth_redirect = _check_authentication_or_redirect(request)
-    if auth_redirect:
-        return auth_redirect
     
     # Get selected customer context
     customer_id = _get_selected_customer_id(request)
@@ -921,16 +923,14 @@ def company_profile_view(request: HttpRequest) -> HttpResponse:
 
 @never_cache
 @require_http_methods(["GET", "POST"])
+@require_billing_access()
+@log_access_attempt
 def company_profile_edit_view(request: HttpRequest) -> HttpResponse:
     """
-    Company profile edit view - allows editing company information.
+    🔒 Company profile edit view - allows editing company information.
     Updates company details via Platform API with form validation.
+    Requires billing or admin role access.
     """
-    
-    # Check authentication
-    auth_redirect = _check_authentication_or_redirect(request)
-    if auth_redirect:
-        return auth_redirect
     
     # Get selected customer context
     customer_id = _get_selected_customer_id(request)
@@ -1057,57 +1057,106 @@ def company_profile_edit_view(request: HttpRequest) -> HttpResponse:
 
 @never_cache
 @require_http_methods(["POST"])
+@csrf_protect
 def switch_customer_view(request: HttpRequest) -> HttpResponse:
     """
-    Switch active customer context for multi-customer users.
+    🔒 Switch active customer context for multi-customer users.
     Updates session with selected customer and refreshes customer data.
+    Enhanced with real-time Platform API verification for security.
     """
-    
+
     # Check authentication
     auth_redirect = _check_authentication_or_redirect(request)
     if auth_redirect:
         return auth_redirect
-        
+
+    user_id = request.session.get('user_id')
     customer_id = request.POST.get('customer_id')
+
     if not customer_id:
+        logger.warning(f"🚨 [Security] Empty customer_id in switch request from user {user_id}")
         messages.error(request, _("Please select a valid customer."))
         return redirect(request.META.get('HTTP_REFERER', '/profile/'))
-    
-    # Verify user has access to this customer
+
+    # 🔒 SECURITY: Real-time verification with Platform API
+    try:
+        response = api_client.post('users/verify-customer-access/', {
+            'user_id': user_id,
+            'customer_id': customer_id,
+            'timestamp': int(timezone.now().timestamp()),
+            'action': 'switch_customer'
+        }, user_id=user_id)
+
+        if not response or not response.get('success'):
+            logger.warning(
+                f"🚨 [Security] Platform API rejected customer switch: "
+                f"user {user_id} -> customer {customer_id}"
+            )
+            messages.error(request, _("Customer access verification failed. Please try again."))
+            return redirect('/profile/')
+
+        # Extract verified access information
+        verification_data = response.get('data', {})
+        if not verification_data.get('has_access'):
+            logger.warning(
+                f"🚨 [Security] Unauthorized customer switch attempt: "
+                f"user {user_id} -> customer {customer_id}"
+            )
+            messages.error(request, _("You don't have access to this customer."))
+            return redirect('/profile/')
+
+        # Get verified customer information
+        selected_customer_name = verification_data.get('customer_name', f'Customer {customer_id}')
+        selected_role = verification_data.get('role', 'viewer')
+        # Note: permissions available if needed for future use
+        # permissions = verification_data.get('permissions', [])
+
+    except PlatformAPIError as e:
+        logger.error(
+            f"🔥 [Security] Customer switch verification failed: "
+            f"user {user_id} -> customer {customer_id}, error: {e}"
+        )
+        messages.error(request, _("Unable to verify customer access. Please try again."))
+        return redirect('/profile/')
+
+    # 🔒 SECURITY: Also verify against cached memberships as backup
     memberships = _get_user_customer_memberships(request)
-    if not memberships:
-        messages.error(request, _("Unable to verify customer access."))
-        return redirect('/profile/')
-        
-    # Check if customer_id is in user's memberships
-    has_access = False
-    selected_customer_name = None
-    selected_role = None
-    
-    for membership in memberships:
-        if str(membership.get('customer_id')) == str(customer_id):
-            has_access = True
-            selected_customer_name = membership.get('customer_name', f'Customer {customer_id}')
-            selected_role = membership.get('role', 'viewer')
-            break
-    
-    if not has_access:
-        messages.error(request, _("You don't have access to this customer."))
-        return redirect('/profile/')
-    
-    # Update session with selected customer
+    if memberships:
+        cached_access = any(
+            str(membership.get('customer_id')) == str(customer_id)
+            for membership in memberships
+        )
+
+        if not cached_access:
+            logger.warning(
+                f"🚨 [Security] Customer not found in cached memberships: "
+                f"user {user_id} -> customer {customer_id}"
+            )
+            # Still allow switch if Platform API approved, but log the discrepancy
+            logger.warning("🚨 [Security] Cached memberships out of sync with Platform API")
+
+    # Update session with verified customer information
     request.session['selected_customer_id'] = customer_id
     request.session['selected_customer_name'] = selected_customer_name
     request.session['selected_customer_role'] = selected_role
-    request.session['user_memberships'] = memberships  # Cache memberships
-    
-    logger.info(f"🔄 [Portal] User switched to customer {customer_id} ({selected_customer_name}) with role {selected_role}")
-    
+
+    # Update cached memberships with fresh data
+    if memberships:
+        request.session['user_memberships'] = memberships
+
+    # 🔒 SECURITY: Log successful customer switch
+    logger.info(
+        f"✅ [Security] Customer switch successful: "
+        f"user {user_id} -> customer {customer_id} ({selected_customer_name}) "
+        f"with role {selected_role}"
+    )
+
     # Success message with customer context
     role_display = {
         'owner': _('Owner'),
-        'billing': _('Billing Manager'), 
-        'tech': _('Technical Manager'),
+        'admin': _('Administrator'),
+        'billing': _('Billing Manager'),
+        'technical': _('Technical Manager'),
         'viewer': _('Viewer')
     }.get(selected_role, selected_role.title())
     
