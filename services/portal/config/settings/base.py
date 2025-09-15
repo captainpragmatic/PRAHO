@@ -40,17 +40,22 @@ INSTALLED_APPS: list[str] = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE: list[str] = [
     "django.middleware.security.SecurityMiddleware",
-    "django.contrib.sessions.middleware.SessionMiddleware",   # Cache-only sessions
-    "django.middleware.locale.LocaleMiddleware",              # After sessions
-    "apps.users.middleware.SessionLanguageMiddleware",        # Activate session language
-    "django.middleware.common.CommonMiddleware",              # After locale
-    "django.middleware.csrf.CsrfViewMiddleware",              # CSRF protection
-    "django.contrib.messages.middleware.MessageMiddleware",   # Messages support
+    # 🔒 SECURITY: Rate limiting before sessions to prevent DoS
+    "apps.common.rate_limiting.AuthenticationRateLimitMiddleware",  # Auth rate limiting
+    "apps.common.rate_limiting.APIRateLimitMiddleware",             # API rate limiting
+    "django.contrib.sessions.middleware.SessionMiddleware",         # Cache-only sessions
+    "django.middleware.locale.LocaleMiddleware",                    # After sessions
+    "apps.users.middleware.SessionLanguageMiddleware",              # Activate session language
+    "django.middleware.common.CommonMiddleware",                    # After locale
+    "django.middleware.csrf.CsrfViewMiddleware",                    # CSRF protection
+    "django.contrib.messages.middleware.MessageMiddleware",         # Messages support
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    # 🔒 SECURITY: Session security after authentication
+    "apps.common.middleware.SessionSecurityMiddleware",             # Session protection
     # Custom middleware last
     "apps.common.middleware.RequestIDMiddleware",
-    "apps.common.middleware.SecurityHeadersMiddleware", 
-    "apps.users.middleware.PortalAuthenticationMiddleware",   # Portal validation
+    "apps.common.middleware.SecurityHeadersMiddleware",
+    "apps.users.middleware.PortalAuthenticationMiddleware",         # Portal validation
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -121,7 +126,8 @@ else:
 
 # Platform service API connection
 PLATFORM_API_BASE_URL = os.environ.get("PLATFORM_API_BASE_URL", "http://localhost:8700/api")
-PLATFORM_API_SECRET = os.environ.get("PLATFORM_API_SECRET", "dev-shared-secret")
+# 🔒 SECURITY: No fallback secrets in base config - must be set in environment
+PLATFORM_API_SECRET = os.environ.get("PLATFORM_API_SECRET")
 PLATFORM_API_TIMEOUT = int(os.environ.get("PLATFORM_API_TIMEOUT", "30"))
 
 
@@ -157,7 +163,9 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 # SECURITY SETTINGS
 # ===============================================================================
 
-SECRET_KEY = os.environ.get("SECRET_KEY", "portal-dev-key-change-in-production")
+# 🔒 SECURITY: No fallback secrets in base config - must be set in environment
+# Production settings will enforce this with proper error messages
+SECRET_KEY = os.environ.get("SECRET_KEY")
 
 DEBUG = os.environ.get("DEBUG", "True").lower() == "true"
 

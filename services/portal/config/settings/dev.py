@@ -10,6 +10,13 @@ from .base import *  # noqa: F403
 # Debug mode
 DEBUG = True
 
+# 🔒 SECURITY: Development-safe secret fallback
+if not SECRET_KEY:
+    # Only in development - provide a working default
+    SECRET_KEY = "dev-portal-key-for-local-development-only-not-for-production"
+    import logging
+    logging.getLogger(__name__).info("🔍 [Dev] Using development SECRET_KEY fallback")
+
 # Allow all hosts in development
 ALLOWED_HOSTS = ["*"]
 
@@ -69,6 +76,22 @@ if is_testing:
 PLATFORM_API_BASE_URL = "http://localhost:8700/api"
 PLATFORM_API_SECRET = "dev-shared-secret-change-in-production"
 PLATFORM_API_TIMEOUT = 10  # seconds
+
+# 🔒 SECURITY: Development warnings for weak secrets (non-blocking)
+try:
+    from apps.common.security_validation import validate_all_secrets
+    # Run validation but don't fail in development - just warn
+    validate_all_secrets()
+except ImportError:
+    # Security validation module not available yet - skip silently
+    pass
+except ValueError as e:
+    # In development, security validation errors become warnings
+    import logging
+    logging.getLogger(__name__).warning(f"⚠️ [Dev Security] {e}")
+except Exception as e:
+    import logging
+    logging.getLogger(__name__).debug(f"🔍 [Dev Security] Validation check: {e}")
 
 # No authentication backends - portal is stateless
 

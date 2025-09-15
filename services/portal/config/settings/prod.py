@@ -8,9 +8,16 @@ from .base import *  # noqa: F403
 
 # Security
 DEBUG = False
+
+# 🔒 SECURITY: Strict secret validation for production
+from apps.common.security_validation import validate_all_secrets
+
 SECRET_KEY = os.environ.get("SECRET_KEY")
 if not SECRET_KEY:
-    raise ValueError("SECRET_KEY environment variable must be set in production")
+    raise ValueError(
+        "SECURITY ERROR: SECRET_KEY environment variable must be set in production.\n"
+        "Generate one with: python -c \"from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())\""
+    )
 
 # Allowed hosts from environment
 ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "portal.pragmatichost.com").split(",")
@@ -19,8 +26,21 @@ ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "portal.pragmatichost.com").spli
 PLATFORM_API_BASE_URL = os.environ.get("PLATFORM_API_BASE_URL", "http://platform:8700/api")
 PLATFORM_API_SECRET = os.environ.get("PLATFORM_API_SECRET")
 if not PLATFORM_API_SECRET:
-    raise ValueError("PLATFORM_API_SECRET must be set in production")
+    raise ValueError(
+        "SECURITY ERROR: PLATFORM_API_SECRET must be set in production.\n"
+        "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+    )
 PLATFORM_API_TIMEOUT = int(os.environ.get("PLATFORM_API_TIMEOUT", "30"))
+
+# 🔒 SECURITY: Validate all secrets meet production security requirements
+# This will raise ValueError with detailed instructions if any secret is too weak
+try:
+    validate_all_secrets()
+except ImportError as e:
+    # Handle case where security_validation module isn't available yet
+    import logging
+    logging.getLogger(__name__).warning(f"⚠️ [Security] Could not import security validation: {e}")
+    pass
 
 # Security settings
 SESSION_COOKIE_SECURE = True

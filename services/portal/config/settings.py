@@ -53,10 +53,8 @@ CACHES = {
 # BASIC DJANGO CONFIGURATION
 # ===============================================================================
 
-SECRET_KEY = os.environ.get(
-    'DJANGO_SECRET_KEY', 
-    'django-insecure-%x&z&%0*hbpmsngz&y_avfpp0-h+z&+9toxb%i7+(ivw#-y7l4'
-)
+# 🔒 SECURITY: No fallback secrets - must be set in environment
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
 
 DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() == 'true'
 ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0']
@@ -127,9 +125,9 @@ PLATFORM_API_BASE_URL = os.environ.get(
     'http://127.0.0.1:8700'
 )
 
-# API authentication token (shared secret)
-PLATFORM_API_TOKEN = os.environ.get('PLATFORM_API_TOKEN', 'dev-token-123')
-PLATFORM_API_SECRET = os.environ.get('PLATFORM_API_SECRET', 'dev-shared-secret-change-in-production')  # HMAC secret
+# 🔒 SECURITY: API authentication - no fallback secrets
+PLATFORM_API_TOKEN = os.environ.get('PLATFORM_API_TOKEN')  # Legacy token
+PLATFORM_API_SECRET = os.environ.get('PLATFORM_API_SECRET')  # HMAC secret - REQUIRED
 PLATFORM_API_TIMEOUT = int(os.environ.get('PLATFORM_API_TIMEOUT', '30'))  # 30 seconds
 
 # ===============================================================================
