@@ -102,6 +102,10 @@ dev-platform: build-css
 	@echo "📍 PYTHONPATH: services/platform (scoped)"
 	@echo "🗄️ Running migrations..."
 	@$(PYTHON_PLATFORM_MANAGE) migrate --settings=config.settings.dev
+	@echo "🏷️ Setting up default setting categories..."
+	@$(PYTHON_PLATFORM_MANAGE) setup_categories --settings=config.settings.dev || echo "⚠️ Categories setup skipped"
+	@echo "⚙️ Setting up default system settings..."
+	@$(PYTHON_PLATFORM_MANAGE) setup_default_settings --settings=config.settings.dev || echo "⚠️ Default settings setup skipped"
 	@echo "🔧 Setting up comprehensive test data..."
 	@$(PYTHON_PLATFORM_MANAGE) generate_sample_data --customers 2 --users 3 --services-per-customer 2 --orders-per-customer 1 --invoices-per-customer 2 --proformas-per-customer 1 --tickets-per-customer 2 --settings=config.settings.dev || echo "⚠️ Sample data setup skipped"
 	@echo "⚙️ Setting up scheduled tasks..."
@@ -230,10 +234,18 @@ migrate:
 
 fixtures:
 	@echo "📊 [Platform] Loading comprehensive sample data..."
+	@echo "🏷️ Setting up default setting categories..."
+	@$(PYTHON_PLATFORM_MANAGE) setup_categories --settings=config.settings.dev || echo "⚠️ Categories setup skipped"
+	@echo "⚙️ Setting up default system settings..."
+	@$(PYTHON_PLATFORM_MANAGE) setup_default_settings --settings=config.settings.dev || echo "⚠️ Default settings setup skipped"
 	@$(PYTHON_PLATFORM_MANAGE) generate_sample_data --settings=config.settings.dev
 
 fixtures-light:
 	@echo "📊 [Platform] Loading minimal sample data (fast)..."
+	@echo "🏷️ Setting up default setting categories..."
+	@$(PYTHON_PLATFORM_MANAGE) setup_categories --settings=config.settings.dev || echo "⚠️ Categories setup skipped"
+	@echo "⚙️ Setting up default system settings..."
+	@$(PYTHON_PLATFORM_MANAGE) setup_default_settings --settings=config.settings.dev || echo "⚠️ Default settings setup skipped"
 	@$(PYTHON_PLATFORM_MANAGE) generate_sample_data --customers 2 --users 3 --services-per-customer 2 --orders-per-customer 1 --invoices-per-customer 2 --proformas-per-customer 1 --tickets-per-customer 2 --settings=config.settings.dev
 
 # ===============================================================================
