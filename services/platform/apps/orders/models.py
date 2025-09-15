@@ -411,7 +411,7 @@ class OrderItem(models.Model):
 
     def calculate_totals(self) -> int:
         """Calculate tax and line total with proper banker's rounding for Romanian VAT compliance"""
-        from decimal import Decimal, ROUND_HALF_EVEN
+        from decimal import ROUND_HALF_EVEN, Decimal
 
         subtotal = self.subtotal_cents
         # Use banker's rounding for VAT compliance (same as OrderVATCalculator)

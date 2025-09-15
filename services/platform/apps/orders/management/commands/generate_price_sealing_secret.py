@@ -4,14 +4,18 @@ Django management command to generate secure PRICE_SEALING_SECRET keys.
 """
 
 import secrets
+from typing import Any
 
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandParser
+
+# Security constants
+MIN_SECRET_LENGTH = 32  # Minimum characters for cryptographic security
 
 
 class Command(BaseCommand):
     help = '🔒 Generate secure PRICE_SEALING_SECRET for price token HMAC signing'
 
-    def add_arguments(self, parser) -> None:
+    def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument(
             '--length',
             type=int,
@@ -25,12 +29,12 @@ class Command(BaseCommand):
             help='Output format: env variable or raw key'
         )
 
-    def handle(self, *args, **options) -> None:
+    def handle(self, *args: Any, **options: Any) -> None:
         length = options['length']
         output_format = options['format']
         
         # Validate minimum length
-        if length < 32:
+        if length < MIN_SECRET_LENGTH:
             self.stdout.write(
                 self.style.ERROR('🚨 Error: Secret length must be at least 32 characters for security')
             )

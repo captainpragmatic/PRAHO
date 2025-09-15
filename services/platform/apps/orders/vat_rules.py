@@ -6,8 +6,9 @@ Comprehensive EU VAT compliance for Romanian hosting provider.
 
 import logging
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_HALF_EVEN
+from decimal import ROUND_HALF_EVEN, Decimal
 from enum import Enum
+from typing import TypedDict
 
 from django.utils import timezone
 
@@ -23,7 +24,16 @@ class VATScenario(Enum):
     EU_B2C = "eu_b2c"                     # EU consumer
     EU_B2B_REVERSE_CHARGE = "eu_b2b_reverse"  # EU business (reverse charge)
     NON_EU_ZERO_VAT = "non_eu_zero"       # Non-EU customer
-    
+
+
+class CustomerVATInfo(TypedDict, total=False):
+    """Customer VAT information for calculation"""
+    country: str
+    is_business: bool
+    vat_number: str | None
+    customer_id: str | None
+    order_id: str | None
+
 
 @dataclass
 class VATCalculationResult:
@@ -65,11 +75,7 @@ class OrderVATCalculator:
     def calculate_vat(
         cls,
         subtotal_cents: int,
-        customer_country: str,
-        is_business: bool = False,
-        vat_number: str | None = None,
-        customer_id: str | None = None,
-        order_id: str | None = None
+        customer_info: CustomerVATInfo
     ) -> VATCalculationResult:
         """
         🔒 Calculate VAT for order with full compliance and audit logging.
@@ -85,9 +91,13 @@ class OrderVATCalculator:
         Returns:
             VATCalculationResult with full audit trail
         """
-        
-        country_code = customer_country.upper()
-        
+        # Extract customer information
+        country_code = customer_info['country'].upper()
+        is_business = customer_info.get('is_business', False)
+        vat_number = customer_info.get('vat_number')
+        customer_id = customer_info.get('customer_id')
+        order_id = customer_info.get('order_id')
+
         # Determine VAT scenario
         scenario, vat_rate = cls._determine_vat_scenario(
             country_code, is_business, vat_number
@@ -97,7 +107,7 @@ class OrderVATCalculator:
         if vat_rate == Decimal('0.0'):
             vat_cents = 0
         else:
-            # VAT = subtotal * (vat_rate / 100)
+            # Calculate VAT: subtotal * (vat_rate / 100)
             vat_amount = Decimal(subtotal_cents) * (vat_rate / Decimal('100'))
             # Use banker's rounding (round half to even) for financial consistency
             vat_cents = int(vat_amount.quantize(Decimal('1'), rounding=ROUND_HALF_EVEN))

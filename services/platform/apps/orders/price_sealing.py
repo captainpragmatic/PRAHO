@@ -9,10 +9,23 @@ import hmac
 import json
 import time
 import uuid
-from typing import Any
+from typing import Any, TypedDict
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+
+# Security constants
+MIN_SECRET_LENGTH = 32  # Minimum characters for cryptographic security
+
+
+class PriceData(TypedDict):
+    """Structured price information for sealing"""
+    product_price_id: uuid.UUID
+    amount_cents: int
+    setup_cents: int
+    currency_code: str
+    billing_period: str
+    product_slug: str
 
 
 def get_client_ip(request) -> str:
@@ -33,9 +46,7 @@ def get_client_ip(request) -> str:
         if forwarded_ip:
             # Take first IP if comma-separated list
             ip = forwarded_ip.split(',')[0].strip()
-            if ip and ip != 'unknown':
-                # Basic IP validation
-                if _is_valid_ip(ip):
+            if ip and ip != 'unknown' and _is_valid_ip(ip):
                     return ip
     
     # Fall back to direct connection IP
@@ -90,7 +101,7 @@ class PriceSealingService:
                 return settings.SECRET_KEY
         
         # Validate secret key length for security
-        if len(price_sealing_secret) < 32:
+        if len(price_sealing_secret) < MIN_SECRET_LENGTH:
             raise ValidationError(
                 "PRICE_SEALING_SECRET must be at least 32 characters long for security"
             )
@@ -99,12 +110,7 @@ class PriceSealingService:
     
     @staticmethod
     def seal_price(
-        product_price_id: uuid.UUID,
-        amount_cents: int,
-        setup_cents: int,
-        currency_code: str,
-        billing_period: str,
-        product_slug: str,
+        price_data: PriceData,
         client_ip: str,
         timestamp: float | None = None
     ) -> str:
@@ -128,19 +134,19 @@ class PriceSealingService:
             timestamp = time.time()
         
         # 🔒 SECURITY: Create price payload with IP binding
-        price_data = {
-            'product_price_id': str(product_price_id),
-            'amount_cents': int(amount_cents),
-            'setup_cents': int(setup_cents),
-            'currency_code': currency_code,
-            'billing_period': billing_period,
-            'product_slug': product_slug,
+        payload = {
+            'product_price_id': str(price_data['product_price_id']),
+            'amount_cents': int(price_data['amount_cents']),
+            'setup_cents': int(price_data['setup_cents']),
+            'currency_code': price_data['currency_code'],
+            'billing_period': price_data['billing_period'],
+            'product_slug': price_data['product_slug'],
             'client_ip': client_ip,  # 🔒 SECURITY: IP address binding
             'timestamp': timestamp
         }
         
         # Convert to canonical JSON (sorted keys for consistent signing)
-        canonical_json = json.dumps(price_data, sort_keys=True, separators=(',', ':'))
+        canonical_json = json.dumps(payload, sort_keys=True, separators=(',', ':'))
         
         # Create HMAC signature
         secret_key = PriceSealingService._get_secret_key()
@@ -216,7 +222,7 @@ class PriceSealingService:
             return price_data
             
         except (json.JSONDecodeError, ValueError, TypeError) as e:
-            raise ValidationError(f"Invalid price token format: {e}")
+            raise ValidationError(f"Invalid price token format: {e}") from e
     
     @staticmethod
     def validate_price_against_database(
@@ -248,8 +254,8 @@ class PriceSealingService:
                     id=product_price_id,
                     is_active=True
                 )
-            except ProductPrice.DoesNotExist:
-                raise ValidationError("Price no longer available - please refresh your cart")
+            except ProductPrice.DoesNotExist as e:
+                raise ValidationError("Price no longer available - please refresh your cart") from e
             
             # Optional: Validate expected ProductPrice ID matches
             if expected_product_price_id and product_price_id != expected_product_price_id:
@@ -299,7 +305,7 @@ class PriceSealingService:
         except Exception as e:
             if isinstance(e, ValidationError):
                 raise
-            raise ValidationError(f"Price validation failed: {e}")
+            raise ValidationError(f"Price validation failed: {e}") from e
 
 
 def create_sealed_price_for_product_price(product_price, client_ip: str, billing_period: str = 'monthly') -> str:
@@ -318,12 +324,16 @@ def create_sealed_price_for_product_price(product_price, client_ip: str, billing
     # Get the price for the specified billing period
     amount_cents = product_price.get_price_cents_for_period(billing_period)
 
-    return PriceSealingService.seal_price(
+    price_data = PriceData(
         product_price_id=product_price.id,
         amount_cents=amount_cents,
         setup_cents=product_price.setup_cents,
         currency_code=product_price.currency.code,
         billing_period=billing_period,
-        product_slug=product_price.product.slug,
+        product_slug=product_price.product.slug
+    )
+
+    return PriceSealingService.seal_price(
+        price_data=price_data,
         client_ip=client_ip
     )

@@ -4,7 +4,7 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from django.contrib.auth import get_user_model
 from django.db import models, transaction
@@ -13,6 +13,8 @@ from django.utils import timezone
 from apps.billing.models import Currency
 from apps.common.types import EmailAddress, Err, Ok, Result
 from apps.common.validators import log_security_event
+from apps.products.models import Product
+from apps.provisioning.service_models import Service, ServicePlan
 
 if TYPE_CHECKING:
     from apps.customers.models import Customer
@@ -120,8 +122,8 @@ class OrderCalculationService:
     """
 
     @staticmethod
-    def calculate_order_totals(items: list[OrderItemData], customer: 'Customer' = None,
-                              billing_address: dict = None) -> dict[str, int]:
+    def calculate_order_totals(items: list[OrderItemData], customer: Customer = None,
+                              billing_address: dict | None = None) -> dict[str, int]:
         """
         Calculate order subtotal, VAT, and total in cents using authoritative VAT calculator.
 
@@ -515,7 +517,7 @@ class OrderServiceCreationService:
 
     @staticmethod
     @transaction.atomic
-    def create_pending_services(order: 'Order') -> Result[list['Service'], str]:
+    def create_pending_services(order: Order) -> Result[list[Service], str]:
         """
         Create Service records for all order items when order transitions to pending.
 
@@ -529,7 +531,7 @@ class OrderServiceCreationService:
             Result containing list of created services or error message
         """
         try:
-            from apps.provisioning.models import Service, ServicePlan  # noqa: PLC0415
+            from apps.provisioning.models import Service  # noqa: PLC0415
 
             services_created = []
 
@@ -601,7 +603,7 @@ class OrderServiceCreationService:
             if services_created:
                 logger.info(f"🎉 [ServiceCreation] Successfully created {len(services_created)} pending services for order {order.order_number}")
             else:
-                logger.info(f"ℹ️ [ServiceCreation] No new services created for order {order.order_number} (services may already exist)")
+                logger.info(f"💡 [ServiceCreation] No new services created for order {order.order_number} (services may already exist)")
 
             return Ok(services_created)
 
@@ -610,7 +612,7 @@ class OrderServiceCreationService:
             return Err(f"Failed to create pending services: {e}")
 
     @staticmethod
-    def _get_service_plan_for_product(product: 'Product') -> Result['ServicePlan', str]:
+    def _get_service_plan_for_product(product: Product) -> Result[ServicePlan, str]:
         """
         Map a product to its corresponding service plan for service creation.
 
@@ -667,7 +669,7 @@ class OrderServiceCreationService:
             return Err(f"Failed to map product to service plan: {e}")
 
     @staticmethod
-    def update_service_status_on_payment(order: 'Order') -> Result[list['Service'], str]:
+    def update_service_status_on_payment(order: Order) -> Result[list[Service], str]:
         """
         Update service status from 'pending' to 'provisioning' when payment is confirmed.
 

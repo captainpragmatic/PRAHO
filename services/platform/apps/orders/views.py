@@ -166,9 +166,8 @@ def _get_vat_rate_for_customer(customer: Customer) -> Decimal:
 
         # Determine customer country
         country_code = 'RO'  # Default to Romania
-        if tax_profile and tax_profile.cui:
-            if tax_profile.cui.startswith("RO"):
-                country_code = 'RO'
+        if tax_profile and tax_profile.cui and tax_profile.cui.startswith("RO"):
+            country_code = 'RO'
 
         # Get VAT rate as decimal (0.21 for 21%)
         vat_rate = TaxService.get_vat_rate(country_code, as_decimal=True)

@@ -44,7 +44,7 @@ class OrderPreflightValidationService:
                 logger.warning(f"🔎 [Validation] Missing field '{field}': '{field_value}' from billing data: {list(billing.keys())}")
                 errors.append(str(message))
 
-        # Basic email presence – format validation is assumed upstream
+        # Basic email presence - format validation is assumed upstream
         # VAT number presence for businesses (company name given)
         company_name = str(billing.get("company_name", "")).strip()
         vat_number = str(billing.get("vat_number", billing.get("vat_id", ""))).strip()
@@ -52,7 +52,7 @@ class OrderPreflightValidationService:
         country = str(billing.get("country", "RO")).upper()
 
         if is_business and country == "RO" and not vat_number:
-            warnings.append(str(_("Romanian business without VAT number – verify tax profile")))
+            warnings.append(str(_("Romanian business without VAT number - verify tax profile")))
 
         # 2) Pricing snapshots and product state per item
         for item in order.items.select_related("product"):
@@ -79,7 +79,7 @@ class OrderPreflightValidationService:
                 if not isinstance(item.config, dict) or not str(item.config.get("product_price_id", "")):
                     warnings.append(str(_("Item '{}': missing price snapshot metadata").format(item.product_name)))
 
-        # 3) VAT and totals consistency – recompute
+        # 3) VAT and totals consistency - recompute
         try:
             # For preflight validation (temporary orders), use the provided subtotal
             # For real orders, recompute from items
