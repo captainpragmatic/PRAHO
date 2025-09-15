@@ -3,6 +3,8 @@ Order API Serializers for PRAHO Platform
 DRF serializers for order and product catalog endpoints with Romanian compliance.
 """
 
+import logging
+
 from rest_framework import serializers
 
 from apps.orders.models import Order, OrderItem
@@ -29,9 +31,8 @@ class ProductPriceSerializer(serializers.ModelSerializer):
             'is_active', 'sealed_price_token'
         ]
     
-    def get_sealed_price_token(self, obj):
+    def get_sealed_price_token(self, obj: ProductPrice) -> dict[str, str]:
         """🔒 Generate sealed price tokens for all billing periods"""
-        import logging
         logger = logging.getLogger(__name__)
 
         try:

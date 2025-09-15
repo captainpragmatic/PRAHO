@@ -5,6 +5,11 @@ DRF views for product catalog, order management, and cart calculations.
 
 import logging
 
+# Constants
+ISO_COUNTRY_CODE_LENGTH = 2
+IDEMPOTENCY_KEY_MIN_LENGTH = 16
+IDEMPOTENCY_KEY_MAX_LENGTH = 128
+
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
@@ -15,7 +20,8 @@ from rest_framework.throttling import ScopedRateThrottle
 
 from apps.api.secure_auth import require_customer_authentication
 from apps.common.types import Ok
-from apps.orders.services import OrderCreateData, OrderService
+from apps.customers.models import Customer
+from apps.orders.services import OrderCreateData, OrderService, StatusChangeData
 from apps.products.models import Product
 
 from .serializers import (
@@ -111,7 +117,7 @@ def product_detail(request: Request, slug: str) -> Response:
 @permission_classes([AllowAny])
 @throttle_classes([OrderCalculateThrottle])
 @require_customer_authentication
-def calculate_cart_totals(request: Request, customer) -> Response:
+def calculate_cart_totals(request: Request, customer: Customer) -> Response:
     """
     Calculate cart totals with Romanian VAT compliance.
     Server-authoritative pricing - never trust client input.
@@ -136,7 +142,7 @@ def calculate_cart_totals(request: Request, customer) -> Response:
     
     try:
         # Import here to avoid circular imports
-        from apps.billing.models import Currency
+        from apps.billing.models import Currency  # noqa: PLC0415
         
         # Get currency
         try:
@@ -269,7 +275,7 @@ def calculate_cart_totals(request: Request, customer) -> Response:
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([OrderCalculateThrottle])
 @require_customer_authentication
-def preflight_order(request: Request, customer) -> Response:
+def preflight_order(request: Request, customer: Customer) -> Response:
     """
     🔎 Preflight validation for portal checkout.
     Validates customer profile, product/price availability, VAT scenario, and returns errors/warnings + totals preview.
@@ -368,7 +374,7 @@ def preflight_order(request: Request, customer) -> Response:
         else:
             country = country_raw.upper().strip()
             # If country code looks invalid, default to RO for compliance
-            if len(country) != 2:
+            if len(country) != ISO_COUNTRY_CODE_LENGTH:
                 country = 'RO'
         is_business = bool(company_name)
         
@@ -444,7 +450,7 @@ def preflight_order(request: Request, customer) -> Response:
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([OrderCreateThrottle])
 @require_customer_authentication
-def create_order(request: Request, customer) -> Response:
+def create_order(request: Request, customer: Customer) -> Response:
     """
     Create order from cart items with server-side pricing resolution.
     Supports idempotency keys to prevent duplicate orders and race conditions.
@@ -457,7 +463,7 @@ def create_order(request: Request, customer) -> Response:
             'error': 'Idempotency-Key header or idempotency_key field required'
         }, status=status.HTTP_400_BAD_REQUEST)
     
-    if len(idempotency_key) < 16 or len(idempotency_key) > 128:
+    if len(idempotency_key) < IDEMPOTENCY_KEY_MIN_LENGTH or len(idempotency_key) > IDEMPOTENCY_KEY_MAX_LENGTH:
         return Response({
             'error': 'Idempotency key must be between 16-128 characters'
         }, status=status.HTTP_400_BAD_REQUEST)
@@ -528,7 +534,7 @@ def create_order(request: Request, customer) -> Response:
             if sealed_token:
                 try:
                     # Import here to avoid circular imports
-                    from apps.orders.price_sealing import PriceSealingService, get_client_ip
+                    from apps.orders.price_sealing import PriceSealingService, get_client_ip  # noqa: PLC0415
                     
                     # Get client IP for validation
                     client_ip = get_client_ip(request)

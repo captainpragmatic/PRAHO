@@ -264,18 +264,18 @@ class CustomerCreationSerializer(serializers.Serializer):
 
                 # Create tax profile if VAT number provided
                 if validated_data.get('vat_number'):
-                    from apps.customers.models import CustomerTaxProfile
+                    from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
                     CustomerTaxProfile.objects.create(
                         customer=customer,
                         vat_number=validated_data['vat_number'],
                         cui=validated_data['vat_number'],  # Same as VAT for simplicity
                         registration_number=validated_data.get('trade_registry_number', ''),
-                        is_vat_payer=True if validated_data.get('vat_number') else False,
+                        is_vat_payer=bool(validated_data.get('vat_number')),
                     )
 
                 # Create billing address if provided
                 if billing_address_data:
-                    from apps.customers.models import CustomerAddress
+                    from apps.customers.models import CustomerAddress  # noqa: PLC0415
                     CustomerAddress.objects.create(
                         customer=customer,
                         address_type='primary',
@@ -288,7 +288,7 @@ class CustomerCreationSerializer(serializers.Serializer):
                     )
 
                 # Create owner membership for the user
-                from apps.users.models import CustomerMembership
+                from apps.users.models import CustomerMembership  # noqa: PLC0415
                 CustomerMembership.objects.create(
                     user=user,
                     customer=customer,

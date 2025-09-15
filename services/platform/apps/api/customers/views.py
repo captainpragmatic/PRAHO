@@ -381,7 +381,7 @@ class CustomerProfileAPIView(APIView):
     throttle_classes: ClassVar = [BurstAPIThrottle]
     
     @require_customer_authentication
-    def post(self, request: HttpRequest, customer) -> Response:
+    def post(self, request: HttpRequest, customer: Customer) -> Response:
         """
         🔒 POST /api/customers/profile/ (SECURITY: Changed from GET)
         
@@ -418,7 +418,7 @@ class CustomerProfileAPIView(APIView):
         })
     
     @require_customer_authentication
-    def put(self, request: HttpRequest, customer) -> Response:
+    def put(self, request: HttpRequest, customer: Customer) -> Response:
         """
         PUT /api/customers/profile/
         
@@ -470,7 +470,7 @@ class CustomerProfileAPIView(APIView):
             }, status=status.HTTP_400_BAD_REQUEST)
     
     @require_customer_authentication
-    def patch(self, request: HttpRequest, customer) -> Response:
+    def patch(self, request: HttpRequest, customer: Customer) -> Response:
         """
         PATCH /api/customers/profile/
         
@@ -675,7 +675,7 @@ def customer_detail_api(request: HttpRequest, customer: Customer) -> Response:
 @api_view(['POST'])
 @throttle_classes([BurstAPIThrottle])
 @require_customer_authentication
-def update_customer_billing_address(request: Request, customer) -> Response:
+def update_customer_billing_address(request: Request, customer: Customer) -> Response:
     """
     🏠 Update customer billing address during checkout validation failures.
     
@@ -730,7 +730,7 @@ def update_customer_billing_address(request: Request, customer) -> Response:
     
     try:
         # Import models locally to avoid circular imports
-        from apps.customers.models import CustomerAddress, CustomerTaxProfile
+        from apps.customers.models import CustomerAddress, CustomerTaxProfile  # noqa: PLC0415
         
         with transaction.atomic():
             # Update customer basic info

@@ -8,7 +8,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from django.http import HttpRequest
+from django.http import HttpRequest, JsonResponse
 from rest_framework.response import Response
 
 from apps.customers.models import Customer

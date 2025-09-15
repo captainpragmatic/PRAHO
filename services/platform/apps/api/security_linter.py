@@ -153,8 +153,7 @@ class APISecurityLinter:
                     ))
 
                 # Check for customer_id in query parameters (GET specific)
-                if 'GET' in self.http_methods:
-                    if re.search(r'request\.GET\.get.*customer_id', function_source):
+                if 'GET' in self.http_methods and re.search(r'request\.GET\.get.*customer_id', function_source):
                         self.linter.violations.append(SecurityViolation(
                             str(self.file_path),
                             node.lineno,
@@ -264,8 +263,7 @@ class APISecurityLinter:
         for severity in ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']:
             if severity in by_severity:
                 report.append(f"📊 {severity} SEVERITY ({len(by_severity[severity])} issues):")
-                for violation in by_severity[severity]:
-                    report.append(f"  • {violation}")
+                report.extend(f"  • {violation}" for violation in by_severity[severity])
                 report.append("")
         
         # Summary
