@@ -167,8 +167,8 @@ def _handle_failed_login(request: HttpRequest, user: User | None) -> None:
         )
 
 
-@ratelimit(key="ip", rate="10/m", method="POST", block=False)  # type: ignore[misc]
-@ratelimit(key="post:email", rate="5/m", method="POST", block=False)  # type: ignore[misc]
+@ratelimit(key="ip", rate="10/m", method="POST", block=False)
+@ratelimit(key="post:email", rate="5/m", method="POST", block=False)
 def login_view(request: HttpRequest) -> HttpResponse:
     """Romanian-localized login view with account lockout protection"""
     if request.user.is_authenticated:

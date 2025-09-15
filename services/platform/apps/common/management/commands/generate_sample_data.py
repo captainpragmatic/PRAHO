@@ -473,8 +473,8 @@ class Command(BaseCommand):
 
     def create_products_from_service_plans(self) -> None:
         """Create Product objects and ProductPrice objects based on existing ServicePlans with new pricing model"""
-        from apps.products.models import ProductPrice  # Import here to avoid circular imports
         from apps.billing.models import Currency
+        from apps.products.models import ProductPrice  # Import here to avoid circular imports
 
         service_plans = ServicePlan.objects.all()
 
@@ -668,7 +668,7 @@ class Command(BaseCommand):
             self.stdout.write(f"  ✓ Customer membership already exists for {test_user.email}")
         
         # Clear existing test data for Test Company to ensure fresh comprehensive test data
-        self.stdout.write(f"  ✓ Clearing existing test data for Test Company...")
+        self.stdout.write("  ✓ Clearing existing test data for Test Company...")
         Service.objects.filter(customer=customer).delete()
         Order.objects.filter(customer=customer).delete()
         from apps.billing.models import Invoice, ProformaInvoice
@@ -683,7 +683,7 @@ class Command(BaseCommand):
         self.create_customer_proformas(fake, customer, orders, 5)    # 5 proformas with different statuses
         self.create_customer_tickets(fake, customer, 10)             # 10 tickets with different statuses
 
-        self.stdout.write(f"  ✅ Created comprehensive test data: 7 services, 7 orders, 10 invoices, 5 proformas, 10 tickets")
+        self.stdout.write("  ✅ Created comprehensive test data: 7 services, 7 orders, 10 invoices, 5 proformas, 10 tickets")
         
         return customer
 

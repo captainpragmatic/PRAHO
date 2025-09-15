@@ -627,7 +627,7 @@ class CustomerOnboardingRegistrationForm(UserCreationForm):  # type: ignore[type
             raise ValidationError(_("Invalid customer type selected."))
         return customer_type or ""
 
-    def clean(self) -> dict[str, Any]:  # type: ignore[override]
+    def clean(self) -> dict[str, Any]:
         cleaned = super().clean()
         customer_type = cleaned.get("customer_type") or self.data.get("customer_type")
         cnp = (cleaned.get("cnp") or "").strip()

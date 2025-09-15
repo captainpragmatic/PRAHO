@@ -3,7 +3,7 @@ Django management command to set up default setting categories
 Creates all default setting categories for the PRAHO Platform
 """
 
-from typing import Any
+from typing import Any, ClassVar
 
 from django.core.management.base import BaseCommand, CommandParser
 
@@ -16,7 +16,7 @@ class Command(BaseCommand):
     help = "Set up default setting categories for PRAHO Platform"
 
     # Default categories configuration
-    DEFAULT_CATEGORIES = [
+    DEFAULT_CATEGORIES: ClassVar[list[dict[str, Any]]] = [
         {
             "key": "billing",
             "name": "💰 Billing & Invoicing",

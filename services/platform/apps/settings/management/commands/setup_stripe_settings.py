@@ -65,7 +65,7 @@ class Command(BaseCommand):
         )
 
         if created:
-            self.stdout.write(f"✅ Created integrations category")
+            self.stdout.write("✅ Created integrations category")
 
         # Define Stripe settings with metadata
         stripe_settings = [

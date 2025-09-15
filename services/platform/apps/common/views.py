@@ -75,7 +75,7 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
     )
     
     # Combine and annotate document type, then sort by date and limit to 4
-    recent_documents = []
+    recent_documents: list[Invoice | ProformaInvoice] = []
     for invoice in recent_invoices:
         invoice.document_type = 'invoice'
         recent_documents.append(invoice)

@@ -8,12 +8,11 @@ Provides configurable tax rates with caching and audit trail.
 from __future__ import annotations
 
 import logging
-from decimal import Decimal, ROUND_HALF_EVEN
-from typing import Any, ClassVar
+from decimal import ROUND_HALF_EVEN, Decimal
+from typing import ClassVar
 
 from django.conf import settings
 from django.core.cache import cache
-from django.db import models, transaction
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
