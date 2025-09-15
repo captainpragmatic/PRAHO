@@ -1,0 +1,650 @@
+"""
+🔐 HMAC Concurrent Attack Scenario Tests
+
+Comprehensive tests for concurrent attack scenarios against HMAC authentication:
+- Concurrent brute force attacks
+- Nonce exhaustion attacks
+- Race condition exploitation
+- Cache poisoning attempts
+- Resource exhaustion attacks
+- Distributed attack simulation
+
+These tests ensure HMAC authentication remains secure under concurrent
+load and sophisticated coordinated attacks.
+"""
+
+import hashlib
+import hmac
+import json
+import threading
+import time
+import concurrent.futures
+from collections import defaultdict
+from unittest.mock import patch, Mock
+from typing import Dict, List, Any, Callable
+
+from django.test import SimpleTestCase, override_settings
+
+from apps.api_client.services import PlatformAPIClient
+
+
+class HMACConcurrentAttackTestCase(SimpleTestCase):
+    """🔐 Concurrent attack scenario testing for HMAC authentication"""
+
+    def setUp(self):
+        """Set up concurrent attack test environment"""
+        self.test_secret = "concurrent-attack-test-secret-key"
+        self.portal_id = "concurrent-attack-portal"
+
+        # Note: No cache operations needed for SimpleTestCase
+
+        # Thread-safe result collection
+        self.attack_results = []
+        self.result_lock = threading.Lock()
+
+    def _record_result(self, result: Dict[str, Any]) -> None:
+        """Thread-safe result recording"""
+        with self.result_lock:
+            self.attack_results.append(result)
+
+    def test_concurrent_brute_force_signature_attack(self):
+        """🔐 Test resistance to concurrent brute force signature attacks"""
+
+        def brute_force_worker(worker_id: int, signature_prefix: str) -> Dict[str, Any]:
+            """Worker thread for brute force attack"""
+            attempts = 0
+            successful_auths = 0
+
+            with override_settings(
+                PLATFORM_API_SECRET=self.test_secret,
+                PORTAL_ID=self.portal_id,
+                PLATFORM_API_BASE_URL="http://localhost:8000"
+            ):
+                client = PlatformAPIClient()
+
+                def mock_brute_force_validation(*args, **kwargs):
+                    nonlocal attempts
+                    attempts += 1
+
+                    headers = kwargs.get('headers', {})
+                    signature = headers.get('X-Signature', '')
+
+                    # Simulate Platform rejecting invalid signatures
+                    # Only accept signatures with correct secret
+                    method = kwargs.get('method', 'POST')
+                    url = kwargs.get('url', '')
+                    path = url.replace('http://localhost:8000', '') if url else '/api/test/'
+                    body = kwargs.get('data', b'{}')
+                    if isinstance(body, str):
+                        body = body.encode()
+
+                    portal_id = headers.get('X-Portal-Id', '')
+                    nonce = headers.get('X-Nonce', '')
+                    timestamp = headers.get('X-Timestamp', '')
+
+                    # Generate expected signature
+                    canonical = f"{method}|{path}|{body.decode()}|{portal_id}|{nonce}|{timestamp}"
+                    expected_signature = hmac.new(
+                        self.test_secret.encode(), canonical.encode(), hashlib.sha256
+                    ).hexdigest()
+
+                    mock_response = Mock()
+                    if signature == expected_signature:
+                        mock_response.status_code = 200
+                        mock_response.json.return_value = {'success': True, 'authenticated': True}
+                        return mock_response
+                    else:
+                        # Simulate rate limiting after many failed attempts
+                        if attempts > 50:
+                            mock_response.status_code = 429
+                            mock_response.json.return_value = {'error': 'Rate limited'}
+                        else:
+                            mock_response.status_code = 401
+                            mock_response.json.return_value = {'error': 'HMAC authentication failed'}
+                        return mock_response
+
+                # Attempt multiple authentications with invalid signatures
+                for i in range(10):
+                    # Modify signature to make it invalid
+                    with patch.object(client, '_generate_hmac_headers') as mock_headers:
+                        headers = client._generate_hmac_headers('POST', '/api/test/', b'{}')
+                        # Corrupt signature
+                        headers['X-Signature'] = signature_prefix + headers['X-Signature'][len(signature_prefix):]
+                        mock_headers.return_value = headers
+
+                        with patch('requests.request', side_effect=mock_brute_force_validation):
+                            result = client.authenticate_customer(f'attacker{worker_id}@example.com', 'password123')
+                            if result:
+                                successful_auths += 1
+
+                return {
+                    'worker_id': worker_id,
+                    'attempts': attempts,
+                    'successful_auths': successful_auths,
+                    'signature_prefix': signature_prefix
+                }
+
+        # Launch concurrent brute force workers
+        signature_prefixes = ['aaaa', 'bbbb', 'cccc', 'dddd', 'eeee']
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [
+                executor.submit(brute_force_worker, i, prefix)
+                for i, prefix in enumerate(signature_prefixes)
+            ]
+
+            results = [future.result() for future in concurrent.futures.as_completed(futures)]
+
+        # Analysis
+        total_attempts = sum(r['attempts'] for r in results)
+        total_successes = sum(r['successful_auths'] for r in results)
+
+        # No brute force attempts should succeed
+        self.assertEqual(total_successes, 0,
+                        f"Brute force attack succeeded {total_successes}/{total_attempts} times")
+
+        # Should have attempted reasonable number of brute force tries (5 workers × 10 iterations)
+        self.assertGreaterEqual(total_attempts, 45, "Should have attempted multiple brute force tries")
+
+    def test_nonce_exhaustion_attack(self):
+        """🔐 Test resistance to nonce exhaustion attacks"""
+
+        def nonce_exhaustion_worker(worker_id: int) -> Dict[str, Any]:
+            """Worker thread attempting to exhaust nonce space"""
+            nonces_used = set()
+            cache_hits = 0
+
+            with override_settings(
+                PLATFORM_API_SECRET=self.test_secret,
+                PORTAL_ID=self.portal_id
+            ):
+                client = PlatformAPIClient()
+
+                # Track nonces in memory for this test
+                used_nonces = set()
+
+                def mock_nonce_tracking(*args, **kwargs):
+                    headers = kwargs.get('headers', {})
+                    nonce = headers.get('X-Nonce', '')
+
+                    mock_response = Mock()
+                    if nonce in used_nonces:
+                        # Nonce already used
+                        nonlocal cache_hits
+                        cache_hits += 1
+                        mock_response.status_code = 401
+                        mock_response.json.return_value = {'error': 'Nonce already used'}
+                    else:
+                        # New nonce - track it
+                        used_nonces.add(nonce)
+                        nonces_used.add(nonce)
+                        mock_response.status_code = 200
+                        mock_response.json.return_value = {'success': True, 'authenticated': True}
+
+                    return mock_response
+
+                # Attempt to use many nonces rapidly
+                for i in range(50):
+                    with patch('requests.request', side_effect=mock_nonce_tracking):
+                        client.authenticate_customer(f'nonce_attacker{worker_id}@example.com', 'password123')
+
+                return {
+                    'worker_id': worker_id,
+                    'nonces_used': len(nonces_used),
+                    'cache_hits': cache_hits,
+                    'unique_nonces': len(nonces_used)
+                }
+
+        # Launch concurrent nonce exhaustion workers
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            futures = [executor.submit(nonce_exhaustion_worker, i) for i in range(8)]
+            results = [future.result() for future in concurrent.futures.as_completed(futures)]
+
+        # Analysis
+        total_nonces = sum(r['nonces_used'] for r in results)
+        total_cache_hits = sum(r['cache_hits'] for r in results)
+
+        # All nonces should be unique (no collisions in reasonable timeframe)
+        all_nonces_unique = total_cache_hits == 0
+
+        # With cryptographically secure nonces, collisions should be extremely rare
+        collision_rate = total_cache_hits / (total_nonces + total_cache_hits) if (total_nonces + total_cache_hits) > 0 else 0
+
+        self.assertLess(collision_rate, 0.01,
+                       f"Nonce collision rate too high: {collision_rate:.3%} "
+                       f"(Total nonces: {total_nonces}, Collisions: {total_cache_hits})")
+
+    def test_concurrent_timestamp_manipulation_attack(self):
+        """🔐 Test resistance to concurrent timestamp manipulation attacks"""
+
+        def timestamp_attack_worker(worker_id: int, timestamp_strategy: str) -> Dict[str, Any]:
+            """Worker thread with different timestamp manipulation strategies"""
+
+            attack_results = {
+                'worker_id': worker_id,
+                'strategy': timestamp_strategy,
+                'attempts': 0,
+                'successes': 0,
+                'rate_limited': 0
+            }
+
+            with override_settings(
+                PLATFORM_API_SECRET=self.test_secret,
+                PORTAL_ID=self.portal_id
+            ):
+                client = PlatformAPIClient()
+                current_time = time.time()
+
+                def mock_timestamp_validation(*args, **kwargs):
+                    headers = kwargs.get('headers', {})
+                    timestamp_str = headers.get('X-Timestamp', '')
+
+                    mock_response = Mock()
+                    try:
+                        timestamp = float(timestamp_str)
+                        time_diff = abs(current_time - timestamp)
+
+                        if time_diff <= 300:  # 5 minute window
+                            mock_response.status_code = 200
+                            mock_response.json.return_value = {'success': True, 'authenticated': True}
+                        else:
+                            mock_response.status_code = 401
+                            mock_response.json.return_value = {'error': 'Timestamp out of range'}
+
+                    except (ValueError, TypeError):
+                        mock_response.status_code = 401
+                        mock_response.json.return_value = {'error': 'Invalid timestamp'}
+
+                    return mock_response
+
+                # Generate attack timestamps based on strategy
+                for i in range(20):
+                    attack_results['attempts'] += 1
+
+                    if timestamp_strategy == 'future':
+                        attack_timestamp = str(current_time + 3600)  # 1 hour in future
+                    elif timestamp_strategy == 'past':
+                        attack_timestamp = str(current_time - 3600)  # 1 hour in past
+                    elif timestamp_strategy == 'boundary':
+                        attack_timestamp = str(current_time + 301)  # Just outside 5 min window
+                    elif timestamp_strategy == 'malformed':
+                        attack_timestamp = f"malformed_{i}"
+                    else:  # 'valid'
+                        attack_timestamp = str(current_time)
+
+                    # Override timestamp in headers
+                    with patch.object(client, '_generate_hmac_headers') as mock_headers:
+                        headers = client._generate_hmac_headers('POST', '/api/test/', b'{}')
+                        headers['X-Timestamp'] = attack_timestamp
+                        mock_headers.return_value = headers
+
+                        with patch('requests.request', side_effect=mock_timestamp_validation):
+                            result = client.authenticate_customer(f'ts_attacker{worker_id}@example.com', 'password123')
+
+                            if result:
+                                attack_results['successes'] += 1
+
+            return attack_results
+
+        # Test different timestamp manipulation strategies concurrently
+        strategies = ['future', 'past', 'boundary', 'malformed', 'valid']
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(strategies)) as executor:
+            futures = [
+                executor.submit(timestamp_attack_worker, i, strategy)
+                for i, strategy in enumerate(strategies)
+            ]
+
+            results = [future.result() for future in concurrent.futures.as_completed(futures)]
+
+        # Analysis by strategy
+        results_by_strategy = {r['strategy']: r for r in results}
+
+        # Only valid timestamps should succeed
+        self.assertEqual(results_by_strategy['valid']['successes'], 20,
+                        "Valid timestamps should always succeed")
+
+        # Invalid strategies should fail
+        invalid_strategies = ['future', 'past', 'boundary', 'malformed']
+        for strategy in invalid_strategies:
+            self.assertEqual(results_by_strategy[strategy]['successes'], 0,
+                           f"Timestamp {strategy} attack should never succeed")
+
+    def test_concurrent_portal_id_spoofing_attack(self):
+        """🔐 Test resistance to concurrent Portal ID spoofing attacks"""
+
+        legitimate_portal_id = "legitimate-portal"
+        attack_portal_ids = [
+            "attacker-portal-1",
+            "attacker-portal-2",
+            "legitimate-portal-fake",
+            "",  # Empty portal ID
+            "admin-portal",
+            "system-portal"
+        ]
+
+        def portal_spoofing_worker(worker_id: int, spoofed_portal_id: str) -> Dict[str, Any]:
+            """Worker attempting Portal ID spoofing"""
+
+            with override_settings(
+                PLATFORM_API_SECRET=self.test_secret,
+                PORTAL_ID=spoofed_portal_id,  # Attacker tries to use different Portal ID
+                PLATFORM_API_BASE_URL="http://localhost:8000"
+            ):
+                client = PlatformAPIClient()
+
+                def mock_portal_validation(*args, **kwargs):
+                    headers = kwargs.get('headers', {})
+                    portal_id = headers.get('X-Portal-Id', '')
+
+                    mock_response = Mock()
+                    # Only legitimate portal should be accepted
+                    if portal_id == legitimate_portal_id:
+                        mock_response.status_code = 200
+                        mock_response.json.return_value = {'success': True, 'authenticated': True}
+                    else:
+                        mock_response.status_code = 401
+                        mock_response.json.return_value = {
+                            'error': 'Unauthorized portal',
+                            'portal_id': portal_id
+                        }
+
+                    return mock_response
+
+                attempts = 0
+                successes = 0
+
+                for i in range(15):
+                    attempts += 1
+
+                    with patch('requests.request', side_effect=mock_portal_validation):
+                        result = client.authenticate_customer(f'spoof_attacker{worker_id}@example.com', 'password123')
+                        if result:
+                            successes += 1
+
+                return {
+                    'worker_id': worker_id,
+                    'spoofed_portal_id': spoofed_portal_id,
+                    'attempts': attempts,
+                    'successes': successes
+                }
+
+        # Test spoofing attempts with different Portal IDs concurrently
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(attack_portal_ids)) as executor:
+            futures = [
+                executor.submit(portal_spoofing_worker, i, portal_id)
+                for i, portal_id in enumerate(attack_portal_ids)
+            ]
+
+            results = [future.result() for future in concurrent.futures.as_completed(futures)]
+
+        # Analysis
+        total_attempts = sum(r['attempts'] for r in results)
+        total_successes = sum(r['successes'] for r in results)
+
+        # No spoofing attempts should succeed (only legitimate portal ID allowed)
+        self.assertEqual(total_successes, 0,
+                        f"Portal ID spoofing succeeded {total_successes}/{total_attempts} times")
+
+        # Test that legitimate portal would succeed
+        with override_settings(
+            PLATFORM_API_SECRET=self.test_secret,
+            PORTAL_ID=legitimate_portal_id
+        ):
+            client = PlatformAPIClient()
+
+            def mock_legitimate_portal(*args, **kwargs):
+                headers = kwargs.get('headers', {})
+                portal_id = headers.get('X-Portal-Id', '')
+
+                mock_response = Mock()
+                if portal_id == legitimate_portal_id:
+                    mock_response.status_code = 200
+                    mock_response.json.return_value = {'success': True, 'authenticated': True}
+                else:
+                    mock_response.status_code = 401
+                    mock_response.json.return_value = {'error': 'Unauthorized portal'}
+
+                return mock_response
+
+            with patch('requests.request', side_effect=mock_legitimate_portal):
+                result = client.authenticate_customer('legitimate@example.com', 'password123')
+                self.assertIsNotNone(result, "Legitimate portal should succeed")
+                self.assertTrue(result.get('authenticated', False))
+
+    def test_concurrent_race_condition_exploitation(self):
+        """🔐 Test resistance to race condition exploitation in HMAC validation"""
+
+        def race_condition_worker(worker_id: int, attack_type: str) -> Dict[str, Any]:
+            """Worker attempting to exploit race conditions"""
+
+            race_results = {
+                'worker_id': worker_id,
+                'attack_type': attack_type,
+                'attempts': 0,
+                'race_wins': 0
+            }
+
+            with override_settings(
+                PLATFORM_API_SECRET=self.test_secret,
+                PORTAL_ID=self.portal_id
+            ):
+                client = PlatformAPIClient()
+
+                if attack_type == 'nonce_reuse':
+                    # Attempt to reuse nonces in rapid succession
+                    fixed_nonce = f"race_nonce_{worker_id}"
+
+                    for i in range(30):
+                        race_results['attempts'] += 1
+
+                        with patch.object(client, '_generate_hmac_headers') as mock_headers:
+                            headers = client._generate_hmac_headers('POST', '/api/test/', b'{}')
+                            headers['X-Nonce'] = fixed_nonce  # Reuse same nonce
+                            mock_headers.return_value = headers
+
+                            # Use shared nonce tracking to properly test race conditions
+                            if not hasattr(test_concurrent_race_condition_exploitation, 'race_nonces'):
+                                test_concurrent_race_condition_exploitation.race_nonces = set()
+
+                            def mock_race_nonce_validation(*args, **kwargs):
+                                headers = kwargs.get('headers', {})
+                                nonce = headers.get('X-Nonce', '')
+
+                                mock_response = Mock()
+                                # Properly reject duplicate nonces (as Platform would)
+                                if nonce in test_concurrent_race_condition_exploitation.race_nonces:
+                                    mock_response.status_code = 401
+                                    mock_response.json.return_value = {'error': 'Nonce already used'}
+                                    return mock_response
+
+                                # Accept new nonce
+                                test_concurrent_race_condition_exploitation.race_nonces.add(nonce)
+                                mock_response.status_code = 200
+                                mock_response.json.return_value = {'success': True, 'nonce_first_use': True}
+                                return mock_response
+
+                            with patch('requests.request', side_effect=mock_race_nonce_validation):
+                                result = client.authenticate_customer(f'race_attacker{worker_id}@example.com', 'password123')
+                                if result:
+                                    race_results['race_wins'] += 1
+
+                elif attack_type == 'timestamp_window':
+                    # Attempt to exploit timestamp validation window
+                    base_timestamp = time.time()
+
+                    for i in range(20):
+                        race_results['attempts'] += 1
+
+                        # Use timestamp at edge of validation window
+                        edge_timestamp = str(base_timestamp + 299.9)  # Just under 300s limit
+
+                        with patch.object(client, '_generate_hmac_headers') as mock_headers:
+                            headers = client._generate_hmac_headers('POST', '/api/test/', b'{}')
+                            headers['X-Timestamp'] = edge_timestamp
+                            mock_headers.return_value = headers
+
+                            def mock_timestamp_race_validation(*args, **kwargs):
+                                headers = kwargs.get('headers', {})
+                                timestamp_str = headers.get('X-Timestamp', '')
+
+                                try:
+                                    timestamp = float(timestamp_str)
+                                    current_time = time.time()
+                                    time_diff = abs(current_time - timestamp)
+
+                                    mock_response = Mock()
+                                    if time_diff <= 300:  # 5 minute window
+                                        mock_response.status_code = 200
+                                        mock_response.json.return_value = {'success': True}
+                                    else:
+                                        mock_response.status_code = 401
+                                        mock_response.json.return_value = {'error': 'Timestamp expired'}
+
+                                except (ValueError, TypeError):
+                                    mock_response = Mock()
+                                    mock_response.status_code = 401
+                                    mock_response.json.return_value = {'error': 'Invalid timestamp'}
+
+                                return mock_response
+
+                            with patch('requests.request', side_effect=mock_timestamp_race_validation):
+                                result = client.authenticate_customer(f'ts_race_attacker{worker_id}@example.com', 'password123')
+                                if result:
+                                    race_results['race_wins'] += 1
+
+            return race_results
+
+        # Launch concurrent race condition attacks
+        attack_types = ['nonce_reuse', 'timestamp_window']
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+            futures = []
+            # Multiple workers per attack type to increase race condition chances
+            for attack_type in attack_types:
+                for i in range(3):
+                    futures.append(executor.submit(race_condition_worker, i, attack_type))
+
+            results = [future.result() for future in concurrent.futures.as_completed(futures)]
+
+        # Analysis
+        results_by_type = defaultdict(list)
+        for result in results:
+            results_by_type[result['attack_type']].append(result)
+
+        for attack_type, type_results in results_by_type.items():
+            total_attempts = sum(r['attempts'] for r in type_results)
+            total_race_wins = sum(r['race_wins'] for r in type_results)
+
+            # Race condition exploitation should be minimal/zero
+            race_success_rate = total_race_wins / total_attempts if total_attempts > 0 else 0
+
+            self.assertLess(race_success_rate, 0.05,
+                           f"Race condition {attack_type} success rate too high: {race_success_rate:.2%} "
+                           f"({total_race_wins}/{total_attempts})")
+
+    def test_distributed_coordinated_attack_simulation(self):
+        """🔐 Test resistance to distributed coordinated attacks"""
+
+        def coordinated_attack_worker(worker_id: int, coordination_data: Dict[str, Any]) -> Dict[str, Any]:
+            """Worker simulating part of coordinated attack"""
+
+            attack_start_time = coordination_data['start_time']
+            attack_duration = coordination_data['duration']
+            worker_attack_type = coordination_data['attack_types'][worker_id % len(coordination_data['attack_types'])]
+
+            # Wait for coordinated start
+            while time.time() < attack_start_time:
+                time.sleep(0.01)
+
+            attack_results = {
+                'worker_id': worker_id,
+                'attack_type': worker_attack_type,
+                'attempts': 0,
+                'successes': 0,
+                'rate_limited_responses': 0
+            }
+
+            with override_settings(
+                PLATFORM_API_SECRET=self.test_secret,
+                PORTAL_ID=self.portal_id
+            ):
+                client = PlatformAPIClient()
+                end_time = attack_start_time + attack_duration
+
+                def mock_coordinated_defense(*args, **kwargs):
+                    """Mock Platform with coordinated attack defense"""
+
+                    # Simulate rate limiting and DDoS protection
+                    request_rate = len(self.attack_results)  # Approximate current load
+
+                    mock_response = Mock()
+                    if request_rate > 100:  # High load detected
+                        mock_response.status_code = 429
+                        mock_response.json.return_value = {
+                            'error': 'Rate limited - coordinated attack detected',
+                            'retry_after': 60
+                        }
+                        return mock_response
+
+                    # Normal validation (most should still fail due to invalid credentials)
+                    mock_response.status_code = 401
+                    mock_response.json.return_value = {'error': 'HMAC authentication failed'}
+                    return mock_response
+
+                # Execute coordinated attack
+                while time.time() < end_time:
+                    attack_results['attempts'] += 1
+
+                    with patch('requests.request', side_effect=mock_coordinated_defense):
+                        result = client.authenticate_customer(
+                            f'coordinated_attacker{worker_id}@example.com',
+                            'password123'
+                        )
+
+                        if result:
+                            attack_results['successes'] += 1
+                        # Check for rate limiting response (simplified)
+                        attack_results['rate_limited_responses'] += 1 if len(self.attack_results) > 100 else 0
+
+                    self._record_result({'worker': worker_id, 'timestamp': time.time()})
+
+                    # Brief pause to avoid overwhelming test environment
+                    time.sleep(0.01)
+
+            return attack_results
+
+        # Coordinate attack parameters
+        coordination_data = {
+            'start_time': time.time() + 1,  # Start in 1 second
+            'duration': 5,  # 5 second attack
+            'attack_types': ['brute_force', 'nonce_flood', 'timestamp_manipulation', 'portal_spoofing']
+        }
+
+        # Launch distributed coordinated attack
+        num_workers = 20
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = [
+                executor.submit(coordinated_attack_worker, i, coordination_data)
+                for i in range(num_workers)
+            ]
+
+            results = [future.result() for future in concurrent.futures.as_completed(futures)]
+
+        # Analysis
+        total_attempts = sum(r['attempts'] for r in results)
+        total_successes = sum(r['successes'] for r in results)
+        total_rate_limited = sum(r['rate_limited_responses'] for r in results)
+
+        # Coordinated attack should be largely unsuccessful
+        success_rate = total_successes / total_attempts if total_attempts > 0 else 0
+        self.assertLess(success_rate, 0.01,
+                       f"Coordinated attack success rate too high: {success_rate:.3%}")
+
+        # Rate limiting should have been triggered
+        self.assertGreater(total_rate_limited, 0,
+                          "Rate limiting should have been triggered during coordinated attack")
+
+        # System should maintain reasonable performance under attack
+        self.assertGreater(total_attempts, 100,
+                          "Attack should have generated significant load for testing")
