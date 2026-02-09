@@ -3,6 +3,15 @@ Billing Services for PRAHO Platform
 Handles invoice management, refunds, and Romanian VAT compliance.
 Contains critical financial operations including bidirectional refund synchronization.
 
+Includes comprehensive usage-based billing services:
+- MeteringService: Event recording and processing
+- AggregationService: Usage aggregation management
+- RatingEngine: Charge calculation with tiered pricing
+- UsageAlertService: Threshold monitoring and alerts
+- UsageInvoiceService: Automatic invoice generation from usage
+- BillingCycleManager: Subscription billing cycle management
+- Stripe metering integration services
+
 This file serves as a re-export hub following ADR-0012 feature-based organization.
 """
 
@@ -50,6 +59,26 @@ from .refund_service import (
     RefundStatus,
     RefundType,
     Result,
+)
+
+# Import usage-based billing services
+from .metering_service import (
+    AggregationService,
+    MeteringService,
+    RatingEngine,
+    UsageAlertService,
+    UsageEventData,
+)
+from .usage_invoice_service import (
+    BillingCycleManager,
+    UsageInvoiceService,
+)
+from .stripe_metering import (
+    StripeMeterService,
+    StripeMeterEventService,
+    StripeSubscriptionMeterService,
+    StripeUsageSyncService,
+    StripeMeterWebhookHandler,
 )
 
 # Result class is imported from refund_service.py - no need to redefine here
@@ -213,6 +242,7 @@ class ProformaConversionService:
 
 # Expose all services in __all__ for explicit imports
 __all__ = [
+    # Core billing services
     "BillingAnalyticsService",
     "EFacturaService",
     "InvoiceNumberingService",
@@ -220,6 +250,7 @@ __all__ = [
     "PaymentRetryService",
     "ProformaConversionService",
     "ProformaService",
+    # Refund services
     "RefundData",
     "RefundEligibility",
     "RefundQueryService",
@@ -229,6 +260,21 @@ __all__ = [
     "RefundStatus",
     "RefundType",
     "Result",
+    # Usage-based billing services
+    "AggregationService",
+    "BillingCycleManager",
+    "MeteringService",
+    "RatingEngine",
+    "UsageAlertService",
+    "UsageEventData",
+    "UsageInvoiceService",
+    # Stripe metering services
+    "StripeMeterEventService",
+    "StripeMeterService",
+    "StripeMeterWebhookHandler",
+    "StripeSubscriptionMeterService",
+    "StripeUsageSyncService",
+    # Helper functions
     "generate_e_factura_xml",
     "generate_invoice_pdf",
     "generate_proforma_pdf",

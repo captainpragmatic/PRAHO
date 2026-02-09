@@ -3,6 +3,14 @@ Billing models for PRAHO Platform
 Romanian invoice generation with VAT compliance and e-Factura support.
 Aligned with PostgreSQL hosting panel schema v1 with separate proforma handling.
 
+Includes comprehensive usage-based billing system:
+- Usage metering and event tracking
+- Aggregation and rating engine
+- Subscription and billing cycle management
+- Tiered pricing support
+- Usage alerts and thresholds
+- Stripe Meter integration
+
 This file serves as a re-export hub following ADR-0012 feature-based organization.
 """
 
@@ -41,6 +49,20 @@ from .validators import (
     validate_financial_json,
     validate_financial_text_field,
     validate_invoice_sequence_increment,
+)
+
+# Usage-based billing model imports
+from .metering_models import (
+    BillingCycle,
+    PricingTier,
+    PricingTierBracket,
+    Subscription,
+    SubscriptionItem,
+    UsageAggregation,
+    UsageAlert,
+    UsageEvent,
+    UsageMeter,
+    UsageThreshold,
 )
 
 logger = logging.getLogger(__name__)
@@ -100,6 +122,15 @@ __all__ = [
     # Tax Models
     "TaxRule",
     "VATValidation",
+    # Usage-based billing models
+    "BillingCycle",
+    "PricingTier",
+    "PricingTierBracket",
+    "UsageAggregation",
+    "UsageAlert",
+    "UsageEvent",
+    "UsageMeter",
+    "UsageThreshold",
     # Validators
     "log_security_event",
     "validate_financial_amount",
