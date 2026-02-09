@@ -1,0 +1,172 @@
+{% extends 'base.html' %}
+{% load ui_components %}
+{% load formatting %}
+{% load i18n %}
+
+{% block title %}{% trans "Domain Administration" %} - PRAHO Staff{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <!-- Page Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
+        <div>
+            <h1 class="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-3">
+                🔧 {% trans "Domain Administration" %}
+                {% if total_count %}
+                    {% badge total_count variant="secondary" size="sm" %}
+                {% endif %}
+            </h1>
+            <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                {% trans "Manage all domains across all customers" %}
+            </p>
+        </div>
+        <div class="mt-4 sm:mt-0 flex gap-3">
+            {% url 'domains:tld_list' as tld_list_url %}
+            {% url 'domains:registrar_list' as registrar_list_url %}
+            {% button "🌐 TLDs" variant="secondary" href=tld_list_url %}
+            {% button "🏢 Registrars" variant="secondary" href=registrar_list_url %}
+        </div>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm font-medium text-slate-600 dark:text-slate-400">{% trans "Total Domains" %}</p>
+                    <p class="text-2xl font-bold text-slate-900 dark:text-white">{{ total_count|default:0 }}</p>
+                </div>
+                <div class="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                    <span class="text-2xl">🌍</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm font-medium text-slate-600 dark:text-slate-400">{% trans "Active Domains" %}</p>
+                    <p class="text-2xl font-bold text-green-600 dark:text-green-400">{{ active_count|default:0 }}</p>
+                </div>
+                <div class="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                    <span class="text-2xl">✅</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm font-medium text-slate-600 dark:text-slate-400">{% trans "Expiring Soon" %}</p>
+                    <p class="text-2xl font-bold text-orange-600 dark:text-orange-400">{{ expiring_count|default:0 }}</p>
+                </div>
+                <div class="p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
+                    <span class="text-2xl">⚠️</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm font-medium text-slate-600 dark:text-slate-400">{% trans "Auto-Renew" %}</p>
+                    <p class="text-2xl font-bold text-purple-600 dark:text-purple-400">{{ auto_renew_count|default:0 }}</p>
+                </div>
+                <div class="p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
+                    <span class="text-2xl">🔄</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4 mb-6">
+        <form method="get" class="flex flex-wrap items-end gap-4">
+            <div class="w-full sm:w-auto flex-1 min-w-[200px]">
+                <label for="search" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    {% trans "Search" %}
+                </label>
+                <input type="text" id="search" name="search" value="{{ search_query }}"
+                       placeholder="{% trans 'Domain name or customer...' %}"
+                       class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-3 py-2 text-sm text-slate-900 dark:text-slate-100" />
+            </div>
+            <div>
+                <label for="status" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    {% trans "Status" %}
+                </label>
+                <select name="status" id="status"
+                        class="block w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-3 py-2 text-sm text-slate-900 dark:text-slate-100">
+                    <option value="all">{% trans "All Statuses" %}</option>
+                    <option value="active" {% if status_filter == 'active' %}selected{% endif %}>🟢 {% trans "Active" %}</option>
+                    <option value="pending" {% if status_filter == 'pending' %}selected{% endif %}>🟡 {% trans "Pending" %}</option>
+                    <option value="expired" {% if status_filter == 'expired' %}selected{% endif %}>🔴 {% trans "Expired" %}</option>
+                    <option value="suspended" {% if status_filter == 'suspended' %}selected{% endif %}>⏸️ {% trans "Suspended" %}</option>
+                    <option value="cancelled" {% if status_filter == 'cancelled' %}selected{% endif %}>❌ {% trans "Cancelled" %}</option>
+                    <option value="transfer_in" {% if status_filter == 'transfer_in' %}selected{% endif %}>📥 {% trans "Transfer In" %}</option>
+                    <option value="transfer_out" {% if status_filter == 'transfer_out' %}selected{% endif %}>📤 {% trans "Transfer Out" %}</option>
+                </select>
+            </div>
+            <div>
+                <label for="registrar" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    {% trans "Registrar" %}
+                </label>
+                <select name="registrar" id="registrar"
+                        class="block w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-3 py-2 text-sm text-slate-900 dark:text-slate-100">
+                    <option value="">{% trans "All Registrars" %}</option>
+                    {% for registrar in registrars %}
+                        <option value="{{ registrar.id }}" {% if registrar_filter == registrar.id|stringformat:"s" %}selected{% endif %}>
+                            {{ registrar.display_name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label for="expiry" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    {% trans "Expiry" %}
+                </label>
+                <select name="expiry" id="expiry"
+                        class="block w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-3 py-2 text-sm text-slate-900 dark:text-slate-100">
+                    <option value="">{% trans "All" %}</option>
+                    <option value="expiring" {% if expiry_filter == 'expiring' %}selected{% endif %}>⚠️ {% trans "Expiring (30 days)" %}</option>
+                    <option value="auto_renew" {% if expiry_filter == 'auto_renew' %}selected{% endif %}>🔄 {% trans "Auto-Renew Candidates" %}</option>
+                </select>
+            </div>
+            <div class="flex gap-2">
+                <button type="submit" class="inline-flex items-center px-4 py-2 rounded-md bg-slate-900 text-white text-sm hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600">
+                    🔎 {% trans "Filter" %}
+                </button>
+                <a href="{% url 'domains:domain_admin_list' %}" class="inline-flex items-center px-4 py-2 rounded-md border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 text-sm hover:bg-slate-50 dark:hover:bg-slate-700">
+                    {% trans "Clear" %}
+                </a>
+            </div>
+        </form>
+    </div>
+
+    <!-- Domains Table -->
+    {% if domains %}
+        {% table_enhanced table_data.columns table_data.rows page_obj=domains pagination_enabled=True %}
+    {% else %}
+        <!-- Empty State -->
+        <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 text-center py-12">
+            <div class="mx-auto h-24 w-24 text-slate-400 dark:text-slate-500 mb-4">
+                <span class="text-6xl">🌍</span>
+            </div>
+            <h3 class="mt-2 text-lg font-medium text-slate-900 dark:text-white">{% trans "No domains found" %}</h3>
+            <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                {% if search_query or status_filter or registrar_filter or expiry_filter %}
+                    {% trans "Try adjusting your filters to find domains." %}
+                {% else %}
+                    {% trans "No domains have been registered yet." %}
+                {% endif %}
+            </p>
+            {% if search_query or status_filter or registrar_filter or expiry_filter %}
+                <div class="mt-6">
+                    <a href="{% url 'domains:domain_admin_list' %}" class="inline-flex items-center px-4 py-2 rounded-md bg-slate-900 text-white text-sm hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600">
+                        {% trans "Clear Filters" %}
+                    </a>
+                </div>
+            {% endif %}
+        </div>
+    {% endif %}
+</div>
+{% endblock %}

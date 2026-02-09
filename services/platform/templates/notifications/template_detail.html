@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+{% load ui_components %}
+{% load i18n %}
+
+{% block title %}{{ object.key }} - {% trans "Email Template" %}{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <!-- Page Header with Breadcrumb -->
+    <div class="mb-6">
+        <nav class="flex mb-4" aria-label="Breadcrumb">
+            <ol class="inline-flex items-center space-x-1 md:space-x-3">
+                <li class="inline-flex items-center">
+                    <a href="{% url 'notifications:template_list' %}" class="inline-flex items-center text-sm font-medium text-slate-700 hover:text-blue-600 dark:text-slate-400 dark:hover:text-white">
+                        {% trans "Email Templates" %}
+                    </a>
+                </li>
+                <li>
+                    <div class="flex items-center">
+                        <span class="mx-2 text-slate-400">/</span>
+                        <span class="text-sm font-medium text-slate-500 dark:text-slate-400">{{ object.key }}</span>
+                    </div>
+                </li>
+            </ol>
+        </nav>
+
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+            <div>
+                <h1 class="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-3">
+                    {{ object.key }}
+                    {% if object.is_active %}
+                        {% badge "Active" variant="success" size="sm" %}
+                    {% else %}
+                        {% badge "Inactive" variant="secondary" size="sm" %}
+                    {% endif %}
+                </h1>
+                <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                    {{ object.description|default:object.subject }}
+                </p>
+            </div>
+            <div class="mt-4 sm:mt-0 flex gap-3">
+                <a href="{% url 'notifications:template_list' %}" class="inline-flex items-center px-4 py-2 rounded-md border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 text-sm hover:bg-slate-50 dark:hover:bg-slate-700">
+                    {% trans "Back to List" %}
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Main Content -->
+        <div class="lg:col-span-2 space-y-6">
+            <!-- Subject -->
+            <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+                    <h2 class="text-lg font-semibold text-slate-900 dark:text-white">{% trans "Subject" %}</h2>
+                </div>
+                <div class="p-6">
+                    <p class="text-slate-900 dark:text-slate-100 font-medium">{{ object.subject }}</p>
+                </div>
+            </div>
+
+            <!-- HTML Body Preview -->
+            <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                    <h2 class="text-lg font-semibold text-slate-900 dark:text-white">{% trans "HTML Body" %}</h2>
+                    <div class="flex gap-2">
+                        <button type="button" onclick="togglePreview('html')"
+                                class="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">
+                            {% trans "Toggle Preview" %}
+                        </button>
+                    </div>
+                </div>
+                <div class="p-6">
+                    <!-- Source Code View -->
+                    <div id="html-source" class="block">
+                        <pre class="bg-slate-50 dark:bg-slate-900 rounded-lg p-4 overflow-x-auto text-sm text-slate-800 dark:text-slate-200 font-mono whitespace-pre-wrap break-words">{{ object.body_html }}</pre>
+                    </div>
+                    <!-- Preview View -->
+                    <div id="html-preview" class="hidden">
+                        <div class="bg-white dark:bg-slate-900 rounded-lg p-4 border border-slate-200 dark:border-slate-700">
+                            <iframe id="preview-frame" class="w-full min-h-[400px] border-0" sandbox="allow-same-origin"></iframe>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Plain Text Body -->
+            {% if object.body_text %}
+            <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+                    <h2 class="text-lg font-semibold text-slate-900 dark:text-white">{% trans "Plain Text Body" %}</h2>
+                </div>
+                <div class="p-6">
+                    <pre class="bg-slate-50 dark:bg-slate-900 rounded-lg p-4 overflow-x-auto text-sm text-slate-800 dark:text-slate-200 font-mono whitespace-pre-wrap">{{ object.body_text }}</pre>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Sidebar -->
+        <div class="space-y-6">
+            <!-- Template Info -->
+            <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+                    <h2 class="text-lg font-semibold text-slate-900 dark:text-white">{% trans "Template Info" %}</h2>
+                </div>
+                <div class="p-6 space-y-4">
+                    <div>
+                        <dt class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "Key" %}</dt>
+                        <dd class="mt-1 text-sm text-slate-900 dark:text-slate-100 font-mono">{{ object.key }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "Locale" %}</dt>
+                        <dd class="mt-1 text-sm text-slate-900 dark:text-slate-100">
+                            {% if object.locale == 'ro' %}
+                                🇷🇴 {% trans "Romanian" %}
+                            {% elif object.locale == 'en' %}
+                                🇬🇧 {% trans "English" %}
+                            {% else %}
+                                {{ object.locale }}
+                            {% endif %}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "Category" %}</dt>
+                        <dd class="mt-1 text-sm text-slate-900 dark:text-slate-100">
+                            {% badge object.get_category_display variant="secondary" %}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "Version" %}</dt>
+                        <dd class="mt-1 text-sm text-slate-900 dark:text-slate-100">v{{ object.version }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "Status" %}</dt>
+                        <dd class="mt-1">
+                            {% if object.is_active %}
+                                {% badge "Active" variant="success" %}
+                            {% else %}
+                                {% badge "Inactive" variant="secondary" %}
+                            {% endif %}
+                        </dd>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Available Variables -->
+            {% if object.variables %}
+            <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+                    <h2 class="text-lg font-semibold text-slate-900 dark:text-white">{% trans "Available Variables" %}</h2>
+                </div>
+                <div class="p-6">
+                    <div class="space-y-3">
+                        {% for key, description in object.variables.items %}
+                        <div class="bg-slate-50 dark:bg-slate-900 rounded-lg p-3">
+                            <code class="text-sm font-mono text-blue-600 dark:text-blue-400">{% templatetag openvariable %} {{ key }} {% templatetag closevariable %}</code>
+                            {% if description %}
+                            <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">{{ description }}</p>
+                            {% endif %}
+                        </div>
+                        {% empty %}
+                        <p class="text-sm text-slate-500 dark:text-slate-400 italic">{% trans "No variables defined" %}</p>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Timestamps -->
+            <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+                    <h2 class="text-lg font-semibold text-slate-900 dark:text-white">{% trans "History" %}</h2>
+                </div>
+                <div class="p-6 space-y-4">
+                    <div>
+                        <dt class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "Created" %}</dt>
+                        <dd class="mt-1 text-sm text-slate-900 dark:text-slate-100">
+                            {{ object.created_at|date:"d M Y, H:i" }}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "Last Updated" %}</dt>
+                        <dd class="mt-1 text-sm text-slate-900 dark:text-slate-100">
+                            {{ object.updated_at|date:"d M Y, H:i" }}
+                        </dd>
+                    </div>
+                    {% if object.created_by %}
+                    <div>
+                        <dt class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "Created By" %}</dt>
+                        <dd class="mt-1 text-sm text-slate-900 dark:text-slate-100">
+                            {{ object.created_by.get_full_name|default:object.created_by.email }}
+                        </dd>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function togglePreview(type) {
+    const source = document.getElementById(type + '-source');
+    const preview = document.getElementById(type + '-preview');
+
+    if (source.classList.contains('hidden')) {
+        source.classList.remove('hidden');
+        preview.classList.add('hidden');
+    } else {
+        source.classList.add('hidden');
+        preview.classList.remove('hidden');
+
+        // Load HTML content into iframe for safe preview
+        if (type === 'html') {
+            const frame = document.getElementById('preview-frame');
+            const htmlContent = document.querySelector('#html-source pre').textContent;
+            frame.srcdoc = htmlContent;
+        }
+    }
+}
+</script>
+{% endblock %}

@@ -92,8 +92,6 @@
       {% input_field "domain_name" label="Domain Name" html_id="id_domain_name" placeholder="example.com" value=form.domain_name.value help_text="Domain name for this service (if applicable)" error=form.domain_name.errors.0 %}
     </div>
 
-    <!-- Additional Configuration -->
-
     <!-- Advanced Configuration (JSON) -->
     <div class="mb-6">
       <details class="bg-slate-900 rounded-lg border border-slate-700 p-4">
@@ -133,11 +131,11 @@
   
   <!-- Form Actions -->
   <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
-    <button type="button" 
+    <button type="button"
             {% if action == 'create' %}
-              onclick="hideAddItemModal()"
+              onclick="if(typeof cancelAddItemForm === 'function') cancelAddItemForm(); else if(typeof hideAddItemModal === 'function') hideAddItemModal();"
             {% else %}
-              onclick="hideEditItemModal()"
+              onclick="if(typeof cancelExpandableEdit === 'function') cancelExpandableEdit('{{ item.id }}'); else if(typeof hideEditItemModal === 'function') hideEditItemModal();"
             {% endif %}
             class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white">
       ❌ {% trans "Cancel" %}

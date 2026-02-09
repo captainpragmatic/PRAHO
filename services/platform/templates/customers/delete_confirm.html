@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans 'Delete Customer' %} - {{ customer.name }}{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 max-w-2xl mx-auto">
+    <!-- Page Header -->
+    <div class="mb-6">
+        <nav class="flex mb-4" aria-label="Breadcrumb">
+            <ol class="inline-flex items-center space-x-1 md:space-x-3">
+                <li class="inline-flex items-center">
+                    <a href="{% url 'customers:list' %}" class="inline-flex items-center text-sm font-medium text-slate-400 hover:text-white">
+                        {% trans "Customers" %}
+                    </a>
+                </li>
+                <li>
+                    <div class="flex items-center">
+                        <span class="mx-2 text-slate-500">/</span>
+                        <a href="{% url 'customers:detail' customer.pk %}" class="text-sm font-medium text-slate-400 hover:text-white">
+                            {{ customer.name|truncatechars:30 }}
+                        </a>
+                    </div>
+                </li>
+                <li>
+                    <div class="flex items-center">
+                        <span class="mx-2 text-slate-500">/</span>
+                        <span class="text-sm font-medium text-red-400">{% trans "Delete" %}</span>
+                    </div>
+                </li>
+            </ol>
+        </nav>
+    </div>
+
+    <!-- Warning Card -->
+    <div class="bg-slate-800 rounded-lg border border-red-600 overflow-hidden">
+        <!-- Header -->
+        <div class="px-6 py-4 bg-red-900/30 border-b border-red-600">
+            <div class="flex items-center">
+                <span class="text-3xl mr-4">⚠️</span>
+                <div>
+                    <h1 class="text-xl font-bold text-white">{% trans "Delete Customer" %}</h1>
+                    <p class="text-sm text-red-300">{% trans "This action cannot be undone" %}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Customer Info -->
+        <div class="px-6 py-6">
+            <div class="bg-slate-900 rounded-lg p-4 mb-6">
+                <h2 class="text-sm font-semibold text-slate-400 mb-3">{% trans "Customer to be deleted:" %}</h2>
+                <div class="flex items-start">
+                    <div class="w-12 h-12 rounded-lg bg-slate-700 flex items-center justify-center text-xl mr-4">
+                        {% if customer.customer_type == 'company' %}🏢
+                        {% elif customer.customer_type == 'individual' %}👤
+                        {% elif customer.customer_type == 'pfa' %}💼
+                        {% else %}🏛️{% endif %}
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-semibold text-white">{{ customer.name }}</h3>
+                        {% if customer.company_name %}
+                            <p class="text-sm text-slate-400">{{ customer.company_name }}</p>
+                        {% endif %}
+                        <div class="flex flex-wrap gap-2 mt-2">
+                            {% badge customer.get_customer_type_display variant="secondary" size="sm" %}
+                            {% badge customer.get_status_display variant="secondary" size="sm" %}
+                            {% if customer.cui %}
+                                {% badge customer.cui variant="secondary" size="sm" %}
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Warning Messages -->
+            <div class="space-y-4 mb-6">
+                <div class="bg-amber-900/30 border border-amber-600 rounded-lg p-4">
+                    <h3 class="text-sm font-semibold text-amber-400 mb-2">{% trans "What will happen:" %}</h3>
+                    <ul class="text-sm text-amber-300 space-y-2">
+                        <li class="flex items-start">
+                            <span class="mr-2">•</span>
+                            <span>{% trans "The customer record will be soft-deleted (marked as inactive)" %}</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="mr-2">•</span>
+                            <span>{% trans "Associated orders and invoices will be preserved for audit" %}</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="mr-2">•</span>
+                            <span>{% trans "User assignments will be removed" %}</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="mr-2">•</span>
+                            <span>{% trans "This action is logged for GDPR compliance" %}</span>
+                        </li>
+                    </ul>
+                </div>
+
+                <div class="bg-blue-900/30 border border-blue-600 rounded-lg p-4">
+                    <div class="flex items-start">
+                        <span class="text-xl mr-3">🇷🇴</span>
+                        <div>
+                            <h3 class="text-sm font-semibold text-blue-400 mb-1">{% trans "Romanian Business Records" %}</h3>
+                            <p class="text-sm text-blue-300">
+                                {% trans "Per Romanian fiscal regulations, invoice and order records must be preserved for the legally required period. Only the customer profile will be deactivated." %}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Confirmation Form -->
+            <form method="POST" class="space-y-4">
+                {% csrf_token %}
+
+                <div class="bg-slate-900 rounded-lg p-4">
+                    <label for="confirm_name" class="block text-sm font-medium text-slate-300 mb-2">
+                        {% trans "Type the customer name to confirm deletion:" %}
+                    </label>
+                    <input type="text"
+                           id="confirm_name"
+                           name="confirm_name"
+                           autocomplete="off"
+                           required
+                           placeholder="{{ customer.name }}"
+                           class="w-full px-4 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500">
+                    <p class="mt-2 text-xs text-slate-500">
+                        {% trans "This confirmation ensures you are deleting the correct customer." %}
+                    </p>
+                </div>
+
+                <!-- Actions -->
+                <div class="flex items-center justify-between pt-4 border-t border-slate-700">
+                    <a href="{% url 'customers:detail' customer.pk %}"
+                       class="inline-flex items-center px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors">
+                        {% trans "Cancel" %}
+                    </a>
+                    <button type="submit"
+                            class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg bg-red-600 text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-slate-800 transition-colors">
+                        <span class="mr-2">🗑️</span>
+                        {% trans "Delete Customer" %}
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.querySelector('form');
+    const confirmInput = document.getElementById('confirm_name');
+    const customerName = '{{ customer.name|escapejs }}';
+    const submitButton = form.querySelector('button[type="submit"]');
+
+    // Disable submit button initially
+    submitButton.disabled = true;
+    submitButton.classList.add('opacity-50', 'cursor-not-allowed');
+
+    // Enable button only when name matches
+    confirmInput.addEventListener('input', function() {
+        const matches = this.value.trim() === customerName;
+        submitButton.disabled = !matches;
+
+        if (matches) {
+            submitButton.classList.remove('opacity-50', 'cursor-not-allowed');
+        } else {
+            submitButton.classList.add('opacity-50', 'cursor-not-allowed');
+        }
+    });
+
+    // Final confirmation on submit
+    form.addEventListener('submit', function(e) {
+        if (confirmInput.value.trim() !== customerName) {
+            e.preventDefault();
+            alert('{% trans "Please type the exact customer name to confirm deletion." %}');
+            return false;
+        }
+
+        // Extra confirmation dialog
+        if (!confirm('{% trans "Are you absolutely sure you want to delete this customer? This action cannot be undone." %}')) {
+            e.preventDefault();
+            return false;
+        }
+    });
+});
+</script>
+{% endblock %}
