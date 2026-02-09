@@ -292,6 +292,7 @@ class RegisterViewTest(BaseViewTestCase):
             'customer_type': 'individual',
             'customer_name': 'New User',
             'company_name': 'Individual User',  # Required for Romanian compliance
+            'cnp': '1234567890123',  # Required for individuals - Romanian Personal Numeric Code
             'terms_accepted': True,  # Required for Romanian compliance
             'gdpr_consent': True,
             'data_processing_consent': True,
@@ -549,7 +550,7 @@ class TwoFactorViewsTest(BaseViewTestCase):
         self.client.force_login(self.user)
         response = self.client.get(reverse('users:mfa_method_selection'))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, '2FA')
+        self.assertContains(response, 'MFA')
         
     def test_mfa_method_selection_anonymous(self) -> None:
         """Test MFA method selection for anonymous user"""
@@ -559,7 +560,7 @@ class TwoFactorViewsTest(BaseViewTestCase):
     def test_two_factor_setup_totp_get(self) -> None:
         """Test GET request to TOTP setup"""
         self.client.force_login(self.user)
-        response = self.client.get(reverse('users:two_factor_setup_totp'))
+        response = self.client.get(reverse('users:mfa_setup_totp'))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Authenticator App')
         
@@ -578,7 +579,7 @@ class TwoFactorViewsTest(BaseViewTestCase):
         totp = pyotp.TOTP('TESTBASE32SECRET')
         valid_token = totp.now()
         
-        response = self.client.post(reverse('users:two_factor_setup_totp'), {
+        response = self.client.post(reverse('users:mfa_setup_totp'), {
             'token': valid_token
         })
         
@@ -591,14 +592,14 @@ class TwoFactorViewsTest(BaseViewTestCase):
     def test_two_factor_setup_webauthn_get(self) -> None:
         """Test GET request to WebAuthn setup (redirects to TOTP as WebAuthn is not yet implemented)"""
         self.client.force_login(self.user)
-        response = self.client.get(reverse('users:two_factor_setup_webauthn'))
+        response = self.client.get(reverse('users:mfa_setup_webauthn'))
         # WebAuthn redirects to TOTP setup as it's not yet implemented
         self.assertEqual(response.status_code, 302)
         
     def test_two_factor_verify_get_no_2fa_enabled(self) -> None:
         """Test 2FA verify page when 2FA not enabled"""
         self.client.force_login(self.user)
-        response = self.client.get(reverse('users:two_factor_verify'))
+        response = self.client.get(reverse('users:mfa_verify'))
         self.assertEqual(response.status_code, 302)  # Redirect
         
     def test_two_factor_verify_get_2fa_enabled(self) -> None:
@@ -612,7 +613,7 @@ class TwoFactorViewsTest(BaseViewTestCase):
         session['pre_2fa_user_id'] = str(self.user.id)
         session.save()
         
-        response = self.client.get(reverse('users:two_factor_verify'))
+        response = self.client.get(reverse('users:mfa_verify'))
         self.assertEqual(response.status_code, 200)
         # Check for 2FA-related content instead of specific "verification" text
         self.assertContains(response, 'Two-Factor')
@@ -626,7 +627,7 @@ class TwoFactorViewsTest(BaseViewTestCase):
         session['new_backup_codes'] = ['CODE1', 'CODE2', 'CODE3']
         session.save()
         
-        response = self.client.get(reverse('users:two_factor_backup_codes'))
+        response = self.client.get(reverse('users:mfa_backup_codes'))
         self.assertEqual(response.status_code, 200)
         
     def test_two_factor_regenerate_backup_codes_post(self) -> None:
@@ -635,10 +636,10 @@ class TwoFactorViewsTest(BaseViewTestCase):
         self.user.save()
         
         self.client.force_login(self.user)
-        response = self.client.post(reverse('users:two_factor_regenerate_backup_codes'))
+        response = self.client.post(reverse('users:mfa_regenerate_backup_codes'))
         
         self.assertEqual(response.status_code, 302)  # Redirect to backup codes page
-        self.assertRedirects(response, reverse('users:two_factor_backup_codes'))
+        self.assertRedirects(response, reverse('users:mfa_backup_codes'))
         
         # Check backup codes were generated
         self.user.refresh_from_db()
@@ -651,7 +652,7 @@ class TwoFactorViewsTest(BaseViewTestCase):
         self.user.save()
         
         self.client.force_login(self.user)
-        response = self.client.post(reverse('users:two_factor_disable'), {
+        response = self.client.post(reverse('users:mfa_disable'), {
             'password': 'testpass123'
         })
         
@@ -972,6 +973,7 @@ class IntegrationTest(BaseViewTestCase):
                 'customer_type': 'individual',
                 'customer_name': 'New User',
                 'company_name': 'Individual User',  # Required for Romanian compliance
+                'cnp': '1234567890123',  # Required for individuals - Romanian Personal Numeric Code
                 'terms_accepted': True,  # Required for Romanian compliance
                 'gdpr_consent': True,
                 'data_processing_consent': True,
@@ -1067,14 +1069,14 @@ class IntegrationTest(BaseViewTestCase):
         self.assertEqual(response.status_code, 200)
         
         # Step 2: Set up TOTP
-        response = self.client.get(reverse('users:two_factor_setup_totp'))
+        response = self.client.get(reverse('users:mfa_setup_totp'))
         self.assertEqual(response.status_code, 200)
         
         # Step 3: Verify TOTP setup
         totp = pyotp.TOTP('TESTBASE32SECRET')
         valid_token = totp.now()
         
-        response = self.client.post(reverse('users:two_factor_setup_totp'), {
+        response = self.client.post(reverse('users:mfa_setup_totp'), {
             'token': valid_token,
             'secret': 'TESTBASE32SECRET'
         })

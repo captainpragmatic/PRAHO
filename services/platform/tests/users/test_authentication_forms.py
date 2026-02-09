@@ -158,6 +158,7 @@ class MinimalCustomerOnboardingFormTestCase(TestCase):
             'customer_type': 'individual',
             'customer_name': 'Test User',
             'company_name': 'Test Individual',  # Required for Romanian compliance
+            'cnp': '1234567890123',  # Required for individuals - Romanian Personal Numeric Code
             'terms_accepted': True,  # Required for Romanian compliance
             'gdpr_consent': True,  # Required for Romanian GDPR compliance
             'phone': '+40712345678',

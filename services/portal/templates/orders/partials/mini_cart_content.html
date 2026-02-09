@@ -1,0 +1,86 @@
+{% load i18n ui_components %}
+
+<!-- Mini Cart Content -->
+<div class="bg-slate-800 rounded-lg shadow-xl border border-slate-700">
+  
+  {% if cart_items %}
+  <!-- Cart Header -->
+  <div class="px-4 py-3 border-b border-slate-700">
+    <h3 class="font-medium text-white">
+      🛒 {% trans "Your Cart" %}
+    </h3>
+    <p class="text-xs text-slate-400 mt-1">
+      {% blocktrans count counter=total_items %}
+        {{ counter }} product
+      {% plural %}
+        {{ counter }} products
+      {% endblocktrans %}
+    </p>
+  </div>
+  
+  <!-- Cart Items Preview -->
+  <div class="px-4 py-3 space-y-3 max-h-64 overflow-y-auto">
+    {% for item in cart_items %}
+    <div class="flex items-center justify-between">
+      <div class="flex-1 min-w-0">
+        <p class="text-sm font-medium text-white truncate">
+          {{ item.product_name }}
+        </p>
+        <div class="flex items-center text-xs text-slate-400 space-x-2">
+          <span>{{ item.quantity }}x</span>
+          <span>{{ item.billing_period|title }}</span>
+          {% if item.domain_name %}
+          <span>• {{ item.domain_name }}</span>
+          {% endif %}
+        </div>
+      </div>
+      
+      <!-- Remove Item Button -->
+      <button hx-post="{% url 'orders:remove_from_cart' %}"
+              hx-vals='{"product_slug": "{{ item.product_slug }}", "billing_period": "{{ item.billing_period }}"}'
+              hx-target="#cart-widget"
+              hx-swap="outerHTML"
+              hx-on::after-request="document.body.dispatchEvent(new CustomEvent('cartUpdated'));"
+              hx-confirm="Are you sure you want to remove this product from cart?"
+              class="ml-2 text-slate-400 hover:text-red-400 transition-colors p-1"
+              aria-label="{% trans 'Remove from cart' %}">
+        <span class="text-xs">🗑️</span>
+      </button>
+    </div>
+    {% endfor %}
+    
+    {% if show_view_all %}
+    <div class="pt-2 border-t border-slate-700">
+      <p class="text-xs text-slate-400 text-center">
+        {% trans "... și alte produse" %}
+      </p>
+    </div>
+    {% endif %}
+  </div>
+  
+  <!-- Cart Actions -->
+  <div class="px-4 py-3 border-t border-slate-700 space-y-2">
+    <a href="{% url 'orders:cart_review' %}" class="w-full text-center inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-slate-300 bg-slate-700 border border-slate-600 rounded-lg hover:bg-slate-600 transition-colors">
+      👀 {% trans "View full cart" %}
+    </a>
+    <a href="{% url 'orders:checkout' %}" class="w-full text-center inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-white bg-blue-600 border border-blue-600 rounded-lg hover:bg-blue-700 transition-colors">
+      💳 {% trans "Finish order" %}
+    </a>
+  </div>
+  
+  {% else %}
+  <!-- Empty Cart State -->
+  <div class="px-4 py-6 text-center">
+    <div class="text-slate-400 mb-3">
+      <span class="text-2xl">🛒</span>
+    </div>
+    <p class="text-sm text-slate-400 mb-3">
+      {% trans "Coșul dumneavoastră este gol" %}
+    </p>
+    <a href="{% url 'orders:catalog' %}" class="w-full text-center inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-white bg-blue-600 border border-blue-600 rounded-lg hover:bg-blue-700 transition-colors">
+      📦 {% trans "Explore products" %}
+    </a>
+  </div>
+  {% endif %}
+  
+</div>

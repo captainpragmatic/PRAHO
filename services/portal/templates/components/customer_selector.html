@@ -1,0 +1,128 @@
+{% load i18n %}
+
+<!-- Customer Selector Component -->
+<div class="customer-selector-container">
+  <!-- Current Customer Badge -->
+  <div class="flex items-center space-x-3">
+    <div class="flex items-center space-x-2">
+      <span class="text-sm text-slate-400">{% trans "Acting as:" %}</span>
+      <div class="bg-slate-700 rounded-lg px-3 py-1 flex items-center space-x-2">
+        <span class="text-blue-400">🏢</span>
+        <span class="text-sm font-medium text-white">
+          {% if selected_customer_name %}
+            {{ selected_customer_name }}
+          {% else %}
+            {% trans "Select Customer" %}
+          {% endif %}
+        </span>
+        {% if selected_customer_role %}
+          <span class="text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full">
+            {% if selected_customer_role == "owner" %}{% trans "Owner" %}
+            {% elif selected_customer_role == "billing" %}{% trans "Billing" %}
+            {% elif selected_customer_role == "tech" %}{% trans "Technical" %}
+            {% elif selected_customer_role == "viewer" %}{% trans "Viewer" %}
+            {% else %}{{ selected_customer_role|title }}{% endif %}
+          </span>
+        {% endif %}
+      </div>
+    </div>
+    
+    <!-- Customer Switcher Button (if multiple customers) -->
+    <button id="customerSelectorBtn" 
+            class="text-slate-400 hover:text-white transition-colors"
+            title="{% trans 'Switch Customer' %}"
+            onclick="toggleCustomerSelector()">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l4-4 4 4m0 6l-4 4-4-4"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- Customer Selection Dropdown (Hidden by default) -->
+  <div id="customerSelectorDropdown" 
+       class="absolute top-full left-0 mt-2 w-80 bg-slate-800 border border-slate-600 rounded-lg shadow-xl z-50 hidden">
+    <div class="p-4">
+      <h3 class="text-sm font-semibold text-white mb-3">{% trans "Select Customer Context" %}</h3>
+      
+      <!-- Customer List -->
+      <form method="post" action="{% url 'users:switch_customer' %}">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        
+        <div class="space-y-2 max-h-60 overflow-y-auto">
+          {% for membership in user_memberships %}
+          <button type="submit" name="customer_id" value="{{ membership.customer_id }}" 
+                  class="w-full text-left p-3 rounded-lg border transition-colors
+                         {% if membership.customer_id|stringformat:'s' == selected_customer_id|stringformat:'s' %}
+                           bg-blue-900/30 border-blue-600 text-blue-200
+                         {% else %}
+                           bg-slate-700 border-slate-600 hover:bg-slate-600 hover:border-slate-500 text-white
+                         {% endif %}">
+            <div class="flex items-center justify-between">
+              <div>
+                <div class="font-medium">{{ membership.customer_name }}</div>
+                <div class="text-sm text-slate-400">ID: {{ membership.customer_id }}</div>
+              </div>
+              <div class="flex items-center space-x-2">
+                <span class="text-xs px-2 py-1 rounded-full 
+                           {% if membership.role == 'owner' %}bg-green-600 text-white
+                           {% elif membership.role == 'billing' %}bg-blue-600 text-white  
+                           {% elif membership.role == 'tech' %}bg-purple-600 text-white
+                           {% elif membership.role == 'viewer' %}bg-gray-600 text-white
+                           {% else %}bg-slate-600 text-white{% endif %}">
+                  {% if membership.role == "owner" %}👑 {% trans "Owner" %}
+                  {% elif membership.role == "billing" %}💳 {% trans "Billing" %}
+                  {% elif membership.role == "tech" %}⚙️ {% trans "Technical" %}
+                  {% elif membership.role == "viewer" %}👁️ {% trans "Viewer" %}
+                  {% else %}{{ membership.role|title }}{% endif %}
+                </span>
+                {% if membership.customer_id|stringformat:'s' == selected_customer_id|stringformat:'s' %}
+                  <span class="text-blue-400">✓</span>
+                {% endif %}
+              </div>
+            </div>
+          </button>
+          {% empty %}
+          <div class="text-center py-4 text-slate-400">
+            <span class="text-gray-500">{% trans "No customers available" %}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </form>
+    </div>
+    
+    <!-- Footer -->
+    <div class="border-t border-slate-600 p-3 text-center">
+      <p class="text-xs text-slate-400">
+        {% trans "Your access level determines what actions you can perform" %}
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- JavaScript for Customer Selector -->
+<script>
+function toggleCustomerSelector() {
+  const dropdown = document.getElementById('customerSelectorDropdown');
+  const btn = document.getElementById('customerSelectorBtn');
+  
+  if (dropdown.classList.contains('hidden')) {
+    dropdown.classList.remove('hidden');
+    btn.classList.add('text-white');
+  } else {
+    dropdown.classList.add('hidden');
+    btn.classList.remove('text-white');
+  }
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click', function(event) {
+  const container = document.querySelector('.customer-selector-container');
+  const dropdown = document.getElementById('customerSelectorDropdown');
+  
+  if (!container.contains(event.target)) {
+    dropdown.classList.add('hidden');
+    document.getElementById('customerSelectorBtn').classList.remove('text-white');
+  }
+});
+</script>

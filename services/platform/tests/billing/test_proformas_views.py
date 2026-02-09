@@ -97,7 +97,7 @@ class ProformaViewsTestCase(TestCase):
         """Test proforma create GET request"""
         # Use Django test client for staff-required view
         self.client.force_login(self.staff_user)
-        response = self.client.get('/app/billing/proformas/create/')
+        response = self.client.get('/billing/proformas/create/')
         
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Create New Proforma')
@@ -107,7 +107,7 @@ class ProformaViewsTestCase(TestCase):
         """Test proforma create without staff permissions"""
         # Use Django test client for proper decorator testing
         self.client.force_login(self.regular_user)
-        response = self.client.get('/app/billing/proformas/create/')
+        response = self.client.get('/billing/proformas/create/')
         
         # Should redirect due to @billing_staff_required decorator
         self.assertEqual(response.status_code, 302)
@@ -125,7 +125,7 @@ class ProformaViewsTestCase(TestCase):
             'line_0_vat_rate': '19',
         }
         
-        request = self.factory.post('/app/billing/proformas/create/', post_data)
+        request = self.factory.post('/billing/proformas/create/', post_data)
         request.user = self.staff_user
         request = self.add_middleware_to_request(request)
         

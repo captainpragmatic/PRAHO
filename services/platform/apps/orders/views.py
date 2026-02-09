@@ -38,6 +38,7 @@ from apps.tickets.models import SupportCategory, Ticket
 from apps.users.models import User
 
 from .models import Order, OrderItem
+from .preflight import OrderPreflightValidationService
 from .services import (
     OrderService,
     StatusChangeData,
@@ -155,30 +156,30 @@ def _validate_manual_price_override(
 
 def _get_vat_rate_for_customer(customer: Customer) -> Decimal:
     """
-    Calculate VAT rate for customer based on Romanian tax rules.
-    Romanian customers: 19% VAT
-    EU customers with valid VAT ID: 0% (reverse charge)
-    EU customers without VAT ID: 19%
-    Non-EU customers: 0%
+    Calculate VAT rate for customer using centralized TaxService.
+    DEPRECATED: Use OrderVATCalculator.calculate_vat() instead for full compliance.
     """
     try:
+        from apps.common.tax_service import TaxService
+
         tax_profile = customer.get_tax_profile()
 
-        # Romanian customers always pay 19% VAT
+        # Determine customer country
+        country_code = 'RO'  # Default to Romania
         if tax_profile and tax_profile.cui and tax_profile.cui.startswith("RO"):
-            return Decimal("0.19")  # 19%
+            country_code = 'RO'
 
-        # For now, default to 19% VAT for all customers with tax profile
-        # TODO: Implement EU/non-EU logic based on customer address or VAT ID format
-        if tax_profile and tax_profile.is_vat_payer:
-            return Decimal("0.19")  # 19%
+        # Get VAT rate as decimal (0.21 for 21%)
+        vat_rate = TaxService.get_vat_rate(country_code, as_decimal=True)
 
-        # No tax profile or not VAT payer: 0%
-        return Decimal("0.00")  # 0%
+        logger.info(f"💰 [Orders] VAT rate for customer {customer.id}: {vat_rate} ({country_code})")
+        return vat_rate
 
     except Exception as e:
         logger.warning(f"⚠️ [Orders] Could not determine VAT rate for customer {customer.id}: {e}")
-        return Decimal("0.19")  # Default to 19% for safety
+        # Fall back to centralized Romanian VAT rate
+        from apps.common.tax_service import TaxService
+        return TaxService.get_vat_rate('RO', as_decimal=True)
 
 
 def _get_accessible_customer_ids(user: User) -> list[int]:
@@ -358,15 +359,64 @@ def order_detail(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
         and order.status not in ["completed", "cancelled", "refunded"]  # Terminal states
     )
 
+    # Preflight validation (only for draft orders)
+    preflight_errors: list[str] = []
+    preflight_warnings: list[str] = []
+    preflight_ok = True
+    if order.status == "draft":
+        try:
+            preflight_errors, preflight_warnings = OrderPreflightValidationService.validate(order)
+            preflight_ok = len(preflight_errors) == 0
+        except Exception as e:
+            logger.warning(f"⚠️ [Orders] Preflight computation failed for {order.order_number}: {e}")
+            preflight_ok = False
+
     context = {
         "order": order,
         "is_staff": is_staff,
         "can_edit": can_edit,
         "editable_fields": editable_fields,
         "can_edit_all": editable_fields == ["*"],
+        # Preflight
+        "preflight_ok": preflight_ok,
+        "preflight_errors": preflight_errors,
+        "preflight_warnings": preflight_warnings,
     }
 
     return render(request, "orders/order_detail.html", context)
+
+
+@staff_required_strict
+def order_validate(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
+    """
+    🧪 Run preflight validation for an order (HTMX/partial)
+    Returns a partial with errors/warnings and a JS hint to enable UI.
+    """
+    order = get_object_or_404(Order, id=pk)
+
+    # Validate access
+    if access_denied := _validate_order_access(request, order):
+        return access_denied
+
+    errors: list[str] = []
+    warnings: list[str] = []
+    ok = False
+    try:
+        errors, warnings = OrderPreflightValidationService.validate(order)
+        ok = len(errors) == 0
+    except Exception as e:
+        logger.error(f"🔥 [Orders] Preflight validation error for {order.order_number}: {e}")
+        errors = ["Validation failed to run"]
+        ok = False
+
+    context = {
+        "order": order,
+        "preflight_ok": ok,
+        "preflight_errors": errors,
+        "preflight_warnings": warnings,
+    }
+
+    return render(request, "orders/partials/preflight_results.html", context)
 
 
 @staff_required_strict
@@ -482,6 +532,189 @@ def order_create(request: HttpRequest) -> HttpResponse:
     }
 
     return render(request, "orders/order_form.html", context)
+
+
+@staff_required_strict
+@require_POST
+def order_create_preview(request: HttpRequest) -> HttpResponse:
+    """
+    🧮 HTMX endpoint: Preview first item + VAT totals during order creation (staff UI)
+    No persistence. Uses OrderVATCalculator for authoritative VAT rules.
+    """
+    try:
+        customer_id = request.POST.get("customer")
+        currency_code = request.POST.get("currency", "RON")
+        product_id = request.POST.get("first_product")
+        billing_period = request.POST.get("first_billing_period", "monthly")
+        quantity = int(request.POST.get("first_quantity", 1) or 1)
+        (request.POST.get("first_domain_name") or "").strip()
+
+        if not (customer_id and product_id):
+            return render(request, "orders/partials/create_preview_totals.html", {
+                "error": True,
+                "message": "Select a customer and product to preview totals",
+            })
+
+        customer = get_object_or_404(Customer, id=customer_id)
+        product = get_object_or_404(Product, id=product_id)
+
+        # Resolve price for selected period + currency
+        price = product.get_price_for_period(currency_code, billing_period)
+        if price is None:
+            return render(request, "orders/partials/create_preview_totals.html", {
+                "error": True,
+                "message": f"No price for {currency_code} / {billing_period}",
+            })
+
+        unit_cents = int(price.effective_price_cents)
+        setup_cents = int(price.setup_cents)
+        subtotal_cents = (unit_cents * quantity) + setup_cents
+
+        # VAT calc per rules
+        from .vat_rules import CustomerVATInfo, OrderVATCalculator
+
+        billing = customer.get_billing_address()
+        tax_profile = customer.get_tax_profile()
+        country = (billing.country if billing and billing.country else "RO").upper()
+        vat_number = getattr(tax_profile, "vat_number", None) or getattr(tax_profile, "cui", None)
+        is_business = bool(getattr(customer, "company_name", ""))
+
+        customer_vat_info: CustomerVATInfo = {
+            'country': country,
+            'is_business': is_business,
+            'vat_number': vat_number,
+            'customer_id': str(customer.id),
+            'order_id': None,
+        }
+        vat_result = OrderVATCalculator.calculate_vat(
+            subtotal_cents=subtotal_cents,
+            customer_info=customer_vat_info
+        )
+
+        context = {
+            "error": False,
+            "currency": currency_code,
+            "quantity": quantity,
+            "product": product,
+            "billing_period": billing_period,
+            "unit_cents": unit_cents,
+            "setup_cents": setup_cents,
+            "subtotal_cents": subtotal_cents,
+            "vat_cents": int(vat_result.vat_cents),
+            "total_cents": int(vat_result.total_cents),
+            "vat_reasoning": vat_result.reasoning,
+        }
+        return render(request, "orders/partials/create_preview_totals.html", context)
+
+    except Exception as e:
+        logger.error(f"🔥 [Orders] Preview error: {e}")
+        return render(request, "orders/partials/create_preview_totals.html", {
+            "error": True,
+            "message": "Failed to calculate preview",
+        })
+
+
+@staff_required_strict
+@require_POST
+def order_create_with_item(request: HttpRequest) -> HttpResponse:
+    """
+    ✨ Create order and first item in one transaction (staff UI).
+    Uses server-side price resolution and VAT rules.
+    """
+    # Base order form
+    order_form = modelform_factory(Order, fields=["customer", "currency", "payment_method", "notes", "customer_notes"])
+    form = order_form(request.POST)
+    if not form.is_valid():
+        messages.error(request, _("❌ Please correct the errors below."))
+        return redirect("orders:order_create")
+
+    try:
+        with transaction.atomic():
+            # Create order (reuse logic from order_create)
+            order = form.save(commit=False)
+            customer = order.customer
+            tax_profile = customer.get_tax_profile()
+            billing_address = customer.get_billing_address()
+
+            order.customer_email = customer.primary_email
+            order.customer_name = customer.get_display_name()
+            order.customer_company = customer.company_name
+            order.customer_vat_id = tax_profile.cui if tax_profile else ""
+
+            if billing_address:
+                order.billing_address = {
+                    "company_name": customer.company_name,
+                    "line1": billing_address.address_line1,
+                    "line2": billing_address.address_line2,
+                    "city": billing_address.city,
+                    "county": billing_address.county,
+                    "postal_code": billing_address.postal_code,
+                    "country": billing_address.country,
+                    "vat_id": tax_profile.cui if tax_profile else "",
+                    "contact_person": customer.get_display_name(),
+                    "contact_email": customer.primary_email,
+                    "contact_phone": customer.primary_phone,
+                }
+            else:
+                order.billing_address = {
+                    "company_name": customer.company_name,
+                    "line1": "",
+                    "line2": "",
+                    "city": "",
+                    "county": "",
+                    "postal_code": "",
+                    "country": "România",
+                    "vat_id": tax_profile.cui if tax_profile else "",
+                    "contact_person": customer.get_display_name(),
+                    "contact_email": customer.primary_email,
+                    "contact_phone": customer.primary_phone,
+                }
+
+            order.subtotal_cents = 0
+            order.tax_cents = 0
+            order.total_cents = 0
+            order.save()
+
+            # First item fields
+            product_id = request.POST.get("first_product")
+            billing_period = request.POST.get("first_billing_period", "monthly")
+            quantity = int(request.POST.get("first_quantity", 1) or 1)
+            domain_name = (request.POST.get("first_domain_name") or "").strip()
+
+            if product_id:
+                product = get_object_or_404(Product, id=product_id)
+                price = product.get_price_for_period(order.currency.code, billing_period)
+                if not price:
+                    raise ValueError(f"No price for {order.currency.code} / {billing_period}")
+
+                # Build item
+                from .models import OrderItem  # noqa: PLC0415
+                item = OrderItem(
+                    order=order,
+                    product=product,
+                    product_name=product.name,
+                    product_type=product.product_type,
+                    billing_period=billing_period,
+                    quantity=quantity,
+                    unit_price_cents=int(price.effective_price_cents),
+                    setup_cents=int(price.setup_cents),
+                    config={"product_price_id": str(price.id)},
+                    domain_name=domain_name,
+                )
+                # Save triggers total calc in model; but recalc order totals afterward too
+                item.save()
+                order.calculate_totals()
+
+            messages.success(
+                request,
+                _(f"✅ Order '{order.order_number}' created successfully. You can now add products."),
+            )
+            return redirect("orders:order_detail", pk=order.id)
+
+    except Exception as e:
+        logger.error(f"🔥 [Orders] Error creating order with item: {e}")
+        messages.error(request, _("❌ Error creating order with first item. Please try again."))
+        return redirect("orders:order_create")
 
 
 @staff_required_strict
@@ -878,7 +1111,7 @@ def order_item_create(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     # Dynamic form creation for OrderItem
     order_item_form = modelform_factory(
         OrderItem,
-        fields=["product", "quantity", "unit_price_cents", "setup_cents", "billing_period", "config", "domain_name"],
+        fields=["product", "quantity", "unit_price_cents", "setup_cents", "config", "domain_name"],
     )
 
     if request.method == "POST":
@@ -1098,7 +1331,7 @@ def order_item_edit(request: HttpRequest, pk: uuid.UUID, item_pk: uuid.UUID) -> 
     # Dynamic form creation for OrderItem
     order_item_form = modelform_factory(
         OrderItem,
-        fields=["product", "quantity", "unit_price_cents", "setup_cents", "billing_period", "config", "domain_name"],
+        fields=["product", "quantity", "unit_price_cents", "setup_cents", "config", "domain_name"],
     )
 
     if request.method == "POST":
@@ -1191,3 +1424,189 @@ def order_export(request: HttpRequest) -> HttpResponse:
     """📤 Export orders (to be implemented)"""
     messages.info(request, _("Order export will be implemented next."))
     return redirect("orders:order_list")
+
+
+# ===============================================================================
+# CART OPERATIONS - CUSTOMER SHOPPING CART 🛒
+# ===============================================================================
+
+@login_required
+def cart_view(request: HttpRequest) -> HttpResponse:
+    """
+    🛒 Display customer shopping cart with items and totals
+    Multi-tenant: Users only see their own cart items
+    """
+    # Type guard for authenticated user
+    if not isinstance(request.user, User):
+        return redirect("users:login")
+
+    # Get or create current customer context
+    try:
+        customer = request.user.get_primary_customer()
+        if not customer:
+            messages.error(request, _("❌ No customer profile found. Please contact support."))
+            return redirect("dashboard")
+    except Exception as e:
+        logger.error(f"🔥 [Cart] Error getting customer for user {request.user.id}: {e}")
+        messages.error(request, _("❌ Error accessing cart. Please try again."))
+        return redirect("dashboard")
+
+    # Get current cart order (draft)
+    cart_order = Order.objects.filter(
+        customer=customer,
+        status=Order.Status.DRAFT
+    ).first()
+
+    context = {
+        "cart_order": cart_order,
+        "cart_items": cart_order.items.select_related("product") if cart_order else [],
+        "customer": customer,
+    }
+
+    return render(request, "orders/cart/cart_view.html", context)
+
+
+@login_required
+def cart_calculate(request: HttpRequest) -> HttpResponse:
+    """
+    🧮 Calculate cart totals via HTMX
+    Returns order summary HTML partial
+    """
+    # Type guard for authenticated user
+    if not isinstance(request.user, User):
+        return HttpResponse("Authentication required", status=401)
+
+    try:
+        customer = request.user.get_primary_customer()
+        if not customer:
+            return HttpResponse("No customer profile", status=400)
+
+        # Get current cart order
+        cart_order = Order.objects.filter(
+            customer=customer,
+            status=Order.Status.DRAFT
+        ).first()
+
+        if not cart_order:
+            return HttpResponse("Empty cart", status=400)
+
+        # Recalculate totals
+        cart_order.calculate_totals()
+        cart_order.save()
+
+        # Return order summary partial
+        context = {
+            "cart_order": cart_order,
+            "customer": customer,
+        }
+
+        return render(request, "orders/cart/cart_summary_partial.html", context)
+
+    except Exception as e:
+        logger.error(f"🔥 [Cart] Error calculating cart totals: {e}")
+        return HttpResponse("Calculation error", status=500)
+
+
+@login_required
+def cart_update(request: HttpRequest) -> HttpResponse:
+    """
+    📝 Update cart item quantity via HTMX
+    """
+    if request.method != "POST":
+        return HttpResponse("Method not allowed", status=405)
+
+    # Type guard for authenticated user
+    if not isinstance(request.user, User):
+        return HttpResponse("Authentication required", status=401)
+
+    try:
+        customer = request.user.get_primary_customer()
+        if not customer:
+            return HttpResponse("No customer profile", status=400)
+
+        item_id = request.POST.get("item_id")
+        quantity = int(request.POST.get("quantity", 1))
+
+        if not item_id or quantity < 1:
+            return HttpResponse("Invalid parameters", status=400)
+
+        # Get cart order and item
+        cart_order = Order.objects.filter(
+            customer=customer,
+            status=Order.Status.DRAFT
+        ).first()
+
+        if not cart_order:
+            return HttpResponse("Cart not found", status=404)
+
+        cart_item = get_object_or_404(OrderItem, id=item_id, order=cart_order)
+
+        # Update quantity
+        cart_item.quantity = quantity
+        cart_item.save()
+
+        # Recalculate totals
+        cart_order.calculate_totals()
+        cart_order.save()
+
+        # Return updated cart partial
+        context = {
+            "cart_order": cart_order,
+            "customer": customer,
+        }
+        return render(request, "orders/cart/cart_items_partial.html", context)
+
+    except Exception as e:
+        logger.error(f"🔥 [Cart] Error updating cart item: {e}")
+        return HttpResponse("Update error", status=500)
+
+
+@login_required
+def cart_remove(request: HttpRequest) -> HttpResponse:
+    """
+    🗑️ Remove item from cart via HTMX
+    """
+    if request.method != "POST":
+        return HttpResponse("Method not allowed", status=405)
+
+    # Type guard for authenticated user
+    if not isinstance(request.user, User):
+        return HttpResponse("Authentication required", status=401)
+
+    try:
+        customer = request.user.get_primary_customer()
+        if not customer:
+            return HttpResponse("No customer profile", status=400)
+
+        item_id = request.POST.get("item_id")
+        if not item_id:
+            return HttpResponse("Invalid parameters", status=400)
+
+        # Get cart order and item
+        cart_order = Order.objects.filter(
+            customer=customer,
+            status=Order.Status.DRAFT
+        ).first()
+
+        if not cart_order:
+            return HttpResponse("Cart not found", status=404)
+
+        cart_item = get_object_or_404(OrderItem, id=item_id, order=cart_order)
+        
+        # Remove item
+        cart_item.delete()
+
+        # Recalculate totals
+        cart_order.calculate_totals()
+        cart_order.save()
+
+        # Return updated cart partial
+        context = {
+            "cart_order": cart_order,
+            "customer": customer,
+        }
+        return render(request, "orders/cart/cart_items_partial.html", context)
+
+    except Exception as e:
+        logger.error(f"🔥 [Cart] Error removing cart item: {e}")
+        return HttpResponse("Remove error", status=500)

@@ -64,7 +64,7 @@ def test_staff_billing_system_access_via_navigation(page: Page) -> None:
         
         # Navigate to dashboard first
         assert navigate_to_dashboard(page)
-        assert "/app/" in page.url
+        assert "/dashboard/" in page.url
         
         # Click on Business dropdown button to open the menu (billing is under Business)
         business_dropdown = page.get_by_role('button', name='🏢 Business')
@@ -78,8 +78,8 @@ def test_staff_billing_system_access_via_navigation(page: Page) -> None:
         invoices_menuitem.click()
         
         # Verify we're on the billing list page
-        page.wait_for_url("**/app/billing/invoices/", timeout=8000)
-        assert "/app/billing/invoices/" in page.url, "Should navigate to billing list page"
+        page.wait_for_url("**/billing/invoices/", timeout=8000)
+        assert "/billing/invoices/" in page.url, "Should navigate to billing list page"
         
         # Verify page title and staff-specific content (handle both English and Romanian)
         title = page.title()
@@ -117,7 +117,7 @@ def test_staff_billing_list_dashboard_display(page: Page) -> None:
         # Login and navigate to billing
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-        page.goto("http://localhost:8701/app/billing/invoices/")
+        page.goto("http://localhost:8701/billing/invoices/")
         page.wait_for_load_state("networkidle")
         
         # Verify billing statistics are present
@@ -188,7 +188,7 @@ def test_staff_proforma_creation_workflow(page: Page) -> None:
         # Login and navigate to proforma creation
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-        page.goto("http://localhost:8701/app/billing/invoices/")
+        page.goto("http://localhost:8701/billing/invoices/")
         page.wait_for_load_state("networkidle")
         
         # Click "New Proforma" button
@@ -197,8 +197,8 @@ def test_staff_proforma_creation_workflow(page: Page) -> None:
         new_proforma_button.click()
         
         # Verify we're on the create proforma page
-        page.wait_for_url("**/app/billing/proformas/create/", timeout=8000)
-        assert "/app/billing/proformas/create/" in page.url
+        page.wait_for_url("**/billing/proformas/create/", timeout=8000)
+        assert "/billing/proformas/create/" in page.url
         
         # Verify create proforma form elements
         create_heading = page.locator('h1:has-text("📄 Create New Proforma"), h1:has-text("Create Proforma")')
@@ -260,7 +260,7 @@ def test_staff_proforma_creation_workflow(page: Page) -> None:
             page.wait_for_timeout(1000)
             
             # Check if proforma was created successfully
-            if "/app/billing/proformas/" in page.url and page.url != "http://localhost:8701/app/billing/proformas/create/":
+            if "/billing/proformas/" in page.url and page.url != "http://localhost:8701/billing/proformas/create/":
                 print("  ✅ Proforma creation succeeded - redirected away from create page")
                 
                 # Look for success message
@@ -308,14 +308,14 @@ def test_staff_proforma_to_invoice_conversion(page: Page) -> None:
         # Login and navigate to billing
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-        page.goto("http://localhost:8701/app/billing/invoices/")
+        page.goto("http://localhost:8701/billing/invoices/")
         page.wait_for_load_state("networkidle")
         
         # Find first proforma to convert (if any exist)
-        proforma_links = page.locator('a[href*="/app/billing/proformas/"]:has-text("PRO-")')
+        proforma_links = page.locator('a[href*="/billing/proformas/"]:has-text("PRO-")')
         if proforma_links.count() == 0:
             # Try alternative selectors for proforma links
-            proforma_links = page.locator('a[href*="/app/billing/proformas/"]:not([href*="create"])')
+            proforma_links = page.locator('a[href*="/billing/proformas/"]:not([href*="create"])')
         
         if proforma_links.count() > 0:
             # Click on first proforma
@@ -324,7 +324,7 @@ def test_staff_proforma_to_invoice_conversion(page: Page) -> None:
             page.wait_for_load_state("networkidle")
             
             # Verify we're on a proforma detail page
-            assert "/app/billing/proformas/" in page.url and page.url.endswith("/")
+            assert "/billing/proformas/" in page.url and page.url.endswith("/")
             print("  ✅ Navigated to proforma detail page")
             
             # Look for convert to invoice button
@@ -335,7 +335,7 @@ def test_staff_proforma_to_invoice_conversion(page: Page) -> None:
                 page.wait_for_load_state("networkidle")
                 
                 # Check if conversion was successful
-                if "/app/billing/invoices/" in page.url:
+                if "/billing/invoices/" in page.url:
                     print("  ✅ Proforma successfully converted to invoice")
                     
                     # Verify we're now on the invoice detail page
@@ -398,14 +398,14 @@ def test_staff_invoice_detail_and_management_features(page: Page) -> None:
         # Login and navigate to billing
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-        page.goto("http://localhost:8701/app/billing/invoices/")
+        page.goto("http://localhost:8701/billing/invoices/")
         page.wait_for_load_state("networkidle")
         
         # Find first invoice to view (if any exist)  
-        invoice_links = page.locator('a[href*="/app/billing/invoices/"]:has-text("INV-")')
+        invoice_links = page.locator('a[href*="/billing/invoices/"]:has-text("INV-")')
         if invoice_links.count() == 0:
             # Try looking for any table/list links containing invoice numbers
-            invoice_links = page.locator('table a[href*="/app/billing/invoices/"], .invoice-list a[href*="/app/billing/invoices/"]')
+            invoice_links = page.locator('table a[href*="/billing/invoices/"], .invoice-list a[href*="/billing/invoices/"]')
         
         if invoice_links.count() > 0:
             # Click on first invoice
@@ -414,7 +414,7 @@ def test_staff_invoice_detail_and_management_features(page: Page) -> None:
             page.wait_for_load_state("networkidle")
             
             # Verify we're on an invoice detail page
-            assert "/app/billing/invoices/" in page.url and page.url.endswith("/")
+            assert "/billing/invoices/" in page.url and page.url.endswith("/")
             print("  ✅ Navigated to invoice detail page")
             
             # Verify invoice detail elements are present
@@ -495,7 +495,7 @@ def test_staff_billing_reports_and_analytics(page: Page) -> None:
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
         
         # Test access to billing reports
-        page.goto("http://localhost:8701/app/billing/reports/")
+        page.goto("http://localhost:8701/billing/reports/")
         page.wait_for_load_state("networkidle")
         
         # Verify reports page loads
@@ -512,7 +512,7 @@ def test_staff_billing_reports_and_analytics(page: Page) -> None:
                 vat_report_link.click()
                 page.wait_for_load_state("networkidle")
                 
-                if "/app/billing/reports/vat/" in page.url:
+                if "/billing/reports/vat/" in page.url:
                     print("  ✅ VAT report page loads correctly")
                     
                     # Check for Romanian VAT compliance elements
@@ -523,7 +523,7 @@ def test_staff_billing_reports_and_analytics(page: Page) -> None:
                     print("  ℹ️ VAT report may not be implemented")
             
             # Navigate back to main reports
-            page.goto("http://localhost:8701/app/billing/reports/")
+            page.goto("http://localhost:8701/billing/reports/")
             page.wait_for_load_state("networkidle")
             
             # Check for payment reports
@@ -568,7 +568,7 @@ def test_staff_billing_system_mobile_responsiveness(page: Page) -> None:
         # Login and navigate to billing on desktop first
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
-        page.goto("http://localhost:8701/app/billing/invoices/")
+        page.goto("http://localhost:8701/billing/invoices/")
         page.wait_for_load_state("networkidle")
         
         # Test mobile viewport
@@ -641,7 +641,7 @@ def test_staff_complete_billing_workflow(page: Page) -> None:
         
         # Step 1: Create a new proforma
         print("    Step 1: Creating new proforma for customer...")
-        page.goto("http://localhost:8701/app/billing/proformas/create/")
+        page.goto("http://localhost:8701/billing/proformas/create/")
         page.wait_for_load_state("networkidle")
         
         # Test proforma data for comprehensive workflow
@@ -674,12 +674,12 @@ def test_staff_complete_billing_workflow(page: Page) -> None:
         
         # Verify proforma creation
         proforma_created = False
-        if "/app/billing/proformas/" in page.url and "create" not in page.url:
+        if "/billing/proformas/" in page.url and "create" not in page.url:
             print("      ✅ Proforma created successfully")
             proforma_created = True
         else:
             print("      ℹ️ Proforma creation may have validation issues - checking list")
-            page.goto("http://localhost:8701/app/billing/invoices/")
+            page.goto("http://localhost:8701/billing/invoices/")
             page.wait_for_load_state("networkidle")
             
             # Look for our proforma
@@ -699,7 +699,7 @@ def test_staff_complete_billing_workflow(page: Page) -> None:
                 convert_button.click()
                 page.wait_for_load_state("networkidle")
                 
-                if "/app/billing/invoices/" in page.url:
+                if "/billing/invoices/" in page.url:
                     print("      ✅ Proforma converted to invoice successfully")
                     
                     # Step 3: Test PDF generation
@@ -761,7 +761,7 @@ def test_staff_billing_system_responsive_breakpoints(page: Page) -> None:
             """Test core staff billing functionality across viewports."""
             try:
                 # Navigate to billing
-                test_page.goto("http://localhost:8701/app/billing/invoices/")
+                test_page.goto("http://localhost:8701/billing/invoices/")
                 test_page.wait_for_load_state("networkidle")
                 
                 # Verify authentication maintained

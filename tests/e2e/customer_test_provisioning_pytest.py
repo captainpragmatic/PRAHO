@@ -58,12 +58,12 @@ def test_customer_can_view_own_services_but_not_manage(page: Page) -> None:
         
         # Access provisioning services as customer
         print("  👁️ Accessing provisioning services as customer")
-        page.goto("http://localhost:8701/app/provisioning/services/")
+        page.goto("http://localhost:8701/provisioning/services/")
         page.wait_for_load_state("networkidle")
         
         # Customer should be able to see the services page
         current_url = page.url
-        assert "/app/provisioning/" in current_url, "Customer should be able to view their services"
+        assert "/provisioning/" in current_url, "Customer should be able to view their services"
         print("    ✅ Customer can access their services page")
         
         # Check main heading is visible
@@ -104,8 +104,8 @@ def test_customer_cannot_create_services(page: Page) -> None:
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
         
         # Attempt to access service creation directly
-        print("  🚨 Attempting direct access to /app/provisioning/services/create/")
-        page.goto("http://localhost:8701/app/provisioning/services/create/")
+        print("  🚨 Attempting direct access to /provisioning/services/create/")
+        page.goto("http://localhost:8701/provisioning/services/create/")
         page.wait_for_load_state("networkidle")
         
         # Should be redirected away from service creation
@@ -142,9 +142,9 @@ def test_customer_cannot_access_service_management_actions(page: Page) -> None:
         
         # Test service management actions that should be staff-only
         management_actions = [
-            ("/app/provisioning/services/1/suspend/", "suspend service"),
-            ("/app/provisioning/services/1/activate/", "activate service"),  
-            ("/app/provisioning/services/1/edit/", "edit service"),
+            ("/provisioning/services/1/suspend/", "suspend service"),
+            ("/provisioning/services/1/activate/", "activate service"),  
+            ("/provisioning/services/1/edit/", "edit service"),
         ]
         
         blocked_actions = 0
@@ -189,7 +189,7 @@ def test_customer_server_access_blocked_but_plans_allowed(page: Page) -> None:
         
         # Test servers section access (should be blocked)
         print("  🖥️ Testing servers section access control")
-        page.goto("http://localhost:8701/app/provisioning/servers/")
+        page.goto("http://localhost:8701/provisioning/servers/")
         page.wait_for_load_state("networkidle")
         
         servers_url = page.url
@@ -201,7 +201,7 @@ def test_customer_server_access_blocked_but_plans_allowed(page: Page) -> None:
         
         # Test plans section access (should be allowed - customers need to see available plans)
         print("  📦 Testing plans section access (should be allowed)")
-        page.goto("http://localhost:8701/app/provisioning/plans/")
+        page.goto("http://localhost:8701/provisioning/plans/")
         page.wait_for_load_state("networkidle")
         
         plans_url = page.url
@@ -237,7 +237,7 @@ def test_customer_provisioning_navigation_not_available(page: Page) -> None:
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
         
         # Go to dashboard/main page
-        page.goto("http://localhost:8701/app/")
+        page.goto("http://localhost:8701/dashboard/")
         page.wait_for_load_state("networkidle")
         
         # Check if Business dropdown exists (it should, but shouldn't contain provisioning)
@@ -267,7 +267,7 @@ def test_customer_provisioning_navigation_not_available(page: Page) -> None:
             print("  ℹ️ Business dropdown not found in customer interface")
         
         # Check for any direct provisioning links on page
-        direct_provisioning_links = page.locator('a[href*="/app/provisioning/"]')
+        direct_provisioning_links = page.locator('a[href*="/provisioning/"]')
         if direct_provisioning_links.count() == 0:
             print("  ✅ No direct provisioning links found in customer interface")
         else:
@@ -296,16 +296,16 @@ def test_customer_provisioning_comprehensive_security_validation(page: Page) -> 
         # Test various provisioning URLs with correct security expectations
         test_urls = [
             # Should be BLOCKED (staff-only management)
-            ("/app/provisioning/services/create/", False, "service creation"),
-            ("/app/provisioning/services/1/edit/", False, "service editing"),
-            ("/app/provisioning/services/1/suspend/", False, "service suspension"),
-            ("/app/provisioning/services/1/activate/", False, "service activation"),
-            ("/app/provisioning/servers/", False, "servers management"),
+            ("/provisioning/services/create/", False, "service creation"),
+            ("/provisioning/services/1/edit/", False, "service editing"),
+            ("/provisioning/services/1/suspend/", False, "service suspension"),
+            ("/provisioning/services/1/activate/", False, "service activation"),
+            ("/provisioning/servers/", False, "servers management"),
             
             # Should be ALLOWED (customer viewing)
-            ("/app/provisioning/services/", True, "services list"),
-            ("/app/provisioning/services/1/", True, "service details"),
-            ("/app/provisioning/plans/", True, "plans catalog"),
+            ("/provisioning/services/", True, "services list"),
+            ("/provisioning/services/1/", True, "service details"),
+            ("/provisioning/plans/", True, "plans catalog"),
         ]
         
         correct_count = 0
@@ -314,7 +314,7 @@ def test_customer_provisioning_comprehensive_security_validation(page: Page) -> 
             page.wait_for_load_state("networkidle")
             
             current_url = page.url
-            is_accessible = test_url in current_url or "/app/provisioning/" in current_url
+            is_accessible = test_url in current_url or "/provisioning/" in current_url
             
             if (should_allow and is_accessible) or (not should_allow and not is_accessible):
                 correct_count += 1
@@ -335,7 +335,7 @@ def test_customer_provisioning_comprehensive_security_validation(page: Page) -> 
         print("  🔍 Phase 2: Error message validation")
         
         # Test that we get proper error messaging
-        page.goto("http://localhost:8701/app/provisioning/services/")
+        page.goto("http://localhost:8701/provisioning/services/")
         page.wait_for_load_state("networkidle")
         
         # Look for appropriate security messaging
@@ -355,7 +355,7 @@ def test_customer_provisioning_comprehensive_security_validation(page: Page) -> 
         
         # Ensure we're in a safe location
         final_url = page.url
-        safe_patterns = ["/app/dashboard", "/app/", "/dashboard", "/auth/"]
+        safe_patterns = ["/dashboard/", "/dashboard", "/auth/"]
         is_safe = any(pattern in final_url for pattern in safe_patterns)
         
         if is_safe:
@@ -391,16 +391,16 @@ def test_customer_provisioning_security_mobile_compatibility(page: Page) -> None
         print("  📱 Testing provisioning access on mobile viewport")
         
         # Test provisioning access on mobile (should follow same rules as desktop)
-        page.goto("http://localhost:8701/app/provisioning/services/")
+        page.goto("http://localhost:8701/provisioning/services/")
         page.wait_for_load_state("networkidle")
         
         # Customer should be able to view services (same as desktop)
         current_url = page.url
-        if "/app/provisioning/" in current_url:
+        if "/provisioning/" in current_url:
             print("    ✅ Customer can view services on mobile (correct - same as desktop)")
             
             # Test that management actions are still blocked on mobile
-            page.goto("http://localhost:8701/app/provisioning/services/create/")
+            page.goto("http://localhost:8701/provisioning/services/create/")
             page.wait_for_load_state("networkidle")
             
             create_url = page.url

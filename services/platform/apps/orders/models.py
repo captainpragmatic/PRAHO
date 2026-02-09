@@ -120,6 +120,7 @@ class Order(models.Model):
         help_text=_("Payment method used"),
     )
     transaction_id = models.CharField(max_length=255, blank=True, help_text=_("Payment gateway transaction ID"))
+    payment_intent_id = models.CharField(max_length=255, blank=True, help_text=_("Stripe payment intent ID"))
     gateway_response = models.JSONField(default=dict, blank=True, help_text=_("Payment gateway response data"))
 
     # Source tracking
@@ -283,7 +284,6 @@ class OrderItem(models.Model):
     # Product information snapshot (in case product changes)
     product_name = models.CharField(max_length=200, help_text=_("Product name at time of order"))
     product_type = models.CharField(max_length=30, help_text=_("Product type at time of order"))
-    billing_period = models.CharField(max_length=20, help_text=_("Billing period for this item"))
 
     # Quantity and pricing
     quantity = models.PositiveIntegerField(
@@ -411,18 +411,29 @@ class OrderItem(models.Model):
         return Decimal(self.subtotal_cents) / 100
 
     def calculate_totals(self) -> int:
-        """Calculate tax and line total"""
+        """Calculate tax and line total with proper banker's rounding for Romanian VAT compliance"""
+        from decimal import ROUND_HALF_EVEN, Decimal
+
         subtotal = self.subtotal_cents
-        self.tax_cents = int(subtotal * self.tax_rate)
+        # Use banker's rounding for VAT compliance (same as OrderVATCalculator)
+        vat_amount = Decimal(subtotal) * Decimal(str(self.tax_rate))
+        self.tax_cents = int(vat_amount.quantize(Decimal('1'), rounding=ROUND_HALF_EVEN))
         self.line_total_cents = subtotal + self.tax_cents
         return self.line_total_cents
 
     def mark_as_provisioned(self, service: Optional["Service"] = None) -> None:
-        """Mark this item as successfully provisioned"""
+        """Mark this item as successfully provisioned and activate the service"""
         self.provisioning_status = "completed"
         self.provisioned_at = timezone.now()
         if service:
             self.service = service
+
+        # Update the linked service status to active when provisioning completes
+        if self.service and self.service.status == 'provisioning':
+            self.service.status = 'active'
+            self.service.activated_at = timezone.now()
+            self.service.save(update_fields=['status', 'activated_at'])
+
         self.save(update_fields=["provisioning_status", "provisioned_at", "service"])
 
 

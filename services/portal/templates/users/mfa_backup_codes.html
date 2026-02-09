@@ -1,0 +1,228 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans 'Backup Codes' %} - PragmaticHost{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 max-w-4xl mx-auto">
+  <!-- Header -->
+  <div class="mb-6">
+    <h1 class="text-2xl font-bold text-white romanian-flag">
+      🔢 {% trans 'Backup Codes' %}
+    </h1>
+    <p class="mt-2 text-sm text-slate-400">
+      {% trans 'Use these codes to access your account if you lose your phone or authenticator app' %}
+    </p>
+  </div>
+
+  <!-- Backup Codes Display -->
+  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
+    <div class="p-6">
+      <h3 class="text-lg font-medium text-white mb-6">
+        🔒 {% trans 'Your Recovery Codes' %}
+      </h3>
+
+      {% if backup_codes %}
+      <div class="space-y-4">
+        <!-- Important Warning -->
+        <div class="bg-yellow-900/20 border border-yellow-700/50 rounded-lg p-4 mb-6">
+          <div class="flex items-start">
+            <span class="text-yellow-400 text-lg mr-3">⚠️</span>
+            <div>
+              <h5 class="text-sm font-medium text-yellow-300">{% trans 'Important Security Information' %}</h5>
+              <ul class="text-xs text-yellow-200 mt-2 space-y-1">
+                <li>• {% trans 'Each code can only be used once' %}</li>
+                <li>• {% trans 'Store these codes in a safe place' %}</li>
+                <li>• {% trans 'Don\'t share these codes with anyone' %}</li>
+                <li>• {% trans 'Generate new codes if these are compromised' %}</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- Codes Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {% for code in backup_codes %}
+          <div class="bg-slate-700 p-4 rounded-lg border border-slate-600 flex items-center justify-between">
+            <code class="text-green-400 font-mono text-lg">{{ code }}</code>
+            <button type="button" onclick="copyCode('{{ code }}')" 
+                    class="ml-2 text-slate-400 hover:text-white transition-colors" 
+                    title="{% trans 'Copy code' %}">
+              📋
+            </button>
+          </div>
+          {% endfor %}
+        </div>
+
+        <!-- Actions -->
+        <div class="flex gap-4 mt-6">
+          <button type="button" onclick="copyAllCodes()" 
+                  class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors">
+            📋 {% trans 'Copy All Codes' %}
+          </button>
+          
+          <button type="button" onclick="printCodes()" 
+                  class="bg-gray-600 hover:bg-gray-700 text-white font-medium py-2 px-4 rounded-lg transition-colors">
+            🖨️ {% trans 'Print Codes' %}
+          </button>
+        </div>
+      </div>
+      {% else %}
+      <div class="bg-red-900/20 border border-red-700/50 rounded-lg p-6">
+        <div class="flex items-center">
+          <span class="text-red-400 text-2xl mr-3">❌</span>
+          <div>
+            <h5 class="text-lg font-medium text-red-300">{% trans 'No Backup Codes Available' %}</h5>
+            <p class="text-sm text-red-200 mt-1">
+              {% trans 'Unable to load your backup codes. Please try again or contact support if the problem persists.' %}
+            </p>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Regenerate Codes Section -->
+  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
+    <div class="p-6">
+      <h3 class="text-lg font-medium text-white mb-4">
+        🔄 {% trans 'Regenerate Codes' %}
+      </h3>
+      
+      <div class="space-y-4">
+        <p class="text-sm text-slate-300">
+          {% trans 'If you\'ve used most of your codes or suspect they\'ve been compromised, you can generate new ones. This will invalidate all existing backup codes.' %}
+        </p>
+        
+        <div class="bg-orange-900/20 border border-orange-700/50 rounded-lg p-4">
+          <div class="flex items-start">
+            <span class="text-orange-400 text-lg mr-3">⚠️</span>
+            <div>
+              <h5 class="text-sm font-medium text-orange-300">{% trans 'Warning' %}</h5>
+              <p class="text-xs text-orange-200 mt-1">
+                {% trans 'Generating new codes will immediately invalidate all current backup codes. Make sure you have access to your authenticator app before proceeding.' %}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <button type="button" onclick="regenerateCodes()" 
+                class="bg-orange-600 hover:bg-orange-700 text-white font-medium py-2 px-4 rounded-lg transition-colors">
+          🔄 {% trans 'Generate New Backup Codes' %}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Usage Instructions -->
+  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg">
+    <div class="p-6">
+      <h3 class="text-lg font-medium text-white mb-4">
+        📖 {% trans 'How to Use Backup Codes' %}
+      </h3>
+      
+      <div class="space-y-3 text-sm text-slate-300">
+        <div class="flex items-start">
+          <span class="text-blue-400 mr-2">1.</span>
+          {% trans 'When logging in, if you can\'t access your authenticator app, click "Use backup code" on the MFA verification screen.' %}
+        </div>
+        <div class="flex items-start">
+          <span class="text-blue-400 mr-2">2.</span>
+          {% trans 'Enter one of these backup codes exactly as shown (including any dashes).' %}
+        </div>
+        <div class="flex items-start">
+          <span class="text-blue-400 mr-2">3.</span>
+          {% trans 'Each code can only be used once. Cross it off your list after use.' %}
+        </div>
+        <div class="flex items-start">
+          <span class="text-blue-400 mr-2">4.</span>
+          {% trans 'When you have only a few codes left, generate new ones to ensure continued access.' %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Back Navigation -->
+  <div class="mt-6 text-center">
+    <a href="{% url 'users:mfa_management' %}" 
+       class="text-blue-400 hover:text-blue-300 text-sm">
+      ← {% trans 'Back to MFA Management' %}
+    </a>
+  </div>
+</div>
+
+<!-- JavaScript for copying and printing -->
+<script>
+function copyCode(code) {
+  navigator.clipboard.writeText(code).then(function() {
+    // Could add visual feedback here
+    console.log('Code copied:', code);
+  }).catch(function(err) {
+    console.error('Could not copy code: ', err);
+  });
+}
+
+function copyAllCodes() {
+  const codes = [{% for code in backup_codes %}'{{ code }}'{% if not forloop.last %}, {% endif %}{% endfor %}];
+  const allCodes = codes.join('\n');
+  
+  navigator.clipboard.writeText(allCodes).then(function() {
+    alert('{% trans "All backup codes copied to clipboard!" %}');
+  }).catch(function(err) {
+    console.error('Could not copy codes: ', err);
+  });
+}
+
+function printCodes() {
+  const printWindow = window.open('', '_blank');
+  const codes = [{% for code in backup_codes %}'{{ code }}'{% if not forloop.last %}, {% endif %}{% endfor %}];
+  
+  printWindow.document.write(`
+    <html>
+      <head>
+        <title>{% trans "MFA Backup Codes" %}</title>
+        <style>
+          body { font-family: monospace; margin: 20px; }
+          h1 { color: #333; }
+          .code { 
+            background: #f5f5f5; 
+            padding: 10px; 
+            margin: 5px 0; 
+            border: 1px solid #ddd;
+            font-size: 14px;
+          }
+          .warning {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            padding: 10px;
+            margin: 10px 0;
+          }
+        </style>
+      </head>
+      <body>
+        <h1>{% trans "PragmaticHost - MFA Backup Codes" %}</h1>
+        <p><strong>{% trans "Account:" %}</strong> {{ customer_email }}</p>
+        <div class="warning">
+          <strong>⚠️ {% trans "Important:" %}</strong> 
+          {% trans "Store these codes safely. Each can only be used once." %}
+        </div>
+        ${codes.map(code => '<div class="code">' + code + '</div>').join('')}
+        <p><small>{% trans "Generated:" %} ${new Date().toLocaleString()}</small></p>
+      </body>
+    </html>
+  `);
+  
+  printWindow.document.close();
+  printWindow.print();
+}
+
+function regenerateCodes() {
+  if (confirm('{% trans "Are you sure you want to generate new backup codes? This will invalidate all current codes." %}')) {
+    // This would typically be a form submission or AJAX call
+    window.location.href = '{% url "users:mfa_backup_codes" %}?regenerate=1';
+  }
+}
+</script>
+{% endblock %}

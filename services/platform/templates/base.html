@@ -17,15 +17,13 @@
   <meta name="author" content="PragmaticHost">
 
   <!-- Favicon -->
-  {% load static %}
-  <link rel="icon" type="image/svg+xml" href="{% static 'img/favicon_simple.svg' %}">
-  <link rel="alternate icon" href="{% static 'img/favicon.svg' %}">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3e%3crect width='100' height='100' fill='%233b82f6'/%3e%3ctext y='75' font-size='80' fill='white'%3eP%3c/text%3e%3c/svg%3e">
 
-  <!-- Styles & Scripts - DEVELOPMENT ONLY -->
-  <!-- NOTE: Tailwind CDN is for development only. Production should use PostCSS/Tailwind CLI -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <!-- Scripts & Styles - Local Assets -->
+  {% load static %}
+  <link rel="stylesheet" href="{% static 'css/tailwind.min.css' %}">
+  <script src="{% static 'js/htmx.min.js' %}"></script>
+  <script defer src="{% static 'js/alpine.min.js' %}"></script>
 
   <style>
     /* Romanian Hosting Brand Colors */
@@ -47,11 +45,40 @@
       content: "🇷🇴";
       margin-right: 0.5rem;
     }
+
+    /* Custom scrollbar - Global */
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: #475569 #1e293b;
+    }
+    
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #1e293b;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #475569;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #64748b;
+    }
+    ::-webkit-scrollbar-corner {
+      background: #1e293b;
+    }
+
+    /* Alpine.js x-cloak directive - prevents flash */
+    [x-cloak] {
+      display: none !important;
+    }
   </style>
 </head>
 
 <body class="h-full bg-slate-900 text-slate-100">
-  <div class="min-h-full">
+  <div class="min-h-screen flex flex-col">
     <!-- Mobile Header & Navigation -->
     {% include 'components/mobile_header.html' %}
     
@@ -62,19 +89,21 @@
         <div class="flex justify-between h-16">
           <div class="flex items-center min-w-0 flex-1">
             <!-- Logo -->
-            <a href="{% url 'dashboard' %}" class="flex-shrink-0 flex items-center hover:opacity-80 transition-opacity">
-              <img src="{% static 'img/favicon.svg' %}" alt="PRAHO" class="h-8 w-8 mr-3">
-              <h1 class="text-xl font-bold text-blue-400">
-                PRAHO Platform
-              </h1>
-            </a>
+            <div class="w-52 flex-shrink-0">
+              <a href="{% url 'dashboard' %}" class="flex items-center hover:opacity-80 transition-opacity">
+                <img src="{% static 'img/favicon.svg' %}" alt="PRAHO" class="h-8 w-8 mr-3">
+                <h1 class="text-xl font-bold text-blue-400 whitespace-nowrap">
+                  PRAHO Platform
+                </h1>
+              </a>
+            </div>
 
             <!-- Navigation Links -->
-            <div class="hidden lg:ml-6 lg:flex lg:space-x-4">
+            <div class="hidden lg:ml-6 lg:flex lg:space-x-2">
               <!-- Dashboard is always available -->
               <a href="{% url 'dashboard' %}"
-                class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
-                <span class="mr-2">📊</span> {% trans 'Dashboard' %}
+                class="text-slate-300 hover:text-white px-2 py-2 rounded-md text-sm font-medium flex items-center">
+                <span class="mr-1">📊</span> {% trans 'Dashboard' %}
               </a>
 
               <!-- Staff/Admin Navigation with Dropdowns -->
@@ -84,11 +113,26 @@
               {% dropdown "Support" support_items icon="🎫" %}
               
               {% else %}
-              <!-- Customer User Navigation with Dropdowns -->
+              <!-- Customer User Navigation with Direct Links -->
               {% if user.is_customer_user %}
               
-              {% dropdown "My Account" customer_items icon="👤" %}
-              {% dropdown "Support" customer_support_items icon="🎫" %}
+              <!-- My Invoices -->
+              <a href="{% url 'billing:invoice_list' %}"
+                class="text-slate-300 hover:text-white px-2 py-2 rounded-md text-sm font-medium flex items-center">
+                <span class="mr-1">📄</span> {% trans 'My Invoices' %}
+              </a>
+
+              <!-- My Services -->
+              <a href="{% url 'provisioning:services' %}"
+                class="text-slate-300 hover:text-white px-2 py-2 rounded-md text-sm font-medium flex items-center">
+                <span class="mr-1">🚀</span> {% trans 'My Services' %}
+              </a>
+
+              <!-- My Tickets -->
+              <a href="{% url 'tickets:list' %}"
+                class="text-slate-300 hover:text-white px-2 py-2 rounded-md text-sm font-medium flex items-center">
+                <span class="mr-1">🎫</span> {% trans 'My Tickets' %}
+              </a>
               
               {% else %}
               <!-- User with no customer access -->
@@ -101,26 +145,11 @@
           </div>
 
           <!-- User Menu -->
-          <div class="flex items-center space-x-3 flex-shrink-0">
+          <div class="w-72 flex items-center justify-end space-x-2 flex-shrink-0">
             <a href="{% url 'users:user_profile' %}"
               class="text-slate-300 hover:text-white flex items-center px-2 py-1 whitespace-nowrap">
               <span class="mr-1">⚙️</span> {% trans 'Profile' %}
             </a>
-            <form action="/i18n/setlang/" method="post" class="inline">
-              {% csrf_token %}
-              <input name="next" type="hidden" value="{{ request.get_full_path|slice:':-1' }}" />
-              <select name="language" onchange="this.form.submit()"
-                class="bg-slate-700 text-white rounded-md text-sm font-medium">
-                {% get_current_language as LANGUAGE_CODE %}
-                {% get_available_languages as LANGUAGES %}
-                {% get_language_info_list for LANGUAGES as languages %}
-                {% for language in languages %}
-                <option value="{{ language.code }}" {% if language.code == LANGUAGE_CODE %}selected{% endif %}>
-                  {{ language.name_local }} ({{ language.code }})
-                </option>
-                {% endfor %}
-              </select>
-            </form>
             {% url 'users:logout' as logout_url %}
             {% button "Logout" variant="danger" href=logout_url size="sm" %}
           </div>
@@ -129,23 +158,104 @@
     </nav>
     {% endif %}
 
-    <!-- Flash Messages -->
+    <!-- Toast Messages -->
     {% if messages %}
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-4">
-      {% for message in messages %}
-      {% alert message.message variant=message.tags dismissible=True %}
-      {% endfor %}
+    <div id="toast-container" class="fixed top-4 lg:top-20 left-1/2 transform -translate-x-1/2 z-50 space-y-2">
+        {% for message in messages %}
+        <div class="max-w-sm rounded-lg p-4 shadow-lg border transition-all duration-300 ease-out
+                    {% if message.tags == 'success' %}bg-green-50 border-green-200 text-green-800 dark:bg-green-950 dark:border-green-800 dark:text-green-200{% elif message.tags == 'error' %}bg-red-50 border-red-200 text-red-800 dark:bg-red-950 dark:border-red-800 dark:text-red-200{% elif message.tags == 'warning' %}bg-yellow-50 border-yellow-200 text-yellow-800 dark:bg-yellow-950 dark:border-yellow-800 dark:text-yellow-200{% else %}bg-blue-50 border-blue-200 text-blue-800 dark:bg-blue-950 dark:border-blue-800 dark:text-blue-200{% endif %}"
+             style="transform: translateY(-100%); opacity: 0;"
+             id="toast-{{ forloop.counter }}">
+            
+            <div class="flex items-center justify-between">
+                <div class="flex items-center">
+                    {% if message.tags == 'success' %}
+                        <svg class="h-5 w-5 text-green-400 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                        </svg>
+                    {% elif message.tags == 'error' %}
+                        <svg class="h-5 w-5 text-red-400 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                        </svg>
+                    {% elif message.tags == 'warning' %}
+                        <svg class="h-5 w-5 text-yellow-400 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                        </svg>
+                    {% else %}
+                        <svg class="h-5 w-5 text-blue-400 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
+                        </svg>
+                    {% endif %}
+                    <span>{{ message.message }}</span>
+                </div>
+                <button onclick="dismissToast(this)" class="ml-4 inline-flex rounded-md p-1.5 
+                       {% if message.tags == 'success' %}text-green-400 hover:bg-green-100 dark:text-green-400 dark:hover:bg-green-900{% elif message.tags == 'error' %}text-red-400 hover:bg-red-100 dark:text-red-400 dark:hover:bg-red-900{% elif message.tags == 'warning' %}text-yellow-400 hover:bg-yellow-100 dark:text-yellow-400 dark:hover:bg-yellow-900{% else %}text-blue-400 hover:bg-blue-100 dark:text-blue-400 dark:hover:bg-blue-900{% endif %}" 
+                       aria-label="Close notification">
+                    <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+        {% endfor %}
     </div>
+    
+    <!-- Toast animations and auto-dismiss -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const toasts = document.querySelectorAll('[id^="toast-"]');
+            
+            toasts.forEach(function(toast, index) {
+                // Slide in from top after a small delay per toast
+                setTimeout(function() {
+                    toast.style.transform = 'translateY(0)';
+                    toast.style.opacity = '1';
+                }, index * 100); // Stagger multiple toasts
+                
+                // Auto slide out after 3 seconds
+                setTimeout(function() {
+                    if (toast && toast.parentNode) {
+                        toast.style.transition = 'all 0.3s ease-out';
+                        toast.style.transform = 'translateY(-100%)';
+                        toast.style.opacity = '0';
+                        // Remove from DOM after animation completes
+                        setTimeout(function() {
+                            if (toast.parentNode) {
+                                toast.parentNode.removeChild(toast);
+                            }
+                        }, 300);
+                    }
+                }, 3000 + (index * 100));
+            });
+        });
+        
+        // Manual dismiss function
+        function dismissToast(button) {
+            const toast = button.closest('[id^="toast-"]');
+            if (toast) {
+                toast.style.transition = 'all 0.3s ease-out';
+                toast.style.transform = 'translateY(-100%)';
+                toast.style.opacity = '0';
+                setTimeout(function() {
+                    if (toast.parentNode) {
+                        toast.parentNode.removeChild(toast);
+                    }
+                }, 300);
+            }
+        }
+    </script>
     {% endif %}
 
     <!-- Main Content -->
-    <main class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-      {% block content %}
-      {% endblock %}
+    <main class="flex-1 pt-4">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        {% block content %}
+        {% endblock %}
+      </div>
     </main>
 
     <!-- Footer -->
-    <footer class="bg-slate-800 border-t border-slate-700 mt-12">
+    <footer class="bg-slate-800 border-t border-slate-700 mt-8 sm:mt-12 lg:mt-16 xl:mt-20">
       <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
         <div class="text-center text-slate-400 text-sm">
           <p>
@@ -179,9 +289,9 @@
       alert('{% trans "An error occurred. Please try again." %}');
     });
 
-    // Auto-hide flash messages
+    // Auto-hide flash messages (more specific selector to avoid removing pricing cards)
     setTimeout(function () {
-      const messages = document.querySelectorAll('.max-w-7xl .mb-4[class*="bg-"][class*="border"]');
+      const messages = document.querySelectorAll('.alert, .message, .flash-message, [data-dismiss-after]');
       messages.forEach(function (msg) {
         msg.style.transition = 'opacity 0.5s';
         msg.style.opacity = '0';
@@ -190,10 +300,10 @@
     }, 5000);
   </script>
 
-  {% block extra_js %}{% endblock %}
+  <!-- Page-specific modals (before JS to ensure DOM availability) -->
+  {% block extra_modals %}{% endblock %}
   
-  <!-- Dangerous Action Confirmation Modal -->
-  {% include "components/dangerous_action_modal.html" %}
+  {% block extra_js %}{% endblock %}
 </body>
 
 </html>

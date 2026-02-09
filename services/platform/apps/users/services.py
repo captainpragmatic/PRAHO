@@ -158,6 +158,7 @@ class SecureUserRegistrationService:
         company_name: str
         customer_type: str
         vat_number: VATString | None
+        cnp: str | None
         registration_number: CUIString | None
         billing_address: str | None
         billing_city: str | None
@@ -212,12 +213,14 @@ class SecureUserRegistrationService:
 
             # Step 4: Create tax profile with Romanian compliance
             vat_number = customer_data.get("vat_number", "").strip()
+            cnp = (customer_data.get("cnp", "") or "").strip()
             registration_number = customer_data.get("registration_number", "").strip()
 
-            if vat_number or registration_number:
+            if vat_number or registration_number or cnp:
                 CustomerTaxProfile.objects.create(  # type: ignore[misc]
                     customer=customer,
                     vat_number=vat_number,  # RO prefix validated
+                    cnp=cnp,
                     registration_number=registration_number,  # CUI format validated
                     is_vat_payer=bool(vat_number),
                 )
@@ -225,7 +228,12 @@ class SecureUserRegistrationService:
                 # Log tax profile creation for Romanian compliance
                 log_security_event(
                     "tax_profile_created",
-                    {"customer_id": customer.id, "has_vat": bool(vat_number), "has_cui": bool(registration_number)},
+                    {
+                        "customer_id": customer.id,
+                        "has_vat": bool(vat_number),
+                        "has_cui": bool(registration_number),
+                        "has_cnp": bool(cnp),
+                    },
                     request_ip,
                 )
 

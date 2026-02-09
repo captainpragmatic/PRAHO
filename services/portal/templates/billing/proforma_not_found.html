@@ -1,0 +1,59 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans 'Proforma Not Found' %} - PRAHO Portal{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 max-w-4xl mx-auto">
+  
+  <!-- Header -->
+  <div class="text-center mb-8">
+    <h1 class="text-3xl font-bold text-white mb-4">
+      📄 {% trans 'Proforma Not Found' %}
+    </h1>
+  </div>
+
+  <!-- Error Card -->
+  <div class="bg-slate-800 rounded-lg border border-slate-700 p-8 text-center">
+    <div class="mb-6">
+      <div class="text-6xl mb-4">❌</div>
+      <h2 class="text-xl font-semibold text-white mb-2">
+        {% trans 'Proforma Not Available' %}
+      </h2>
+      {% if proforma_number %}
+        <p class="text-slate-400">
+          {% blocktrans with number=proforma_number %}
+          Proforma {{ number }} could not be found or you don't have access to it.
+          {% endblocktrans %}
+        </p>
+      {% else %}
+        <p class="text-slate-400">
+          {% trans 'The requested proforma could not be found or you don\'t have access to it.' %}
+        </p>
+      {% endif %}
+    </div>
+
+    {% if error %}
+    <div class="bg-red-900 border border-red-700 rounded-lg p-4 mb-6">
+      <p class="text-red-200 text-sm">
+        {% trans 'An error occurred while loading the proforma. Please try again or contact support if the problem persists.' %}
+      </p>
+    </div>
+    {% endif %}
+
+    <div class="flex justify-center space-x-4">
+      <a href="{% url 'billing:invoices_list' %}" 
+         class="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition-colors">
+        ← {% trans 'Back to Billing' %}
+      </a>
+      
+      <a href="{% url 'dashboard:dashboard' %}" 
+         class="inline-flex items-center px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-md font-medium transition-colors">
+        🏠 {% trans 'Dashboard' %}
+      </a>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

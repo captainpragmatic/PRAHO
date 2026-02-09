@@ -12,6 +12,10 @@ import re
 import time
 from pathlib import Path
 
+# File modification constants
+FILE_MODIFICATION_THRESHOLD_SECONDS = 300  # 5 minutes
+AUTO_FORMATTING_WARNING_THRESHOLD = 2  # operators
+
 # ===============================================================================
 # CONFIGURATION
 # ===============================================================================
@@ -47,7 +51,7 @@ def check_if_recently_modified(file_path: Path) -> bool:
     try:
         mtime = file_path.stat().st_mtime
         current_time = time.time()
-        return (current_time - mtime) < 300  # 5 minutes
+        return (current_time - mtime) < FILE_MODIFICATION_THRESHOLD_SECONDS
     except OSError:
         return False
 
@@ -61,7 +65,7 @@ def detect_potential_auto_formatting(changes: list[str], file_path: Path) -> lis
 
     # Check for multiple comparison operators fixed (common in auto-formatting)
     operator_count = len([c for c in changes if any(op in c for op in ["==", "!=", "<=", ">=", "<", ">"])])
-    if operator_count > 2:
+    if operator_count > AUTO_FORMATTING_WARNING_THRESHOLD:
         warnings.append("⚠️  Multiple operators affected - check IDE settings")
 
     return warnings

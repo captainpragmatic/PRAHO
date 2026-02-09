@@ -196,9 +196,9 @@ def test_dashboard_actions_and_interactions(page: Page) -> None:
             print(f"  📊 Dashboard interactions tested: {interactions_tested}")
             
             # Verify we're still on dashboard after interactions
-            if "/app/" not in page.url:
+            if "/dashboard/" not in page.url:
                 print("  🔄 Returning to dashboard after interactions")
-                page.goto(f"{BASE_URL}/app/")
+                page.goto(f"{BASE_URL}/dashboard/")
                 page.wait_for_load_state("networkidle")
             
         except AuthenticationError:

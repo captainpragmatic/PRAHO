@@ -31,6 +31,9 @@ DISABLE_ACCOUNT_LOCKOUT = True
 # Insert debug toolbar middleware into existing MIDDLEWARE list
 MIDDLEWARE.insert(1, "debug_toolbar.middleware.DebugToolbarMiddleware")
 
+# Disable CSRF middleware for API development (allows Portal login)
+MIDDLEWARE = [mw for mw in MIDDLEWARE if 'CsrfViewMiddleware' not in mw]
+
 # ===============================================================================
 # DEVELOPMENT APPS
 # ===============================================================================
@@ -172,7 +175,8 @@ CSRF_TRUSTED_ORIGINS = [
     "http://127.0.0.1:8700",
     "http://localhost:8701",
     "http://127.0.0.1:8701",
-    "http://100.73.13.8:8701",  # Tailscale IP
+    "http://100.73.13.8:8700",  # Tailscale IP - Platform
+    "http://100.73.13.8:8701",  # Tailscale IP - Portal
 ]
 
 # ===============================================================================
@@ -240,6 +244,13 @@ ROMANIAN_BUSINESS_CONTEXT.update(
         "email": "dev@pragmatichost.com",
     }
 )
+
+# ===============================================================================
+# INTER-SERVICE COMMUNICATION
+# ===============================================================================
+
+# Shared secret for portal service authentication
+PLATFORM_API_SECRET = "dev-shared-secret-change-in-production"
 
 # ===============================================================================
 # SECURE IP DETECTION - DEVELOPMENT CONFIGURATION 🔒

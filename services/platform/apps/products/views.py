@@ -165,13 +165,8 @@ def product_detail(request: HttpRequest, slug: str) -> HttpResponse:
             slug=slug,
         )
 
-        # Get active prices grouped by currency
-        prices_by_currency: dict[str, list[ProductPrice]] = {}
-        for price in product.get_active_prices():
-            currency_code = price.currency.code
-            if currency_code not in prices_by_currency:
-                prices_by_currency[currency_code] = []
-            prices_by_currency[currency_code].append(price)
+        # Get active prices (simplified - one per currency)
+        active_prices = product.get_active_prices()
 
         # Get product relationships
         relationships_from = product.relationships_from.filter(is_active=True).select_related("target_product")
@@ -188,7 +183,7 @@ def product_detail(request: HttpRequest, slug: str) -> HttpResponse:
 
         context = {
             "product": product,
-            "prices_by_currency": prices_by_currency,
+            "active_prices": active_prices,
             "relationships_from": relationships_from,
             "relationships_to": relationships_to,
             "bundle_memberships": bundle_memberships,
@@ -223,6 +218,7 @@ def product_create(request: HttpRequest) -> HttpResponse:
             "short_description",
             "product_type",
             "module_config",
+            "default_service_plan",
             "includes_vat",
             "is_active",
             "is_public",
@@ -281,6 +277,7 @@ def product_edit(request: HttpRequest, slug: str) -> HttpResponse:
             "product_type",
             "module",
             "module_config",
+            "default_service_plan",
             "is_active",
             "is_featured",
             "is_public",
@@ -409,7 +406,7 @@ def product_prices(request: HttpRequest, slug: str) -> HttpResponse:
         prices = (
             product.prices.filter(is_active=True)
             .select_related("currency")
-            .order_by("currency__code", "billing_period")
+            .order_by("currency__code")
         )
 
         # Get available currencies (with RON first for Romanian business)
@@ -448,10 +445,10 @@ def product_price_create(request: HttpRequest, slug: str) -> HttpResponse:
         ProductPrice,
         fields=[
             "currency",
-            "billing_period",
-            "amount_cents",
+            "monthly_price_cents",
             "setup_cents",
-            "discount_percent",
+            "semiannual_discount_percent",
+            "annual_discount_percent",
             "minimum_quantity",
             "maximum_quantity",
             "promo_price_cents",
@@ -489,18 +486,101 @@ def product_price_create(request: HttpRequest, slug: str) -> HttpResponse:
         {"value": currency.code, "label": f"{currency.code} ({currency.symbol})"} for currency in currencies
     ]
 
-    # Format billing period choices for component
-    billing_period_options = [{"value": choice[0], "label": str(choice[1])} for choice in ProductPrice.BILLING_PERIODS]
-
     context = {
         "form": form,
         "product": product,
         "currencies": currencies,
         "currency_options": currency_options,
-        "billing_period_choices": ProductPrice.BILLING_PERIODS,
-        "billing_period_options": billing_period_options,
         "action": "create",
         "is_staff_user": True,
     }
 
     return render(request, "products/product_price_form.html", context)
+
+
+def product_price_edit(request: HttpRequest, slug: str, price_id: str) -> HttpResponse:
+    """💰 Edit existing product price"""
+    product = get_object_or_404(Product, slug=slug)
+    price = get_object_or_404(ProductPrice, id=price_id, product=product)
+
+    product_price_form = modelform_factory(
+        ProductPrice,
+        fields=[
+            "currency",
+            "monthly_price_cents",
+            "setup_cents",
+            "semiannual_discount_percent",
+            "annual_discount_percent",
+            "minimum_quantity",
+            "maximum_quantity",
+            "promo_price_cents",
+            "promo_valid_until",
+            "is_active",
+        ],
+    )
+
+    if request.method == "POST":
+        form = product_price_form(request.POST, instance=price)
+        log_security_event(event_type="product_price_edit_attempt", details={"path": request.path})
+        if form.is_valid():
+            try:
+                with transaction.atomic():
+                    updated_price = form.save()
+                    logger.info(f"✅ [Products] Updated price for {product.name}: {updated_price}")
+                    log_security_event(event_type="product_price_updated", details={"product": product.slug})
+                    messages.success(request, _("✅ Product price updated successfully"))
+                    return redirect("products:product_prices", slug=product.slug)
+            except Exception as e:
+                logger.error(f"🔥 [Products] Error updating price: {e}")
+                messages.error(request, _("❌ Error updating product price"))
+        else:
+            log_security_event(event_type="product_price_validation_failed", details={"errors": form.errors})
+            messages.error(request, _("❌ Please correct the errors below. All required fields must be filled in."))
+    else:
+        form = product_price_form(instance=price)
+
+    # Get available currencies and format for component
+    currencies = Currency.objects.order_by("code")
+    currency_options = [
+        {"value": currency.code, "label": f"{currency.code} ({currency.symbol})"} for currency in currencies
+    ]
+
+    context = {
+        "form": form,
+        "product": product,
+        "price": price,
+        "currencies": currencies,
+        "currency_options": currency_options,
+        "action": "edit",
+        "is_staff_user": True,
+    }
+
+    return render(request, "products/product_price_form.html", context)
+
+
+def product_price_delete(request: HttpRequest, slug: str, price_id: str) -> HttpResponse:
+    """💰 Delete product price"""
+    product = get_object_or_404(Product, slug=slug)
+    price = get_object_or_404(ProductPrice, id=price_id, product=product)
+
+    if request.method == "POST":
+        log_security_event(event_type="product_price_delete_attempt", details={"path": request.path})
+        try:
+            with transaction.atomic():
+                price_info = f"{price.currency.code} - {price.monthly_price}"
+                price.delete()
+                logger.info(f"✅ [Products] Deleted price for {product.name}: {price_info}")
+                log_security_event(event_type="product_price_deleted", details={"product": product.slug})
+                messages.success(request, _("✅ Product price deleted successfully"))
+                return redirect("products:product_prices", slug=product.slug)
+        except Exception as e:
+            logger.error(f"🔥 [Products] Error deleting price: {e}")
+            messages.error(request, _("❌ Error deleting product price"))
+            return redirect("products:product_prices", slug=product.slug)
+
+    context = {
+        "product": product,
+        "price": price,
+    }
+
+    return render(request, "products/product_price_confirm_delete.html", context)

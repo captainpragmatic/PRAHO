@@ -1,0 +1,264 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans 'Ticket Details' %}{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6">
+    <h1 class="text-3xl font-bold text-white mb-6">
+        {% trans 'Ticket' %} 
+        {% if ticket.ticket_number %}
+            #{{ ticket.ticket_number }}
+        {% else %}
+            #{{ ticket.id }}
+        {% endif %}
+    </h1>
+
+    <!-- Dynamic content that updates after replies -->
+    <div id="ticket-status-and-comments">
+        {% include 'tickets/partials/status_and_comments.html' with replies=replies %}
+    </div>
+    <!-- End dynamic content -->
+
+    <div class="mt-6">
+        <a href="{% url 'tickets:list' %}" class="inline-block align-baseline font-bold text-sm text-blue-400 hover:text-blue-300">
+            ← {% trans 'Back to Tickets' %}
+        </a>
+    </div>
+</div>
+
+<!-- Enhanced JavaScript for HTMX replies -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const textarea = document.querySelector('textarea[name="message"]');
+    const charCounter = document.getElementById('char-counter');
+    const submitBtn = document.querySelector('#reply-form button[type="submit"]');
+    const submitText = document.getElementById('submit-text');
+    const submitSpinner = document.getElementById('submit-spinner');
+    
+    // Character counter
+    if (textarea && charCounter) {
+        textarea.addEventListener('input', function() {
+            charCounter.textContent = this.value.length;
+            
+            // Visual feedback for long messages
+            if (this.value.length > 1000) {
+                charCounter.className = 'text-xs text-yellow-400';
+            } else if (this.value.length > 2000) {
+                charCounter.className = 'text-xs text-red-400';
+            } else {
+                charCounter.className = 'text-xs text-slate-400';
+            }
+        });
+    }
+
+    // Auto-scroll to bottom after new comment
+    window.updateReplyCount = function() {
+        const container = document.getElementById('comments-container');
+        if (container) {
+            container.scrollTop = container.scrollHeight;
+        }
+        
+        // Update reply count in header
+        const comments = container.querySelectorAll('.mb-6:not(.text-center)');
+        const countSpan = document.getElementById('reply-count');
+        if (countSpan && comments.length >= 0) {
+            countSpan.textContent = `(${comments.length} replies)`;
+        }
+        // Update subtle scroll hints after content changes
+        if (typeof updateScrollHints === 'function') {
+            updateScrollHints();
+        }
+    };
+
+    // File upload handling
+    const fileInput = document.getElementById('file-input');
+    const attachBtn = document.getElementById('attach-btn');
+    const fileList = document.getElementById('file-list');
+    
+    // File attachment handling
+    if (attachBtn && fileInput) {
+        attachBtn.addEventListener('click', function() {
+            fileInput.click();
+        });
+        
+        fileInput.addEventListener('change', function() {
+            if (this.files.length > 0) {
+                window.displayFileList(this.files);
+            }
+        });
+    }
+    
+    // Make these functions global so they can be used after HTMX replacement
+    window.displayFileList = function(files) {
+        const currentFileList = document.getElementById('file-list');
+        if (!currentFileList) return;
+        
+        currentFileList.innerHTML = '';
+        currentFileList.classList.remove('hidden');
+        
+        Array.from(files).forEach((file, index) => {
+            const fileItem = document.createElement('div');
+            fileItem.className = 'flex items-center space-x-2 text-xs text-slate-400 bg-slate-700 px-2 py-1 rounded';
+            fileItem.innerHTML = `
+                <span>${file.name} (${formatFileSize(file.size)})</span>
+                <button type="button" onclick="removeFile(${index})" class="text-slate-400 hover:text-red-400 ml-2">×</button>
+            `;
+            currentFileList.appendChild(fileItem);
+        });
+    };
+    
+    window.formatFileSize = function(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    };
+    
+    window.removeFile = function(index) {
+        const currentFileInput = document.getElementById('file-input');
+        const currentFileList = document.getElementById('file-list');
+        if (!currentFileInput || !currentFileList) return;
+        
+        // Create new FileList without the removed file
+        const dt = new DataTransfer();
+        const files = Array.from(currentFileInput.files);
+        files.splice(index, 1);
+        files.forEach(file => dt.items.add(file));
+        currentFileInput.files = dt.files;
+        
+        if (currentFileInput.files.length === 0) {
+            currentFileList.classList.add('hidden');
+        } else {
+            window.displayFileList(currentFileInput.files);
+        }
+    };
+
+    // On initial load, scroll to bottom only if the container actually overflows
+    function scrollToBottomIfOverflow() {
+        const container = document.getElementById('comments-container');
+        if (!container) return;
+        const overflows = container.scrollHeight > container.clientHeight;
+        if (overflows) {
+            container.scrollTop = container.scrollHeight;
+        }
+    }
+    function updateScrollHints() {
+        const container = document.getElementById('comments-container');
+        const hintSticky = document.getElementById('scroll-hint-sticky');
+        const icon = document.getElementById('scroll-hint-sticky-icon');
+        if (!container || !hintSticky || !icon) return;
+
+        const atTop = container.scrollTop <= 10;
+        const atBottom = container.scrollTop >= (container.scrollHeight - container.clientHeight - 10);
+
+        if (atTop) {
+            hintSticky.style.opacity = '0';
+            icon.style.opacity = '0';
+        } else {
+            hintSticky.style.opacity = '1';
+            icon.style.opacity = '1';
+        }
+    }
+
+    // Initialize and update scroll hints
+    requestAnimationFrame(updateScrollHints);
+    window.addEventListener('load', updateScrollHints);
+    const containerEl = document.getElementById('comments-container');
+    if (containerEl) {
+        containerEl.addEventListener('scroll', updateScrollHints, { passive: true });
+    }
+
+    // Keyboard shortcuts
+    if (textarea) {
+        textarea.addEventListener('keydown', function(e) {
+            if (e.ctrlKey && e.key === 'Enter') {
+                e.preventDefault();
+                if (submitBtn && !submitBtn.disabled) {
+                    submitBtn.click();
+                }
+            }
+        });
+    }
+});
+
+// HTMX event listeners
+document.addEventListener('htmx:beforeRequest', function(e) {
+    if (e.detail.elt.id === 'reply-form') {
+        const submitBtn = document.querySelector('#reply-form button[type="submit"]');
+        const submitText = document.getElementById('submit-text');
+        const submitSpinner = document.getElementById('submit-spinner');
+        
+        if (submitBtn) submitBtn.disabled = true;
+        if (submitText) submitText.textContent = '{% trans "Sending..." %}';
+        if (submitSpinner) submitSpinner.classList.remove('hidden');
+    }
+});
+
+document.addEventListener('htmx:afterRequest', function(e) {
+    if (e.detail.elt.id === 'reply-form') {
+        const submitBtn = document.querySelector('#reply-form button[type="submit"]');
+        const submitText = document.getElementById('submit-text');
+        const submitSpinner = document.getElementById('submit-spinner');
+        const charCounter = document.getElementById('char-counter');
+        
+        if (submitBtn) submitBtn.disabled = false;
+        if (submitText) submitText.textContent = '{% trans "Send Reply" %}';
+        if (submitSpinner) submitSpinner.classList.add('hidden');
+        if (charCounter) charCounter.textContent = '0';
+        
+        // Clear file attachments
+        const fileInput = document.getElementById('file-input');
+        const fileList = document.getElementById('file-list');
+        if (fileInput) fileInput.value = '';
+        if (fileList) {
+            fileList.innerHTML = '';
+            fileList.classList.add('hidden');
+        }
+        
+        // Update reply count and scroll
+        setTimeout(updateReplyCount, 100);
+        
+        // Re-bind file handling after HTMX content replacement
+        setTimeout(function() {
+            const newFileInput = document.getElementById('file-input');
+            const newAttachBtn = document.getElementById('attach-btn');
+            const newFileList = document.getElementById('file-list');
+            
+            if (newAttachBtn && newFileInput) {
+                newAttachBtn.addEventListener('click', function() {
+                    newFileInput.click();
+                });
+                
+                newFileInput.addEventListener('change', function() {
+                    if (this.files.length > 0) {
+                        window.displayFileList(this.files);
+                    }
+                });
+            }
+            
+            // Re-bind character counter after HTMX replacement
+            const newTextarea = document.querySelector('textarea[name="message"]');
+            const newCharCounter = document.getElementById('char-counter');
+            
+            if (newTextarea && newCharCounter) {
+                newTextarea.addEventListener('input', function() {
+                    newCharCounter.textContent = this.value.length;
+                    
+                    // Visual feedback for long messages
+                    if (this.value.length > 1000) {
+                        newCharCounter.className = 'text-xs text-yellow-400';
+                    } else if (this.value.length > 2000) {
+                        newCharCounter.className = 'text-xs text-red-400';
+                    } else {
+                        newCharCounter.className = 'text-xs text-slate-400';
+                    }
+                });
+            }
+        }, 200);
+    }
+});
+</script>
+{% endblock %}

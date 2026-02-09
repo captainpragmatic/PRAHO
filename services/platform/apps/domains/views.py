@@ -102,7 +102,7 @@ def _build_domain_table_data(domains: QuerySet[Domain] | list[Domain], user: Use
 
         row_data = {
             "clickable": True,
-            "click_url": f"/app/domains/{domain.id}/",
+            "click_url": f"/domains/{domain.id}/",
             "cells": [
                 {
                     "component": "text",

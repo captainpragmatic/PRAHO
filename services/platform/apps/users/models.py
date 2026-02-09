@@ -321,6 +321,12 @@ class User(AbstractUser):
         """Check if user has unused backup codes"""
         return len(self.backup_tokens) > 0
 
+    # MFA alias properties for API compatibility
+    @property
+    def mfa_enabled(self) -> bool:
+        """Alias for two_factor_enabled - for MFA API compatibility"""
+        return self.two_factor_enabled
+
 
 class CustomerMembership(models.Model):
     """
@@ -351,6 +357,11 @@ class CustomerMembership(models.Model):
     # Primary customer flag (replaces User.primary_customer)
     is_primary = models.BooleanField(
         default=False, help_text=_("Primary customer for this user (used for default context)")
+    )
+
+    # Active membership flag (allows deactivating without deleting)
+    is_active = models.BooleanField(
+        default=True, help_text=_("Whether this membership is currently active")
     )
 
     # ===============================================================================

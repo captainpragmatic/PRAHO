@@ -26,6 +26,7 @@ DJANGO_APPS: list[str] = [
 
 THIRD_PARTY_APPS: list[str] = [
     "rest_framework",
+    "rest_framework.authtoken",  # 🔐 Token authentication for API access
     "django_extensions",
     "ipware",
     "django_q",  # Async task processing
@@ -46,6 +47,7 @@ LOCAL_APPS: list[str] = [
     "apps.audit",
     "apps.ui",
     "apps.settings",  # ⚙️ System configuration management
+    "apps.api",  # 🚀 Centralized API endpoints (Sentry/Stripe pattern)
 ]
 
 INSTALLED_APPS: list[str] = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -60,6 +62,8 @@ MIDDLEWARE: list[str] = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    "apps.common.middleware.StaffOnlyPlatformMiddleware",  # Block customer access to platform (after AuthenticationMiddleware and MessageMiddleware)
+    "apps.common.middleware.PortalServiceHMACMiddleware",  # HMAC auth for portal API requests (after AuthenticationMiddleware)
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
@@ -142,7 +146,7 @@ PASSWORD_HASHERS = [
 
 # Authentication URLs
 LOGIN_URL = "/users/login/"
-LOGIN_REDIRECT_URL = "/app/"
+LOGIN_REDIRECT_URL = "/dashboard/"
 LOGOUT_REDIRECT_URL = "/"
 
 # Password reset settings
@@ -204,8 +208,8 @@ CACHES = {
 # SESSION & COOKIE SETTINGS
 # ===============================================================================
 
-SESSION_ENGINE = "django.contrib.sessions.backends.cache"
-SESSION_CACHE_ALIAS = "default"
+# Use DB-backed sessions across environments (simple and persistent)
+SESSION_ENGINE = "django.contrib.sessions.backends.db"
 SESSION_COOKIE_AGE = 86400  # 24 hours
 SESSION_COOKIE_HTTPONLY = True
 SESSION_SAVE_EVERY_REQUEST = True
@@ -240,24 +244,42 @@ EMAIL_USE_SSL = False  # Use TLS instead of SSL
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
+        # Session auth for web UI (HTMX calls from platform)
         "rest_framework.authentication.SessionAuthentication",
+        # Token auth for portal service and external clients
+        "rest_framework.authentication.TokenAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
-    "PAGE_SIZE": 25,
+    "PAGE_SIZE": 20,  # Updated to match our API pagination
     "DEFAULT_FILTER_BACKENDS": [
         "django_filters.rest_framework.DjangoFilterBackend",
     ],
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle", 
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": "100/hour",     # Anonymous users (very limited)
+        "user": "1000/hour",    # Authenticated users (generous for portal)
+        "burst": "60/min",      # Search/autocomplete endpoints
+        
+        # 🔒 SECURITY: Order-specific throttling to prevent abuse
+        "order_create": "10/min",      # Order creation (expensive operations)
+        "order_calculate": "30/min",   # Cart calculations (less expensive)
+        "order_list": "100/min",       # Order listing (read operations)
+        "product_catalog": "200/min",  # Product browsing (public-ish)
+    },
 }
 
 # ===============================================================================
 # ROMANIAN BUSINESS CONFIGURATION
 # ===============================================================================
 
-# Romanian VAT rate (19% standard)
-ROMANIA_VAT_RATE = "0.19"
+# Romanian VAT rate (21% standard)
+ROMANIA_VAT_RATE = "0.21"
 
 # Romanian company information
 ROMANIAN_BUSINESS_CONTEXT = {
@@ -266,7 +288,7 @@ ROMANIAN_BUSINESS_CONTEXT = {
     "email": os.environ.get("COMPANY_EMAIL", "contact@pragmatichost.com"),
     "phone": os.environ.get("COMPANY_PHONE", "+40.21.123.4567"),
     "address": os.environ.get("COMPANY_ADDRESS", "Str. Exemplu Nr. 1, Bucuresti, Romania"),
-    "vat_rate": 0.19,
+    "vat_rate": 0.21,
     "currency": "RON",
 }
 
@@ -340,7 +362,7 @@ COMPANY_PHONE = os.environ.get("COMPANY_PHONE", "+40 21 000 0000")
 COMPANY_WEBSITE = os.environ.get("COMPANY_WEBSITE", "https://praho.ro")
 
 # VAT settings for Romanian compliance
-VAT_RATE = 0.19  # 19% Romanian VAT rate
+VAT_RATE = 0.21  # 21% Romanian VAT rate
 VAT_ENABLED = True
 
 # ===============================================================================

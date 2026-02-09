@@ -1,0 +1,206 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans 'Create New Ticket' %} - PRAHO Portal{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 max-w-3xl mx-auto">
+  <!-- Header -->
+  <div class="mb-6">
+    <div class="flex items-center space-x-4">
+      {% url 'tickets:list' as tickets_url %}
+      {% button "← Back to Tickets" variant="secondary" href=tickets_url size="sm" %}
+    </div>
+    <h1 class="text-2xl font-bold text-white mt-4 romanian-flag">
+      {% trans 'Create New Ticket' %}
+    </h1>
+    <p class="text-slate-400 mt-2">
+      {% trans 'Get help from our support team' %}
+    </p>
+  </div>
+
+  <!-- Ticket Form -->
+  <div class="bg-slate-800 rounded-lg border border-slate-700">
+    <div class="p-6">
+      <form method="post" class="space-y-6">
+        {% csrf_token %}
+
+        <!-- Category & Priority -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label for="category" class="block text-sm font-medium text-slate-300 mb-2">
+              {% trans 'Category' %}
+            </label>
+            <select name="category" id="category"
+              class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+              <option value="">{% trans 'Select category (optional)' %}</option>
+              <option value="technical">🛠️ {% trans 'Technical Support' %}</option>
+              <option value="billing">💰 {% trans 'Billing & Account' %}</option>
+              <option value="hosting">🏠 {% trans 'Hosting Services' %}</option>
+              <option value="domains">🌐 {% trans 'Domain Management' %}</option>
+              <option value="general">💬 {% trans 'General Inquiry' %}</option>
+            </select>
+          </div>
+
+          <div>
+            <label for="priority" class="block text-sm font-medium text-slate-300 mb-2">
+              {% trans 'Priority' %}
+            </label>
+            <select name="priority" id="priority"
+              class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+              <option value="low">🟢 {% trans 'Low' %}</option>
+              <option value="normal" selected>🟡 {% trans 'Normal' %}</option>
+              <option value="high">🟠 {% trans 'High' %}</option>
+              <option value="critical">🔴 {% trans 'Critical' %}</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Title -->
+        <div>
+          <label for="title" class="block text-sm font-medium text-slate-300 mb-2">
+            {% trans 'Title' %}
+          </label>
+          {% input_field name="title" placeholder="Brief description of the issue" required=True %}
+        </div>
+
+        <!-- Optional: Related Service - For future implementation -->
+        <!-- 
+        <div>
+          <label for="service" class="block text-sm font-medium text-slate-300 mb-2">
+            {% trans 'Related Service' %} <span class="text-slate-500">({% trans 'optional' %})</span>
+          </label>
+          <select name="service" id="service"
+            class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+            <option value="">{% trans 'Select a service (if applicable)' %}</option>
+          </select>
+        </div>
+        -->
+
+        <!-- Description -->
+        <div>
+          <label for="description" class="block text-sm font-medium text-slate-300 mb-2">
+            {% trans 'Description' %}
+          </label>
+          <textarea name="description" id="description" rows="6" required
+            class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
+            placeholder="{% trans 'Please provide detailed information about your request or issue...' %}"></textarea>
+          <p class="mt-1 text-xs text-slate-400">
+            {% trans 'Be as specific as possible. Include error messages, steps to reproduce, etc.' %}
+          </p>
+        </div>
+
+        <!-- Priority Guidelines -->
+        <div class="bg-slate-700/50 rounded-lg border border-slate-600 p-4">
+          <h3 class="text-sm font-medium text-slate-200 mb-3">
+            {% trans "Priority Guidelines" %}
+          </h3>
+          <div class="space-y-2 text-sm">
+            <div class="flex items-center space-x-2">
+              <span class="text-red-400">🔴</span>
+              <span class="text-slate-300">
+                <strong>{% trans "Critical" %}:</strong> {% trans "Service completely down, affecting your business" %}
+              </span>
+            </div>
+            <div class="flex items-center space-x-2">
+              <span class="text-orange-400">🟠</span>
+              <span class="text-slate-300">
+                <strong>{% trans "High" %}:</strong> {% trans "Critical issues significantly impacting service" %}
+              </span>
+            </div>
+            <div class="flex items-center space-x-2">
+              <span class="text-yellow-400">🟡</span>
+              <span class="text-slate-300">
+                <strong>{% trans "Normal" %}:</strong> {% trans "Standard support requests and questions" %}
+              </span>
+            </div>
+            <div class="flex items-center space-x-2">
+              <span class="text-green-400">🟢</span>
+              <span class="text-slate-300">
+                <strong>{% trans "Low" %}:</strong> {% trans "General questions or minor issues" %}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Form Actions -->
+        <div class="flex justify-between items-center pt-4 border-t border-slate-600">
+          <p class="text-xs text-slate-400">
+            {% trans "You will receive email notifications about replies to your ticket." %}
+          </p>
+          <div class="flex space-x-4">
+            {% url 'tickets:list' as tickets_url %}
+            {% button "Cancel" variant="secondary" href=tickets_url %}
+            {% button "Create Ticket" variant="primary" type="submit" icon="ticket" %}
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Support Contact Info -->
+  <div class="mt-8 bg-slate-800 rounded-lg border border-slate-700 p-6">
+    <h3 class="text-lg font-medium text-white mb-3">
+      {% trans "Need Immediate Help?" %}
+    </h3>
+    <div class="space-y-2 text-sm text-slate-400">
+      <p>
+        {% trans "For critical issues affecting your service, you can also:" %}
+      </p>
+      <ul class="list-disc list-inside space-y-1 ml-4">
+        <li>{% trans "Call our emergency support line" %}</li>
+        <li>{% trans "Check our status page for known issues" %}</li>
+        <li>{% trans "Browse our knowledge base for quick solutions" %}</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Auto-populate title placeholder based on category
+  document.getElementById('category').addEventListener('change', function () {
+    const titleField = document.getElementById('title');
+    const category = this.value;
+
+    if (!titleField.value) {
+      const templates = {
+        'technical': '{% trans "Technical issue with" %} ',
+        'billing': '{% trans "Billing question about" %} ',
+        'hosting': '{% trans "Hosting issue with" %} ',
+        'domains': '{% trans "Domain question about" %} ',
+        'general': '{% trans "Question about" %} '
+      };
+
+      if (templates[category]) {
+        titleField.placeholder = templates[category];
+      } else {
+        titleField.placeholder = '{% trans "Brief description of the issue" %}';
+      }
+    }
+  });
+
+  // Character counter for description
+  document.getElementById('description').addEventListener('input', function () {
+    const maxLength = 2000;
+    const currentLength = this.value.length;
+
+    if (currentLength > maxLength * 0.8) {
+      // Show warning when approaching limit
+      console.log(`${currentLength}/${maxLength} characters`);
+    }
+  });
+
+  // Form validation helper
+  document.querySelector('form').addEventListener('submit', function (e) {
+    const title = document.getElementById('title').value.trim();
+    const description = document.getElementById('description').value.trim();
+    
+    if (!title || !description) {
+      e.preventDefault();
+      alert('{% trans "Please fill in both title and description fields." %}');
+      return false;
+    }
+  });
+</script>
+{% endblock %}

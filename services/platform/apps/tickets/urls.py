@@ -10,6 +10,7 @@ app_name = "tickets"
 
 urlpatterns = [
     path("", views.ticket_list, name="list"),
+    path("search/", views.ticket_search_htmx, name="search_htmx"),
     path("create/", views.ticket_create, name="create"),
     path("<int:pk>/", views.ticket_detail, name="detail"),
     path("<int:pk>/reply/", views.ticket_reply, name="reply"),

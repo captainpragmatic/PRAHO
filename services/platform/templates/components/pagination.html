@@ -33,27 +33,28 @@ Features:
 
 {% load i18n %}
 
-{# Only show pagination if there are multiple pages #}
-{% if page_obj.has_other_pages %}
+{# Always show pagination for now #}
+{% if page_obj or paginator_data %}
 
-{# Pagination Container with Consistent Spacing #}
-<div class="flex flex-col items-center space-y-2 py-6 px-4 sm:py-8 {{ css_class|default:'' }}">
+{# Pagination Container with Left/Right Layout #}
+<div class="flex items-center justify-between py-4 px-4 {{ css_class|default:'' }}">
 
-  {# Results Information - Centered Above Pagination #}
+  {# Results Information - Left Side with Button-like Styling #}
   {% if show_info|default:True %}
-  <div class="flex justify-center">
-    <div class="inline-flex items-center px-3 sm:px-4 py-1.5 sm:py-2 bg-slate-800/40 backdrop-blur-sm border border-slate-700/50 rounded-full text-xs sm:text-sm text-slate-300 shadow-sm">
-      <span>
-        {% blocktrans with page_obj.start_index as start_index and page_obj.end_index as end_index and page_obj.paginator.count as count %}
-          Showing {{ start_index }}–{{ end_index }} of {{ count }} results
-        {% endblocktrans %}
-      </span>
+    <div class="inline-flex items-center justify-center py-4 px-3 sm:px-4 bg-slate-800/30 backdrop-blur-sm border border-slate-700/40 rounded-lg shadow-lg text-sm text-slate-300">
+      {% with page_obj.start_index as start_index and page_obj.end_index as end_index and page_obj.paginator.count as count %}
+        {# Consistent format for both mobile and desktop #}
+        <span>
+          {% blocktrans %}
+            {{ start_index }}–{{ end_index }} of {{ count }} results
+          {% endblocktrans %}
+        </span>
+      {% endwith %}
     </div>
-  </div>
   {% endif %}
 
-  {# Modern Pagination Navigation with Consistent Spacing #}
-  <nav role="navigation" aria-label="{% trans 'Pagination' %}" data-slot="pagination" class="flex w-full justify-center">
+  {# Modern Pagination Navigation - Right Side #}
+  <nav role="navigation" aria-label="{% trans 'Pagination' %}" data-slot="pagination" class="flex justify-end">
     <ul data-slot="pagination-content" class="inline-flex items-center gap-0.5 sm:gap-1 bg-slate-800/30 backdrop-blur-sm border border-slate-700/40 rounded-lg px-1.5 py-1.5 sm:px-2 sm:py-2 shadow-lg">
     
     {# Previous Page Button #}

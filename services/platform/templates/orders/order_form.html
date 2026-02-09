@@ -155,7 +155,12 @@
           {% if order %}
             {% button "💾 Update Order" type="submit" variant="primary" %}
           {% else %}
-            {% button "📦 Create Order" type="submit" variant="primary" %}
+            {% button "📦 Create Order" type="submit" variant="outline" %}
+            {% url 'orders:order_create_with_item' as create_with_item_url %}
+            <button type="submit" formaction="{{ create_with_item_url }}"
+                    class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-green-600 bg-green-700 text-white hover:bg-green-600 focus:ring-2 focus:ring-green-500">
+              🚀 {% trans "Create Order with Item" %}
+            </button>
           {% endif %}
         </div>
       </form>
@@ -182,6 +187,66 @@
       <h3 class="text-lg font-semibold text-white">🇷🇴 {% trans "Romanian Business Compliance" %}</h3>
     </div>
     <div class="p-6">
+      <!-- First Item (Optional) -->
+      <div class="mb-8">
+        <h4 class="text-md font-semibold text-white mb-3">🧩 {% trans "First Item (optional)" %}</h4>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-slate-400 mb-2">{% trans "Product" %}</label>
+            <select name="first_product" id="first_product"
+                    class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+                    hx-post="{% url 'orders:order_create_preview' %}"
+                    hx-include="#id_customer, #id_currency, #first_product, #first_billing_period, #first_quantity, #first_domain_name"
+                    hx-target="#create-preview"
+                    hx-swap="innerHTML">
+              <option value="">{% trans "Select product..." %}</option>
+              {% for p in products %}
+              <option value="{{ p.id }}">{{ p.name }} ({{ p.get_product_type_display }})</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-400 mb-2">{% trans "Billing Period" %}</label>
+            <select name="first_billing_period" id="first_billing_period"
+                    class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+                    hx-post="{% url 'orders:order_create_preview' %}"
+                    hx-include="#id_customer, #id_currency, #first_product, #first_billing_period, #first_quantity, #first_domain_name"
+                    hx-target="#create-preview"
+                    hx-swap="innerHTML">
+              <option value="monthly">{% trans "Monthly" %}</option>
+              <option value="quarterly">{% trans "Quarterly" %}</option>
+              <option value="semiannual">{% trans "Semi-Annual" %}</option>
+              <option value="annual">{% trans "Annual" %}</option>
+              <option value="biennial">{% trans "Biennial" %}</option>
+              <option value="triennial">{% trans "Triennial" %}</option>
+              <option value="once">{% trans "One Time" %}</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-400 mb-2">{% trans "Quantity" %}</label>
+            <input type="number" min="1" value="1" name="first_quantity" id="first_quantity"
+                   class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+                   hx-post="{% url 'orders:order_create_preview' %}"
+                   hx-include="#id_customer, #id_currency, #first_product, #first_billing_period, #first_quantity, #first_domain_name"
+                   hx-target="#create-preview"
+                   hx-swap="innerHTML">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-400 mb-2">{% trans "Domain (if required)" %}</label>
+            <input type="text" name="first_domain_name" id="first_domain_name" placeholder="exemplu.ro"
+                   class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+                   hx-post="{% url 'orders:order_create_preview' %}"
+                   hx-include="#id_customer, #id_currency, #first_product, #first_billing_period, #first_quantity, #first_domain_name"
+                   hx-target="#create-preview"
+                   hx-swap="innerHTML">
+          </div>
+        </div>
+
+        <!-- Totals Preview (HTMX) -->
+        <div id="create-preview" class="mt-4">
+          <div class="text-sm text-slate-400">{% trans "Select a product and period to preview totals." %}</div>
+        </div>
+      </div>
       <p class="text-slate-400 mb-4">
         {% trans "Orders are automatically configured for Romanian business compliance:" %}
       </p>

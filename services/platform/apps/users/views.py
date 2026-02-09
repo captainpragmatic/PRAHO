@@ -3,12 +3,10 @@ User management views for PRAHO Platform
 Romanian-localized authentication and profile forms.
 """
 
-import hashlib
 import logging
 import secrets
 import time
 from typing import Any, cast
-from uuid import uuid4
 
 import pyotp
 from django.conf import settings
@@ -16,7 +14,6 @@ from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.contrib.auth.tokens import default_token_generator
 from django.contrib.auth.views import (
     PasswordChangeView,
     PasswordResetCompleteView,
@@ -24,19 +21,14 @@ from django.contrib.auth.views import (
     PasswordResetDoneView,
     PasswordResetView,
 )
-from django.core.exceptions import ValidationError
-from django.core.mail import EmailMultiAlternatives
 from django.db import models
 from django.db.models import QuerySet
 from django.forms import Form
 from django.http import HttpRequest, HttpResponse, HttpResponseBase, JsonResponse
 from django.shortcuts import redirect, render, resolve_url
-from django.template.loader import render_to_string
 from django.urls import reverse, reverse_lazy
-from django.utils import timezone
 from django.utils.decorators import method_decorator
-from django.utils.encoding import force_bytes
-from django.utils.http import url_has_allowed_host_and_scheme, urlsafe_base64_encode
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods
 from django.views.generic import DetailView, ListView
@@ -49,7 +41,6 @@ from apps.common.request_ip import get_safe_client_ip
 from apps.common.validators import log_security_event
 
 from .forms import (
-    CustomerOnboardingRegistrationForm,
     LoginForm,
     TwoFactorSetupForm,
     TwoFactorVerifyForm,
@@ -139,7 +130,9 @@ def _handle_successful_login(request: HttpRequest, user: User, form: LoginForm) 
     # Update timeout policy based on context
     SessionSecurityService.update_session_timeout(request)
 
-    messages.success(request, _("Welcome, {user_full_name}!").format(user_full_name=user.get_full_name()))
+    # Only show welcome message for staff users since customers will be blocked by middleware
+    if user.is_staff or getattr(user, "staff_role", None):
+        messages.success(request, _("Welcome, {user_full_name}!").format(user_full_name=user.get_full_name()))
 
     next_url = _get_safe_redirect_target(request, fallback="dashboard")
 
@@ -174,8 +167,8 @@ def _handle_failed_login(request: HttpRequest, user: User | None) -> None:
         )
 
 
-@ratelimit(key="ip", rate="10/m", method="POST", block=False)  # type: ignore[misc]
-@ratelimit(key="post:email", rate="5/m", method="POST", block=False)  # type: ignore[misc]
+@ratelimit(key="ip", rate="10/m", method="POST", block=False)
+@ratelimit(key="post:email", rate="5/m", method="POST", block=False)
 def login_view(request: HttpRequest) -> HttpResponse:
     """Romanian-localized login view with account lockout protection"""
     if request.user.is_authenticated:
@@ -210,83 +203,6 @@ def login_view(request: HttpRequest) -> HttpResponse:
 
     return render(request, "users/login.html", {"form": form})
 
-
-@ratelimit(key="ip", rate="5/h", method="POST", block=False)  # type: ignore[misc]
-@ratelimit(key="header:user-agent", rate="10/h", method="POST", block=False)  # type: ignore[misc]
-def register_view(request: HttpRequest) -> HttpResponse:
-    """Enhanced user registration with proper customer onboarding"""
-    if request.user.is_authenticated:
-        return redirect("dashboard")
-
-    if request.method == "POST":
-        if getattr(request, "limited", False) and not getattr(settings, "TESTING", False):
-            # Log rate limit event to audit system
-            rate_limit_data = RateLimitEventData(
-                endpoint="users:register",
-                ip_address=get_safe_client_ip(request),
-                user_agent=request.META.get("HTTP_USER_AGENT", ""),
-                rate_limit_key="ip,user-agent",
-                rate_limit_rate="5/h,10/h",
-            )
-            SecurityAuditService.log_rate_limit_event(
-                event_data=rate_limit_data,
-                user=None,  # User not registered yet
-            )
-            messages.error(request, _("Too many registration attempts. Please wait and try again."))
-            return render(
-                request, "users/register.html", {"form": CustomerOnboardingRegistrationForm(request.POST)}, status=429
-            )
-        form = CustomerOnboardingRegistrationForm(request.POST)
-        # Normalize email early and handle existing users with a neutral flow (prevents enumeration)
-        raw_email = (request.POST.get("email") or "").lower()
-        if raw_email and User.objects.filter(email=raw_email).exists():
-            _audit_registration_attempt(request, raw_email, "existing_user")
-            try:
-                user = User.objects.get(email=raw_email)
-                _send_password_reset_for_existing_user(user, request)
-            except User.DoesNotExist:
-                # Race condition: treat uniformly without leaking info
-                pass
-            _sleep_uniform()
-            return redirect("users:registration_submitted")
-
-        if form.is_valid():
-            email = form.cleaned_data.get("email", "").lower()
-            # Existing user path handled above; proceed with new user creation
-
-            # New user path
-            try:
-                form.save()
-                _audit_registration_attempt(request, email, "new_user")
-                _sleep_uniform()
-                return redirect("users:registration_submitted")
-            except ValidationError as e:
-                # Treat as validation failure
-                messages.error(request, str(e))
-                _audit_registration_attempt(request, email, "form_validation_error")
-            except Exception:
-                # Likely integrity or unexpected issue; treat as existing for uniformity
-                _audit_registration_attempt(request, email, "existing_user")
-                try:
-                    user = User.objects.get(email=email)
-                    _send_password_reset_for_existing_user(user, request)
-                except User.DoesNotExist:
-                    pass
-                _sleep_uniform()
-                return redirect("users:registration_submitted")
-        else:
-            # Form validation errors path (keep user on page, but audit attempt)
-            email = (request.POST.get("email") or "").lower()
-            _audit_registration_attempt(request, email, "form_validation_error")
-    else:
-        form = CustomerOnboardingRegistrationForm()
-
-    return render(request, "users/register.html", {"form": form})
-
-
-def registration_submitted_view(request: HttpRequest) -> HttpResponse:
-    """Neutral page shown after registration submission (prevents enumeration)."""
-    return render(request, "users/registration_submitted.html")
 
 
 def logout_view(request: HttpRequest) -> HttpResponse:
@@ -531,13 +447,13 @@ logger = logging.getLogger(__name__)
 
 # Define 2FA Setup Steps for Progress Indicator
 TWO_FACTOR_STEPS = [
-    {"label": _("Choose Method"), "description": _("Select authentication method"), "url": "users:two_factor_setup"},
+    {"label": _("Choose Method"), "description": _("Select authentication method"), "url": "users:mfa_setup"},
     {
         "label": _("Set Up Method"),
         "description": _("Configure your authenticator"),
-        "url": "users:two_factor_setup_totp",
+        "url": "users:mfa_setup_totp",
     },
-    {"label": _("Complete"), "description": _("Save backup codes"), "url": "users:two_factor_backup_codes"},
+    {"label": _("Complete"), "description": _("Save backup codes"), "url": "users:mfa_backup_codes"},
 ]
 
 
@@ -552,11 +468,11 @@ def mfa_method_selection(request: HttpRequest) -> HttpResponse:
         return redirect("users:user_profile")
 
     context = {"steps": TWO_FACTOR_STEPS, "current_step": 1}
-    return render(request, "users/two_factor_method_selection.html", context)
+    return render(request, "users/mfa_method_selection.html", context)
 
 
 @login_required
-def two_factor_setup_totp(request: HttpRequest) -> HttpResponse:
+def mfa_setup_totp(request: HttpRequest) -> HttpResponse:
     """Set up 2FA for user account using new MFA service"""
     # Check if user already has 2FA enabled - user is guaranteed to be authenticated due to @login_required
     user = cast(User, request.user)
@@ -591,7 +507,7 @@ def two_factor_setup_totp(request: HttpRequest) -> HttpResponse:
                         if "2fa_secret" in request.session:
                             del request.session["2fa_secret"]
 
-                        return redirect("users:two_factor_backup_codes")
+                        return redirect("users:mfa_backup_codes")
 
                     except Exception as e:
                         logger.error(f"🔥 [2FA] Failed to enable TOTP: {e}")
@@ -617,14 +533,14 @@ def two_factor_setup_totp(request: HttpRequest) -> HttpResponse:
         "user": user,
         "steps": TWO_FACTOR_STEPS,
         "current_step": 2,
-        "back_url": reverse("users:two_factor_setup"),  # Explicit back to method selection
+        "back_url": reverse("users:mfa_setup"),  # Explicit back to method selection
     }
 
-    return render(request, "users/two_factor_setup.html", context)
+    return render(request, "users/mfa_setup.html", context)
 
 
 @login_required
-def two_factor_setup_webauthn(request: HttpRequest) -> HttpResponse:
+def mfa_setup_webauthn(request: HttpRequest) -> HttpResponse:
     """WebAuthn/Passkey setup - future implementation"""
 
     # Check if user already has 2FA enabled - user is guaranteed to be authenticated due to @login_required
@@ -635,7 +551,7 @@ def two_factor_setup_webauthn(request: HttpRequest) -> HttpResponse:
 
     # For now, redirect to TOTP setup with a message
     messages.info(request, _("WebAuthn/Passkeys are coming soon! Please use the Authenticator App method for now."))
-    return redirect("users:two_factor_setup_totp")
+    return redirect("users:mfa_setup_totp")
 
 
 def _handle_2fa_rate_limit(request: HttpRequest, user: User) -> HttpResponse | None:
@@ -643,7 +559,7 @@ def _handle_2fa_rate_limit(request: HttpRequest, user: User) -> HttpResponse | N
     if getattr(request, "limited", False) and not getattr(settings, "TESTING", False):
         # Log rate limit event to audit system
         rate_limit_data = RateLimitEventData(
-            endpoint="users:two_factor_verify",
+            endpoint="users:mfa_verify",
             ip_address=get_safe_client_ip(request),
             user_agent=request.META.get("HTTP_USER_AGENT", ""),
             rate_limit_key="ip",
@@ -656,7 +572,7 @@ def _handle_2fa_rate_limit(request: HttpRequest, user: User) -> HttpResponse | N
         messages.error(request, _("Too many verification attempts. Please wait and try again."))
         return render(
             request,
-            "users/two_factor_verify.html",
+            "users/mfa_verify.html",
             {"form": TwoFactorVerifyForm(request.POST), "user": user},
             status=429,
         )
@@ -691,7 +607,7 @@ def _handle_backup_code_warnings(request: HttpRequest, user: User) -> None:
 
 
 @ratelimit(key="ip", rate="10/m", method="POST", block=False)  # type: ignore[misc]
-def two_factor_verify(request: HttpRequest) -> HttpResponse:
+def mfa_verify(request: HttpRequest) -> HttpResponse:
     """Verify 2FA token during login"""
     user_id = request.session.get("pre_2fa_user_id")
     if not user_id:
@@ -726,7 +642,9 @@ def two_factor_verify(request: HttpRequest) -> HttpResponse:
                 if backup_code_valid:
                     _handle_backup_code_warnings(request, user)
 
-                messages.success(request, _("Welcome, {user_full_name}!").format(user_full_name=user.get_full_name()))
+                # Only show welcome message for staff users since customers will be blocked by middleware
+                if user.is_staff or getattr(user, "staff_role", None):
+                    messages.success(request, _("Welcome, {user_full_name}!").format(user_full_name=user.get_full_name()))
 
                 next_url = _get_safe_redirect_target(request, fallback="dashboard")
                 return redirect(next_url)
@@ -736,11 +654,11 @@ def two_factor_verify(request: HttpRequest) -> HttpResponse:
     else:
         form = TwoFactorVerifyForm()
 
-    return render(request, "users/two_factor_verify.html", {"form": form, "user": user})
+    return render(request, "users/mfa_verify.html", {"form": form, "user": user})
 
 
 @login_required
-def two_factor_backup_codes(request: HttpRequest) -> HttpResponse:
+def mfa_backup_codes(request: HttpRequest) -> HttpResponse:
     """Display backup codes after 2FA setup or regeneration"""
     backup_codes = request.session.get("new_backup_codes")
 
@@ -753,18 +671,18 @@ def two_factor_backup_codes(request: HttpRequest) -> HttpResponse:
 
     return render(
         request,
-        "users/two_factor_backup_codes.html",
+        "users/mfa_backup_codes.html",
         {
             "backup_codes": backup_codes,
             "steps": TWO_FACTOR_STEPS,
             "current_step": 3,
-            "back_url": reverse("users:two_factor_setup_totp"),  # Back to TOTP setup
+            "back_url": reverse("users:mfa_setup_totp"),  # Back to TOTP setup
         },
     )
 
 
 @login_required
-def two_factor_regenerate_backup_codes(request: HttpRequest) -> HttpResponse:
+def mfa_regenerate_backup_codes(request: HttpRequest) -> HttpResponse:
     """Regenerate backup codes for 2FA"""
     # User is guaranteed to be authenticated due to @login_required
     user = cast(User, request.user)
@@ -778,13 +696,13 @@ def two_factor_regenerate_backup_codes(request: HttpRequest) -> HttpResponse:
         request.session["new_backup_codes"] = backup_codes
 
         messages.success(request, _("New backup codes have been generated."))
-        return redirect("users:two_factor_backup_codes")
+        return redirect("users:mfa_backup_codes")
 
-    return render(request, "users/two_factor_regenerate_backup_codes.html", {"backup_count": len(user.backup_tokens)})
+    return render(request, "users/mfa_regenerate_backup_codes.html", {"backup_count": len(user.backup_tokens)})
 
 
 @login_required
-def two_factor_disable(request: HttpRequest) -> HttpResponse:
+def mfa_disable(request: HttpRequest) -> HttpResponse:
     """Disable 2FA for user account"""
     # User is guaranteed to be authenticated due to @login_required
     user = cast(User, request.user)
@@ -797,7 +715,7 @@ def two_factor_disable(request: HttpRequest) -> HttpResponse:
         password = request.POST.get("password")
         if not password or not user.check_password(password):
             messages.error(request, _("Invalid password."))
-            return render(request, "users/two_factor_disable.html")
+            return render(request, "users/mfa_disable.html")
 
         # Disable 2FA
         user.two_factor_enabled = False
@@ -819,7 +737,7 @@ def two_factor_disable(request: HttpRequest) -> HttpResponse:
         messages.success(request, _("Two-factor authentication has been disabled."))
         return redirect("users:user_profile")
 
-    return render(request, "users/two_factor_disable.html")
+    return render(request, "users/mfa_disable.html")
 
 
 # ===============================================================================
@@ -835,6 +753,25 @@ def user_profile(request: HttpRequest) -> HttpResponse:
     profile, created = UserProfile.objects.get_or_create(user=user)
 
     if request.method == "POST":
+        # Handle language change if present
+        if 'language' in request.POST:
+            selected_language = request.POST.get('language')
+            from django.conf import settings
+            
+            # Set the language in session
+            session_key = getattr(settings, 'LANGUAGE_SESSION_KEY', 'django_language')
+            request.session[session_key] = selected_language
+            
+            # Also set the cookie for future requests
+            cookie_name = getattr(settings, 'LANGUAGE_COOKIE_NAME', 'django_language')
+            response = redirect("users:user_profile")
+            response.set_cookie(
+                cookie_name, 
+                selected_language,
+                max_age=365 * 24 * 60 * 60  # 1 year
+            )
+            return response
+        
         form = UserProfileForm(request.POST, instance=profile)
         if form.is_valid():
             form.save()
@@ -1032,52 +969,6 @@ def _log_user_login(request: HttpRequest, user: User, status: str) -> None:
         user.save(update_fields=["last_login_ip", "failed_login_attempts", "account_locked_until"])
 
 
-def _audit_registration_attempt(request: HttpRequest, email: str, result_type: str) -> dict[str, Any]:
-    """Audit a registration attempt with correlation and privacy-preserving details."""
-    # Ensure session key exists without assuming session middleware
-    session_key = None
-    try:
-        session = getattr(request, "session", None)
-        if session is not None:
-            session_key = session.session_key
-            if not session_key:
-                session.modified = True
-                session.save()
-                session_key = session.session_key
-    except Exception:  # pragma: no cover
-        session_key = None
-
-    details: dict[str, Any] = {
-        "correlation_id": str(uuid4()),
-        "timestamp": timezone.now().isoformat(),
-        "email_hash": hashlib.sha256(email.lower().encode()).hexdigest()[:16],
-        "result_type": result_type,
-        "session_key": session_key,
-    }
-    log_security_event(event_type="registration_attempt", details=details, request_ip=get_safe_client_ip(request))
-    return details
-
-
-def _send_password_reset_for_existing_user(user: User, request: HttpRequest) -> None:
-    """Send a neutral password-reset style email for existing users who re-register."""
-    uid = urlsafe_base64_encode(force_bytes(user.pk))
-    token = default_token_generator.make_token(user)
-
-    context = {
-        "user": user,
-        "uid": uid,
-        "token": token,
-        "protocol": "https" if getattr(settings, "USE_HTTPS", False) else "http",
-        "domain": getattr(settings, "DOMAIN_NAME", request.get_host() or "localhost"),
-    }
-
-    subject = str(_("Account Access - PRAHO Platform"))
-    text_body = render_to_string("users/emails/existing_user_registration.txt", context)
-    html_body = render_to_string("users/emails/existing_user_registration.html", context)
-
-    email = EmailMultiAlternatives(subject=subject, body=text_body, to=[user.email])
-    email.attach_alternative(html_body, "text/html")
-    email.send(fail_silently=False)
 
 
 def _get_safe_redirect_target(request: HttpRequest, fallback: str = "dashboard") -> str:

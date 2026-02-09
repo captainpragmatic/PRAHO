@@ -70,32 +70,32 @@ class UsersURLsTest(TestCase):
     def test_two_factor_urls(self) -> None:
         """Test two-factor authentication URL patterns"""
         # Method selection
-        url = reverse('users:two_factor_setup')
-        self.assertEqual(url, '/auth/2fa/setup/')
+        url = reverse('users:mfa_setup')
+        self.assertEqual(url, '/auth/mfa/setup/')
         
         # TOTP setup
-        url = reverse('users:two_factor_setup_totp')
-        self.assertEqual(url, '/auth/2fa/setup/totp/')
+        url = reverse('users:mfa_setup_totp')
+        self.assertEqual(url, '/auth/mfa/setup/totp/')
         
         # WebAuthn setup
-        url = reverse('users:two_factor_setup_webauthn')
-        self.assertEqual(url, '/auth/2fa/setup/webauthn/')
+        url = reverse('users:mfa_setup_webauthn')
+        self.assertEqual(url, '/auth/mfa/setup/webauthn/')
         
         # Verify
-        url = reverse('users:two_factor_verify')
-        self.assertEqual(url, '/auth/2fa/verify/')
+        url = reverse('users:mfa_verify')
+        self.assertEqual(url, '/auth/mfa/verify/')
         
         # Backup codes
-        url = reverse('users:two_factor_backup_codes')
-        self.assertEqual(url, '/auth/2fa/backup-codes/')
+        url = reverse('users:mfa_backup_codes')
+        self.assertEqual(url, '/auth/mfa/backup-codes/')
         
         # Regenerate backup codes
-        url = reverse('users:two_factor_regenerate_backup_codes')
-        self.assertEqual(url, '/auth/2fa/regenerate-backup-codes/')
+        url = reverse('users:mfa_regenerate_backup_codes')
+        self.assertEqual(url, '/auth/mfa/regenerate-backup-codes/')
         
         # Disable
-        url = reverse('users:two_factor_disable')
-        self.assertEqual(url, '/auth/2fa/disable/')
+        url = reverse('users:mfa_disable')
+        self.assertEqual(url, '/auth/mfa/disable/')
     
     def test_profile_url(self) -> None:
         """Test user profile URL pattern"""
@@ -149,13 +149,13 @@ class UsersURLsTest(TestCase):
             'users:password_reset_done',
             'users:password_reset_complete',
             'users:password_change',
-            'users:two_factor_setup',
-            'users:two_factor_setup_totp',
-            'users:two_factor_setup_webauthn',
-            'users:two_factor_verify',
-            'users:two_factor_backup_codes',
-            'users:two_factor_regenerate_backup_codes',
-            'users:two_factor_disable',
+            'users:mfa_setup',
+            'users:mfa_setup_totp',
+            'users:mfa_setup_webauthn',
+            'users:mfa_verify',
+            'users:mfa_backup_codes',
+            'users:mfa_regenerate_backup_codes',
+            'users:mfa_disable',
             'users:user_profile',
             'users:user_list',
             'users:api_check_email',

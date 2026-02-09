@@ -248,6 +248,66 @@ class TypeSuggestionEngine:
         # Default for template tags/filters
         return "str"
 
+    def _suggest_django_types(self, arg_name: str) -> str | None:
+        """Suggest Django-specific types"""
+        if arg_name == "request":
+            return "HttpRequest"
+        elif arg_name == "queryset":
+            return "QuerySet[Any]"
+        return None
+
+    def _suggest_business_domain_types(self, arg_name: str) -> str | None:
+        """Suggest Romanian business domain types"""
+        business_type_map = {
+            "cui": "CUIString",
+            "vat_number": "VATString", 
+            "email": "EmailAddress",
+            "phone": "PhoneNumber",
+            "domain": "DomainName",
+            "invoice_number": "InvoiceNumber",
+            "order_number": "OrderNumber",
+            "amount": "Amount",
+            "currency": "Currency",
+        }
+        return business_type_map.get(arg_name)
+
+    def _suggest_common_types(self, arg_name: str) -> str | None:
+        """Suggest common Python types based on patterns"""
+        # Create pattern mappings to reduce branching
+        exact_patterns = {
+            "pk": "int",
+            "template_name": "TemplateName",
+        }
+        
+        multi_value_patterns = {
+            ("name", "title", "description", "content", "message", "subject"): "str",
+            ("data", "params", "kwargs", "context", "config"): "dict[str, Any]",
+            ("css_class", "css_classes"): "CSSClass | CSSClasses",
+        }
+        
+        # Check exact patterns first
+        if arg_name in exact_patterns:
+            return exact_patterns[arg_name]
+        
+        # Check multi-value patterns
+        for pattern_group, type_hint in multi_value_patterns.items():
+            if arg_name in pattern_group:
+                return type_hint
+        
+        # Check prefix/suffix patterns with consolidated returns
+        pattern_checks = [
+            (arg_name.endswith("_id"), "int"),
+            (arg_name.startswith(("is_", "has_", "can_")), "bool"),
+            ("date" in arg_name or "time" in arg_name, "datetime"),
+            (arg_name.endswith("s") and arg_name not in ("cls", "args", "address"), "list[Any]"),
+        ]
+        
+        for condition, type_hint in pattern_checks:
+            if condition:
+                return type_hint
+        
+        return None
+
     def suggest_parameter_types(self, node: ast.FunctionDef) -> list[tuple[str, str]]:
         """Suggest types for function parameters based on names and context"""
         suggestions = []
@@ -263,65 +323,12 @@ class TypeSuggestionEngine:
             if arg.annotation:
                 continue
 
-            suggested_type = None
-
-            # Django request patterns
-            if arg_name == "request":
-                suggested_type = "HttpRequest"
-
-            # Django queryset patterns
-            elif arg_name == "queryset":
-                suggested_type = "QuerySet[Any]"
-
-            # Common ID patterns
-            elif arg_name.endswith("_id") or arg_name == "pk":
-                suggested_type = "int"
-
-            # Romanian business domain types (CUIString, VATString, etc.)
-            elif arg_name == "cui":
-                suggested_type = "CUIString"
-            elif arg_name == "vat_number":
-                suggested_type = "VATString"
-            elif arg_name == "email":
-                suggested_type = "EmailAddress"
-            elif arg_name == "phone":
-                suggested_type = "PhoneNumber"
-            elif arg_name == "domain":
-                suggested_type = "DomainName"
-            elif arg_name == "invoice_number":
-                suggested_type = "InvoiceNumber"
-            elif arg_name == "order_number":
-                suggested_type = "OrderNumber"
-            elif arg_name == "amount":
-                suggested_type = "Amount"  # Amount in cents
-            elif arg_name == "currency":
-                suggested_type = "Currency"
-
-            # String-like patterns
-            elif arg_name in ("name", "title", "description", "content", "message", "subject"):
-                suggested_type = "str"
-
-            # Boolean patterns
-            elif arg_name.startswith(("is_", "has_", "can_")):
-                suggested_type = "bool"
-
-            # Date/datetime patterns
-            elif "date" in arg_name or "time" in arg_name:
-                suggested_type = "datetime"  # Will need import
-
-            # Data/dict patterns
-            elif arg_name in ("data", "params", "kwargs", "context", "config"):
-                suggested_type = "dict[str, Any]"
-
-            # Template context patterns
-            elif arg_name == "template_name":
-                suggested_type = "TemplateName"
-            elif arg_name in ("css_class", "css_classes"):
-                suggested_type = "CSSClass | CSSClasses"
-
-            # List patterns
-            elif arg_name.endswith("s") and arg_name not in ("cls", "args", "address"):
-                suggested_type = "list[Any]"
+            # Try different type suggestion strategies
+            suggested_type = (
+                self._suggest_django_types(arg_name) or
+                self._suggest_business_domain_types(arg_name) or
+                self._suggest_common_types(arg_name)
+            )
 
             if suggested_type:
                 suggestions.append((arg_name, suggested_type))
@@ -580,26 +587,48 @@ class InteractiveTypeAdder:
         self.format_after = format_after
         self.engine = TypeSuggestionEngine(file_path)
 
-    def run(self) -> None:
-        """Run the interactive type addition process"""
+    def _validate_analysis(self) -> bool:
+        """Validate that analysis was successful and suggestions were found"""
         if not self.engine.run_analysis():
             logger.error("Failed to analyze file")
-            return
+            return False
 
         if not self.engine.suggestions:
             logger.info("No type annotation suggestions found")
-            return
+            return False
 
         logger.info(f"Found {len(self.engine.suggestions)} functions that could benefit from type annotations")
+        return True
 
-        # Check needed imports
+    def _display_needed_imports(self) -> set[str]:
+        """Display needed imports and return the set"""
         needed_imports = self.engine.generate_needed_imports()
         if needed_imports:
             print("\n📦 The following imports will be needed:")
             for imp in sorted(needed_imports):
                 print(f"  from {imp}")
             print()
+        return needed_imports
 
+    def _process_user_choice(self, choice: str, i: int, approved_changes: list, remaining_suggestions: list) -> str:
+        """Process user choice and return action ('continue', 'break', 'add_all')"""
+        if choice == "q":
+            print("Quitting...")
+            return "break"
+        elif choice == "a":
+            print("Applying all remaining changes...")
+            approved_changes.extend(remaining_suggestions)
+            return "break"
+        elif choice == "y":
+            approved_changes.append(self.engine.suggestions[i - 1])
+            print("✅ Change approved")
+            return "continue"
+        else:
+            print("❌ Change skipped")
+            return "continue"
+
+    def _process_suggestions_interactively(self) -> list:
+        """Process suggestions interactively and return approved changes"""
         approved_changes = []
 
         for i, suggestion in enumerate(self.engine.suggestions, 1):
@@ -615,20 +644,27 @@ class InteractiveTypeAdder:
                 approved_changes.append(suggestion)
             else:
                 choice = input("\nApply this change? [y/N/q/a]: ").lower().strip()
-
-                if choice == "q":
-                    print("Quitting...")
+                remaining_suggestions = self.engine.suggestions[i - 1:]
+                action = self._process_user_choice(choice, i, approved_changes, remaining_suggestions)
+                
+                if action == "break":
                     break
-                elif choice == "a":
-                    print("Applying all remaining changes...")
-                    approved_changes.extend(self.engine.suggestions[i - 1 :])
-                    break
-                elif choice == "y":
-                    approved_changes.append(suggestion)
-                    print("✅ Change approved")
-                else:
-                    print("❌ Change skipped")
 
+        return approved_changes
+
+    def run(self) -> None:
+        """Run the interactive type addition process"""
+        # Validate analysis
+        if not self._validate_analysis():
+            return
+
+        # Display needed imports
+        needed_imports = self._display_needed_imports()
+
+        # Process suggestions
+        approved_changes = self._process_suggestions_interactively()
+
+        # Apply changes
         if approved_changes:
             if self.dry_run:
                 print(f"\n🔍 DRY RUN: Would apply {len(approved_changes)} changes")
@@ -683,10 +719,10 @@ class InteractiveTypeAdder:
     def _format_file(self) -> None:
         """Format the file using ruff"""
         try:
-            import subprocess
+            import subprocess  # noqa: PLC0415
 
-            result = subprocess.run(
-                ["ruff", "format", str(self.file_path)], capture_output=True, text=True, check=False
+            result = subprocess.run(  # noqa: S603
+                ["ruff", "format", str(self.file_path)], capture_output=True, text=True, check=False  # noqa: S607
             )
             if result.returncode == 0:
                 logger.info(f"✅ Formatted {self.file_path} with ruff")
@@ -784,11 +820,11 @@ with Romanian business domain types and Result pattern for error handling.
         # Patch the input function to always return 'a' (approve all)
         original_input = input
 
-        def mock_input(prompt):
+        def mock_input(prompt: str) -> str:
             print(prompt + " a")
             return "a"
 
-        import builtins
+        import builtins  # noqa: PLC0415
 
         builtins.input = mock_input  # type: ignore[assignment]
 

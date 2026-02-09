@@ -13,23 +13,16 @@
         🧾 {% trans "Billing Management" %}
       </h1>
       <p class="mt-2 text-slate-400">
-        {% if is_staff_user %}
-          {% trans "Manage proformas and invoices following Romanian business practices" %}
-        {% else %}
-          {% trans "View your proformas and invoices" %}
-        {% endif %}
+        {% trans "Manage proformas and invoices following Romanian business practices" %}
       </p>
     </div>
     <div class="mt-4 sm:ml-16 sm:mt-0 sm:flex-none">
-      {% if user.is_staff %}
-        {% url 'billing:proforma_create' as create_proforma_url %}
-        {% button "📄 New Proforma" variant="primary" href=create_proforma_url %}
-      {% endif %}
+      {% url 'billing:proforma_create' as create_proforma_url %}
+      {% button "📄 New Proforma" variant="primary" href=create_proforma_url %}
     </div>
   </div>
 
-  <!-- Romanian Business Notice - Staff Only -->
-  {% if is_staff_user %}
+  <!-- Romanian Business Notice -->
   <div class="bg-blue-900 border border-blue-700 rounded-lg p-4 mb-6">
     <div class="flex items-start">
       <div class="flex-shrink-0">
@@ -43,7 +36,6 @@
       </div>
     </div>
   </div>
-  {% endif %}
 
   <!-- Statistics Cards -->
   <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
@@ -53,11 +45,7 @@
           <div class="w-8 h-8 text-2xl">📄</div>
         </div>
         <div class="ml-4">
-          {% if is_staff_user %}
             <p class="text-sm font-medium text-slate-400">{% trans 'Active Proformas' %}</p>
-          {% else %}
-            <p class="text-sm font-medium text-slate-400">{% trans 'Pending Quotes' %}</p>
-          {% endif %}
           <p class="text-2xl font-semibold text-white">{{ proforma_count }}</p>
         </div>
       </div>
@@ -69,11 +57,7 @@
           <div class="w-8 h-8 text-2xl">🧾</div>
         </div>
         <div class="ml-4">
-          {% if is_staff_user %}
             <p class="text-sm font-medium text-slate-400">{% trans 'Total Invoices' %}</p>
-          {% else %}
-            <p class="text-sm font-medium text-slate-400">{% trans 'My Invoices' %}</p>
-          {% endif %}
           <p class="text-2xl font-semibold text-white">{{ invoice_count }}</p>
         </div>
       </div>
@@ -85,11 +69,7 @@
           <div class="w-8 h-8 text-2xl">💰</div>
         </div>
         <div class="ml-4">
-          {% if is_staff_user %}
             <p class="text-sm font-medium text-slate-400">{% trans 'Proforma Value' %}</p>
-          {% else %}
-            <p class="text-sm font-medium text-slate-400">{% trans 'Pending Payments' %}</p>
-          {% endif %}
           <p class="text-2xl font-semibold text-white">{{ proforma_total|floatformat:0 }} RON</p>
         </div>
       </div>
@@ -101,11 +81,7 @@
           <div class="w-8 h-8 text-2xl">💳</div>
         </div>
         <div class="ml-4">
-          {% if is_staff_user %}
             <p class="text-sm font-medium text-slate-400">{% trans 'Invoice Revenue' %}</p>
-          {% else %}
-            <p class="text-sm font-medium text-slate-400">{% trans 'Total Spent' %}</p>
-          {% endif %}
           <p class="text-2xl font-semibold text-white">{{ invoice_total|floatformat:0 }} RON</p>
         </div>
       </div>

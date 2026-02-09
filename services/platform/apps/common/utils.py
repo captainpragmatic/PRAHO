@@ -44,11 +44,12 @@ class VATCalculation(TypedDict):
     vat_rate: int
 
 
-def calculate_romanian_vat(amount: Decimal, vat_rate: int = 19) -> VATCalculation:
+def calculate_romanian_vat(amount: Decimal, vat_rate: int = 21) -> VATCalculation:
     """Calculate Romanian VAT breakdown (deprecated - use apps.common.types.calculate_romanian_vat)"""
     if new_calculator is None:
         # Fallback implementation in case of circular import
-        vat_amount = amount * Decimal(vat_rate) / Decimal("119")  # 19% VAT included
+        # Included VAT extraction based on provided vat_rate (e.g., 21 -> divisor 121)
+        vat_amount = amount * Decimal(vat_rate) / (Decimal(100) + Decimal(vat_rate))
         amount_without_vat = amount - vat_amount
         return VATCalculation(
             amount_without_vat=amount_without_vat,

@@ -74,7 +74,7 @@ def test_customer_login_and_profile_access(page: Page) -> None:
         
         # Navigate to dashboard first
         assert navigate_to_dashboard(page)
-        assert "/app/" in page.url
+        assert "/dashboard/" in page.url
         
         # Navigate to user profile
         page.goto("http://localhost:8701/auth/profile/")
@@ -596,9 +596,9 @@ def test_customer_cannot_edit_other_users(page: Page) -> None:
         
         # Try to navigate to admin areas
         restricted_urls = [
-            "/app/users/",
-            "/app/users/create/",  
-            "/app/staff/users/",
+            "/users/",
+            "/users/create/",  
+            "/staff/users/",
             "/admin/",
             "/admin/users/",
         ]

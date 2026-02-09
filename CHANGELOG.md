@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **🏗️ Platform/Portal Service Separation**: Complete architectural split into two Django services
+  - **Platform Service** (staff/admin): Business operations, billing, provisioning, customer management
+  - **Portal Service** (customer-facing): Order placement, service management, account self-service
+  - **HMAC API Authentication**: Secure inter-service communication with SHA-256 signed requests
+  - **Stripe Payment Integration**: Complete payment flow with payment intents and webhook processing
+  - **Async Provisioning**: Celery-based task queue for service provisioning with failure tracking
+  - **Settings Dashboard**: Category-based system configuration management
+  - **Order Checkout Flow**: End-to-end order placement from portal through platform API
+
 - **🚀 Virtualmin Integration with Rollback Strategy**: Complete hosting provider automation with production-ready safety mechanisms
   - **Two-Phase Provisioning**: Pre-flight validation and rollback capability preventing partial failures
     - **Phase 1 - Validation (Quick Win)**: Comprehensive pre-flight checks before any provisioning

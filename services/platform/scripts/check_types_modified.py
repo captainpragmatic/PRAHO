@@ -28,7 +28,7 @@ def get_modified_python_files(staged_only: bool = False, since: str | None = Non
             # Get files modified since last commit
             cmd = ["git", "diff", "--name-only", "HEAD"]
 
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)  # noqa: S603
         files = result.stdout.strip().split("\n")
 
         # Filter for Python files
@@ -72,7 +72,7 @@ def run_mypy_on_files(files: list[str], verbose: bool = False) -> bool:
     """Run mypy on the given files."""
     if not files:
         if verbose:
-            print("ℹ️  No Python files to check")
+            print("i  No Python files to check")
         return True
 
     # Filter files based on impact
@@ -80,7 +80,7 @@ def run_mypy_on_files(files: list[str], verbose: bool = False) -> bool:
 
     if not files_to_check:
         if verbose:
-            print("ℹ️  No high-impact files to check")
+            print("i  No high-impact files to check")
         return True
 
     if verbose:
@@ -90,7 +90,7 @@ def run_mypy_on_files(files: list[str], verbose: bool = False) -> bool:
 
     # Run mypy
     cmd = ["mypy", *files_to_check]
-    result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    result = subprocess.run(cmd, check=False, capture_output=True, text=True)  # noqa: S603
 
     if result.returncode == 0:
         print("✅ Type checking passed")
@@ -120,7 +120,7 @@ def main() -> int:
     files = get_modified_python_files(staged_only=args.staged, since=args.since)
 
     if not files:
-        print("ℹ️  No Python files modified")
+        print("i  No Python files modified")
         return 0
 
     # Run type checking

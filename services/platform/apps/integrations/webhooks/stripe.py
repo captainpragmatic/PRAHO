@@ -3,7 +3,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from django.conf import settings
+from django.utils import timezone
 
 from apps.billing.models import Payment
 from apps.customers.models import Customer
@@ -50,21 +50,27 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         return str(payload.get("type", ""))
 
     def verify_signature(self, payload: dict[str, Any], signature: str, headers: dict[str, str]) -> bool:
-        """🔐 Verify Stripe webhook signature"""
-        webhook_secret = getattr(settings, "STRIPE_WEBHOOK_SECRET", None)
+        """🔐 Verify Stripe webhook signature using settings system"""
+        try:
+            from apps.settings.services import SettingsService
 
-        if not webhook_secret:
-            # Fail secure when secret is not configured
-            logger = logging.getLogger("apps.integrations.webhooks.stripe")
-            logger.error("STRIPE_WEBHOOK_SECRET not configured - failing secure")
+            # Get encrypted webhook secret from settings system
+            webhook_secret = SettingsService.get("integrations.stripe_webhook_secret")
+
+            if not webhook_secret:
+                # Fail secure when secret is not configured
+                logger.error("Stripe webhook secret not configured in settings system - failing secure")
+                return False
+
+            # Get raw payload for signature verification
+            payload_body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+            return verify_stripe_signature(
+                payload_body=payload_body, stripe_signature=signature, webhook_secret=webhook_secret
+            )
+        except Exception as e:
+            logger.error(f"🔥 Error verifying Stripe webhook signature: {e}")
             return False
-
-        # Get raw payload for signature verification
-        payload_body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-
-        return verify_stripe_signature(
-            payload_body=payload_body, stripe_signature=signature, webhook_secret=webhook_secret
-        )
 
     def __init__(self) -> None:
         super().__init__()
@@ -135,6 +141,9 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             # Update associated invoice if exists
             if payment.invoice:
                 payment.invoice.update_status_from_payments()
+
+            # 🔔 NEW: Notify Portal of payment success
+            self._notify_portal_payment_success(payment, payment_intent)
 
             logger.info(f"✅ Payment {payment.id} marked as succeeded from Stripe")
             return True, f"Payment {payment.id} succeeded"
@@ -246,3 +255,81 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             return True, f"SetupIntent succeeded: {setup_intent_id}"
 
         return True, f"Skipped SetupIntent event: {event_type}"
+
+    def _notify_portal_payment_success(self, payment, payment_intent: dict[str, Any]) -> None:
+        """
+        🔔 Notify Portal service of payment success
+
+        Args:
+            payment: Payment model instance
+            payment_intent: Stripe PaymentIntent data
+        """
+        try:
+            # Extract order ID from payment metadata
+            order_id = payment.meta.get('order_id')
+            if not order_id:
+                logger.warning("⚠️ No order_id in payment metadata - skipping Portal notification")
+                return
+
+            # Check if this payment was created via Portal
+            created_via = payment.meta.get('created_via')
+            if created_via != 'portal_checkout':
+                logger.info("⏭️ Payment not from Portal checkout - skipping notification")
+                return
+
+            # Prepare notification data
+            notification_data = {
+                'order_id': order_id,
+                'payment_id': str(payment.id),
+                'status': 'succeeded',
+                'stripe_payment_intent_id': payment_intent.get('id'),
+                'amount_received': payment_intent.get('amount_received'),
+                'currency': payment_intent.get('currency', 'ron').upper(),
+                'timestamp': timezone.now().isoformat()
+            }
+
+            # Send notification to Portal
+            # TODO: In production, this should use a proper HTTP client or message queue
+            # For now, we'll use a simple HTTP request
+            self._send_portal_webhook(notification_data)
+
+            logger.info(f"✅ Notified Portal of payment success for order {order_id}")
+
+        except Exception as e:
+            logger.error(f"🔥 Error notifying Portal of payment success: {e}")
+            # Don't fail the webhook processing if Portal notification fails
+
+    def _send_portal_webhook(self, data: dict[str, Any]) -> None:
+        """Send webhook notification to Portal service"""
+        try:
+            import requests
+            from django.conf import settings
+
+            # Get Portal webhook URL from settings
+            portal_webhook_url = getattr(settings, 'PORTAL_PAYMENT_WEBHOOK_URL', None)
+            if not portal_webhook_url:
+                logger.warning("⚠️ PORTAL_PAYMENT_WEBHOOK_URL not configured - skipping notification")
+                return
+
+            # Send POST request to Portal
+            response = requests.post(
+                portal_webhook_url,
+                json=data,
+                timeout=10,
+                headers={
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'PRAHO-Platform/1.0'
+                }
+            )
+
+            if response.status_code == 200:
+                logger.info(f"✅ Successfully notified Portal: {response.status_code}")
+            else:
+                logger.warning(f"⚠️ Portal notification failed: {response.status_code} - {response.text}")
+
+        except requests.exceptions.Timeout:
+            logger.error("🕐 Portal notification timeout")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"🔥 Portal notification request failed: {e}")
+        except Exception as e:
+            logger.error(f"🔥 Unexpected error sending Portal notification: {e}")

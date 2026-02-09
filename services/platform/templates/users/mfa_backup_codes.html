@@ -1,0 +1,231 @@
+{% extends 'base.html' %}
+{% load i18n %}
+
+{% block title %}{% trans 'Backup Codes' %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+  <div class="max-w-4xl w-full space-y-8">
+    
+    <!-- Step Navigation -->
+    {% include 'components/step_navigation.html' with steps=steps current_step=current_step show_back_button=False %}
+    
+    <!-- Header -->
+    <div class="text-center">
+      <div class="mx-auto h-16 w-16 text-5xl">🔑</div>
+      <h2 class="mt-6 text-3xl font-extrabold text-white">
+        {% trans 'Your Backup Codes' %}
+      </h2>
+      <p class="mt-2 text-lg text-slate-400">
+        {% trans 'Save these codes in a secure location for emergency access' %}
+      </p>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      
+      <!-- Left Column: Security Notice -->
+      <div class="lg:col-span-1">
+        <div class="bg-yellow-900 bg-opacity-50 rounded-lg p-6 border border-yellow-600">
+          <div class="flex items-center mb-4">
+            <div class="text-2xl mr-3">⚠️</div>
+            <h3 class="text-lg font-medium text-yellow-200">
+              {% trans 'Security Notice' %}
+            </h3>
+          </div>
+          <div class="space-y-3 text-sm text-yellow-200">
+            <div class="flex items-start">
+              <span class="text-yellow-400 mr-2">•</span>
+              {% trans 'Each code works only once' %}
+            </div>
+            <div class="flex items-start">
+              <span class="text-yellow-400 mr-2">•</span>
+              {% trans 'Store in password manager' %}
+            </div>
+            <div class="flex items-start">
+              <span class="text-yellow-400 mr-2">•</span>
+              {% trans 'Never share with anyone' %}
+            </div>
+            <div class="flex items-start">
+              <span class="text-yellow-400 mr-2">•</span>
+              {% trans 'Print or write down safely' %}
+            </div>
+          </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="mt-6 space-y-3">
+          <button onclick="downloadCodes()" 
+                  class="w-full flex items-center justify-center px-4 py-3 border border-green-600 text-sm font-medium rounded-lg text-green-200 bg-green-900 bg-opacity-50 hover:bg-opacity-75 focus:outline-none focus:ring-2 focus:ring-green-500 transition-all">
+            <span class="mr-2">💾</span>
+            {% trans 'Download as Text File' %}
+          </button>
+          
+          <button onclick="printCodes()" 
+                  class="w-full flex items-center justify-center px-4 py-3 border border-blue-600 text-sm font-medium rounded-lg text-blue-200 bg-blue-900 bg-opacity-50 hover:bg-opacity-75 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+            <span class="mr-2">🖨️</span>
+            {% trans 'Print Codes' %}
+          </button>
+          
+          <button onclick="copyAllCodes()" 
+                  class="w-full flex items-center justify-center px-4 py-3 border border-purple-600 text-sm font-medium rounded-lg text-purple-200 bg-purple-900 bg-opacity-50 hover:bg-opacity-75 focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all">
+            <span class="mr-2">📋</span>
+            {% trans 'Copy All Codes' %}
+          </button>
+        </div>
+      </div>
+
+      <!-- Right Column: Backup Codes Display -->
+      <div class="lg:col-span-2">
+        <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+          <div class="flex items-center justify-between mb-6">
+            <div>
+              <h3 class="text-lg font-medium text-white">
+                {% trans 'Your 8 Backup Codes' %}
+              </h3>
+              <p class="text-sm text-slate-400 mt-1">
+                {% trans 'Each code can be used only once' %}
+              </p>
+            </div>
+            <div class="text-right">
+              <div class="text-2xl">🔐</div>
+            </div>
+          </div>
+                    
+          <!-- Backup Codes Grid -->
+          <div class="grid grid-cols-2 gap-3" id="backup-codes-grid">
+            {% for code in backup_codes %}
+            <div class="bg-slate-900 rounded-lg p-4 border border-slate-600 hover:border-green-500 transition-colors group">
+              <div class="flex items-center justify-between">
+                <code class="text-lg font-mono text-green-400 select-all">{{ code }}</code>
+                <button onclick="copyCode('{{ code }}', this)" 
+                        class="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-green-400 transition-all ml-2">
+                  📋
+                </button>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          
+          <!-- Usage Instructions -->
+          <div class="mt-6 p-4 bg-blue-900 bg-opacity-50 rounded-lg border border-blue-600">
+            <div class="flex items-start">
+              <div class="text-xl mr-3">💡</div>
+              <div class="text-sm text-blue-200">
+                <p class="font-medium mb-2">{% trans 'How to use backup codes:' %}</p>
+                <ol class="space-y-1 text-blue-300 list-decimal list-inside">
+                  <li>{% trans 'When prompted for MFA code, enter a backup code instead' %}</li>
+                  <li>{% trans 'Each code works only once - they will be marked as used' %}</li>
+                  <li>{% trans 'Generate new codes when you have few remaining' %}</li>
+                </ol>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="flex flex-col sm:flex-row gap-4 justify-center">
+      <a href="{% url 'users:user_profile' %}" 
+         class="flex items-center justify-center px-6 py-3 border border-green-600 text-sm font-medium rounded-lg text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 transition-colors">
+        <span class="mr-2">✅</span>
+        {% trans 'Continue to Profile' %}
+      </a>
+      
+      <a href="{% url 'users:mfa_regenerate_backup_codes' %}" 
+         class="flex items-center justify-center px-6 py-3 border border-yellow-600 text-sm font-medium rounded-lg text-yellow-200 bg-yellow-900 bg-opacity-50 hover:bg-opacity-75 focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-colors">
+        <span class="mr-2">🔄</span>
+        {% trans 'Generate New Codes' %}
+      </a>
+    </div>
+  </div>
+</div>
+
+<!-- JavaScript Functions -->
+<script>
+// Copy individual backup code
+function copyCode(code, button) {
+  navigator.clipboard.writeText(code).then(function() {
+    const originalText = button.textContent;
+    button.textContent = '✅';
+    button.style.color = '#10b981';
+    
+    setTimeout(() => {
+      button.textContent = originalText;
+      button.style.color = '';
+    }, 2000);
+  }).catch(function(err) {
+    console.error('Could not copy code: ', err);
+  });
+}
+
+// Copy all backup codes
+function copyAllCodes() {
+  const codes = [{% for code in backup_codes %}'{{ code }}'{% if not forloop.last %},{% endif %}{% endfor %}];
+  const codesText = codes.join('
+');
+  
+  navigator.clipboard.writeText(codesText).then(function() {
+    // Visual feedback on button
+    const button = document.querySelector('[onclick="copyAllCodes()"]');
+    const originalText = button.innerHTML;
+    button.innerHTML = '<span class="mr-2">✅</span>{% trans "Copied!" %}';
+    button.style.backgroundColor = '#10b981';
+    
+    setTimeout(() => {
+      button.innerHTML = originalText;
+      button.style.backgroundColor = '';
+    }, 2000);
+  }).catch(function(err) {
+    console.error('Could not copy codes: ', err);
+  });
+}
+
+// Download codes as text file
+function downloadCodes() {
+  const codes = [{% for code in backup_codes %}'{{ code }}'{% if not forloop.last %},{% endif %}{% endfor %}];
+  const codesText = `PRAHO Platform - Backup Codes
+Generated: ${new Date().toLocaleDateString()}
+
+${codes.join('
+')}
+
+IMPORTANT: Each code can only be used once. Store securely.`;
+  
+  const blob = new Blob([codesText], { type: 'text/plain' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'praho-backup-codes.txt';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(url);
+}
+
+// Print codes
+function printCodes() {
+  const codes = [{% for code in backup_codes %}'{{ code }}'{% if not forloop.last %},{% endif %}{% endfor %}];
+  const printContent = `
+    <h1>PRAHO Platform - Backup Codes</h1>
+    <p>Generated: ${new Date().toLocaleDateString()}</p>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 20px 0;">
+      ${codes.map(code => `<div style="border: 1px solid #000; padding: 10px; text-align: center; font-family: monospace; font-size: 16px;">${code}</div>`).join('')}
+    </div>
+    <p><strong>IMPORTANT:</strong> Each code can only be used once. Store securely.</p>
+  `;
+  
+  const printWindow = window.open('', '_blank');
+  printWindow.document.write(`
+    <html>
+      <head><title>PRAHO Backup Codes</title></head>
+      <body style="font-family: Arial, sans-serif; padding: 20px;">
+        ${printContent}
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
+  printWindow.print();
+}
+</script>
+{% endblock %}

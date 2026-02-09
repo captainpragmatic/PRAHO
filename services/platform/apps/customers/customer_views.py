@@ -21,14 +21,17 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
 from django_ratelimit.decorators import ratelimit  # type: ignore[import-untyped]
 
+from apps.billing.models import Invoice
 from apps.common.constants import SEARCH_QUERY_MIN_LENGTH
 from apps.common.decorators import staff_required
 from apps.common.types import Err
+from apps.provisioning.models import Service
+from apps.tickets.models import Ticket
 from apps.users.models import User
 from apps.users.services import CustomerUserService, UserCreationRequest, UserLinkingRequest
 
 from .customer_models import Customer
-from .forms import CustomerCreationForm, CustomerForm, CustomerUserAssignmentForm
+from .forms import CustomerCreationForm, CustomerEditForm, CustomerUserAssignmentForm
 
 logger = logging.getLogger(__name__)
 security_logger = logging.getLogger("security")
@@ -146,6 +149,68 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
     # Get recent notes
     recent_notes = customer.notes.order_by("-created_at")[:5]
 
+    # Get services for this customer (using services app)
+    services = []
+    services_summary = {'total': 0, 'active': 0, 'suspended': 0}
+    try:
+        # Import here to avoid circular imports
+        services_qs = Service.objects.filter(customer=customer).select_related('service_plan').order_by('-created_at')[:5]
+        services = list(services_qs)
+        
+        # Calculate services summary
+        all_services = Service.objects.filter(customer=customer)
+        services_summary = {
+            'total': all_services.count(),
+            'active': all_services.filter(status='active').count(),
+            'suspended': all_services.filter(status='suspended').count(),
+            'pending': all_services.filter(status='pending').count(),
+        }
+    except ImportError:
+        # Services app not available
+        pass
+
+    # Get recent invoices/orders for this customer (using billing app)
+    invoices = []
+    invoices_summary = {'total': 0, 'paid': 0, 'unpaid': 0}
+    try:
+        invoices_qs = Invoice.objects.filter(customer=customer).order_by('-created_at')[:5]
+        invoices = list(invoices_qs)
+        
+        # Calculate invoices summary
+        all_invoices = Invoice.objects.filter(customer=customer)
+        invoices_summary = {
+            'total': all_invoices.count(),
+            'paid': all_invoices.filter(status='paid').count(),
+            'unpaid': all_invoices.filter(status__in=['pending', 'overdue']).count(),
+            'draft': all_invoices.filter(status='draft').count(),
+        }
+    except ImportError:
+        # Billing app not available
+        pass
+
+    # Get recent tickets for this customer (using tickets app)
+    tickets = []
+    tickets_summary = {'total': 0, 'open': 0, 'closed': 0}
+    try:
+        tickets_qs = Ticket.objects.filter(customer=customer).order_by('-created_at')[:5]
+        tickets = list(tickets_qs)
+        
+        # Calculate tickets summary
+        all_tickets = Ticket.objects.filter(customer=customer)
+        tickets_summary = {
+            'total': all_tickets.count(),
+            'open': all_tickets.filter(status__in=['open', 'in_progress']).count(),
+            'closed': all_tickets.filter(status='closed').count(),
+            'pending': all_tickets.filter(status='pending').count(),
+        }
+    except ImportError:
+        # Tickets app not available
+        pass
+
+    # User management context for safeguards
+    total_users = customer.memberships.count()
+    owner_count = customer.memberships.filter(role="owner").count()
+    
     context = {
         "customer": customer,
         "tax_profile": customer.get_tax_profile(),
@@ -153,6 +218,18 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
         "primary_address": customer.get_primary_address(),
         "billing_address": customer.get_billing_address(),
         "recent_notes": recent_notes,
+        # New data for cards
+        "services": services,
+        "services_summary": services_summary,
+        "invoices": invoices,
+        "invoices_summary": invoices_summary,
+        "tickets": tickets,
+        "tickets_summary": tickets_summary,
+        # User management context
+        "total_users": total_users,
+        "owner_count": owner_count,
+        "is_last_user": total_users <= 1,
+        "is_last_owner": owner_count <= 1,
     }
 
     return render(request, "customers/detail.html", context)
@@ -291,8 +368,8 @@ def customer_create(request: HttpRequest) -> HttpResponse:
 @staff_required
 def customer_edit(request: HttpRequest, customer_id: int) -> HttpResponse:
     """
-    ✏️ Edit customer core information
-    Separate views for tax/billing/address profiles
+    ✏️ Comprehensive customer edit with all profiles
+    Edits core customer, tax profile, billing profile, and primary address
     """
     # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
     user = cast(User, request.user)  # Safe due to @staff_required
@@ -304,28 +381,40 @@ def customer_edit(request: HttpRequest, customer_id: int) -> HttpResponse:
         if accessible_customers
         else Customer.objects.none()
     )
-    customer = get_object_or_404(accessible_qs, id=customer_id)
+    # Prefetch related profiles for efficiency
+    customer = get_object_or_404(
+        accessible_qs.select_related("tax_profile", "billing_profile").prefetch_related("addresses"),
+        id=customer_id
+    )
 
     if request.method == "POST":
-        form = CustomerForm(request.POST, instance=customer)
-        if form.is_valid():
-            form.save()
-            messages.success(
-                request, _('✅ Customer "{customer_name}" updated').format(customer_name=customer.get_display_name())
-            )
-            return redirect("customers:detail", customer_id=customer.id)
-        else:
-            messages.error(request, _("❌ Please correct the errors below"))
+        try:
+            form = CustomerEditForm(customer, request.POST)
+            if form.is_valid():
+                updated_customer = form.save(user=user)
+                messages.success(
+                    request, 
+                    _('✅ Customer "{customer_name}" updated successfully').format(
+                        customer_name=updated_customer.get_display_name()
+                    )
+                )
+                return redirect("customers:detail", customer_id=updated_customer.id)
+            else:
+                messages.error(request, _("❌ Please correct the errors below"))
+        except Exception as e:
+            _handle_secure_error(request, e, "customer_edit", user.id)
+            # Form will be re-rendered with error messages
     else:
-        form = CustomerForm(instance=customer)
+        form = CustomerEditForm(customer)
 
     context = {
         "form": form,
         "customer": customer,
-        "action": _("Edit"),
+        "title": _("Edit Customer"),
+        "submit_text": _("Update Customer"),
     }
 
-    return render(request, "customers/form.html", context)
+    return render(request, "customers/edit.html", context)
 
 
 @staff_required

@@ -68,7 +68,7 @@ class SimpleAccessControlTestCase(TestCase):
         
         response = test_view(request)
         self.assertEqual(response.status_code, 302)  # Redirect
-        self.assertIn('/app/', response.url)
+        self.assertIn('/dashboard/', response.url)
 
     def test_staff_required_decorator_blocks_customers(self):
         """Test that staff_required decorator blocks customer users"""

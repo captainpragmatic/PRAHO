@@ -53,12 +53,25 @@ env/
 ehthumbs.db
 Thumbs.db
 
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
 # Development
 .coverage
+.coverage.*
 htmlcov/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# Node.js
+node_modules/
 
 # Production
 *.env
@@ -119,3 +132,11 @@ services/portal/static/dist/
 
 # Django Q logs
 django_q.log
+
+# Logs directory - ignore all contents but keep the directory structure
+logs/*
+!logs/.gitkeep
+services/platform/logs/*
+!services/platform/logs/.gitkeep
+services/portal/logs/*
+!services/portal/logs/.gitkeep

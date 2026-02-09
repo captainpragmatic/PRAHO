@@ -1,0 +1,421 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Service Action Request" %} - {{ service.service_name }}{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+  <!-- Back Navigation -->
+  <div class="mb-6">
+    <a href="{% url 'services:detail' service_id=service_id %}"
+       class="inline-flex items-center text-slate-400 hover:text-white transition-colors">
+      <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+      </svg>
+      {% trans "Back to Service Details" %}
+    </a>
+  </div>
+
+  <!-- Header -->
+  <div class="mb-8">
+    <div class="bg-gradient-to-r from-slate-800 to-slate-900 rounded-lg p-6 border border-slate-700">
+      <div class="flex items-center space-x-4">
+        <div class="w-12 h-12 bg-blue-600/20 rounded-lg flex items-center justify-center">
+          <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l4-4 4 4m0 6l-4 4-4-4"></path>
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-2xl font-bold text-white">{% trans "Request Service Action" %}</h1>
+          <p class="text-slate-400 mt-1">{{ service.service_name }}</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+    <!-- Main Form -->
+    <div class="lg:col-span-2">
+      <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+        <h2 class="text-xl font-semibold text-white mb-6">{% trans "Select Action Type" %}</h2>
+
+        <form method="post" action="{% url 'services:request_action' service_id=service_id %}">
+          {% csrf_token %}
+
+          <!-- Action Type Selection -->
+          <div class="space-y-4 mb-8">
+            {% for action_value, action_label in action_types %}
+            <div class="relative">
+              <input type="radio"
+                     id="action_{{ action_value }}"
+                     name="action"
+                     value="{{ action_value }}"
+                     class="sr-only peer"
+                     {% if forloop.first %}checked{% endif %}>
+
+              <label for="action_{{ action_value }}"
+                     class="flex items-center p-4 border-2 border-slate-700 rounded-lg cursor-pointer
+                            peer-checked:border-blue-500 peer-checked:bg-blue-500/10
+                            hover:border-slate-600 transition-all">
+                <div class="flex-1">
+                  <div class="flex items-center space-x-3">
+                    <!-- Action Icon -->
+                    <div class="action-icon w-8 h-8 rounded-full bg-slate-600 flex items-center justify-center transition-all">
+                      {% if action_value == 'upgrade_request' %}
+                        <svg class="w-4 h-4 text-slate-300 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 11l5-5m0 0l5 5m-5-5v12"></path>
+                        </svg>
+                      {% elif action_value == 'downgrade_request' %}
+                        <svg class="w-4 h-4 text-slate-300 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 13l-5 5m0 0l-5-5m5 5V6"></path>
+                        </svg>
+                      {% elif action_value == 'suspend_request' %}
+                        <svg class="w-4 h-4 text-slate-300 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                      {% elif action_value == 'cancel_request' %}
+                        <svg class="w-4 h-4 text-slate-300 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                      {% else %}
+                        <svg class="w-4 h-4 text-slate-300 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l4-4 4 4m0 6l-4 4-4-4"></path>
+                        </svg>
+                      {% endif %}
+                    </div>
+
+                    <!-- Action Details -->
+                    <div class="flex-1">
+                      <h3 class="text-white font-medium">{{ action_label }}</h3>
+                      <p class="text-sm text-slate-400 mt-1">
+                        {% if action_value == 'upgrade_request' %}
+                          {% trans "Request to upgrade your service to a higher plan with more resources" %}
+                        {% elif action_value == 'downgrade_request' %}
+                          {% trans "Request to downgrade your service to a lower plan to reduce costs" %}
+                        {% elif action_value == 'suspend_request' %}
+                          {% trans "Request to temporarily suspend your service (can be reactivated later)" %}
+                        {% elif action_value == 'cancel_request' %}
+                          {% trans "Request to permanently cancel your service and terminate the contract" %}
+                        {% else %}
+                          {% trans "Submit a custom service action request" %}
+                        {% endif %}
+                      </p>
+                    </div>
+                  </div>
+
+                  <!-- Action Requirements -->
+                  {% if action_value == 'upgrade_request' %}
+                  <div class="mt-3 pl-11">
+                    <div class="text-xs text-green-400 bg-green-400/10 px-2 py-1 rounded-full inline-block">
+                      {% trans "May incur additional charges" %}
+                    </div>
+                  </div>
+                  {% elif action_value == 'suspend_request' or action_value == 'cancel_request' %}
+                  <div class="mt-3 pl-11">
+                    <div class="text-xs text-yellow-400 bg-yellow-400/10 px-2 py-1 rounded-full inline-block">
+                      {% trans "Reason required" %}
+                    </div>
+                  </div>
+                  {% endif %}
+                </div>
+
+                <!-- Selection Indicator -->
+                <div class="selection-indicator w-5 h-5 border-2 border-slate-600 rounded-full flex items-center justify-center bg-transparent transition-all">
+                  <div class="w-2 h-2 bg-transparent rounded-full transition-all"></div>
+                </div>
+              </label>
+            </div>
+            {% endfor %}
+          </div>
+
+          <!-- Upgrade Plans (shown only for upgrade requests) -->
+          <div id="upgrade-plans" class="mb-8 hidden">
+            <h3 class="text-lg font-semibold text-white mb-4">{% trans "Available Plans" %}</h3>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {% for plan in available_plans %}
+              <div class="border border-slate-700 rounded-lg p-4 hover:border-blue-500 transition-colors cursor-pointer">
+                <div class="flex items-center justify-between mb-2">
+                  <h4 class="font-medium text-white">{{ plan.name }}</h4>
+                  <div class="text-sm text-green-400 font-mono">{{ plan.price_monthly }} RON/mo</div>
+                </div>
+                <p class="text-xs text-slate-400 mb-3">{{ plan.description|truncatewords:15 }}</p>
+
+                <div class="grid grid-cols-2 gap-2 text-xs">
+                  {% if plan.disk_space_gb %}
+                  <div class="text-slate-400">
+                    <span class="text-blue-400">{{ plan.disk_space_gb }}GB</span> {% trans "Storage" %}
+                  </div>
+                  {% endif %}
+                  {% if plan.bandwidth_gb %}
+                  <div class="text-slate-400">
+                    <span class="text-green-400">{{ plan.bandwidth_gb }}GB</span> {% trans "Bandwidth" %}
+                  </div>
+                  {% endif %}
+                  {% if plan.email_accounts %}
+                  <div class="text-slate-400">
+                    <span class="text-purple-400">{{ plan.email_accounts }}</span> {% trans "Emails" %}
+                  </div>
+                  {% endif %}
+                  {% if plan.databases %}
+                  <div class="text-slate-400">
+                    <span class="text-yellow-400">{{ plan.databases }}</span> {% trans "DBs" %}
+                  </div>
+                  {% endif %}
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+
+          <!-- Reason Field -->
+          <div class="mb-8">
+            <label for="reason" class="block text-sm font-medium text-slate-300 mb-2">
+              {% trans "Reason" %}
+              <span id="reason-required" class="text-red-400 hidden">*</span>
+            </label>
+            <textarea
+              id="reason"
+              name="reason"
+              rows="4"
+              class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-4 py-2
+                     focus:ring-2 focus:ring-blue-500 focus:border-transparent
+                     placeholder-slate-400 resize-none"
+              placeholder="{% trans 'Please provide a detailed reason for this request...' %}"></textarea>
+            <div class="text-xs text-slate-400 mt-1">
+              {% trans "This information helps our team process your request faster" %}
+            </div>
+          </div>
+
+          <!-- Submit Buttons -->
+          <div class="flex flex-col sm:flex-row gap-3">
+            <button type="submit"
+                    class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-6 rounded-lg
+                           transition-colors flex items-center justify-center">
+              <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path>
+              </svg>
+              {% trans "Submit Request" %}
+            </button>
+
+            <a href="{% url 'services:detail' service_id=service_id %}"
+               class="flex-1 border border-slate-600 hover:border-slate-500 text-slate-300 hover:text-white
+                      font-medium py-3 px-6 rounded-lg transition-colors text-center">
+              {% trans "Cancel" %}
+            </a>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Sidebar -->
+    <div class="lg:col-span-1 space-y-6">
+      <!-- Current Service Info -->
+      <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+        <h3 class="text-lg font-semibold text-white mb-4">{% trans "Current Service" %}</h3>
+
+        <div class="space-y-3">
+          <div>
+            <dt class="text-sm font-medium text-slate-400">{% trans "Service Name" %}</dt>
+            <dd class="text-sm text-white">{{ service.service_name }}</dd>
+          </div>
+
+          <div>
+            <dt class="text-sm font-medium text-slate-400">{% trans "Current Plan" %}</dt>
+            <dd class="text-sm text-white">{{ service.service_plan.name }}</dd>
+          </div>
+
+          <div>
+            <dt class="text-sm font-medium text-slate-400">{% trans "Monthly Cost" %}</dt>
+            <dd class="text-sm text-white font-mono">{{ service.monthly_price|floatformat:2 }} RON</dd>
+          </div>
+
+          <div>
+            <dt class="text-sm font-medium text-slate-400">{% trans "Status" %}</dt>
+            <dd class="text-sm">
+              {% if service.status == 'active' %}
+                <span class="text-green-400">✅ {% trans "Active" %}</span>
+              {% elif service.status == 'suspended' %}
+                <span class="text-red-400">⏸️ {% trans "Suspended" %}</span>
+              {% elif service.status == 'pending' %}
+                <span class="text-yellow-400">⏳ {% trans "Pending" %}</span>
+              {% else %}
+                <span class="text-slate-400">{{ service.status_display }}</span>
+              {% endif %}
+            </dd>
+          </div>
+        </div>
+      </div>
+
+      <!-- Request Process -->
+      <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+        <h3 class="text-lg font-semibold text-white mb-4">{% trans "Request Process" %}</h3>
+
+        <div class="space-y-4">
+          <div class="flex items-center space-x-3">
+            <div class="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center">
+              <span class="text-white text-sm font-bold">1</span>
+            </div>
+            <div>
+              <div class="text-sm font-medium text-white">{% trans "Submit Request" %}</div>
+              <div class="text-xs text-slate-400">{% trans "Fill out the form and submit" %}</div>
+            </div>
+          </div>
+
+          <div class="flex items-center space-x-3">
+            <div class="w-8 h-8 bg-slate-600 rounded-full flex items-center justify-center">
+              <span class="text-slate-300 text-sm font-bold">2</span>
+            </div>
+            <div>
+              <div class="text-sm font-medium text-slate-300">{% trans "Review" %}</div>
+              <div class="text-xs text-slate-400">{% trans "Our team reviews your request" %}</div>
+            </div>
+          </div>
+
+          <div class="flex items-center space-x-3">
+            <div class="w-8 h-8 bg-slate-600 rounded-full flex items-center justify-center">
+              <span class="text-slate-300 text-sm font-bold">3</span>
+            </div>
+            <div>
+              <div class="text-sm font-medium text-slate-300">{% trans "Processing" %}</div>
+              <div class="text-xs text-slate-400">{% trans "Changes are applied to your service" %}</div>
+            </div>
+          </div>
+
+          <div class="flex items-center space-x-3">
+            <div class="w-8 h-8 bg-slate-600 rounded-full flex items-center justify-center">
+              <span class="text-slate-300 text-sm font-bold">4</span>
+            </div>
+            <div>
+              <div class="text-sm font-medium text-slate-300">{% trans "Confirmation" %}</div>
+              <div class="text-xs text-slate-400">{% trans "You receive confirmation email" %}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Contact Support -->
+      <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+        <h3 class="text-lg font-semibold text-white mb-4">{% trans "Need Help?" %}</h3>
+
+        <div class="space-y-3">
+          <a href="#" class="flex items-center space-x-3 text-slate-300 hover:text-white transition-colors">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+            </svg>
+            <span>{% trans "Chat with Support" %}</span>
+          </a>
+
+          <a href="mailto:support@pragmatichost.com" class="flex items-center space-x-3 text-slate-300 hover:text-white transition-colors">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+            </svg>
+            <span>{% trans "Email Support" %}</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- JavaScript for dynamic form behavior -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const actionRadios = document.querySelectorAll('input[name="action"]');
+  const reasonField = document.getElementById('reason');
+  const reasonRequired = document.getElementById('reason-required');
+  const upgradeSection = document.getElementById('upgrade-plans');
+
+  function updateForm() {
+    const selectedAction = document.querySelector('input[name="action"]:checked');
+    if (!selectedAction) return;
+
+    const actionValue = selectedAction.value;
+
+    // Update all radio button visual states
+    actionRadios.forEach(radio => {
+      const label = document.querySelector(`label[for="${radio.id}"]`);
+      const icon = label.querySelector('.action-icon');
+      const iconSvg = icon.querySelector('svg');
+      const selectionIndicator = label.querySelector('.selection-indicator');
+
+      if (radio.checked) {
+        // Selected state
+        label.classList.remove('border-slate-700');
+        label.classList.add('border-blue-500', 'bg-blue-500/10');
+        icon.classList.remove('bg-slate-600');
+        icon.classList.add('bg-blue-600');
+        iconSvg.classList.remove('text-slate-300');
+        iconSvg.classList.add('text-white');
+        selectionIndicator.classList.remove('border-slate-600', 'bg-transparent');
+        selectionIndicator.classList.add('border-blue-500', 'bg-blue-500');
+        selectionIndicator.querySelector('div').classList.add('bg-white');
+      } else {
+        // Unselected state
+        label.classList.remove('border-blue-500', 'bg-blue-500/10');
+        label.classList.add('border-slate-700');
+        icon.classList.remove('bg-blue-600');
+        icon.classList.add('bg-slate-600');
+        iconSvg.classList.remove('text-white');
+        iconSvg.classList.add('text-slate-300');
+        selectionIndicator.classList.remove('border-blue-500', 'bg-blue-500');
+        selectionIndicator.classList.add('border-slate-600', 'bg-transparent');
+        selectionIndicator.querySelector('div').classList.remove('bg-white');
+      }
+    });
+
+    // Show/hide upgrade plans
+    if (actionValue === 'upgrade_request') {
+      upgradeSection.classList.remove('hidden');
+    } else {
+      upgradeSection.classList.add('hidden');
+    }
+
+    // Update reason field requirement
+    if (actionValue === 'suspend_request' || actionValue === 'cancel_request') {
+      reasonRequired.classList.remove('hidden');
+      reasonField.required = true;
+      reasonField.placeholder = '{% trans "Please provide a detailed reason for this request (required)..." %}';
+    } else {
+      reasonRequired.classList.add('hidden');
+      reasonField.required = false;
+      reasonField.placeholder = '{% trans "Please provide a detailed reason for this request..." %}';
+    }
+  }
+
+  // Update form when action changes
+  actionRadios.forEach(radio => {
+    radio.addEventListener('change', updateForm);
+    radio.addEventListener('click', updateForm);
+  });
+
+  // Initial form update
+  updateForm();
+
+  // Form validation
+  document.querySelector('form').addEventListener('submit', function(e) {
+    const selectedAction = document.querySelector('input[name="action"]:checked');
+    if (!selectedAction) {
+      e.preventDefault();
+      alert('{% trans "Please select an action type." %}');
+      return;
+    }
+
+    const actionValue = selectedAction.value;
+    const reason = reasonField.value.trim();
+
+    if ((actionValue === 'suspend_request' || actionValue === 'cancel_request') && !reason) {
+      e.preventDefault();
+      reasonField.focus();
+      reasonField.classList.add('border-red-500');
+
+      setTimeout(() => {
+        reasonField.classList.remove('border-red-500');
+      }, 3000);
+
+      alert('{% trans "Please provide a reason for this request." %}');
+    }
+  });
+});
+</script>
+
+{% endblock %}

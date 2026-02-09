@@ -212,8 +212,8 @@ CacheTTL = int  # Time to live in seconds
 # ROMANIAN BUSINESS CONSTANTS
 # ===============================================================================
 
-ROMANIAN_VAT_RATE = 0.19  # 19% standard VAT rate
-ROMANIAN_VAT_RATE_PERCENT = 19  # For display purposes
+ROMANIAN_VAT_RATE = 0.21  # 21% standard VAT rate
+ROMANIAN_VAT_RATE_PERCENT = 21  # For display purposes
 
 # ===============================================================================
 # ROMANIAN BUSINESS SPECIFIC TYPES
@@ -337,7 +337,7 @@ def validate_email(email: str) -> Result[EmailAddress, str]:
 
 
 def calculate_romanian_vat(amount_cents: int, include_vat: bool = True) -> dict[str, float]:
-    """Calculate Romanian VAT (19%) for the given amount"""
+    """Calculate Romanian VAT (21%) for the given amount"""
 
     if include_vat:
         # Amount includes VAT, extract base amount

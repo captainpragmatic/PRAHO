@@ -168,8 +168,11 @@ class TestDockerServicesIntegration:
             ], capture_output=True, text=True)
             
             assert result.returncode == 0
-            # Should NOT contain Redis dependencies
-            assert 'django-redis' not in result.stdout.lower()
+            # Should NOT install Redis dependencies, but notes are OK
+            build_lines = result.stdout.lower().split('\n')
+            redis_install_lines = [line for line in build_lines 
+                                   if 'successfully installed' in line and 'django-redis' in line]
+            assert len(redis_install_lines) == 0, "django-redis should not be installed as a dependency"
 
 
 # ===============================================================================

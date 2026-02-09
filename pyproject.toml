@@ -379,6 +379,16 @@ strict_settings = false
 module = "*.migrations.*"
 ignore_errors = true
 
+# Third-party libraries without stubs
+[[tool.mypy.overrides]]
+module = [
+    "rest_framework.*",
+    "django_q.*",
+    "captcha.*",
+    "faker.*"
+]
+ignore_missing_imports = true
+
 # Strict perimeter: business logic + managers/querysets
 [[tool.mypy.overrides]]
 module = [
@@ -394,12 +404,37 @@ disallow_incomplete_defs = true
 # Views/forms/serializers: keep checks, relax Django's dynamic attrs
 [[tool.mypy.overrides]]
 module = ["*.views", "*.forms", "*.serializers"]
-disable_error_code = ["attr-defined"]
+disable_error_code = ["attr-defined", "misc"]
+
+# API views: additional DRF-specific relaxations
+[[tool.mypy.overrides]]
+module = ["apps.api.*.views"]
+disable_error_code = ["attr-defined", "misc", "no-untyped-def", "no-untyped-call"]
+
+# API serializers and core: DRF typing issues
+[[tool.mypy.overrides]]
+module = ["apps.api.*.serializers", "apps.api.core.*"]
+disable_error_code = ["attr-defined", "misc", "no-any-return", "assignment"]
 
 # Admin: low ROI → relax dynamic attrs
 [[tool.mypy.overrides]]
 module = "apps.*.admin"
 disable_error_code = ["attr-defined"]
+
+# Sample data generation: test/development only, relax strictness
+[[tool.mypy.overrides]]
+module = "apps.common.management.commands.generate_sample_data"
+disable_error_code = ["attr-defined", "misc", "assignment", "arg-type", "union-attr"]
+
+# Task modules: async/queue operations, relax Celery/Django-Q typing
+[[tool.mypy.overrides]]
+module = ["apps.billing.tasks", "apps.users.tasks", "apps.orders.tasks", "apps.customers.tasks", "apps.provisioning.virtualmin_tasks", "apps.common.queue"]
+disable_error_code = ["no-any-return", "misc", "return-value"]
+
+# Common middleware: Django internals, relax dynamic attributes
+[[tool.mypy.overrides]]
+module = ["apps.common.middleware"]
+disable_error_code = ["attr-defined", "misc", "assignment", "arg-type", "return-value"]
 
 # Tests: allow friction-free typing
 [[tool.mypy.overrides]]

@@ -1,0 +1,28 @@
+{% comment %}
+Breadcrumb Navigation Component for Romanian Business UI
+Provides hierarchical navigation with proper accessibility.
+{% endcomment %}
+
+{% load i18n %}
+
+<nav aria-label="{% trans 'Breadcrumb' %}" class="{% if css_class %}{{ css_class }}{% endif %}">
+  <ol class="flex items-center space-x-2 text-sm">
+    {% for item in items %}
+    <li class="flex items-center">
+      {% if not forloop.first %}
+        <span class="text-slate-400 mx-2">{{ separator }}</span>
+      {% endif %}
+      
+      {% if item.url and not forloop.last %}
+        <a href="{{ item.url }}" class="text-blue-600 hover:text-blue-800 font-medium transition-colors">
+          {{ item.text }}
+        </a>
+      {% else %}
+        <span class="{% if forloop.last %}text-slate-900 font-semibold{% else %}text-slate-600{% endif %}">
+          {{ item.text }}
+        </span>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+</nav>

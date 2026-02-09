@@ -6,298 +6,490 @@
 {% block title %}{% trans "System Settings" %} - PRAHO Platform{% endblock %}
 
 {% block content %}
-<div class="px-4 py-6">
-    <!-- Header -->
-    <div class="mb-8">
-        <h1 class="text-3xl font-bold text-white">⚙️ {% trans "System Settings" %}</h1>
-        <p class="mt-2 text-slate-400">
-            {% trans "Configure platform-wide settings for billing, users, domains, and more" %}
-        </p>
-    </div>
-
-    <!-- Statistics Cards -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <!-- Total Settings -->
-        <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
-            <div class="flex items-center">
-                <div class="flex-shrink-0">
-                    <div class="w-8 h-8 text-2xl">⚙️</div>
+<div class="min-h-screen bg-slate-900">
+    <div class="px-4 sm:px-6 lg:px-8 py-6">
+        <!-- Header -->
+        <div class="mb-8">
+            <div class="sm:flex sm:items-center sm:justify-between">
+                <div class="min-w-0 flex-1">
+                    <h1 class="text-2xl sm:text-3xl font-bold text-white flex items-center">
+                        <span class="text-3xl sm:text-4xl mr-3">⚙️</span>
+                        {% trans "System Settings" %}
+                    </h1>
+                    <p class="mt-2 text-sm sm:text-base text-slate-400">
+                        {% trans "Configure platform-wide settings for billing, users, domains, and more" %}
+                    </p>
                 </div>
-                <div class="ml-4">
-                    <p class="text-sm font-medium text-slate-400">{% trans "Total Settings" %}</p>
-                    <p class="text-2xl font-semibold text-white">{{ total_settings|default:0 }}</p>
-                </div>
-            </div>
-        </div>
-
-        <!-- Public Settings -->
-        <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
-            <div class="flex items-center">
-                <div class="flex-shrink-0">
-                    <div class="w-8 h-8 text-2xl">🔓</div>
-                </div>
-                <div class="ml-4">
-                    <p class="text-sm font-medium text-slate-400">{% trans "Public Settings" %}</p>
-                    <p class="text-2xl font-semibold text-white">{{ public_settings_count|default:0 }}</p>
+                <div class="mt-4 sm:mt-0 sm:ml-4 flex space-x-3">
+                    <button
+                        onclick="refreshCache(event)"
+                        class="inline-flex items-center px-3 py-2 text-sm font-medium text-white bg-blue-600 border border-blue-600 rounded-lg hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 transition-all duration-200 shadow-lg"
+                        title="{% trans 'Clear Redis cache for all settings' %}"
+                    >
+                        <span class="mr-2">🔄</span>
+                        <span class="hidden sm:inline">{% trans "Refresh Cache" %}</span>
+                        <span class="sm:hidden">{% trans "Refresh" %}</span>
+                    </button>
+                    <a
+                        href="{% url 'settings:export_settings' %}"
+                        class="inline-flex items-center px-3 py-2 text-sm font-medium text-white bg-slate-600 border border-slate-600 rounded-lg hover:bg-slate-700 focus:ring-4 focus:ring-slate-300 transition-all duration-200 shadow-lg"
+                    >
+                        <span class="mr-2">📥</span>
+                        <span class="hidden sm:inline">{% trans "Export" %}</span>
+                    </a>
                 </div>
             </div>
         </div>
 
-        <!-- Restart Required -->
-        <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
-            <div class="flex items-center">
-                <div class="flex-shrink-0">
-                    <div class="w-8 h-8 text-2xl">🔄</div>
-                </div>
-                <div class="ml-4">
-                    <p class="text-sm font-medium text-slate-400">{% trans "Restart Required" %}</p>
-                    <p class="text-2xl font-semibold text-white">{{ restart_required_count|default:0 }}</p>
-                </div>
-            </div>
-        </div>
-
-        <!-- Categories -->
-        <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
-            <div class="flex items-center">
-                <div class="flex-shrink-0">
-                    <div class="w-8 h-8 text-2xl">📊</div>
-                </div>
-                <div class="ml-4">
-                    <p class="text-sm font-medium text-slate-400">{% trans "Categories" %}</p>
-                    <p class="text-2xl font-semibold text-white">{{ categories.count }}</p>
+        <!-- Statistics Cards -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-8">
+            <!-- Total Settings -->
+            <div class="bg-slate-800 rounded-lg p-4 sm:p-6 border border-slate-700 hover:border-slate-600 transition-colors">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <div class="w-8 h-8 text-xl sm:text-2xl">⚙️</div>
+                    </div>
+                    <div class="ml-3 sm:ml-4">
+                        <p class="text-xs sm:text-sm font-medium text-slate-400">{% trans "Total Settings" %}</p>
+                        <p class="text-xl sm:text-2xl font-semibold text-white">{{ total_settings|default:0 }}</p>
+                    </div>
                 </div>
             </div>
-        </div>
-    </div>
 
-    <!-- Quick Actions -->
-    <div class="bg-slate-800 rounded-lg border border-slate-700 mb-8">
-        <div class="p-6">
-            <h3 class="text-lg font-medium text-white mb-4">⚡ {% trans "Quick Actions" %}</h3>
-            <div class="flex flex-wrap gap-3">
-                <button 
-                    onclick="refreshCache()" 
-                    class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-blue-600 rounded-lg hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 transition-all duration-200"
-                    title="{% trans 'Clear Redis cache for all settings (cached values reset to database)' %}"
-                >
-                    🔄 {% trans "Refresh Cache" %}
-                </button>
-                <a 
-                    href="{% url 'settings:export_settings' %}" 
-                    class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-slate-600 border border-slate-600 rounded-lg hover:bg-slate-700 focus:ring-4 focus:ring-slate-300 transition-all duration-200"
-                >
-                    📥 {% trans "Export Settings" %}
-                </a>
-                <a 
-                    href="{% url 'settings:health_check' %}" 
-                    target="_blank"
-                    class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-green-600 border border-green-600 rounded-lg hover:bg-green-700 focus:ring-4 focus:ring-green-300 transition-all duration-200"
-                >
-                    🏥 {% trans "Health Check" %}
-                </a>
-            </div>
-        </div>
-    </div>
-
-
-    <!-- Settings Management Interface -->
-    {% if categories %}
-    <div class="bg-slate-800 rounded-lg border border-slate-700">
-        <div class="border-b border-slate-700">
-            <h3 class="text-lg font-medium text-white p-6 pb-4">⚙️ {% trans "Settings Management" %}</h3>
-            
-            <!-- Tab Navigation -->
-            <nav class="flex space-x-8 px-6" aria-label="Tabs">
-                {% for category in categories %}
-                <button 
-                    class="tab-button py-4 px-1 border-b-2 font-medium text-sm transition-colors duration-200 {% if forloop.first %}border-blue-500 text-blue-400{% else %}border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-300{% endif %}"
-                    hx-get="{% url 'settings:category_management_partial' category.key %}"
-                    hx-target="#settings-content"
-                    hx-indicator="#settings-loading"
-                    onclick="setActiveTab(this)"
-                >
-                    <span class="text-lg mr-2">
-                        {% if category.key == 'billing' %}💰
-                        {% elif category.key == 'users' %}👥
-                        {% elif category.key == 'domains' %}🌐
-                        {% elif category.key == 'provisioning' %}🚀
-                        {% elif category.key == 'security' %}🔒
-                        {% elif category.key == 'notifications' %}📧
-                        {% elif category.key == 'integrations' %}🔗
-                        {% elif category.key == 'system' %}⚙️
-                        {% else %}📋{% endif %}
-                    </span>
-                    {{ category.name }}
-                </button>
-                {% endfor %}
-            </nav>
-        </div>
-        
-        <!-- Loading Indicator -->
-        <div id="settings-loading" class="htmx-indicator">
-            <div class="flex items-center justify-center py-8">
-                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-                <span class="ml-3 text-slate-400">{% trans "Loading settings..." %}</span>
-            </div>
-        </div>
-        
-        <!-- Settings Content Area -->
-        <div id="settings-content" class="p-8">
-            <!-- Initial content will be loaded via HTMX for first category -->
-            <div class="text-center py-12">
-                <div class="text-slate-400 text-4xl mb-4">⚙️</div>
-                <h3 class="text-lg font-medium text-white mb-2">{% trans "Select a Category" %}</h3>
-                <p class="text-slate-400">{% trans "Choose a settings category above to manage its configuration" %}</p>
-            </div>
-        </div>
-    </div>
-    
-    <script>
-    // Tab management
-    function setActiveTab(clickedTab) {
-        // Remove active state from all tabs
-        document.querySelectorAll('.tab-button').forEach(tab => {
-            tab.classList.remove('border-blue-500', 'text-blue-400');
-            tab.classList.add('border-transparent', 'text-slate-400');
-        });
-        
-        // Add active state to clicked tab
-        clickedTab.classList.remove('border-transparent', 'text-slate-400');
-        clickedTab.classList.add('border-blue-500', 'text-blue-400');
-    }
-    
-    // Auto-load first category on page load
-    document.addEventListener('DOMContentLoaded', function() {
-        const firstTab = document.querySelector('.tab-button');
-        if (firstTab) {
-            // Simulate click to load first category
-            setTimeout(() => {
-                firstTab.click();
-            }, 500);
-        }
-    });
-    
-    // Handle successful settings updates
-    document.addEventListener('htmx:afterRequest', function(event) {
-        if (event.detail.target.id === 'form-result' && event.detail.successful) {
-            try {
-                const response = JSON.parse(event.detail.xhr.responseText);
-                if (response.success) {
-                    // Show success notification at the top of the page
-                    const notification = document.createElement('div');
-                    notification.className = 'fixed top-4 right-4 bg-green-600 border border-green-500 rounded-lg p-4 text-white z-50 shadow-lg';
-                    notification.innerHTML = `
-                        <div class="flex items-center">
-                            <div class="text-xl mr-3">✅</div>
-                            <div>
-                                <strong>{% trans "Settings Updated!" %}</strong>
-                                <p class="text-green-100 text-sm">${response.updated} {% trans "settings were updated successfully" %}</p>
-                            </div>
-                        </div>
-                    `;
-                    
-                    document.body.appendChild(notification);
-                    
-                    // Auto-remove after 5 seconds
-                    setTimeout(() => {
-                        notification.style.transition = 'opacity 0.5s';
-                        notification.style.opacity = '0';
-                        setTimeout(() => notification.remove(), 500);
-                    }, 5000);
-                }
-            } catch (e) {
-                // Ignore JSON parse errors
-            }
-        }
-    });
-    </script>
-    {% else %}
-    <div class="bg-slate-800 rounded-lg border border-slate-700">
-        <div class="p-6">
-            <div class="text-center py-12">
-                <div class="text-slate-400 text-6xl mb-4">📋</div>
-                <h3 class="text-lg font-medium text-white mb-2">{% trans "No Settings Categories" %}</h3>
-                <p class="text-slate-400">{% trans "Settings categories will appear here once created." %}</p>
-            </div>
-        </div>
-    </div>
-    {% endif %}
-
-    <!-- Error Display -->
-    {% if error %}
-    <div class="bg-slate-800 rounded-lg border border-slate-700 mt-8">
-        <div class="p-6">
-            <div class="flex">
-                <div class="flex-shrink-0">
-                    <div class="text-xl">⚠️</div>
+            <!-- Public Settings -->
+            <div class="bg-slate-800 rounded-lg p-4 sm:p-6 border border-slate-700 hover:border-slate-600 transition-colors">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <div class="w-8 h-8 text-xl sm:text-2xl">🔓</div>
+                    </div>
+                    <div class="ml-3 sm:ml-4">
+                        <p class="text-xs sm:text-sm font-medium text-slate-400">{% trans "Public Settings" %}</p>
+                        <p class="text-xl sm:text-2xl font-semibold text-white">{{ public_settings_count|default:0 }}</p>
+                    </div>
                 </div>
-                <div class="ml-3">
-                    <h3 class="text-lg font-medium text-red-400">{% trans "Error Loading Settings" %}</h3>
-                    <div class="mt-2 text-sm text-slate-400">
-                        {% trans "Failed to load settings dashboard" %}
+            </div>
+
+            <!-- Restart Required -->
+            <div class="bg-slate-800 rounded-lg p-4 sm:p-6 border border-slate-700 hover:border-slate-600 transition-colors">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <div class="w-8 h-8 text-xl sm:text-2xl">🔄</div>
+                    </div>
+                    <div class="ml-3 sm:ml-4">
+                        <p class="text-xs sm:text-sm font-medium text-slate-400">{% trans "Restart Required" %}</p>
+                        <p class="text-xl sm:text-2xl font-semibold text-white">{{ restart_required_count|default:0 }}</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Categories -->
+            <div class="bg-slate-800 rounded-lg p-4 sm:p-6 border border-slate-700 hover:border-slate-600 transition-colors">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <div class="w-8 h-8 text-xl sm:text-2xl">📊</div>
+                    </div>
+                    <div class="ml-3 sm:ml-4">
+                        <p class="text-xs sm:text-sm font-medium text-slate-400">{% trans "Categories" %}</p>
+                        <p class="text-xl sm:text-2xl font-semibold text-white">{{ categories.count }}</p>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
-    {% endif %}
 
+        <!-- Category Grid Overview -->
+        {% if categories %}
+        <div class="mb-8">
+            <h2 class="text-lg sm:text-xl font-semibold text-white mb-4 flex items-center">
+                <span class="mr-2">📂</span>
+                {% trans "Settings Categories" %}
+            </h2>
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
+                {% for category in categories %}
+                <div class="bg-slate-800 rounded-lg border border-slate-700 hover:border-blue-500 transition-all duration-200 cursor-pointer group"
+                     onclick="loadCategorySettings('{{ category.key }}')">
+                    <div class="p-4 sm:p-6">
+                        <div class="flex items-center mb-3">
+                            <div class="flex-shrink-0">
+                                <div class="w-10 h-10 text-2xl sm:text-3xl">
+                                    {% if category.key == 'billing' %}💰
+                                    {% elif category.key == 'users' %}👥
+                                    {% elif category.key == 'domains' %}🌐
+                                    {% elif category.key == 'provisioning' %}🚀
+                                    {% elif category.key == 'virtualmin' %}🖥️
+                                    {% elif category.key == 'security' %}🔒
+                                    {% elif category.key == 'notifications' %}📧
+                                    {% elif category.key == 'integrations' %}🔗
+                                    {% elif category.key == 'system' %}⚙️
+                                    {% else %}📋{% endif %}
+                                </div>
+                            </div>
+                            <div class="ml-3 flex-1 min-w-0">
+                                <h3 class="text-sm sm:text-base font-semibold text-white group-hover:text-blue-400 transition-colors truncate">
+                                    {{ category.name }}
+                                </h3>
+                                <p class="text-xs sm:text-sm text-slate-400 mt-1 line-clamp-2">
+                                    {{ category.description|truncatechars:60 }}
+                                </p>
+                            </div>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs text-slate-500">
+                                {{ category.settings.count }} {% trans "settings" %}
+                            </span>
+                            <div class="text-slate-400 group-hover:text-blue-400 transition-colors">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                                </svg>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% else %}
+        <div class="bg-slate-800 rounded-lg border border-slate-700">
+            <div class="p-6">
+                <div class="text-center py-12">
+                    <div class="text-slate-400 text-4xl sm:text-6xl mb-4">📋</div>
+                    <h3 class="text-lg font-medium text-white mb-2">{% trans "No Settings Categories" %}</h3>
+                    <p class="text-slate-400">{% trans "Settings categories will appear here once created." %}</p>
+                    <div class="mt-6">
+                        <a href="{% url 'settings:health_check' %}" class="text-blue-400 hover:text-blue-300 transition-colors">
+                            🏥 {% trans "Check System Health" %}
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Settings Management Interface -->
+        <div id="settings-management" class="bg-gradient-to-br from-slate-800 via-slate-800 to-slate-900 rounded-xl shadow-2xl border border-slate-700/50 overflow-hidden" style="display: none;">
+            <!-- Enhanced Category Header with Gradient Background -->
+            <div class="relative bg-gradient-to-r from-slate-800 to-slate-700 px-6 py-8 sm:px-8 sm:py-10 border-b border-slate-600/50">
+                <!-- Background Pattern Overlay -->
+                <div class="absolute inset-0 opacity-5">
+                    <div class="absolute inset-0" style="background-image: url('data:image/svg+xml,%3Csvg width="60" height="60" viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg"%3E%3Cg fill="none" fill-rule="evenodd"%3E%3Cg fill="%23ffffff" fill-opacity="0.1"%3E%3Cpath d="M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z"/%3E%3C/g%3E%3C/g%3E%3C/svg%3E');"></div>
+                </div>
+
+                <!-- Header Content -->
+                <div class="relative">
+                    <div class="flex items-start justify-between">
+                        <div class="flex-1">
+                            <!-- Back Button and Breadcrumb -->
+                            <div class="flex items-center mb-4">
+                                <button onclick="closeCategorySettings()" class="mr-3 text-slate-400 hover:text-white transition-colors p-2 hover:bg-slate-700/50 rounded-lg">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+                                    </svg>
+                                </button>
+                                <div class="text-sm text-slate-400">
+                                    <span id="category-breadcrumb">{% trans "Settings" %} › {% trans "Category" %}</span>
+                                </div>
+                            </div>
+
+                            <!-- Category Title with Icon -->
+                            <div class="flex items-center space-x-4">
+                                <div id="category-icon-container" class="flex-shrink-0 w-14 h-14 sm:w-16 sm:h-16 bg-slate-900/50 rounded-xl flex items-center justify-center shadow-lg border border-slate-600/30">
+                                    <span id="category-icon" class="text-3xl sm:text-4xl">⚙️</span>
+                                </div>
+                                <div>
+                                    <h2 id="category-title" class="text-2xl sm:text-3xl font-bold text-white">
+                                        {% trans "Category Settings" %}
+                                    </h2>
+                                    <p id="category-description" class="text-slate-300/80 text-sm sm:text-base mt-1 leading-relaxed hidden">
+                                        <!-- Description loaded dynamically -->
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Settings Count Badge -->
+                        <div class="flex-shrink-0 ml-4">
+                            <div class="bg-blue-600/20 border border-blue-500/30 rounded-lg px-4 py-2 backdrop-blur-sm">
+                                <div class="text-center">
+                                    <div id="settings-count" class="text-2xl font-bold text-blue-400">0</div>
+                                    <div class="text-xs text-blue-300/80 uppercase tracking-wider">{% trans "Settings" %}</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Settings Content Area -->
+            <div id="settings-content" class="p-4 sm:p-6 lg:p-8">
+                <!-- Content loaded dynamically -->
+            </div>
+        </div>
+    
+    </div>
 </div>
 
 <script>
-async function refreshCache() {
-  try {
-    // Show loading state
-    const button = event.target;
-    const originalText = button.innerHTML;
-    button.innerHTML = '⏳ {% trans "Refreshing..." %}';
-    button.disabled = true;
-    
-    const response = await fetch('/app/settings/api/cache/refresh/', {
-      method: 'POST',
-      headers: {
-        'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]')?.value || '',
-        'Content-Type': 'application/json'
-      }
+// Category management functions
+function loadCategorySettings(categoryKey, tabElement) {
+    // Show the management interface
+    const managementDiv = document.getElementById('settings-management');
+    managementDiv.style.display = 'block';
+    managementDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    // Update the title and breadcrumb
+    updateCategoryTitle(categoryKey);
+
+    // Load content via HTMX
+    htmx.ajax('GET', `/settings/manage/category/${categoryKey}/`, {
+        target: '#settings-content'
+    }).then(() => {
+        // Update settings count after content is loaded
+        setTimeout(() => {
+            const settingsRows = document.querySelectorAll('#settings-content .bg-slate-800, #settings-content tbody tr, #settings-content .setting-item');
+            const countElement = document.getElementById('settings-count');
+            if (countElement && settingsRows.length > 0) {
+                // Filter out non-setting elements (headers, buttons, etc.)
+                const actualSettings = Array.from(settingsRows).filter(row =>
+                    !row.querySelector('button') || row.querySelector('input[name]')
+                );
+                countElement.textContent = actualSettings.length;
+            }
+        }, 100);
     });
-    
-    const data = await response.json();
-    
-    if (data.success) {
-      // Show success notification
-      const notification = document.createElement('div');
-      notification.className = 'fixed top-4 right-4 bg-green-600 border border-green-500 rounded-lg p-4 text-white z-50 shadow-lg';
-      notification.innerHTML = `
-        <div class="flex items-center">
-          <div class="text-xl mr-3">✅</div>
-          <div>
-            <strong>{% trans "Cache Refreshed!" %}</strong>
-            <p class="text-green-100 text-sm">{% trans "All settings cache cleared successfully" %}</p>
-          </div>
-        </div>
-      `;
-      
-      document.body.appendChild(notification);
-      
-      // Auto-remove notification
-      setTimeout(() => {
-        notification.style.transition = 'opacity 0.5s';
-        notification.style.opacity = '0';
-        setTimeout(() => notification.remove(), 500);
-      }, 3000);
-      
-    } else {
-      alert('❌ Error refreshing cache: ' + data.error);
+}
+
+function updateCategoryTitle(categoryKey) {
+    const categoryIcons = {
+        'billing': '💰',
+        'users': '👥',
+        'domains': '🌐',
+        'provisioning': '🚀',
+        'virtualmin': '🖥️',
+        'security': '🔒',
+        'notifications': '📧',
+        'integrations': '🔗',
+        'system': '⚙️'
+    };
+
+    const categoryNames = {
+        'billing': 'Billing & Invoicing',
+        'users': 'Users & Authentication',
+        'domains': 'Domain Management',
+        'provisioning': 'Service Provisioning',
+        'virtualmin': 'Virtualmin Integration',
+        'security': 'Security & Access',
+        'notifications': 'Notifications',
+        'integrations': 'External Integrations',
+        'system': 'System Configuration'
+    };
+
+    const categoryDescriptions = {
+        'billing': 'Invoice settings, VAT rates, payment terms, and billing automation',
+        'users': 'User management, 2FA settings, session timeouts, and access control',
+        'domains': 'Domain registration, renewal settings, and registrar configurations',
+        'provisioning': 'Hosting services automation, server management, and resource allocation',
+        'virtualmin': 'Virtualmin server configuration, API settings, and hosting account management',
+        'security': 'Security policies, rate limiting, audit settings, and access controls',
+        'notifications': 'Email templates, SMS settings, notification delivery, and alert configurations',
+        'integrations': 'Payment gateways, webhooks, API keys, and third-party service configurations',
+        'system': 'Platform-wide settings, maintenance mode, backup settings, and system preferences'
+    };
+
+    const icon = categoryIcons[categoryKey] || '⚙️';
+    const name = categoryNames[categoryKey] || 'Settings';
+    const description = categoryDescriptions[categoryKey] || '';
+
+    // Update icon
+    const iconElement = document.getElementById('category-icon');
+    if (iconElement) {
+        iconElement.textContent = icon;
     }
-  } catch (error) {
-    alert('❌ Network error: ' + error.message);
-  } finally {
-    // Restore button
-    button.innerHTML = originalText;
-    button.disabled = false;
-  }
+
+    // Update title
+    const titleElement = document.getElementById('category-title');
+    if (titleElement) {
+        titleElement.textContent = name;
+    }
+
+    // Update breadcrumb
+    const breadcrumbElement = document.getElementById('category-breadcrumb');
+    if (breadcrumbElement) {
+        breadcrumbElement.innerHTML = `Settings › ${name}`;
+    }
+
+    // Update description
+    const descriptionElement = document.getElementById('category-description');
+    if (descriptionElement && description) {
+        descriptionElement.textContent = description;
+        descriptionElement.classList.remove('hidden');
+    }
+
+    // Update settings count (will be updated when settings are loaded)
+    fetch(`/settings/api/category/${categoryKey}/`)
+        .then(response => response.json())
+        .then(data => {
+            const countElement = document.getElementById('settings-count');
+            if (countElement) {
+                const settingsCount = Array.isArray(data.settings) ? data.settings.length : (data.count || 0);
+                countElement.textContent = settingsCount;
+            }
+        })
+        .catch(() => {
+            // Fallback - try to count from the DOM after content loads
+            setTimeout(() => {
+                const countElement = document.getElementById('settings-count');
+                const settingsRows = document.querySelectorAll('#settings-content .setting-row, #settings-content tr[data-setting], #settings-content .bg-slate-800');
+                if (countElement && settingsRows.length > 0) {
+                    countElement.textContent = settingsRows.length;
+                } else {
+                    countElement.textContent = '0';
+                }
+            }, 500);
+        });
+}
+
+function closeCategorySettings() {
+    const managementDiv = document.getElementById('settings-management');
+    managementDiv.style.display = 'none';
+
+    // Scroll back to categories
+    const categoriesSection = document.querySelector('.grid.grid-cols-1.sm\\:grid-cols-2');
+    if (categoriesSection) {
+        categoriesSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+}
+
+// Handle successful settings updates and content loading
+document.addEventListener('htmx:afterRequest', function(event) {
+    if (event.detail.target.id === 'form-result' && event.detail.successful) {
+        try {
+            const response = JSON.parse(event.detail.xhr.responseText);
+            if (response.success) {
+                showNotification('✅', '{% trans "Settings Updated!" %}', `${response.updated} {% trans "settings were updated successfully" %}`, 'success');
+            }
+        } catch (e) {
+            // Ignore JSON parse errors
+        }
+    }
+
+    // Update settings count when content is loaded
+    if (event.detail.target.id === 'settings-content' && event.detail.successful) {
+        setTimeout(() => {
+            const settingsRows = document.querySelectorAll('#settings-content .bg-slate-800, #settings-content tbody tr, #settings-content .setting-item');
+            const countElement = document.getElementById('settings-count');
+            if (countElement && settingsRows.length > 0) {
+                // Filter out non-setting elements (headers, buttons, etc.)
+                const actualSettings = Array.from(settingsRows).filter(row =>
+                    !row.querySelector('button') || row.querySelector('input[name]')
+                );
+                countElement.textContent = actualSettings.length;
+            } else if (countElement) {
+                countElement.textContent = '0';
+            }
+        }, 100);
+    }
+});
+
+// Utility function for notifications
+function showNotification(icon, title, message, type = 'info') {
+    const colors = {
+        success: 'bg-green-600 border-green-500',
+        error: 'bg-red-600 border-red-500',
+        warning: 'bg-yellow-600 border-yellow-500',
+        info: 'bg-blue-600 border-blue-500'
+    };
+
+    const notification = document.createElement('div');
+    notification.className = `fixed top-4 right-4 ${colors[type]} rounded-lg p-4 text-white z-50 shadow-lg max-w-sm`;
+    notification.innerHTML = `
+        <div class="flex items-start">
+            <div class="text-xl mr-3 flex-shrink-0">${icon}</div>
+            <div class="flex-1 min-w-0">
+                <strong class="block">${title}</strong>
+                <p class="text-sm mt-1 opacity-90">${message}</p>
+            </div>
+            <button onclick="this.parentElement.parentElement.remove()" class="ml-2 text-white/70 hover:text-white">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+            </button>
+        </div>
+    `;
+
+    document.body.appendChild(notification);
+
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+        if (notification.parentElement) {
+            notification.style.transition = 'opacity 0.5s';
+            notification.style.opacity = '0';
+            setTimeout(() => notification.remove(), 500);
+        }
+    }, 5000);
+}
+
+// Cache refresh function
+async function refreshCache(event) {
+    try {
+        // Show loading state
+        const button = event.target;
+        const originalText = button.innerHTML;
+        const icon = button.querySelector('span:first-child');
+        if (icon) {
+            icon.textContent = '⏳';
+        }
+        button.disabled = true;
+        button.classList.add('opacity-75', 'cursor-not-allowed');
+
+        const response = await fetch('{% url "settings:refresh_cache" %}', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]')?.value || '',
+                'Content-Type': 'application/json'
+            }
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            showNotification('✅', '{% trans "Cache Refreshed!" %}', '{% trans "All settings cache cleared successfully" %}', 'success');
+
+            // Refresh the page stats
+            setTimeout(() => {
+                location.reload();
+            }, 1000);
+        } else {
+            showNotification('❌', '{% trans "Error" %}', '{% trans "Error refreshing cache" %}: ' + data.error, 'error');
+        }
+    } catch (error) {
+        showNotification('❌', '{% trans "Network Error" %}', error.message, 'error');
+    } finally {
+        // Restore button
+        button.innerHTML = originalText;
+        button.disabled = false;
+        button.classList.remove('opacity-75', 'cursor-not-allowed');
+    }
 }
 </script>
+
+        <!-- Error Display -->
+        {% if error %}
+        <div class="bg-slate-800 rounded-lg border border-red-700 mt-8">
+            <div class="p-6">
+                <div class="flex">
+                    <div class="flex-shrink-0">
+                        <div class="text-xl">⚠️</div>
+                    </div>
+                    <div class="ml-3">
+                        <h3 class="text-lg font-medium text-red-400">{% trans "Error Loading Settings" %}</h3>
+                        <div class="mt-2 text-sm text-slate-400">
+                            {% trans "Failed to load settings dashboard" %}: {{ error }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
 
 {% csrf_token %}
 {% endblock %}

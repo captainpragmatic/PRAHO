@@ -91,9 +91,18 @@
               </label>
               <select name="language" id="language"
                       class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
-                <option value="ro">🇷🇴 Română</option>
-                <option value="en">🇬🇧 English</option>
+                {% get_current_language as LANGUAGE_CODE %}
+                {% get_available_languages as LANGUAGES %}
+                {% get_language_info_list for LANGUAGES as languages %}
+                {% for language in languages %}
+                <option value="{{ language.code }}" {% if language.code == LANGUAGE_CODE %}selected{% endif %}>
+                  {% if language.code == 'en' %}🇬🇧 {{ language.name_local }}{% elif language.code == 'ro' %}🇷🇴 {{ language.name_local }}{% else %}{{ language.name_local }}{% endif %}
+                </option>
+                {% endfor %}
               </select>
+              <p class="mt-1 text-xs text-slate-400">
+                {% trans 'Interface language changes when you save' %} (Current: {{ LANGUAGE_CODE }})
+              </p>
             </div>
 
             <div>
@@ -177,20 +186,20 @@
           <div>
             <dt class="text-sm font-medium text-slate-400">{% trans 'Two-Factor Authentication' %}</dt>
             <dd class="mt-1 text-sm">
-              {% if user.two_factor_enabled %}
+              {% if user.mfa_enabled %}
                 <span class="text-green-400">🔒 {% trans 'Enabled' %}</span>
                 <div class="mt-2 space-x-4">
-                  <a href="{% url 'users:two_factor_regenerate_backup_codes' %}" class="text-blue-400 hover:text-blue-300 text-xs">
+                  <a href="{% url 'users:mfa_regenerate_backup_codes' %}" class="text-blue-400 hover:text-blue-300 text-xs">
                     {% trans 'Regenerate Backup Codes' %}
                   </a>
-                  <a href="{% url 'users:two_factor_disable' %}" class="text-red-400 hover:text-red-300 text-xs">
-                    {% trans 'Disable 2FA' %}
+                  <a href="{% url 'users:mfa_disable' %}" class="text-red-400 hover:text-red-300 text-xs">
+                    {% trans 'Disable MFA' %}
                   </a>
                 </div>
               {% else %}
                 {% badge "Disabled" variant="warning" icon="⚠️" %}
-                <a href="{% url 'users:two_factor_setup' %}" class="ml-2 text-blue-400 hover:text-blue-300 text-xs">
-                  {% trans 'Enable 2FA' %}
+                <a href="{% url 'users:mfa_setup' %}" class="ml-2 text-blue-400 hover:text-blue-300 text-xs">
+                  {% trans 'Enable MFA' %}
                 </a>
               {% endif %}
             </dd>
@@ -348,5 +357,6 @@
     </div>
   </div>
   {% endif %}
+
 </div>
 {% endblock %}

@@ -98,17 +98,17 @@ def romanian_currency(value: TemplateNumeric, currency: str = "RON") -> str:
 
 
 @register.filter
-def romanian_vat(value: TemplateNumeric, vat_rate: float = 0.19) -> str:
+def romanian_vat(value: TemplateNumeric, vat_rate: float = 0.21) -> str:
     """
     Calculate and format VAT amount in Romanian style
 
     Usage:
-        {{ subtotal|romanian_vat }}        -> "95,22 RON TVA"
+        {{ subtotal|romanian_vat }}        -> "105,00 RON TVA"
         {{ amount|romanian_vat:0.05 }}     -> "25,00 RON TVA"
 
     Args:
         value: Base amount for VAT calculation
-        vat_rate: VAT rate (default 19% for Romania)
+        vat_rate: VAT rate (default 21% for Romania)
     """
     if value is None:
         return "0,00 RON TVA"
@@ -552,7 +552,7 @@ def multiply(value: TemplateNumeric, multiplier: TemplateNumeric) -> Decimal:
 
     Usage:
         {{ price|multiply:1.19 }}           -> 118.99 (from 100)
-        {{ subtotal|multiply:vat_rate }}    -> 95.22 (from 500 with 0.19)
+        {{ subtotal|multiply:vat_rate }}    -> 105.00 (from 500 with 0.21)
         {{ amount|multiply:quantity }}      -> 300.00 (from 100 and 3)
 
     Args:
@@ -577,7 +577,7 @@ def divide(value: TemplateNumeric, divisor: TemplateNumeric) -> Decimal:
 
     Usage:
         {{ total|divide:1.19 }}           -> 84.03 (from 100)
-        {{ vat_amount|divide:0.19 }}      -> 500.00 (from 95)
+        {{ vat_amount|divide:0.21 }}      -> 500.00 (from 105)
 
     Args:
         value: Base number to divide

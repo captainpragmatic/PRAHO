@@ -45,22 +45,34 @@ def service_list(request: HttpRequest) -> HttpResponse:
 
     # Filter by status
     status_filter = request.GET.get("status")
+    filtered_services = services
     if status_filter:
-        services = services.filter(status=status_filter)
+        filtered_services = services.filter(status=status_filter)
 
     # Pagination
-    paginator = Paginator(services, 25)
+    paginator = Paginator(filtered_services, 25)
     page_number = request.GET.get("page")
     services_page = paginator.get_page(page_number)
 
     # Only staff can manage services (edit/suspend)
     can_manage_services = user.is_staff or getattr(user, "staff_role", None)
 
+    # For filtered views, show filtered count as "active" count in header
+    if status_filter:
+        # When filtering, show filtered count instead of active count
+        active_count = filtered_services.count()
+        display_status = status_filter
+    else:
+        # For "All Services", show actual active count
+        active_count = services.filter(status="active").count()
+        display_status = 'active'
+
     context = {
         "services": services_page,
         "status_filter": status_filter,
-        "active_count": services.filter(status="active").count(),
-        "total_count": services.count(),
+        "active_count": active_count,
+        "display_status": display_status,
+        "total_count": services.count(),  # Always total from unfiltered
         "can_manage_services": can_manage_services,
     }
 

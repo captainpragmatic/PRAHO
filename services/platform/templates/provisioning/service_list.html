@@ -49,6 +49,16 @@
           ⏳ {% trans 'Pending' %}
         </a>
 
+        <a href="{% url 'provisioning:services' %}?status=provisioning"
+           class="{% if status_filter == 'provisioning' %}border-blue-500 text-blue-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
+          🔄 {% trans 'Provisioning' %}
+        </a>
+
+        <a href="{% url 'provisioning:services' %}?status=failed"
+           class="{% if status_filter == 'failed' %}border-red-500 text-red-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
+          💥 {% trans 'Failed' %}
+        </a>
+
         <a href="{% url 'provisioning:services' %}?status=cancelled"
            class="{% if status_filter == 'cancelled' %}border-slate-500 text-slate-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
           ❌ {% trans 'Cancelled' %}

@@ -1,0 +1,150 @@
+{% extends 'base.html' %}
+{% load i18n %}
+
+{% block title %}{% trans 'Export My Data' %} - PragmaticHost{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 max-w-3xl mx-auto">
+  <!-- Header -->
+  <div class="mb-6">
+    <h1 class="text-2xl font-bold text-white romanian-flag">
+      📄 {% trans 'Export My Data' %}
+    </h1>
+    <p class="mt-2 text-sm text-slate-400">
+      {% trans 'Request a copy of your personal data in machine-readable format (GDPR Article 20)' %}
+    </p>
+  </div>
+
+  <!-- Data Export Information -->
+  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
+    <div class="p-6">
+      <h3 class="text-lg font-medium text-white mb-4">
+        ℹ️ {% trans 'What Data Will Be Included' %}
+      </h3>
+      
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="space-y-3">
+          <div class="flex items-start">
+            <span class="text-green-400 mr-2 mt-1">✅</span>
+            <div>
+              <div class="text-sm font-medium text-white">{% trans 'Account Information' %}</div>
+              <div class="text-xs text-slate-400">{% trans 'Name, email, phone number, account settings' %}</div>
+            </div>
+          </div>
+          
+          <div class="flex items-start">
+            <span class="text-green-400 mr-2 mt-1">✅</span>
+            <div>
+              <div class="text-sm font-medium text-white">{% trans 'Service History' %}</div>
+              <div class="text-xs text-slate-400">{% trans 'Hosting services, domains, configuration data' %}</div>
+            </div>
+          </div>
+          
+          <div class="flex items-start">
+            <span class="text-green-400 mr-2 mt-1">✅</span>
+            <div>
+              <div class="text-sm font-medium text-white">{% trans 'Billing Records' %}</div>
+              <div class="text-xs text-slate-400">{% trans 'Invoices, payments, billing preferences' %}</div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="space-y-3">
+          <div class="flex items-start">
+            <span class="text-green-400 mr-2 mt-1">✅</span>
+            <div>
+              <div class="text-sm font-medium text-white">{% trans 'Support Tickets' %}</div>
+              <div class="text-xs text-slate-400">{% trans 'Support requests and communications' %}</div>
+            </div>
+          </div>
+          
+          <div class="flex items-start">
+            <span class="text-green-400 mr-2 mt-1">✅</span>
+            <div>
+              <div class="text-sm font-medium text-white">{% trans 'Privacy Consents' %}</div>
+              <div class="text-xs text-slate-400">{% trans 'GDPR consents and marketing preferences' %}</div>
+            </div>
+          </div>
+          
+          <div class="flex items-start">
+            <span class="text-yellow-400 mr-2 mt-1">⚠️</span>
+            <div>
+              <div class="text-sm font-medium text-white">{% trans 'Server Data' %}</div>
+              <div class="text-xs text-slate-400">{% trans 'Website files not included - contact support if needed' %}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Export Request Form -->
+  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
+    <div class="p-6">
+      <h3 class="text-lg font-medium text-white mb-4">
+        📋 {% trans 'Request Data Export' %}
+      </h3>
+      
+      <form method="post" class="space-y-4">
+        {% csrf_token %}
+        
+        <div class="bg-blue-900/50 border border-blue-700 rounded-lg p-4">
+          <div class="flex items-start">
+            <span class="text-blue-400 mr-3 mt-1">ℹ️</span>
+            <div class="text-sm text-blue-200">
+              <p class="font-medium mb-1">{% trans 'Export Process' %}</p>
+              <ul class="text-xs space-y-1 text-blue-300">
+                <li>• {% trans 'Your request will be processed within 48 hours' %}</li>
+                <li>• {% trans 'You will receive an email with a secure download link' %}</li>
+                <li>• {% trans 'The download link expires after 7 days for security' %}</li>
+                <li>• {% trans 'Data will be provided in JSON format' %}</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        
+        <div class="bg-slate-700 rounded-lg p-4">
+          <div class="text-sm text-white mb-2">{% trans 'Account Information' %}</div>
+          <div class="text-xs text-slate-400 space-y-1">
+            <p><strong>{% trans 'Email:' %}</strong> {{ customer_email }}</p>
+            <p><strong>{% trans 'Customer ID:' %}</strong> {{ customer_id }}</p>
+          </div>
+        </div>
+        
+        <div class="flex justify-between items-center pt-4 border-t border-slate-600">
+          <a href="{% url 'users:privacy_dashboard' %}" 
+             class="text-slate-400 hover:text-white px-4 py-2 rounded-md text-sm font-medium transition-colors">
+            ← {% trans 'Back to Privacy Dashboard' %}
+          </a>
+          
+          <button type="submit"
+                  class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-md font-medium transition-colors">
+            📦 {% trans 'Request Data Export' %}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Legal Information -->
+  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg">
+    <div class="p-6">
+      <h3 class="text-lg font-medium text-white mb-4">
+        ⚖️ {% trans 'Legal Information' %}
+      </h3>
+      
+      <div class="text-sm text-slate-300 space-y-2">
+        <p>
+          {% trans 'This data export is provided under GDPR Article 20 (Right to Data Portability) and Article 15 (Right of Access).' %}
+        </p>
+        <p>
+          {% trans 'The export includes personal data you provided and data generated through your use of our services.' %}
+        </p>
+        <p class="text-xs text-slate-400">
+          🇷🇴 {% trans 'In compliance with Romanian Law 190/2018 and EU Regulation 2016/679' %}
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

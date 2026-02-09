@@ -1,6 +1,6 @@
 """
-Streamlined ticket signals for PRAHO Platform
-Focus ONLY on open/close events for SLA tracking and customer service compliance.
+Ticket lifecycle signals for PRAHO Platform
+Focus on status transitions and audit logging without SLA complexity.
 """
 
 import logging
@@ -9,7 +9,6 @@ from typing import Any
 from django.db import models
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
-from django.utils import timezone
 
 from apps.audit.services import TicketsAuditService
 
@@ -17,29 +16,13 @@ from .models import Ticket
 
 logger = logging.getLogger(__name__)
 
-# Business constants for Romanian customer service standards
-SLA_COMPLIANCE_THRESHOLDS: dict[str, Any] = {
-    "response_warning_hours": 20,  # Alert when 20/24 hours passed without response
-    "resolution_warning_hours": 60,  # Alert when 60/72 hours passed without resolution
-    "escalation_priority_levels": ["high", "urgent", "critical"],  # Auto-escalate these priorities
-    "weekend_sla_adjustment_factor": 1.5,  # 50% longer SLA on weekends
-}
-
-# Romanian business hours constants
-BUSINESS_HOURS: dict[str, int] = {
-    "max_weekday": 5,  # Monday=0, Sunday=6 (so < 5 means weekday)
-    "start_hour": 9,  # 9:00 AM
-    "end_hour": 17,  # 5:00 PM (17:00)
-}
-
 
 @receiver(pre_save, sender=Ticket)
 def capture_ticket_status_change(sender: type[Ticket], instance: Ticket, **kwargs: Any) -> None:
     """
-    Capture ticket status changes to determine if this is an open/close event.
-
+    Capture ticket status changes for audit logging.
+    
     This pre_save signal captures the old status so we can compare it in post_save.
-    We only care about transitions that affect SLA tracking.
     """
     try:
         if instance.pk:
@@ -60,12 +43,11 @@ def capture_ticket_status_change(sender: type[Ticket], instance: Ticket, **kwarg
 @receiver(post_save, sender=Ticket)
 def log_ticket_lifecycle_events(sender: type[Ticket], instance: Ticket, created: bool, **kwargs: Any) -> None:
     """
-    Log ticket lifecycle events focusing on SLA-critical transitions.
-
+    Log ticket lifecycle events focusing on status transitions.
+    
     Events tracked:
-    - Ticket creation (opened)
-    - Status changes from open -> closed states
-    - SLA breach warnings
+    - Ticket creation
+    - Status changes
     - Customer service quality metrics
     """
     try:
@@ -85,24 +67,16 @@ def log_ticket_lifecycle_events(sender: type[Ticket], instance: Ticket, created:
 
 
 def _log_ticket_opened(ticket: Ticket) -> None:
-    """Log ticket creation event with SLA setup"""
+    """Log ticket creation event"""
     try:
-        # Calculate SLA compliance metadata
-        sla_metadata = _calculate_sla_metadata(ticket)
-
-        # Determine if auto-escalation should be applied
-        escalation_priorities = SLA_COMPLIANCE_THRESHOLDS.get("escalation_priority_levels", [])
-        should_escalate = ticket.priority in escalation_priorities
-
         TicketsAuditService.log_ticket_opened(
             ticket=ticket,
-            sla_metadata=sla_metadata,
-            should_escalate=should_escalate,
+            sla_metadata={},  # Empty SLA metadata since we removed SLA system
+            should_escalate=False,  # Default escalation
             romanian_business_context={
                 "customer_cui": getattr(ticket.customer, "cui", None),
                 "service_category": ticket.category.name if ticket.category else "General",
                 "contact_language": "ro",  # Default to Romanian for local customers
-                "business_hours": _is_business_hours(),
             },
         )
 
@@ -113,11 +87,11 @@ def _log_ticket_opened(ticket: Ticket) -> None:
 
 
 def _handle_status_change(ticket: Ticket, old_status: str, new_status: str) -> None:
-    """Handle status change events with focus on SLA-critical transitions"""
+    """Handle status change events"""
 
     # Define open and closed status groups
-    open_statuses = {"new", "open", "pending"}
-    closed_statuses = {"resolved", "closed"}
+    open_statuses = {"open", "in_progress", "waiting_on_customer"}
+    closed_statuses = {"closed"}
 
     was_open = old_status in open_statuses
     is_closed = new_status in closed_statuses
@@ -126,22 +100,14 @@ def _handle_status_change(ticket: Ticket, old_status: str, new_status: str) -> N
     if was_open and is_closed:
         _log_ticket_closed(ticket, old_status, new_status)
 
-    # Log status changes that affect SLA (but don't close the ticket)
+    # Log significant status changes
     elif old_status != new_status:
         _log_status_change(ticket, old_status, new_status)
 
 
 def _log_ticket_closed(ticket: Ticket, old_status: str, new_status: str) -> None:
-    """Log ticket closure with comprehensive SLA analysis"""
+    """Log ticket closure with service metrics"""
     try:
-        # Set resolved_at if not already set
-        if not ticket.resolved_at:
-            ticket.resolved_at = timezone.now()
-            ticket.save(update_fields=["resolved_at"])
-
-        # Calculate SLA performance
-        sla_performance = _calculate_sla_performance(ticket)
-
         # Calculate customer service metrics
         service_metrics = _calculate_service_metrics(ticket)
 
@@ -149,8 +115,8 @@ def _log_ticket_closed(ticket: Ticket, old_status: str, new_status: str) -> None
             ticket=ticket,
             old_status=old_status,
             new_status=new_status,
-            sla_performance=sla_performance,
             service_metrics=service_metrics,
+            sla_performance={},  # Empty SLA performance since we removed SLA system
             romanian_compliance={
                 "gdpr_compliant": True,  # All ticket handling is GDPR compliant
                 "data_retention_applied": True,
@@ -158,93 +124,30 @@ def _log_ticket_closed(ticket: Ticket, old_status: str, new_status: str) -> None
             },
         )
 
-        logger.info(f"✅ [Tickets] Closed ticket {ticket.ticket_number} - SLA: {sla_performance['overall_compliance']}")
+        logger.info(f"✅ [Tickets] Closed ticket {ticket.ticket_number} with resolution: {ticket.resolution_code}")
 
     except Exception as e:
         logger.error(f"🔥 [Tickets] Failed to log ticket closure: {e}")
 
 
 def _log_status_change(ticket: Ticket, old_status: str, new_status: str) -> None:
-    """Log non-closure status changes that might affect SLA"""
+    """Log significant status changes"""
     try:
-        # Only log significant status changes that affect customer experience
+        # Log meaningful status transitions
         significant_changes = {
-            ("new", "open"): "agent_assigned",
-            ("open", "pending"): "waiting_customer_response",
-            ("pending", "open"): "customer_responded",
+            ("open", "in_progress"): "agent_started_work",
+            ("in_progress", "waiting_on_customer"): "awaiting_customer_response", 
+            ("waiting_on_customer", "in_progress"): "customer_responded",
+            ("waiting_on_customer", "open"): "customer_responded_unassigned",
         }
 
         change_key = (old_status, new_status)
         if change_key in significant_changes:
-            logger.info(f"📝 [Tickets] Status change for {ticket.ticket_number}: {old_status} -> {new_status}")
+            event_type = significant_changes[change_key]
+            logger.info(f"📝 [Tickets] Status change for {ticket.ticket_number}: {old_status} -> {new_status} ({event_type})")
 
     except Exception as e:
         logger.error(f"🔥 [Tickets] Failed to log status change: {e}")
-
-
-def _calculate_sla_metadata(ticket: Ticket) -> dict[str, Any]:
-    """Calculate SLA metadata for new ticket"""
-
-    # Get SLA thresholds from category or use defaults
-    response_hours = ticket.category.sla_response_hours if ticket.category else 24
-    resolution_hours = ticket.category.sla_resolution_hours if ticket.category else 72
-
-    # Adjust for weekends if needed
-    if not _is_business_hours():
-        adjustment_factor = SLA_COMPLIANCE_THRESHOLDS.get("weekend_sla_adjustment_factor", 1.5)
-        response_hours = int(response_hours * adjustment_factor)
-        resolution_hours = int(resolution_hours * adjustment_factor)
-
-    return {
-        "sla_response_deadline": ticket.sla_response_due.isoformat() if ticket.sla_response_due else None,
-        "sla_resolution_deadline": ticket.sla_resolution_due.isoformat() if ticket.sla_resolution_due else None,
-        "response_hours_allocated": response_hours,
-        "resolution_hours_allocated": resolution_hours,
-        "priority_level": ticket.priority,
-        "category": ticket.category.name if ticket.category else None,
-        "weekend_adjustment_applied": not _is_business_hours(),
-        "escalation_eligible": ticket.priority in SLA_COMPLIANCE_THRESHOLDS.get("escalation_priority_levels", []),
-    }
-
-
-def _calculate_sla_performance(ticket: Ticket) -> dict[str, Any]:
-    """Calculate comprehensive SLA performance metrics"""
-    now = timezone.now()
-
-    # Response SLA calculation
-    response_compliant = True
-    response_time_minutes = None
-    if ticket.first_response_at and ticket.sla_response_due:
-        response_time_minutes = int((ticket.first_response_at - ticket.created_at).total_seconds() / 60)
-        response_compliant = ticket.first_response_at <= ticket.sla_response_due
-    elif ticket.sla_response_due and not ticket.first_response_at:
-        # No response yet, check if overdue
-        response_compliant = now <= ticket.sla_response_due
-
-    # Resolution SLA calculation
-    resolution_compliant = True
-    resolution_time_hours = None
-    if ticket.resolved_at and ticket.sla_resolution_due:
-        resolution_time_hours = (ticket.resolved_at - ticket.created_at).total_seconds() / 3600
-        resolution_compliant = ticket.resolved_at <= ticket.sla_resolution_due
-    elif ticket.sla_resolution_due and not ticket.resolved_at:
-        # Just closed but no resolved_at set, check current time
-        resolution_compliant = now <= ticket.sla_resolution_due
-        if ticket.resolved_at:
-            resolution_time_hours = (ticket.resolved_at - ticket.created_at).total_seconds() / 3600
-
-    # Overall compliance
-    overall_compliance = response_compliant and resolution_compliant
-
-    return {
-        "response_sla_met": response_compliant,
-        "resolution_sla_met": resolution_compliant,
-        "overall_compliance": overall_compliance,
-        "response_time_minutes": response_time_minutes,
-        "resolution_time_hours": resolution_time_hours,
-        "sla_grade": "EXCELLENT" if overall_compliance else "BREACH",
-        "customer_impact": "low" if overall_compliance else "medium",
-    }
 
 
 def _calculate_service_metrics(ticket: Ticket) -> dict[str, Any]:
@@ -265,24 +168,10 @@ def _calculate_service_metrics(ticket: Ticket) -> dict[str, Any]:
         "total_hours_worked": float(total_time_spent),
         "satisfaction_rating": ticket.satisfaction_rating,
         "was_escalated": ticket.is_escalated,
-        "required_customer_response": ticket.requires_customer_response,
         "agent_assigned": ticket.assigned_to.get_full_name() if ticket.assigned_to else None,
         "attachments_count": ticket.attachments.count(),
+        "resolution_code": ticket.resolution_code,
+        "customer_replied_during_process": ticket.has_customer_replied,
     }
 
     return service_metrics
-
-
-def _is_business_hours() -> bool:
-    """Check if current time is within Romanian business hours"""
-    now = timezone.now()
-
-    # Convert to Bucharest time
-    bucharest_tz = timezone.get_default_timezone()
-    local_time = now.astimezone(bucharest_tz)
-
-    # Romanian business hours: Monday-Friday, 9:00-17:00
-    is_weekday = local_time.weekday() < BUSINESS_HOURS["max_weekday"]
-    is_business_hour = BUSINESS_HOURS["start_hour"] <= local_time.hour < BUSINESS_HOURS["end_hour"]
-
-    return is_weekday and is_business_hour

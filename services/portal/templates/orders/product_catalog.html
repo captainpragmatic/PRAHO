@@ -1,0 +1,341 @@
+{% extends "base.html" %}
+{% load i18n ui_components %}
+
+{% block title %}{% trans "Product Catalog" %}{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+  
+  <!-- Breadcrumbs -->
+  {% include "orders/partials/order_breadcrumbs.html" with current_step="products" %}
+  
+  <!-- Page Header with Trust Signals -->
+  <div class="mb-6 sm:mb-8">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 sm:mb-6">
+      <div>
+        <h1 class="text-2xl sm:text-3xl font-bold text-white mb-2">📦 {% trans "Product Catalog" %}</h1>
+        <p class="text-slate-400 text-sm sm:text-base">{% trans "Choose from our complete range of hosting services" %}</p>
+      </div>
+
+      <!-- Cart Widget (Mobile & Desktop) -->
+      <div class="mt-3 sm:mt-0">
+        <div id="cart-widget" class="relative">
+          <button onclick="toggleMiniCart()"
+                  class="flex items-center justify-center sm:justify-start space-x-2 bg-slate-700 hover:bg-slate-600 text-white px-3 sm:px-4 py-2 rounded-lg transition-colors w-full sm:w-auto text-sm sm:text-base"
+                  aria-label="{% trans 'Shopping Cart' %}">
+            <span>🛒</span>
+            <span>{% trans "Cart" %}</span>
+            {% if cart_count > 0 %}
+            <span id="cart-count" class="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full ml-1">
+              {{ cart_count }}
+            </span>
+            {% endif %}
+          </button>
+
+          <!-- Mini Cart Dropdown -->
+          <div id="mini-cart" class="hidden absolute right-0 mt-2 w-80 max-w-[90vw] z-50">
+            <div hx-get="{% url 'orders:mini_cart_content' %}"
+                 hx-trigger="load, cartUpdated from:body"
+                 hx-target="this"
+                 hx-swap="innerHTML">
+              <!-- Loading content -->
+              <div class="bg-slate-800 rounded-lg shadow-xl border border-slate-700 p-4">
+                <div class="animate-pulse">
+                  <div class="h-4 bg-slate-700 rounded w-3/4 mb-2"></div>
+                  <div class="h-4 bg-slate-700 rounded w-1/2"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Trust Signals -->
+    {% include "orders/partials/trust_signals.html" %}
+  </div>
+  
+  <!-- Product Type Filters -->
+  <div class="mb-6 sm:mb-8">
+    <div class="border-b border-slate-700">
+      <nav class="-mb-px flex space-x-4 sm:space-x-8 overflow-x-auto pb-px">
+        {% for value, label in product_type_options %}
+        <a href="{% url 'orders:catalog' %}{% if value %}?type={{ value }}{% endif %}"
+           class="{% if product_type_filter == value %}border-blue-500 text-blue-400{% else %}border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-600{% endif %} whitespace-nowrap border-b-2 py-2 sm:py-3 px-1 text-xs sm:text-sm font-medium transition-colors flex-shrink-0">
+          {{ label }}
+        </a>
+        {% endfor %}
+      </nav>
+    </div>
+  </div>
+  
+  <!-- Products Grid -->
+  {% if products %}
+  <div class="grid gap-4 sm:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+    {% for product in products %}
+    <div class="bg-slate-800 rounded-lg border border-slate-700 hover:border-blue-500 transition-colors group relative overflow-hidden">
+
+      <!-- Featured Badge -->
+      {% if product.is_featured %}
+      <div class="absolute -top-3 left-1/2 transform -translate-x-1/2 z-10">
+        <span class="bg-green-100 text-green-800 border border-green-200 px-2 py-0.5 text-xs font-medium rounded-full">
+          ⭐ RECOMMENDED
+        </span>
+      </div>
+      {% endif %}
+
+      <!-- Product Header -->
+      <div class="p-4 sm:p-6 pb-4">
+        <h3 class="text-base sm:text-lg font-semibold text-white mb-2 group-hover:text-blue-400 transition-colors">
+          {{ product.name }}
+        </h3>
+        <p class="text-slate-400 text-sm leading-relaxed">
+          {{ product.short_description|truncatewords:15 }}
+        </p>
+      </div>
+
+      <!-- Pricing Section -->
+      <div class="px-4 sm:px-6 pb-4">
+        {% if product.prices %}
+          {% for price in product.prices %}
+          <div class="mb-4">
+            <!-- Current Price Display -->
+            <div class="text-center mb-3 p-3 bg-slate-700/50 rounded-lg">
+              <div class="text-xl sm:text-2xl font-bold text-green-400" id="price-display-{{ product.slug }}">
+                {{ price.monthly_price }} RON
+              </div>
+              <div class="text-xs text-slate-400" id="period-display-{{ product.slug }}">
+                {% trans "per month" %}
+              </div>
+              {% if price.setup_fee and price.setup_fee != "0.00" %}
+              <div class="text-xs text-slate-500 mt-1" id="setup-display-{{ product.slug }}">
+                + {{ price.setup_fee }} RON {% trans "setup fee" %}
+              </div>
+              {% endif %}
+            </div>
+
+            <!-- Billing Period Selector -->
+            <select class="w-full bg-slate-700 text-white rounded-lg px-3 py-2 text-sm border border-slate-600 focus:border-blue-500 focus:outline-none"
+                    onchange="updateProductPricing('{{ product.slug }}', this.value, {{ price.monthly_price }}, {{ price.semiannual_price }}, {{ price.annual_price }}, '{{ price.setup_fee|default:"0.00" }}')"
+                    id="billing-period-{{ product.slug }}">
+              <option value="monthly"
+                      data-price="{{ price.monthly_price }}"
+                      data-setup="{{ price.setup_fee|default:0 }}"
+                      selected>
+                {% trans "Monthly" %} - {{ price.monthly_price }} RON/{% trans "month" %}
+              </option>
+              {% if price.has_semiannual_discount %}
+              <option value="semiannual"
+                      data-price="{{ price.semiannual_price }}"
+                      data-setup="{{ price.setup_fee|default:0 }}">
+                {% trans "6 Months" %} - {{ price.semiannual_price }} RON {% trans "total" %}
+              </option>
+              {% endif %}
+              {% if price.has_annual_discount %}
+              <option value="annual"
+                      data-price="{{ price.annual_price }}"
+                      data-setup="{{ price.setup_fee|default:0 }}">
+                {% trans "12 Months" %} - {{ price.annual_price }} RON {% trans "total" %}
+              </option>
+              {% endif %}
+            </select>
+          </div>
+          {% endfor %}
+        {% endif %}
+        
+        <!-- Features Preview -->
+        {% if product.meta.features %}
+        <ul class="space-y-2 mb-6 text-sm">
+          {% for feature in product.meta.features|slice:":3" %}
+          <li class="flex items-center text-green-400">
+            <span class="mr-2">✅</span>
+            <span class="text-slate-300">{{ feature }}</span>
+          </li>
+          {% endfor %}
+          {% if product.meta.features|length > 3 %}
+          <li class="text-slate-500 text-xs">
+            + {{ product.meta.features|length|add:"-3" }} {% trans "mai multe funcții" %}
+          </li>
+          {% endif %}
+        </ul>
+        {% endif %}
+      </div>
+      
+      <!-- Actions -->
+      <div class="px-4 sm:px-6 pb-6 flex flex-col space-y-2">
+        <!-- Add to Cart Form -->
+        <form hx-post="{% url 'orders:add_to_cart' %}"
+              hx-target="#cart-widget"
+              hx-swap="outerHTML"
+              hx-on::after-request="if(event.detail.successful) { document.body.dispatchEvent(new CustomEvent('cartUpdated')); showSuccessToast('{% trans "Product added to cart!" %}'); }"
+              id="cart-form-{{ product.slug }}">
+          {% csrf_token %}
+
+          <input type="hidden" name="product_slug" value="{{ product.slug }}">
+          <input type="hidden" name="quantity" value="1">
+          <input type="hidden" name="billing_period" value="monthly" id="selected-billing-period-{{ product.slug }}">
+
+          <!-- Domain Name Input (if required) -->
+          {% if product.requires_domain %}
+          <div class="mb-3">
+            <label for="domain-{{ product.slug }}" class="block text-sm font-medium text-slate-300 mb-2">
+              🌐 {% trans "Domain name (required)" %}
+            </label>
+            <input type="text"
+                   name="domain_name"
+                   id="domain-{{ product.slug }}"
+                   placeholder="example.ro"
+                   required
+                   class="w-full bg-slate-700 border border-slate-600 text-white placeholder-slate-400 rounded-lg px-3 py-2 text-sm focus:border-blue-500 focus:outline-none">
+          </div>
+          {% endif %}
+
+          <button type="submit"
+                  class="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2 sm:py-3 px-4 rounded-lg transition-colors text-sm sm:text-base mb-2">
+            🛒 {% trans "Add to Cart" %}
+          </button>
+        </form>
+
+        <!-- View Details Link -->
+        <a href="{% url 'orders:product_detail' product_slug=product.slug %}"
+           class="text-center text-blue-400 hover:text-blue-300 text-sm font-medium transition-colors block py-2">
+          📋 {% trans "View Details" %}
+        </a>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <!-- Empty State -->
+  <div class="text-center py-16">
+    <div class="text-6xl mb-4">📦</div>
+    <h3 class="text-xl font-medium text-white mb-2">
+      {% if product_type_filter %}
+        {% trans "No products found for selected filter" %}
+      {% else %}
+        {% trans "No products available" %}
+      {% endif %}
+    </h3>
+    <p class="text-slate-400 mb-6">
+      {% trans "Please try modifying the filters or check back later." %}
+    </p>
+    
+    {% if product_type_filter %}
+    <a href="{% url 'orders:catalog' %}" class="inline-flex items-center px-4 py-2 text-sm font-medium text-slate-300 bg-slate-700 border border-slate-600 rounded-lg hover:bg-slate-600 transition-colors">
+      📋 {% trans "View all products" %}
+    </a>
+    {% endif %}
+  </div>
+  {% endif %}
+  
+  <!-- Continue to Cart (if items exist) -->
+  {% if cart_count > 0 %}
+  <div class="mt-12 text-center">
+    <div class="bg-slate-800 rounded-lg p-6 border border-slate-700 inline-block">
+      <p class="text-slate-300 mb-4">
+        {% blocktrans count counter=cart_count %}
+          You have {{ counter }} product in cart
+        {% plural %}
+          You have {{ counter }} products in cart
+        {% endblocktrans %}
+      </p>
+      <a href="{% url 'orders:cart_review' %}" class="inline-flex items-center justify-center px-6 py-3 text-base font-medium text-white bg-green-600 border border-green-600 rounded-lg hover:bg-green-700 focus:ring-4 focus:ring-green-300 transition-all duration-200">
+        👀 {% trans "Review cart" %}
+        <svg class="ml-2 -mr-1 h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd"></path>
+        </svg>
+      </a>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- JavaScript for cart and pricing -->
+<script>
+// Mini cart toggle
+function toggleMiniCart() {
+  const miniCart = document.getElementById('mini-cart');
+  miniCart.classList.toggle('hidden');
+}
+
+// Close mini cart when clicking outside
+document.addEventListener('click', function(event) {
+  const cartWidget = document.getElementById('cart-widget');
+  const miniCart = document.getElementById('mini-cart');
+  
+  if (!cartWidget.contains(event.target)) {
+    miniCart.classList.add('hidden');
+  }
+});
+
+// Success toast notification
+function showSuccessToast(message) {
+  // Simple toast implementation
+  const toast = document.createElement('div');
+  toast.className = 'fixed top-4 right-4 bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg z-50 transform transition-transform duration-300 translate-x-full';
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  
+  // Slide in
+  setTimeout(() => toast.classList.remove('translate-x-full'), 100);
+  
+  // Auto dismiss
+  setTimeout(() => {
+    toast.classList.add('translate-x-full');
+    setTimeout(() => document.body.removeChild(toast), 300);
+  }, 3000);
+}
+
+// Update product pricing display
+function updateProductPricing(productSlug, billingPeriod, monthlyPrice, semiannualPrice, annualPrice, setupFee) {
+  const priceDisplay = document.getElementById(`price-display-${productSlug}`);
+  const periodDisplay = document.getElementById(`period-display-${productSlug}`);
+  const setupDisplay = document.getElementById(`setup-display-${productSlug}`);
+  const billingPeriodInput = document.getElementById(`selected-billing-period-${productSlug}`);
+
+  if (!priceDisplay || !periodDisplay || !billingPeriodInput) {
+    console.error('Price display elements not found for:', productSlug);
+    return;
+  }
+
+  // Update hidden input for cart form
+  billingPeriodInput.value = billingPeriod;
+
+  let price, periodText;
+
+  switch(billingPeriod) {
+    case 'monthly':
+      price = monthlyPrice;
+      periodText = 'per month';
+      break;
+    case 'semiannual':
+      price = semiannualPrice;
+      periodText = 'for 6 months';
+      break;
+    case 'annual':
+      price = annualPrice;
+      periodText = 'for 12 months';
+      break;
+    default:
+      price = monthlyPrice;
+      periodText = 'per month';
+  }
+
+  // Update display
+  priceDisplay.textContent = `${price} RON`;
+  periodDisplay.textContent = periodText;
+
+  // Update setup fee display
+  if (setupDisplay) {
+    if (setupFee && setupFee !== "0.00") {
+      setupDisplay.textContent = `+ ${setupFee} RON setup fee`;
+      setupDisplay.style.display = 'block';
+    } else {
+      setupDisplay.style.display = 'none';
+    }
+  }
+
+  console.log(`✅ Updated pricing for ${productSlug}: ${price} RON (${periodText})`);
+}
+</script>
+{% endblock %}

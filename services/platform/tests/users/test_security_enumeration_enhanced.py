@@ -265,7 +265,7 @@ class NeutralRegistrationFlowTestCase(TestCase):
         
         # Should have links to useful pages
         self.assertContains(response, 'href="/auth/login/"')
-        self.assertContains(response, 'href="/app/"')  # Dashboard/home
+        self.assertContains(response, 'href="/dashboard/"')  # Dashboard/home
         
         # Should have support options
         self.assertContains(response, "contact support")

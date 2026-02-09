@@ -1,0 +1,73 @@
+{% comment %}
+===============================================================================
+🧭 MOBILE NAVIGATION ITEM COMPONENT
+===============================================================================
+Reusable mobile navigation item following DRY principles
+
+Usage:
+{% include 'components/mobile_nav_item.html' with url='dashboard' title='Dashboard' subtitle='Overview & analytics' icon='home' %}
+
+Required Parameters:
+- url: Django URL name or full URL
+- title: Main text to display
+- subtitle: Secondary description text
+- icon: SVG icon content (HTML)
+
+Optional Parameters:
+- staff_only: Boolean, defaults to False
+- disabled: Boolean for coming soon items, defaults to False
+- extra_classes: Additional CSS classes
+===============================================================================
+{% endcomment %}
+
+{% load i18n %}
+
+<!-- Navigation Item -->
+{% if not staff_only or user.is_staff %}
+    {% if disabled %}
+        <div class="mobile-nav-item group opacity-50 cursor-not-allowed">
+            <div class="flex items-center space-x-5 p-4">
+                <div class="flex-shrink-0 w-16 h-16 bg-slate-700/50 rounded-2xl flex items-center justify-center">
+                    {{ icon|safe }}
+                </div>
+                <div class="flex-1 min-w-0">
+                    <div class="text-xl font-semibold text-slate-400">{{ title }}</div>
+                    <div class="text-base text-slate-500">{{ subtitle }}</div>
+                </div>
+                <svg class="h-6 w-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                </svg>
+            </div>
+        </div>
+    {% elif is_button %}
+        <form method="post" action="{{ url }}" class="w-full">
+            {% csrf_token %}
+            <button type="submit" class="mobile-nav-item group w-full text-left {{ extra_classes }}">
+                <div class="flex items-center space-x-5 p-4">
+                    <div class="flex-shrink-0 w-16 h-16 {{ button_bg|default:'bg-slate-700/50' }} rounded-2xl flex items-center justify-center group-hover:{{ button_hover_bg|default:'bg-slate-600/60' }} transition-colors shadow-lg">
+                        {{ icon|safe }}
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <div class="text-xl font-semibold {{ text_color|default:'text-slate-200' }} group-hover:{{ text_hover_color|default:'text-white' }}">{{ title }}</div>
+                        <div class="text-base {{ subtitle_color|default:'text-slate-400' }}">{{ subtitle }}</div>
+                    </div>
+                </div>
+            </button>
+        </form>
+    {% else %}
+        <a href="{% if url_name %}{% url url_name %}{% else %}{{ url }}{% endif %}" class="mobile-nav-item group {{ extra_classes }}">
+            <div class="flex items-center space-x-5 p-4">
+                <div class="flex-shrink-0 w-16 h-16 bg-slate-700/50 rounded-2xl flex items-center justify-center group-hover:bg-slate-600/60 transition-colors shadow-lg">
+                    {{ icon|safe }}
+                </div>
+                <div class="flex-1 min-w-0">
+                    <div class="text-xl font-semibold text-slate-200 group-hover:text-white">{{ title }}</div>
+                    <div class="text-base text-slate-400">{{ subtitle }}</div>
+                </div>
+                <svg class="h-6 w-6 text-slate-400 group-hover:text-slate-300 transition-transform group-hover:translate-x-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                </svg>
+            </div>
+        </a>
+    {% endif %}
+{% endif %}

@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans 'Add User to' %} {{ customer.name }} - {% trans 'Customer Management' %}{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 max-w-4xl mx-auto">
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <h1 class="text-2xl font-bold text-white">
+                {% trans 'Add User to Customer' %}
+            </h1>
+            <p class="mt-1 text-sm text-slate-400">
+                🏢 {{ customer.name }}
+            </p>
+        </div>
+        <div>
+            <a href="{% url 'customers:detail' customer.id %}" class="bg-slate-600 hover:bg-slate-700 text-white px-4 py-2 rounded-md font-medium transition-colors">
+                ← {% trans 'Back to Customer' %}
+            </a>
+        </div>
+    </div>
+
+    <!-- Add User Form -->
+    <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg">
+        <div class="p-6">
+            <form method="post" class="space-y-6">
+                {% csrf_token %}
+                
+                <!-- User Selection -->
+                <div>
+                    <label for="user_email" class="block text-sm font-medium text-slate-300 mb-2">
+                        📧 {% trans 'User Email Address' %}
+                    </label>
+                    <select name="user_email" id="user_email" required
+                            class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        <option value="">{% trans 'Select a user...' %}</option>
+                        {% for user in available_users %}
+                        <option value="{{ user.email }}">
+                            {{ user.email }} {% if user.get_full_name %}({{ user.get_full_name }}){% endif %}
+                        </option>
+                        {% endfor %}
+                    </select>
+                    
+                    {% if not available_users %}
+                    <p class="mt-2 text-sm text-slate-500">
+                        {% trans 'No available users found. All active users are already assigned to this customer.' %}
+                    </p>
+                    {% endif %}
+                </div>
+
+                <!-- Role Selection -->
+                <div>
+                    <label for="role" class="block text-sm font-medium text-slate-300 mb-2">
+                        🎭 {% trans 'User Role' %}
+                    </label>
+                    <select name="role" id="role" required
+                            class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        {% for role_value, role_display in role_choices %}
+                        <option value="{{ role_value }}" {% if role_value == 'viewer' %}selected{% endif %}>
+                            {% if role_value == 'owner' %}👑
+                            {% elif role_value == 'billing' %}💳
+                            {% elif role_value == 'tech' %}🔧
+                            {% else %}👁️{% endif %}
+                            {{ role_display }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                    
+                    <!-- Role Descriptions -->
+                    <div class="mt-3 bg-slate-700/50 rounded-lg p-4 border border-slate-600">
+                        <h4 class="text-sm font-medium text-slate-300 mb-2">ℹ️ {% trans "Role Permissions" %}</h4>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-slate-400">
+                            <div>
+                                <span class="text-purple-400">👑 Owner:</span> Full control, manage users, billing
+                            </div>
+                            <div>
+                                <span class="text-green-400">💳 Billing:</span> View/pay invoices, update payment methods
+                            </div>
+                            <div>
+                                <span class="text-blue-400">🔧 Technical:</span> Manage services, create support tickets
+                            </div>
+                            <div>
+                                <span class="text-slate-300">👁️ Viewer:</span> Read-only access to customer data
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="flex flex-col sm:flex-row gap-3 pt-4 border-t border-slate-700">
+                    {% if available_users %}
+                        {% button "👥 Add User to Customer" type="submit" variant="primary" %}
+                    {% endif %}
+                    
+                    <a href="{% url 'customers:create_user' customer.id %}" 
+                       class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-blue-400 hover:text-blue-300 border border-blue-600 rounded-lg hover:border-blue-500 transition-colors">
+                        🆕 {% trans 'Create New User Instead' %}
+                    </a>
+                    
+                    <a href="{% url 'customers:detail' customer.id %}" 
+                       class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-slate-400 hover:text-white border border-slate-600 rounded-lg hover:border-slate-500 transition-colors">
+                        ❌ {% trans 'Cancel' %}
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

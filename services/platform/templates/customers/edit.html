@@ -1,0 +1,635 @@
+{% extends 'base.html' %}
+{% load i18n %}
+
+{% block title %}{{ title }} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 max-w-6xl mx-auto">
+  <!-- Header -->
+  <div class="mb-6">
+    <div class="flex items-center space-x-4">
+      <a href="{% url 'customers:detail' customer.id %}" class="text-slate-400 hover:text-white">
+        ← {% trans 'Back to customer details' %}
+      </a>
+    </div>
+
+    <h1 class="text-2xl font-bold text-white mt-4">
+      {{ title }}
+    </h1>
+    <p class="text-slate-400 text-sm mt-1">
+      {% trans 'Update customer information and all related profiles' %}
+    </p>
+  </div>
+
+  <!-- Form -->
+  <div class="bg-slate-800 rounded-lg border border-slate-700">
+    <div class="p-8">
+      <form method="post" class="space-y-8">
+        {% csrf_token %}
+
+        <!-- Form Errors -->
+        {% if form.non_field_errors %}
+        <div class="bg-red-900 border border-red-700 rounded-md p-3">
+          {% for error in form.non_field_errors %}
+          <p class="text-red-100 text-sm">❌ {{ error }}</p>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        <!-- Core Customer Information -->
+        <div class="space-y-4">
+          <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
+            👤 {% trans 'Customer Information' %}
+          </h3>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Customer Name -->
+            <div>
+              <label for="{{ form.name.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                {{ form.name.label }}
+              </label>
+              {{ form.name }}
+              {% if form.name.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.name.errors.0 }}</p>
+              {% endif %}
+            </div>
+
+            <!-- Customer Type -->
+            <div>
+              <label for="{{ form.customer_type.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                {{ form.customer_type.label }}
+              </label>
+              {{ form.customer_type }}
+              {% if form.customer_type.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.customer_type.errors.0 }}</p>
+              {% endif %}
+            </div>
+          </div>
+
+          <!-- Company Name -->
+          <div>
+            <label for="{{ form.company_name.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+              {{ form.company_name.label }}
+            </label>
+            {{ form.company_name }}
+            {% if form.company_name.errors %}
+            <p class="mt-1 text-sm text-red-400">{{ form.company_name.errors.0 }}</p>
+            {% endif %}
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Primary Email -->
+            <div>
+              <label for="{{ form.primary_email.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                {{ form.primary_email.label }}
+              </label>
+              {{ form.primary_email }}
+              {% if form.primary_email.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.primary_email.errors.0 }}</p>
+              {% endif %}
+            </div>
+
+            <!-- Primary Phone -->
+            <div>
+              <label for="{{ form.primary_phone.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                {{ form.primary_phone.label }}
+              </label>
+              {{ form.primary_phone }}
+              {% if form.primary_phone.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.primary_phone.errors.0 }}</p>
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Industry -->
+            <div>
+              <label for="{{ form.industry.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                {{ form.industry.label }}
+              </label>
+              {{ form.industry }}
+              {% if form.industry.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.industry.errors.0 }}</p>
+              {% endif %}
+            </div>
+
+            <!-- Website -->
+            <div>
+              <label for="{{ form.website.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                {{ form.website.label }}
+              </label>
+              {{ form.website }}
+              {% if form.website.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.website.errors.0 }}</p>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <!-- Tax Profile Information -->
+        <div class="space-y-4">
+          <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
+            🏛️ {% trans 'Romanian Tax Information' %}
+          </h3>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- CUI -->
+            <div>
+              <label for="{{ form.cui.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                {{ form.cui.label }}
+              </label>
+              {{ form.cui }}
+              {% if form.cui.help_text %}
+              <p class="mt-1 text-xs text-slate-400">{{ form.cui.help_text }}</p>
+              {% endif %}
+              {% if form.cui.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.cui.errors.0 }}</p>
+              {% endif %}
+            </div>
+
+            <!-- Registration Number -->
+            <div>
+              <label for="{{ form.registration_number.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                {{ form.registration_number.label }}
+              </label>
+              {{ form.registration_number }}
+              {% if form.registration_number.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.registration_number.errors.0 }}</p>
+              {% endif %}
+            </div>
+          </div>
+
+          <!-- VAT Payer Status -->
+          <div class="flex items-start space-x-3">
+            {{ form.is_vat_payer }}
+            <div class="flex-1">
+              <label for="{{ form.is_vat_payer.id_for_label }}" class="text-sm text-slate-300">
+                {{ form.is_vat_payer.label }}
+              </label>
+              {% if form.is_vat_payer.help_text %}
+              <p class="text-xs text-slate-400">{{ form.is_vat_payer.help_text }}</p>
+              {% endif %}
+              {% if form.is_vat_payer.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.is_vat_payer.errors.0 }}</p>
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- VAT Number -->
+            <div>
+              <label for="{{ form.vat_number.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                {{ form.vat_number.label }}
+              </label>
+              {{ form.vat_number }}
+              {% if form.vat_number.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.vat_number.errors.0 }}</p>
+              {% endif %}
+            </div>
+
+            <!-- VAT Rate -->
+            <div>
+              <label for="{{ form.vat_rate.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                {{ form.vat_rate.label }}
+              </label>
+              {{ form.vat_rate }}
+              {% if form.vat_rate.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.vat_rate.errors.0 }}</p>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <!-- Billing Profile Information -->
+        <div class="space-y-4">
+          <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
+            💼 {% trans 'Billing Configuration' %}
+          </h3>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <!-- Payment Terms -->
+            <div>
+              <label for="{{ form.payment_terms.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                {{ form.payment_terms.label }}
+              </label>
+              {{ form.payment_terms }}
+              {% if form.payment_terms.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.payment_terms.errors.0 }}</p>
+              {% endif %}
+            </div>
+
+            <!-- Credit Limit -->
+            <div>
+              <label for="{{ form.credit_limit.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                {{ form.credit_limit.label }}
+              </label>
+              {{ form.credit_limit }}
+              {% if form.credit_limit.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.credit_limit.errors.0 }}</p>
+              {% endif %}
+            </div>
+
+            <!-- Preferred Currency -->
+            <div>
+              <label for="{{ form.preferred_currency.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                {{ form.preferred_currency.label }}
+              </label>
+              {{ form.preferred_currency }}
+              {% if form.preferred_currency.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.preferred_currency.errors.0 }}</p>
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Invoice Delivery Method -->
+            <div>
+              <label for="{{ form.invoice_delivery_method.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                {{ form.invoice_delivery_method.label }}
+              </label>
+              {{ form.invoice_delivery_method }}
+              {% if form.invoice_delivery_method.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.invoice_delivery_method.errors.0 }}</p>
+              {% endif %}
+            </div>
+
+            <!-- Auto-payment -->
+            <div class="flex items-start space-x-3 mt-6">
+              {{ form.auto_payment_enabled }}
+              <div class="flex-1">
+                <label for="{{ form.auto_payment_enabled.id_for_label }}" class="text-sm text-slate-300">
+                  {{ form.auto_payment_enabled.label }}
+                </label>
+                {% if form.auto_payment_enabled.help_text %}
+                <p class="text-xs text-slate-400">{{ form.auto_payment_enabled.help_text }}</p>
+                {% endif %}
+                {% if form.auto_payment_enabled.errors %}
+                <p class="mt-1 text-sm text-red-400">{{ form.auto_payment_enabled.errors.0 }}</p>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Address Information -->
+        <div class="space-y-4">
+          <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
+            📍 {% trans 'Primary Address Information' %}
+          </h3>
+
+          <!-- Address Line 1 -->
+          <div>
+            <label for="{{ form.address_line1.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+              {{ form.address_line1.label }}
+            </label>
+            {{ form.address_line1 }}
+            {% if form.address_line1.errors %}
+            <p class="mt-1 text-sm text-red-400">{{ form.address_line1.errors.0 }}</p>
+            {% endif %}
+          </div>
+
+          <!-- Address Line 2 -->
+          <div>
+            <label for="{{ form.address_line2.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+              {{ form.address_line2.label }}
+            </label>
+            {{ form.address_line2 }}
+            {% if form.address_line2.help_text %}
+            <p class="mt-1 text-xs text-slate-400">{{ form.address_line2.help_text }}</p>
+            {% endif %}
+            {% if form.address_line2.errors %}
+            <p class="mt-1 text-sm text-red-400">{{ form.address_line2.errors.0 }}</p>
+            {% endif %}
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <!-- City -->
+            <div>
+              <label for="{{ form.city.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                {{ form.city.label }}
+              </label>
+              {{ form.city }}
+              {% if form.city.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.city.errors.0 }}</p>
+              {% endif %}
+            </div>
+
+            <!-- County -->
+            <div>
+              <label for="{{ form.county.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                {{ form.county.label }}
+              </label>
+              {{ form.county }}
+              {% if form.county.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.county.errors.0 }}</p>
+              {% endif %}
+            </div>
+
+            <!-- Postal Code -->
+            <div>
+              <label for="{{ form.postal_code.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                {{ form.postal_code.label }}
+              </label>
+              {{ form.postal_code }}
+              {% if form.postal_code.help_text %}
+              <p class="mt-1 text-xs text-slate-400">{{ form.postal_code.help_text }}</p>
+              {% endif %}
+              {% if form.postal_code.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.postal_code.errors.0 }}</p>
+              {% endif %}
+            </div>
+          </div>
+
+          <!-- Country -->
+          <div>
+            <label for="{{ form.country.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+              {{ form.country.label }}
+            </label>
+            {{ form.country }}
+            {% if form.country.errors %}
+            <p class="mt-1 text-sm text-red-400">{{ form.country.errors.0 }}</p>
+            {% endif %}
+          </div>
+        </div>
+
+        <!-- Billing Address Information -->
+        <div class="space-y-4">
+          <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
+            🧾 {% trans 'Billing Address Information' %}
+          </h3>
+
+          <!-- Billing Same As Primary Checkbox -->
+          <div class="flex items-start space-x-3">
+            {{ form.billing_same_as_primary }}
+            <div class="flex-1">
+              <label for="{{ form.billing_same_as_primary.id_for_label }}" class="text-sm text-slate-300">
+                {{ form.billing_same_as_primary.label }}
+              </label>
+              {% if form.billing_same_as_primary.help_text %}
+              <p class="text-xs text-slate-400">{{ form.billing_same_as_primary.help_text }}</p>
+              {% endif %}
+              {% if form.billing_same_as_primary.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.billing_same_as_primary.errors.0 }}</p>
+              {% endif %}
+            </div>
+          </div>
+
+          <!-- Separate Billing Address Fields (Hidden by default) -->
+          <div id="billing-address-fields" class="space-y-4 border-l-4 border-blue-500 pl-4 bg-slate-900/50 p-4 rounded-r-lg">
+            <p class="text-sm text-blue-300 mb-4">
+              📝 {% trans "Specify different billing address details below:" %}
+            </p>
+
+            <!-- Billing Address Line 1 -->
+            <div>
+              <label for="{{ form.billing_address_line1.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                {{ form.billing_address_line1.label }}
+              </label>
+              {{ form.billing_address_line1 }}
+              {% if form.billing_address_line1.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.billing_address_line1.errors.0 }}</p>
+              {% endif %}
+            </div>
+
+            <!-- Billing Address Line 2 -->
+            <div>
+              <label for="{{ form.billing_address_line2.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                {{ form.billing_address_line2.label }}
+              </label>
+              {{ form.billing_address_line2 }}
+              {% if form.billing_address_line2.help_text %}
+              <p class="mt-1 text-xs text-slate-400">{{ form.billing_address_line2.help_text }}</p>
+              {% endif %}
+              {% if form.billing_address_line2.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.billing_address_line2.errors.0 }}</p>
+              {% endif %}
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <!-- Billing City -->
+              <div>
+                <label for="{{ form.billing_city.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                  {{ form.billing_city.label }}
+                </label>
+                {{ form.billing_city }}
+                {% if form.billing_city.errors %}
+                <p class="mt-1 text-sm text-red-400">{{ form.billing_city.errors.0 }}</p>
+                {% endif %}
+              </div>
+
+              <!-- Billing County -->
+              <div>
+                <label for="{{ form.billing_county.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                  {{ form.billing_county.label }}
+                </label>
+                {{ form.billing_county }}
+                {% if form.billing_county.errors %}
+                <p class="mt-1 text-sm text-red-400">{{ form.billing_county.errors.0 }}</p>
+                {% endif %}
+              </div>
+
+              <!-- Billing Postal Code -->
+              <div>
+                <label for="{{ form.billing_postal_code.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                  {{ form.billing_postal_code.label }}
+                </label>
+                {{ form.billing_postal_code }}
+                {% if form.billing_postal_code.help_text %}
+                <p class="mt-1 text-xs text-slate-400">{{ form.billing_postal_code.help_text }}</p>
+                {% endif %}
+                {% if form.billing_postal_code.errors %}
+                <p class="mt-1 text-sm text-red-400">{{ form.billing_postal_code.errors.0 }}</p>
+                {% endif %}
+              </div>
+            </div>
+
+            <!-- Billing Country -->
+            <div>
+              <label for="{{ form.billing_country.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">
+                {{ form.billing_country.label }}
+              </label>
+              {{ form.billing_country }}
+              {% if form.billing_country.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.billing_country.errors.0 }}</p>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <!-- GDPR Compliance -->
+        <div class="space-y-4">
+          <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
+            🛡️ {% trans 'Privacy & Consent' %}
+          </h3>
+
+          <!-- Data Processing Consent -->
+          <div class="flex items-start space-x-3">
+            {{ form.data_processing_consent }}
+            <div class="flex-1">
+              <label for="{{ form.data_processing_consent.id_for_label }}" class="text-sm text-slate-300">
+                {{ form.data_processing_consent.label }}
+              </label>
+              {% if form.data_processing_consent.help_text %}
+              <p class="text-xs text-slate-400">{{ form.data_processing_consent.help_text }}</p>
+              {% endif %}
+              {% if form.data_processing_consent.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.data_processing_consent.errors.0 }}</p>
+              {% endif %}
+            </div>
+          </div>
+
+          <!-- Marketing Consent -->
+          <div class="flex items-start space-x-3">
+            {{ form.marketing_consent }}
+            <div class="flex-1">
+              <label for="{{ form.marketing_consent.id_for_label }}" class="text-sm text-slate-300">
+                {{ form.marketing_consent.label }}
+              </label>
+              {% if form.marketing_consent.help_text %}
+              <p class="text-xs text-slate-400">{{ form.marketing_consent.help_text }}</p>
+              {% endif %}
+              {% if form.marketing_consent.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.marketing_consent.errors.0 }}</p>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <!-- Form Actions -->
+        <div class="pt-6 border-t border-slate-600 flex justify-end space-x-4">
+          <a href="{% url 'customers:detail' customer.id %}" 
+            class="bg-slate-600 hover:bg-slate-700 text-white px-6 py-2 rounded-md font-medium transition-colors">
+            {% trans 'Cancel' %}
+          </a>
+
+          <button type="submit" 
+            class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md font-medium transition-colors">
+            {{ submit_text }}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  // ===============================================================================
+  // BILLING ADDRESS TOGGLE FUNCTIONALITY 🧾
+  // ===============================================================================
+  
+  const billingSameCheckbox = document.getElementById('id_billing_same_as_primary');
+  const billingAddressFields = document.getElementById('billing-address-fields');
+  
+  if (billingSameCheckbox && billingAddressFields) {
+    // Function to toggle billing address fields visibility
+    function toggleBillingFields() {
+      if (billingSameCheckbox.checked) {
+        // Hide billing fields when "same as primary" is checked
+        billingAddressFields.style.display = 'none';
+        
+        // Clear billing field values when hiding (optional)
+        const billingFields = billingAddressFields.querySelectorAll('input[id^="id_billing_"]');
+        billingFields.forEach(field => {
+          if (field.type !== 'hidden') {
+            field.value = '';
+          }
+        });
+      } else {
+        // Show billing fields when "same as primary" is unchecked
+        billingAddressFields.style.display = 'block';
+        
+        // Optionally pre-fill billing fields with primary address values
+        copyPrimaryToBillingFields();
+      }
+    }
+    
+    // Function to copy primary address values to billing fields
+    function copyPrimaryToBillingFields() {
+      const fieldMapping = {
+        'id_address_line1': 'id_billing_address_line1',
+        'id_address_line2': 'id_billing_address_line2', 
+        'id_city': 'id_billing_city',
+        'id_county': 'id_billing_county',
+        'id_postal_code': 'id_billing_postal_code',
+        'id_country': 'id_billing_country'
+      };
+      
+      Object.keys(fieldMapping).forEach(primaryId => {
+        const primaryField = document.getElementById(primaryId);
+        const billingField = document.getElementById(fieldMapping[primaryId]);
+        
+        if (primaryField && billingField && !billingField.value) {
+          billingField.value = primaryField.value;
+        }
+      });
+    }
+    
+    // Set initial state based on checkbox value
+    toggleBillingFields();
+    
+    // Add event listener for checkbox changes
+    billingSameCheckbox.addEventListener('change', toggleBillingFields);
+  }
+
+  // ===============================================================================
+  // FORM VALIDATION & FORMATTING 🔍
+  // ===============================================================================
+  
+  // Real-time CUI validation
+  const cuiField = document.getElementById('id_cui');
+  if (cuiField) {
+    cuiField.addEventListener('blur', function () {
+      const cui = this.value;
+      if (cui && cui.length > 3) {
+        const isValid = /^RO\d{6,10}$/.test(cui);
+        this.className = this.className.replace(/(border-red-500|border-green-500)/g, '');
+        this.className += isValid ? ' border-green-500' : ' border-red-500';
+      }
+    });
+  }
+
+  // Real-time VAT number validation
+  const vatField = document.getElementById('id_vat_number');
+  if (vatField) {
+    vatField.addEventListener('blur', function () {
+      const vat = this.value;
+      if (vat && vat.length > 3) {
+        const isValid = /^RO\d{6,10}$/.test(vat);
+        this.className = this.className.replace(/(border-red-500|border-green-500)/g, '');
+        this.className += isValid ? ' border-green-500' : ' border-red-500';
+      }
+    });
+  }
+
+  // Auto-format phone number
+  const phoneField = document.getElementById('id_primary_phone');
+  if (phoneField) {
+    phoneField.addEventListener('input', function () {
+      let value = this.value.replace(/\D/g, '');
+      if (value.startsWith('40')) {
+        value = '+40 ' + value.substring(2);
+      } else if (value.startsWith('0')) {
+        // Keep Romanian local format
+      }
+      // Additional formatting could be added here
+    });
+  }
+
+  // Real-time billing postal code validation
+  const billingPostalField = document.getElementById('id_billing_postal_code');
+  if (billingPostalField) {
+    billingPostalField.addEventListener('blur', function () {
+      const postalCode = this.value;
+      const country = document.getElementById('id_billing_country')?.value || 'Romania';
+      
+      if (country.includes('Romania') && postalCode && postalCode.length > 0) {
+        const isValid = /^\d{6}$/.test(postalCode);
+        this.className = this.className.replace(/(border-red-500|border-green-500)/g, '');
+        this.className += isValid ? ' border-green-500' : ' border-red-500';
+      }
+    });
+  }
+});
+</script>
+{% endblock %}

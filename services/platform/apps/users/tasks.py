@@ -97,7 +97,7 @@ def cleanup_expired_2fa_sessions() -> dict[str, Any]:
 
             # Clean up inactive/expired WebAuthn credentials (optional)
             old_webauthn_cutoff = timezone.now() - timedelta(days=90)
-            inactive_webauthn = WebAuthnCredential.objects.filter(is_active=False, created_at__lt=old_webauthn_cutoff)  # type: ignore[misc]
+            inactive_webauthn = WebAuthnCredential.objects.filter(is_active=False, created_at__lt=old_webauthn_cutoff)
 
             webauthn_count = inactive_webauthn.count()
             if webauthn_count > 0:

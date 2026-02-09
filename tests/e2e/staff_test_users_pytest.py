@@ -64,7 +64,7 @@ def test_staff_user_management_access_via_navigation(page: Page) -> None:
         
         # Navigate to dashboard first
         assert navigate_to_dashboard(page)
-        assert "/app/" in page.url
+        assert "/dashboard/" in page.url
         
         # Test direct access to user management
         page.goto("http://localhost:8701/auth/users/")
@@ -677,10 +677,10 @@ def test_staff_customer_user_assignment_and_management(page: Page) -> None:
         # Test access to customer management section
         print("  🏢 Testing integration with customer management")
         
-        page.goto("http://localhost:8701/app/customers/")
+        page.goto("http://localhost:8701/customers/")
         page.wait_for_load_state("networkidle")
         
-        if "/app/customers/" in page.url:
+        if "/customers/" in page.url:
             print("    ✅ Staff can access customer management")
             
             # Look for user management from customer perspective
@@ -932,10 +932,10 @@ def test_staff_complete_user_management_workflow(page: Page) -> None:
         print("    Step 6: Cross-system integration validation")
         
         # Test integration with customer management
-        page.goto("http://localhost:8701/app/customers/")
+        page.goto("http://localhost:8701/customers/")
         page.wait_for_load_state("networkidle")
         
-        if "/app/customers/" in page.url:
+        if "/customers/" in page.url:
             print("      ✅ Customer management system accessible")
             
             customer_user_integration = page.locator('a:has-text("User"), a:has-text("Member")').count()

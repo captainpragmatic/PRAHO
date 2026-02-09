@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import decimal
+import json
 import logging
 import uuid
 from datetime import datetime, timedelta
@@ -36,7 +37,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
-from django.views.decorators.http import require_POST
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods, require_POST
 
 from apps.billing.pdf_generators import RomanianInvoicePDFGenerator, RomanianProformaPDFGenerator
 from apps.common.decorators import billing_staff_required, can_edit_proforma, rate_limit, staff_required
@@ -58,27 +60,13 @@ from .models import (
     ProformaLine,
     ProformaSequence,
 )
+from .payment_service import PaymentService
 from .services import (
     log_security_event,
     # TODO: Add RefundService imports when implemented
 )
 
-
-def _get_accessible_customer_ids(user: User | None) -> list[int]:
-    """Helper to get customer IDs that user can access"""
-    if user is None:
-        return []
-
-    try:
-        accessible_customers = user.get_accessible_customers()
-    except AttributeError:
-        # Handle cases where user doesn't have get_accessible_customers method
-        return []
-
-    if isinstance(accessible_customers, QuerySet):
-        return list(accessible_customers.values_list("id", flat=True))
-    else:
-        return [c.id for c in accessible_customers] if accessible_customers else []
+# Customer access function removed - platform is staff-only
 
 
 def _validate_financial_document_access(
@@ -204,7 +192,19 @@ def _validate_pdf_access(request: HttpRequest, document: Invoice | ProformaInvoi
     return result
 
 
-@login_required
+def _get_accessible_customer_ids(user: User) -> list[int]:
+    """Helper to get customer IDs that user can access"""
+    accessible_customers = user.get_accessible_customers()
+
+    if isinstance(accessible_customers, QuerySet):
+        return list(accessible_customers.values_list("id", flat=True))
+    elif isinstance(accessible_customers, list):
+        return [customer.id for customer in accessible_customers]
+    else:
+        return []
+
+
+@billing_staff_required
 @rate_limit(requests_per_minute=60, per_user=True)
 def billing_list(request: HttpRequest) -> HttpResponse:
     """
@@ -215,8 +215,8 @@ def billing_list(request: HttpRequest) -> HttpResponse:
         return redirect("users:login")
 
     try:
-        # Get accessible customers
-        customer_ids = _get_accessible_customer_ids(request.user)
+        # Staff can access all customers
+        customer_ids = list(Customer.objects.values_list('id', flat=True))
 
         # Filter by type
         doc_type = request.GET.get("type", "all")  # all, proforma, invoice
@@ -260,7 +260,7 @@ def billing_list(request: HttpRequest) -> HttpResponse:
                     "total": proforma.total,
                     "currency": proforma.currency,
                     "created_at": proforma.created_at,
-                    "status": "valid" if not proforma.is_expired else "expired",
+                    "status": proforma.status,
                     "can_edit": (request.user.is_staff or getattr(request.user, "staff_role", None))
                     and not proforma.is_expired,
                     "can_convert": (request.user.is_staff or getattr(request.user, "staff_role", None))
@@ -310,8 +310,8 @@ def billing_list(request: HttpRequest) -> HttpResponse:
         proforma_total = proformas_qs.aggregate(total=Sum("total_cents"))["total"] or 0
         invoice_total = invoices_qs.aggregate(total=Sum("total_cents"))["total"] or 0
 
-        # Check if user is staff for different context
-        is_staff_user = request.user.is_staff or getattr(request.user, "staff_role", None)
+        # Platform is staff-only
+        is_staff_user = True
 
         context = {
             "documents": pagination_context["page_obj"],  # ✅ Use paginated documents
@@ -366,8 +366,8 @@ def proforma_list(request: HttpRequest) -> HttpResponse:
         return redirect("users:login")
 
     try:
-        # Get accessible customers
-        customer_ids = _get_accessible_customer_ids(request.user)
+        # Staff can access all customers
+        customer_ids = list(Customer.objects.values_list('id', flat=True))
 
         # ✅ Get search context for template
         search_context = get_search_context(request, "search")
@@ -422,8 +422,8 @@ def proforma_list(request: HttpRequest) -> HttpResponse:
         # Statistics
         proforma_total = proformas_qs.aggregate(total=Sum("total_cents"))["total"] or 0
 
-        # Check if user is staff for different context
-        is_staff_user = request.user.is_staff or getattr(request.user, "staff_role", None)
+        # Platform is staff-only
+        is_staff_user = True
 
         context = {
             "documents": pagination_context["page_obj"],
@@ -466,7 +466,7 @@ def proforma_list(request: HttpRequest) -> HttpResponse:
         return render(request, "billing/billing_list.html", context)
 
 
-@login_required
+@billing_staff_required
 def billing_list_htmx(request: HttpRequest) -> HttpResponse:
     """
     🚀 HTMX endpoint for billing documents list with dynamic loading
@@ -477,8 +477,8 @@ def billing_list_htmx(request: HttpRequest) -> HttpResponse:
         return redirect("users:login")
 
     try:
-        # Get accessible customers
-        customer_ids = _get_accessible_customer_ids(request.user)
+        # Staff can access all customers
+        customer_ids = list(Customer.objects.values_list('id', flat=True))
 
         # Filter by type
         doc_type = request.GET.get("type", "all")  # all, proforma, invoice
@@ -518,7 +518,7 @@ def billing_list_htmx(request: HttpRequest) -> HttpResponse:
                     "total": proforma.total,
                     "currency": proforma.currency,
                     "created_at": proforma.created_at,
-                    "status": "valid" if not proforma.is_expired else "expired",
+                    "status": proforma.status,
                     "can_edit": (request.user.is_staff or getattr(request.user, "staff_role", None))
                     and not proforma.is_expired,
                     "can_convert": (request.user.is_staff or getattr(request.user, "staff_role", None))
@@ -597,10 +597,7 @@ def invoice_detail(request: HttpRequest, pk: int) -> HttpResponse:
     """
     invoice = get_object_or_404(Invoice, pk=pk)
 
-    # Security check - type guard for authenticated user
-    if not isinstance(request.user, User) or not request.user.can_access_customer(invoice.customer):
-        messages.error(request, _("❌ You do not have permission to access this invoice."))
-        return redirect("billing:invoice_list")
+    # Staff access - no customer restrictions needed
 
     # Get invoice items and payments
     items = invoice.lines.all()
@@ -715,10 +712,7 @@ def proforma_detail(request: HttpRequest, pk: int) -> HttpResponse:
     """
     proforma = get_object_or_404(ProformaInvoice, pk=pk)
 
-    # Security check - type guard for authenticated user
-    if not isinstance(request.user, User) or not request.user.can_access_customer(proforma.customer):
-        messages.error(request, _("❌ You do not have permission to access this proforma."))
-        return redirect("billing:invoice_list")
+    # Staff access - no customer restrictions needed
 
     # Get proforma lines
     lines = proforma.lines.all()
@@ -1599,3 +1593,382 @@ This ticket was automatically created from a customer refund request.
     except Exception as e:
         logger.exception(f"Failed to create invoice refund request ticket: {e}")
         return json_error("An unexpected error occurred while submitting your refund request")
+
+
+# ===============================================================================
+# PAYMENT API ENDPOINTS FOR PORTAL CONSUMPTION
+# ===============================================================================
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_create_payment_intent(request: HttpRequest) -> JsonResponse:
+    """
+    🔐 API: Create payment intent for Portal checkout
+
+    Expected payload:
+    {
+        "order_id": "uuid-string",
+        "amount_cents": 2999,
+        "currency": "RON",
+        "customer_id": 123,
+        "order_number": "ORD-2024-001",
+        "gateway": "stripe",
+        "metadata": {...}
+    }
+    """
+    logger = logging.getLogger(__name__)
+    try:
+        # Parse request data
+        data = json.loads(request.body)
+        order_id = data.get('order_id')
+        amount_cents = data.get('amount_cents')
+        currency = data.get('currency', 'RON')
+        customer_id = data.get('customer_id')
+        order_number = data.get('order_number')
+        gateway = data.get('gateway', 'stripe')
+        metadata = data.get('metadata', {})
+
+        # Enhanced input validation
+        if not order_id or not isinstance(order_id, str):
+            return JsonResponse({
+                'success': False,
+                'error': 'order_id is required and must be a string'
+            }, status=400)
+
+        if not amount_cents or not isinstance(amount_cents, int):
+            return JsonResponse({
+                'success': False,
+                'error': 'amount_cents is required and must be an integer'
+            }, status=400)
+
+        if amount_cents <= 0 or amount_cents > 100000000:  # Max 1M RON
+            return JsonResponse({
+                'success': False,
+                'error': 'amount_cents must be between 1 and 100,000,000 (1M RON)'
+            }, status=400)
+
+        if not customer_id:
+            return JsonResponse({
+                'success': False,
+                'error': 'customer_id is required'
+            }, status=400)
+
+        if currency and currency not in ['RON', 'EUR', 'USD']:
+            return JsonResponse({
+                'success': False,
+                'error': 'currency must be one of: RON, EUR, USD'
+            }, status=400)
+
+        if gateway not in ['stripe', 'bank']:
+            return JsonResponse({
+                'success': False,
+                'error': 'gateway must be one of: stripe, bank'
+            }, status=400)
+
+        # Create payment intent using PaymentService
+        result = PaymentService.create_payment_intent_direct(
+            order_id=order_id,
+            amount_cents=amount_cents,
+            currency=currency,
+            customer_id=customer_id,
+            order_number=order_number,
+            gateway=gateway,
+            metadata=metadata
+        )
+
+        if result['success']:
+            logger.info(f"✅ API: Created payment intent for order {order_id}")
+            return JsonResponse({
+                'success': True,
+                'payment_intent_id': result['payment_intent_id'],
+                'client_secret': result['client_secret']
+            })
+        else:
+            logger.error(f"❌ API: Failed to create payment intent: {result['error']}")
+            return JsonResponse({
+                'success': False,
+                'error': result['error']
+            }, status=400)
+
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'error': 'Invalid JSON payload'
+        }, status=400)
+    except Exception as e:
+        logger.error(f"🔥 API: Unexpected error creating payment intent: {e}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Internal server error'
+        }, status=500)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_confirm_payment(request: HttpRequest) -> JsonResponse:
+    """
+    🔐 API: Confirm payment status
+
+    Expected payload:
+    {
+        "payment_intent_id": "pi_...",
+        "gateway": "stripe"
+    }
+    """
+    logger = logging.getLogger(__name__)
+    try:
+        # Parse request data
+        data = json.loads(request.body)
+        payment_intent_id = data.get('payment_intent_id')
+        gateway = data.get('gateway', 'stripe')
+
+        # Enhanced input validation
+        if not payment_intent_id or not isinstance(payment_intent_id, str):
+            return JsonResponse({
+                'success': False,
+                'error': 'payment_intent_id is required and must be a string'
+            }, status=400)
+
+        # Basic format validation for Stripe payment intent IDs
+        if gateway == 'stripe' and not payment_intent_id.startswith('pi_'):
+            return JsonResponse({
+                'success': False,
+                'error': 'Invalid Stripe payment_intent_id format'
+            }, status=400)
+
+        if gateway not in ['stripe', 'bank']:
+            return JsonResponse({
+                'success': False,
+                'error': 'gateway must be one of: stripe, bank'
+            }, status=400)
+
+        # Confirm payment using PaymentService
+        result = PaymentService.confirm_payment(
+            payment_intent_id=payment_intent_id,
+            gateway=gateway
+        )
+
+        if result.get('success', False):
+            result_status = result.get('status', 'unknown')
+            logger.info(f"✅ API: Confirmed payment {payment_intent_id} - status: {result_status}")
+            return JsonResponse({
+                'success': True,
+                'status': result_status
+            })
+        else:
+            result_error = result.get('error', 'Unknown error')
+            logger.error(f"❌ API: Failed to confirm payment: {result_error}")
+            return JsonResponse({
+                'success': False,
+                'error': result_error
+            }, status=400)
+
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'error': 'Invalid JSON payload'
+        }, status=400)
+    except Exception as e:
+        logger.error(f"🔥 API: Unexpected error confirming payment: {e}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Internal server error'
+        }, status=500)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_create_subscription(request: HttpRequest) -> JsonResponse:
+    """
+    🔐 API: Create recurring subscription
+
+    Expected payload:
+    {
+        "customer_id": "uuid-string",
+        "price_id": "price_...",
+        "gateway": "stripe",
+        "metadata": {...}
+    }
+    """
+    logger = logging.getLogger(__name__)
+    try:
+        # Parse request data
+        data = json.loads(request.body)
+        customer_id = data.get('customer_id')
+        price_id = data.get('price_id')
+        gateway = data.get('gateway', 'stripe')
+        metadata = data.get('metadata', {})
+
+        # Validate required fields
+        if not customer_id or not price_id:
+            return JsonResponse({
+                'success': False,
+                'error': 'customer_id and price_id are required'
+            }, status=400)
+
+        # Create subscription using PaymentService
+        result = PaymentService.create_subscription(
+            customer_id=customer_id,
+            price_id=price_id,
+            gateway=gateway,
+            metadata=metadata
+        )
+
+        if result['success']:
+            logger.info(f"✅ API: Created subscription {result['subscription_id']} for customer {customer_id}")
+            return JsonResponse({
+                'success': True,
+                'subscription_id': result['subscription_id'],
+                'status': result['status']
+            })
+        else:
+            logger.error(f"❌ API: Failed to create subscription: {result['error']}")
+            return JsonResponse({
+                'success': False,
+                'error': result['error']
+            }, status=400)
+
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'error': 'Invalid JSON payload'
+        }, status=400)
+    except Exception as e:
+        logger.error(f"🔥 API: Unexpected error creating subscription: {e}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Internal server error'
+        }, status=500)
+
+
+@require_http_methods(["GET"])
+def api_payment_methods(request: HttpRequest, customer_id: str) -> JsonResponse:
+    """
+    🔐 API: Get available payment methods for customer
+
+    URL: /api/billing/payment-methods/{customer_id}/
+    """
+    logger = logging.getLogger(__name__)
+    try:
+        # Get available payment methods
+        methods = PaymentService.get_available_payment_methods(customer_id)
+
+        logger.info(f"✅ API: Retrieved {len(methods)} payment methods for customer {customer_id}")
+        return JsonResponse({
+            'success': True,
+            'payment_methods': methods
+        })
+
+    except Exception as e:
+        logger.error(f"🔥 API: Unexpected error getting payment methods: {e}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Internal server error'
+        }, status=500)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_process_refund(request: HttpRequest) -> JsonResponse:
+    """
+    🔐 API: Process payment refund
+
+    Expected payload:
+    {
+        "payment_id": "uuid-string",
+        "amount_cents": 2999,
+        "reason": "Customer request"
+    }
+    """
+    logger = logging.getLogger(__name__)
+    try:
+        # Parse request data
+        data = json.loads(request.body)
+        payment_id = data.get('payment_id')
+        data.get('amount_cents')
+        data.get('reason', 'API refund request')
+
+        # Validate required fields
+        if not payment_id:
+            return JsonResponse({
+                'success': False,
+                'error': 'payment_id is required'
+            }, status=400)
+
+        # TODO: Implement refund processing via PaymentService
+
+        logger.info(f"📝 API: Refund request for payment {payment_id} - not yet implemented")
+        return JsonResponse({
+            'success': False,
+            'error': 'Refund processing not yet implemented'
+        }, status=501)
+
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'error': 'Invalid JSON payload'
+        }, status=400)
+    except Exception as e:
+        logger.error(f"🔥 API: Unexpected error processing refund: {e}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Internal server error'
+        }, status=500)
+
+
+@require_http_methods(["GET"])
+def api_stripe_config(request: HttpRequest) -> JsonResponse:
+    """
+    🔐 API: Get Stripe configuration for Portal frontend
+
+    Returns only public keys and configuration safe for client-side use.
+    """
+    logger = logging.getLogger(__name__)
+    try:
+        from apps.settings.services import SettingsService
+
+        # Check if Stripe integration is enabled
+        stripe_enabled = SettingsService.get_setting("integrations.stripe_enabled", default=False)
+        if not stripe_enabled:
+            logger.warning("⚠️ API: Stripe integration is disabled")
+            return JsonResponse({
+                'success': False,
+                'error': 'Stripe integration disabled'
+            }, status=503)
+
+        # Get public configuration from settings system
+        publishable_key = SettingsService.get_setting("integrations.stripe_publishable_key")
+
+        config = {
+            'publishable_key': publishable_key,
+            'currency': 'RON',
+            'country': 'RO',
+            'supported_payment_methods': ['card'],
+            'appearance': {
+                'theme': 'stripe',
+                'variables': {
+                    'colorPrimary': '#0570de',
+                }
+            }
+        }
+
+        if not config['publishable_key']:
+            logger.error("❌ API: Stripe publishable key not configured in settings system")
+            return JsonResponse({
+                'success': False,
+                'error': 'Stripe not configured'
+            }, status=500)
+
+        logger.info("✅ API: Retrieved Stripe configuration from settings system")
+        return JsonResponse({
+            'success': True,
+            'config': config
+        })
+
+    except Exception as e:
+        logger.error(f"🔥 API: Unexpected error getting Stripe config: {e}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Internal server error'
+        }, status=500)

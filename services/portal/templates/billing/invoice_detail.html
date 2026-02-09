@@ -1,0 +1,371 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load formatting %}
+{% load ui_components %}
+
+{% block title %}{% trans "Invoice" %} {{ invoice.number }} - PRAHO Portal{% endblock %}
+
+{% block content %}
+<div class="px-4 sm:px-6 lg:px-8">
+  <!-- Header -->
+  <div class="sm:flex sm:items-center">
+    <div class="sm:flex-auto">
+      <h1 class="text-xl sm:text-2xl font-semibold text-white romanian-flag">
+        {% trans "Invoice" %} <span class="block sm:inline mt-1 sm:mt-0">{{ invoice.number }}</span>
+      </h1>
+      <p class="mt-2 text-sm text-slate-400">
+        {% trans "Invoice details and line items" %}
+      </p>
+    </div>
+    <div class="mt-4 sm:mt-0 sm:ml-16 sm:flex-none">
+      <!-- Mobile: Stacked buttons -->
+      <div class="flex flex-col sm:flex-row gap-2 sm:gap-3">
+        <!-- PDF Download Button -->
+        <a href="{% url 'billing:invoice_pdf_export' invoice.number %}" 
+           class="inline-flex items-center justify-center rounded-md border border-transparent bg-green-600 px-3 sm:px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-green-700">
+          📄 {% trans "Download PDF" %}
+        </a>
+        
+        <!-- Customer Refund Request Button -->
+        {% if invoice.status == "paid" %}
+          <button onclick="showInvoiceRefundRequestModal()" class="inline-flex items-center justify-center rounded-md border border-transparent bg-blue-600 px-3 sm:px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700">
+            🎫 {% trans "Request Refund" %}
+          </button>
+        {% endif %}
+        
+        <a href="{% url 'billing:invoices_list' %}"
+           class="inline-flex items-center justify-center rounded-md border border-transparent bg-slate-600 px-3 sm:px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-700">
+          ← {% trans "Back to Billing" %}
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Invoice Information -->
+  <div class="mt-6 sm:mt-8 bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg overflow-hidden">
+    <div class="px-4 py-5 sm:p-6">
+      <div class="grid grid-cols-1 gap-x-4 gap-y-4 sm:gap-y-6 sm:grid-cols-3">
+        <!-- Customer Name -->
+        <div>
+          <dt class="text-xs sm:text-sm font-medium text-slate-400">{% trans "Customer" %}</dt>
+          <dd class="mt-1 text-sm text-white">
+            {{ invoice.bill_to.name|default:"N/A" }}
+          </dd>
+        </div>
+
+        <!-- Status -->
+        <div>
+          <dt class="text-sm font-medium text-slate-400">{% trans "Status" %}</dt>
+          <dd class="mt-1">
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+              {% if invoice.status == 'paid' %}bg-green-100 text-green-800
+              {% elif invoice.status == 'issued' %}bg-blue-100 text-blue-800
+              {% elif invoice.status == 'overdue' %}bg-red-100 text-red-800
+              {% elif invoice.status == 'draft' %}bg-gray-100 text-gray-800
+              {% else %}bg-yellow-100 text-yellow-800{% endif %}">
+              {{ invoice.get_status_display }}
+            </span>
+          </dd>
+        </div>
+
+        <!-- Amount -->
+        <div>
+          <dt class="text-sm font-medium text-slate-400">{% trans "Total Amount" %}</dt>
+          <dd class="mt-1 text-lg font-semibold text-white">
+            {{ invoice.total_cents|cents_to_currency|romanian_currency:invoice.currency.code }}
+          </dd>
+        </div>
+
+        <!-- Issue Date -->
+        <div>
+          <dt class="text-sm font-medium text-slate-400">{% trans "Issue Date" %}</dt>
+          <dd class="mt-1 text-sm text-white">
+            {{ invoice.issued_at|date:"d.m.Y" }}
+          </dd>
+        </div>
+
+        <!-- Due Date -->
+        <div>
+          <dt class="text-sm font-medium text-slate-400">{% trans "Due Date" %}</dt>
+          <dd class="mt-1 text-sm text-white">
+            {{ invoice.due_at|date:"d.m.Y" }}
+          </dd>
+        </div>
+
+        <!-- Payment Status -->
+        <div>
+          <dt class="text-sm font-medium text-slate-400">{% trans "Payment Date" %}</dt>
+          <dd class="mt-1 text-sm text-white">
+            {% if invoice.paid_at %}
+              {{ invoice.paid_at|date:"d.m.Y H:i" }}
+            {% else %}
+              <span class="text-slate-500">{% trans "Not paid" %}</span>
+            {% endif %}
+          </dd>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Invoice Lines -->
+  <div class="mt-6 sm:mt-8">
+    <h2 class="text-base sm:text-lg font-medium text-white mb-4">{% trans "Invoice Lines" %}</h2>
+    <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg overflow-hidden">
+      
+      <!-- Desktop Table (hidden on mobile) -->
+      <div class="hidden sm:block">
+        <table class="min-w-full divide-y divide-slate-700">
+          <thead class="bg-slate-900">
+            <tr>
+              <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+                {% trans "Description" %}
+              </th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+                {% trans "Type" %}
+              </th>
+              <th class="px-6 py-3 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">
+                {% trans "Quantity" %}
+              </th>
+              <th class="px-6 py-3 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">
+                {% trans "Unit Price" %}
+              </th>
+              <th class="px-6 py-3 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">
+                {% trans "Total" %}
+              </th>
+            </tr>
+          </thead>
+          <tbody class="bg-slate-800 divide-y divide-slate-700">
+            {% for line in invoice.lines.all %}
+            <tr>
+              <td class="px-6 py-4 text-sm text-white">
+                {{ line.description }}
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
+                {{ line.get_kind_display }}
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap text-sm text-white text-right">
+                {{ line.quantity }}
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap text-sm text-white text-right">
+                {{ line.unit_price_cents|cents_to_currency|romanian_currency:invoice.currency.code }}
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-white text-right">
+                {{ line.line_total_cents|cents_to_currency|romanian_currency:invoice.currency.code }}
+              </td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="5" class="px-6 py-4 text-center text-sm text-slate-500">
+                {% trans "No invoice lines found" %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+          <tfoot class="bg-slate-900">
+            <tr>
+              <td colspan="4" class="px-6 py-4 text-right text-sm font-medium text-slate-400">
+                {% trans "Subtotal:" %}
+              </td>
+              <td class="px-6 py-4 text-right text-sm font-medium text-white">
+                {{ invoice.subtotal_cents|cents_to_currency|romanian_currency:invoice.currency.code }}
+              </td>
+            </tr>
+            <tr>
+              <td colspan="4" class="px-6 py-4 text-right text-sm font-medium text-slate-400">
+                {% trans "VAT:" %}
+              </td>
+              <td class="px-6 py-4 text-right text-sm font-medium text-white">
+                {{ invoice.tax_cents|cents_to_currency|romanian_currency:invoice.currency.code }}
+              </td>
+            </tr>
+            <tr class="border-t border-slate-600">
+              <td colspan="4" class="px-6 py-4 text-right text-lg font-bold text-slate-300">
+                {% trans "Total:" %}
+              </td>
+              <td class="px-6 py-4 text-right text-lg font-bold text-white">
+                {{ invoice.total_cents|cents_to_currency|romanian_currency:invoice.currency.code }}
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <!-- Mobile Card List (visible on mobile only) -->
+      <div class="sm:hidden">
+        {% for line in invoice.lines.all %}
+        <div class="p-4 border-b border-slate-700 last:border-b-0">
+          <!-- Line Item Header -->
+          <div class="flex items-center justify-between mb-2">
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-800 text-blue-200">
+              {{ line.get_kind_display }}
+            </span>
+            <span class="text-white font-medium text-sm">
+              {{ line.line_total_cents|cents_to_currency|romanian_currency:invoice.currency.code }}
+            </span>
+          </div>
+          
+          <!-- Description -->
+          <div class="mb-2">
+            <p class="text-white text-sm font-medium">{{ line.description }}</p>
+          </div>
+          
+          <!-- Quantity and Unit Price -->
+          <div class="flex items-center justify-between text-xs text-slate-400">
+            <span>{% trans "Qty:" %} {{ line.quantity }}</span>
+            <span>{% trans "Unit:" %} {{ line.unit_price_cents|cents_to_currency|romanian_currency:invoice.currency.code }}</span>
+          </div>
+        </div>
+        {% empty %}
+        <div class="p-6 text-center text-sm text-slate-500">
+          {% trans "No invoice lines found" %}
+        </div>
+        {% endfor %}
+
+        <!-- Mobile Totals -->
+        <div class="bg-slate-900 p-4 space-y-2">
+          <div class="flex items-center justify-between text-sm">
+            <span class="text-slate-400">{% trans "Subtotal:" %}</span>
+            <span class="text-white font-medium">
+              {{ invoice.subtotal_cents|cents_to_currency|romanian_currency:invoice.currency.code }}
+            </span>
+          </div>
+          <div class="flex items-center justify-between text-sm">
+            <span class="text-slate-400">{% trans "VAT:" %}</span>
+            <span class="text-white font-medium">
+              {{ invoice.tax_cents|cents_to_currency|romanian_currency:invoice.currency.code }}
+            </span>
+          </div>
+          <div class="flex items-center justify-between text-base font-bold border-t border-slate-600 pt-2">
+            <span class="text-slate-300">{% trans "Total:" %}</span>
+            <span class="text-white">
+              {{ invoice.total_cents|cents_to_currency|romanian_currency:invoice.currency.code }}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Invoice Refund Request Modal (for customers) -->
+{% if invoice.status == "paid" %}
+<div id="invoiceRefundRequestModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
+  <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+    <div class="fixed inset-0 transition-opacity" aria-hidden="true">
+      <div class="absolute inset-0 bg-slate-900 opacity-75" onclick="hideInvoiceRefundRequestModal()"></div>
+    </div>
+
+    <div class="inline-block align-bottom bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+      <form id="invoiceRefundRequestForm" method="post">
+        {% csrf_token %}
+        <div class="px-6 pt-6 pb-4">
+          <h3 class="text-lg font-medium text-white mb-4">🎫 {% trans "Request Invoice Refund" %}</h3>
+          <p class="text-sm text-slate-400 mb-4">
+            {% trans "Submit a refund request for this invoice. Our billing team will review your request and contact you." %}
+          </p>
+          
+          <div class="mb-4">
+            <label for="invoice_refund_request_reason" class="block text-sm font-medium text-slate-400 mb-2">
+              {% trans "Refund Reason" %} <span class="text-red-400">*</span>
+            </label>
+            <select id="invoice_refund_request_reason" name="refund_reason" required
+                    class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500">
+              <option value="">{% trans "Please select a reason..." %}</option>
+              <option value="customer_request">🙋 {% trans "General Customer Request" %}</option>
+              <option value="service_failure">❌ {% trans "Service Not Working" %}</option>
+              <option value="quality_issue">🔍 {% trans "Quality Not As Expected" %}</option>
+              <option value="technical_issue">⚙️ {% trans "Technical Problems" %}</option>
+              <option value="cancellation_request">🚫 {% trans "Want to Cancel Service" %}</option>
+              <option value="duplicate_invoice">📋 {% trans "Duplicate Invoice" %}</option>
+              <option value="billing_error">💳 {% trans "Billing Error" %}</option>
+              <option value="policy_violation">📜 {% trans "Service Policy Issue" %}</option>
+              <option value="unsatisfied_service">😞 {% trans "Not Satisfied with Service" %}</option>
+              <option value="other">❓ {% trans "Other Reason" %}</option>
+            </select>
+          </div>
+          
+          <div class="mb-4">
+            <label for="invoice_refund_request_notes" class="block text-sm font-medium text-slate-400 mb-2">
+              {% trans "Details" %} <span class="text-red-400">*</span>
+            </label>
+            <textarea id="invoice_refund_request_notes" name="refund_notes" rows="4" required
+                      class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+                      placeholder="{% trans 'Please provide details about your refund request. The more information you provide, the faster we can process your request.' %}"></textarea>
+            <p class="text-xs text-slate-500 mt-1">
+              {% trans "Include details like what went wrong, when the issue occurred, or any relevant information." %}
+            </p>
+          </div>
+
+          <div class="mb-4 p-4 bg-blue-900 border border-blue-700 rounded-lg">
+            <div class="flex items-start">
+              <div class="flex-shrink-0">
+                <span class="text-blue-300 text-xl">ℹ️</span>
+              </div>
+              <div class="ml-3">
+                <h4 class="text-sm font-medium text-blue-200">{% trans 'What happens next?' %}</h4>
+                <div class="mt-1 text-sm text-blue-300">
+                  <p>{% trans 'We will create a support ticket for your refund request and our billing team will review it within 1-2 business days.' %}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
+          <button type="button" onclick="hideInvoiceRefundRequestModal()" 
+                  class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white">
+            {% trans "Cancel" %}
+          </button>
+          <button type="submit"
+                  class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700 focus:ring-2 focus:ring-blue-500">
+            🎫 {% trans "Submit Request" %}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+function showInvoiceRefundRequestModal() {
+    document.getElementById('invoiceRefundRequestModal').classList.remove('hidden');
+}
+
+function hideInvoiceRefundRequestModal() {
+    document.getElementById('invoiceRefundRequestModal').classList.add('hidden');
+}
+
+// Handle invoice refund request form submission
+document.getElementById('invoiceRefundRequestForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(this);
+    
+    // Basic validation
+    if (!formData.get('refund_reason') || !formData.get('refund_notes').trim()) {
+        alert('{% trans "Please fill in all required fields." %}');
+        return;
+    }
+    
+    // Show confirmation
+    if (!confirm('{% trans "Submit refund request? We will create a support ticket and contact you." %}')) {
+        return;
+    }
+    
+    // Disable submit button
+    const submitBtn = this.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '⏳ {% trans "Submitting..." %}';
+    
+    // For now, just show success message
+    alert('{% trans "Refund request feature coming soon! Please contact support directly." %}');
+    
+    // Re-enable button
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = '🎫 {% trans "Submit Request" %}';
+    hideInvoiceRefundRequestModal();
+});
+</script>
+{% endif %}
+
+{% endblock %}

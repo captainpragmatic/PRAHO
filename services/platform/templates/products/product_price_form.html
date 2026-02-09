@@ -21,60 +21,83 @@
       💰 {% trans "Add New Price" %}
     </h1>
     <p class="mt-2 text-slate-400">
-      {% trans "Configure pricing for" %} {{ product.name }}
+      {% trans "Configure simplified pricing for" %} {{ product.name }}
     </p>
   </div>
 
-  <!-- Romanian Business Context -->
-  <div class="bg-blue-900 border border-blue-700 rounded-lg p-4 mb-6">
+  <!-- Simplified Pricing Notice -->
+  <div class="bg-green-900 border border-green-700 rounded-lg p-4 mb-6">
     <div class="flex items-start">
       <div class="flex-shrink-0">
-        <span class="text-blue-300 text-xl">🇷🇴</span>
+        <span class="text-green-300 text-xl">✨</span>
       </div>
       <div class="ml-3">
-        <h3 class="text-sm font-medium text-blue-200">{% trans 'Romanian Business Pricing' %}</h3>
-        <div class="mt-1 text-sm text-blue-300">
-          <p>{% trans 'Product VAT setting:' %}
-            {% if product.includes_vat %}
-              <span class="text-green-300 font-medium">{% trans 'Prices include 19% VAT' %}</span>
-              <br>{% trans 'Enter the final price including VAT. System will calculate base price for e-Factura.' %}
-            {% else %}
-              <span class="text-yellow-300 font-medium">{% trans 'Prices exclude VAT' %}</span>
-              <br>{% trans 'Enter the base price. 19% VAT will be added for Romanian customers.' %}
-            {% endif %}
-          </p>
+        <h3 class="text-sm font-medium text-green-200">{% trans 'Simplified Pricing Model' %}</h3>
+        <div class="mt-1 text-sm text-green-300">
+          <p>{% trans 'Set one monthly price and optional discounts:' %}</p>
+          <ul class="mt-2 space-y-1">
+            <li>• {% trans 'Monthly: Base price (what you enter)' %}</li>
+            <li>• {% trans 'Semi-annual: Monthly × 6 (with optional discount)' %}</li>
+            <li>• {% trans 'Annual: Monthly × 12 (with optional discount)' %}</li>
+          </ul>
         </div>
       </div>
     </div>
   </div>
 
+
   <!-- Form -->
   <form method="POST" class="space-y-6">
     {% csrf_token %}
-    
+
     <!-- Basic Pricing -->
     <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
       <h2 class="text-xl font-semibold text-white mb-6">💰 {% trans 'Basic Pricing' %}</h2>
-      
+
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <!-- Currency -->
         <div>
           {% input_field "currency" input_type="select" label="Currency" html_id="id_currency" placeholder="Select currency" required=True options=currency_options value=form.currency.value help_text="RON recommended for Romanian customers" error=form.currency.errors.0 %}
         </div>
 
-        <!-- Billing Period -->
+        <!-- Monthly Price (in cents) -->
         <div>
-          {% input_field "billing_period" input_type="select" label="Billing Period" html_id="id_billing_period" placeholder="Select billing period" required=True options=billing_period_options value=form.billing_period.value help_text="How often customer is billed" error=form.billing_period.errors.0 %}
-        </div>
-
-        <!-- Amount (in cents) -->
-        <div>
-          {% input_field "amount_cents" input_type="number" label="Price (in cents)" html_id="id_amount_cents" placeholder="2999" required=True value=form.amount_cents.value help_text="Enter price in cents (e.g., 2999 for 29.99). Avoids decimal precision issues." error=form.amount_cents.errors.0 %}
+          {% input_field "monthly_price_cents" input_type="number" label="Monthly Price (in cents)" html_id="id_monthly_price_cents" placeholder="2999" required=True value=form.monthly_price_cents.value help_text="Enter monthly price in cents (e.g., 2999 for 29.99). Longer periods calculated automatically." error=form.monthly_price_cents.errors.0 %}
+          <div id="monthly_price_helper" class="text-xs text-slate-400 mt-1"></div>
         </div>
 
         <!-- Setup Fee (in cents) -->
-        <div>
+        <div class="md:col-span-2">
           {% input_field "setup_cents" input_type="number" label="Setup Fee (in cents)" html_id="id_setup_cents" placeholder="0" value=form.setup_cents.value|default:"0" help_text="One-time setup fee (0 for none)" error=form.setup_cents.errors.0 %}
+          <div id="setup_price_helper" class="text-xs text-slate-400 mt-1"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Billing Period Discounts -->
+    <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+      <h2 class="text-xl font-semibold text-white mb-6">🎯 {% trans 'Billing Period Discounts' %}</h2>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Semi-annual Discount -->
+        <div>
+          {% input_field "semiannual_discount_percent" input_type="number" label="Semi-Annual Discount %" html_id="id_semiannual_discount_percent" placeholder="0" min=0 max=100 value=form.semiannual_discount_percent.value|default:"0" help_text="Discount for 6-month billing (0 = no discount)" error=form.semiannual_discount_percent.errors.0 %}
+          <div id="semiannual_calculation" class="text-xs text-slate-400 mt-1">{% trans 'Semi-annual will be: Monthly × 6' %}</div>
+        </div>
+
+        <!-- Annual Discount -->
+        <div>
+          {% input_field "annual_discount_percent" input_type="number" label="Annual Discount %" html_id="id_annual_discount_percent" placeholder="0" min=0 max=100 value=form.annual_discount_percent.value|default:"0" help_text="Discount for 12-month billing (0 = no discount)" error=form.annual_discount_percent.errors.0 %}
+          <div id="annual_calculation" class="text-xs text-slate-400 mt-1">{% trans 'Annual will be: Monthly × 12' %}</div>
+        </div>
+      </div>
+
+      <div class="mt-4 p-3 bg-yellow-900 border border-yellow-700 rounded-lg">
+        <div class="flex items-start">
+          <span class="text-yellow-300 mr-2">💡</span>
+          <div class="text-sm text-yellow-200">
+            {% trans 'When discount is 0%, longer billing periods show calculated prices as read-only. When discount > 0%, they become active pricing options with reduced rates.' %}
+          </div>
         </div>
       </div>
     </div>
@@ -82,7 +105,7 @@
     <!-- Quantity Limits -->
     <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
       <h2 class="text-xl font-semibold text-white mb-6">📊 {% trans 'Quantity Limits' %}</h2>
-      
+
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <!-- Minimum Quantity -->
         <div>
@@ -93,22 +116,18 @@
         <div>
           {% input_field "maximum_quantity" input_type="number" label="Maximum Quantity" html_id="id_maximum_quantity" placeholder="" value=form.maximum_quantity.value help_text="Maximum quantity (blank for unlimited)" error=form.maximum_quantity.errors.0 %}
         </div>
-
-        <!-- Discount Percentage -->
-        <div class="md:col-span-2">
-          {% input_field "discount_percent" input_type="number" label="Discount Percentage" html_id="id_discount_percent" placeholder="0" min=0 max=100 value=form.discount_percent.value|default:"0" help_text="Optional discount percentage (0-100)" error=form.discount_percent.errors.0 %}
-        </div>
       </div>
     </div>
 
     <!-- Promotional Pricing -->
     <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
       <h2 class="text-xl font-semibold text-white mb-6">🎉 {% trans 'Promotional Pricing' %}</h2>
-      
+
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <!-- Promo Price -->
         <div>
-          {% input_field "promo_price_cents" input_type="number" label="Promotional Price (in cents)" html_id="id_promo_price_cents" placeholder="1999" value=form.promo_price_cents.value help_text="Special promotional price (leave blank for none)" error=form.promo_price_cents.errors.0 %}
+          {% input_field "promo_price_cents" input_type="number" label="Promotional Monthly Price (in cents)" html_id="id_promo_price_cents" placeholder="1999" value=form.promo_price_cents.value help_text="Special promotional monthly price (leave blank for none)" error=form.promo_price_cents.errors.0 %}
+          <div id="promo_price_helper" class="text-xs text-slate-400 mt-1"></div>
         </div>
 
         <!-- Promo Valid Until -->
@@ -116,12 +135,12 @@
           {% input_field "promo_valid_until" input_type="date" label="Promotion Valid Until" html_id="id_promo_valid_until" value=form.promo_valid_until.value help_text="When the promotional pricing expires" error=form.promo_valid_until.errors.0 %}
         </div>
       </div>
-      
+
       <div class="mt-4 p-3 bg-yellow-900 border border-yellow-700 rounded-lg">
         <div class="flex items-start">
           <span class="text-yellow-300 mr-2">⚠️</span>
           <div class="text-sm text-yellow-200">
-            {% trans 'Promotional pricing will automatically revert to regular pricing after the expiration date.' %}
+            {% trans 'Promotional pricing affects the monthly base price. Longer billing periods will be calculated from the promotional monthly price.' %}
           </div>
         </div>
       </div>
@@ -130,13 +149,13 @@
     <!-- Status -->
     <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
       <h2 class="text-xl font-semibold text-white mb-6">⚙️ {% trans 'Status' %}</h2>
-      
+
       {% checkbox_field "is_active" label="Active (available for ordering)" html_id="id_is_active" checked=form.is_active.value help_text="Inactive prices are not shown to customers" %}
     </div>
 
     <!-- Form Actions -->
     <div class="flex justify-end space-x-3">
-      <a href="{% url 'products:product_prices' slug=product.slug %}" 
+      <a href="{% url 'products:product_prices' slug=product.slug %}"
          class="px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-md font-medium transition-colors">
         ❌ {% trans 'Cancel' %}
       </a>
@@ -146,34 +165,62 @@
 </div>
 
 <script>
-// Price calculator helper
+// Price calculator helper for the simplified model
 document.addEventListener('DOMContentLoaded', function() {
-    const amountInput = document.getElementById('id_amount_cents');
+    const monthlyInput = document.getElementById('id_monthly_price_cents');
     const setupInput = document.getElementById('id_setup_cents');
     const promoInput = document.getElementById('id_promo_price_cents');
-    
-    function addCentsHelper(input) {
-        if (!input) return;
-        
-        const helper = document.createElement('div');
-        helper.className = 'text-xs text-slate-400 mt-1';
-        helper.id = input.id + '_helper';
-        
-        input.parentNode.insertBefore(helper, input.nextSibling);
-        
-        input.addEventListener('input', function() {
-            const cents = parseInt(this.value) || 0;
-            const currency = cents / 100;
-            helper.textContent = `≈ ${currency.toFixed(2)} (${currency} units)`;
-        });
-        
-        // Initial calculation
-        input.dispatchEvent(new Event('input'));
+    const semiannualDiscountInput = document.getElementById('id_semiannual_discount_percent');
+    const annualDiscountInput = document.getElementById('id_annual_discount_percent');
+
+    function updateCalculations() {
+        const monthlyCents = parseInt(monthlyInput.value) || 0;
+        const monthlyPrice = monthlyCents / 100;
+        const semiannualDiscount = parseFloat(semiannualDiscountInput.value) || 0;
+        const annualDiscount = parseFloat(annualDiscountInput.value) || 0;
+
+        // Update monthly price helper
+        document.getElementById('monthly_price_helper').textContent =
+            `≈ ${monthlyPrice.toFixed(2)} per month`;
+
+        // Update setup fee helper
+        const setupCents = parseInt(setupInput.value) || 0;
+        document.getElementById('setup_price_helper').textContent =
+            `≈ ${(setupCents / 100).toFixed(2)} one-time fee`;
+
+        // Update promotional price helper
+        if (promoInput.value) {
+            const promoCents = parseInt(promoInput.value) || 0;
+            document.getElementById('promo_price_helper').textContent =
+                `≈ ${(promoCents / 100).toFixed(2)} promotional monthly price`;
+        }
+
+        // Calculate semi-annual price
+        const semiannualBase = monthlyPrice * 6;
+        const semiannualFinal = semiannualBase * (1 - semiannualDiscount / 100);
+        document.getElementById('semiannual_calculation').textContent =
+            semiannualDiscount > 0
+                ? `Semi-annual: ${semiannualBase.toFixed(2)} - ${semiannualDiscount}% = ${semiannualFinal.toFixed(2)}`
+                : `Semi-annual will be: ${semiannualBase.toFixed(2)} (no discount)`;
+
+        // Calculate annual price
+        const annualBase = monthlyPrice * 12;
+        const annualFinal = annualBase * (1 - annualDiscount / 100);
+        document.getElementById('annual_calculation').textContent =
+            annualDiscount > 0
+                ? `Annual: ${annualBase.toFixed(2)} - ${annualDiscount}% = ${annualFinal.toFixed(2)}`
+                : `Annual will be: ${annualBase.toFixed(2)} (no discount)`;
     }
-    
-    addCentsHelper(amountInput);
-    addCentsHelper(setupInput);
-    addCentsHelper(promoInput);
+
+    // Add event listeners
+    monthlyInput.addEventListener('input', updateCalculations);
+    setupInput.addEventListener('input', updateCalculations);
+    promoInput.addEventListener('input', updateCalculations);
+    semiannualDiscountInput.addEventListener('input', updateCalculations);
+    annualDiscountInput.addEventListener('input', updateCalculations);
+
+    // Initial calculation
+    updateCalculations();
 });
 </script>
 {% endblock %}

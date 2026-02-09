@@ -1,0 +1,206 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans 'Regenerate Backup Codes' %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+  <div class="max-w-3xl w-full space-y-8">
+    
+    <!-- Header -->
+    <div class="text-center">
+      <div class="mx-auto h-16 w-16 text-5xl">🔄</div>
+      <h2 class="mt-6 text-3xl font-extrabold text-white">
+        {% trans 'Regenerate Backup Codes' %}
+      </h2>
+      <p class="mt-2 text-lg text-slate-400">
+        {% trans 'Generate fresh backup codes for emergency access' %}
+      </p>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      
+      <!-- Left Column: Status & Warning -->
+      <div class="space-y-6">
+        
+        <!-- Current Status Card -->
+        <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+          <div class="text-center">
+            <div class="text-4xl mb-4">📊</div>
+            <h3 class="text-lg font-medium text-white mb-4">
+              {% trans 'Current Status' %}
+            </h3>
+            <div class="bg-slate-700 rounded-lg p-4 border border-slate-600">
+              <div class="text-3xl font-bold text-blue-400 mb-2">
+                {{ backup_count }}
+              </div>
+              <p class="text-sm text-slate-300">
+                {% trans 'unused backup codes remaining' %}
+              </p>
+            </div>
+            
+            {% if backup_count <= 2 %}
+            <div class="mt-4 p-3 bg-yellow-900 bg-opacity-50 rounded-lg border border-yellow-600">
+              <div class="flex items-center">
+                <span class="text-xl mr-2">⚠️</span>
+                <span class="text-yellow-200 text-sm">
+                  {% trans 'Running low on backup codes!' %}
+                </span>
+              </div>
+            </div>
+            {% endif %}
+          </div>
+        </div>
+
+        <!-- Security Warning -->
+        <div class="bg-red-900 bg-opacity-50 rounded-lg p-6 border border-red-600">
+          <div class="flex items-center mb-4">
+            <div class="text-2xl mr-3">🚨</div>
+            <h3 class="text-lg font-medium text-red-200">
+              {% trans 'Important Warning' %}
+            </h3>
+          </div>
+          <div class="space-y-3 text-sm text-red-200">
+            <div class="flex items-start">
+              <span class="text-red-400 mr-2">•</span>
+              {% trans 'All existing backup codes will be invalidated' %}
+            </div>
+            <div class="flex items-start">
+              <span class="text-red-400 mr-2">•</span>
+              {% trans 'You will receive 8 new fresh backup codes' %}
+            </div>
+            <div class="flex items-start">
+              <span class="text-red-400 mr-2">•</span>
+              {% trans 'Ensure you have access to your authenticator app' %}
+            </div>
+            <div class="flex items-start">
+              <span class="text-red-400 mr-2">•</span>
+              {% trans 'Store new codes securely after generation' %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column: Action Form -->
+      <div>
+        <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+          <div class="text-center mb-6">
+            <div class="text-4xl mb-4">🔑</div>
+            <h3 class="text-lg font-medium text-white mb-2">
+              {% trans 'Generate New Codes' %}
+            </h3>
+            <p class="text-sm text-slate-400">
+              {% trans 'Confirm regeneration to proceed' %}
+            </p>
+          </div>
+      </div>
+    </div>
+
+    <form method="post" class="space-y-6">
+            {% csrf_token %}
+            
+            <!-- Display form errors -->
+            {% if messages %}
+              {% for message in messages %}
+                {% if message.tags == 'error' %}
+                <div class="bg-red-900 bg-opacity-50 border border-red-600 rounded-lg p-4">
+                  <div class="flex items-center">
+                    <div class="text-xl mr-3">❌</div>
+                    <div class="text-red-200 text-sm">{{ message }}</div>
+                  </div>
+                </div>
+                {% endif %}
+              {% endfor %}
+            {% endif %}
+
+            <!-- Verification Input -->
+            <div>
+              <label for="token" class="block text-sm font-medium text-slate-300 mb-2">
+                🔢 {% trans 'Confirm with MFA Code' %}
+              </label>
+              <input type="text" id="token" name="token" maxlength="8" 
+                     class="appearance-none block w-full px-4 py-3 border border-slate-600 placeholder-slate-400 text-white text-center text-xl font-mono tracking-widest rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-slate-700 transition-all"
+                     placeholder="123456" required autocomplete="off" autofocus>
+              <p class="mt-2 text-xs text-slate-400">
+                {% trans 'Enter code from your authenticator app or existing backup code' %}
+              </p>
+            </div>
+
+            <!-- Confirmation Checkbox -->
+            <div class="border border-yellow-600 bg-yellow-900 bg-opacity-30 rounded-lg p-4">
+              {% checkbox_field name="confirm_regenerate" label="I understand that all existing backup codes will be invalidated and I will need to store the new codes securely" required=True variant="warning" %}
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="flex space-x-3">
+              <a href="{% url 'users:user_profile' %}" 
+                 class="flex-1 flex justify-center py-3 px-4 border border-slate-600 text-sm font-medium rounded-lg text-slate-300 hover:bg-slate-700 hover:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-500 transition-colors">
+                ← {% trans 'Cancel' %}
+              </a>
+              <button type="submit" 
+                      class="flex-1 flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
+                      onclick="return confirmRegenerate()">
+                <span class="mr-2">🔄</span>
+                {% trans 'Regenerate Codes' %}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- Best Practices Guide -->
+    <div class="bg-blue-900 bg-opacity-50 rounded-lg border border-blue-600 p-6">
+      <div class="flex items-start">
+        <div class="text-2xl mr-4">💡</div>
+        <div>
+          <h3 class="text-lg font-medium text-blue-200 mb-3">
+            {% trans 'When to Regenerate Backup Codes' %}
+          </h3>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-blue-300">
+            <div class="space-y-2">
+              <p class="font-medium">{% trans 'Good reasons:' %}</p>
+              <p>• {% trans 'Running low on unused codes (< 3 remaining)' %}</p>
+              <p>• {% trans 'Suspect codes may be compromised' %}</p>
+              <p>• {% trans 'Lost access to stored codes' %}</p>
+            </div>
+            <div class="space-y-2">
+              <p class="font-medium">{% trans 'After regeneration:' %}</p>
+              <p>• {% trans 'Download and store codes securely' %}</p>
+              <p>• {% trans 'Print codes for offline backup' %}</p>
+              <p>• {% trans 'Test one code to verify it works' %}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- JavaScript for Enhanced UX -->
+<script>
+function confirmRegenerate() {
+  const checkbox = document.getElementById('checkbox-confirm_regenerate');
+  if (!checkbox.checked) {
+    alert('{% trans "Please confirm that you understand the implications of regenerating backup codes" %}');
+    return false;
+  }
+  
+  return confirm('{% trans "Are you sure you want to regenerate your backup codes? All existing codes will be invalidated." %}');
+}
+
+// Auto-format input
+document.getElementById('token').addEventListener('input', function(e) {
+  let value = e.target.value.replace(/\D/g, ''); // Remove non-digits for TOTP
+  // Allow backup codes (alphanumeric with dashes)
+  if (value.length === 0 && e.target.value.match(/[A-Za-z-]/)) {
+    value = e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, '');
+  } else if (value.length > 6) {
+    value = value.substring(0, 6); // Limit TOTP to 6 digits
+  }
+  e.target.value = value;
+});
+</script>
+
+{% endblock %}

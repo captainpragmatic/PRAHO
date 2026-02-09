@@ -270,6 +270,20 @@ class Invoice(models.Model):
         """Convert cents to decimal"""
         return Decimal(self.total_cents) / 100
 
+    def recalculate_totals(self) -> None:
+        """
+        Recalculate document totals from line items.
+        Ensures end-to-end consistency: subtotal = Σ(line subtotals), tax = Σ(line taxes)
+        """
+        lines = self.lines.all()
+
+        # Calculate subtotals and tax amounts by summing line items
+        self.subtotal_cents = sum(line.subtotal_cents for line in lines)
+        self.tax_cents = sum(line.tax_cents for line in lines)
+
+        # Total = subtotal + tax (no discount handling for now)
+        self.total_cents = self.subtotal_cents + self.tax_cents
+
     def is_overdue(self) -> bool:
         """Check if invoice is overdue"""
         return self.due_at is not None and timezone.now() > self.due_at and self.status == "issued"
@@ -332,6 +346,7 @@ class InvoiceLine(models.Model):
     tax_rate = models.DecimalField(
         max_digits=5, decimal_places=4, default=Decimal("0.0000"), help_text=_("Tax rate as decimal (0.19 for 19%)")
     )
+    tax_cents = models.BigIntegerField(default=0, help_text=_("Tax amount in cents"))
     line_total_cents = models.BigIntegerField(default=0)
 
     class Meta:
@@ -344,11 +359,30 @@ class InvoiceLine(models.Model):
         )
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        # Calculate line total
-        subtotal = self.quantity * (Decimal(self.unit_price_cents) / 100)
-        tax_amount = subtotal * self.tax_rate
-        self.line_total_cents = int((subtotal + tax_amount) * 100)
+        # Calculate totals before saving
+        self.calculate_totals()
         super().save(*args, **kwargs)
+
+    def calculate_totals(self) -> int:
+        """Calculate tax and line total with proper banker's rounding for Romanian VAT compliance"""
+        from decimal import ROUND_HALF_EVEN
+
+        subtotal = self.subtotal_cents
+        # Use banker's rounding for VAT compliance (same as OrderItem)
+        vat_amount = Decimal(subtotal) * Decimal(str(self.tax_rate))
+        self.tax_cents = int(vat_amount.quantize(Decimal('1'), rounding=ROUND_HALF_EVEN))
+        self.line_total_cents = subtotal + self.tax_cents
+        return self.line_total_cents
+
+    @property
+    def subtotal_cents(self) -> int:
+        """Calculate subtotal (quantity x unit_price) in cents"""
+        return int(self.quantity * self.unit_price_cents)
+
+    @property
+    def subtotal(self) -> Decimal:
+        """Return subtotal in currency units"""
+        return Decimal(self.subtotal_cents) / 100
 
     @property
     def unit_price(self) -> Decimal:

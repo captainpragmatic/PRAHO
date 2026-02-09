@@ -1,0 +1,498 @@
+{% extends "base.html" %}
+{% load i18n ui_components %}
+
+{% block title %}{% trans "Order Confirmed" %}{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+  
+  <!-- Breadcrumbs -->
+  {% include "orders/partials/order_breadcrumbs.html" with current_step="confirm" %}
+  
+  <!-- Success Header -->
+  <div class="text-center mb-8">
+    <div class="text-6xl mb-4">✅</div>
+    <h1 class="text-3xl font-bold text-green-400 mb-2">
+      {% trans "Order confirmed successfully!" %}
+    </h1>
+    <p class="text-slate-400 text-lg">
+      {% trans "Your order has been registered and will be processed soon." %}
+    </p>
+  </div>
+  
+  <!-- Order Details Card -->
+  <div class="bg-slate-800 rounded-lg border border-slate-700 mb-8">
+    
+    <!-- Order Header -->
+    <div class="px-6 py-4 border-b border-slate-700">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 class="text-xl font-medium text-white">
+            {% trans "Order" %} #{{ order.order_number }}
+          </h2>
+          <p class="text-slate-400 text-sm mt-1">
+            {% trans "Created at" %}: {{ order.created_at|date:"d M Y, H:i" }}
+          </p>
+        </div>
+        
+        <div class="mt-3 sm:mt-0">
+          {% badge order.status|upper variant="warning" size="lg" icon="⏳" %}
+        </div>
+      </div>
+    </div>
+    
+    <!-- Order Items -->
+    <div class="px-6 py-4">
+      <h3 class="text-lg font-medium text-white mb-4">{% trans "Ordered products" %}</h3>
+      
+      <div class="space-y-4">
+        {% for item in order.items %}
+        <div class="flex items-start justify-between p-4 bg-slate-700/30 rounded-lg">
+          <div class="flex-1 min-w-0">
+            <h4 class="font-medium text-white">{{ item.product_name }}</h4>
+            
+            <div class="flex flex-wrap items-center gap-2 mt-2">
+              {% badge item.product_type|title variant="secondary" size="sm" %}
+              {% badge item.billing_period|title variant="primary" size="sm" %}
+              
+              {% if item.domain_name %}
+              <span class="flex items-center text-slate-400 text-sm">
+                <span class="mr-1">🌐</span>
+                {{ item.domain_name }}
+              </span>
+              {% endif %}
+            </div>
+            
+            <!-- Configuration -->
+            {% if item.config %}
+            <details class="mt-3">
+              <summary class="text-sm text-blue-400 cursor-pointer hover:text-blue-300">
+                {% trans "View configuration" %}
+              </summary>
+              <div class="mt-2 pl-4 border-l-2 border-slate-600">
+                <dl class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                  {% for key, value in item.config.items %}
+                  <div>
+                    <dt class="text-slate-400">{{ key|title }}</dt>
+                    <dd class="text-white">{{ value }}</dd>
+                  </div>
+                  {% endfor %}
+                </dl>
+              </div>
+            </details>
+            {% endif %}
+          </div>
+          
+          <!-- Quantity and Price -->
+          <div class="text-right ml-4 flex-shrink-0">
+            <div class="text-white font-medium">
+              {{ item.quantity }}x
+            </div>
+            <div class="text-slate-400 text-sm font-mono">
+              {{ item.line_total }} {{ order.currency_code }}
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    
+    <!-- Order Totals -->
+    <div class="px-6 py-4 border-t border-slate-700 bg-slate-700/20">
+      <div class="flex justify-end">
+        <div class="w-full max-w-xs">
+          <div class="space-y-2">
+            <div class="flex justify-between text-slate-400">
+              <span>{% trans "Subtotal" %}</span>
+              <span class="font-mono">{{ order.subtotal }} {{ order.currency_code }}</span>
+            </div>
+            <div class="flex justify-between text-slate-400">
+              <span>{% trans "VAT (21%)" %}</span>
+              <span class="font-mono">{{ order.tax_amount }} {{ order.currency_code }}</span>
+            </div>
+            <div class="border-t border-slate-600 pt-2">
+              <div class="flex justify-between text-lg font-bold text-white">
+                <span>{% trans "Total" %}</span>
+                <span class="font-mono text-green-400">{{ order.total }} {{ order.currency_code }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Payment Section for Pending Orders -->
+  {% if payment_info and stripe_config %}{% if order.status == 'pending' %}
+  <div class="bg-gradient-to-r from-blue-900/40 to-green-900/40 border border-blue-700/50 rounded-lg mb-8">
+    <div class="px-6 py-4 border-b border-blue-700/50">
+      <h3 class="text-xl font-medium text-white flex items-center">
+        <span class="mr-2">💳</span>
+        {% trans "Complete Payment" %}
+      </h3>
+      <p class="text-blue-200 text-sm mt-1">
+        {% trans "Complete your payment to activate your services immediately" %}
+      </p>
+    </div>
+
+    <div class="p-6">
+      <div class="grid md:grid-cols-2 gap-8">
+
+        <!-- Payment Form -->
+        <div>
+          <h4 class="text-lg font-medium text-white mb-4">{% trans "Payment Details" %}</h4>
+
+          <form id="payment-form" class="space-y-4">
+            {% csrf_token %}
+
+            <!-- Stripe Elements Container -->
+            <div id="payment-element" class="p-4 bg-white rounded-lg border border-slate-300">
+              <!-- Stripe Elements will be inserted here -->
+            </div>
+
+            <!-- Payment Button -->
+            <button
+              id="submit"
+              class="w-full bg-green-600 hover:bg-green-500 text-white font-medium py-3 px-6 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled
+            >
+              <span id="button-text">
+                💳 {% trans "Pay" %} {{ order.total }} {{ order.currency_code }}
+              </span>
+              <div id="spinner" class="hidden inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin ml-2"></div>
+            </button>
+
+            <!-- Error messages -->
+            <div id="payment-errors" class="hidden bg-red-900/50 border border-red-700 rounded-lg p-3">
+              <p class="text-red-300 text-sm"></p>
+            </div>
+
+            <!-- Success message -->
+            <div id="payment-success" class="hidden bg-green-900/50 border border-green-700 rounded-lg p-3">
+              <p class="text-green-300 text-sm">
+                ✅ {% trans "Payment successful! Your services are being activated..." %}
+              </p>
+            </div>
+          </form>
+        </div>
+
+        <!-- Payment Summary -->
+        <div>
+          <h4 class="text-lg font-medium text-white mb-4">{% trans "Payment Summary" %}</h4>
+
+          <div class="bg-slate-800 rounded-lg p-4 space-y-3">
+            <div class="flex justify-between text-slate-300">
+              <span>{% trans "Order" %}</span>
+              <span class="font-mono">#{{ order.order_number }}</span>
+            </div>
+            <div class="flex justify-between text-slate-300">
+              <span>{% trans "Subtotal" %}</span>
+              <span class="font-mono">{{ order.subtotal }} {{ order.currency_code }}</span>
+            </div>
+            <div class="flex justify-between text-slate-300">
+              <span>{% trans "VAT (21%)" %}</span>
+              <span class="font-mono">{{ order.tax_amount }} {{ order.currency_code }}</span>
+            </div>
+            <div class="border-t border-slate-600 pt-3">
+              <div class="flex justify-between text-xl font-bold text-white">
+                <span>{% trans "Total" %}</span>
+                <span class="font-mono text-green-400">{{ order.total }} {{ order.currency_code }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Security Features -->
+          <div class="mt-4 p-3 bg-slate-700/30 rounded-lg">
+            <h5 class="text-sm font-medium text-white mb-2">🔒 {% trans "Secure Payment" %}</h5>
+            <ul class="text-xs text-slate-400 space-y-1">
+              <li>✅ {% trans "256-bit SSL encryption" %}</li>
+              <li>✅ {% trans "PCI DSS compliant" %}</li>
+              <li>✅ {% trans "Powered by Stripe" %}</li>
+              <li>✅ {% trans "Romanian VAT compliance" %}</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}{% endif %}
+
+  <!-- Next Steps -->
+  <div class="grid md:grid-cols-2 gap-6 mb-8">
+    
+    <!-- What Happens Next -->
+    <div class="bg-blue-900/20 border border-blue-700/50 rounded-lg p-6">
+      <h3 class="text-blue-400 font-medium text-lg mb-4 flex items-center">
+        <span class="mr-2">📋</span>
+        {% trans "What's next?" %}
+      </h3>
+      
+      <ol class="space-y-3">
+        <li class="flex items-start">
+          <span class="flex-shrink-0 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-bold mr-3 mt-0.5">1</span>
+          <div>
+            <p class="text-blue-300 font-medium">{% trans "Order processing" %}</p>
+            <p class="text-blue-200 text-sm mt-1">{% trans "Our team will review and process your order within 24 hours." %}</p>
+          </div>
+        </li>
+        
+        <li class="flex items-start">
+          <span class="flex-shrink-0 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-bold mr-3 mt-0.5">2</span>
+          <div>
+            <p class="text-blue-300 font-medium">{% trans "Confirmation and billing" %}</p>
+            <p class="text-blue-200 text-sm mt-1">{% trans "You will receive payment details and proforma invoice by email." %}</p>
+          </div>
+        </li>
+        
+        <li class="flex items-start">
+          <span class="flex-shrink-0 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-bold mr-3 mt-0.5">3</span>
+          <div>
+            <p class="text-blue-300 font-medium">{% trans "Service activation" %}</p>
+            <p class="text-blue-200 text-sm mt-1">{% trans "After payment confirmation, services will be automatically activated." %}</p>
+          </div>
+        </li>
+      </ol>
+    </div>
+    
+    <!-- Contact Information -->
+    <div class="bg-green-900/20 border border-green-700/50 rounded-lg p-6">
+      <h3 class="text-green-400 font-medium text-lg mb-4 flex items-center">
+        <span class="mr-2">📞</span>
+        {% trans "Have questions?" %}
+      </h3>
+      
+      <div class="space-y-3">
+        <div>
+          <p class="text-green-300 font-medium">{% trans "Customer support" %}</p>
+          <p class="text-green-200 text-sm">{% trans "Our team is available 24/7" %}</p>
+        </div>
+        
+        <div class="space-y-2 text-sm">
+          <div class="flex items-center text-green-200">
+            <span class="mr-2">📧</span>
+            <a href="mailto:support@pragmatichost.com" class="hover:text-green-100 transition-colors">
+              support@pragmatichost.com
+            </a>
+          </div>
+          <div class="flex items-center text-green-200">
+            <span class="mr-2">💬</span>
+            <span>{% trans "Live chat on website" %}</span>
+          </div>
+          <div class="flex items-center text-green-200">
+            <span class="mr-2">🎫</span>
+            <span>{% trans "Ticketing system in portal" %}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Action Buttons -->
+  <div class="text-center space-y-4">
+    <div class="flex flex-col sm:flex-row gap-4 justify-center">
+      {% url 'orders:catalog' as catalog_url %}
+      {% button "📦 Order other products" variant="secondary" size="lg" href=catalog_url %}
+      {% button "🏠 Back to dashboard" variant="primary" size="lg" href="/" %}
+    </div>
+    
+    <div class="pt-4">
+      <p class="text-slate-400 text-sm">
+        {% trans "A confirmation email has been sent to" %} <strong>{{ order.customer_email }}</strong>
+      </p>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<!-- Stripe Elements Integration -->
+{% if payment_info and stripe_config %}{% if order.status == 'pending' %}
+<script src="https://js.stripe.com/v3/"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  // Initialize Stripe
+  const stripe = Stripe('{{ stripe_config.publishable_key }}');
+
+  // Configure Stripe Elements
+  const options = {
+    clientSecret: '{{ payment_info.client_secret }}',
+    appearance: {
+      theme: '{{ stripe_config.appearance.theme }}',
+      variables: {
+        colorPrimary: '{{ stripe_config.appearance.variables.colorPrimary }}',
+        colorBackground: '#ffffff',
+        colorText: '#1a202c',
+        fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+        borderRadius: '8px',
+      },
+      rules: {
+        '.Input': {
+          backgroundColor: '#ffffff',
+          border: '1px solid #d1d5db',
+        },
+        '.Input:focus': {
+          border: '2px solid #3b82f6',
+          outline: 'none',
+          boxShadow: '0 0 0 1px #3b82f6',
+        },
+      }
+    }
+  };
+
+  const elements = stripe.elements(options);
+
+  // Create and mount the Payment Element
+  const paymentElement = elements.create('payment');
+  paymentElement.mount('#payment-element');
+
+  // Get form elements
+  const form = document.getElementById('payment-form');
+  const submitButton = document.getElementById('submit');
+  const buttonText = document.getElementById('button-text');
+  const spinner = document.getElementById('spinner');
+  const errorsElement = document.getElementById('payment-errors');
+  const successElement = document.getElementById('payment-success');
+
+  // Enable the submit button when the payment element is ready
+  paymentElement.on('ready', function() {
+    submitButton.disabled = false;
+    console.log('💳 Stripe Elements ready');
+  });
+
+  // Handle real-time validation errors from the Payment Element
+  paymentElement.on('change', function(event) {
+    if (event.error) {
+      showError(event.error.message);
+    } else {
+      hideError();
+    }
+  });
+
+  // Handle form submission
+  form.addEventListener('submit', async function(event) {
+    event.preventDefault();
+
+    // Disable submit button and show loading
+    submitButton.disabled = true;
+    buttonText.classList.add('hidden');
+    spinner.classList.remove('hidden');
+    hideError();
+
+    try {
+      // Confirm the payment using Stripe
+      const {error, paymentIntent} = await stripe.confirmPayment({
+        elements,
+        redirect: 'if_required',
+        confirmParams: {
+          return_url: window.location.href,
+        }
+      });
+
+      if (error) {
+        // Payment failed
+        console.error('💥 Payment failed:', error);
+        showError(error.message);
+        resetButton();
+      } else {
+        // Payment succeeded
+        console.log('✅ Payment succeeded:', paymentIntent);
+
+        // Confirm payment on backend and create service
+        confirmPaymentOnBackend(paymentIntent.id);
+      }
+    } catch (err) {
+      console.error('💥 Unexpected error:', err);
+      showError('{% trans "An unexpected error occurred. Please try again." %}');
+      resetButton();
+    }
+  });
+
+  // Helper functions
+  function showError(message) {
+    errorsElement.querySelector('p').textContent = message;
+    errorsElement.classList.remove('hidden');
+    successElement.classList.add('hidden');
+  }
+
+  function hideError() {
+    errorsElement.classList.add('hidden');
+  }
+
+  function showSuccess() {
+    successElement.classList.remove('hidden');
+    errorsElement.classList.add('hidden');
+    form.style.opacity = '0.6';
+    form.style.pointerEvents = 'none';
+  }
+
+  async function confirmPaymentOnBackend(paymentIntentId) {
+    try {
+      // Show success message immediately
+      showSuccess();
+
+      // Call backend to confirm payment and create service
+      const response = await fetch('/order/confirm-payment/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': getCookie('csrftoken')
+        },
+        body: JSON.stringify({
+          payment_intent_id: paymentIntentId,
+          order_id: '{{ order.id }}',
+          gateway: 'stripe'
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        console.log('✅ Payment confirmed on backend:', data);
+        // Redirect to success page or dashboard
+        setTimeout(() => {
+          window.location.href = '/order/';
+        }, 2000);
+      } else {
+        console.error('❌ Backend confirmation failed:', data.error);
+        showError(data.error || 'Payment confirmation failed');
+        resetButton();
+      }
+    } catch (err) {
+      console.error('💥 Error confirming payment:', err);
+      showError('Failed to confirm payment. Please contact support.');
+      resetButton();
+    }
+  }
+
+  function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+      const cookies = document.cookie.split(';');
+      for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i].trim();
+        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+          cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+          break;
+        }
+      }
+    }
+    return cookieValue;
+  }
+
+  function resetButton() {
+    submitButton.disabled = false;
+    buttonText.classList.remove('hidden');
+    spinner.classList.add('hidden');
+  }
+
+  // Log configuration for debugging
+  console.log('🔧 Stripe configuration:', {
+    publishable_key: '{{ stripe_config.publishable_key }}' ? 'configured' : 'missing',
+    client_secret: '{{ payment_info.client_secret }}' ? 'configured' : 'missing',
+    currency: '{{ stripe_config.currency }}',
+    country: '{{ stripe_config.country }}'
+  });
+});
+</script>
+{% endif %}{% endif %}
+{% endblock %}

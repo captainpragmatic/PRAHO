@@ -10,6 +10,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# Type coverage thresholds
+ERROR_COUNT_PASS_THRESHOLD = 50  # errors
+HIGH_ERROR_COUNT_THRESHOLD = 20  # errors per app
+
 
 class TypeCoverageReporter:
     """Generates type coverage reports for PRAHO Platform"""
@@ -24,7 +28,7 @@ class TypeCoverageReporter:
         cmd = ["python", "-m", "mypy", target, "--config-file", "pyproject.toml", "--show-traceback", "--error-summary"]
 
         try:
-            result = subprocess.run(cmd, check=False, capture_output=True, text=True, cwd=self.project_root)
+            result = subprocess.run(cmd, check=False, capture_output=True, text=True, cwd=self.project_root)  # noqa: S603
 
             error_count = len([line for line in result.stdout.split("\n") if "error:" in line])
 
@@ -59,7 +63,7 @@ class TypeCoverageReporter:
             "total_files": total_files,
             "error_count": result["error_count"],
             "type_coverage": max(0, 100 - (result["error_count"] / max(total_files, 1)) * 10),
-            "status": "pass" if result["error_count"] < 50 else "needs_improvement",
+            "status": "pass" if result["error_count"] < ERROR_COUNT_PASS_THRESHOLD else "needs_improvement",
         }
 
     def generate_comprehensive_report(self) -> dict[str, Any]:
@@ -119,7 +123,7 @@ class TypeCoverageReporter:
         """Generate recommendations based on type coverage"""
         recommendations = []
 
-        high_error_apps = [app for app in app_reports if app["error_count"] > 20]
+        high_error_apps = [app for app in app_reports if app["error_count"] > HIGH_ERROR_COUNT_THRESHOLD]
 
         if high_error_apps:
             recommendations.append(f"Focus on apps with high type errors: {[app['app'] for app in high_error_apps]}")

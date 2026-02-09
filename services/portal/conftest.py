@@ -4,19 +4,21 @@
 # Ensures portal service cannot access platform database during tests
 # This enforces the security boundary between services
 
-import pytest
-import warnings
-from unittest.mock import patch
-from django.core.exceptions import ImproperlyConfigured
-from django.db import connections, DEFAULT_DB_ALIAS
+from collections.abc import Callable
+from typing import Any, Never
+from unittest.mock import Mock, patch
 
+import pytest
+from django.core.exceptions import ImproperlyConfigured
+from django.db import DEFAULT_DB_ALIAS, connections
+from django.test import Client
 
 # ===============================================================================
 # DATABASE ACCESS PREVENTION 🚫
 # ===============================================================================
 
 @pytest.fixture(autouse=True)
-def block_database_access():
+def block_database_access() -> None:
     """
     Automatically prevent all database access in portal tests.
     
@@ -25,17 +27,15 @@ def block_database_access():
     enforcing the service boundary.
     """
     
-    # Store original database operations
-    original_ensure_connection = connections[DEFAULT_DB_ALIAS].ensure_connection
-    original_cursor = connections[DEFAULT_DB_ALIAS].cursor
+    # Block database operations to enforce service boundaries
     
-    def blocked_ensure_connection():
+    def blocked_ensure_connection() -> Never:
         raise ImproperlyConfigured(
             "🚨 SECURITY VIOLATION: Portal service attempted database access! "
             "Portal must use platform API, not direct database queries."
         )
     
-    def blocked_cursor():
+    def blocked_cursor() -> Never:
         raise ImproperlyConfigured(
             "🚨 SECURITY VIOLATION: Portal service attempted to create database cursor! "
             "Portal must communicate with platform via API only."
@@ -52,14 +52,13 @@ def block_database_access():
 # ===============================================================================
 
 @pytest.fixture
-def mock_platform_api():
+def mock_platform_api() -> Any:
     """
     Mock platform API responses for portal tests.
     
     Since portal cannot access database, it must get data via API.
     This fixture provides common API response mocks.
     """
-    from unittest.mock import Mock
     
     api_mock = Mock()
     
@@ -78,13 +77,12 @@ def mock_platform_api():
 
 
 @pytest.fixture
-def portal_client():
+def portal_client() -> Any:
     """
     Django test client configured for portal service.
     
     This client can only test portal endpoints, not platform ones.
     """
-    from django.test import Client
     return Client()
 
 
@@ -92,7 +90,7 @@ def portal_client():
 # SECURITY VALIDATION HELPERS 🔒
 # ===============================================================================
 
-def assert_no_database_queries(test_func):
+def assert_no_database_queries(test_func: Callable) -> Callable:
     """
     Decorator to ensure a test function makes no database queries.
     
@@ -101,7 +99,7 @@ def assert_no_database_queries(test_func):
         def test_portal_endpoint():
             # Test code here - will fail if DB accessed
     """
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
         with patch('django.db.connection.cursor') as mock_cursor:
             mock_cursor.side_effect = ImproperlyConfigured(
                 "Database access detected in portal test!"

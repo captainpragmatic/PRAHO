@@ -28,7 +28,7 @@
         <div class="ml-3">
           <h4 class="text-sm font-medium text-blue-200">{% trans 'Romanian VAT Compliance' %}</h4>
           <div class="mt-1 text-sm text-blue-300">
-            <p>{% trans 'VAT will be automatically calculated at 19% for Romanian customers. Prices are stored in cents for precision.' %}</p>
+            <p>{% trans 'VAT will be automatically calculated at 21% for Romanian customers. Prices are stored in cents for precision.' %}</p>
           </div>
         </div>
       </div>
@@ -117,7 +117,7 @@
                 <span id="preview-subtotal">{{ order.currency }} 0.00</span>
               </div>
               <div class="flex justify-between">
-                <span>{% trans "VAT (19%):" %}</span>
+                <span>{% trans "VAT (21%):" %}</span>
                 <span id="preview-vat">{{ order.currency }} 0.00</span>
               </div>
               <div class="flex justify-between font-semibold border-t border-green-700 pt-1">
@@ -172,7 +172,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // Update tax preview
         const lineTotal = (unitPriceCents + setupCents) * quantity;
         const subtotal = lineTotal / 100;
-        const vatAmount = subtotal * 0.19; // 19% VAT
+        const vatAmount = subtotal * 0.21; // 21% VAT
         const total = subtotal + vatAmount;
         
         document.getElementById('preview-subtotal').textContent = `${currency} ${subtotal.toFixed(2)}`;

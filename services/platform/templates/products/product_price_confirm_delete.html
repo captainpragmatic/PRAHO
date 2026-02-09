@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans "Delete Price" %}: {{ product.name }} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="px-4 sm:px-6 lg:px-8 max-w-2xl mx-auto">
+  <!-- Header -->
+  <div class="mb-6">
+    <div class="flex flex-wrap items-center gap-1 text-sm text-slate-400 mb-2">
+      <a href="{% url 'products:product_list' %}" class="hover:text-blue-400">{% trans 'Products' %}</a>
+      <span class="hidden sm:inline">•</span>
+      <a href="{% url 'products:product_detail' slug=product.slug %}" class="hover:text-blue-400 truncate">{{ product.name }}</a>
+      <span class="hidden sm:inline">•</span>
+      <a href="{% url 'products:product_prices' slug=product.slug %}" class="hover:text-blue-400">{% trans 'Pricing' %}</a>
+      <span class="hidden sm:inline">•</span>
+      <span>{% trans 'Delete' %}</span>
+    </div>
+    <h1 class="text-2xl sm:text-3xl font-bold text-white">
+      🗑️ {% trans "Delete Price" %}
+    </h1>
+    <p class="text-sm sm:text-base text-slate-400 mt-2">{{ product.name }}</p>
+  </div>
+
+  <!-- Warning Card -->
+  <div class="bg-red-900 border border-red-700 rounded-lg p-4 sm:p-6 mb-6">
+    <div class="flex items-start gap-3">
+      <span class="text-red-300 text-2xl flex-shrink-0">⚠️</span>
+      <div class="min-w-0 flex-1">
+        <h3 class="text-lg font-semibold text-red-200 mb-2">{% trans 'Confirm Deletion' %}</h3>
+        <p class="text-red-300 text-sm mb-4">
+          {% trans 'Are you sure you want to delete this pricing configuration? This action cannot be undone.' %}
+        </p>
+
+        <!-- Price Details -->
+        <div class="bg-red-950 border border-red-800 rounded-lg p-4 mb-4">
+          <h4 class="font-medium text-red-200 mb-3">{% trans 'Price to Delete' %}</h4>
+          <div class="space-y-2 text-sm">
+            <div class="flex justify-between">
+              <span class="text-red-400">{% trans 'Currency' %}:</span>
+              <span class="text-red-200 font-medium">{{ price.currency.code }} ({{ price.currency.symbol }})</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-red-400">{% trans 'Monthly Price' %}:</span>
+              <span class="text-red-200 font-medium">{{ price.monthly_price|floatformat:2 }} {{ price.currency.symbol }}</span>
+            </div>
+            {% if price.semiannual_discount_percent > 0 %}
+              <div class="flex justify-between">
+                <span class="text-red-400">{% trans '6-month Discount' %}:</span>
+                <span class="text-red-200 font-medium">{{ price.semiannual_discount_percent }}%</span>
+              </div>
+            {% endif %}
+            {% if price.annual_discount_percent > 0 %}
+              <div class="flex justify-between">
+                <span class="text-red-400">{% trans 'Annual Discount' %}:</span>
+                <span class="text-red-200 font-medium">{{ price.annual_discount_percent }}%</span>
+              </div>
+            {% endif %}
+            <div class="flex justify-between">
+              <span class="text-red-400">{% trans 'Status' %}:</span>
+              <span class="text-red-200 font-medium">
+                {% if price.is_active %}{% trans 'Active' %}{% else %}{% trans 'Inactive' %}{% endif %}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Action Buttons -->
+  <div class="flex flex-col sm:flex-row gap-3 sm:justify-end">
+    <a href="{% url 'products:product_prices' slug=product.slug %}"
+       class="inline-flex items-center justify-center px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-lg transition-colors">
+      <span class="mr-2">←</span>
+      {% trans 'Cancel' %}
+    </a>
+
+    <form method="post" class="inline">
+      {% csrf_token %}
+      <button type="submit"
+              class="w-full sm:w-auto inline-flex items-center justify-center px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors">
+        <span class="mr-2">🗑️</span>
+        {% trans 'Delete Price' %}
+      </button>
+    </form>
+  </div>
+</div>
+{% endblock %}

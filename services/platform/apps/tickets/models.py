@@ -4,7 +4,6 @@ Romanian hosting provider customer support system.
 """
 
 import secrets
-from datetime import timedelta
 from typing import Any, ClassVar
 
 from django.contrib.contenttypes.fields import GenericForeignKey
@@ -27,9 +26,8 @@ class SupportCategory(models.Model):
     icon = models.CharField(max_length=50, default="help-circle", verbose_name=_("Icon"))
     color = models.CharField(max_length=7, default="#3B82F6", verbose_name=_("Color"))
 
-    # Service level
-    sla_response_hours = models.PositiveIntegerField(default=24, verbose_name=_("SLA Response (hours)"))
-    sla_resolution_hours = models.PositiveIntegerField(default=72, verbose_name=_("SLA Resolution (hours)"))
+    # Category settings
+    # Auto-assignment and priority settings (SLA removed)
 
     # Auto-assignment
     auto_assign_to = models.ForeignKey(
@@ -37,7 +35,7 @@ class SupportCategory(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        limit_choices_to={"role__in": ["support", "admin"]},
+        limit_choices_to={"staff_role__in": ["support", "admin"]},
         verbose_name=_("Auto Assign To"),
     )
 
@@ -60,12 +58,20 @@ class Ticket(models.Model):
     """Customer support ticket"""
 
     STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
-        ("new", _("New")),
         ("open", _("Open")),
-        ("pending", _("Pending")),
-        ("resolved", _("Resolved")),
+        ("in_progress", _("In Progress")),
+        ("waiting_on_customer", _("Waiting on Customer")),
         ("closed", _("Closed")),
+    )
+
+    RESOLUTION_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
+        ("fixed", _("Fixed")),
+        ("invalid", _("Invalid")),
+        ("duplicate", _("Duplicate")),
+        ("by_design", _("By Design")),
+        ("refunded", _("Refunded")),
         ("cancelled", _("Cancelled")),
+        ("other", _("Other")),
     )
 
     PRIORITY_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
@@ -97,13 +103,13 @@ class Ticket(models.Model):
         "customers.Customer", on_delete=models.CASCADE, related_name="tickets", verbose_name=_("Customer")
     )
     contact_person = models.CharField(max_length=100, blank=True, verbose_name=_("Contact Person"))
-    contact_email = models.EmailField(verbose_name=_("Contact Email"))
+    contact_email = models.EmailField(blank=True, verbose_name=_("Contact Email"))
     contact_phone = models.CharField(max_length=20, blank=True, verbose_name=_("Contact Phone"))
 
     # Classification
     category = models.ForeignKey(SupportCategory, on_delete=models.SET_NULL, null=True, verbose_name=_("Category"))
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default="normal", verbose_name=_("Priority"))
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="new", verbose_name=_("Status"))
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default="open", verbose_name=_("Status"))
     source = models.CharField(max_length=20, choices=SOURCE_CHOICES, default="web", verbose_name=_("Source"))
 
     # Assignment
@@ -112,7 +118,7 @@ class Ticket(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        limit_choices_to={"role__in": ["support", "admin", "manager"]},
+        limit_choices_to={"staff_role__in": ["support", "admin", "manager"]},
         related_name="assigned_tickets",
         verbose_name=_("Assigned To"),
     )
@@ -135,11 +141,19 @@ class Ticket(models.Model):
     )  # 36 chars for UUIDs, integers fit fine
     related_object = GenericForeignKey("content_type", "object_id")
 
-    # SLA tracking
-    sla_response_due = models.DateTimeField(null=True, blank=True)
-    sla_resolution_due = models.DateTimeField(null=True, blank=True)
-    first_response_at = models.DateTimeField(null=True, blank=True)
-    resolved_at = models.DateTimeField(null=True, blank=True)
+    # Resolution tracking
+    resolution_code = models.CharField(
+        max_length=20, 
+        choices=RESOLUTION_CHOICES, 
+        blank=True, 
+        default='',
+        verbose_name=_("Resolution Code")
+    )
+    closed_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Closed At"))
+    
+    # Customer interaction tracking
+    customer_replied_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Customer Last Reply"))
+    has_customer_replied = models.BooleanField(default=False, verbose_name=_("Customer Replied"))
 
     # Time tracking
     estimated_hours = models.DecimalField(
@@ -156,7 +170,6 @@ class Ticket(models.Model):
     # Flags
     is_escalated = models.BooleanField(default=False, verbose_name=_("Escalated"))
     is_public = models.BooleanField(default=True, verbose_name=_("Public for Customer"))
-    requires_customer_response = models.BooleanField(default=False, verbose_name=_("Requires Customer Response"))
 
     # Audit
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("Created At"))
@@ -186,10 +199,9 @@ class Ticket(models.Model):
         if not self.ticket_number:
             self.ticket_number = self._generate_ticket_number()
 
-        # Set SLA deadlines
-        if not self.sla_response_due and self.category:
-            self.sla_response_due = timezone.now() + timedelta(hours=self.category.sla_response_hours)
-            self.sla_resolution_due = timezone.now() + timedelta(hours=self.category.sla_resolution_hours)
+        # Set closed timestamp when status becomes closed
+        if self.status == "closed" and not self.closed_at:
+            self.closed_at = timezone.now()
 
         super().save(*args, **kwargs)
 
@@ -213,20 +225,14 @@ class Ticket(models.Model):
         return candidate
 
     @property
-    def is_sla_breach_response(self) -> bool:
-        """Check if SLA response time is breached"""
-        if not self.sla_response_due or self.first_response_at:
-            return False
-
-        return timezone.now() > self.sla_response_due
-
+    def is_awaiting_customer(self) -> bool:
+        """Check if ticket is waiting on customer response"""
+        return self.status == "waiting_on_customer"
+    
     @property
-    def is_sla_breach_resolution(self) -> bool:
-        """Check if SLA resolution time is breached"""
-        if not self.sla_resolution_due or self.resolved_at:
-            return False
-
-        return timezone.now() > self.sla_resolution_due
+    def customer_replied_recently(self) -> bool:
+        """Check if customer has replied recently (for badge display)"""
+        return self.has_customer_replied and self.status != "waiting_on_customer"
 
     def get_priority_color(self) -> str:
         """Get color for priority display"""
@@ -242,12 +248,10 @@ class Ticket(models.Model):
     def get_status_color(self) -> str:
         """Get color for status display"""
         colors = {
-            "new": "#8B5CF6",  # Purple
             "open": "#3B82F6",  # Blue
-            "pending": "#F59E0B",  # Amber
-            "resolved": "#10B981",  # Green
+            "in_progress": "#8B5CF6",  # Purple
+            "waiting_on_customer": "#F59E0B",  # Amber
             "closed": "#6B7280",  # Gray
-            "cancelled": "#EF4444",  # Red
         }
         return colors.get(self.status, "#6B7280")
 
@@ -260,6 +264,13 @@ class TicketComment(models.Model):
         ("support", _("Support")),
         ("internal", _("Internal")),
         ("system", _("System")),
+    )
+
+    REPLY_ACTION_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
+        ("reply", _("Reply")),
+        ("reply_and_wait", _("Reply & set Waiting on Customer")),
+        ("internal_note", _("Internal note")),
+        ("close_with_resolution", _("Close with resolution")),
     )
 
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="comments", verbose_name=_("Ticket"))
@@ -278,6 +289,19 @@ class TicketComment(models.Model):
     is_public = models.BooleanField(default=True, verbose_name=_("Public"))
     is_solution = models.BooleanField(default=False, verbose_name=_("Is Solution"))
 
+    # Agent reply actions (for support/internal comments)
+    reply_action = models.CharField(
+        max_length=30, 
+        choices=REPLY_ACTION_CHOICES, 
+        default='',
+        blank=True, 
+        verbose_name=_("Reply Action")
+    )
+    sets_waiting_on_customer = models.BooleanField(
+        default=False, 
+        verbose_name=_("Sets Waiting on Customer")
+    )
+    
     # Time tracking
     time_spent = models.DecimalField(max_digits=5, decimal_places=2, default=0, verbose_name=_("Time Spent (hours)"))
 

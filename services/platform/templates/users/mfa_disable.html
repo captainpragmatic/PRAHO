@@ -1,0 +1,257 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans 'Disable Two-Factor Authentication' %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+  <div class="max-w-2xl w-full space-y-8">
+    
+    <!-- Header -->
+    <div class="text-center">
+      <div class="mx-auto h-16 w-16 text-5xl">⚠️</div>
+      <h2 class="mt-6 text-3xl font-extrabold text-white">
+        {% trans 'Disable Two-Factor Authentication' %}
+      </h2>
+      <p class="mt-2 text-lg text-slate-400">
+        {% trans 'This will reduce your account security' %}
+      </p>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      
+      <!-- Left Column: Security Impact -->
+      <div class="space-y-6">
+        
+        <!-- Security Warning -->
+        <div class="bg-red-900 bg-opacity-50 rounded-lg p-6 border border-red-600">
+          <div class="flex items-center mb-4">
+            <div class="text-2xl mr-3">🚨</div>
+            <h3 class="text-lg font-medium text-red-200">
+              {% trans 'Security Warning' %}
+            </h3>
+          </div>
+          <div class="space-y-3 text-sm text-red-200">
+            <p class="font-medium">{% trans 'Disabling MFA will:' %}</p>
+            <div class="space-y-2">
+              <div class="flex items-start">
+                <span class="text-red-400 mr-2">•</span>
+                {% trans 'Make your account vulnerable to password breaches' %}
+              </div>
+              <div class="flex items-start">
+                <span class="text-red-400 mr-2">•</span>
+                {% trans 'Delete all your backup codes permanently' %}
+              </div>
+              <div class="flex items-start">
+                <span class="text-red-400 mr-2">•</span>
+                {% trans 'Remove your authenticator app connection' %}
+              </div>
+              <div class="flex items-start">
+                <span class="text-red-400 mr-2">•</span>
+                {% trans 'Allow login with just email and password' %}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Current Security Status -->
+        <div class="bg-green-900 bg-opacity-30 rounded-lg p-6 border border-green-600">
+          <div class="flex items-center mb-4">
+            <div class="text-2xl mr-3">🛡️</div>
+            <h3 class="text-lg font-medium text-green-200">
+              {% trans 'Current Protection' %}
+            </h3>
+          </div>
+          <div class="space-y-2 text-sm text-green-200">
+            <div class="flex items-center">
+              <span class="text-green-400 mr-2">✅</span>
+              {% trans 'TOTP Authenticator Active' %}
+            </div>
+            <div class="flex items-center">
+              <span class="text-green-400 mr-2">✅</span>
+              {% trans 'Backup Codes Generated' %}
+            </div>
+            <div class="flex items-center">
+              <span class="text-green-400 mr-2">✅</span>
+              {% trans 'Account Breach Protection' %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column: Confirmation Form -->
+      <div>
+        <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+          <div class="text-center mb-6">
+            <div class="text-4xl mb-4">🔓</div>
+            <h3 class="text-lg font-medium text-white mb-2">
+              {% trans 'Confirm Disable MFA' %}
+            </h3>
+            <p class="text-sm text-slate-400">
+              {% trans 'Enter your current MFA code to proceed' %}
+            </p>
+          </div>
+          
+          <form method="post" class="space-y-6">
+            {% csrf_token %}
+            
+            <!-- Display form errors -->
+            {% if messages %}
+              {% for message in messages %}
+                {% if message.tags == 'error' %}
+                <div class="bg-red-900 bg-opacity-50 border border-red-600 rounded-lg p-4">
+                  <div class="flex items-center">
+                    <div class="text-xl mr-3">❌</div>
+                    <div class="text-red-200 text-sm">{{ message }}</div>
+                  </div>
+                </div>
+                {% endif %}
+              {% endfor %}
+            {% endif %}
+
+            <!-- MFA Code Verification -->
+            <div>
+              <label for="token" class="block text-sm font-medium text-slate-300 mb-2">
+                🔢 {% trans 'Current MFA Code' %}
+              </label>
+              <input type="text" id="token" name="token" maxlength="6" 
+                     class="appearance-none block w-full px-4 py-3 border border-slate-600 placeholder-slate-400 text-white text-center text-xl font-mono tracking-widest rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 bg-slate-700 transition-all"
+                     placeholder="123456" required autocomplete="off" autofocus>
+              <p class="mt-2 text-xs text-slate-400">
+                {% trans 'Enter code from your authenticator app or backup code' %}
+              </p>
+            </div>
+
+            <!-- Password Confirmation -->
+            <div>
+              <label for="password" class="block text-sm font-medium text-slate-300 mb-2">
+                🔐 {% trans 'Confirm Your Password' %}
+              </label>
+              <input type="password" id="password" name="password" 
+                     class="appearance-none block w-full px-4 py-3 border border-slate-600 placeholder-slate-400 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 bg-slate-700 transition-all"
+                     placeholder="Enter your current password" required autocomplete="current-password">
+              <p class="mt-2 text-xs text-slate-400">
+                {% trans 'Enter your current password to confirm this action' %}
+              </p>
+            </div>
+
+            <!-- Confirmation Checkbox -->
+            <div class="border border-yellow-600 bg-yellow-900 bg-opacity-30 rounded-lg p-4">
+              {% checkbox_field name="confirm_disable" label="I understand that disabling MFA will make my account less secure and will permanently delete all backup codes" required=True variant="warning" %}
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="flex space-x-3">
+              <a href="{% url 'users:user_profile' %}" 
+                 class="flex-1 flex justify-center py-3 px-4 border border-slate-600 text-sm font-medium rounded-lg text-slate-300 hover:bg-slate-700 hover:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-500 transition-colors">
+                ← {% trans 'Cancel' %}
+              </a>
+              <button type="submit" 
+                      class="flex-1 flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 transition-colors"
+                      onclick="return confirmDisable()">
+                <span class="mr-2">🔓</span>
+                {% trans 'Disable MFA' %}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- Additional Security Recommendations -->
+    <div class="bg-blue-900 bg-opacity-50 rounded-lg border border-blue-600 p-6">
+      <div class="flex items-start">
+        <div class="text-2xl mr-4">💡</div>
+        <div>
+          <h3 class="text-lg font-medium text-blue-200 mb-3">
+            {% trans 'Consider These Alternatives' %}
+          </h3>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-blue-300">
+            <div class="space-y-2">
+              <p class="font-medium">{% trans 'Instead of disabling:' %}</p>
+              <p>• {% trans 'Add a second authenticator device' %}</p>
+              <p>• {% trans 'Print backup codes for safe storage' %}</p>
+              <p>• {% trans 'Use a password manager with MFA' %}</p>
+            </div>
+            <div class="space-y-2">
+              <p class="font-medium">{% trans 'Security best practices:' %}</p>
+              <p>• {% trans 'Use strong, unique passwords' %}</p>
+              <p>• {% trans 'Enable email notifications' %}</p>
+              <p>• {% trans 'Review account activity regularly' %}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- JavaScript for Enhanced UX -->
+<script>
+function confirmDisable() {
+  const checkbox = document.getElementById('checkbox-confirm_disable');
+  if (!checkbox.checked) {
+    alert('{% trans "Please confirm that you understand the security implications" %}');
+    return false;
+  }
+  
+  return confirm('{% trans "Are you absolutely sure you want to disable two-factor authentication? This action cannot be undone." %}');
+}
+
+// Auto-format MFA code input
+document.getElementById('token').addEventListener('input', function(e) {
+  let value = e.target.value.replace(/\D/g, ''); // Remove non-digits for TOTP
+  // Allow backup codes (alphanumeric with dashes)
+  if (value.length === 0 && e.target.value.match(/[A-Za-z-]/)) {
+    value = e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, '');
+  } else if (value.length > 6) {
+    value = value.substring(0, 6); // Limit TOTP to 6 digits
+  }
+  e.target.value = value;
+});
+</script>
+
+      <!-- Action Buttons -->
+      <div class="space-y-4">
+        <button type="submit" class="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
+          <span class="absolute left-0 inset-y-0 flex items-center pl-3">
+            ⚠️
+          </span>
+          {% trans 'Yes, Disable Two-Factor Authentication' %}
+        </button>
+        
+        <div class="text-center">
+          <a href="{% url 'users:user_profile' %}" class="inline-flex items-center px-4 py-2 border border-slate-600 text-sm font-medium rounded-md text-slate-300 bg-slate-800 hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500 transition-colors">
+            {% trans 'Cancel' %}
+          </a>
+        </div>
+      </div>
+    </form>
+
+    <!-- Alternative Options -->
+    <div class="rounded-lg bg-blue-900 border border-blue-600 p-4">
+      <div class="flex">
+        <div class="flex-shrink-0">
+          <svg class="h-5 w-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
+          </svg>
+        </div>
+        <div class="ml-3">
+          <h3 class="text-sm font-medium text-blue-200">
+            {% trans 'Lost your authenticator app?' %}
+          </h3>
+          <div class="mt-1 text-sm text-blue-200">
+            <p class="mb-2">{% trans 'Before disabling MFA, try these options:' %}</p>
+            <ul class="list-disc list-inside space-y-1">
+              <li>{% trans 'Use a backup code to log in' %}</li>
+              <li>{% trans 'Restore your authenticator app from backup' %}</li>
+              <li>{% trans 'Contact support if you have no other options' %}</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

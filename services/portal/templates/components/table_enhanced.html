@@ -1,0 +1,126 @@
+{% comment %}
+===============================================================================
+🔥 ENHANCED TABLE COMPONENT - PRAHO Platform
+===============================================================================
+Modern, standardized enhanced table component with:
+- Clickable rows with navigation
+- Fixed column widths for consistency  
+- Badge and button component integration
+- HTMX pagination support
+- Romanian business compliance theming
+===============================================================================
+{% endcomment %}
+
+{% load i18n %}
+{% load ui_components %}
+
+<div class="overflow-hidden">
+  <table class="min-w-full divide-y divide-slate-700">
+    <!-- Table Header -->
+    <thead class="bg-slate-900">
+      <tr>
+        {% for column in columns %}
+        <th class="px-6 py-3 text-{{ column.align|default:'left' }} text-xs font-medium text-slate-300 uppercase tracking-wider {% if column.width %}{{ column.width }}{% endif %}">
+          {% if column.sortable %}
+            <button type="button" class="group inline-flex items-center hover:text-white transition-colors">
+              {{ column.label }}
+              {% comment %}Add sort icons here if needed{% endcomment %}
+            </button>
+          {% else %}
+            {{ column.label }}
+          {% endif %}
+        </th>
+        {% endfor %}
+        
+        {% if show_actions %}
+        <th class="px-6 py-3 text-center text-xs font-medium text-slate-300 uppercase tracking-wider w-16">
+          {{ action_column_label|default:_('Actions') }}
+        </th>
+        {% endif %}
+      </tr>
+    </thead>
+    
+    <!-- Table Body -->
+    <tbody class="divide-y divide-slate-700">
+      {% if rows %}
+        {% for row in rows %}
+        <tr class="hover:bg-slate-700 {% if row.clickable %}cursor-pointer transition-colors{% endif %}"
+            {% if row.clickable and row.click_url %}onclick="window.location.href='{{ row.click_url }}'"{% endif %}
+            {% if row.click_js %}onclick="{{ row.click_js }}"{% endif %}>
+          
+          {% for cell in row.cells %}
+          <td class="px-6 py-4 {% if cell.no_wrap %}whitespace-nowrap{% endif %} text-{{ cell.align|default:'left' }} text-sm {% if cell.text_color %}{{ cell.text_color }}{% else %}text-slate-300{% endif %} {% if cell.font_class %}{{ cell.font_class }}{% endif %}">
+            {% if cell.component == 'badge' %}
+              {% badge cell.text variant=cell.variant %}
+            {% elif cell.component == 'button' %}
+              {% button cell.text variant=cell.variant size=cell.size href=cell.href %}
+            {% elif cell.truncate %}
+              <div class="truncate" {% if cell.title %}title="{{ cell.title }}"{% endif %}>
+                {{ cell.text }}
+              </div>
+            {% else %}
+              {{ cell.text }}
+            {% endif %}
+          </td>
+          {% endfor %}
+          
+          {% if show_actions %}
+          <td class="px-6 py-4 whitespace-nowrap text-center text-sm font-medium" 
+              {% if row.clickable %}onclick="event.stopPropagation()"{% endif %}>
+            {% for action in row.actions %}
+              {% if action.component == 'button' %}
+                {% button action.text variant=action.variant size=action.size href=action.href class=action.class %}
+              {% elif action.component == 'link' %}
+                <a href="{{ action.href }}" class="{{ action.class|default:'text-blue-400 hover:text-blue-300' }}">
+                  {{ action.text }}
+                </a>
+              {% endif %}
+            {% endfor %}
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      {% else %}
+        <!-- Empty State -->
+        <tr>
+          <td colspan="{% widthratio columns|length 1 1 %}{% if show_actions %}1{% endif %}" class="px-6 py-12 text-center text-slate-400">
+            <div class="text-4xl mb-4">{{ empty_icon|default:'📋' }}</div>
+            <h3 class="text-lg font-medium mb-2">{{ empty_title|default:_('No data found') }}</h3>
+            <p class="text-sm">{{ empty_message|default:_('No items available.') }}</p>
+            {% if empty_action_url %}
+              <div class="mt-4">
+                {% button empty_action_text variant="primary" href=empty_action_url %}
+              </div>
+            {% endif %}
+          </td>
+        </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+{% if pagination_enabled %}
+  <!-- Pagination -->
+  {% include 'components/pagination.html' with page_obj=page_obj extra_params=extra_params htmx_target=htmx_target htmx_url=htmx_url %}
+{% endif %}
+
+{% if include_js %}
+<script>
+// Generic navigation function for clickable rows
+function navigateToUrl(url) {
+  window.location.href = url;
+}
+
+// Dynamic navigation function for integer IDs
+function navigateToDocument(type, id, baseUrl) {
+  const url = baseUrl.replace('/0/', '/' + id + '/');
+  window.location.href = url;
+}
+
+// Dynamic navigation function for UUID IDs
+function navigateToDocumentUUID(type, id, baseUrl) {
+  const url = baseUrl.replace('00000000-0000-0000-0000-000000000000', id);
+  window.location.href = url;
+}
+</script>
+{% endif %}

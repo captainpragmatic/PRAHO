@@ -80,7 +80,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
             customer=self.customer,
             title='Test Support Ticket',
             description='Test ticket description',
-            priority='medium',
+            priority='normal',
             status='open',
             created_by=self.customer_user
         )

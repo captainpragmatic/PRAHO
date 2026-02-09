@@ -22,7 +22,7 @@ from apps.common.views import dashboard_view
 def root_redirect(request: HttpRequest) -> HttpResponseBase:
     """Redirect root URL based on authentication status"""
     if request.user.is_authenticated:
-        return RedirectView.as_view(url="/app/", permanent=False)(request)
+        return RedirectView.as_view(url="/dashboard/", permanent=False)(request)
     else:
         return RedirectView.as_view(url="/users/login/", permanent=False)(request)
 
@@ -33,7 +33,7 @@ urlpatterns = [
     # Django admin interface
     path("admin/", admin.site.urls),
     # Dashboard - main app after login
-    path("app/", dashboard_view, name="dashboard"),
+    path("dashboard/", dashboard_view, name="dashboard"),
     # Authentication URLs
     path("auth/", include("apps.users.urls")),
     # Backward-compatible alias expected by some tests
@@ -41,23 +41,24 @@ urlpatterns = [
     # Django i18n for language switching
     path("i18n/", include("django.conf.urls.i18n")),
     # Core business apps
-    path("app/customers/", include("apps.customers.urls")),
-    path("app/products/", include("apps.products.urls")),
-    path("app/orders/", include("apps.orders.urls")),
-    path("app/billing/", include("apps.billing.urls")),
-    path("app/tickets/", include("apps.tickets.urls")),
-    path("app/provisioning/", include("apps.provisioning.urls")),
-    path("app/domains/", include("apps.domains.urls")),
+    path("customers/", include("apps.customers.urls")),
+    path("products/", include("apps.products.urls")),
+    path("orders/", include("apps.orders.urls")),
+    path("order/", include("apps.orders.urls")),  # Singular alias for cart operations
+    path("billing/", include("apps.billing.urls")),
+    path("tickets/", include("apps.tickets.urls")),
+    path("provisioning/", include("apps.provisioning.urls")),
+    path("domains/", include("apps.domains.urls")),
     # Notifications (admin/staff tools)
-    path("app/notifications/", include("apps.notifications.urls")),
+    path("notifications/", include("apps.notifications.urls")),
     # External integrations & webhooks
     path("integrations/", include("apps.integrations.urls")),
     # GDPR compliance and audit
-    path("app/audit/", include("apps.audit.urls")),
+    path("audit/", include("apps.audit.urls")),
     # System configuration (staff only)
-    path("app/settings/", include("apps.settings.urls")),
-    # API endpoints
-    path("api/customers/", include("apps.customers.urls")),
+    path("settings/", include("apps.settings.urls")),
+    # Centralized API endpoints (v1)
+    path("api/", include("apps.api.urls")),
     # Background job monitoring (DISABLED - Redis not needed yet)
     # path('django-rq/', include('django_rq.urls')),  # noqa: ERA001
 ]

@@ -5,6 +5,7 @@ PRAHO PLATFORM - Deployment Script
 Automated deployment system for Romanian hosting provider production environment
 """
 
+import argparse
 import json
 import logging
 import os
@@ -14,6 +15,17 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+import django
+import requests
+from django.conf import settings
+from django.core.mail import send_mail
+
+# HTTP status constants
+HTTP_OK = 200
+
+# Health check constants
+MAX_HEALTH_CHECK_RETRIES = 4
 
 # Configure logging
 logging.basicConfig(
@@ -184,7 +196,7 @@ class PragmaticHostDeployment:
                 return True
 
             cmd = [sys.executable, str(backup_script)]
-            result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+            result = subprocess.run(cmd, check=False, capture_output=True, text=True)  # noqa: S603
 
             if result.returncode != 0:
                 logger.error(f"Backup failed: {result.stderr}")
@@ -204,7 +216,7 @@ class PragmaticHostDeployment:
 
             cmd = ["git", "clone", "--branch", branch, "--depth", "1", self.config["git_repo"], str(release_dir)]
 
-            result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+            result = subprocess.run(cmd, check=False, capture_output=True, text=True)  # noqa: S603
 
             if result.returncode != 0:
                 logger.error(f"Git clone failed: {result.stderr}")
@@ -275,7 +287,7 @@ class PragmaticHostDeployment:
 
             cmd = [self.config["pip_path"], "install", "--upgrade", "--requirement", str(requirements_file)]
 
-            result = subprocess.run(cmd, check=False, cwd=str(release_dir), capture_output=True, text=True)
+            result = subprocess.run(cmd, check=False, cwd=str(release_dir), capture_output=True, text=True)  # noqa: S603
 
             if result.returncode != 0:
                 logger.error(f"Pip install failed: {result.stderr}")
@@ -298,7 +310,7 @@ class PragmaticHostDeployment:
             env = os.environ.copy()
             env["DJANGO_SETTINGS_MODULE"] = "config.settings.prod"
 
-            result = subprocess.run(cmd, check=False, cwd=str(release_dir), env=env, capture_output=True, text=True)
+            result = subprocess.run(cmd, check=False, cwd=str(release_dir), env=env, capture_output=True, text=True)  # noqa: S603
 
             if result.returncode != 0:
                 logger.error(f"Migrations failed: {result.stderr}")
@@ -321,7 +333,7 @@ class PragmaticHostDeployment:
             env = os.environ.copy()
             env["DJANGO_SETTINGS_MODULE"] = "config.settings.prod"
 
-            result = subprocess.run(cmd, check=False, cwd=str(release_dir), env=env, capture_output=True, text=True)
+            result = subprocess.run(cmd, check=False, cwd=str(release_dir), env=env, capture_output=True, text=True)  # noqa: S603
 
             if result.returncode != 0:
                 logger.error(f"Static files collection failed: {result.stderr}")
@@ -366,7 +378,7 @@ class PragmaticHostDeployment:
                     logger.info(f"Restarting {service}...")
 
                     cmd = ["sudo", "systemctl", "restart", service]
-                    result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+                    result = subprocess.run(cmd, check=False, capture_output=True, text=True)  # noqa: S603
 
                     if result.returncode != 0:
                         logger.error(f"Failed to restart {service}: {result.stderr}")
@@ -387,8 +399,6 @@ class PragmaticHostDeployment:
         try:
             logger.info("Performing health check...")
 
-            import requests
-
             url = self.config["health_check_url"]
             timeout = self.config["health_check_timeout"]
 
@@ -396,11 +406,11 @@ class PragmaticHostDeployment:
             for attempt in range(5):
                 try:
                     response = requests.get(url, timeout=timeout)
-                    if response.status_code == 200:
+                    if response.status_code == HTTP_OK:
                         logger.info("Health check passed")
                         return True
                 except requests.RequestException:
-                    if attempt < 4:
+                    if attempt < MAX_HEALTH_CHECK_RETRIES:
                         logger.info(f"Health check attempt {attempt + 1} failed, retrying...")
                         time.sleep(5)
                     continue
@@ -445,7 +455,7 @@ class PragmaticHostDeployment:
             logger.error(f"Rollback failed: {e}")
             return False
 
-    def _cleanup_old_releases(self):
+    def _cleanup_old_releases(self) -> None:
         """Remove old releases"""
         try:
             logger.info("Cleaning up old releases...")
@@ -461,7 +471,7 @@ class PragmaticHostDeployment:
 
             for release in to_remove:
                 logger.info(f"Removing old release: {release.name}")
-                subprocess.run(["rm", "-rf", str(release)], check=False)
+                subprocess.run(["rm", "-rf", str(release)], check=False)  # noqa: S603, S607
 
             logger.info(f"Cleaned up {len(to_remove)} old releases")
 
@@ -475,12 +485,7 @@ class PragmaticHostDeployment:
         try:
             # Import Django for email functionality
             os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.prod")
-            import django
-
             django.setup()
-
-            from django.conf import settings
-            from django.core.mail import send_mail
 
             if success:
                 subject = f"PragmaticHost: Deployment Successful - {release_name}"
@@ -516,9 +521,8 @@ class PragmaticHostDeployment:
         return releases
 
 
-def main():
+def main() -> None:
     """Main deployment script entry point"""
-    import argparse
 
     parser = argparse.ArgumentParser(description="PragmaticHost Deployment System")
     parser.add_argument("--config", default="/etc/pragmatichost/deploy.json", help="Deployment configuration file")

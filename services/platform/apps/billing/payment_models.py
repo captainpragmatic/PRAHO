@@ -101,6 +101,51 @@ class Payment(models.Model):
     def amount(self) -> Decimal:
         return Decimal(self.amount_cents) / 100
 
+    @property
+    def stripe_payment_intent_id(self) -> str | None:
+        """Get Stripe PaymentIntent ID from meta or gateway_txn_id"""
+        if self.payment_method == 'stripe':
+            # Check meta first for new records
+            stripe_id = self.meta.get('payment_intent_id')
+            if stripe_id:
+                return stripe_id
+            # Fallback to gateway_txn_id for existing records
+            if self.gateway_txn_id and self.gateway_txn_id.startswith('pi_'):
+                return self.gateway_txn_id
+        return None
+
+    @property
+    def stripe_customer_id(self) -> str | None:
+        """Get Stripe customer ID from metadata"""
+        return self.meta.get('stripe_customer_id') if self.payment_method == 'stripe' else None
+
+    def update_from_stripe_payment_intent(self, payment_intent: dict[str, Any]) -> None:
+        """Update payment from Stripe PaymentIntent data"""
+        if self.payment_method != 'stripe':
+            return
+
+        # Update meta with Stripe data
+        self.meta.update({
+            'payment_intent_id': payment_intent.get('id'),
+            'stripe_status': payment_intent.get('status'),
+            'payment_method_details': payment_intent.get('payment_method'),
+            'stripe_amount_received': payment_intent.get('amount_received'),
+            'updated_from_stripe_at': timezone.now().isoformat()
+        })
+
+        # Map Stripe status to our status
+        stripe_status = payment_intent.get('status')
+        if stripe_status == 'succeeded':
+            self.status = 'succeeded'
+        elif stripe_status in ['requires_payment_method', 'requires_confirmation', 'requires_action', 'processing']:
+            self.status = 'pending'
+        elif stripe_status in ['canceled']:
+            self.status = 'failed'
+
+    def is_stripe_payment(self) -> bool:
+        """Check if this is a Stripe payment"""
+        return self.payment_method == 'stripe'
+
 
 class CreditLedger(models.Model):
     """

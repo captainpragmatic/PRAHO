@@ -78,10 +78,16 @@ This template includes both the table content and header count update.
             
             <td class="px-6 py-4 whitespace-nowrap text-center">
               {% if document.type == 'proforma' %}
-                {% if document.status == 'expired' %}
+                {% if document.status == 'draft' %}
+                  {% badge "📝 Draft" variant="secondary" %}
+                {% elif document.status == 'sent' %}
+                  {% badge "📧 Sent" variant="primary" %}
+                {% elif document.status == 'accepted' %}
+                  {% badge "✅ Accepted" variant="success" %}
+                {% elif document.status == 'expired' %}
                   {% badge "❌ Expired" variant="danger" %}
                 {% else %}
-                  {% badge "⏳ Valid" variant="success" %}
+                  {% badge document.status|capfirst variant="secondary" %}
                 {% endif %}
               {% else %}
                 {% if document.status == 'paid' %}

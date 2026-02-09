@@ -18,8 +18,9 @@ from .services import UserRegistrationService
 
 T = TypeVar("T")
 
-# Romanian VAT number validation constants
+# Romanian validation constants
 MIN_VAT_DIGITS = 6  # Minimum number of digits in Romanian VAT number
+CNP_LENGTH = 13  # Romanian CNP (Personal Numeric Code) is exactly 13 digits
 
 
 class LoginForm(forms.Form):
@@ -453,6 +454,19 @@ class CustomerOnboardingRegistrationForm(UserCreationForm):  # type: ignore[type
         ),
     )
 
+    cnp = forms.CharField(
+        label=_("CNP"),
+        max_length=13,
+        required=False,
+        help_text=_("Cod Numeric Personal (13 cifre). Required for individuals."),
+        widget=forms.TextInput(
+            attrs={
+                "class": "block w-full px-3 py-2 border border-slate-600 rounded-md shadow-sm bg-slate-800 text-white placeholder-slate-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500",
+                "placeholder": "1234567890123",
+            }
+        ),
+    )
+
     company_name = forms.CharField(
         label=_("Company/Organization Name"),
         max_length=255,
@@ -599,12 +613,30 @@ class CustomerOnboardingRegistrationForm(UserCreationForm):  # type: ignore[type
                     raise ValidationError(_("VAT number must start with RO followed by digits (e.g., RO12345678)"))
         return vat_number
 
+    def clean_cnp(self) -> str:
+        """Validate CNP format (13 digits)."""
+        cnp: str = (self.cleaned_data.get("cnp") or "").strip()
+        if cnp and not (cnp.isdigit() and len(cnp) == CNP_LENGTH):
+            raise ValidationError(_("CNP must be exactly 13 digits."))
+        return cnp
+
     def clean_customer_type(self) -> str:
         """Validate customer type"""
         customer_type: str | None = self.cleaned_data.get("customer_type")
         if customer_type not in dict(UserRegistrationService.CUSTOMER_TYPES):
             raise ValidationError(_("Invalid customer type selected."))
         return customer_type or ""
+
+    def clean(self) -> dict[str, Any]:
+        cleaned = super().clean()
+        customer_type = cleaned.get("customer_type") or self.data.get("customer_type")
+        cnp = (cleaned.get("cnp") or "").strip()
+
+        # Require CNP for individuals
+        if customer_type == "individual" and not cnp:
+            self.add_error("cnp", _("CNP is required for individuals."))
+
+        return cleaned
 
     def save(self, commit: bool = True) -> User:
         """Save user and create customer organization"""
@@ -624,6 +656,7 @@ class CustomerOnboardingRegistrationForm(UserCreationForm):  # type: ignore[type
             "customer_type": self.cleaned_data["customer_type"],
             "company_name": self.cleaned_data["company_name"],
             "vat_number": self.cleaned_data.get("vat_number", ""),
+            "cnp": self.cleaned_data.get("cnp", ""),
             "address_line1": self.cleaned_data["address_line1"],
             "city": self.cleaned_data["city"],
             "county": self.cleaned_data["county"],

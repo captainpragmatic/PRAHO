@@ -171,28 +171,28 @@ def navigation_dropdowns(request: HttpRequest) -> dict[str, Any]:
     # Staff/Admin Navigation Items
     if request.user.is_staff or getattr(request.user, "staff_role", None):
         business_items = [
-            {"text": "Customers", "url": "/app/customers/", "icon": "👥"},
-            {"text": "Products", "url": "/app/products/", "icon": "🛍️"},
-            {"text": "Orders", "url": "/app/orders/", "icon": "🛒"},
+            {"text": "Customers", "url": "/customers/", "icon": "👥"},
+            {"text": "Products", "url": "/products/", "icon": "🛍️"},
+            {"text": "Orders", "url": "/orders/", "icon": "🛒"},
             {"divider": True},
-            {"text": "Invoices", "url": "/app/billing/invoices/", "icon": "🧾"},
-            {"text": "Services", "url": "/app/provisioning/services/", "icon": "🚀"},
-            {"text": "Domains", "url": "/app/domains/", "icon": "🌐"},
+            {"text": "Invoices", "url": "/billing/invoices/", "icon": "🧾"},
+            {"text": "Services", "url": "/provisioning/services/", "icon": "🚀"},
+            {"text": "Domains", "url": "/domains/", "icon": "🌐"},
             {"divider": True},
-            {"text": "Virtualmin Servers", "url": "/app/provisioning/virtualmin/servers/", "icon": "🖥️"},
-            {"text": "Hosting Accounts", "url": "/app/provisioning/virtualmin/accounts/", "icon": "🏠"},
+            {"text": "Virtualmin Servers", "url": "/provisioning/virtualmin/servers/", "icon": "🖥️"},
+            {"text": "Hosting Accounts", "url": "/provisioning/virtualmin/accounts/", "icon": "🏠"},
             {"divider": True},
-            {"text": "Registrars", "url": "/app/domains/admin/registrars/", "icon": "🏢"},
-            {"text": "TLD Management", "url": "/app/domains/admin/tlds/", "icon": "🌍"},
+            {"text": "Registrars", "url": "/domains/admin/registrars/", "icon": "🏢"},
+            {"text": "TLD Management", "url": "/domains/admin/tlds/", "icon": "🌍"},
         ]
 
         support_items = [
-            {"text": "All Tickets", "url": "/app/tickets/", "icon": "🎫"},
-            {"text": "Create Ticket", "url": "/app/tickets/create/", "icon": "+"},
+            {"text": "All Tickets", "url": "/tickets/", "icon": "🎫"},
+            {"text": "Create Ticket", "url": "/tickets/create/", "icon": "+"},
             {"divider": True},
-            {"text": "System Settings", "url": "/app/settings/dashboard/", "icon": "⚙️"},
-            {"text": "GDPR Management", "url": "/app/audit/gdpr_management/", "icon": "🔒"},
-            {"text": "Audit Logs", "url": "/app/audit/logs/", "icon": "📊"},
+            {"text": "System Settings", "url": "/settings/dashboard/", "icon": "⚙️"},
+            {"text": "GDPR Management", "url": "/audit/gdpr_management/", "icon": "🔒"},
+            {"text": "Audit Logs", "url": "/audit/logs/", "icon": "📊"},
         ]
 
         return {
@@ -203,18 +203,18 @@ def navigation_dropdowns(request: HttpRequest) -> dict[str, Any]:
     # Customer User Navigation Items
     elif getattr(request.user, "is_customer_user", False):
         customer_items = [
-            {"text": "My Orders", "url": "/app/orders/", "icon": "🛒"},
-            {"text": "My Invoices", "url": "/app/billing/invoices/", "icon": "🧾"},
+            {"text": "My Orders", "url": "/orders/", "icon": "🛒"},
+            {"text": "My Invoices", "url": "/billing/invoices/", "icon": "🧾"},
             {"divider": True},
-            {"text": "My Services", "url": "/app/provisioning/services/", "icon": "🚀"},
-            {"text": "My Domains", "url": "/app/domains/", "icon": "🌐"},
+            {"text": "My Services", "url": "/provisioning/services/", "icon": "🚀"},
+            {"text": "My Domains", "url": "/domains/", "icon": "🌐"},
         ]
 
         customer_support_items = [
-            {"text": "My Tickets", "url": "/app/tickets/", "icon": "🎫"},
-            {"text": "New Ticket", "url": "/app/tickets/create/", "icon": "+"},
+            {"text": "My Tickets", "url": "/tickets/", "icon": "🎫"},
+            {"text": "New Ticket", "url": "/tickets/create/", "icon": "+"},
             {"divider": True},
-            {"text": "Knowledge Base", "url": "/app/help/", "icon": "📚"},
+            {"text": "Knowledge Base", "url": "/help/", "icon": "📚"},
         ]
 
         return {

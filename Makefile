@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install dev dev-platform dev-portal dev-all test test-platform test-portal test-integration test-e2e test-security build-css migrate fixtures clean lint lint-platform lint-portal type-check pre-commit
+.PHONY: help install dev dev-platform dev-portal dev-all test test-platform test-portal test-integration test-e2e test-security install-frontend build-css watch-css migrate fixtures fixtures-light clean lint lint-platform lint-portal type-check pre-commit
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -43,8 +43,11 @@ help:
 	@echo ""
 	@echo "🔧 DATABASE & ASSETS:"
 	@echo "  make migrate         - Run platform database migrations"
-	@echo "  make fixtures        - Load sample data (platform only)"
-	@echo "  make build-css       - Build Tailwind CSS assets"
+	@echo "  make fixtures        - Load comprehensive sample data (platform only)"
+	@echo "  make fixtures-light  - Load minimal sample data (fast, platform only)"
+	@echo "  make install-frontend - Install Node.js dependencies"
+	@echo "  make build-css       - Build Tailwind CSS assets for all services"
+	@echo "  make watch-css       - Watch and rebuild CSS during development"
 	@echo ""
 	@echo "🧹 CODE QUALITY:"
 	@echo "  make lint            - Lint all services"
@@ -93,14 +96,18 @@ install:
 # DEVELOPMENT SERVERS 🚀
 # ===============================================================================
 
-dev-platform:
+dev-platform: build-css
 	@echo "🏗️ [Platform] Starting admin platform service..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "📍 PYTHONPATH: services/platform (scoped)"
 	@echo "🗄️ Running migrations..."
 	@$(PYTHON_PLATFORM_MANAGE) migrate --settings=config.settings.dev
-	@echo "🔧 Setting up test data..."
-	@$(PYTHON_PLATFORM) scripts/setup_test_data.py || echo "⚠️ Test data setup skipped"
+	@echo "🏷️ Setting up default setting categories..."
+	@$(PYTHON_PLATFORM_MANAGE) setup_categories --settings=config.settings.dev || echo "⚠️ Categories setup skipped"
+	@echo "⚙️ Setting up default system settings..."
+	@$(PYTHON_PLATFORM_MANAGE) setup_default_settings --settings=config.settings.dev || echo "⚠️ Default settings setup skipped"
+	@echo "🔧 Setting up comprehensive test data..."
+	@$(PYTHON_PLATFORM_MANAGE) generate_sample_data --customers 2 --users 3 --services-per-customer 2 --orders-per-customer 1 --invoices-per-customer 2 --proformas-per-customer 1 --tickets-per-customer 2 --settings=config.settings.dev || echo "⚠️ Sample data setup skipped"
 	@echo "⚙️ Setting up scheduled tasks..."
 	@$(PYTHON_PLATFORM_MANAGE) setup_scheduled_tasks --settings=config.settings.dev || echo "⚠️ Scheduled tasks setup skipped"
 	@echo "🚀 Starting Django-Q2 workers in background..."
@@ -111,7 +118,7 @@ dev-platform:
 	trap 'echo "🛑 Stopping Django-Q2 workers..."; kill $$QCLUSTER_PID 2>/dev/null || true' EXIT; \
 	$(PYTHON_PLATFORM_MANAGE) runserver 0.0.0.0:8700 --settings=config.settings.dev
 
-dev-portal:
+dev-portal: build-css
 	@echo "🌐 [Portal] Starting customer portal service..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "🔒 NO PYTHONPATH - portal cannot import platform code"
@@ -121,13 +128,31 @@ dev-portal:
 	@echo "🌐 Starting portal server on :8701..."
 	@$(PYTHON_PORTAL_MANAGE) runserver 0.0.0.0:8701
 
-dev-all:
+dev-all: build-css
 	@echo "🚀 [All Services] Starting platform + portal..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@$(MAKE) -j2 dev-platform dev-portal
 
-dev:
+dev: build-css
 	@$(MAKE) dev-all
+
+# Start both services and write logs to files via tee
+.PHONY: dev-with-logs
+dev-with-logs: build-css
+	@echo "🚀 [All Services] Starting platform + portal with logs..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@mkdir -p logs
+	@echo "🧹 Killing anything bound to :8700/:8701 (if any)"
+	@-lsof -tiTCP:8700 -sTCP:LISTEN | xargs -r kill -9 >/dev/null 2>&1 || true
+	@-lsof -tiTCP:8701 -sTCP:LISTEN | xargs -r kill -9 >/dev/null 2>&1 || true
+	@echo "📜 Logs: logs/platform_dev.log, logs/portal_dev.log"
+	@echo "🏗️  Starting platform (port :8700)..."
+	@sh -c '$(MAKE) dev-platform 2>&1 | tee logs/platform_dev.log' & echo $$! > logs/platform_dev.pid
+	@sleep 2
+	@echo "🌐 Starting portal (port :8701)..."
+	@sh -c '$(MAKE) dev-portal 2>&1 | tee logs/portal_dev.log' & echo $$! > logs/portal_dev.pid
+	@echo "📍 Follow logs:"
+	@echo "  tail -f logs/platform_dev.log logs/portal_dev.log"
 
 # ===============================================================================
 # TESTING WITH SERVICE ISOLATION 🧪
@@ -208,8 +233,20 @@ migrate:
 	@$(PYTHON_PLATFORM_MANAGE) migrate --settings=config.settings.dev
 
 fixtures:
-	@echo "📊 [Platform] Loading sample data..."
+	@echo "📊 [Platform] Loading comprehensive sample data..."
+	@echo "🏷️ Setting up default setting categories..."
+	@$(PYTHON_PLATFORM_MANAGE) setup_categories --settings=config.settings.dev || echo "⚠️ Categories setup skipped"
+	@echo "⚙️ Setting up default system settings..."
+	@$(PYTHON_PLATFORM_MANAGE) setup_default_settings --settings=config.settings.dev || echo "⚠️ Default settings setup skipped"
 	@$(PYTHON_PLATFORM_MANAGE) generate_sample_data --settings=config.settings.dev
+
+fixtures-light:
+	@echo "📊 [Platform] Loading minimal sample data (fast)..."
+	@echo "🏷️ Setting up default setting categories..."
+	@$(PYTHON_PLATFORM_MANAGE) setup_categories --settings=config.settings.dev || echo "⚠️ Categories setup skipped"
+	@echo "⚙️ Setting up default system settings..."
+	@$(PYTHON_PLATFORM_MANAGE) setup_default_settings --settings=config.settings.dev || echo "⚠️ Default settings setup skipped"
+	@$(PYTHON_PLATFORM_MANAGE) generate_sample_data --customers 2 --users 3 --services-per-customer 2 --orders-per-customer 1 --invoices-per-customer 2 --proformas-per-customer 1 --tickets-per-customer 2 --settings=config.settings.dev
 
 # ===============================================================================
 # CODE QUALITY 🧹
@@ -287,9 +324,23 @@ pre-commit:
 # BUILD & ASSETS 🎨
 # ===============================================================================
 
+install-css:
+	@echo "📦 Installing frontend dependencies..."
+	npm install
+
 build-css:
-	@echo "🎨 Building Tailwind CSS assets..."
-	npx tailwindcss -i static/src/styles.css -o static/dist/styles.css --watch
+	@echo "🎨 Building Tailwind CSS assets for all services..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "🏗️  Building Portal CSS..."
+	npx @tailwindcss/cli -c services/portal/tailwind.config.js -i assets/css/input.css -o services/portal/static/css/tailwind.min.css --minify
+	@echo "🏗️  Building Platform CSS..."
+	npx @tailwindcss/cli -c services/platform/tailwind.config.js -i assets/css/input.css -o services/platform/static/css/tailwind.min.css --minify
+	@echo "✅ CSS build complete!"
+
+watch-css:
+	@echo "👀 Watching CSS changes for development..."
+	npx @tailwindcss/cli -c services/portal/tailwind.config.js -i assets/css/input.css -o services/portal/static/css/tailwind.min.css --watch &
+	npx @tailwindcss/cli -c services/platform/tailwind.config.js -i assets/css/input.css -o services/platform/static/css/tailwind.min.css --watch
 
 # ===============================================================================
 # DOCKER SERVICES DEPLOYMENT 🐳

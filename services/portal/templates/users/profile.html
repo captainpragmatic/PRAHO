@@ -1,0 +1,545 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans 'Account Settings' %} - PragmaticHost{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 max-w-4xl mx-auto">
+  <!-- Header -->
+  <div class="mb-6">
+    <h1 class="text-2xl font-bold text-white romanian-flag">
+      {% trans 'Account Settings' %}
+    </h1>
+    <p class="mt-2 text-sm text-slate-400">
+      {% trans 'Manage your account settings and personal information' %}
+    </p>
+  </div>
+
+  <!-- Customer Selector (for multi-customer users) -->
+  {% if user_memberships|length > 1 %}
+  <div class="mb-6 relative">
+    {% include 'components/customer_selector.html' %}
+  </div>
+  {% endif %}
+
+  <!-- Profile Form -->
+  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg">
+    <div class="p-6">
+      <h3 class="text-lg font-medium text-white mb-6">
+        👤 {% trans 'Personal Information' %}
+      </h3>
+
+      <form method="post" class="space-y-6">
+        {% csrf_token %}
+
+        <!-- Form Errors -->
+        {% if form.non_field_errors %}
+        <div class="bg-red-900 border border-red-700 rounded-md p-3">
+          {% for error in form.non_field_errors %}
+          <p class="text-red-100 text-sm">❌ {{ error }}</p>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        <!-- Basic Information -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <label for="id_first_name" class="block text-sm font-medium text-slate-300 mb-1">
+              {% trans 'First Name' %}
+            </label>
+            <input type="text" name="first_name" id="id_first_name" value="{{ profile.first_name|default:'' }}"
+                   class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
+                   placeholder="{% trans 'Your first name' %}">
+          </div>
+
+          <div>
+            <label for="id_last_name" class="block text-sm font-medium text-slate-300 mb-1">
+              {% trans 'Last Name' %}
+            </label>
+            <input type="text" name="last_name" id="id_last_name" value="{{ profile.last_name|default:'' }}"
+                   class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
+                   placeholder="{% trans 'Your last name' %}">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <label for="id_email" class="block text-sm font-medium text-slate-300 mb-1">
+              {% trans 'Email Address' %}
+            </label>
+            <input type="email" name="email" id="id_email" value="{{ profile.email|default:customer_email }}" disabled
+                   class="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded-md text-slate-300 cursor-not-allowed">
+            <p class="mt-1 text-xs text-slate-400">
+              {% trans 'Contact support to change your email address' %}
+            </p>
+          </div>
+
+          <div>
+            <label for="id_phone" class="block text-sm font-medium text-slate-300 mb-1">
+              {% trans 'Phone Number' %}
+            </label>
+            <input type="text" name="phone" id="id_phone" value="{{ profile.phone|default:'' }}"
+                   class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
+                   placeholder="+40 721 123 456">
+          </div>
+        </div>
+
+        <!-- Language & Preferences -->
+        <div class="border-t border-slate-600 pt-6">
+          <h4 class="text-md font-medium text-white mb-4">
+            🌐 {% trans 'Preferences' %}
+          </h4>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <label for="preferred_language" class="block text-sm font-medium text-slate-300 mb-1">
+                {% trans 'Language' %}
+              </label>
+              <select name="preferred_language" id="preferred_language"
+                      class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+                <option value="ro" {% if profile.profile.preferred_language == 'ro' %}selected{% endif %}>🇷🇴 Română</option>
+                <option value="en" {% if profile.profile.preferred_language == 'en' %}selected{% endif %}>🇬🇧 English</option>
+              </select>
+            </div>
+
+            <div>
+              <label for="timezone" class="block text-sm font-medium text-slate-300 mb-1">
+                {% trans 'Timezone' %}
+              </label>
+              <select name="timezone" id="timezone"
+                      class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+                <option value="Europe/Bucharest" {% if profile.profile.timezone == 'Europe/Bucharest' or not profile.profile.timezone %}selected{% endif %}>🇷🇴 Europe/Bucharest</option>
+                <option value="UTC" {% if profile.profile.timezone == 'UTC' %}selected{% endif %}>🌍 UTC</option>
+                <option value="Europe/London" {% if profile.profile.timezone == 'Europe/London' %}selected{% endif %}>🇬🇧 Europe/London</option>
+                <option value="Europe/Paris" {% if profile.profile.timezone == 'Europe/Paris' %}selected{% endif %}>🇫🇷 Europe/Paris</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="flex justify-end space-x-4 pt-6 border-t border-slate-600">
+          <button type="submit"
+                  class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md font-medium transition-colors">
+            💾 {% trans 'Save Changes' %}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Account Information Card -->
+  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mt-6">
+    <div class="p-6">
+      <h3 class="text-lg font-medium text-white mb-6">
+        🔐 {% trans 'Account Information' %}
+      </h3>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="space-y-4">
+          <div>
+            <dt class="text-sm font-medium text-slate-400">{% trans 'Account Status' %}</dt>
+            <dd class="mt-1 text-sm text-white">
+              {% if profile.is_active|default:True %}
+                {% badge "Active" variant="success" icon="✅" %}
+              {% else %}
+                {% badge "Inactive" variant="danger" icon="❌" %}
+              {% endif %}
+            </dd>
+          </div>
+
+          <div>
+            <dt class="text-sm font-medium text-slate-400">{% trans 'Member Since' %}</dt>
+            <dd class="mt-1 text-sm text-white">{{ profile.date_joined|date:"d.m.Y"|default:'N/A' }}</dd>
+          </div>
+        </div>
+
+        <div class="space-y-4">
+          <div>
+            <dt class="text-sm font-medium text-slate-400">{% trans 'Last Login' %}</dt>
+            <dd class="mt-1 text-sm text-white">
+              {% if profile.last_login %}
+                {{ profile.last_login|date:"d.m.Y H:i" }}
+              {% else %}
+                <span class="text-slate-500">{% trans 'Never' %}</span>
+              {% endif %}
+            </dd>
+          </div>
+
+          <div>
+            <dt class="text-sm font-medium text-slate-400">{% trans 'Two-Factor Authentication' %}</dt>
+            <dd class="mt-1 text-sm">
+              {% if profile.mfa_enabled %}
+                {% badge "Enabled" variant="success" icon="🔒" %}
+                <div class="mt-2">
+                  <a href="{% url 'users:mfa_management' %}" 
+                     class="text-blue-400 hover:text-blue-300 text-xs">
+                    🔧 {% trans 'Manage MFA Settings' %}
+                  </a>
+                </div>
+              {% else %}
+                {% badge "Disabled" variant="warning" icon="⚠️" %}
+                <div class="mt-2">
+                  <a href="{% url 'users:mfa_management' %}" 
+                     class="text-yellow-400 hover:text-yellow-300 text-xs">
+                    ⚡ {% trans 'Enable MFA Now' %}
+                  </a>
+                </div>
+              {% endif %}
+            </dd>
+          </div>
+
+          <div>
+            <dt class="text-sm font-medium text-slate-400">{% trans 'Password Security' %}</dt>
+            <dd class="mt-1 text-sm">
+              <a href="{% url 'users:change_password' %}" 
+                 class="text-blue-400 hover:text-blue-300">
+                🔑 {% trans 'Change Password' %}
+              </a>
+            </dd>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Multi-Customer Company Profile Management -->
+  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mt-6">
+    <div class="p-6">
+      <div class="mb-6">
+        <!-- Header - Mobile Stacked, Desktop Side-by-Side -->
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+          <h3 class="text-lg font-medium text-white">
+            🏢 {% trans 'Company Profiles' %}
+          </h3>
+          
+          <!-- Customer Context Summary - Mobile Full Width -->
+          {% if user_memberships %}
+          <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+            <span class="text-xs text-slate-400 whitespace-nowrap">
+              {{ user_memberships|length }} {% trans 'company' %}{% if user_memberships|length != 1 %}{% trans 'ies' %}{% endif %}
+            </span>
+            
+            <!-- Quick Customer Selector - Mobile Full Width -->
+            <div class="relative w-full sm:w-auto min-w-0 sm:min-w-48">
+              <select onchange="switchCustomer(this.value)" class="w-full bg-slate-700 border border-slate-600 text-white text-sm rounded-lg px-3 py-2 pr-10 appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 truncate">
+                <option value="">{% trans 'Select Customer' %}</option>
+                {% for membership in user_memberships %}
+                <option value="{{ membership.customer_id }}" {% if membership.customer_id|stringformat:'s' == selected_customer_id|stringformat:'s' %}selected{% endif %}>
+                  {{ membership.customer_name }} ({{ membership.role|title }})
+                </option>
+                {% endfor %}
+              </select>
+              <svg class="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+              </svg>
+            </div>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Current Customer Context Display -->
+      {% if selected_customer_name %}
+      <div class="mb-6 p-4 bg-slate-700/50 border border-slate-600 rounded-lg">
+        <!-- Mobile Stacked, Desktop Side-by-Side -->
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <!-- Customer Info -->
+          <div class="flex items-start sm:items-center space-x-3 min-w-0 flex-1">
+            <span class="text-blue-400 mt-0.5 sm:mt-0 flex-shrink-0">🏢</span>
+            <div class="min-w-0 flex-1">
+              <div class="text-sm font-medium text-white truncate">
+                {% trans 'Currently viewing:' %} {{ selected_customer_name }}
+              </div>
+              <div class="text-xs text-slate-400 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 mt-1">
+                <span class="whitespace-nowrap">{% trans 'Your role:' %}</span>
+                <span class="inline-flex px-2 py-1 rounded-full text-xs font-medium
+                  {% if selected_customer_role == 'owner' %}bg-green-600 text-white
+                  {% elif selected_customer_role == 'billing' %}bg-blue-600 text-white  
+                  {% elif selected_customer_role == 'tech' %}bg-purple-600 text-white
+                  {% elif selected_customer_role == 'viewer' %}bg-gray-600 text-white
+                  {% else %}bg-slate-600 text-white{% endif %}">
+                  {% if selected_customer_role == "owner" %}👑 {% trans "Owner" %}
+                  {% elif selected_customer_role == "billing" %}💳 {% trans "Billing" %}
+                  {% elif selected_customer_role == "tech" %}⚙️ {% trans "Technical" %}
+                  {% elif selected_customer_role == "viewer" %}👁️ {% trans "Viewer" %}
+                  {% else %}{{ selected_customer_role|title }}{% endif %}
+                </span>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Quick Actions - Mobile Full Width Buttons -->
+          <div class="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            <a href="{% url 'users:company_profile' %}" 
+               class="flex items-center justify-center px-4 py-2 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors">
+              👁️ {% trans 'View' %}
+            </a>
+            {% if can_edit_profile %}
+            <a href="{% url 'users:company_profile_edit' %}" 
+               class="flex items-center justify-center px-4 py-2 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 transition-colors">
+              ✏️ {% trans 'Edit' %}
+            </a>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Company Cards Grid - Better Mobile Spacing -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
+        
+        <!-- Existing Company Cards -->
+        {% for membership in user_memberships %}
+        <div class="bg-slate-700/50 border border-slate-600 rounded-lg p-4 hover:border-slate-500 transition-colors
+                    {% if membership.customer_id|stringformat:'s' == selected_customer_id|stringformat:'s' %}ring-2 ring-blue-500 border-blue-500{% endif %}">
+          
+          <!-- Company Header -->
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center space-x-2">
+              <span class="text-blue-400">🏢</span>
+              <h4 class="font-medium text-white text-sm truncate">{{ membership.customer_name }}</h4>
+            </div>
+            
+            <!-- Role Badge -->
+            <span class="px-2 py-1 rounded-full text-xs font-medium
+              {% if membership.role == 'owner' %}bg-green-600 text-white
+              {% elif membership.role == 'billing' %}bg-blue-600 text-white
+              {% elif membership.role == 'tech' %}bg-purple-600 text-white  
+              {% elif membership.role == 'viewer' %}bg-gray-600 text-white
+              {% else %}bg-slate-600 text-white{% endif %}">
+              {% if membership.role == "owner" %}👑{% elif membership.role == "billing" %}💳{% elif membership.role == "tech" %}⚙️{% elif membership.role == "viewer" %}👁️{% endif %}
+              {{ membership.role|title }}
+            </span>
+          </div>
+
+          <!-- Company Info -->
+          <div class="space-y-2 mb-4">
+            <div class="text-xs text-slate-400">
+              <span>{% trans 'ID:' %} {{ membership.customer_id }}</span>
+            </div>
+            {% if membership.company_name %}
+            <div class="text-xs text-slate-300 truncate">
+              {{ membership.company_name }}
+            </div>
+            {% endif %}
+          </div>
+
+          <!-- Action Buttons - Mobile Friendly -->
+          <div class="flex flex-col sm:flex-row gap-2">
+            {% if membership.customer_id|stringformat:'s' == selected_customer_id|stringformat:'s' %}
+              <!-- Current customer - direct actions -->
+              <a href="{% url 'users:company_profile' %}" 
+                 class="flex-1 px-3 py-2 bg-blue-600 text-white text-xs text-center font-medium rounded-lg hover:bg-blue-700 transition-colors">
+                👁️ {% trans 'View' %}
+              </a>
+              {% if membership.role in 'owner,billing' %}
+              <a href="{% url 'users:company_profile_edit' %}" 
+                 class="flex-1 px-3 py-2 bg-green-600 text-white text-xs text-center font-medium rounded-lg hover:bg-green-700 transition-colors">
+                ✏️ {% trans 'Edit' %}
+              </a>
+              {% endif %}
+            {% else %}
+              <!-- Other customer - switch first -->
+              <button onclick="switchToCustomer('{{ membership.customer_id }}')" 
+                      class="w-full px-3 py-2 bg-slate-600 text-white text-xs font-medium rounded-lg hover:bg-slate-500 transition-colors">
+                🔄 {% trans 'Switch & View' %}
+              </button>
+            {% endif %}
+          </div>
+        </div>
+        {% empty %}
+        <!-- No companies message - Mobile Friendly -->
+        <div class="sm:col-span-2 xl:col-span-3 text-center py-8 px-4">
+          <div class="text-slate-400 mb-4">
+            <span class="text-4xl">🏢</span>
+          </div>
+          <p class="text-slate-400 mb-2 text-sm sm:text-base">{% trans 'No company profiles found' %}</p>
+          <p class="text-xs text-slate-500">{% trans 'Create your first company profile to get started' %}</p>
+        </div>
+        {% endfor %}
+
+        <!-- Add New Company Card - Mobile Optimized -->
+        <div class="bg-slate-700/30 border-2 border-dashed border-slate-600 rounded-lg p-4 hover:border-slate-500 hover:bg-slate-700/40 transition-colors group">
+          <div class="text-center">
+            <div class="text-slate-400 group-hover:text-slate-300 mb-3">
+              <span class="text-2xl sm:text-3xl">➕</span>
+            </div>
+            <h4 class="font-medium text-slate-400 group-hover:text-slate-300 mb-2 text-sm">
+              {% trans 'Add New Company' %}
+            </h4>
+            <p class="text-xs text-slate-500 group-hover:text-slate-400 mb-4 leading-relaxed">
+              {% trans 'Create a new company profile and become the owner' %}
+            </p>
+            <a href="{% url 'users:create_company' %}" 
+               class="inline-flex items-center justify-center w-full px-4 py-2.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors">
+              🏢 {% trans 'Create Company' %}
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Romanian Compliance Notice - Mobile Friendly -->
+      <div class="mt-6 p-4 bg-slate-900 border border-slate-600 rounded-lg">
+        <div class="flex items-start space-x-3">
+          <span class="text-blue-400 mt-0.5 flex-shrink-0">🇷🇴</span>
+          <div class="text-xs sm:text-sm text-slate-400 min-w-0">
+            <p class="font-medium text-slate-300 mb-2 text-sm">{% trans 'Romanian Business Compliance' %}</p>
+            <p class="leading-relaxed">{% trans 'VAT number (CUI) and legal address required for invoicing. Company owners can invite team members with different access levels.' %}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- JavaScript for Multi-Customer Management -->
+  <script>
+  function switchCustomer(customerId) {
+    if (!customerId) return;
+    
+    // Create a form and submit to switch customer
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '{% url "users:switch_customer" %}';
+    
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    const csrfInput = document.createElement('input');
+    csrfInput.type = 'hidden';
+    csrfInput.name = 'csrfmiddlewaretoken';
+    csrfInput.value = csrfToken;
+    form.appendChild(csrfInput);
+    
+    const customerInput = document.createElement('input');
+    customerInput.type = 'hidden';
+    customerInput.name = 'customer_id';
+    customerInput.value = customerId;
+    form.appendChild(customerInput);
+    
+    const nextInput = document.createElement('input');
+    nextInput.type = 'hidden';
+    nextInput.name = 'next';
+    nextInput.value = window.location.pathname;
+    form.appendChild(nextInput);
+    
+    document.body.appendChild(form);
+    form.submit();
+  }
+  
+  function switchToCustomer(customerId) {
+    switchCustomer(customerId);
+  }
+  
+  // addNewCompany function removed - now uses direct link to create_company view
+  </script>
+
+  <!-- GDPR Privacy & Data Protection -->
+  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mt-6">
+    <div class="p-6">
+      <h3 class="text-lg font-medium text-white mb-6">
+        🛡️ {% trans 'Privacy & Data Protection' %}
+      </h3>
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Current Consent Status -->
+        <div class="space-y-4">
+          <h4 class="text-sm font-semibold text-slate-300">{% trans 'Current Consent Status' %}</h4>
+          
+          <div class="space-y-3">
+            <!-- Data Processing Consent -->
+            <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
+              <div class="flex items-center">
+                <span class="text-green-400 mr-2">🔒</span>
+                <div>
+                  <div class="text-sm font-medium text-white">{% trans 'Data Processing' %}</div>
+                  <div class="text-xs text-slate-400">{% trans 'Required for service' %}</div>
+                </div>
+              </div>
+              {% if profile.gdpr_consent_date %}
+                {% badge "Given" variant="success" icon="✅" %}
+              {% else %}
+                {% badge "Not Given" variant="danger" icon="❌" %}
+              {% endif %}
+            </div>
+
+            <!-- Marketing Consent -->
+            <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
+              <div class="flex items-center">
+                <span class="text-blue-400 mr-2">📧</span>
+                <div>
+                  <div class="text-sm font-medium text-white">{% trans 'Marketing Communications' %}</div>
+                  <div class="text-xs text-slate-400">{% trans 'Newsletters and updates' %}</div>
+                </div>
+              </div>
+              {% if profile.accepts_marketing %}
+                {% badge "Enabled" variant="success" icon="✅" %}
+              {% else %}
+                {% badge "Disabled" variant="secondary" icon="📛" %}
+              {% endif %}
+            </div>
+          </div>
+
+          {% if profile.gdpr_consent_date %}
+          <div class="text-xs text-slate-400">
+            {% trans 'Last updated:' %} {{ profile.gdpr_consent_date|date:"M d, Y" }}
+          </div>
+          {% endif %}
+        </div>
+
+        <!-- GDPR Actions -->
+        <div class="space-y-4">
+          <h4 class="text-sm font-semibold text-slate-300">{% trans 'Your Data Rights' %}</h4>
+          
+          <div class="space-y-3">
+            <a href="{% url 'users:privacy_dashboard' %}" class="flex items-center p-3 bg-blue-900/50 hover:bg-blue-800/60 rounded-lg transition-colors group">
+              <span class="text-blue-400 mr-3 text-lg">🛡️</span>
+              <div class="flex-1">
+                <div class="text-sm font-medium text-white group-hover:text-blue-200">
+                  {% trans 'Privacy Dashboard' %}
+                </div>
+                <div class="text-xs text-blue-300">
+                  {% trans 'Manage your privacy settings and data preferences' %}
+                </div>
+              </div>
+              <span class="text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+            </a>
+
+            <a href="{% url 'users:data_export' %}" class="flex items-center p-3 bg-slate-700/50 hover:bg-slate-600/60 rounded-lg transition-colors group">
+              <span class="text-green-400 mr-3">📄</span>
+              <div class="flex-1">
+                <div class="text-sm font-medium text-white group-hover:text-green-200">
+                  {% trans 'Export My Data' %}
+                </div>
+                <div class="text-xs text-slate-400">
+                  {% trans 'Download a copy of your personal data' %}
+                </div>
+              </div>
+              <span class="text-green-400 opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+            </a>
+
+            <a href="{% url 'users:consent_history' %}" class="flex items-center p-3 bg-slate-700/50 hover:bg-slate-600/60 rounded-lg transition-colors group">
+              <span class="text-yellow-400 mr-3">📜</span>
+              <div class="flex-1">
+                <div class="text-sm font-medium text-white group-hover:text-yellow-200">
+                  {% trans 'Consent History' %}
+                </div>
+                <div class="text-xs text-slate-400">
+                  {% trans 'View and manage your consent preferences' %}
+                </div>
+              </div>
+              <span class="text-yellow-400 opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+            </a>
+          </div>
+
+          <!-- Legal compliance note -->
+          <div class="mt-4 p-3 bg-slate-900 border border-slate-600 rounded-lg">
+            <p class="text-xs text-slate-400">
+              🇷🇴 {% trans 'GDPR compliant according to Romanian Law 190/2018 and EU Regulation 2016/679' %}
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

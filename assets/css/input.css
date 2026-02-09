@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+/* Custom styles can be added here */
+
+/* Romanian Hosting Brand Colors - moved from inline styles */
+:root {
+  --brand-h: 220;
+  --brand-s: 90%;
+  --brand-l: 56%;
+  --bg: #0b0c10;
+  --bg-elev: #111217;
+  --content: #e6e8eb;
+  --primary: hsl(var(--brand-h) var(--brand-s) var(--brand-l));
+}
+
+.brand-gradient {
+  background: linear-gradient(135deg, #3b82f6 0%, #1e40af 100%);
+}
+
+.romanian-flag::before {
+  content: "🇷🇴";
+  margin-right: 0.5rem;
+}
