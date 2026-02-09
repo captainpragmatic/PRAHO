@@ -154,6 +154,7 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Platform service API endpoint
 PLATFORM_API_BASE_URL = os.environ.get(
 <<<<<<< HEAD
+<<<<<<< HEAD
     'PLATFORM_API_BASE_URL', 
     'http://127.0.0.1:8700'
 )
@@ -163,6 +164,8 @@ PLATFORM_API_TOKEN = os.environ.get('PLATFORM_API_TOKEN')  # Legacy token
 PLATFORM_API_SECRET = os.environ.get('PLATFORM_API_SECRET')  # HMAC secret - REQUIRED
 PLATFORM_API_TIMEOUT = int(os.environ.get('PLATFORM_API_TIMEOUT', '30'))  # 30 seconds
 =======
+=======
+>>>>>>> origin/claude/improve-code-structure-gfBbo
     'PLATFORM_API_BASE_URL',
     'http://127.0.0.1:8700/api/'
 )
@@ -184,6 +187,9 @@ if not _api_token:
         )
 PLATFORM_API_TOKEN = _api_token
 >>>>>>> origin/claude/code-security-review-88rnF
+
+# API request timeout (seconds) - externalized for production tuning
+PORTAL_API_TIMEOUT = int(os.environ.get('PORTAL_API_TIMEOUT', '30'))
 
 # ===============================================================================
 # LOCALIZATION

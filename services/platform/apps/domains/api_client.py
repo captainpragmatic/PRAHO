@@ -9,16 +9,24 @@ import time
 from typing import Any
 
 import requests
+from django.conf import settings
 from requests import Response
 
 from .models import Registrar
 
 logger = logging.getLogger(__name__)
 
-# API security constants
-API_REQUEST_TIMEOUT = 30  # seconds
-API_MAX_RETRIES = 3
-HTTP_SUCCESS_THRESHOLD = 400  # HTTP status codes below this are considered successful
+
+def get_api_timeouts() -> dict[str, int]:
+    """Get API timeout configuration from settings with fallbacks."""
+    return getattr(settings, 'API_TIMEOUTS', {
+        'REQUEST_TIMEOUT': 30,
+        'MAX_RETRIES': 3,
+    })
+
+
+# HTTP status codes below this are considered successful
+HTTP_SUCCESS_THRESHOLD = 400
 
 
 class SecureAPIClient:
@@ -33,10 +41,12 @@ class SecureAPIClient:
         api_key, api_secret = registrar.get_api_credentials()
 
         headers = SecureAPIClient._build_headers(api_key, api_secret)
+        timeouts = get_api_timeouts()
+        max_retries = timeouts.get('MAX_RETRIES', 3)
 
-        for attempt in range(API_MAX_RETRIES):
+        for attempt in range(max_retries):
             try:
-                logger.info(f"🌐 [API] {method} {endpoint} (attempt {attempt + 1}/{API_MAX_RETRIES})")
+                logger.info(f"🌐 [API] {method} {endpoint} (attempt {attempt + 1}/{max_retries})")
 
                 response = SecureAPIClient._make_http_request(method, full_url, data, headers)
 
@@ -45,24 +55,24 @@ class SecureAPIClient:
                     return SecureAPIClient._parse_success_response(response)
 
                 # Handle failed response
-                error_result = SecureAPIClient._handle_error_response(response, attempt)
+                error_result = SecureAPIClient._handle_error_response(response, attempt, max_retries)
                 if error_result:
                     return False, error_result
 
             except requests.exceptions.Timeout:
-                if SecureAPIClient._handle_timeout(registrar, attempt):
+                if SecureAPIClient._handle_timeout(registrar, attempt, max_retries):
                     return False, {"error": "Request timeout"}
 
             except requests.exceptions.ConnectionError as e:
-                if SecureAPIClient._handle_connection_error(registrar, attempt, e):
+                if SecureAPIClient._handle_connection_error(registrar, attempt, e, max_retries):
                     return False, {"error": "Connection failed"}
 
             except Exception as e:
-                if SecureAPIClient._handle_unexpected_error(registrar, attempt, e):
+                if SecureAPIClient._handle_unexpected_error(registrar, attempt, e, max_retries):
                     return False, {"error": str(e)}
 
             # Wait before retry with secure jitter
-            if attempt < API_MAX_RETRIES - 1:
+            if attempt < max_retries - 1:
                 SecureAPIClient._secure_backoff(attempt)
 
         return False, {"error": "All retry attempts failed"}
@@ -84,12 +94,14 @@ class SecureAPIClient:
     @staticmethod
     def _make_http_request(method: str, url: str, data: dict[str, Any], headers: dict[str, str]) -> Response:
         """🌐 Make HTTP request with security settings"""
+        timeouts = get_api_timeouts()
+        request_timeout = timeouts.get('REQUEST_TIMEOUT', 30)
         return requests.request(
             method=method,
             url=url,
             json=data,
             headers=headers,
-            timeout=API_REQUEST_TIMEOUT,
+            timeout=request_timeout,
             verify=True,  # Always verify SSL certificates
         )
 
@@ -102,10 +114,10 @@ class SecureAPIClient:
             return True, {"response": response.text}
 
     @staticmethod
-    def _handle_error_response(response: Response, attempt: int) -> dict[str, Any] | None:
+    def _handle_error_response(response: Response, attempt: int, max_retries: int = 3) -> dict[str, Any] | None:
         """❌ Handle HTTP error response"""
         logger.warning(f"⚠️ [API] HTTP {response.status_code}: {response.text}")
-        if attempt == API_MAX_RETRIES - 1:  # Last attempt
+        if attempt == max_retries - 1:  # Last attempt
             return {
                 "error": f"HTTP {response.status_code}",
                 "message": response.text[:200],
@@ -113,22 +125,22 @@ class SecureAPIClient:
         return None
 
     @staticmethod
-    def _handle_timeout(registrar: Registrar, attempt: int) -> bool:
+    def _handle_timeout(registrar: Registrar, attempt: int, max_retries: int = 3) -> bool:
         """⏱️ Handle request timeout"""
         logger.warning(f"⏱️ [API] Timeout for {registrar.name} (attempt {attempt + 1})")
-        return attempt == API_MAX_RETRIES - 1
+        return attempt == max_retries - 1
 
     @staticmethod
-    def _handle_connection_error(registrar: Registrar, attempt: int, error: Exception) -> bool:
+    def _handle_connection_error(registrar: Registrar, attempt: int, error: Exception, max_retries: int = 3) -> bool:
         """🔌 Handle connection error"""
         logger.warning(f"🔌 [API] Connection error for {registrar.name}: {error}")
-        return attempt == API_MAX_RETRIES - 1
+        return attempt == max_retries - 1
 
     @staticmethod
-    def _handle_unexpected_error(registrar: Registrar, attempt: int, error: Exception) -> bool:
+    def _handle_unexpected_error(registrar: Registrar, attempt: int, error: Exception, max_retries: int = 3) -> bool:
         """🔥 Handle unexpected error"""
         logger.error(f"🔥 [API] Unexpected error for {registrar.name}: {error}")
-        return attempt == API_MAX_RETRIES - 1
+        return attempt == max_retries - 1
 
     @staticmethod
     def _secure_backoff(attempt: int) -> None:

@@ -980,7 +980,8 @@ class RefundService:
         # Check related refunds
         try:
             return Refund.objects.filter(order=order).aggregate(total=Sum("amount_cents", default=0))["total"]  # type: ignore[no-any-return]
-        except Exception:
+        except (TypeError, AttributeError):
+            # Handle cases where order doesn't have proper relationships or Sum returns unexpected type
             return 0
 
     @staticmethod
@@ -998,7 +999,8 @@ class RefundService:
         # Check related refunds
         try:
             return Refund.objects.filter(invoice=invoice).aggregate(total=Sum("amount_cents", default=0))["total"]  # type: ignore[no-any-return]
-        except Exception:
+        except (TypeError, AttributeError):
+            # Handle cases where invoice doesn't have proper relationships or Sum returns unexpected type
             return 0
 
     @staticmethod

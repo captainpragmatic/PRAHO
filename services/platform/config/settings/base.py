@@ -477,6 +477,7 @@ Q_CLUSTER = {
 }
 
 # ===============================================================================
+<<<<<<< HEAD
 # 🚀 PERFORMANCE & SCALABILITY CONFIGURATION
 # ===============================================================================
 
@@ -664,3 +665,26 @@ N_PLUS_ONE_THRESHOLD = int(os.environ.get("N_PLUS_ONE_THRESHOLD", "10"))
 # Lock timeout defaults (seconds)
 DISTRIBUTED_LOCK_TIMEOUT = int(os.environ.get("DISTRIBUTED_LOCK_TIMEOUT", "300"))
 DISTRIBUTED_LOCK_BLOCKING_TIMEOUT = int(os.environ.get("DISTRIBUTED_LOCK_BLOCKING_TIMEOUT", "30"))
+=======
+# API CLIENT TIMEOUT CONFIGURATIONS ⏱️
+# ===============================================================================
+
+# Externalized timeout configurations for API clients (Domain, Server Gateway, Portal)
+# These values can be overridden by environment variables (API_*_TIMEOUT)
+API_TIMEOUTS = {
+    # General API request timeouts (seconds)
+    'REQUEST_TIMEOUT': int(os.environ.get('API_REQUEST_TIMEOUT', '30')),
+    'HEALTH_CHECK_TIMEOUT': int(os.environ.get('API_HEALTH_CHECK_TIMEOUT', '10')),
+
+    # Retry configuration
+    'MAX_RETRIES': int(os.environ.get('API_MAX_RETRIES', '3')),
+    'RETRY_DELAY': int(os.environ.get('API_RETRY_DELAY', '2')),
+
+    # Rate limiting
+    'RATE_LIMIT_WINDOW': int(os.environ.get('API_RATE_LIMIT_WINDOW', '3600')),  # 1 hour
+    'RATE_LIMIT_MAX_CALLS': int(os.environ.get('API_RATE_LIMIT_MAX_CALLS', '50')),
+}
+
+# Portal service specific timeout (can be overridden)
+PORTAL_API_TIMEOUT = int(os.environ.get('PORTAL_API_TIMEOUT', '30'))
+>>>>>>> origin/claude/improve-code-structure-gfBbo

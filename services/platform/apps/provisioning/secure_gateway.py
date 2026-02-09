@@ -12,6 +12,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import requests
+from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 
@@ -21,12 +22,19 @@ from .models import Server
 
 logger = logging.getLogger(__name__)
 
-# Server management API security constants
-API_REQUEST_TIMEOUT = 30  # seconds
-API_MAX_RETRIES = 3
-API_RATE_LIMIT_WINDOW = 3600  # 1 hour in seconds
-API_RATE_LIMIT_MAX_CALLS = 50  # Max API calls per hour per server
-HTTP_SUCCESS_THRESHOLD = 400  # HTTP status codes below this are considered successful
+
+def get_api_timeouts() -> dict[str, int]:
+    """Get API timeout configuration from settings with fallbacks."""
+    return getattr(settings, 'API_TIMEOUTS', {
+        'REQUEST_TIMEOUT': 30,
+        'MAX_RETRIES': 3,
+        'RATE_LIMIT_WINDOW': 3600,
+        'RATE_LIMIT_MAX_CALLS': 50,
+    })
+
+
+# HTTP status codes below this are considered successful
+HTTP_SUCCESS_THRESHOLD = 400
 
 # Whitelisted server management domains for SSRF protection
 # SECURITY: localhost/127.0.0.1 removed to prevent SSRF attacks (OWASP A10:2021)
@@ -232,19 +240,22 @@ class SecureServerGateway:
     def _check_server_rate_limit(server: Server, operation: str) -> bool:
         """⏱️ Check API rate limits per server"""
         cache_key = f"server_api_limit:{server.id}:{operation}"
+        timeouts = get_api_timeouts()
+        rate_limit_max_calls = timeouts.get('RATE_LIMIT_MAX_CALLS', 50)
+        rate_limit_window = timeouts.get('RATE_LIMIT_WINDOW', 3600)
 
         try:
             # Get current call count
             current_calls = cache.get(cache_key, 0)
 
-            if current_calls >= API_RATE_LIMIT_MAX_CALLS:
+            if current_calls >= rate_limit_max_calls:
                 logger.warning(
-                    f"🚨 [Rate Limit] Server {server.name} exceeded limit: {current_calls}/{API_RATE_LIMIT_MAX_CALLS}"
+                    f"🚨 [Rate Limit] Server {server.name} exceeded limit: {current_calls}/{rate_limit_max_calls}"
                 )
                 return False
 
             # Increment counter
-            cache.set(cache_key, current_calls + 1, timeout=API_RATE_LIMIT_WINDOW)
+            cache.set(cache_key, current_calls + 1, timeout=rate_limit_window)
             return True
 
         except Exception as e:
@@ -297,6 +308,9 @@ class SecureServerGateway:
         """🔒 Make secure HTTP API call to server management system"""
         full_url = f"{server.management_api_url.rstrip('/')}{endpoint}"
         api_key, api_secret = server.get_management_api_credentials()
+        timeouts = get_api_timeouts()
+        request_timeout = timeouts.get('REQUEST_TIMEOUT', 30)
+        max_retries = timeouts.get('MAX_RETRIES', 3)
 
         headers = {
             "User-Agent": "PRAHO-Platform/1.0",
@@ -311,20 +325,20 @@ class SecureServerGateway:
 
         success = False
         result: dict[str, Any] = {}
-        for attempt in range(API_MAX_RETRIES):
+        for attempt in range(max_retries):
             req = {
                 "method": method,
                 "url": full_url,
                 "json": data,
                 "headers": headers,
-                "timeout": API_REQUEST_TIMEOUT,
+                "timeout": request_timeout,
                 "verify": True,
             }
             success, payload, should_continue = SecureServerGateway._attempt_request(
                 request_kwargs=req,
                 server_name=server.name,
                 attempt=attempt,
-                max_retries=API_MAX_RETRIES,
+                max_retries=max_retries,
             )
             if success:
                 return True, payload
@@ -356,12 +370,14 @@ class SecureServerGateway:
             f"(attempt {attempt + 1}/{max_retries})"
         )
         try:
+            # Use timeout from request_kwargs (already set by caller from settings)
+            request_timeout = request_kwargs.get("timeout", get_api_timeouts().get('REQUEST_TIMEOUT', 30))
             response = requests.request(
                 method=request_kwargs["method"],
                 url=request_kwargs["url"],
                 json=request_kwargs.get("json"),
                 headers=request_kwargs["headers"],
-                timeout=API_REQUEST_TIMEOUT,
+                timeout=request_timeout,
                 verify=True,
             )
             is_success, resp_payload = SecureServerGateway._process_http_response(response)

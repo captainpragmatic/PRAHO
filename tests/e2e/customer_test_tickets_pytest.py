@@ -240,7 +240,7 @@ def test_customer_ticket_creation_workflow(page: Page) -> None:
             try:
                 page.select_option('select[name="priority"]', test_ticket_data['priority'])
                 print("  ✅ Set ticket priority")
-            except:
+            except (TimeoutError, Exception):  # noqa: S110
                 # Try normal priority if high is not available to customers
                 page.select_option('select[name="priority"]', 'normal')
                 print("  ✅ Set ticket priority (fallback to normal)")
@@ -929,7 +929,7 @@ def test_customer_complete_ticket_workflow(page: Page) -> None:
         if priority_field.is_visible():
             try:
                 page.select_option('select[name="priority"]', workflow_ticket['priority'])
-            except:
+            except (TimeoutError, Exception):  # noqa: S110
                 page.select_option('select[name="priority"]', 'normal')  # Fallback
         
         # Submit form
