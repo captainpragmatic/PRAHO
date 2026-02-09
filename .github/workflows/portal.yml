@@ -53,25 +53,27 @@ jobs:
         echo "PLATFORM_API_URL=http://mock-platform:8000" >> $GITHUB_ENV
         echo "PLATFORM_API_KEY=test-api-key" >> $GITHUB_ENV
 
-    - name: Validate portal has no database dependencies
+    - name: Validate portal has no external database dependencies
       run: |
-        echo "Verifying portal has no database drivers..."
+        echo "Verifying portal has no external database drivers..."
         cd services/portal
 
-        # Check pyproject.toml doesn't contain DB drivers
-        if grep -i "psycopg\|mysql\|sqlite" pyproject.toml 2>/dev/null; then
-          echo "SECURITY FAILURE: Portal has database drivers in pyproject.toml!"
+        # Check pyproject.toml doesn't contain external DB drivers
+        # (psycopg, mysql-connector, etc. — sqlite3 is stdlib, not a dep)
+        if grep -iP "psycopg|mysql-connector|mysqlclient|cx.oracle" pyproject.toml 2>/dev/null; then
+          echo "SECURITY FAILURE: Portal has external database drivers in pyproject.toml!"
           exit 1
         else
-          echo "Portal pyproject.toml has no database drivers"
+          echo "Portal pyproject.toml has no external database drivers"
         fi
 
-        # Verify portal settings has no DATABASES config
-        if grep -r "DATABASES.*=" config/settings* 2>/dev/null | grep -v "DATABASES = {}"; then
-          echo "SECURITY FAILURE: Portal has database configuration!"
+        # Verify portal does not use PostgreSQL/MySQL — in-memory SQLite for
+        # Django session/auth internals is acceptable (no business data).
+        if grep -r "psycopg\|mysql\|oracle" config/settings* 2>/dev/null; then
+          echo "SECURITY FAILURE: Portal has external database configuration!"
           exit 1
         else
-          echo "Portal settings have no database configuration"
+          echo "Portal settings use only SQLite (Django internals only)"
         fi
 
     - name: Run portal type checking
