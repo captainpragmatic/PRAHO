@@ -265,7 +265,6 @@ class TestOrdersAuditService:
             product=product,
             product_name='Shared Hosting Plan',
             product_type='hosting',
-            billing_period='monthly',
             quantity=1,
             unit_price_cents=4200,  # 42 EUR
             tax_rate=Decimal('0.19'),

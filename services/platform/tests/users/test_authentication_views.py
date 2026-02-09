@@ -120,40 +120,58 @@ class LoginViewTest(BaseViewTestCase):
         self.assertIsInstance(response.context['form'], LoginForm)
         
     def test_authenticated_user_redirect(self) -> None:
-        """Test authenticated user gets redirected"""
-        self.client.force_login(self.user)
+        """Test authenticated staff user gets redirected"""
+        self.client.force_login(self.staff_user)  # Must be staff for platform
         response = self.client.get(reverse('users:login'))
         self.assertRedirects(response, reverse('dashboard'))
         
     def test_successful_login(self) -> None:
-        """Test successful login process"""
+        """Test successful staff login process (platform is staff-only)"""
         response = self.client.post(reverse('users:login'), {
-            'email': 'test@example.com',
-            'password': 'testpass123'
+            'email': 'staff@example.com',
+            'password': 'staffpass123'
         })
-        
+
         self.assertRedirects(response, reverse('dashboard'))
-        
+
         # Check user is logged in
-        self.assertEqual(str(self.client.session['_auth_user_id']), str(self.user.pk))
-        
+        self.assertEqual(str(self.client.session['_auth_user_id']), str(self.staff_user.pk))
+
         # Check success message
         messages = list(get_messages(response.wsgi_request))
         self.assertEqual(len(messages), 1)
         self.assertIn('Welcome', str(messages[0]))
-        
+
         # Check login log
-        login_log = UserLoginLog.objects.filter(user=self.user, status='success').first()
+        login_log = UserLoginLog.objects.filter(user=self.staff_user, status='success').first()
         self.assertIsNotNone(login_log)
-        
-    def test_successful_login_with_next_url(self) -> None:
-        """Test successful login with next parameter"""
-        next_url = reverse('users:user_profile')
-        response = self.client.post(f"{reverse('users:login')}?next={next_url}", {
+
+    def test_customer_login_rejected(self) -> None:
+        """Test customer login is rejected on platform - customers use portal"""
+        response = self.client.post(reverse('users:login'), {
             'email': 'test@example.com',
             'password': 'testpass123'
         })
+
+        # Should redirect back to login with error
+        self.assertRedirects(response, reverse('users:login'))
+
+        # Check error message
+        messages = list(get_messages(response.wsgi_request))
+        self.assertTrue(any('customer portal' in str(m).lower() for m in messages))
+
+        # Check login log shows rejection
+        login_log = UserLoginLog.objects.filter(user=self.user, status='rejected_customer').first()
+        self.assertIsNotNone(login_log)
         
+    def test_successful_login_with_next_url(self) -> None:
+        """Test successful staff login with next parameter"""
+        next_url = reverse('users:user_profile')
+        response = self.client.post(f"{reverse('users:login')}?next={next_url}", {
+            'email': 'staff@example.com',
+            'password': 'staffpass123'
+        })
+
         self.assertRedirects(response, next_url)
         
     def test_failed_login_wrong_password(self) -> None:
@@ -263,85 +281,6 @@ class LoginViewTest(BaseViewTestCase):
         self.assertEqual(login_log.ip_address, '192.168.1.1')
 
 
-class RegisterViewTest(BaseViewTestCase):
-    """Test register_view function"""
-    
-    def test_get_register_page(self) -> None:
-        """Test GET request to register page"""
-        response = self.client.get(reverse('users:register'))
-        self.assertEqual(response.status_code, 200)
-        self.assertIsInstance(response.context['form'], CustomerOnboardingRegistrationForm)
-        
-    def test_authenticated_user_redirect(self) -> None:
-        """Test authenticated user gets redirected from register page"""
-        self.client.force_login(self.user)
-        response = self.client.get(reverse('users:register'))
-        self.assertRedirects(response, reverse('dashboard'))
-        
-    @patch('apps.users.forms.CustomerOnboardingRegistrationForm.save')
-    def test_successful_registration(self, mock_save: Mock) -> None:
-        """Test successful user registration"""
-        mock_save.return_value = None
-        
-        response = self.client.post(reverse('users:register'), {
-            'email': 'newuser@example.com',
-            'password1': 'complexpassword123',
-            'password2': 'complexpassword123',
-            'first_name': 'New',
-            'last_name': 'User',
-            'customer_type': 'individual',
-            'customer_name': 'New User',
-            'company_name': 'Individual User',  # Required for Romanian compliance
-            'cnp': '1234567890123',  # Required for individuals - Romanian Personal Numeric Code
-            'terms_accepted': True,  # Required for Romanian compliance
-            'gdpr_consent': True,
-            'data_processing_consent': True,
-            'phone': '+40712345678',
-            'address_line1': 'Test Address 123',
-            'city': 'Bucharest',
-            'county': 'Bucharest',
-            'postal_code': '123456',
-        })
-        
-        self.assertRedirects(response, reverse('users:registration_submitted'))
-        
-        # Check that no specific success message is shown (anti-enumeration)
-        messages = list(get_messages(response.wsgi_request))
-        # Should have neutral message or no message to prevent enumeration
-        
-    @patch('apps.users.forms.CustomerOnboardingRegistrationForm.save')
-    def test_registration_validation_error(self, mock_save: Mock) -> None:
-        """Test registration with validation error"""
-        mock_save.side_effect = ValidationError('Test validation error')
-        
-        response = self.client.post(reverse('users:register'), {
-            'email': 'newuser@example.com',
-            'password1': 'complexpassword123',
-            'password2': 'complexpassword123',
-            'first_name': 'New',
-            'last_name': 'User',
-            'gdpr_consent': True,
-        })
-        
-        self.assertEqual(response.status_code, 200)
-        
-        # Check for form errors or messages
-        # Mock might not work as expected, just ensure the form re-renders
-        self.assertContains(response, 'Create Account')  # Form is re-rendered on error
-        
-    def test_registration_form_invalid(self) -> None:
-        """Test registration with invalid form data"""
-        response = self.client.post(reverse('users:register'), {
-            'email': 'invalid-email',
-            'password1': 'pass',
-            'password2': 'different',
-        })
-        
-        self.assertEqual(response.status_code, 200)
-        form = response.context['form']
-        self.assertFalse(form.is_valid())
-
-
 class LogoutViewTest(BaseViewTestCase):
     """Test logout_view function"""
     
@@ -368,142 +307,6 @@ class LogoutViewTest(BaseViewTestCase):
 
 
 # ===============================================================================
-# PASSWORD RESET VIEWS TESTS
-# ===============================================================================
-
-@override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')
-class PasswordResetViewsTest(BaseViewTestCase):
-    """Test password reset view classes"""
-    
-    def test_password_reset_get(self) -> None:
-        """Test GET request to password reset page"""
-        response = self.client.get(reverse('users:password_reset'))
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'email')
-        
-    def test_password_reset_post_valid_email(self) -> None:
-        """Test password reset with valid email"""
-        response = self.client.post(reverse('users:password_reset'), {
-            'email': 'test@example.com'
-        })
-        
-        self.assertRedirects(response, reverse('users:password_reset_done'))
-        
-        # Check email was sent
-        self.assertEqual(len(mail.outbox), 1)
-        email = mail.outbox[0]
-        self.assertEqual(email.to, ['test@example.com'])
-        self.assertIn('Password reset', email.subject)
-        
-    def test_password_reset_post_invalid_email(self) -> None:
-        """Test password reset with invalid email"""
-        response = self.client.post(reverse('users:password_reset'), {
-            'email': 'nonexistent@example.com'
-        })
-        
-        # Still redirects to done page for security (don't reveal user existence)
-        self.assertRedirects(response, reverse('users:password_reset_done'))
-        
-        # No email should be sent
-        self.assertEqual(len(mail.outbox), 0)
-        
-    def test_password_reset_rate_limiting(self) -> None:
-        """Test rate limiting on password reset"""
-        # Rate limiting is tested by making multiple requests
-        # The actual rate limit is configured in the view decorator
-        # This test just ensures the view handles multiple requests properly
-        
-        for i in range(6):  # More than the rate limit of 3/h
-            response = self.client.post(reverse('users:password_reset'), {
-                'email': 'test@example.com'
-            })
-            # First few should succeed, later ones might be rate limited
-            # But Django's test client doesn't enforce rate limits by default
-            # Also allow 403 for CSRF failures 
-            self.assertIn(response.status_code, [302, 403, 429])  # Success, CSRF, or rate limited
-            
-    def test_password_reset_done_view(self) -> None:
-        """Test password reset done view"""
-        response = self.client.get(reverse('users:password_reset_done'))
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Password Reset Sent')
-        
-    def test_password_reset_confirm_get(self) -> None:
-        """Test password reset confirm GET"""
-        # Generate valid token
-        from django.contrib.auth.tokens import default_token_generator
-        from django.utils.encoding import force_bytes
-        from django.utils.http import urlsafe_base64_encode
-        
-        uidb64 = urlsafe_base64_encode(force_bytes(self.user.pk))
-        token = default_token_generator.make_token(self.user)
-        
-        response = self.client.get(
-            reverse('users:password_reset_confirm', kwargs={
-                'uidb64': uidb64,
-                'token': token
-            })
-        )
-        
-        # Should redirect to set-password URL 
-        self.assertEqual(response.status_code, 302)
-        
-        # Follow redirect and check that the form page loads
-        response = self.client.get(
-            reverse('users:password_reset_confirm', kwargs={
-                'uidb64': uidb64,
-                'token': 'set-password'
-            })
-        )
-        
-        self.assertEqual(response.status_code, 200)
-        
-    def test_password_reset_confirm_post_valid(self) -> None:
-        """Test password reset confirm with valid data"""
-        from django.contrib.auth.tokens import default_token_generator
-
-        from django.utils.encoding import force_bytes
-
-        from django.utils.http import urlsafe_base64_encode
-
-        
-        uidb64 = urlsafe_base64_encode(force_bytes(self.user.pk))
-        token = default_token_generator.make_token(self.user)
-        
-        # First GET to validate token and set up session
-        self.client.get(
-            reverse('users:password_reset_confirm', kwargs={
-                'uidb64': uidb64,
-                'token': token
-            })
-        )
-        
-        # Then POST to the set-password URL
-        response = self.client.post(
-            reverse('users:password_reset_confirm', kwargs={
-                'uidb64': uidb64,
-                'token': 'set-password'
-            }),
-            {
-                'new_password1': 'newcomplexpassword123',
-                'new_password2': 'newcomplexpassword123'
-            }
-        )
-        
-        self.assertRedirects(response, reverse('users:password_reset_complete'))
-        
-        # Verify password was changed
-        self.user.refresh_from_db()
-        self.assertTrue(self.user.check_password('newcomplexpassword123'))
-        
-    def test_password_reset_complete_view(self) -> None:
-        """Test password reset complete view"""
-        response = self.client.get(reverse('users:password_reset_complete'))
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'password has been set')
-
-
-# ===============================================================================
 # PASSWORD CHANGE TESTS
 # ===============================================================================
 
@@ -511,8 +314,8 @@ class PasswordChangeViewTest(BaseViewTestCase):
     """Test SecurePasswordChangeView class"""
     
     def test_password_change_get_authenticated(self) -> None:
-        """Test GET request to password change (authenticated)"""
-        self.client.force_login(self.user)
+        """Test GET request to password change (authenticated staff)"""
+        self.client.force_login(self.staff_user)  # Platform is staff-only
         response = self.client.get(reverse('users:password_change'))
         self.assertEqual(response.status_code, 200)
         
@@ -522,20 +325,20 @@ class PasswordChangeViewTest(BaseViewTestCase):
         self.assertEqual(response.status_code, 302)  # Redirect to login
         
     def test_password_change_post_valid(self) -> None:
-        """Test password change with valid data"""
-        self.client.force_login(self.user)
-        
+        """Test password change with valid data (staff user)"""
+        self.client.force_login(self.staff_user)  # Platform is staff-only
+
         response = self.client.post(reverse('users:password_change'), {
-            'old_password': 'testpass123',
+            'old_password': 'staffpass123',
             'new_password1': 'newcomplexpassword123',
             'new_password2': 'newcomplexpassword123'
         })
-        
+
         self.assertEqual(response.status_code, 302)  # Success redirect
-        
+
         # Verify password was changed
-        self.user.refresh_from_db()
-        self.assertTrue(self.user.check_password('newcomplexpassword123'))
+        self.staff_user.refresh_from_db()
+        self.assertTrue(self.staff_user.check_password('newcomplexpassword123'))
 
 
 # ===============================================================================
@@ -546,8 +349,8 @@ class TwoFactorViewsTest(BaseViewTestCase):
     """Test 2FA-related views"""
     
     def test_mfa_method_selection_get(self) -> None:
-        """Test GET request to MFA method selection"""
-        self.client.force_login(self.user)
+        """Test GET request to MFA method selection (staff)"""
+        self.client.force_login(self.staff_user)  # Platform is staff-only
         response = self.client.get(reverse('users:mfa_method_selection'))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'MFA')
@@ -958,106 +761,12 @@ class SecurityTest(BaseViewTestCase):
 # ===============================================================================
 
 class IntegrationTest(BaseViewTestCase):
-    """Integration tests for complete user workflows"""
-    
-    def test_complete_registration_login_workflow(self) -> None:
-        """Test complete user registration and login workflow"""
-        # Step 1: Register new user
-        with patch('apps.users.forms.CustomerOnboardingRegistrationForm.save'):
-            response = self.client.post(reverse('users:register'), {
-                'email': 'newuser@example.com',
-                'password1': 'complexpassword123',
-                'password2': 'complexpassword123',
-                'first_name': 'New',
-                'last_name': 'User',
-                'customer_type': 'individual',
-                'customer_name': 'New User',
-                'company_name': 'Individual User',  # Required for Romanian compliance
-                'cnp': '1234567890123',  # Required for individuals - Romanian Personal Numeric Code
-                'terms_accepted': True,  # Required for Romanian compliance
-                'gdpr_consent': True,
-                'data_processing_consent': True,
-                'phone': '+40712345678',
-                'address_line1': 'Test Address 123',
-                'city': 'Bucharest',
-                'county': 'Bucharest',
-                'postal_code': '123456',
-            })
-        
-        self.assertRedirects(response, reverse('users:registration_submitted'))
-        
-        # Step 2: Login with new credentials (simulate user creation)
-        new_user = UserModel.objects.create_user(
-            email='newuser@example.com',
-            password='complexpassword123',
-            first_name='New',
-            last_name='User'
-        )
-        
-        # Verify user was created successfully
-        self.assertIsNotNone(new_user.id)
-        self.assertEqual(new_user.email, 'newuser@example.com')
-        
-        response = self.client.post(reverse('users:login'), {
-            'email': 'newuser@example.com',
-            'password': 'complexpassword123'
-        })
-        
-        self.assertRedirects(response, reverse('dashboard'))
-        
-    def test_password_reset_workflow(self) -> None:
-        """Test complete password reset workflow"""
-        # Step 1: Request password reset
-        response = self.client.post(reverse('users:password_reset'), {
-            'email': 'test@example.com'
-        })
-        
-        self.assertRedirects(response, reverse('users:password_reset_done'))
-        
-        # Step 2: Use reset link (simulate email link)
-        from django.contrib.auth.tokens import default_token_generator
+    """Integration tests for complete user workflows
 
-        from django.utils.encoding import force_bytes
+    Note: Registration and password reset workflows moved to Portal service.
+    See services/portal/tests/ for those tests.
+    """
 
-        from django.utils.http import urlsafe_base64_encode
-
-        
-        uidb64 = urlsafe_base64_encode(force_bytes(self.user.pk))
-        token = default_token_generator.make_token(self.user)
-        
-        # Step 3: First GET to validate token and redirect to set-password
-        get_response = self.client.get(
-            reverse('users:password_reset_confirm', kwargs={
-                'uidb64': uidb64,
-                'token': token
-            })
-        )
-        
-        # This should redirect to the set-password URL
-        self.assertEqual(get_response.status_code, 302)
-        
-        # Step 4: Set new password on the set-password URL
-        response = self.client.post(
-            reverse('users:password_reset_confirm', kwargs={
-                'uidb64': uidb64,
-                'token': 'set-password'
-            }),
-            {
-                'new_password1': 'newcomplexpassword123',
-                'new_password2': 'newcomplexpassword123'
-            }
-        )
-        
-        self.assertRedirects(response, reverse('users:password_reset_complete'))
-        
-        # Step 5: Login with new password
-        response = self.client.post(reverse('users:login'), {
-            'email': 'test@example.com',
-            'password': 'newcomplexpassword123'
-        })
-        
-        self.assertRedirects(response, reverse('dashboard'))
-        
     @patch('pyotp.random_base32')
     def test_2fa_setup_workflow(self, mock_random: Mock) -> None:
         """Test complete 2FA setup workflow"""

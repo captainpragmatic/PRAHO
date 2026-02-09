@@ -102,8 +102,35 @@ def _handle_account_lockout(
 
 
 def _handle_successful_login(request: HttpRequest, user: User, form: LoginForm) -> HttpResponse:
-    """Handle successful login logic"""
-    # Successful login - reset failed attempts and log success
+    """Handle successful login logic - staff only on platform"""
+    # Check if user is staff - customers must use portal
+    is_staff_user = user.is_staff or getattr(user, "staff_role", None)
+
+    if not is_staff_user:
+        # Log the rejected customer login attempt
+        UserLoginLog.objects.create(
+            user=user,
+            ip_address=get_safe_client_ip(request),
+            user_agent=request.META.get("HTTP_USER_AGENT", ""),
+            status="rejected_customer",
+        )
+
+        # Don't actually log them in - reject with helpful message
+        messages.error(
+            request,
+            _("❌ This is the staff administration portal. Customers please use the customer portal to access your account.")
+        )
+
+        # Handle HTMX requests
+        if request.headers.get("HX-Request"):
+            response = HttpResponse()
+            response["HX-Redirect"] = reverse("users:login")
+            return response
+
+        return redirect("users:login")
+
+    # Staff user - proceed with normal login flow
+    # Reset failed attempts and log success
     user.reset_failed_login_attempts()
 
     # Update login tracking

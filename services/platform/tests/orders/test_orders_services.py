@@ -28,19 +28,20 @@ class OrderCalculationServiceTestCase(TestCase):
     """Test cases for order calculation services"""
 
     def test_romanian_vat_calculation(self):
-        """Test 19% Romanian VAT calculation"""
-        # Test various amounts
+        """Test 21% Romanian VAT calculation via calculate_order_totals"""
+        # Test various amounts - Romania VAT is 21%
         test_cases = [
-            (10000, 1900),    # 100.00 RON → 19.00 RON VAT
-            (50000, 9500),    # 500.00 RON → 95.00 RON VAT
-            (100000, 19000),  # 1000.00 RON → 190.00 RON VAT
+            (10000, 2100),    # 100.00 RON → 21.00 RON VAT (21%)
+            (50000, 10500),   # 500.00 RON → 105.00 RON VAT (21%)
+            (100000, 21000),  # 1000.00 RON → 210.00 RON VAT (21%)
             (1, 0),           # 0.01 RON → 0.00 RON VAT (rounded down)
         ]
-        
+
         for amount_cents, expected_vat_cents in test_cases:
             with self.subTest(amount=amount_cents):
-                vat_cents = OrderCalculationService.calculate_vat(amount_cents)
-                self.assertEqual(vat_cents, expected_vat_cents)
+                items = [{'quantity': 1, 'unit_price_cents': amount_cents}]
+                totals = OrderCalculationService.calculate_order_totals(items)
+                self.assertEqual(totals['tax_cents'], expected_vat_cents)
 
     def test_order_totals_calculation(self):
         """Test complete order totals calculation"""
@@ -58,8 +59,8 @@ class OrderCalculationServiceTestCase(TestCase):
         totals = OrderCalculationService.calculate_order_totals(items)
         
         expected_subtotal = 20000  # 200.00 RON
-        expected_vat = 3800        # 38.00 RON (19% VAT)
-        expected_total = 23800     # 238.00 RON
+        expected_vat = 4200        # 42.00 RON (21% VAT)
+        expected_total = 24200     # 242.00 RON
         
         self.assertEqual(totals['subtotal_cents'], expected_subtotal)
         self.assertEqual(totals['tax_cents'], expected_vat)
@@ -242,8 +243,8 @@ class OrderServiceTestCase(TestCase):
         self.assertEqual(order.customer, self.customer)
         self.assertEqual(order.currency, self.currency)
         self.assertEqual(order.subtotal_cents, 10000)
-        self.assertEqual(order.tax_cents, 1900)  # 19% VAT
-        self.assertEqual(order.total_cents, 11900)
+        self.assertEqual(order.tax_cents, 2100)  # 21% VAT
+        self.assertEqual(order.total_cents, 12100)
         
         # Verify billing address
         self.assertEqual(order.billing_address['company_name'], "Test Company SRL")
@@ -269,12 +270,25 @@ class OrderServiceTestCase(TestCase):
 
     def test_order_status_update_success(self):
         """Test successful order status update"""
-        # Create order
+        # Create order with billing address (required for preflight validation)
         order = Order.objects.create(
             customer=self.customer,
             order_number="ORD-2024-TEST-0001",
             currency=self.currency,
-            status="draft"
+            status="draft",
+            billing_address={
+                'company_name': 'Test Company SRL',
+                'contact_name': 'Ion Popescu',
+                'email': 'ion@company.ro',
+                'phone': '+40123456789',
+                'address_line1': 'Str. Aviatorilor nr. 1',
+                'address_line2': '',
+                'city': 'Bucuresti',
+                'county': 'Bucuresti',
+                'postal_code': '010563',
+                'country': 'Romania',
+                'fiscal_code': 'RO12345678',
+            }
         )
         
         # Update status
@@ -350,7 +364,16 @@ class OrderServiceTestCase(TestCase):
                     customer=self.customer,
                     order_number=f"ORD-2024-{old_status.upper()}-{new_status.upper()}",
                     currency=self.currency,
-                    status=old_status
+                    status=old_status,
+                    billing_address={
+                        'contact_name': 'Test Contact',
+                        'email': 'test@company.ro',
+                        'address_line1': 'Test Street 1',
+                        'city': 'Bucuresti',
+                        'county': 'Bucuresti',
+                        'postal_code': '010001',
+                        'country': 'Romania',
+                    }
                 )
                 
                 status_data = StatusChangeData(
@@ -454,8 +477,7 @@ class OrderQueryServiceTestCase(TestCase):
             unit_price_cents=5000,
             line_total_cents=5000,
             product_name="Test Item",
-            product_type="hosting",
-            billing_period="monthly"
+            product_type="hosting"
         )
         
         result = OrderQueryService.get_order_with_items(self.order1.id, self.customer)

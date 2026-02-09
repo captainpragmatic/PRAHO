@@ -91,8 +91,7 @@ class OrderSecurityTestCase(TestCase):
         self.product_price = ProductPrice.objects.create(
             product=self.product,
             currency=self.currency,
-            billing_period="monthly",
-            amount_cents=1000,  # 10 RON
+            monthly_price_cents=1000,  # 10 RON
             setup_cents=0,
             is_active=True
         )
@@ -299,7 +298,6 @@ class PriceTamperingSecurityTests(OrderSecurityTestCase):
         url = reverse('orders:add_item', kwargs={'pk': self.order.pk})
         data = {
             'product': self.product.pk,
-            'billing_period': 'monthly',
             'quantity': 1,
             'unit_price_cents': 5000,  # Manual override
             'setup_cents': 0,  # Required field
@@ -318,7 +316,8 @@ class PriceTamperingSecurityTests(OrderSecurityTestCase):
         normal_item = OrderItem.objects.create(
             order=self.order,
             product=self.product,
-            billing_period="monthly",
+            product_name=self.product.name,
+            product_type=self.product.product_type,
             quantity=1,
             unit_price_cents=1000,  # 10 EUR
         )
@@ -332,7 +331,6 @@ class PriceTamperingSecurityTests(OrderSecurityTestCase):
         excessive_price = 15000  # 15x the original 1000 cents
         data = {
             'product': self.product.pk,
-            'billing_period': 'monthly', 
             'quantity': 1,
             'unit_price_cents': excessive_price,
             'setup_cents': 0,  # Add required field
@@ -593,8 +591,8 @@ class SecurityRegressionTests(OrderSecurityTestCase):
             lambda: _validate_manual_price_override(999999999, 1000, self.admin_user, "test"),
             lambda: _validate_manual_price_override(5000, 1000, self.customer_user, "test"),
         ]
-        
+
         for event_func in security_events:
             with self.subTest(event=event_func.__name__ if hasattr(event_func, '__name__') else str(event_func)):
-                with self.assertLogs(level='WARNING'):
+                with self.assertLogs('apps.orders.views', level='WARNING'):
                     event_func()  # Should always produce at least a warning log

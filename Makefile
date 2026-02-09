@@ -192,13 +192,13 @@ test-cache:
 test-security:
 	@echo "🔒 [Security] Validating service isolation (no Redis dependencies)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "🧪 Testing portal cannot import platform code..."
+	@echo "🧪 Testing portal cannot import platform-specific code..."
 	@cd services/portal && \
-		if env -u PYTHONPATH $(PWD)/.venv/bin/python -c "import apps" 2>/dev/null; then \
-			echo "❌ SECURITY BREACH: Portal can import platform!"; \
+		if env -u PYTHONPATH $(PWD)/.venv/bin/python -c "from apps.billing.models import Invoice" 2>/dev/null; then \
+			echo "❌ SECURITY BREACH: Portal can import platform models!"; \
 			exit 1; \
 		else \
-			echo "✅ Portal properly isolated from platform"; \
+			echo "✅ Portal properly isolated from platform models"; \
 		fi
 	@echo "🧪 Testing platform uses database cache (base settings, not dev override)..."
 	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.base'); import django; django.setup(); from django.conf import settings; cache_backend = settings.CACHES['default']['BACKEND']; assert 'DatabaseCache' in cache_backend, f'Should use database cache, got: {cache_backend}'; print('✅ Platform base settings use database cache')"

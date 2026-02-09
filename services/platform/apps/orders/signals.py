@@ -10,7 +10,7 @@ from typing import Any
 from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 
-from apps.audit.services import AuditContext, AuditEventData, AuditService, OrdersAuditService
+from apps.audit.services import AuditContext, AuditEventData, AuditService, BusinessEventData, OrdersAuditService
 from apps.common.validators import log_security_event
 
 from .models import Order, OrderItem
@@ -47,15 +47,16 @@ def handle_order_created_or_updated(sender: type[Order], instance: Order, create
         }
 
         # Enhanced order audit logging using OrdersAuditService
-        OrdersAuditService.log_order_event(  # type: ignore[call-arg]
+        event_data = BusinessEventData(
             event_type=event_type,
-            order=instance,
+            business_object=instance,
             user=None,  # System event
             context=AuditContext(actor_type="system"),
             old_values=old_values,
             new_values=new_values,
             description=f"Order {instance.order_number} {'created' if created else 'updated'}",
         )
+        OrdersAuditService.log_order_event(event_data)
 
         if created:
             # Order created - send welcome email

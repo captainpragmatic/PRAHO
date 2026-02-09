@@ -83,9 +83,13 @@ class TestDockerServicesIntegration:
         Test that Docker Compose configuration is correct (no Redis).
         """
         import yaml
-        
-        # Read docker-compose configuration
-        with open('/Users/Claudiu/Developer/PRAHO/deploy/docker-compose.services.yml', 'r') as f:
+        import os
+
+        # Read docker-compose configuration using relative path from project root
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        compose_path = os.path.join(project_root, 'deploy', 'docker-compose.services.yml')
+
+        with open(compose_path, 'r') as f:
             compose_config = yaml.safe_load(f)
         
         services = compose_config['services']
@@ -150,23 +154,22 @@ class TestDockerServicesIntegration:
         """
         Test that Docker build process works without Redis dependencies.
         """
-        # Mock docker build output
+        # Mock docker build output - should NOT contain redis packages
         mock_build_output = """
         Step 5/9 : RUN pip install -r requirements/prod.txt
          ---> Running in abc123
         Successfully installed Django-5.2.6 gunicorn-21.2.0 psycopg2-binary-2.9.7
-        Note: django-redis not installed (Redis removed)
         """
-        
+
         with patch('subprocess.run') as mock_run:
             mock_run.return_value.stdout = mock_build_output
             mock_run.return_value.returncode = 0
-            
+
             # Test platform build
             result = subprocess.run([
                 'docker', 'build', '-f', 'deploy/platform/Dockerfile', '.'
             ], capture_output=True, text=True)
-            
+
             assert result.returncode == 0
             # Should NOT install Redis dependencies, but notes are OK
             build_lines = result.stdout.lower().split('\n')

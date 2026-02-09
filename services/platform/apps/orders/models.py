@@ -406,6 +406,36 @@ class OrderItem(models.Model):
         """Return line total in currency units"""
         return Decimal(self.line_total_cents) / 100
 
+    # =========================================================================
+    # BILLING PERIOD - Stored in config JSON for flexibility
+    # =========================================================================
+
+    BILLING_PERIOD_CHOICES: ClassVar[dict[str, str]] = {
+        "once": "One Time",
+        "monthly": "Monthly",
+        "quarterly": "Quarterly",
+        "semiannual": "Semi-Annual",
+        "annual": "Annual",
+        "biennial": "Biennial",
+        "triennial": "Triennial",
+    }
+
+    @property
+    def billing_period(self) -> str:
+        """Get billing period from config (default: monthly)"""
+        return self.config.get("billing_period", "monthly")
+
+    @billing_period.setter
+    def billing_period(self, value: str) -> None:
+        """Store billing period in config JSON"""
+        if not isinstance(self.config, dict):
+            self.config = {}
+        self.config["billing_period"] = value
+
+    def get_billing_period_display(self) -> str:
+        """Human-readable billing period for templates"""
+        return self.BILLING_PERIOD_CHOICES.get(self.billing_period, "Monthly")
+
     def subtotal(self) -> Decimal:
         """Return subtotal in currency units"""
         return Decimal(self.subtotal_cents) / 100
