@@ -1,0 +1,233 @@
+{% extends 'base.html' %}
+{% load i18n %}
+
+{% block title %}{% trans "Deploy New Node" %}{% endblock %}
+
+{% block content %}
+<div class="bg-slate-900 min-h-screen" x-data="deploymentForm()">
+    <div class="max-w-4xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+        <!-- Header -->
+        <div class="mb-6">
+            <h1 class="text-3xl font-bold text-white">{% trans "Deploy New Hosting Node" %}</h1>
+            <p class="text-slate-400 mt-1">{% trans "Configure and deploy a new infrastructure node" %}</p>
+        </div>
+
+        <form method="post" action="{{ form_action }}" class="space-y-8">
+            {% csrf_token %}
+
+            <!-- Step 1: Environment -->
+            <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+                <h2 class="text-lg font-semibold text-white mb-4">{% trans "1. Environment & Type" %}</h2>
+
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-slate-300 mb-3">{% trans "Environment" %}</label>
+                    <div class="grid grid-cols-3 gap-4">
+                        {% for code, label in form.environment.field.choices %}
+                        <label class="relative cursor-pointer">
+                            <input type="radio" name="environment" value="{{ code }}" x-model="environment"
+                                   class="sr-only peer" {% if code == 'prd' %}checked{% endif %}>
+                            <div class="p-4 bg-slate-700 rounded-lg border-2 border-transparent peer-checked:border-blue-500 hover:bg-slate-600 transition-all">
+                                <div class="text-white font-medium">{{ label }}</div>
+                                <div class="text-slate-400 text-sm">{{ code|upper }}</div>
+                            </div>
+                        </label>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-3">{% trans "Node Type" %}</label>
+                    <div class="grid grid-cols-3 gap-4">
+                        {% for code, label in form.node_type.field.choices %}
+                        <label class="relative cursor-pointer {% if code != 'sha' %}opacity-50{% endif %}">
+                            <input type="radio" name="node_type" value="{{ code }}" x-model="nodeType"
+                                   class="sr-only peer" {% if code == 'sha' %}checked{% endif %} {% if code != 'sha' %}disabled{% endif %}>
+                            <div class="p-4 bg-slate-700 rounded-lg border-2 border-transparent peer-checked:border-blue-500 {% if code == 'sha' %}hover:bg-slate-600{% endif %} transition-all">
+                                <div class="text-white font-medium">{{ label }}</div>
+                                <div class="text-slate-400 text-sm">{{ code|upper }}</div>
+                                {% if code != 'sha' %}
+                                <span class="mt-1 inline-block text-xs text-yellow-400">{% trans "Coming Soon" %}</span>
+                                {% endif %}
+                            </div>
+                        </label>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 2: Provider & Region -->
+            <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+                <h2 class="text-lg font-semibold text-white mb-4">{% trans "2. Provider & Region" %}</h2>
+
+                <div class="grid grid-cols-2 gap-6">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-300 mb-2">{% trans "Cloud Provider" %}</label>
+                        <select name="provider" x-model="provider" @change="updateRegions()"
+                                class="w-full bg-slate-700 border-slate-600 rounded-lg text-white px-4 py-2">
+                            <option value="">{% trans "Select Provider" %}</option>
+                            {% for provider in form.provider.field.queryset %}
+                            <option value="{{ provider.id }}">{{ provider.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-300 mb-2">{% trans "Region" %}</label>
+                        <select name="region" x-model="region" @change="updateHostname()"
+                                class="w-full bg-slate-700 border-slate-600 rounded-lg text-white px-4 py-2">
+                            <option value="">{% trans "Select Region" %}</option>
+                            <template x-for="r in filteredRegions" :key="r.id">
+                                <option :value="r.id" x-text="`${r.name} (${r.country_code.toUpperCase()} / ${r.normalized_code})`"></option>
+                            </template>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 3: Node Size -->
+            <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+                <h2 class="text-lg font-semibold text-white mb-4">{% trans "3. Node Size" %}</h2>
+
+                <div class="grid grid-cols-3 gap-4">
+                    <template x-for="size in filteredSizes" :key="size.id">
+                        <label class="relative cursor-pointer">
+                            <input type="radio" name="node_size" :value="size.id" x-model="nodeSize" class="sr-only peer">
+                            <div class="p-4 bg-slate-700 rounded-lg border-2 border-transparent peer-checked:border-blue-500 hover:bg-slate-600 transition-all">
+                                <div class="text-white font-medium" x-text="size.name"></div>
+                                <div class="text-slate-400 text-sm" x-text="size.display_name"></div>
+                                <div class="mt-2 text-sm">
+                                    <span class="text-slate-300" x-text="`${size.vcpus} vCPU / ${size.memory_gb}GB / ${size.disk_gb}GB`"></span>
+                                </div>
+                                <div class="mt-2 text-blue-400 font-semibold" x-text="`€${size.monthly_cost_eur}/mo`"></div>
+                                <div class="text-xs text-slate-500" x-text="`~${size.max_domains} domains`"></div>
+                            </div>
+                        </label>
+                    </template>
+                </div>
+                <p x-show="filteredSizes.length === 0" class="text-slate-400 text-center py-8">
+                    {% trans "Select a provider to see available sizes" %}
+                </p>
+            </div>
+
+            <!-- Step 4: Panel & Options -->
+            <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+                <h2 class="text-lg font-semibold text-white mb-4">{% trans "4. Panel & Options" %}</h2>
+
+                <div class="grid grid-cols-2 gap-6 mb-6">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-300 mb-2">{% trans "Control Panel" %}</label>
+                        <select name="panel_type" class="w-full bg-slate-700 border-slate-600 rounded-lg text-white px-4 py-2">
+                            {% for panel in form.panel_type.field.queryset %}
+                            <option value="{{ panel.id }}" {% if panel.panel_type == 'virtualmin' %}selected{% endif %}>
+                                {{ panel.name }}{% if panel.version %} v{{ panel.version }}{% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-300 mb-2">{% trans "Display Name" %} <span class="text-slate-500">({% trans "optional" %})</span></label>
+                        <input type="text" name="display_name" placeholder="{% trans 'Friendly name for this node' %}"
+                               class="w-full bg-slate-700 border-slate-600 rounded-lg text-white px-4 py-2">
+                    </div>
+                </div>
+
+                <div class="flex items-center">
+                    <input type="checkbox" name="backup_enabled" id="backup_enabled" checked
+                           class="rounded bg-slate-700 border-slate-600 text-blue-500 focus:ring-blue-500">
+                    <label for="backup_enabled" class="ml-2 text-slate-300">
+                        {% trans "Enable automatic backups (local storage, 7-day retention)" %}
+                    </label>
+                </div>
+            </div>
+
+            <!-- Hostname Preview -->
+            <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+                <h2 class="text-lg font-semibold text-white mb-4">{% trans "Preview" %}</h2>
+                <div class="bg-slate-900 rounded-lg p-4">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400">{% trans "Hostname" %}</label>
+                            <p class="text-xl font-mono text-white" x-text="hostname || '---'"></p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400">{% trans "FQDN" %}</label>
+                            <p class="text-lg font-mono text-slate-300" x-text="fqdn || '---'"></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="flex justify-end space-x-4">
+                <a href="{{ cancel_url }}" class="px-6 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg transition-colors">
+                    {% trans "Cancel" %}
+                </a>
+                <button type="submit" :disabled="!canSubmit"
+                        class="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors">
+                    {% trans "Start Deployment" %}
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function deploymentForm() {
+    return {
+        environment: 'prd',
+        nodeType: 'sha',
+        provider: '',
+        region: '',
+        nodeSize: '',
+        hostname: '',
+        fqdn: '',
+        dnsZone: '{{ dns_zone }}',
+
+        regions: {{ regions_json|safe }},
+        sizes: {{ sizes_json|safe }},
+        providers: {{ providers_json|safe }},
+
+        get filteredRegions() {
+            if (!this.provider) return [];
+            return this.regions.filter(r => r.provider_id == this.provider);
+        },
+
+        get filteredSizes() {
+            if (!this.provider) return [];
+            return this.sizes.filter(s => s.provider_id == this.provider);
+        },
+
+        get canSubmit() {
+            return this.provider && this.region && this.nodeSize;
+        },
+
+        updateRegions() {
+            this.region = '';
+            this.nodeSize = '';
+            this.updateHostname();
+        },
+
+        async updateHostname() {
+            if (!this.provider || !this.region) {
+                this.hostname = '';
+                this.fqdn = '';
+                return;
+            }
+
+            try {
+                const response = await fetch(`{% url 'infrastructure:hostname_preview_api' %}?environment=${this.environment}&node_type=${this.nodeType}&provider=${this.provider}&region=${this.region}`);
+                const data = await response.json();
+                this.hostname = data.hostname;
+                this.fqdn = data.fqdn;
+            } catch (e) {
+                console.error('Failed to get hostname preview:', e);
+            }
+        },
+
+        init() {
+            this.$watch('environment', () => this.updateHostname());
+            this.$watch('nodeType', () => this.updateHostname());
+        }
+    };
+}
+</script>
+{% endblock %}

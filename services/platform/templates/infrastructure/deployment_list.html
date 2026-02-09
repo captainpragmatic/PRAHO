@@ -1,0 +1,194 @@
+{% extends 'base.html' %}
+{% load i18n %}
+
+{% block title %}{% trans "Node Deployments" %}{% endblock %}
+
+{% block content %}
+<div class="bg-slate-900 min-h-screen">
+    <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+        <!-- Header -->
+        <div class="flex justify-between items-center mb-6">
+            <div>
+                <h1 class="text-3xl font-bold text-white">{% trans "Node Deployments" %}</h1>
+                <p class="text-slate-400 mt-1">{% trans "Manage deployed hosting nodes" %}</p>
+            </div>
+            {% if can_create %}
+            <a href="{{ create_url }}"
+               class="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                </svg>
+                {% trans "Deploy New Node" %}
+            </a>
+            {% endif %}
+        </div>
+
+        <!-- Filters -->
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-4 mb-6">
+            <form method="get" class="grid grid-cols-1 md:grid-cols-6 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-1">{% trans "Environment" %}</label>
+                    <select name="environment" class="w-full bg-slate-700 border-slate-600 rounded-lg text-white">
+                        <option value="">{% trans "All" %}</option>
+                        {% for code, label in filters.environment_choices %}
+                        <option value="{{ code }}" {% if filters.environment == code %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-1">{% trans "Type" %}</label>
+                    <select name="node_type" class="w-full bg-slate-700 border-slate-600 rounded-lg text-white">
+                        <option value="">{% trans "All" %}</option>
+                        {% for code, label in filters.node_type_choices %}
+                        <option value="{{ code }}" {% if filters.node_type == code %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-1">{% trans "Provider" %}</label>
+                    <select name="provider" class="w-full bg-slate-700 border-slate-600 rounded-lg text-white">
+                        <option value="">{% trans "All" %}</option>
+                        {% for provider in filters.providers %}
+                        <option value="{{ provider.id }}" {% if filters.provider == provider.id|stringformat:"s" %}selected{% endif %}>{{ provider.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-1">{% trans "Status" %}</label>
+                    <select name="status" class="w-full bg-slate-700 border-slate-600 rounded-lg text-white">
+                        <option value="">{% trans "All" %}</option>
+                        {% for code, label in filters.status_choices %}
+                        <option value="{{ code }}" {% if filters.status == code %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-1">{% trans "Search" %}</label>
+                    <input type="text" name="search" value="{{ filters.search }}"
+                           placeholder="{% trans 'Hostname, IP...' %}"
+                           class="w-full bg-slate-700 border-slate-600 rounded-lg text-white px-4 py-2">
+                </div>
+                <div class="flex items-end">
+                    <button type="submit" class="w-full px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg transition-colors">
+                        {% trans "Filter" %}
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Table -->
+        <div class="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
+            {% if table_data %}
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead class="bg-slate-700">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+                                {% trans "Hostname" %}
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+                                {% trans "Env" %}
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+                                {% trans "Provider / Region" %}
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+                                {% trans "IP Address" %}
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+                                {% trans "Status" %}
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+                                {% trans "Created" %}
+                            </th>
+                            <th class="px-6 py-3 text-right text-xs font-medium text-slate-300 uppercase tracking-wider">
+                                {% trans "Actions" %}
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-700">
+                        {% for item in table_data %}
+                        <tr class="hover:bg-slate-700/50">
+                            <td class="px-6 py-4">
+                                <a href="{{ item.detail_url }}" class="font-mono text-white hover:text-blue-400">
+                                    {{ item.hostname }}
+                                </a>
+                                {% if item.display_name %}
+                                <p class="text-sm text-slate-400">{{ item.display_name }}</p>
+                                {% endif %}
+                            </td>
+                            <td class="px-6 py-4">
+                                <span class="px-2 py-1 text-xs font-medium rounded bg-slate-600 text-slate-200">
+                                    {{ item.environment_code|upper }}
+                                </span>
+                            </td>
+                            <td class="px-6 py-4 text-sm text-slate-300">
+                                {{ item.provider }}<br>
+                                <span class="text-slate-400">{{ item.region }}</span>
+                            </td>
+                            <td class="px-6 py-4 font-mono text-sm text-slate-300">
+                                {{ item.ipv4 }}
+                            </td>
+                            <td class="px-6 py-4">
+                                <span class="inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full
+                                    {% if item.status.variant == 'success' %}bg-green-500/20 text-green-400
+                                    {% elif item.status.variant == 'danger' %}bg-red-500/20 text-red-400
+                                    {% elif item.status.variant == 'warning' %}bg-yellow-500/20 text-yellow-400
+                                    {% elif item.status.variant == 'info' %}bg-blue-500/20 text-blue-400
+                                    {% else %}bg-slate-500/20 text-slate-400{% endif %}">
+                                    {{ item.status.text }}
+                                </span>
+                            </td>
+                            <td class="px-6 py-4 text-sm text-slate-400">
+                                {{ item.created_at|timesince }} ago
+                            </td>
+                            <td class="px-6 py-4 text-right">
+                                <a href="{{ item.detail_url }}" class="text-blue-400 hover:text-blue-300 text-sm">
+                                    {% trans "View" %}
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="text-center py-12">
+                <svg class="mx-auto h-12 w-12 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"></path>
+                </svg>
+                <p class="mt-2 text-slate-400">{% trans "No deployments found" %}</p>
+                {% if can_create %}
+                <a href="{{ create_url }}" class="mt-4 inline-block text-blue-400 hover:text-blue-300">
+                    {% trans "Deploy your first node" %} &rarr;
+                </a>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Pagination -->
+        {% if deployments_page.has_other_pages %}
+        <div class="flex justify-center mt-6">
+            <nav class="inline-flex rounded-lg shadow-sm">
+                {% if deployments_page.has_previous %}
+                <a href="?page={{ deployments_page.previous_page_number }}{% if filters.environment %}&environment={{ filters.environment }}{% endif %}{% if filters.node_type %}&node_type={{ filters.node_type }}{% endif %}{% if filters.provider %}&provider={{ filters.provider }}{% endif %}{% if filters.status %}&status={{ filters.status }}{% endif %}{% if filters.search %}&search={{ filters.search }}{% endif %}"
+                   class="px-4 py-2 bg-slate-700 text-white rounded-l-lg hover:bg-slate-600">
+                    {% trans "Previous" %}
+                </a>
+                {% endif %}
+                <span class="px-4 py-2 bg-slate-800 text-white">
+                    {% trans "Page" %} {{ deployments_page.number }} {% trans "of" %} {{ deployments_page.paginator.num_pages }}
+                </span>
+                {% if deployments_page.has_next %}
+                <a href="?page={{ deployments_page.next_page_number }}{% if filters.environment %}&environment={{ filters.environment }}{% endif %}{% if filters.node_type %}&node_type={{ filters.node_type }}{% endif %}{% if filters.provider %}&provider={{ filters.provider }}{% endif %}{% if filters.status %}&status={{ filters.status }}{% endif %}{% if filters.search %}&search={{ filters.search }}{% endif %}"
+                   class="px-4 py-2 bg-slate-700 text-white rounded-r-lg hover:bg-slate-600">
+                    {% trans "Next" %}
+                </a>
+                {% endif %}
+            </nav>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

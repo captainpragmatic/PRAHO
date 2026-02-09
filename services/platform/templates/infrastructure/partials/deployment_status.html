@@ -1,0 +1,59 @@
+<div id="status-section"
+     {% if is_in_progress %}hx-get="{% url 'infrastructure:deployment_status_partial' deployment.id %}" hx-trigger="every 5s" hx-swap="outerHTML"{% endif %}
+     class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+    <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center">
+            <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold
+                {% if status_variant == 'success' %}bg-green-500/20 text-green-400
+                {% elif status_variant == 'danger' %}bg-red-500/20 text-red-400
+                {% elif status_variant == 'warning' %}bg-yellow-500/20 text-yellow-400
+                {% elif status_variant == 'info' %}bg-blue-500/20 text-blue-400
+                {% else %}bg-slate-500/20 text-slate-400{% endif %}">
+                {{ deployment.get_status_display }}
+            </span>
+            {% if is_in_progress %}
+            <span class="ml-3 text-slate-400 text-sm flex items-center">
+                <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-blue-400" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                {% trans "In progress..." %}
+            </span>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if is_in_progress or deployment.status == 'completed' %}
+    <!-- Progress Bar -->
+    <div class="mb-2">
+        <div class="flex justify-between text-sm text-slate-400 mb-1">
+            <span>{% trans "Deployment Progress" %}</span>
+            <span>{{ progress_percentage }}%</span>
+        </div>
+        <div class="w-full bg-slate-700 rounded-full h-2">
+            <div class="h-2 rounded-full transition-all duration-500
+                {% if deployment.status == 'completed' %}bg-green-500
+                {% elif deployment.status == 'failed' %}bg-red-500
+                {% else %}bg-blue-500{% endif %}"
+                style="width: {{ progress_percentage }}%"></div>
+        </div>
+    </div>
+
+    <!-- Progress Steps -->
+    <div class="grid grid-cols-6 gap-2 mt-4 text-xs text-center">
+        {% with stages="SSH Key,Terraform,DNS,Ansible,Validate,Register" %}
+        {% for stage in stages.split %}
+        <div class="{% if forloop.counter <= progress_percentage|divisibleby:16 %}text-green-400{% else %}text-slate-500{% endif %}">
+            {{ stage }}
+        </div>
+        {% endfor %}
+        {% endwith %}
+    </div>
+    {% endif %}
+
+    {% if deployment.status == 'failed' %}
+    <div class="mt-4 p-4 bg-red-500/10 border border-red-500/20 rounded-lg">
+        <p class="text-red-400 text-sm">{% trans "Deployment failed. Check logs for details." %}</p>
+    </div>
+    {% endif %}
+</div>

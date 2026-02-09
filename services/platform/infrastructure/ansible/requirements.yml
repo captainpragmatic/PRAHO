@@ -1,0 +1,20 @@
+# Ansible Galaxy requirements for PRAHO Node Deployment
+---
+collections:
+  - name: community.general
+    version: ">=8.0.0"
+  - name: ansible.posix
+    version: ">=1.5.0"
+
+roles:
+  # Fail2ban for SSH brute force protection
+  - name: geerlingguy.fail2ban
+    version: "1.3.0"
+
+  # Firewall management (backup to cloud firewall)
+  - name: geerlingguy.firewall
+    version: "2.5.1"
+
+  # NTP time synchronization
+  - name: geerlingguy.ntp
+    version: "2.2.0"

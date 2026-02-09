@@ -1,0 +1,33 @@
+{% load i18n %}
+<tr class="hover:bg-slate-700/50" id="region-{{ region.id }}">
+    <td class="px-6 py-4">
+        <div class="text-white font-medium">{{ region.name }}</div>
+        {% if region.city %}
+        <div class="text-sm text-slate-400">{{ region.city }}</div>
+        {% endif %}
+    </td>
+    <td class="px-6 py-4">
+        <span class="px-2 py-1 text-sm bg-slate-600 rounded">{{ region.country_code|upper }}</span>
+    </td>
+    <td class="px-6 py-4 font-mono text-slate-300">
+        {{ region.normalized_code }}
+    </td>
+    <td class="px-6 py-4">
+        {% if region.is_active %}
+        <span class="px-2 py-1 text-xs font-semibold rounded-full bg-green-500/20 text-green-400">{% trans "Active" %}</span>
+        {% else %}
+        <span class="px-2 py-1 text-xs font-semibold rounded-full bg-slate-500/20 text-slate-400">{% trans "Inactive" %}</span>
+        {% endif %}
+    </td>
+    <td class="px-6 py-4 text-right">
+        <form method="post" action="{% url 'infrastructure:region_toggle' region.id %}" class="inline"
+              hx-post="{% url 'infrastructure:region_toggle' region.id %}"
+              hx-target="#region-{{ region.id }}"
+              hx-swap="outerHTML">
+            {% csrf_token %}
+            <button type="submit" class="text-sm {% if region.is_active %}text-yellow-400 hover:text-yellow-300{% else %}text-green-400 hover:text-green-300{% endif %}">
+                {% if region.is_active %}{% trans "Disable" %}{% else %}{% trans "Enable" %}{% endif %}
+            </button>
+        </form>
+    </td>
+</tr>

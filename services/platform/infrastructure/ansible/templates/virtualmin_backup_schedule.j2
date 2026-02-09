@@ -1,0 +1,26 @@
+# Virtualmin backup schedule configuration
+# Managed by PRAHO - do not edit manually
+#
+# Schedule: {{ backup_schedule }} ({{ backup_schedule | regex_replace('[0-9]', 'X') }})
+# Storage: {{ backup_storage }}
+# Retention: {{ backup_retention_days }} days
+
+# Field format: name=value
+id=1
+enabled=1
+sched={{ backup_schedule }}
+dest={{ backup_local_path if backup_storage == 'local' else 's3://' + backup_s3_bucket | default('') }}
+strftime=%Y%m%d_%H%M%S
+mkdir=1
+all_doms=1
+feature_web=1
+feature_mail=1
+feature_mysql=1
+feature_dns=1
+feature_ssl=1
+feature_dir=1
+feature_unix=1
+feature_webmin=1
+onebyone=1
+compression=gzip
+email_err={{ automatic_updates_mail_to | default('root') }}

@@ -1,0 +1,79 @@
+# Global variables for all PRAHO node deployments
+---
+# Virtualmin installation
+virtualmin_license: "gpl"
+virtualmin_hostname_check: false
+virtualmin_force_hostname: true
+
+# System settings
+system_timezone: "Europe/Bucharest"
+system_locale: "en_US.UTF-8"
+system_swap_size_mb: 2048
+
+# SSH configuration
+ssh_port: 22
+ssh_permit_root_login: "prohibit-password"
+ssh_password_authentication: false
+ssh_use_dns: false
+ssh_max_auth_tries: 3
+
+# Security settings
+fail2ban_enabled: true
+fail2ban_ignoreip: "127.0.0.1/8 ::1"
+fail2ban_bantime: 3600
+fail2ban_maxretry: 5
+
+# Automatic updates
+automatic_updates_enabled: true
+automatic_updates_mail_to: "root"
+
+# Backup defaults (can be overridden per deployment)
+backup_enabled: true
+backup_storage: "local"
+backup_retention_days: 7
+backup_schedule: "0 2 * * *"
+backup_local_path: "/var/backups/virtualmin"
+
+# PHP configuration
+php_default_version: "8.2"
+php_memory_limit: "256M"
+php_upload_max_filesize: "64M"
+php_post_max_size: "64M"
+php_max_execution_time: 300
+php_max_input_time: 300
+
+# MySQL/MariaDB
+mysql_root_password_length: 32
+mysql_default_charset: "utf8mb4"
+mysql_default_collation: "utf8mb4_unicode_ci"
+
+# Apache/Nginx
+webserver_modules:
+  - rewrite
+  - ssl
+  - headers
+  - proxy
+  - proxy_http
+  - proxy_fcgi
+
+# Firewall ports (UFW backup to cloud firewall)
+firewall_allowed_tcp_ports:
+  - "22"      # SSH
+  - "80"      # HTTP
+  - "443"     # HTTPS
+  - "10000"   # Webmin
+  - "20000"   # Usermin
+  - "25"      # SMTP
+  - "465"     # SMTPS
+  - "587"     # Submission
+  - "993"     # IMAPS
+  - "995"     # POP3S
+  - "21"      # FTP
+  - "53"      # DNS
+
+firewall_allowed_udp_ports:
+  - "53"      # DNS
+
+# PRAHO integration
+praho_managed: true
+praho_label: "managed_by=praho"

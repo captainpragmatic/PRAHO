@@ -115,6 +115,34 @@ class SettingsService:
         "notifications.sms_enabled": False,
         "system.maintenance_mode": False,
         "system.backup_retention_days": 30,
+        # Node Deployment settings - Infrastructure provisioning configuration
+        # Terraform Configuration
+        "node_deployment.terraform_state_backend": "local",  # 'local' or 's3'
+        "node_deployment.terraform_s3_bucket": "",  # S3 bucket name (when backend=s3)
+        "node_deployment.terraform_s3_region": "",  # S3 region (when backend=s3)
+        "node_deployment.terraform_s3_key_prefix": "praho/nodes/",  # S3 key prefix
+        # DNS Configuration
+        "node_deployment.dns_default_zone": "",  # Default Cloudflare zone for node hostnames
+        "node_deployment.dns_cloudflare_zone_id": "",  # Cloudflare zone ID
+        "node_deployment.dns_cloudflare_api_token": "",  # Cloudflare API token (sensitive)
+        # Default Deployment Options
+        "node_deployment.default_provider": "hetzner",  # Default cloud provider
+        "node_deployment.default_region": "fsn1",  # Default region code
+        "node_deployment.default_environment": "prd",  # Default environment (prd/stg/dev)
+        # Backup Configuration
+        "node_deployment.backup_enabled": True,  # Enable backups on new nodes
+        "node_deployment.backup_storage": "local",  # 'local' or 's3' (TODO: s3)
+        "node_deployment.backup_s3_bucket": "",  # S3 bucket for backups (TODO)
+        "node_deployment.backup_retention_days": 7,  # Local backup retention
+        "node_deployment.backup_schedule": "0 2 * * *",  # Cron schedule (2 AM daily)
+        # Timeouts (seconds)
+        "node_deployment.timeout_terraform_apply": 600,  # 10 minutes
+        "node_deployment.timeout_ansible_playbook": 1800,  # 30 minutes
+        "node_deployment.timeout_validation": 300,  # 5 minutes
+        # Feature flags
+        "node_deployment.enabled": True,  # Master enable/disable for node deployment
+        "node_deployment.auto_registration": True,  # Auto-register as VirtualminServer
+        "node_deployment.cost_tracking_enabled": True,  # Track deployment costs
     }
 
     @classmethod

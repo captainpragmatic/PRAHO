@@ -1,0 +1,120 @@
+# Backup Configuration Playbook for Virtualmin
+# Configures local (and future S3) backups
+---
+- name: Configure Virtualmin backups
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    backup_local_path: "/var/backups/virtualmin"
+    backup_retention_days: 7
+    backup_schedule: "0 2 * * *"  # 2 AM daily
+
+  tasks:
+    # Local backup setup
+    - name: Create backup directory
+      ansible.builtin.file:
+        path: "{{ backup_local_path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      when: backup_enabled and backup_storage == 'local'
+
+    - name: Create Virtualmin backup schedule
+      ansible.builtin.template:
+        src: templates/virtualmin_backup_schedule.j2
+        dest: /etc/webmin/virtual-server/sched
+        mode: '0600'
+      when: backup_enabled
+      notify: Restart virtualmin
+
+    - name: Configure backup retention
+      ansible.builtin.lineinfile:
+        path: /etc/webmin/virtual-server/config
+        regexp: '^backup_strftime='
+        line: 'backup_strftime=%Y%m%d_%H%M%S'
+
+    - name: Set backup destination
+      ansible.builtin.lineinfile:
+        path: /etc/webmin/virtual-server/config
+        regexp: '^backup_dest='
+        line: "backup_dest={{ backup_local_path }}"
+      when: backup_storage == 'local'
+
+    - name: Configure backup features
+      ansible.builtin.lineinfile:
+        path: /etc/webmin/virtual-server/config
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+      loop:
+        - { regexp: '^backup_virtualmin=', line: 'backup_virtualmin=1' }
+        - { regexp: '^backup_onebyone=', line: 'backup_onebyone=1' }
+        - { regexp: '^backup_compression=', line: 'backup_compression=1' }
+        - { regexp: '^backup_increment=', line: 'backup_increment=0' }  # Full backups
+
+    # TODO: S3_BACKUP - Future S3 backup destination
+    # - name: Configure S3 backup destination
+    #   ansible.builtin.template:
+    #     src: templates/s3_backup_config.j2
+    #     dest: /etc/webmin/virtual-server/backup-s3.conf
+    #   when: backup_storage == 's3'
+
+    # Cleanup script for local backups
+    - name: Create backup cleanup script
+      ansible.builtin.copy:
+        content: |
+          #!/bin/bash
+          # PRAHO Backup Cleanup Script
+          # Removes backups older than {{ backup_retention_days }} days
+
+          BACKUP_DIR="{{ backup_local_path }}"
+          RETENTION_DAYS={{ backup_retention_days }}
+
+          if [ -d "$BACKUP_DIR" ]; then
+              find "$BACKUP_DIR" -type f -name "*.tar.gz" -mtime +$RETENTION_DAYS -delete
+              find "$BACKUP_DIR" -type d -empty -delete
+              echo "Cleanup completed: $(date)"
+          fi
+        dest: /usr/local/bin/praho-backup-cleanup.sh
+        mode: '0755'
+      when: backup_storage == 'local'
+
+    - name: Schedule backup cleanup cron job
+      ansible.builtin.cron:
+        name: "PRAHO backup cleanup"
+        minute: "30"
+        hour: "4"
+        job: "/usr/local/bin/praho-backup-cleanup.sh >> /var/log/praho-backup-cleanup.log 2>&1"
+      when: backup_storage == 'local'
+
+    # Verify backup configuration
+    - name: Test backup configuration
+      ansible.builtin.command: >
+        virtualmin list-backup-dests
+      register: backup_dests
+      changed_when: false
+      failed_when: false
+
+    - name: Display backup destinations
+      ansible.builtin.debug:
+        msg: "Backup destinations: {{ backup_dests.stdout_lines | default(['No destinations configured']) }}"
+
+    - name: Create backup configuration marker
+      ansible.builtin.copy:
+        content: |
+          PRAHO_BACKUP_CONFIGURED=true
+          BACKUP_STORAGE={{ backup_storage }}
+          BACKUP_PATH={{ backup_local_path if backup_storage == 'local' else 's3://' + backup_s3_bucket | default('not-configured') }}
+          BACKUP_RETENTION_DAYS={{ backup_retention_days }}
+          BACKUP_SCHEDULE={{ backup_schedule }}
+          CONFIG_DATE={{ ansible_date_time.iso8601 }}
+        dest: /etc/praho-backup-config
+        mode: '0644'
+
+  handlers:
+    - name: Restart virtualmin
+      ansible.builtin.service:
+        name: webmin
+        state: restarted

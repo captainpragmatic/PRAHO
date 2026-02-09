@@ -1,0 +1,134 @@
+# Common Base Server Setup
+# Run before any panel installation
+---
+- name: Configure base server for PRAHO hosting node
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    required_packages:
+      - curl
+      - wget
+      - vim
+      - htop
+      - iotop
+      - net-tools
+      - dnsutils
+      - unzip
+      - git
+      - ca-certificates
+      - gnupg
+      - lsb-release
+      - software-properties-common
+
+  tasks:
+    - name: Wait for apt lock release
+      ansible.builtin.shell: |
+        while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+          sleep 5
+        done
+      changed_when: false
+
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Upgrade all packages
+      ansible.builtin.apt:
+        upgrade: safe
+        autoremove: yes
+
+    - name: Install required packages
+      ansible.builtin.apt:
+        name: "{{ required_packages }}"
+        state: present
+
+    - name: Set timezone
+      community.general.timezone:
+        name: "{{ system_timezone }}"
+
+    - name: Configure locale
+      ansible.builtin.locale_gen:
+        name: "{{ system_locale }}"
+        state: present
+
+    - name: Set default locale
+      ansible.builtin.lineinfile:
+        path: /etc/default/locale
+        regexp: '^LANG='
+        line: 'LANG={{ system_locale }}'
+        create: yes
+
+    - name: Set hostname
+      ansible.builtin.hostname:
+        name: "{{ inventory_hostname }}"
+      when: virtualmin_force_hostname | default(true)
+
+    - name: Update /etc/hosts with hostname
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '^127\.0\.1\.1'
+        line: "127.0.1.1 {{ inventory_hostname_short }} {{ inventory_hostname }}"
+        insertafter: '^127\.0\.0\.1'
+      when: virtualmin_force_hostname | default(true)
+
+    - name: Configure SSH daemon
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+        validate: 'sshd -t -f %s'
+      loop:
+        - { regexp: '^#?PermitRootLogin', line: 'PermitRootLogin {{ ssh_permit_root_login }}' }
+        - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication {{ ssh_password_authentication | string | lower }}' }
+        - { regexp: '^#?UseDNS', line: 'UseDNS {{ ssh_use_dns | string | lower }}' }
+        - { regexp: '^#?MaxAuthTries', line: 'MaxAuthTries {{ ssh_max_auth_tries }}' }
+      notify: Restart sshd
+
+    - name: Create swap file
+      ansible.builtin.command: |
+        dd if=/dev/zero of=/swapfile bs=1M count={{ system_swap_size_mb }}
+      args:
+        creates: /swapfile
+      when: system_swap_size_mb > 0
+
+    - name: Set swap file permissions
+      ansible.builtin.file:
+        path: /swapfile
+        mode: '0600'
+      when: system_swap_size_mb > 0
+
+    - name: Format swap file
+      ansible.builtin.command: mkswap /swapfile
+      args:
+        creates: /swapfile.formatted
+      register: mkswap_result
+      when: system_swap_size_mb > 0
+
+    - name: Enable swap file
+      ansible.builtin.command: swapon /swapfile
+      when:
+        - system_swap_size_mb > 0
+        - mkswap_result.changed | default(false)
+
+    - name: Add swap to fstab
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        line: '/swapfile none swap sw 0 0'
+        state: present
+      when: system_swap_size_mb > 0
+
+    - name: Apply PRAHO label
+      ansible.builtin.file:
+        path: /etc/praho-managed
+        state: touch
+        mode: '0644'
+      when: praho_managed | default(true)
+
+  handlers:
+    - name: Restart sshd
+      ansible.builtin.service:
+        name: sshd
+        state: restarted

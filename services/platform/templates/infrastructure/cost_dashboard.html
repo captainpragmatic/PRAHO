@@ -1,0 +1,179 @@
+{% extends 'base.html' %}
+{% load i18n %}
+
+{% block title %}{% trans "Infrastructure Costs" %}{% endblock %}
+
+{% block content %}
+<div class="bg-slate-900 min-h-screen">
+    <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+        <!-- Header -->
+        <div class="flex justify-between items-center mb-6">
+            <div>
+                <h1 class="text-3xl font-bold text-white">{% trans "Infrastructure Costs" %}</h1>
+                <p class="text-slate-400 mt-1">{% trans "Monthly cost tracking and analysis" %}</p>
+            </div>
+            <a href="{% url 'infrastructure:cost_history' %}"
+               class="px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg transition-colors">
+                {% trans "View History" %}
+            </a>
+        </div>
+
+        <!-- Summary Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <!-- MTD Cost -->
+            <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-sm font-medium text-slate-400">{% trans "Month to Date" %}</p>
+                        <p class="text-2xl font-bold text-white mt-1">&euro;{{ mtd_summary.total_eur|floatformat:2 }}</p>
+                    </div>
+                    <div class="p-3 bg-cyan-500/10 rounded-lg">
+                        <svg class="w-6 h-6 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Projected -->
+            <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-sm font-medium text-slate-400">{% trans "Projected Monthly" %}</p>
+                        <p class="text-2xl font-bold text-white mt-1">&euro;{{ projected_total|floatformat:2 }}</p>
+                    </div>
+                    <div class="p-3 bg-amber-500/10 rounded-lg">
+                        <svg class="w-6 h-6 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Previous Month -->
+            <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-sm font-medium text-slate-400">{% trans "Last Month" %}</p>
+                        <p class="text-2xl font-bold text-white mt-1">&euro;{{ prev_month_summary.total_eur|floatformat:2 }}</p>
+                    </div>
+                    <div class="p-3 bg-slate-500/10 rounded-lg">
+                        <svg class="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Change -->
+            <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-sm font-medium text-slate-400">{% trans "Change" %}</p>
+                        <p class="text-2xl font-bold {% if mom_change > 0 %}text-red-400{% elif mom_change < 0 %}text-green-400{% else %}text-white{% endif %} mt-1">
+                            {% if mom_change > 0 %}+{% endif %}{{ mom_change|floatformat:1 }}%
+                        </p>
+                    </div>
+                    <div class="p-3 {% if mom_change > 0 %}bg-red-500/10{% elif mom_change < 0 %}bg-green-500/10{% else %}bg-slate-500/10{% endif %} rounded-lg">
+                        {% if mom_change > 0 %}
+                        <svg class="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path>
+                        </svg>
+                        {% elif mom_change < 0 %}
+                        <svg class="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6"></path>
+                        </svg>
+                        {% else %}
+                        <svg class="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"></path>
+                        </svg>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Cost by Provider -->
+            <div class="bg-slate-800 rounded-lg border border-slate-700">
+                <div class="px-6 py-4 border-b border-slate-700">
+                    <h2 class="text-lg font-semibold text-white">{% trans "Cost by Provider" %}</h2>
+                </div>
+                <div class="p-6">
+                    {% if provider_breakdown %}
+                    <div class="space-y-4">
+                        {% for provider, cost in provider_breakdown.items %}
+                        <div>
+                            <div class="flex justify-between items-center mb-1">
+                                <span class="text-white">{{ provider }}</span>
+                                <span class="text-cyan-400 font-semibold">&euro;{{ cost|floatformat:2 }}</span>
+                            </div>
+                            <div class="w-full bg-slate-700 rounded-full h-2">
+                                {% widthratio cost mtd_summary.total_eur 100 as percentage %}
+                                <div class="bg-cyan-500 h-2 rounded-full" style="width: {{ percentage|default:0 }}%"></div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="text-slate-400 text-center py-4">{% trans "No cost data available" %}</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Top Deployments -->
+            <div class="bg-slate-800 rounded-lg border border-slate-700">
+                <div class="px-6 py-4 border-b border-slate-700">
+                    <h2 class="text-lg font-semibold text-white">{% trans "Top Deployments by Cost" %}</h2>
+                </div>
+                <div class="p-6">
+                    {% if top_deployments %}
+                    <div class="space-y-3">
+                        {% for deployment in top_deployments %}
+                        <div class="flex items-center justify-between p-3 bg-slate-700/50 rounded-lg">
+                            <div>
+                                <p class="text-white font-mono text-sm">{{ deployment.hostname }}</p>
+                                <p class="text-slate-400 text-xs">{{ deployment.uptime_hours|floatformat:0 }} hours</p>
+                            </div>
+                            <div class="text-right">
+                                <p class="text-cyan-400 font-semibold">&euro;{{ deployment.total_cost_eur|floatformat:2 }}</p>
+                                <p class="text-slate-400 text-xs">&euro;{{ deployment.monthly_rate_eur }}/mo</p>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="text-slate-400 text-center py-4">{% trans "No deployment cost data available" %}</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Cost Breakdown -->
+        <div class="bg-slate-800 rounded-lg border border-slate-700 mt-6">
+            <div class="px-6 py-4 border-b border-slate-700">
+                <h2 class="text-lg font-semibold text-white">{% trans "Cost Breakdown" %}</h2>
+            </div>
+            <div class="p-6">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="p-4 bg-slate-700/50 rounded-lg">
+                        <p class="text-slate-400 text-sm">{% trans "Compute" %}</p>
+                        <p class="text-2xl font-bold text-white mt-1">&euro;{{ mtd_summary.compute_eur|floatformat:2 }}</p>
+                    </div>
+                    <div class="p-4 bg-slate-700/50 rounded-lg">
+                        <p class="text-slate-400 text-sm">{% trans "Bandwidth" %}</p>
+                        <p class="text-2xl font-bold text-white mt-1">&euro;{{ mtd_summary.bandwidth_eur|floatformat:2 }}</p>
+                    </div>
+                    <div class="p-4 bg-slate-700/50 rounded-lg">
+                        <p class="text-slate-400 text-sm">{% trans "Storage" %}</p>
+                        <p class="text-2xl font-bold text-white mt-1">&euro;{{ mtd_summary.storage_eur|floatformat:2 }}</p>
+                    </div>
+                </div>
+                <p class="text-slate-500 text-sm mt-4 text-center">
+                    {% trans "Tracking" %} {{ mtd_summary.node_count }} {% trans "active nodes" %}
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

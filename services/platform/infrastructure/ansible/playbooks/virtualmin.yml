@@ -1,0 +1,166 @@
+# Virtualmin GPL Installation Playbook
+# Installs and configures Virtualmin on a prepared server
+---
+- name: Install Virtualmin GPL
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    # Pinned versions for stability - UPDATE THESE FOR NEW RELEASES
+    virtualmin_version: "7.10.0"
+    webmin_version: "2.105"
+    virtualmin_install_script_url: "https://software.virtualmin.com/gpl/scripts/virtualmin-install.sh"
+
+  tasks:
+    - name: Check if Virtualmin is already installed
+      ansible.builtin.stat:
+        path: /usr/share/webmin/virtual-server
+      register: virtualmin_installed
+
+    - name: Download Virtualmin install script
+      ansible.builtin.get_url:
+        url: "{{ virtualmin_install_script_url }}"
+        dest: /root/virtualmin-install.sh
+        mode: '0755'
+      when: not virtualmin_installed.stat.exists
+
+    - name: Run Virtualmin installation
+      ansible.builtin.command: >
+        /root/virtualmin-install.sh
+        --hostname {{ inventory_hostname }}
+        --minimal
+        --force
+      args:
+        creates: /usr/share/webmin/virtual-server
+      register: virtualmin_install
+      async: 2400  # 40 minutes timeout
+      poll: 30
+      when: not virtualmin_installed.stat.exists
+
+    - name: Wait for Virtualmin installation to complete
+      ansible.builtin.async_status:
+        jid: "{{ virtualmin_install.ansible_job_id }}"
+      register: job_result
+      until: job_result.finished
+      retries: 80
+      delay: 30
+      when: virtualmin_install is defined and virtualmin_install.ansible_job_id is defined
+
+    - name: Remove install script
+      ansible.builtin.file:
+        path: /root/virtualmin-install.sh
+        state: absent
+
+    - name: Configure Virtualmin settings
+      ansible.builtin.lineinfile:
+        path: /etc/webmin/virtual-server/config
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+        create: yes
+      loop:
+        - { regexp: '^defip=', line: 'defip={{ ansible_default_ipv4.address }}' }
+        - { regexp: '^defip6=', line: 'defip6={{ ansible_default_ipv6.address | default("") }}' }
+        - { regexp: '^php_fpm=', line: 'php_fpm=1' }
+        - { regexp: '^php_vers=', line: 'php_vers={{ php_default_version }}' }
+        - { regexp: '^web_port=', line: 'web_port=10000' }
+        - { regexp: '^ssl=', line: 'ssl=1' }
+        - { regexp: '^autoquota=', line: 'autoquota=1' }
+      notify: Restart webmin
+
+    - name: Configure default domain template
+      ansible.builtin.template:
+        src: templates/domain_template.j2
+        dest: /etc/webmin/virtual-server/domain-template
+        mode: '0644'
+      notify: Restart webmin
+
+    - name: Set PHP defaults
+      ansible.builtin.lineinfile:
+        path: "{{ item.path }}"
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+      loop:
+        - { path: '/etc/php/{{ php_default_version }}/fpm/php.ini', regexp: '^memory_limit', line: 'memory_limit = {{ php_memory_limit }}' }
+        - { path: '/etc/php/{{ php_default_version }}/fpm/php.ini', regexp: '^upload_max_filesize', line: 'upload_max_filesize = {{ php_upload_max_filesize }}' }
+        - { path: '/etc/php/{{ php_default_version }}/fpm/php.ini', regexp: '^post_max_size', line: 'post_max_size = {{ php_post_max_size }}' }
+        - { path: '/etc/php/{{ php_default_version }}/fpm/php.ini', regexp: '^max_execution_time', line: 'max_execution_time = {{ php_max_execution_time }}' }
+        - { path: '/etc/php/{{ php_default_version }}/fpm/php.ini', regexp: '^max_input_time', line: 'max_input_time = {{ php_max_input_time }}' }
+      notify: Restart php-fpm
+      ignore_errors: yes  # PHP path may vary
+
+    - name: Enable required Apache modules
+      community.general.apache2_module:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ webserver_modules }}"
+      notify: Restart apache
+      ignore_errors: yes
+
+    - name: Generate Let's Encrypt certificate for Virtualmin
+      ansible.builtin.command: >
+        virtualmin generate-letsencrypt-cert
+        --host {{ inventory_hostname }}
+        --web
+        --renew
+      args:
+        creates: /etc/webmin/letsencrypt-cert-{{ inventory_hostname }}
+      register: letsencrypt_result
+      failed_when: false
+      changed_when: letsencrypt_result.rc == 0
+
+    - name: Configure Webmin to use Let's Encrypt certificate
+      ansible.builtin.command: >
+        /usr/share/webmin/webmin/letsencrypt.cgi
+        --host {{ inventory_hostname }}
+      when: letsencrypt_result.changed | default(false)
+      failed_when: false
+
+    - name: Enable Virtualmin features
+      ansible.builtin.command: >
+        virtualmin modify-config
+        --enabled-feature {{ item }}
+      loop:
+        - dns
+        - web
+        - ssl
+        - mail
+        - ftp
+        - mysql
+        - dir
+        - unix
+        - webmin
+        - logrotate
+        - status
+        - backup
+      failed_when: false
+      changed_when: false
+
+    - name: Create PRAHO tracking file
+      ansible.builtin.copy:
+        content: |
+          PRAHO_MANAGED=true
+          DEPLOYMENT_ID={{ deployment_id | default('unknown') }}
+          INSTALL_DATE={{ ansible_date_time.iso8601 }}
+          VIRTUALMIN_VERSION={{ virtualmin_version }}
+          WEBMIN_VERSION={{ webmin_version }}
+        dest: /etc/praho-virtualmin-install
+        mode: '0644'
+
+  handlers:
+    - name: Restart webmin
+      ansible.builtin.service:
+        name: webmin
+        state: restarted
+
+    - name: Restart php-fpm
+      ansible.builtin.service:
+        name: "php{{ php_default_version }}-fpm"
+        state: restarted
+      ignore_errors: yes
+
+    - name: Restart apache
+      ansible.builtin.service:
+        name: apache2
+        state: restarted
+      ignore_errors: yes

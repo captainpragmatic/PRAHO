@@ -1,0 +1,29 @@
+# Virtualmin default domain template
+# Managed by PRAHO - do not edit manually
+
+# Default quota settings
+quota={{ virtualmin_default_quota_mb | default(1000) }}
+bwlimit={{ virtualmin_default_bw_mb | default(10000) }}
+
+# Features enabled by default
+features=web,ssl,mail,ftp,mysql,dns,dir,unix,logrotate
+
+# PHP mode
+php_fpm=1
+php_version={{ php_default_version }}
+
+# SSL settings
+ssl_always=1
+ssl_redirect=1
+
+# Mail settings
+spam=1
+virus=1
+greylisting=0
+
+# Database settings
+mysql_charset={{ mysql_default_charset }}
+mysql_collate={{ mysql_default_collation }}
+
+# Webmin login enabled
+webmin=1

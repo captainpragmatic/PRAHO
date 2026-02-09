@@ -1,0 +1,89 @@
+{% extends 'base.html' %}
+{% load i18n %}
+
+{% block title %}{% trans "Destroy Node" %} - {{ deployment.hostname }}{% endblock %}
+
+{% block content %}
+<div class="bg-slate-900 min-h-screen">
+    <div class="max-w-2xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+        <!-- Header -->
+        <div class="mb-6">
+            <h1 class="text-3xl font-bold text-red-400">{% trans "Destroy Node" %}</h1>
+            <p class="text-slate-400 mt-1">{% trans "This action cannot be undone" %}</p>
+        </div>
+
+        <!-- Warning -->
+        <div class="bg-red-500/10 border border-red-500/30 rounded-lg p-6 mb-6">
+            <div class="flex">
+                <svg class="h-6 w-6 text-red-400 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                </svg>
+                <div>
+                    <h3 class="text-red-400 font-semibold">{% trans "Warning: Destructive Action" %}</h3>
+                    <p class="text-red-300 mt-2">{% trans "You are about to permanently destroy this node. This will:" %}</p>
+                    <ul class="mt-2 text-red-300 list-disc list-inside space-y-1">
+                        <li>{% trans "Delete the server from Hetzner Cloud" %}</li>
+                        <li>{% trans "Remove all DNS records from Cloudflare" %}</li>
+                        <li>{% trans "Delete the SSH key from the credential vault" %}</li>
+                        <li>{% trans "Remove all data stored on the server" %}</li>
+                        {% if deployment.virtualmin_server %}
+                        <li>{% trans "Unregister the VirtualminServer from PRAHO" %}</li>
+                        {% endif %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Node Info -->
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-6 mb-6">
+            <h2 class="text-lg font-semibold text-white mb-4">{% trans "Node to be Destroyed" %}</h2>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-slate-400">{% trans "Hostname" %}</label>
+                    <p class="mt-1 text-white font-mono">{{ deployment.hostname }}</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-400">{% trans "IP Address" %}</label>
+                    <p class="mt-1 text-white font-mono">{{ deployment.ipv4_address|default:"-" }}</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-400">{% trans "Provider" %}</label>
+                    <p class="mt-1 text-white">{{ deployment.provider.name }}</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-400">{% trans "Region" %}</label>
+                    <p class="mt-1 text-white">{{ deployment.region.name }}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Confirmation Form -->
+        <form method="post" action="{{ form_action }}">
+            {% csrf_token %}
+            <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+                <h2 class="text-lg font-semibold text-white mb-4">{% trans "Confirm Destruction" %}</h2>
+                <p class="text-slate-300 mb-4">
+                    {% trans "To confirm, type the hostname exactly:" %}
+                    <code class="ml-2 px-2 py-1 bg-slate-700 rounded text-red-400 font-mono">{{ deployment.hostname }}</code>
+                </p>
+                <div class="mb-4">
+                    {{ form.confirm_hostname }}
+                    {% if form.confirm_hostname.errors %}
+                    <p class="mt-1 text-sm text-red-400">{{ form.confirm_hostname.errors.0 }}</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="flex justify-end space-x-4 mt-6">
+                <a href="{{ cancel_url }}" class="px-6 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg transition-colors">
+                    {% trans "Cancel" %}
+                </a>
+                <button type="submit" class="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors">
+                    {% trans "Destroy Node" %}
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

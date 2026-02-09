@@ -1,0 +1,40 @@
+// Unattended-Upgrades configuration for PRAHO hosting nodes
+// Managed by Ansible - do not edit manually
+
+Unattended-Upgrade::Allowed-Origins {
+    "${distro_id}:${distro_codename}";
+    "${distro_id}:${distro_codename}-security";
+    "${distro_id}ESMApps:${distro_codename}-apps-security";
+    "${distro_id}ESM:${distro_codename}-infra-security";
+};
+
+// Packages to never upgrade
+Unattended-Upgrade::Package-Blacklist {
+    // Don't auto-upgrade webmin/virtualmin to prevent breaking changes
+    "webmin";
+    "virtualmin";
+    "usermin";
+};
+
+// Auto-remove unused dependencies
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+
+// Auto-remove unused kernel packages
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+
+// Auto-reboot if needed at 4 AM
+Unattended-Upgrade::Automatic-Reboot "true";
+Unattended-Upgrade::Automatic-Reboot-Time "04:00";
+
+// Only reboot if no users are logged in
+Unattended-Upgrade::Automatic-Reboot-WithUsers "false";
+
+// Email notifications
+{% if automatic_updates_mail_to is defined and automatic_updates_mail_to %}
+Unattended-Upgrade::Mail "{{ automatic_updates_mail_to }}";
+Unattended-Upgrade::MailReport "on-change";
+{% endif %}
+
+// Enable logging
+Unattended-Upgrade::SyslogEnable "true";
+Unattended-Upgrade::SyslogFacility "daemon";

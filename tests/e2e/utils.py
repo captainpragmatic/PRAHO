@@ -27,6 +27,20 @@ from playwright.sync_api import Page, ViewportSize
 # Base URL for the application
 BASE_URL = "http://localhost:8701"
 
+# Auth URL paths (PRAHO uses both /auth/ and /users/ as aliases)
+# Using /auth/ as primary since that's where logout redirects
+LOGIN_URL = "/auth/login/"
+LOGOUT_URL = "/auth/logout/"
+
+# Also support /users/ paths for backwards compatibility
+def is_login_url(url: str) -> bool:
+    """Check if URL is a login page (supports both /auth/ and /users/ paths)"""
+    return "/auth/login/" in url or "/users/login/" in url
+
+def is_logged_in_url(url: str) -> bool:
+    """Check if URL indicates successful login (user is in authenticated area)"""
+    return any(path in url for path in ["/app/", "/dashboard/", "/customers/", "/billing/", "/tickets/", "/infrastructure/"])
+
 # Test user credentials - using dedicated E2E users  
 SUPERUSER_EMAIL = "e2e-admin@test.local"
 SUPERUSER_PASSWORD = "test123"
@@ -93,7 +107,7 @@ def login_user_with_retry(page: Page, email: str, password: str, max_attempts: i
             
         # Navigate to login page fresh
         try:
-            page.goto(f"{BASE_URL}/auth/login/", timeout=10000)
+            page.goto(f"{BASE_URL}{LOGIN_URL}", timeout=10000)
             page.wait_for_load_state("networkidle", timeout=5000)
         except Exception as e:
             print(f"❌ Cannot navigate to login page: {str(e)[:50]}")
@@ -148,10 +162,10 @@ def login_user_with_retry(page: Page, email: str, password: str, max_attempts: i
             page.wait_for_timeout(2000)  # Give time for redirect
             current_url = page.url
             
-            if "/app/" in current_url:
+            if is_logged_in_url(current_url):
                 print(f"✅ Successfully logged in as {email}")
                 return True
-            elif "/auth/login/" in current_url:
+            elif is_login_url(current_url):
                 # Still on login page - check for error messages
                 error_elements = page.locator('.alert, .error, [role="alert"]')
                 if error_elements.count() > 0:
@@ -165,7 +179,7 @@ def login_user_with_retry(page: Page, email: str, password: str, max_attempts: i
                 continue
             else:
                 print(f"  ℹ️ Redirected to unexpected page: {current_url}")
-                if "/app/" in current_url or "dashboard" in current_url:
+                if is_logged_in_url(current_url):
                     print(f"✅ Login successful (alternate redirect): {email}")
                     return True
                     
@@ -198,7 +212,7 @@ def login_user(page: Page, email: str, password: str) -> bool:
     
     # Navigate to login page if not already there
     current_url = page.url
-    if "/auth/login/" not in current_url and not wait_for_server_ready(page):
+    if not is_login_url(current_url) and not wait_for_server_ready(page):
         print("❌ Server is not ready for login")
         return False
     
@@ -223,7 +237,7 @@ def login_user(page: Page, email: str, password: str) -> bool:
     # Wait for redirect after login - use multiple strategies
     try:
         # First try: wait for dashboard URL
-        page.wait_for_url(f"{BASE_URL}/app/", timeout=8000)
+        page.wait_for_url(f"{BASE_URL}/dashboard/", timeout=8000)
         print(f"✅ Successfully logged in as {email}")
         return True
     except Exception:
@@ -231,7 +245,7 @@ def login_user(page: Page, email: str, password: str) -> bool:
         try:
             page.wait_for_load_state("networkidle", timeout=3000)
             current_url = page.url
-            if "/app/" in current_url:
+            if is_logged_in_url(current_url):
                 print(f"✅ Successfully logged in as {email} (alternate check)")
                 return True
         except Exception:  # noqa: S110
@@ -272,11 +286,11 @@ def logout_user(page: Page) -> bool:
     
     try:
         # Navigate to logout endpoint
-        page.goto(f"{BASE_URL}/auth/logout/")
+        page.goto(f"{BASE_URL}{LOGOUT_URL}")
         page.wait_for_load_state("networkidle", timeout=3000)
         
         # Check if we're back on login page
-        if "/auth/login/" in page.url:
+        if is_login_url(page.url):
             print("✅ Successfully logged out")
             return True
         else:
@@ -301,7 +315,7 @@ def wait_for_server_ready(page: Page, max_attempts: int = 10) -> bool:
     """
     for attempt in range(max_attempts):
         try:
-            page.goto(f"{BASE_URL}/auth/login/", timeout=3000)
+            page.goto(f"{BASE_URL}{LOGIN_URL}", timeout=3000)
             page.wait_for_load_state("domcontentloaded", timeout=3000)
             return True
         except Exception:
@@ -330,7 +344,7 @@ def ensure_fresh_session(page: Page) -> None:
     
     # Check if we're already on login page
     current_url = page.url
-    if "/auth/login/" in current_url:
+    if is_login_url(current_url):
         print("  ✅ Already on login page")
         return
     
@@ -1347,7 +1361,7 @@ def require_authentication(page: Page) -> None:
     Raises:
         AuthenticationError: If user is not authenticated
     """
-    if "/auth/login/" in page.url:
+    if is_login_url(page.url):
         raise AuthenticationError("User authentication lost during test")
 
 

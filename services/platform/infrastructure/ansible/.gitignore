@@ -1,0 +1,27 @@
+# Ansible runtime files
+*.retry
+
+# Inventory (generated dynamically)
+inventory/hosts
+inventory/*.json
+
+# Fact cache
+/tmp/ansible_facts_cache/
+
+# Vault files (if using ansible-vault locally)
+vault_password
+.vault_pass
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# SSH keys (should never be stored here)
+*.pem
+*.key
+id_*

@@ -1,0 +1,97 @@
+{% extends 'base.html' %}
+{% load i18n %}
+
+{% block title %}{% trans "Upgrade Node" %} - {{ deployment.hostname }}{% endblock %}
+
+{% block content %}
+<div class="bg-slate-900 min-h-screen">
+    <div class="max-w-2xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+        <!-- Header -->
+        <div class="mb-6">
+            <h1 class="text-3xl font-bold text-white">{% trans "Upgrade Node" %}</h1>
+            <p class="text-slate-400 mt-1">{% trans "Change the server size to increase resources" %}</p>
+        </div>
+
+        <!-- Current Node Info -->
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-6 mb-6">
+            <h2 class="text-lg font-semibold text-white mb-4">{% trans "Current Configuration" %}</h2>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-slate-400">{% trans "Hostname" %}</label>
+                    <p class="mt-1 text-white font-mono">{{ deployment.hostname }}</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-400">{% trans "IP Address" %}</label>
+                    <p class="mt-1 text-white font-mono">{{ deployment.ipv4_address|default:"-" }}</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-400">{% trans "Current Size" %}</label>
+                    <p class="mt-1 text-white">{{ current_size.display_name|default:current_size.name }}</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-400">{% trans "Current Specs" %}</label>
+                    <p class="mt-1 text-white">{{ current_size.vcpus }} vCPUs / {{ current_size.memory_gb }} GB RAM / {{ current_size.disk_gb }} GB SSD</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Info Notice -->
+        <div class="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4 mb-6">
+            <div class="flex">
+                <svg class="h-5 w-5 text-blue-400 mr-3 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                <div class="text-sm text-blue-300">
+                    <p>{% trans "The server will be powered off briefly during the upgrade. This typically takes 1-2 minutes." %}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Upgrade Form -->
+        <form method="post" action="{{ form_action }}">
+            {% csrf_token %}
+            <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+                <h2 class="text-lg font-semibold text-white mb-4">{% trans "Select New Size" %}</h2>
+
+                {% if available_sizes %}
+                <div class="space-y-3">
+                    {% for size in available_sizes %}
+                    <label class="flex items-center p-4 bg-slate-700/50 rounded-lg hover:bg-slate-700 cursor-pointer transition-colors border border-slate-600 hover:border-cyan-500">
+                        <input type="radio" name="new_size" value="{{ size.id }}" class="h-4 w-4 text-cyan-500 focus:ring-cyan-500 border-slate-500 bg-slate-800">
+                        <div class="ml-4 flex-grow">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="text-white font-medium">{{ size.display_name|default:size.name }}</p>
+                                    <p class="text-sm text-slate-400">{{ size.vcpus }} vCPUs / {{ size.memory_gb }} GB RAM / {{ size.disk_gb }} GB SSD</p>
+                                </div>
+                                <div class="text-right">
+                                    <p class="text-cyan-400 font-semibold">&euro;{{ size.monthly_cost_eur }}/mo</p>
+                                    {% if size.max_domains %}
+                                    <p class="text-sm text-slate-400">{% trans "Up to" %} {{ size.max_domains }} {% trans "domains" %}</p>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </label>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-slate-400">{% trans "No other sizes available for this provider." %}</p>
+                {% endif %}
+            </div>
+
+            <!-- Actions -->
+            <div class="flex justify-end space-x-4 mt-6">
+                <a href="{{ cancel_url }}" class="px-6 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg transition-colors">
+                    {% trans "Cancel" %}
+                </a>
+                {% if available_sizes %}
+                <button type="submit" class="px-6 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg transition-colors">
+                    {% trans "Upgrade Node" %}
+                </button>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

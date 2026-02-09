@@ -1,0 +1,23 @@
+{% load i18n %}
+<div class="p-6">
+    {% if logs %}
+    <div class="space-y-2 font-mono text-sm">
+        {% for log in logs %}
+        <div class="flex items-start space-x-3 py-2 {% if not forloop.last %}border-b border-slate-700{% endif %}">
+            <span class="text-slate-500 whitespace-nowrap">{{ log.created_at|time:"H:i:s" }}</span>
+            <span class="px-2 py-0.5 rounded text-xs
+                {% if log.level == 'ERROR' %}bg-red-500/20 text-red-400
+                {% elif log.level == 'WARNING' %}bg-yellow-500/20 text-yellow-400
+                {% elif log.level == 'INFO' %}bg-blue-500/20 text-blue-400
+                {% else %}bg-slate-500/20 text-slate-400{% endif %}">
+                {{ log.level }}
+            </span>
+            <span class="text-slate-400">[{{ log.stage }}]</span>
+            <span class="text-slate-200 flex-1">{{ log.message }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-slate-400 text-center py-4">{% trans "No logs yet" %}</p>
+    {% endif %}
+</div>

@@ -1,0 +1,81 @@
+{% extends 'base.html' %}
+{% load i18n %}
+
+{% block title %}{% trans "Maintenance" %} - {{ deployment.hostname }}{% endblock %}
+
+{% block content %}
+<div class="bg-slate-900 min-h-screen">
+    <div class="max-w-2xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+        <!-- Header -->
+        <div class="mb-6">
+            <h1 class="text-3xl font-bold text-white">{% trans "Run Maintenance" %}</h1>
+            <p class="text-slate-400 mt-1">{% trans "Select maintenance tasks to run on this node" %}</p>
+        </div>
+
+        <!-- Node Info -->
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-6 mb-6">
+            <h2 class="text-lg font-semibold text-white mb-4">{% trans "Target Node" %}</h2>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-slate-400">{% trans "Hostname" %}</label>
+                    <p class="mt-1 text-white font-mono">{{ deployment.hostname }}</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-400">{% trans "IP Address" %}</label>
+                    <p class="mt-1 text-white font-mono">{{ deployment.ipv4_address|default:"-" }}</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-400">{% trans "Provider" %}</label>
+                    <p class="mt-1 text-white">{{ deployment.provider.name }}</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-400">{% trans "Status" %}</label>
+                    <p class="mt-1 text-green-400 font-medium">{{ deployment.get_status_display }}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Info Notice -->
+        <div class="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 mb-6">
+            <div class="flex">
+                <svg class="h-5 w-5 text-amber-400 mr-3 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                <div class="text-sm text-amber-300">
+                    <p>{% trans "Maintenance tasks run in the background via Ansible. Some tasks may briefly impact server performance." %}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Maintenance Form -->
+        <form method="post" action="{{ form_action }}">
+            {% csrf_token %}
+            <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+                <h2 class="text-lg font-semibold text-white mb-4">{% trans "Select Tasks" %}</h2>
+
+                <div class="space-y-3">
+                    {% for playbook in playbook_options %}
+                    <label class="flex items-start p-4 bg-slate-700/50 rounded-lg hover:bg-slate-700 cursor-pointer transition-colors border border-slate-600 hover:border-cyan-500">
+                        <input type="checkbox" name="playbooks" value="{{ playbook.id }}" class="h-4 w-4 mt-1 text-cyan-500 focus:ring-cyan-500 border-slate-500 bg-slate-800 rounded">
+                        <div class="ml-4">
+                            <p class="text-white font-medium">{{ playbook.name }}</p>
+                            <p class="text-sm text-slate-400">{{ playbook.description }}</p>
+                        </div>
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="flex justify-end space-x-4 mt-6">
+                <a href="{{ cancel_url }}" class="px-6 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg transition-colors">
+                    {% trans "Cancel" %}
+                </a>
+                <button type="submit" class="px-6 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg transition-colors">
+                    {% trans "Run Maintenance" %}
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

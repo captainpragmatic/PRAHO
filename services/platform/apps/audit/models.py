@@ -350,6 +350,30 @@ class AuditEvent(models.Model):
         ("user_impersonation_ended", "User Impersonation Ended"),
         ("bulk_operation_started", "Bulk Operation Started"),
         ("bulk_operation_completed", "Bulk Operation Completed"),
+        # ======================================================================
+        # INFRASTRUCTURE & NODE DEPLOYMENT EVENTS
+        # ======================================================================
+        ("node_deployment_created", "Node Deployment Created"),
+        ("node_deployment_started", "Node Deployment Started"),
+        ("node_deployment_terraform_init", "Terraform Initialized"),
+        ("node_deployment_terraform_apply", "Terraform Applied"),
+        ("node_deployment_ansible_run", "Ansible Playbook Executed"),
+        ("node_deployment_validated", "Node Validation Completed"),
+        ("node_deployment_registered", "Node Registered"),
+        ("node_deployment_completed", "Node Deployment Completed"),
+        ("node_deployment_failed", "Node Deployment Failed"),
+        ("node_deployment_retry", "Node Deployment Retry"),
+        ("node_destroy_started", "Node Destruction Started"),
+        ("node_destroy_completed", "Node Destruction Completed"),
+        ("node_destroy_failed", "Node Destruction Failed"),
+        ("cloud_provider_created", "Cloud Provider Created"),
+        ("cloud_provider_updated", "Cloud Provider Updated"),
+        ("cloud_provider_deleted", "Cloud Provider Deleted"),
+        ("node_size_created", "Node Size Created"),
+        ("node_size_updated", "Node Size Updated"),
+        ("node_region_toggled", "Node Region Toggled"),
+        ("infrastructure_ssh_key_generated", "SSH Key Generated"),
+        ("infrastructure_ssh_key_revoked", "SSH Key Revoked"),
     )
 
     # Unique event ID

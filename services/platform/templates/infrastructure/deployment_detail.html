@@ -1,0 +1,268 @@
+{% extends 'base.html' %}
+{% load i18n %}
+
+{% block title %}{{ deployment.hostname }} - {% trans "Deployment" %}{% endblock %}
+
+{% block content %}
+<div class="bg-slate-900 min-h-screen">
+    <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+        <!-- Header -->
+        <div class="flex justify-between items-start mb-6">
+            <div>
+                <h1 class="text-3xl font-bold text-white font-mono">{{ deployment.hostname }}</h1>
+                {% if deployment.display_name %}
+                <p class="text-slate-400 mt-1">{{ deployment.display_name }}</p>
+                {% endif %}
+                <p class="text-slate-500 text-sm mt-1">{{ fqdn }}</p>
+            </div>
+            <div class="flex space-x-3 flex-wrap gap-y-2">
+                {# Lifecycle operations for running nodes #}
+                {% if can_manage %}
+                    {% if deployment.status == "completed" %}
+                    <a href="{% url 'infrastructure:deployment_upgrade' deployment.id %}"
+                       class="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg transition-colors">
+                        <svg class="w-5 h-5 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"></path>
+                        </svg>
+                        {% trans "Upgrade" %}
+                    </a>
+                    <a href="{% url 'infrastructure:deployment_maintenance' deployment.id %}"
+                       class="px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg transition-colors">
+                        <svg class="w-5 h-5 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                        </svg>
+                        {% trans "Maintenance" %}
+                    </a>
+                    <form method="post" action="{% url 'infrastructure:deployment_reboot' deployment.id %}" class="inline"
+                          onsubmit="return confirm('{% trans "Reboot this node? Active connections will be interrupted." %}')">
+                        {% csrf_token %}
+                        <button type="submit" class="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition-colors">
+                            <svg class="w-5 h-5 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                            </svg>
+                            {% trans "Reboot" %}
+                        </button>
+                    </form>
+                    <form method="post" action="{% url 'infrastructure:deployment_stop' deployment.id %}" class="inline"
+                          onsubmit="return confirm('{% trans "Power off this node? All services will be stopped." %}')">
+                        {% csrf_token %}
+                        <button type="submit" class="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg transition-colors">
+                            <svg class="w-5 h-5 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"></path>
+                            </svg>
+                            {% trans "Stop" %}
+                        </button>
+                    </form>
+                    {% elif deployment.status == "stopped" %}
+                    <form method="post" action="{% url 'infrastructure:deployment_start' deployment.id %}" class="inline">
+                        {% csrf_token %}
+                        <button type="submit" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors">
+                            <svg class="w-5 h-5 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path>
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            {% trans "Start" %}
+                        </button>
+                    </form>
+                    {% endif %}
+                {% endif %}
+                {% if can_retry %}
+                <form method="post" action="{% url 'infrastructure:deployment_retry' deployment.id %}" class="inline">
+                    {% csrf_token %}
+                    <button type="submit" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg transition-colors">
+                        <svg class="w-5 h-5 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        </svg>
+                        {% trans "Retry" %}
+                    </button>
+                </form>
+                {% endif %}
+                {% if can_destroy %}
+                <a href="{% url 'infrastructure:deployment_destroy' deployment.id %}"
+                   class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors">
+                    <svg class="w-5 h-5 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                    </svg>
+                    {% trans "Destroy" %}
+                </a>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Status Card -->
+        <div id="status-section"
+             {% if is_in_progress %}hx-get="{% url 'infrastructure:deployment_status_partial' deployment.id %}" hx-trigger="every 5s" hx-swap="outerHTML"{% endif %}>
+            {% include "infrastructure/partials/deployment_status.html" %}
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
+            <!-- Configuration -->
+            <div class="lg:col-span-2 space-y-6">
+                <!-- Server Info -->
+                <div class="bg-slate-800 rounded-lg border border-slate-700">
+                    <div class="px-6 py-4 border-b border-slate-700">
+                        <h2 class="text-lg font-semibold text-white">{% trans "Server Information" %}</h2>
+                    </div>
+                    <div class="p-6 grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400">{% trans "Environment" %}</label>
+                            <p class="mt-1 text-white">{{ deployment.get_environment_display }} ({{ deployment.environment }})</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400">{% trans "Node Type" %}</label>
+                            <p class="mt-1 text-white">{{ deployment.get_node_type_display }} ({{ deployment.node_type }})</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400">{% trans "Provider" %}</label>
+                            <p class="mt-1 text-white">{{ deployment.provider.name }}</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400">{% trans "Region" %}</label>
+                            <p class="mt-1 text-white">{{ deployment.region.name }} ({{ deployment.region.country_code|upper }} / {{ deployment.region.normalized_code }})</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400">{% trans "Size" %}</label>
+                            <p class="mt-1 text-white">{{ deployment.node_size.display_name }}</p>
+                            <p class="text-sm text-slate-400">{{ deployment.node_size.vcpus }} vCPU / {{ deployment.node_size.memory_gb }}GB RAM / {{ deployment.node_size.disk_gb }}GB</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400">{% trans "Panel" %}</label>
+                            <p class="mt-1 text-white">{{ deployment.panel_type.name }}</p>
+                            {% if deployment.panel_type.version %}
+                            <p class="text-sm text-slate-400">v{{ deployment.panel_type.version }}</p>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Network Info -->
+                <div class="bg-slate-800 rounded-lg border border-slate-700">
+                    <div class="px-6 py-4 border-b border-slate-700">
+                        <h2 class="text-lg font-semibold text-white">{% trans "Network" %}</h2>
+                    </div>
+                    <div class="p-6 grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400">{% trans "IPv4 Address" %}</label>
+                            <p class="mt-1 text-white font-mono">{{ deployment.ipv4_address|default:"-" }}</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400">{% trans "IPv6 Address" %}</label>
+                            <p class="mt-1 text-white font-mono text-sm">{{ deployment.ipv6_address|default:"-" }}</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400">{% trans "DNS Zone" %}</label>
+                            <p class="mt-1 text-white">{{ deployment.dns_zone|default:"-" }}</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400">{% trans "FQDN" %}</label>
+                            <p class="mt-1 text-white font-mono">{{ fqdn }}</p>
+                        </div>
+                        {% if deployment.hetzner_server_id %}
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400">{% trans "Hetzner Server ID" %}</label>
+                            <p class="mt-1 text-white font-mono">{{ deployment.hetzner_server_id }}</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Linked Server -->
+                {% if deployment.virtualmin_server %}
+                <div class="bg-slate-800 rounded-lg border border-slate-700">
+                    <div class="px-6 py-4 border-b border-slate-700">
+                        <h2 class="text-lg font-semibold text-white">{% trans "Registered Server" %}</h2>
+                    </div>
+                    <div class="p-6">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-white font-medium">{{ deployment.virtualmin_server.name }}</p>
+                                <p class="text-sm text-slate-400">{{ deployment.virtualmin_server.hostname }}</p>
+                            </div>
+                            <a href="{% url 'provisioning:virtualmin_server_detail' deployment.virtualmin_server.id %}"
+                               class="px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg transition-colors">
+                                {% trans "View Server" %}
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Sidebar -->
+            <div class="space-y-6">
+                <!-- Timestamps -->
+                <div class="bg-slate-800 rounded-lg border border-slate-700">
+                    <div class="px-6 py-4 border-b border-slate-700">
+                        <h2 class="text-lg font-semibold text-white">{% trans "Timeline" %}</h2>
+                    </div>
+                    <div class="p-6 space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400">{% trans "Created" %}</label>
+                            <p class="mt-1 text-white">{{ deployment.created_at }}</p>
+                        </div>
+                        {% if deployment.deployed_at %}
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400">{% trans "Deployed" %}</label>
+                            <p class="mt-1 text-white">{{ deployment.deployed_at }}</p>
+                        </div>
+                        {% endif %}
+                        {% if deployment.destroyed_at %}
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400">{% trans "Destroyed" %}</label>
+                            <p class="mt-1 text-white">{{ deployment.destroyed_at }}</p>
+                        </div>
+                        {% endif %}
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400">{% trans "Initiated By" %}</label>
+                            <p class="mt-1 text-white">{{ deployment.initiated_by.email|default:"System" }}</p>
+                        </div>
+                        {% if deployment.retry_count > 0 %}
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400">{% trans "Retry Count" %}</label>
+                            <p class="mt-1 text-white">{{ deployment.retry_count }}</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Backup Settings -->
+                <div class="bg-slate-800 rounded-lg border border-slate-700">
+                    <div class="px-6 py-4 border-b border-slate-700">
+                        <h2 class="text-lg font-semibold text-white">{% trans "Backup Settings" %}</h2>
+                    </div>
+                    <div class="p-6 space-y-3">
+                        <div class="flex items-center justify-between">
+                            <span class="text-slate-400">{% trans "Backups Enabled" %}</span>
+                            {% if deployment.backup_enabled %}
+                            <span class="text-green-400">{% trans "Yes" %}</span>
+                            {% else %}
+                            <span class="text-slate-500">{% trans "No" %}</span>
+                            {% endif %}
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-slate-400">{% trans "Storage" %}</span>
+                            <span class="text-white">{{ deployment.backup_storage|title }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Deployment Logs -->
+        <div class="bg-slate-800 rounded-lg border border-slate-700 mt-6">
+            <div class="px-6 py-4 border-b border-slate-700 flex justify-between items-center">
+                <h2 class="text-lg font-semibold text-white">{% trans "Recent Logs" %}</h2>
+                <a href="{% url 'infrastructure:deployment_logs' deployment.id %}" class="text-blue-400 hover:text-blue-300 text-sm">
+                    {% trans "View All Logs" %} &rarr;
+                </a>
+            </div>
+            <div id="logs-section"
+                 {% if is_in_progress %}hx-get="{% url 'infrastructure:deployment_logs_partial' deployment.id %}" hx-trigger="every 5s" hx-swap="innerHTML"{% endif %}>
+                {% include "infrastructure/partials/deployment_logs.html" %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -39,6 +39,7 @@ LOCAL_APPS: list[str] = [
     "apps.billing",
     "apps.tickets",
     "apps.provisioning",
+    "apps.infrastructure",  # 🖥️ Cloud infrastructure & node deployment
     "apps.products",
     "apps.orders",
     "apps.domains",  # 🌐 Domain management & TLD configuration

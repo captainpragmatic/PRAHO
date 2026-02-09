@@ -1,0 +1,103 @@
+# Fail2ban configuration for PRAHO hosting nodes
+# Managed by Ansible - do not edit manually
+
+[DEFAULT]
+bantime = {{ fail2ban_bantime }}
+findtime = 600
+maxretry = {{ fail2ban_maxretry }}
+ignoreip = {{ fail2ban_ignoreip }}
+backend = auto
+
+# Email notifications (optional)
+destemail = root@localhost
+sender = fail2ban@{{ inventory_hostname }}
+action = %(action_mwl)s
+
+[sshd]
+enabled = true
+port = {{ ssh_port }}
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = 3
+bantime = 7200
+
+[sshd-ddos]
+enabled = true
+port = {{ ssh_port }}
+filter = sshd-ddos
+logpath = /var/log/auth.log
+maxretry = 6
+bantime = 3600
+
+[webmin-auth]
+enabled = true
+port = 10000
+filter = webmin-auth
+logpath = /var/webmin/miniserv.log
+maxretry = 3
+bantime = 3600
+
+[postfix]
+enabled = true
+port = smtp,submission
+filter = postfix
+logpath = /var/log/mail.log
+maxretry = 5
+bantime = 1800
+
+[postfix-sasl]
+enabled = true
+port = smtp,submission
+filter = postfix[mode=auth]
+logpath = /var/log/mail.log
+maxretry = 3
+bantime = 3600
+
+[dovecot]
+enabled = true
+port = imap,imaps,pop3,pop3s
+filter = dovecot
+logpath = /var/log/mail.log
+maxretry = 5
+bantime = 1800
+
+[apache-auth]
+enabled = true
+port = http,https
+filter = apache-auth
+logpath = /var/log/apache2/*error.log
+maxretry = 5
+bantime = 1800
+
+[apache-badbots]
+enabled = true
+port = http,https
+filter = apache-badbots
+logpath = /var/log/apache2/*access.log
+maxretry = 2
+bantime = 3600
+
+[apache-noscript]
+enabled = true
+port = http,https
+filter = apache-noscript
+logpath = /var/log/apache2/*error.log
+maxretry = 3
+bantime = 1800
+
+[proftpd]
+enabled = true
+port = ftp,ftp-data
+filter = proftpd
+logpath = /var/log/proftpd/proftpd.log
+maxretry = 5
+bantime = 1800
+
+[named-refused]
+enabled = true
+port = domain,953
+protocol = udp
+filter = named-refused
+logpath = /var/log/named/security.log
+maxretry = 5
+bantime = 1800

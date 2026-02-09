@@ -1,0 +1,87 @@
+{% extends 'base.html' %}
+{% load i18n %}
+
+{% block title %}{% if provider %}{% trans "Edit Provider" %}{% else %}{% trans "Create Provider" %}{% endif %}{% endblock %}
+
+{% block content %}
+<div class="bg-slate-900 min-h-screen">
+    <div class="max-w-2xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+        <!-- Header -->
+        <div class="mb-6">
+            <h1 class="text-3xl font-bold text-white">
+                {% if provider %}{% trans "Edit Provider" %}{% else %}{% trans "Create Provider" %}{% endif %}
+            </h1>
+            <p class="text-slate-400 mt-1">{% trans "Configure cloud provider settings" %}</p>
+        </div>
+
+        <form method="post" action="{{ form_action }}" class="space-y-6">
+            {% csrf_token %}
+
+            <div class="bg-slate-800 rounded-lg border border-slate-700 p-6 space-y-6">
+                <div class="grid grid-cols-2 gap-6">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-300 mb-2">{% trans "Provider Name" %}</label>
+                        {{ form.name }}
+                        {% if form.name.errors %}
+                        <p class="mt-1 text-sm text-red-400">{{ form.name.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-300 mb-2">{% trans "Provider Code" %}</label>
+                        {{ form.code }}
+                        <p class="mt-1 text-xs text-slate-500">{% trans "3-letter code (e.g., het, dig, aws)" %}</p>
+                        {% if form.code.errors %}
+                        <p class="mt-1 text-sm text-red-400">{{ form.code.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-2">{% trans "Provider Type" %}</label>
+                    {{ form.provider_type }}
+                    {% if form.provider_type.errors %}
+                    <p class="mt-1 text-sm text-red-400">{{ form.provider_type.errors.0 }}</p>
+                    {% endif %}
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-2">{% trans "API Token" %}</label>
+                    {{ form.api_token }}
+                    {% if provider %}
+                    <p class="mt-1 text-xs text-slate-500">{% trans "Leave blank to keep existing token" %}</p>
+                    {% endif %}
+                    {% if form.api_token.errors %}
+                    <p class="mt-1 text-sm text-red-400">{{ form.api_token.errors.0 }}</p>
+                    {% endif %}
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-2">{% trans "Additional Config (JSON)" %}</label>
+                    {{ form.config }}
+                    <p class="mt-1 text-xs text-slate-500">{% trans "Optional provider-specific configuration" %}</p>
+                    {% if form.config.errors %}
+                    <p class="mt-1 text-sm text-red-400">{{ form.config.errors.0 }}</p>
+                    {% endif %}
+                </div>
+
+                <div class="flex items-center">
+                    {{ form.is_active }}
+                    <label for="{{ form.is_active.id_for_label }}" class="ml-2 text-slate-300">
+                        {% trans "Provider is active" %}
+                    </label>
+                </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="flex justify-end space-x-4">
+                <a href="{{ cancel_url }}" class="px-6 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg transition-colors">
+                    {% trans "Cancel" %}
+                </a>
+                <button type="submit" class="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
+                    {% if provider %}{% trans "Update Provider" %}{% else %}{% trans "Create Provider" %}{% endif %}
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

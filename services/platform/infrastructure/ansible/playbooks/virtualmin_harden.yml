@@ -1,0 +1,191 @@
+# Security Hardening Playbook for Virtualmin Servers
+# Run after Virtualmin installation to apply security best practices
+---
+- name: Harden Virtualmin server security
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Install security packages
+      ansible.builtin.apt:
+        name:
+          - fail2ban
+          - ufw
+          - unattended-upgrades
+          - apt-listchanges
+          - logwatch
+          - libpam-pwquality
+        state: present
+        update_cache: yes
+
+    # Fail2ban configuration
+    - name: Configure fail2ban jail.local
+      ansible.builtin.template:
+        src: templates/jail.local.j2
+        dest: /etc/fail2ban/jail.local
+        mode: '0644'
+      notify: Restart fail2ban
+
+    - name: Enable fail2ban
+      ansible.builtin.service:
+        name: fail2ban
+        enabled: yes
+        state: started
+
+    # SSH hardening (already done in common_base but reinforcing)
+    - name: Harden SSH configuration
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+        validate: 'sshd -t -f %s'
+      loop:
+        - { regexp: '^#?PermitEmptyPasswords', line: 'PermitEmptyPasswords no' }
+        - { regexp: '^#?X11Forwarding', line: 'X11Forwarding no' }
+        - { regexp: '^#?AllowTcpForwarding', line: 'AllowTcpForwarding no' }
+        - { regexp: '^#?AllowAgentForwarding', line: 'AllowAgentForwarding no' }
+        - { regexp: '^#?ClientAliveInterval', line: 'ClientAliveInterval 300' }
+        - { regexp: '^#?ClientAliveCountMax', line: 'ClientAliveCountMax 2' }
+        - { regexp: '^#?Protocol', line: 'Protocol 2' }
+        - { regexp: '^#?Ciphers', line: 'Ciphers aes256-gcm@openssh.com,chacha20-poly1305@openssh.com,aes256-ctr' }
+        - { regexp: '^#?MACs', line: 'MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com' }
+      notify: Restart sshd
+
+    # UFW firewall (backup to cloud firewall)
+    - name: Configure UFW defaults
+      community.general.ufw:
+        default: deny
+        direction: incoming
+      notify: Enable ufw
+
+    - name: Allow UFW outgoing by default
+      community.general.ufw:
+        default: allow
+        direction: outgoing
+      notify: Enable ufw
+
+    - name: Allow TCP ports through UFW
+      community.general.ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop: "{{ firewall_allowed_tcp_ports }}"
+      notify: Enable ufw
+
+    - name: Allow UDP ports through UFW
+      community.general.ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: udp
+      loop: "{{ firewall_allowed_udp_ports }}"
+      notify: Enable ufw
+
+    - name: Allow FTP passive range through UFW
+      community.general.ufw:
+        rule: allow
+        port: "40000:40100"
+        proto: tcp
+      notify: Enable ufw
+
+    # Automatic security updates
+    - name: Configure unattended-upgrades
+      ansible.builtin.template:
+        src: templates/50unattended-upgrades.j2
+        dest: /etc/apt/apt.conf.d/50unattended-upgrades
+        mode: '0644'
+
+    - name: Enable automatic updates
+      ansible.builtin.copy:
+        content: |
+          APT::Periodic::Update-Package-Lists "1";
+          APT::Periodic::Unattended-Upgrade "1";
+          APT::Periodic::AutocleanInterval "7";
+        dest: /etc/apt/apt.conf.d/20auto-upgrades
+        mode: '0644'
+
+    # System hardening
+    - name: Configure sysctl security parameters
+      ansible.posix.sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        sysctl_set: yes
+        state: present
+        reload: yes
+      loop:
+        - { name: 'net.ipv4.tcp_syncookies', value: '1' }
+        - { name: 'net.ipv4.conf.all.rp_filter', value: '1' }
+        - { name: 'net.ipv4.conf.default.rp_filter', value: '1' }
+        - { name: 'net.ipv4.conf.all.accept_redirects', value: '0' }
+        - { name: 'net.ipv4.conf.default.accept_redirects', value: '0' }
+        - { name: 'net.ipv4.conf.all.send_redirects', value: '0' }
+        - { name: 'net.ipv4.conf.default.send_redirects', value: '0' }
+        - { name: 'net.ipv4.conf.all.accept_source_route', value: '0' }
+        - { name: 'net.ipv4.conf.default.accept_source_route', value: '0' }
+        - { name: 'net.ipv4.icmp_echo_ignore_broadcasts', value: '1' }
+        - { name: 'net.ipv4.icmp_ignore_bogus_error_responses', value: '1' }
+
+    # Disable unnecessary services
+    - name: Check for unnecessary services
+      ansible.builtin.service_facts:
+
+    - name: Disable unnecessary services
+      ansible.builtin.service:
+        name: "{{ item }}"
+        enabled: no
+        state: stopped
+      loop:
+        - avahi-daemon
+        - cups
+        - rpcbind
+      when: item in ansible_facts.services
+      ignore_errors: yes
+
+    # Password policies
+    - name: Configure password quality
+      ansible.builtin.lineinfile:
+        path: /etc/security/pwquality.conf
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+      loop:
+        - { regexp: '^# minlen', line: 'minlen = 12' }
+        - { regexp: '^# minclass', line: 'minclass = 3' }
+        - { regexp: '^# maxrepeat', line: 'maxrepeat = 3' }
+
+    # File permissions
+    - name: Secure cron directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        mode: '0700'
+        owner: root
+        group: root
+      loop:
+        - /etc/cron.d
+        - /etc/cron.daily
+        - /etc/cron.hourly
+        - /etc/cron.monthly
+        - /etc/cron.weekly
+        - /var/spool/cron
+
+    - name: Create security hardening completion marker
+      ansible.builtin.copy:
+        content: |
+          PRAHO_HARDENED=true
+          HARDENING_DATE={{ ansible_date_time.iso8601 }}
+        dest: /etc/praho-security-hardening
+        mode: '0644'
+
+  handlers:
+    - name: Restart fail2ban
+      ansible.builtin.service:
+        name: fail2ban
+        state: restarted
+
+    - name: Restart sshd
+      ansible.builtin.service:
+        name: sshd
+        state: restarted
+
+    - name: Enable ufw
+      community.general.ufw:
+        state: enabled
