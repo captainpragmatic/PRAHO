@@ -35,6 +35,8 @@ from .subscription_models import (
     SubscriptionItem,
 )
 from .tax_models import TaxRule, VATValidation
+from .efactura.models import EFacturaDocument, EFacturaDocumentType, EFacturaStatus
+from .efactura.token_storage import OAuthToken
 from .validators import (
     DANGEROUS_FINANCIAL_PATTERNS,
     MAX_ADDRESS_FIELD_LENGTH,
@@ -131,6 +133,11 @@ __all__ = [
     "UsageEvent",
     "UsageMeter",
     "UsageThreshold",
+    # E-Factura models
+    "EFacturaDocument",
+    "EFacturaDocumentType",
+    "EFacturaStatus",
+    "OAuthToken",
     # Validators
     "log_security_event",
     "validate_financial_amount",

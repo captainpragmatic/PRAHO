@@ -1181,12 +1181,15 @@ def _requires_efactura_submission(invoice: Invoice) -> bool:
 def _trigger_efactura_submission(invoice: Invoice) -> None:
     """Trigger e-Factura submission for Romanian compliance"""
     try:
-        from django_q.tasks import async_task  # noqa: PLC0415
+        from apps.billing.efactura.tasks import queue_efactura_submission  # noqa: PLC0415
 
-        async_task("apps.billing.tasks.submit_efactura", str(invoice.id))
-        logger.info(f"🏛️ [e-Factura] Queued submission for {invoice.number}")
-    except ImportError:
-        logger.warning("⚠️ [e-Factura] Django-Q2 not available - implement sync submission")
+        task_id = queue_efactura_submission(str(invoice.id))
+        if task_id:
+            logger.info(f"🏛️ [e-Factura] Queued submission for {invoice.number} (task: {task_id})")
+        else:
+            logger.warning(f"⚠️ [e-Factura] Failed to queue submission for {invoice.number}")
+    except ImportError as e:
+        logger.warning(f"⚠️ [e-Factura] e-Factura module not available: {e}")
 
 
 def _schedule_payment_reminders(invoice: Invoice) -> None:
@@ -1385,19 +1388,36 @@ def _cancel_payment_retries(payment: Payment) -> None:
 def _handle_efactura_refund_reporting(invoice: Invoice) -> None:
     """Handle e-Factura refund reporting for Romanian compliance"""
     try:
-        # Check if this invoice was submitted to e-Factura
-        if invoice.efactura_sent and invoice.bill_to_country == "RO":
-            from apps.billing.services import EFacturaService  # noqa: PLC0415
+        # Check if this invoice has an e-Factura document that was accepted
+        if invoice.bill_to_country == "RO":
+            try:
+                from apps.billing.efactura.models import EFacturaDocument, EFacturaStatus  # noqa: PLC0415
 
-            # Generate refund notification for e-Factura
-            result = EFacturaService.generate_refund_notification(  # type: ignore[attr-defined]
-                original_invoice=invoice, refund_reason="customer_request", refund_date=invoice.updated_at
-            )
+                efactura_doc = getattr(invoice, "efactura_document", None)
+                if efactura_doc and efactura_doc.status == EFacturaStatus.ACCEPTED.value:
+                    # TODO: Generate credit note for refund (requires credit note builder)
+                    # For now, log that a credit note should be generated
+                    logger.info(
+                        f"🏛️ [e-Factura] Invoice {invoice.number} was refunded - "
+                        f"credit note should be generated for e-Factura compliance"
+                    )
 
-            if result.is_ok():
-                logger.info(f"🏛️ [e-Factura] Generated refund notification for {invoice.number}")
-            else:
-                logger.error(f"🔥 [e-Factura] Refund notification failed: {result.error}")
+                    # Log compliance event
+                    compliance_request = ComplianceEventRequest(
+                        compliance_type="efactura_submission",
+                        reference_id=invoice.number,
+                        description=f"Invoice {invoice.number} refunded - credit note pending",
+                        status="pending",
+                        evidence={
+                            "original_upload_index": efactura_doc.anaf_upload_index,
+                            "refund_date": invoice.updated_at.isoformat() if invoice.updated_at else None,
+                        },
+                    )
+                    AuditService.log_compliance_event(compliance_request)
+
+            except EFacturaDocument.DoesNotExist:
+                # No e-Factura document for this invoice
+                pass
 
     except Exception as e:
         logger.exception(f"🔥 [e-Factura] Refund reporting failed: {e}")
