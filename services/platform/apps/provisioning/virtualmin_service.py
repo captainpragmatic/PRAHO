@@ -1,6 +1,10 @@
 """
 Virtualmin Business Logic Service - PRAHO Platform
 High-level service operations for Virtualmin provisioning and management.
+
+Implements:
+- Idempotency: Provisioning operations can be safely retried
+- Rollback Mechanisms: Failed provisioning attempts are cleaned up
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ from django.utils import timezone
 
 from apps.common.types import Err, Ok, Result
 
+from .security_utils import IdempotencyManager
 from .virtualmin_backup_service import BackupConfig, RestoreConfig
 from .virtualmin_gateway import VirtualminConfig, VirtualminGateway, get_virtualmin_config
 from .virtualmin_models import (
@@ -269,13 +274,18 @@ class VirtualminProvisioningService:
                     except Exception as db_error:
                         # Database update failed - rollback Virtualmin domain creation
                         logger.error(f"🔥 [VirtualminService] Database update failed for {account.domain}: {db_error}")
-                        rollback_result = self._execute_rollback(rollback_operations, gateway, account)
-                        if rollback_result.is_err():
+                        rollback_status, rollback_details = self._execute_rollback(rollback_operations, gateway, account)
+                        if rollback_status == "failed":
                             logger.error(
-                                f"🚨 [VirtualminService] CRITICAL: Rollback failed for {account.domain}: {rollback_result.unwrap_err()}"
+                                f"🚨 [VirtualminService] CRITICAL: Rollback failed for {account.domain}"
                             )
 
-                        job.mark_failed(f"Database update failed: {db_error}")
+                        job.mark_failed(
+                            f"Database update failed: {db_error}",
+                            rollback_executed=True,
+                            rollback_status=rollback_status,
+                            rollback_details=rollback_details,
+                        )
                         return Err(f"Provisioning failed during database update: {db_error}")
 
                 else:
@@ -382,7 +392,7 @@ class VirtualminProvisioningService:
 
     def _execute_rollback(
         self, rollback_operations: list[dict[str, Any]], gateway: VirtualminGateway, account: VirtualminAccount
-    ) -> Result[bool, str]:
+    ) -> tuple[str, dict[str, Any]]:
         """
         Execute rollback operations in reverse order (Phase 2).
 
@@ -392,46 +402,106 @@ class VirtualminProvisioningService:
             account: Account being rolled back
 
         Returns:
-            Result indicating rollback success/failure
+            Tuple of (rollback_status, rollback_details) where:
+            - rollback_status: "success", "partial", or "failed"
+            - rollback_details: Dict with operation results
         """
+        rollback_details: dict[str, Any] = {
+            "operations": [],
+            "total_operations": len(rollback_operations),
+            "successful_operations": 0,
+            "failed_operations": 0,
+        }
+
         try:
             logger.warning(f"⚠️ [VirtualminService] Starting rollback for {account.domain}")
 
             # Execute rollback operations in reverse order
             for operation in reversed(rollback_operations):
+                op_result = {"operation": operation["operation"], "description": operation.get("description", "")}
                 try:
                     if operation["operation"] == "delete-domain":
                         result = gateway.call("delete-domain", operation["params"])
                         if result.is_err() or not result.unwrap().success:
                             logger.error(f"🔥 [VirtualminService] Failed to rollback domain deletion: {operation}")
+                            op_result["status"] = "failed"
+                            op_result["error"] = str(result.unwrap_err()) if result.is_err() else "API returned failure"
+                            rollback_details["failed_operations"] += 1
+                        else:
+                            op_result["status"] = "success"
+                            rollback_details["successful_operations"] += 1
 
                     elif operation["operation"] == "revert_server_stats":
                         account.server.current_domains = operation["params"]["domain_count"]
                         account.server.save(update_fields=["current_domains", "updated_at"])
+                        op_result["status"] = "success"
+                        rollback_details["successful_operations"] += 1
 
-                    logger.info(f"✅ [VirtualminService] Rolled back: {operation['description']}")
+                    elif operation["operation"] == "enable-domain":
+                        # Rollback for suspend operation - re-enable the domain
+                        result = gateway.call("enable-domain", operation["params"])
+                        if result.is_err() or not result.unwrap().success:
+                            op_result["status"] = "failed"
+                            op_result["error"] = str(result.unwrap_err()) if result.is_err() else "API returned failure"
+                            rollback_details["failed_operations"] += 1
+                        else:
+                            op_result["status"] = "success"
+                            rollback_details["successful_operations"] += 1
+
+                    elif operation["operation"] == "disable-domain":
+                        # Rollback for unsuspend operation - re-disable the domain
+                        result = gateway.call("disable-domain", operation["params"])
+                        if result.is_err() or not result.unwrap().success:
+                            op_result["status"] = "failed"
+                            op_result["error"] = str(result.unwrap_err()) if result.is_err() else "API returned failure"
+                            rollback_details["failed_operations"] += 1
+                        else:
+                            op_result["status"] = "success"
+                            rollback_details["successful_operations"] += 1
+
+                    else:
+                        op_result["status"] = "skipped"
+                        op_result["reason"] = f"Unknown operation type: {operation['operation']}"
+
+                    logger.info(f"✅ [VirtualminService] Rolled back: {operation.get('description', operation['operation'])}")
 
                 except Exception as op_error:
                     logger.error(
-                        f"🔥 [VirtualminService] Rollback operation failed: {operation['description']} - {op_error}"
+                        f"🔥 [VirtualminService] Rollback operation failed: {operation.get('description', '')} - {op_error}"
                     )
+                    op_result["status"] = "failed"
+                    op_result["error"] = str(op_error)
+                    rollback_details["failed_operations"] += 1
                     # Continue with other rollback operations even if one fails
+
+                rollback_details["operations"].append(op_result)
 
             # Update account status to failed
             account.status = "error"
             account.status_message = "Provisioning failed - rollback executed"
             account.save(update_fields=["status", "status_message", "updated_at"])
 
-            logger.warning(f"⚠️ [VirtualminService] Rollback completed for {account.domain}")
-            return Ok(True)
+            # Determine overall rollback status
+            if rollback_details["failed_operations"] == 0:
+                rollback_status = "success"
+                logger.warning(f"⚠️ [VirtualminService] Rollback completed successfully for {account.domain}")
+            elif rollback_details["successful_operations"] > 0:
+                rollback_status = "partial"
+                logger.warning(f"⚠️ [VirtualminService] Rollback partially completed for {account.domain}")
+            else:
+                rollback_status = "failed"
+                logger.error(f"🚨 [VirtualminService] Rollback failed for {account.domain}")
+
+            return rollback_status, rollback_details
 
         except Exception as e:
             logger.exception(f"🚨 [VirtualminService] CRITICAL: Rollback execution failed for {account.domain}: {e}")
-            return Err(f"Rollback execution failed: {e}")
+            rollback_details["error"] = str(e)
+            return "failed", rollback_details
 
     def suspend_account(self, account: VirtualminAccount, reason: str = "") -> Result[bool, str]:
         """
-        Suspend Virtualmin account.
+        Suspend Virtualmin account with idempotency and rollback support.
 
         Args:
             account: VirtualminAccount to suspend
@@ -439,10 +509,34 @@ class VirtualminProvisioningService:
 
         Returns:
             Result with success status or error message
+
+        Idempotency:
+            Safe to retry - will return success if already suspended.
+
+        Rollback:
+            If database update fails after API call succeeds, will attempt
+            to re-enable the domain in Virtualmin.
         """
         try:
+            # Idempotency check - already suspended
             if account.status == "suspended":
-                return Ok(True)  # Already suspended
+                logger.info(f"⏭️ [VirtualminService] Account {account.domain} already suspended (idempotent)")
+                return Ok(True)
+
+            # Generate idempotency key for this operation
+            idempotency_key = IdempotencyManager.generate_key(
+                str(account.id), "suspend_account", {"domain": account.domain, "reason": reason}
+            )
+
+            # Check if operation is already in progress
+            is_new, existing_result = IdempotencyManager.check_and_set(idempotency_key)
+            if not is_new:
+                if isinstance(existing_result, dict) and existing_result.get("success"):
+                    logger.info(f"✅ [VirtualminService] Returning cached suspend result for {account.domain}")
+                    return Ok(True)
+                else:
+                    logger.warning(f"⚠️ [VirtualminService] Suspend operation already in progress for {account.domain}")
+                    return Err("Operation already in progress")
 
             gateway = self._get_gateway(account.server)
 
@@ -457,31 +551,65 @@ class VirtualminProvisioningService:
             job.save()
             job.mark_started()
 
-            # Make API call
-            result = gateway.call("disable-domain", {"domain": account.domain}, correlation_id=job.correlation_id)
+            try:
+                # Make API call
+                result = gateway.call("disable-domain", {"domain": account.domain}, correlation_id=job.correlation_id)
 
-            if result.is_ok():
-                response = result.unwrap()
+                if result.is_ok():
+                    response = result.unwrap()
 
-                if response.success:
-                    account.status = "suspended"
-                    account.status_message = reason
-                    account.save(update_fields=["status", "status_message", "updated_at"])
+                    if response.success:
+                        # Prepare rollback operation in case DB update fails
+                        rollback_operations = [
+                            {
+                                "operation": "enable-domain",
+                                "params": {"domain": account.domain},
+                                "description": f"Re-enable domain {account.domain} if DB update fails",
+                            }
+                        ]
 
-                    job.mark_completed(response.data)
+                        try:
+                            account.status = "suspended"
+                            account.status_message = reason
+                            account.save(update_fields=["status", "status_message", "updated_at"])
 
-                    logger.info(f"✅ [VirtualminService] Suspended account {account.domain}")
-                    return Ok(True)
+                            job.mark_completed(response.data)
+
+                            # Mark idempotency as complete
+                            IdempotencyManager.complete(idempotency_key, {"success": True})
+
+                            logger.info(f"✅ [VirtualminService] Suspended account {account.domain}")
+                            return Ok(True)
+
+                        except Exception as db_error:
+                            # Database update failed - rollback the API operation
+                            logger.error(f"🔥 [VirtualminService] DB update failed for suspend {account.domain}: {db_error}")
+                            rollback_status, rollback_details = self._execute_rollback(rollback_operations, gateway, account)
+
+                            job.mark_failed(
+                                f"Database update failed: {db_error}",
+                                rollback_executed=True,
+                                rollback_status=rollback_status,
+                                rollback_details=rollback_details,
+                            )
+                            IdempotencyManager.clear(idempotency_key)
+                            return Err(f"Suspension failed during database update: {db_error}")
+                    else:
+                        error_msg = response.data.get("error", "Suspension failed")
+                        job.mark_failed(error_msg, response.data)
+                        IdempotencyManager.clear(idempotency_key)
+                        return Err(error_msg)
+
                 else:
-                    error_msg = response.data.get("error", "Suspension failed")
-                    job.mark_failed(error_msg, response.data)
+                    error = result.unwrap_err()
+                    error_msg = str(error)
+                    job.mark_failed(error_msg)
+                    IdempotencyManager.clear(idempotency_key)
                     return Err(error_msg)
 
-            else:
-                error = result.unwrap_err()
-                error_msg = str(error)
-                job.mark_failed(error_msg)
-                return Err(error_msg)
+            except Exception as e:
+                IdempotencyManager.clear(idempotency_key)
+                raise
 
         except Exception as e:
             logger.exception(f"Error suspending account {account.domain}: {e}")
@@ -489,17 +617,41 @@ class VirtualminProvisioningService:
 
     def unsuspend_account(self, account: VirtualminAccount) -> Result[bool, str]:
         """
-        Unsuspend (reactivate) Virtualmin account.
+        Unsuspend (reactivate) Virtualmin account with idempotency and rollback support.
 
         Args:
             account: VirtualminAccount to unsuspend
 
         Returns:
             Result with success status or error message
+
+        Idempotency:
+            Safe to retry - will return success if already active.
+
+        Rollback:
+            If database update fails after API call succeeds, will attempt
+            to re-disable the domain in Virtualmin.
         """
         try:
+            # Idempotency check - already active
             if account.status == "active":
-                return Ok(True)  # Already active
+                logger.info(f"⏭️ [VirtualminService] Account {account.domain} already active (idempotent)")
+                return Ok(True)
+
+            # Generate idempotency key for this operation
+            idempotency_key = IdempotencyManager.generate_key(
+                str(account.id), "unsuspend_account", {"domain": account.domain}
+            )
+
+            # Check if operation is already in progress
+            is_new, existing_result = IdempotencyManager.check_and_set(idempotency_key)
+            if not is_new:
+                if isinstance(existing_result, dict) and existing_result.get("success"):
+                    logger.info(f"✅ [VirtualminService] Returning cached unsuspend result for {account.domain}")
+                    return Ok(True)
+                else:
+                    logger.warning(f"⚠️ [VirtualminService] Unsuspend operation already in progress for {account.domain}")
+                    return Err("Operation already in progress")
 
             gateway = self._get_gateway(account.server)
 
@@ -514,31 +666,65 @@ class VirtualminProvisioningService:
             job.save()
             job.mark_started()
 
-            # Make API call
-            result = gateway.call("enable-domain", {"domain": account.domain}, correlation_id=job.correlation_id)
+            try:
+                # Make API call
+                result = gateway.call("enable-domain", {"domain": account.domain}, correlation_id=job.correlation_id)
 
-            if result.is_ok():
-                response = result.unwrap()
+                if result.is_ok():
+                    response = result.unwrap()
 
-                if response.success:
-                    account.status = "active"
-                    account.status_message = ""
-                    account.save(update_fields=["status", "status_message", "updated_at"])
+                    if response.success:
+                        # Prepare rollback operation in case DB update fails
+                        rollback_operations = [
+                            {
+                                "operation": "disable-domain",
+                                "params": {"domain": account.domain},
+                                "description": f"Re-disable domain {account.domain} if DB update fails",
+                            }
+                        ]
 
-                    job.mark_completed(response.data)
+                        try:
+                            account.status = "active"
+                            account.status_message = ""
+                            account.save(update_fields=["status", "status_message", "updated_at"])
 
-                    logger.info(f"✅ [VirtualminService] Unsuspended account {account.domain}")
-                    return Ok(True)
+                            job.mark_completed(response.data)
+
+                            # Mark idempotency as complete
+                            IdempotencyManager.complete(idempotency_key, {"success": True})
+
+                            logger.info(f"✅ [VirtualminService] Unsuspended account {account.domain}")
+                            return Ok(True)
+
+                        except Exception as db_error:
+                            # Database update failed - rollback the API operation
+                            logger.error(f"🔥 [VirtualminService] DB update failed for unsuspend {account.domain}: {db_error}")
+                            rollback_status, rollback_details = self._execute_rollback(rollback_operations, gateway, account)
+
+                            job.mark_failed(
+                                f"Database update failed: {db_error}",
+                                rollback_executed=True,
+                                rollback_status=rollback_status,
+                                rollback_details=rollback_details,
+                            )
+                            IdempotencyManager.clear(idempotency_key)
+                            return Err(f"Unsuspension failed during database update: {db_error}")
+                    else:
+                        error_msg = response.data.get("error", "Unsuspension failed")
+                        job.mark_failed(error_msg, response.data)
+                        IdempotencyManager.clear(idempotency_key)
+                        return Err(error_msg)
+
                 else:
-                    error_msg = response.data.get("error", "Unsuspension failed")
-                    job.mark_failed(error_msg, response.data)
+                    error = result.unwrap_err()
+                    error_msg = str(error)
+                    job.mark_failed(error_msg)
+                    IdempotencyManager.clear(idempotency_key)
                     return Err(error_msg)
 
-            else:
-                error = result.unwrap_err()
-                error_msg = str(error)
-                job.mark_failed(error_msg)
-                return Err(error_msg)
+            except Exception as e:
+                IdempotencyManager.clear(idempotency_key)
+                raise
 
         except Exception as e:
             logger.exception(f"Error unsuspending account {account.domain}: {e}")
@@ -546,27 +732,56 @@ class VirtualminProvisioningService:
 
     def delete_account(self, account: VirtualminAccount) -> Result[bool, str]:
         """
-        Delete Virtualmin account permanently.
+        Delete Virtualmin account permanently with idempotency and rollback support.
 
         Args:
             account: VirtualminAccount to delete
 
         Returns:
             Result with success status or error message
+
+        Idempotency:
+            Safe to retry - will return success if already terminated.
+
+        Rollback:
+            If database update fails after API call succeeds, logs the inconsistency
+            (domain deleted in Virtualmin but not marked as such in DB).
+            Note: Domain deletion cannot be rolled back - data loss is irreversible.
         """
         # ⚠️ SAFETY CHECK: Prevent deletion of protected accounts
         if account.protected_from_deletion:
             error_msg = f"Account {account.domain} is protected from deletion. Disable protection first."
             logger.warning(f"🛡️ [VirtualminService] {error_msg}")
             return Err(error_msg)
-            
+
+        # Idempotency check - already terminated
+        if account.status == "terminated":
+            logger.info(f"⏭️ [VirtualminService] Account {account.domain} already terminated (idempotent)")
+            return Ok(True)
+
         # Additional safety check - only allow deletion of terminated/error accounts
-        if account.status not in ["terminated", "error"]:
-            error_msg = f"Account {account.domain} must be terminated before deletion (current: {account.status})"
+        # Note: We check for 'error' status separately since terminated is handled above
+        if account.status not in ["error"]:
+            error_msg = f"Account {account.domain} must be terminated or in error state before deletion (current: {account.status})"
             logger.warning(f"🛡️ [VirtualminService] {error_msg}")
             return Err(error_msg)
 
         try:
+            # Generate idempotency key for this operation
+            idempotency_key = IdempotencyManager.generate_key(
+                str(account.id), "delete_account", {"domain": account.domain}
+            )
+
+            # Check if operation is already in progress
+            is_new, existing_result = IdempotencyManager.check_and_set(idempotency_key)
+            if not is_new:
+                if isinstance(existing_result, dict) and existing_result.get("success"):
+                    logger.info(f"✅ [VirtualminService] Returning cached delete result for {account.domain}")
+                    return Ok(True)
+                else:
+                    logger.warning(f"⚠️ [VirtualminService] Delete operation already in progress for {account.domain}")
+                    return Err("Operation already in progress")
+
             gateway = self._get_gateway(account.server)
 
             # Create provisioning job
@@ -580,35 +795,90 @@ class VirtualminProvisioningService:
             job.save()
             job.mark_started()
 
-            # Make API call
-            result = gateway.call("delete-domain", {"domain": account.domain}, correlation_id=job.correlation_id)
+            # Store original server domain count for potential rollback
+            original_domain_count = account.server.current_domains
 
-            if result.is_ok():
-                response = result.unwrap()
+            try:
+                # Make API call
+                result = gateway.call("delete-domain", {"domain": account.domain}, correlation_id=job.correlation_id)
 
-                if response.success:
-                    # Update server stats
-                    account.server.current_domains = max(0, account.server.current_domains - 1)
-                    account.server.save(update_fields=["current_domains", "updated_at"])
+                if result.is_ok():
+                    response = result.unwrap()
 
-                    # Mark account as terminated (don't delete for audit trail)
-                    account.status = "terminated"
-                    account.save(update_fields=["status", "updated_at"])
+                    if response.success:
+                        try:
+                            # Update server stats
+                            account.server.current_domains = max(0, account.server.current_domains - 1)
+                            account.server.save(update_fields=["current_domains", "updated_at"])
 
-                    job.mark_completed(response.data)
+                            # Mark account as terminated (don't delete for audit trail)
+                            account.status = "terminated"
+                            account.save(update_fields=["status", "updated_at"])
 
-                    logger.info(f"✅ [VirtualminService] Deleted account {account.domain}")
-                    return Ok(True)
+                            job.mark_completed(response.data)
+
+                            # Mark idempotency as complete
+                            IdempotencyManager.complete(idempotency_key, {"success": True})
+
+                            logger.info(f"✅ [VirtualminService] Deleted account {account.domain}")
+                            return Ok(True)
+
+                        except Exception as db_error:
+                            # Database update failed - domain is already deleted in Virtualmin
+                            # This is a critical inconsistency - log it but can't rollback deletion
+                            logger.error(
+                                f"🚨 [VirtualminService] CRITICAL: DB update failed after domain deletion for {account.domain}: {db_error}"
+                            )
+
+                            # Track the rollback attempt (even though we can't restore the domain)
+                            rollback_details = {
+                                "operations": [
+                                    {
+                                        "operation": "restore-domain",
+                                        "status": "not_possible",
+                                        "description": "Domain deletion cannot be rolled back - data is irreversibly lost",
+                                    }
+                                ],
+                                "total_operations": 1,
+                                "successful_operations": 0,
+                                "failed_operations": 1,
+                                "critical_note": f"Domain {account.domain} deleted in Virtualmin but DB not updated",
+                            }
+
+                            job.mark_failed(
+                                f"Database update failed after domain deletion: {db_error}",
+                                rollback_executed=True,
+                                rollback_status="failed",
+                                rollback_details=rollback_details,
+                            )
+                            IdempotencyManager.clear(idempotency_key)
+
+                            # Try to at least revert server stats
+                            try:
+                                account.server.current_domains = original_domain_count
+                                account.server.save(update_fields=["current_domains", "updated_at"])
+                                logger.info(f"✅ [VirtualminService] Reverted server domain count for {account.domain}")
+                            except Exception as revert_error:
+                                logger.error(f"🔥 [VirtualminService] Failed to revert server stats: {revert_error}")
+
+                            return Err(f"Deletion failed during database update (CRITICAL: domain already deleted): {db_error}")
+
+                    else:
+                        error_msg = response.data.get("error", "Deletion failed")
+                        job.mark_failed(error_msg, response.data)
+                        IdempotencyManager.clear(idempotency_key)
+                        return Err(error_msg)
+
                 else:
-                    error_msg = response.data.get("error", "Deletion failed")
-                    job.mark_failed(error_msg, response.data)
+                    error = result.unwrap_err()
+                    error_msg = str(error)
+                    job.mark_failed(error_msg)
+                    IdempotencyManager.clear(idempotency_key)
                     return Err(error_msg)
 
-            else:
-                error = result.unwrap_err()
-                error_msg = str(error)
-                job.mark_failed(error_msg)
-                return Err(error_msg)
+            except Exception as e:
+                IdempotencyManager.clear(idempotency_key)
+                raise
 
         except Exception as e:
             logger.exception(f"Error deleting account {account.domain}: {e}")

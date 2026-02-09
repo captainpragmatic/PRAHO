@@ -575,6 +575,30 @@ class VirtualminProvisioningJob(models.Model):
     max_retries = models.PositiveIntegerField(default=3)
     next_retry_at = models.DateTimeField(null=True, blank=True)
 
+    # Rollback tracking
+    rollback_executed = models.BooleanField(
+        default=False,
+        verbose_name=_("Rollback Executed"),
+        help_text=_("Whether rollback was attempted after failure")
+    )
+    rollback_status = models.CharField(
+        max_length=20,
+        blank=True,
+        choices=(
+            ("", _("Not Applicable")),
+            ("success", _("Rollback Successful")),
+            ("partial", _("Rollback Partially Successful")),
+            ("failed", _("Rollback Failed")),
+        ),
+        verbose_name=_("Rollback Status"),
+        help_text=_("Status of rollback operation if executed")
+    )
+    rollback_details = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text=_("Details of rollback operations performed")
+    )
+
     # Execution tracking
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
@@ -631,8 +655,24 @@ class VirtualminProvisioningJob(models.Model):
 
         self.save(update_fields=["status", "completed_at", "result", "execution_time_seconds", "updated_at"])
 
-    def mark_failed(self, error_message: str, result: dict[str, Any] | None = None) -> None:
-        """Mark job as failed"""
+    def mark_failed(
+        self,
+        error_message: str,
+        result: dict[str, Any] | None = None,
+        rollback_executed: bool = False,
+        rollback_status: str = "",
+        rollback_details: dict[str, Any] | None = None,
+    ) -> None:
+        """
+        Mark job as failed with optional rollback tracking.
+
+        Args:
+            error_message: Error description
+            result: Additional result data
+            rollback_executed: Whether rollback was attempted
+            rollback_status: Status of rollback ("success", "partial", "failed")
+            rollback_details: Details of rollback operations performed
+        """
         now = timezone.now()
         self.status = "failed"
         self.status_message = error_message
@@ -640,6 +680,12 @@ class VirtualminProvisioningJob(models.Model):
 
         if result:
             self.result = result
+
+        # Track rollback information
+        self.rollback_executed = rollback_executed
+        if rollback_executed:
+            self.rollback_status = rollback_status
+            self.rollback_details = rollback_details or {}
 
         if self.started_at:
             duration = now - self.started_at
@@ -659,6 +705,9 @@ class VirtualminProvisioningJob(models.Model):
                 "result",
                 "execution_time_seconds",
                 "next_retry_at",
+                "rollback_executed",
+                "rollback_status",
+                "rollback_details",
                 "updated_at",
             ]
         )
@@ -674,6 +723,10 @@ class VirtualminProvisioningJob(models.Model):
         self.started_at = None
         self.completed_at = None
         self.execution_time_seconds = None
+        # Reset rollback tracking for new attempt
+        self.rollback_executed = False
+        self.rollback_status = ""
+        self.rollback_details = {}
 
         self.save(
             update_fields=[
@@ -683,6 +736,9 @@ class VirtualminProvisioningJob(models.Model):
                 "started_at",
                 "completed_at",
                 "execution_time_seconds",
+                "rollback_executed",
+                "rollback_status",
+                "rollback_details",
                 "updated_at",
             ]
         )
