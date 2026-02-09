@@ -731,3 +731,165 @@ class ComplianceLog(models.Model):
 
     def __str__(self) -> str:
         return f"{self.compliance_type}: {self.reference_id}"
+
+
+class SIEMHashChainState(models.Model):
+    """
+    Track SIEM hash chain state for tamper-proof logging.
+
+    This model maintains the cryptographic hash chain state
+    to ensure log integrity and detect tampering.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    # Chain state
+    sequence_number = models.BigIntegerField(default=0, db_index=True)
+    last_hash = models.CharField(max_length=128, blank=True)
+    last_event_id = models.UUIDField(null=True, blank=True)
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    # Configuration
+    hash_algorithm = models.CharField(max_length=20, default="sha256")
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "audit_siem_hash_chain_state"
+        ordering: ClassVar[tuple[str, ...]] = ("-updated_at",)
+
+    def __str__(self) -> str:
+        return f"HashChain #{self.sequence_number} ({self.hash_algorithm})"
+
+
+class ComplianceReportRecord(models.Model):
+    """Track generated compliance reports for audit trail."""
+
+    REPORT_TYPE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+        ("security_summary", "Security Summary"),
+        ("access_review", "Access Review"),
+        ("authentication_audit", "Authentication Audit"),
+        ("data_access_audit", "Data Access Audit"),
+        ("compliance_violations", "Compliance Violations"),
+        ("gdpr_compliance", "GDPR Compliance"),
+        ("romanian_fiscal_compliance", "Romanian Fiscal Compliance"),
+        ("log_integrity", "Log Integrity"),
+        ("retention_compliance", "Retention Compliance"),
+    )
+
+    FRAMEWORK_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+        ("iso27001", "ISO 27001"),
+        ("soc2", "SOC 2"),
+        ("gdpr", "GDPR"),
+        ("romanian_fiscal", "Romanian Fiscal"),
+        ("e_factura", "e-Factura"),
+        ("nist", "NIST"),
+        ("pci_dss", "PCI DSS"),
+    )
+
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+        ("compliant", "Compliant"),
+        ("partial", "Partial Compliance"),
+        ("non_compliant", "Non-Compliant"),
+    )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    # Report identification
+    report_type = models.CharField(max_length=50, choices=REPORT_TYPE_CHOICES, db_index=True)
+    framework = models.CharField(max_length=30, choices=FRAMEWORK_CHOICES, blank=True, db_index=True)
+
+    # Period covered
+    period_start = models.DateTimeField()
+    period_end = models.DateTimeField()
+
+    # Generation info
+    generated_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    generated_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+
+    # Results
+    overall_status = models.CharField(max_length=20, choices=STATUS_CHOICES, db_index=True)
+    compliance_score = models.DecimalField(max_digits=5, decimal_places=2)
+    total_events = models.PositiveIntegerField(default=0)
+    total_violations = models.PositiveIntegerField(default=0)
+    critical_findings = models.PositiveIntegerField(default=0)
+
+    # Report storage
+    file_path = models.CharField(max_length=500, blank=True)
+    file_format = models.CharField(max_length=10, default="json")
+
+    # Summary data
+    sections_summary = models.JSONField(default=list, blank=True)
+    violations_summary = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        db_table = "audit_compliance_report"
+        ordering: ClassVar[tuple[str, ...]] = ("-generated_at",)
+        indexes: ClassVar[tuple[models.Index, ...]] = (
+            models.Index(fields=["report_type", "-generated_at"]),
+            models.Index(fields=["framework", "-generated_at"]),
+            models.Index(fields=["overall_status", "-generated_at"]),
+            models.Index(fields=["period_start", "period_end"]),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.report_type} report ({self.overall_status}) - {self.generated_at.date()}"
+
+
+class SIEMExportLog(models.Model):
+    """Track SIEM export operations for monitoring."""
+
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+        ("pending", "Pending"),
+        ("in_progress", "In Progress"),
+        ("completed", "Completed"),
+        ("failed", "Failed"),
+    )
+
+    FORMAT_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+        ("cef", "CEF (ArcSight/Splunk)"),
+        ("leef", "LEEF (IBM QRadar)"),
+        ("json", "JSON (ELK/Graylog)"),
+        ("syslog", "Syslog (RFC 5424)"),
+        ("ocsf", "OCSF"),
+    )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    # Export details
+    export_format = models.CharField(max_length=10, choices=FORMAT_CHOICES)
+    destination = models.CharField(max_length=255)  # Host:port or file path
+
+    # Period
+    period_start = models.DateTimeField()
+    period_end = models.DateTimeField()
+
+    # Status
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    # Results
+    events_exported = models.PositiveIntegerField(default=0)
+    events_failed = models.PositiveIntegerField(default=0)
+    bytes_transferred = models.BigIntegerField(default=0)
+
+    # Error handling
+    error_message = models.TextField(blank=True)
+    retry_count = models.PositiveIntegerField(default=0)
+
+    # Metadata
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = "audit_siem_export_log"
+        ordering: ClassVar[tuple[str, ...]] = ("-started_at",)
+        indexes: ClassVar[tuple[models.Index, ...]] = (
+            models.Index(fields=["status", "-started_at"]),
+            models.Index(fields=["export_format", "-started_at"]),
+        )
+
+    def __str__(self) -> str:
+        return f"SIEM Export ({self.export_format}) - {self.status}"
