@@ -1,0 +1,50 @@
+# ===============================================================================
+# PRAHO Platform - SSL/TLS Docker Compose Configuration
+# ===============================================================================
+# Extends the main docker-compose with SSL support using Let's Encrypt
+#
+# Usage:
+#   docker-compose -f docker-compose.yml -f deploy/ssl/docker-compose.ssl.yml up -d
+#
+# Initial Setup:
+#   1. Run certbot-init.sh to obtain initial certificate
+#   2. Start services with this compose file
+#   3. Certificate renewal happens automatically via cron
+# ===============================================================================
+
+services:
+  # Certbot for automatic certificate renewal
+  certbot:
+    image: certbot/certbot:latest
+    container_name: praho-certbot
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot-webroot:/var/www/certbot
+    entrypoint: /bin/sh -c "trap exit TERM; while :; do certbot renew --webroot --webroot-path=/var/www/certbot --quiet; sleep 12h & wait $${!}; done"
+    restart: unless-stopped
+    networks:
+      - praho-network
+
+  # Override nginx with SSL configuration
+  nginx:
+    volumes:
+      - ./deploy/nginx/nginx-ssl.conf:/etc/nginx/nginx.conf:ro
+      - letsencrypt:/etc/letsencrypt:ro
+      - certbot-webroot:/var/www/certbot:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - certbot
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+
+volumes:
+  letsencrypt:
+    driver: local
+  certbot-webroot:
+    driver: local
+
+networks:
+  praho-network:
+    external: true

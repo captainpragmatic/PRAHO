@@ -1,0 +1,13 @@
+[Unit]
+Description=PRAHO SSL Certificate Renewal
+Documentation=https://certbot.eff.org/docs/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/praho/deploy/ssl/certbot-renew.sh
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

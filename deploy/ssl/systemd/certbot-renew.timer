@@ -1,0 +1,12 @@
+[Unit]
+Description=Run PRAHO SSL certificate renewal twice daily
+Documentation=https://certbot.eff.org/docs/
+
+[Timer]
+# Run at 03:00 and 15:00 daily with random delay up to 1 hour
+OnCalendar=*-*-* 03,15:00:00
+RandomizedDelaySec=3600
+Persistent=true
+
+[Install]
+WantedBy=timers.target
