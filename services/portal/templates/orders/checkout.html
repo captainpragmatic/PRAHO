@@ -96,6 +96,42 @@
             </div>
           {% endif %}
           
+          <!-- Payment Method Selection -->
+          <div class="mb-6">
+            <h3 class="text-sm font-medium text-white mb-3">{% trans "Payment Method" %}</h3>
+            <div class="grid gap-3">
+              <!-- Credit/Debit Card -->
+              <label class="relative flex items-start p-4 bg-slate-700/30 rounded-lg border-2 border-slate-600 hover:border-blue-500 transition-colors cursor-pointer">
+                <input type="radio" name="payment_method" value="stripe" class="mt-1 mr-3" checked>
+                <div class="flex-1">
+                  <div class="flex items-center">
+                    <span class="text-white font-medium">💳 {% trans "Credit/Debit Card" %}</span>
+                    <span class="ml-2 px-2 py-0.5 bg-green-600/20 text-green-400 text-xs rounded-full">{% trans "Instant" %}</span>
+                  </div>
+                  <p class="text-slate-400 text-sm mt-1">{% trans "Pay securely with Visa, Mastercard, or other cards" %}</p>
+                  <div class="flex items-center gap-2 mt-2">
+                    <img src="/static/images/visa.svg" alt="Visa" class="h-6">
+                    <img src="/static/images/mastercard.svg" alt="Mastercard" class="h-6">
+                    <span class="text-slate-500 text-xs">{% trans "Powered by Stripe" %}</span>
+                  </div>
+                </div>
+              </label>
+              
+              <!-- Bank Transfer -->
+              <label class="relative flex items-start p-4 bg-slate-700/30 rounded-lg border-2 border-slate-600 hover:border-blue-500 transition-colors cursor-pointer">
+                <input type="radio" name="payment_method" value="bank_transfer" class="mt-1 mr-3">
+                <div class="flex-1">
+                  <div class="flex items-center">
+                    <span class="text-white font-medium">🏦 {% trans "Bank Transfer" %}</span>
+                    <span class="ml-2 px-2 py-0.5 bg-yellow-600/20 text-yellow-400 text-xs rounded-full">{% trans "1-3 days" %}</span>
+                  </div>
+                  <p class="text-slate-400 text-sm mt-1">{% trans "Transfer funds directly to our bank account" %}</p>
+                  <p class="text-slate-500 text-xs mt-1">{% trans "Order will be created and you'll receive payment instructions" %}</p>
+                </div>
+              </label>
+            </div>
+          </div>
+          
           <!-- Order Notes -->
           <div class="mb-6">
             <label for="notes" class="block text-sm font-medium text-white mb-2">
@@ -165,8 +201,16 @@
             </a>
             
             {% if can_submit %}
-              {% trans "Create order" as create_order_text %}
-              {% button "🚀 "|add:create_order_text variant="success" size="lg" type="submit" class="sm:w-auto w-full" %}
+              <button type="submit" id="checkout-submit" class="sm:w-auto w-full inline-flex items-center justify-center px-6 py-3 text-lg font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors focus:outline-none focus:ring-4 focus:ring-green-500/50">
+                <span id="button-text">💳 {% trans "Continue to Payment" %}</span>
+                <span id="button-loading" class="hidden">
+                  <svg class="animate-spin h-5 w-5 mr-2" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  {% trans "Processing..." %}
+                </span>
+              </button>
             {% else %}
               <button type="button" 
                       disabled 
@@ -241,29 +285,136 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    console.log('🚀 Checkout page JavaScript loaded');
+    
     // ===============================================================================
-    // CLIENT-SIDE FORM VALIDATION 🔒
+    // PAYMENT METHOD HANDLING 💳
     // ===============================================================================
     
     const orderForm = document.querySelector('form[action="{% url 'orders:create_order' %}"]');
-    const submitButton = orderForm?.querySelector('button[type="submit"]');
+    const submitButton = document.getElementById('checkout-submit');
+    const buttonText = document.getElementById('button-text');
+    const buttonLoading = document.getElementById('button-loading');
+    const paymentMethodInputs = document.querySelectorAll('input[name="payment_method"]');
     
-    // Prevent form submission if validation has failed
-    if (orderForm && submitButton) {
-        const canSubmit = {% if can_submit %}true{% else %}false{% endif %};
-        
-        if (!canSubmit) {
-            // Additional protection: prevent form submission via JavaScript
-            orderForm.addEventListener('submit', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                
-                // Show user-friendly message
-                alert('{% trans "Please complete your company profile information before creating the order." %}');
-                
-                return false;
-            });
+    // Debug logging
+    console.log('🔍 Found elements:', {
+        orderForm: !!orderForm,
+        submitButton: !!submitButton,
+        buttonText: !!buttonText,
+        buttonLoading: !!buttonLoading,
+        paymentMethodInputs: paymentMethodInputs.length
+    });
+    
+    // Update button text based on payment method
+    function updateButtonText() {
+        try {
+            const selectedMethod = document.querySelector('input[name="payment_method"]:checked')?.value;
+            console.log('🎯 Payment method changed to:', selectedMethod);
+            
+            if (buttonText) {
+                if (selectedMethod === 'stripe') {
+                    buttonText.innerHTML = '💳 {% trans "Continue to Payment" %}';
+                } else if (selectedMethod === 'bank_transfer') {
+                    buttonText.innerHTML = '🏦 {% trans "Create Order for Bank Transfer" %}';
+                }
+            }
+        } catch (error) {
+            console.error('❌ Error updating button text:', error);
         }
+    }
+    
+    // Listen for payment method changes
+    if (paymentMethodInputs.length > 0) {
+        paymentMethodInputs.forEach(input => {
+            input.addEventListener('change', updateButtonText);
+            console.log('✅ Added change listener to payment method input');
+        });
+    } else {
+        console.warn('⚠️ No payment method inputs found');
+    }
+    
+    // Handle form submission
+    if (orderForm) {
+        console.log('✅ Order form found, setting up submission handler');
+        const canSubmit = {% if can_submit %}true{% else %}false{% endif %};
+        console.log('🔒 Can submit form:', canSubmit);
+        
+        orderForm.addEventListener('submit', function(e) {
+            console.log('📨 Form submission triggered');
+            e.preventDefault();
+            e.stopPropagation();
+            
+            try {
+                if (!canSubmit) {
+                    console.log('🚫 Submission blocked - profile incomplete');
+                    alert('{% trans "Please complete your company profile information before creating the order." %}');
+                    return false;
+                }
+                
+                const selectedMethod = document.querySelector('input[name="payment_method"]:checked')?.value;
+                console.log('💳 Selected payment method:', selectedMethod);
+                
+                // Show loading state
+                if (submitButton) {
+                    submitButton.disabled = true;
+                    console.log('✅ Submit button disabled');
+                }
+                if (buttonText && buttonLoading) {
+                    buttonText.classList.add('hidden');
+                    buttonLoading.classList.remove('hidden');
+                    console.log('✅ Loading state shown');
+                }
+                
+                // Determine the correct action URL
+                let actionUrl;
+                if (selectedMethod === 'stripe') {
+                    // For Stripe, redirect to payment processing
+                    actionUrl = "{% url 'orders:process_payment' %}";
+                    console.log('💳 Processing Stripe payment to:', actionUrl);
+                } else if (selectedMethod === 'bank_transfer') {
+                    // For bank transfer, create order directly
+                    actionUrl = "{% url 'orders:create_order' %}";
+                    console.log('🏦 Creating bank transfer order to:', actionUrl);
+                } else {
+                    console.error('❌ No payment method selected!');
+                    alert('Please select a payment method');
+                    
+                    // Reset button state
+                    if (submitButton) submitButton.disabled = false;
+                    if (buttonText && buttonLoading) {
+                        buttonText.classList.remove('hidden');
+                        buttonLoading.classList.add('hidden');
+                    }
+                    return false;
+                }
+                
+                // Update form action and submit
+                console.log('🚀 Updating form action to:', actionUrl);
+                orderForm.action = actionUrl;
+                
+                // Use setTimeout to ensure the form action is updated
+                setTimeout(function() {
+                    console.log('📤 Submitting form to:', orderForm.action);
+                    orderForm.submit();
+                }, 100);
+                
+            } catch (error) {
+                console.error('🔥 Error during form submission:', error);
+                alert('An error occurred. Please try again.');
+                
+                // Reset button state
+                if (submitButton) submitButton.disabled = false;
+                if (buttonText && buttonLoading) {
+                    buttonText.classList.remove('hidden');
+                    buttonLoading.classList.add('hidden');
+                }
+            }
+        });
+        
+        console.log('✅ Form submission handler attached');
+    } else {
+        console.error('❌ Order form not found!');
     }
 });
 </script>

@@ -572,9 +572,33 @@ class PlatformAPIClient:
         return self._make_request('DELETE', endpoint, user_id=user_id)
     
     # ===============================================================================
-    # BILLING API ENDPOINTS  
+    # BILLING API ENDPOINTS
     # ===============================================================================
-    
+
+    def post_billing(self, endpoint: str, data: dict | None = None, user_id: int | None = None) -> dict[str, Any]:
+        """POST request to billing endpoints (outside /api/ namespace)"""
+        # Save current base URL
+        original_base = self.base_url
+        try:
+            # Temporarily change base URL to access /billing/ directly
+            self.base_url = self.base_url.replace('/api', '')
+            return self._make_request('POST', f'billing/{endpoint}', user_id=user_id, data=data)
+        finally:
+            # Restore original base URL
+            self.base_url = original_base
+
+    def get_billing(self, endpoint: str, params: dict | None = None, user_id: int | None = None) -> dict[str, Any]:
+        """GET request to billing endpoints (outside /api/ namespace)"""
+        # Save current base URL
+        original_base = self.base_url
+        try:
+            # Temporarily change base URL to access /billing/ directly
+            self.base_url = self.base_url.replace('/api', '')
+            return self._make_request('GET', f'billing/{endpoint}', user_id=user_id, params=params)
+        finally:
+            # Restore original base URL
+            self.base_url = original_base
+
     def get_invoice_details(self, invoice_id: int, user_id: int) -> dict[str, Any]:
         """Get invoice details"""
         return self._make_request('GET', f'/billing/invoices/{invoice_id}/', user_id=user_id)

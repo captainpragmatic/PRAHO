@@ -144,7 +144,7 @@ class OrderCalculationService:
             subtotal_cents += (qty * unit) + setup
 
         # Use authoritative VAT calculator for consistency
-        from .vat_rules import OrderVATCalculator
+        from .vat_rules import CustomerVATInfo, OrderVATCalculator
 
         # Determine customer context for VAT calculation
         if billing_address:
@@ -162,13 +162,16 @@ class OrderCalculationService:
             vat_number = ''
 
         # Calculate VAT using authoritative calculator
+        customer_vat_info: CustomerVATInfo = {
+            'country': country,
+            'is_business': is_business,
+            'vat_number': vat_number,
+            'customer_id': str(customer.id) if customer else 'unknown',
+            'order_id': 'calculation'
+        }
         vat_result = OrderVATCalculator.calculate_vat(
             subtotal_cents=subtotal_cents,
-            customer_country=country,
-            is_business=is_business,
-            vat_number=vat_number,
-            customer_id=str(customer.id) if customer else 'unknown',
-            order_id='calculation'
+            customer_info=customer_vat_info
         )
 
         return {
@@ -337,13 +340,16 @@ class OrderService:
                     vat_number = data.billing_address.get("vat_number") or data.billing_address.get("vat_id") or ""
                     is_business = bool(data.billing_address.get("company_name")) or bool(vat_number)
 
+                    customer_vat_info: CustomerVATInfo = {
+                        'country': customer_country,
+                        'is_business': is_business,
+                        'vat_number': vat_number,
+                        'customer_id': str(data.customer.id),
+                        'order_id': None,
+                    }
                     vat_result = OrderVATCalculator.calculate_vat(
                         subtotal_cents=subtotal_cents,
-                        customer_country=customer_country,
-                        is_business=is_business,
-                        vat_number=vat_number,
-                        customer_id=str(data.customer.id),
-                        order_id=None,
+                        customer_info=customer_vat_info
                     )
                     # Convert percent to decimal rate with 4 places for storage
                     tax_rate_decimal = (vat_result.vat_rate / Decimal("100")).quantize(Decimal("0.0001"))

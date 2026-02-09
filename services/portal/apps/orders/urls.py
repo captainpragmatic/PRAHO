@@ -25,10 +25,14 @@ urlpatterns = [
     
     # Order creation (POST)
     path('order/create/', views.create_order, name='create_order'),
+    path('process-payment/', views.process_payment, name='process_payment'),
     
     # HTMX partials
     path('partials/mini-cart/', views.mini_cart_content, name='mini_cart_content'),
 
     # Payment webhooks
     path('payment/webhook/', views.payment_success_webhook, name='payment_webhook'),
+
+    # Payment confirmation
+    path('confirm-payment/', views.confirm_payment, name='confirm_payment'),
 ]

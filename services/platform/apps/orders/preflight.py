@@ -13,7 +13,7 @@ import logging
 from django.utils.translation import gettext_lazy as _
 
 from .models import Order
-from .vat_rules import OrderVATCalculator
+from .vat_rules import CustomerVATInfo, OrderVATCalculator
 
 logger = logging.getLogger(__name__)
 
@@ -91,13 +91,16 @@ class OrderPreflightValidationService:
                 for item in order.items.all():
                     subtotal_cents += (int(item.unit_price_cents) * int(item.quantity)) + int(item.setup_cents)
 
+            customer_vat_info: CustomerVATInfo = {
+                'country': country,
+                'is_business': is_business,
+                'vat_number': vat_number or None,
+                'customer_id': str(order.customer_id),
+                'order_id': str(order.id),
+            }
             vat_result = OrderVATCalculator.calculate_vat(
                 subtotal_cents=subtotal_cents,
-                customer_country=country,
-                is_business=is_business,
-                vat_number=vat_number or None,
-                customer_id=str(order.customer_id),
-                order_id=str(order.id),
+                customer_info=customer_vat_info
             )
 
             expected_tax_cents = int(vat_result.vat_cents)

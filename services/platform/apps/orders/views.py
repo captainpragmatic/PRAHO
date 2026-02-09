@@ -571,7 +571,7 @@ def order_create_preview(request: HttpRequest) -> HttpResponse:
         subtotal_cents = (unit_cents * quantity) + setup_cents
 
         # VAT calc per rules
-        from .vat_rules import OrderVATCalculator
+        from .vat_rules import CustomerVATInfo, OrderVATCalculator
 
         billing = customer.get_billing_address()
         tax_profile = customer.get_tax_profile()
@@ -579,13 +579,16 @@ def order_create_preview(request: HttpRequest) -> HttpResponse:
         vat_number = getattr(tax_profile, "vat_number", None) or getattr(tax_profile, "cui", None)
         is_business = bool(getattr(customer, "company_name", ""))
 
+        customer_vat_info: CustomerVATInfo = {
+            'country': country,
+            'is_business': is_business,
+            'vat_number': vat_number,
+            'customer_id': str(customer.id),
+            'order_id': None,
+        }
         vat_result = OrderVATCalculator.calculate_vat(
             subtotal_cents=subtotal_cents,
-            customer_country=country,
-            is_business=is_business,
-            vat_number=vat_number,
-            customer_id=str(customer.id),
-            order_id=None,
+            customer_info=customer_vat_info
         )
 
         context = {

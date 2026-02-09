@@ -22,4 +22,5 @@ urlpatterns = [
     path('create/', views.create_order, name='create_order'),
     path('', views.order_list, name='order_list'),
     path('<uuid:order_id>/', views.order_detail, name='order_detail'),
+    path('<uuid:order_id>/confirm/', views.confirm_order, name='confirm_order'),
 ]

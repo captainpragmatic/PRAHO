@@ -123,7 +123,7 @@
   </div>
 
   <!-- Payment Section for Pending Orders -->
-  {% if order.status == 'pending' and payment_info and stripe_config %}
+  {% if payment_info and stripe_config %}{% if order.status == 'pending' %}
   <div class="bg-gradient-to-r from-blue-900/40 to-green-900/40 border border-blue-700/50 rounded-lg mb-8">
     <div class="px-6 py-4 border-b border-blue-700/50">
       <h3 class="text-xl font-medium text-white flex items-center">
@@ -215,7 +215,7 @@
       </div>
     </div>
   </div>
-  {% endif %}
+  {% endif %}{% endif %}
 
   <!-- Next Steps -->
   <div class="grid md:grid-cols-2 gap-6 mb-8">
@@ -306,7 +306,7 @@
 
 {% block extra_js %}
 <!-- Stripe Elements Integration -->
-{% if order.status == 'pending' and payment_info and stripe_config %}
+{% if payment_info and stripe_config %}{% if order.status == 'pending' %}
 <script src="https://js.stripe.com/v3/"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -396,12 +396,9 @@ document.addEventListener('DOMContentLoaded', function() {
       } else {
         // Payment succeeded
         console.log('✅ Payment succeeded:', paymentIntent);
-        showSuccess();
 
-        // Optional: Redirect to success page after delay
-        setTimeout(() => {
-          window.location.reload();
-        }, 3000);
+        // Confirm payment on backend and create service
+        confirmPaymentOnBackend(paymentIntent.id);
       }
     } catch (err) {
       console.error('💥 Unexpected error:', err);
@@ -428,6 +425,60 @@ document.addEventListener('DOMContentLoaded', function() {
     form.style.pointerEvents = 'none';
   }
 
+  async function confirmPaymentOnBackend(paymentIntentId) {
+    try {
+      // Show success message immediately
+      showSuccess();
+
+      // Call backend to confirm payment and create service
+      const response = await fetch('/order/confirm-payment/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': getCookie('csrftoken')
+        },
+        body: JSON.stringify({
+          payment_intent_id: paymentIntentId,
+          order_id: '{{ order.id }}',
+          gateway: 'stripe'
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        console.log('✅ Payment confirmed on backend:', data);
+        // Redirect to success page or dashboard
+        setTimeout(() => {
+          window.location.href = '/order/';
+        }, 2000);
+      } else {
+        console.error('❌ Backend confirmation failed:', data.error);
+        showError(data.error || 'Payment confirmation failed');
+        resetButton();
+      }
+    } catch (err) {
+      console.error('💥 Error confirming payment:', err);
+      showError('Failed to confirm payment. Please contact support.');
+      resetButton();
+    }
+  }
+
+  function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+      const cookies = document.cookie.split(';');
+      for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i].trim();
+        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+          cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+          break;
+        }
+      }
+    }
+    return cookieValue;
+  }
+
   function resetButton() {
     submitButton.disabled = false;
     buttonText.classList.remove('hidden');
@@ -443,5 +494,5 @@ document.addEventListener('DOMContentLoaded', function() {
   });
 });
 </script>
-{% endif %}
+{% endif %}{% endif %}
 {% endblock %}

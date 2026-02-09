@@ -120,6 +120,7 @@ class Order(models.Model):
         help_text=_("Payment method used"),
     )
     transaction_id = models.CharField(max_length=255, blank=True, help_text=_("Payment gateway transaction ID"))
+    payment_intent_id = models.CharField(max_length=255, blank=True, help_text=_("Stripe payment intent ID"))
     gateway_response = models.JSONField(default=dict, blank=True, help_text=_("Payment gateway response data"))
 
     # Source tracking

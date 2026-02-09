@@ -24,6 +24,10 @@
                       {% badge "Cancelled" variant="secondary" icon="❌" %}
                     {% elif service.status == 'pending' %}
                       {% badge "Pending" variant="warning" icon="⏳" %}
+                    {% elif service.status == 'provisioning' %}
+                      {% badge "Provisioning" variant="info" icon="🔄" %}
+                    {% elif service.status == 'failed' %}
+                      {% badge "Provisioning Failed" variant="danger" icon="💥" %}
                     {% else %}
                       {% badge service.status|title variant="default" %}
                     {% endif %}
@@ -43,6 +47,15 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                             </svg>
                             {{ service.updated_at|date:"d.m.Y H:i" }}
+                        </span>
+                    {% endif %}
+                    {% if service.provisioning_task_id %}
+                        <span class="text-slate-500">•</span>
+                        <span class="flex items-center">
+                            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+                            </svg>
+                            {% trans 'Task:' %} <code class="text-slate-300">{{ service.provisioning_task_id|truncatechars:12 }}</code>
                         </span>
                     {% endif %}
                 </div>
@@ -66,6 +79,44 @@
             </div>
         </div>
     </div>
+
+    <!-- 💥 Provisioning Error Alert (shown only for failed services) -->
+    {% if service.status == 'failed' and service.provisioning_errors %}
+    <div class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
+        <div class="flex items-start">
+            <div class="flex-shrink-0">
+                <span class="text-red-300 text-xl">💥</span>
+            </div>
+            <div class="ml-3 flex-1">
+                <h3 class="text-sm font-medium text-red-200">{% trans 'Provisioning Failed' %}</h3>
+                <div class="mt-1">
+                    <p class="text-sm text-red-300">
+                        {% trans 'This service failed to provision automatically. Please review the error details below and take appropriate action.' %}
+                    </p>
+                    {% if service.last_provisioning_attempt %}
+                    <p class="text-xs text-red-400 mt-1">
+                        {% trans 'Last attempt:' %} {{ service.last_provisioning_attempt|date:"d.m.Y H:i" }}
+                    </p>
+                    {% endif %}
+                </div>
+                <div class="mt-3 bg-red-800/50 rounded border border-red-600 p-3">
+                    <h4 class="text-xs font-medium text-red-200 mb-1">{% trans 'Error Details:' %}</h4>
+                    <pre class="text-xs text-red-300 whitespace-pre-wrap font-mono">{{ service.provisioning_errors }}</pre>
+                </div>
+                {% if can_manage %}
+                <div class="mt-3">
+                    <button class="text-sm bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded transition-colors">
+                        🔄 {% trans 'Retry Provisioning' %}
+                    </button>
+                    <button class="text-sm text-red-300 hover:text-red-200 ml-2 underline">
+                        📝 {% trans 'Add Admin Notes' %}
+                    </button>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
 
     <!-- 📊 Main Content Grid -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">

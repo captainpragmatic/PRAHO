@@ -250,11 +250,12 @@ class SecurityHeadersMiddleware:
         # 🔒 SECURITY: Content Security Policy for HTMX/Tailwind compatibility
         csp_parts = [
             "default-src 'self'",
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval'",  # HTMX and Alpine.js require unsafe-inline and unsafe-eval
-            "style-src 'self' 'unsafe-inline'",   # Tailwind requires unsafe-inline  
+            "script-src 'self' 'unsafe-inline' https://js.stripe.com",  # HTMX, Alpine.js, and Stripe require external scripts
+            "style-src 'self' 'unsafe-inline'",   # Tailwind requires unsafe-inline
             "img-src 'self' data: https:",
             "font-src 'self'",
-            "connect-src 'self'",
+            "connect-src 'self' https://api.stripe.com",
+            "frame-src 'self' https://js.stripe.com https://*.stripe.com",  # Stripe Elements frames
             "frame-ancestors 'none'",
             "form-action 'self'",
             "base-uri 'self'",
@@ -268,7 +269,7 @@ class SecurityHeadersMiddleware:
             "geolocation=()",
             "microphone=()",
             "camera=()",
-            "payment=()",
+            "payment=(self)",
             "usb=()",
             "magnetometer=()",
             "gyroscope=()",

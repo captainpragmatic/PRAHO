@@ -258,6 +258,7 @@ class Service(models.Model):
         ("provisioning", _("Provisioning")),
         ("active", _("Active")),
         ("suspended", _("Suspended")),
+        ("failed", _("Provisioning Failed")),
         ("terminated", _("Terminated")),
         ("expired", _("Expired")),
     )
@@ -301,6 +302,7 @@ class Service(models.Model):
     provisioning_data = models.JSONField(default=dict, blank=True, verbose_name=_("Provisioning Data"))
     last_provisioning_attempt = models.DateTimeField(null=True, blank=True, verbose_name=_("Last Provisioning Attempt"))
     provisioning_errors = models.TextField(blank=True, verbose_name=_("Provisioning Errors"))
+    provisioning_task_id = models.CharField(max_length=100, blank=True, verbose_name=_("Provisioning Task ID"))
 
     # Resource usage/configuration
     disk_usage_mb = models.PositiveIntegerField(default=0, verbose_name=_("Disk Usage (MB)"))

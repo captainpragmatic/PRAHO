@@ -26,8 +26,14 @@ def require_customer_authentication(view_func):
     """Decorator to ensure customer is authenticated"""
     def wrapper(request: HttpRequest, *args, **kwargs):
         # Try request attributes first (set by middleware), fallback to session
-        customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
-        user_id = getattr(request, 'user_id', None) or request.session.get('user_id')
+        customer_id = getattr(request, 'customer_id', None)
+        user_id = getattr(request, 'user_id', None)
+        
+        # Fallback: Try to get from session if not set by middleware
+        if not user_id:
+            user_id = request.session.get('user_id') or request.session.get('customer_id')
+        if not customer_id:
+            customer_id = request.session.get('active_customer_id') or request.session.get('selected_customer_id') or request.session.get('customer_id')
         
         if not customer_id or not user_id:
             messages.error(request, _('Pentru a plasa o comandă, trebuie să fiți autentificat.'))
@@ -388,9 +394,16 @@ def cart_review(request: HttpRequest) -> HttpResponse:
         return redirect('orders:catalog')
     
     # Calculate totals
-    # Try request attributes first (set by middleware), fallback to session
-    customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
-    user_id = getattr(request, 'user_id', None) or request.session.get('user_id')
+    # Get authentication from middleware-set request attributes
+    customer_id = getattr(request, 'customer_id', None)
+    user_id = getattr(request, 'user_id', None)
+    
+    # Fallback: Try to get from session if not set by middleware
+    if not user_id:
+        user_id = request.session.get('user_id') or request.session.get('customer_id')
+    if not customer_id:
+        customer_id = request.session.get('active_customer_id') or request.session.get('selected_customer_id') or request.session.get('customer_id')
+    
     calculation_result = None
     calculation_error = None
     
@@ -448,15 +461,21 @@ def calculate_totals_htmx(request: HttpRequest) -> HttpResponse:
     
     try:
         cart = GDPRCompliantCartSession(request.session)
-        # Try request attributes first (set by middleware), fallback to session
-        customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
-        user_id = getattr(request, 'user_id', None) or request.session.get('user_id')
+        # Get authentication from middleware-set request attributes
+        customer_id = getattr(request, 'customer_id', None)
+        user_id = getattr(request, 'user_id', None)
+        
+        # Fallback: Try to get from session if not set by middleware
+        if not user_id:
+            user_id = request.session.get('user_id') or request.session.get('customer_id')
+        if not customer_id:
+            customer_id = request.session.get('active_customer_id') or request.session.get('selected_customer_id') or request.session.get('customer_id')
         
         # Debug logging for authentication parameters
         logger.info(f"🔍 [Cart] Calculate totals - customer_id: {customer_id}, user_id: {user_id}")
         
-        if not customer_id or not user_id:
-            logger.error(f"🔥 [Cart] Missing authentication parameters - customer_id: {customer_id}, user_id: {user_id}")
+        if not user_id:
+            logger.error(f"🔥 [Cart] Missing user_id parameter - user_id: {user_id}")
             return render(request, 'orders/partials/error_message.html', {
                 'error': _('Authentication error. Please refresh the page.')
             }, status=400)
@@ -505,8 +524,14 @@ def checkout(request: HttpRequest) -> HttpResponse:
     
     # Calculate totals for display
     # Try request attributes first (set by middleware), fallback to session
-    customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
-    user_id = getattr(request, 'user_id', None) or request.session.get('user_id')
+    customer_id = getattr(request, 'customer_id', None)
+    user_id = getattr(request, 'user_id', None)
+    
+    # Fallback: Try to get from session if not set by middleware
+    if not user_id:
+        user_id = request.session.get('user_id') or request.session.get('customer_id')
+    if not customer_id:
+        customer_id = request.session.get('active_customer_id') or request.session.get('selected_customer_id') or request.session.get('customer_id')
     calculation_result = None
     preflight_result = None
     
@@ -565,8 +590,14 @@ def create_order(request: HttpRequest) -> HttpResponse:
     try:
         cart = GDPRCompliantCartSession(request.session)
         # Try request attributes first (set by middleware), fallback to session
-        customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
-        user_id = getattr(request, 'user_id', None) or request.session.get('user_id')
+        customer_id = getattr(request, 'customer_id', None)
+        user_id = getattr(request, 'user_id', None)
+        
+        # Fallback: Try to get from session if not set by middleware
+        if not user_id:
+            user_id = request.session.get('user_id') or request.session.get('customer_id')
+        if not customer_id:
+            customer_id = request.session.get('active_customer_id') or request.session.get('selected_customer_id') or request.session.get('customer_id')
         
         if not cart.has_items():
             messages.error(request, _('Cannot create order with empty cart.'))
@@ -627,10 +658,25 @@ def create_order(request: HttpRequest) -> HttpResponse:
         payment_intent_result = None
         if order_status == 'pending':
             try:
+                # Get order details needed for payment intent
+                order_total = order_data.get('total', '0')
+                order_currency = order_data.get('currency_code', 'RON')
+
+                # Convert total from decimal to cents (Stripe requires amount in smallest currency unit)
+                try:
+                    total_cents = int(float(order_total) * 100)
+                except (ValueError, TypeError):
+                    logger.error(f"❌ Invalid order total format: {order_total}")
+                    total_cents = 0
+
                 # Call Platform API to create payment intent
                 platform_api = PlatformAPIClient()
-                payment_intent_result = platform_api.post('/billing/api/create-payment-intent/', data={
+                payment_intent_result = platform_api.post_billing('create-payment-intent/', data={
                     'order_id': str(order_id),
+                    'amount_cents': total_cents,
+                    'currency': order_currency,
+                    'customer_id': customer_id,
+                    'order_number': order_number,
                     'gateway': 'stripe',
                     'metadata': {
                         'order_number': order_number,
@@ -668,13 +714,145 @@ def create_order(request: HttpRequest) -> HttpResponse:
             )
 
         return redirect('orders:confirmation', order_id=order_id)
-        
+
     except ValidationError as e:
         messages.error(request, str(e))
         return redirect('orders:checkout')
     except Exception as e:
         logger.error(f"🔥 [Orders] Unexpected error creating order: {e}")
         messages.error(request, _('Eroare la crearea comenzii. Vă rugăm încercați din nou.'))
+        return redirect('orders:checkout')
+
+
+@require_customer_authentication
+@require_http_methods(["POST"])
+def process_payment(request: HttpRequest) -> HttpResponse:
+    """
+    Process payment for cart items using Stripe.
+    This creates a payment intent and order, then redirects to Stripe Checkout.
+    """
+
+    payment_method = request.POST.get('payment_method', 'stripe')
+
+    # If bank transfer, create order directly
+    if payment_method == 'bank_transfer':
+        return create_order(request)
+
+    # For Stripe payment, we need to:
+    # 1. Create the order first
+    # 2. Create a Stripe payment intent
+    # 3. Redirect to payment page
+
+    try:
+        cart = GDPRCompliantCartSession(request.session)
+        customer_id = getattr(request, 'customer_id', None)
+        user_id = getattr(request, 'user_id', None)
+
+        # Fallback: Try to get from session if not set by middleware
+        if not user_id:
+            user_id = request.session.get('user_id') or request.session.get('customer_id')
+        if not customer_id:
+            customer_id = request.session.get('active_customer_id') or request.session.get('selected_customer_id') or request.session.get('customer_id')
+
+        if not cart.has_items():
+            messages.error(request, _('Cannot proceed with empty cart.'))
+            return redirect('orders:catalog')
+
+        # Validate cart version
+        expected_version = request.POST.get('cart_version', '')
+        if not cart.validate_cart_version(expected_version):
+            messages.error(request, _('Cart was modified. Please review and try again.'))
+            return redirect('orders:cart_review')
+
+        # Run preflight validation
+        preflight_result = OrderCreationService.preflight_order(cart, customer_id, user_id)
+
+        if not preflight_result.get('valid', False):
+            errors = preflight_result.get('errors', [])
+            logger.warning(f"🔒 [Payment] Validation failed: {errors}")
+            messages.error(request, _('Order validation failed. Please check your information.'))
+            return redirect('orders:checkout')
+
+        # Get notes and agree_terms
+        notes = request.POST.get('notes', '').strip()
+        agree_terms = request.POST.get('agree_terms', '') == 'on'
+
+        if not agree_terms:
+            messages.error(request, _('You must agree to the terms and conditions.'))
+            return redirect('orders:checkout')
+
+        # Create order ready for payment (pending status)
+        result = OrderCreationService.create_draft_order(
+            cart, customer_id, user_id, notes,
+            auto_pending=True  # Promote to pending for immediate payment processing
+        )
+
+        if result.get('error'):
+            messages.error(request, result['error'])
+            return redirect('orders:checkout')
+
+        order_data = result.get('order', {})
+        order_id = order_data.get('id')
+        order_number = order_data.get('order_number')
+
+        # Create Stripe payment intent
+        try:
+            platform_api = PlatformAPIClient()
+
+            # Get order details needed for payment intent
+            order_total = order_data.get('total', '0')
+            order_currency = order_data.get('currency_code', 'RON')
+
+            # Convert total from decimal to cents (Stripe requires amount in smallest currency unit)
+            try:
+                total_cents = int(float(order_total) * 100)
+            except (ValueError, TypeError):
+                logger.error(f"❌ Invalid order total format: {order_total}")
+                total_cents = 0
+
+            # Create payment intent
+            payment_result = platform_api.post_billing('create-payment-intent/', data={
+                'order_id': str(order_id),
+                'amount_cents': total_cents,
+                'currency': order_currency,
+                'customer_id': customer_id,
+                'order_number': order_number,
+                'gateway': 'stripe',
+                'metadata': {
+                    'order_number': order_number,
+                    'customer_id': str(customer_id),
+                    'created_via': 'portal_checkout'
+                }
+            }, user_id=int(user_id))
+
+            if payment_result and payment_result.get('success'):
+                # Store payment intent info in session
+                request.session[f'payment_intent_{order_id}'] = {
+                    'client_secret': payment_result.get('client_secret'),
+                    'payment_intent_id': payment_result.get('payment_intent_id')
+                }
+                
+                logger.info(f"✅ Created payment intent for order {order_number}")
+
+                # Clear cart after successful order creation
+                cart.clear()
+
+                # Redirect to confirmation page where payment will be completed
+                messages.info(request, _('Please complete your payment to activate your order.'))
+                return redirect('orders:confirmation', order_id=order_id)
+            else:
+                logger.error(f"❌ Failed to create payment intent: {payment_result}")
+                messages.error(request, _('Payment initialization failed. Please try again.'))
+                return redirect('orders:checkout')
+
+        except Exception as e:
+            logger.error(f"🔥 Error creating Stripe checkout: {e}")
+            messages.error(request, _('Payment processing is temporarily unavailable.'))
+            return redirect('orders:checkout')
+
+    except Exception as e:
+        logger.error(f"🔥 [Payment] Unexpected error: {e}")
+        messages.error(request, _('Error processing payment. Please try again.'))
         return redirect('orders:checkout')
 
 
@@ -686,9 +864,15 @@ def order_confirmation(request: HttpRequest, order_id: str) -> HttpResponse:
     
     try:
         platform_api = PlatformAPIClient()
-        # Try request attributes first (set by middleware), fallback to session
-        customer_id = getattr(request, 'customer_id', None) or request.session.get('customer_id')
-        user_id = getattr(request, 'user_id', None) or request.session.get('user_id')
+        # Get authentication from middleware-set request attributes
+        customer_id = getattr(request, 'customer_id', None)
+        user_id = getattr(request, 'user_id', None)
+        
+        # Fallback: Try to get from session if not set by middleware
+        if not user_id:
+            user_id = request.session.get('user_id') or request.session.get('customer_id')
+        if not customer_id:
+            customer_id = request.session.get('active_customer_id') or request.session.get('selected_customer_id') or request.session.get('customer_id')
         
         # Fetch order details from Platform API with HMAC authentication
         order_data = platform_api.post(f'orders/{order_id}/', data={
@@ -712,7 +896,7 @@ def order_confirmation(request: HttpRequest, order_id: str) -> HttpResponse:
             if payment_info:
                 try:
                     # Get Stripe configuration from Platform API
-                    stripe_config_result = platform_api.get('/billing/api/stripe-config/')
+                    stripe_config_result = platform_api.get_billing('stripe-config/')
                     if stripe_config_result and stripe_config_result.get('success'):
                         stripe_config = stripe_config_result.get('config', {})
                         logger.info("✅ Retrieved Stripe configuration for checkout")
@@ -800,3 +984,107 @@ def payment_success_webhook(request: HttpRequest) -> JsonResponse:
     except Exception as e:
         logger.error(f"🔥 Error processing payment webhook: {e}")
         return JsonResponse({'error': 'Webhook processing failed'}, status=500)
+
+
+@require_customer_authentication
+@require_http_methods(["POST"])
+def confirm_payment(request: HttpRequest) -> JsonResponse:
+    """
+    Confirm payment and trigger service creation.
+    Called after successful Stripe payment from frontend.
+    """
+    try:
+        data = json.loads(request.body)
+        payment_intent_id = data.get('payment_intent_id')
+        order_id = data.get('order_id')
+        gateway = data.get('gateway', 'stripe')
+
+        if not payment_intent_id or not order_id:
+            return JsonResponse({
+                'success': False,
+                'error': 'Missing payment_intent_id or order_id'
+            }, status=400)
+
+        # Get customer context
+        customer_id = getattr(request, 'customer_id', None) or request.session.get('active_customer_id')
+        user_id = getattr(request, 'user_id', None) or request.session.get('user_id')
+
+        if not customer_id:
+            return JsonResponse({
+                'success': False,
+                'error': 'Customer authentication required'
+            }, status=401)
+
+        logger.info(f"💳 Confirming payment {payment_intent_id} for order {order_id}")
+
+        # Step 1: Confirm payment with platform
+        api_client = PlatformAPIClient()
+
+        # Call the billing/confirm-payment endpoint
+        payment_result = api_client.post_billing('confirm-payment/', {
+            'payment_intent_id': payment_intent_id,
+            'gateway': gateway
+        }, user_id=user_id)
+
+        if not payment_result.get('success'):
+            logger.error(f"❌ Payment confirmation failed: {payment_result.get('error')}")
+            return JsonResponse({
+                'success': False,
+                'error': payment_result.get('error', 'Payment confirmation failed')
+            }, status=400)
+
+        payment_status = payment_result.get('status')
+        logger.info(f"✅ Payment confirmed with status: {payment_status}")
+
+        # Step 2: If payment succeeded, update order status
+        if payment_status == 'succeeded':
+            # Update order to confirmed status via API
+            order_update_result = api_client.post(f'orders/{order_id}/confirm/', {
+                'payment_intent_id': payment_intent_id,
+                'payment_status': payment_status,
+                'customer_id': customer_id
+            }, user_id=user_id)
+
+            if order_update_result.get('success'):
+                logger.info(f"✅ Order {order_id} confirmed and service provisioning triggered")
+
+                # Clear cart after successful payment
+                cart_service = GDPRCompliantCartSession(request.session)
+                cart_service.clear()
+
+                return JsonResponse({
+                    'success': True,
+                    'status': 'confirmed',
+                    'message': 'Payment confirmed and service is being provisioned'
+                })
+            else:
+                logger.error(f"⚠️ Payment succeeded but order update failed: {order_update_result.get('error')}")
+                return JsonResponse({
+                    'success': True,
+                    'status': 'payment_received',
+                    'message': 'Payment received. Order is being processed.',
+                    'warning': 'Order confirmation pending'
+                })
+        else:
+            return JsonResponse({
+                'success': False,
+                'error': f'Payment not completed. Status: {payment_status}'
+            }, status=400)
+
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'error': 'Invalid request data'
+        }, status=400)
+    except PlatformAPIError as e:
+        logger.error(f"🔥 Platform API error: {e}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Failed to communicate with platform'
+        }, status=500)
+    except Exception as e:
+        logger.error(f"🔥 Error confirming payment: {e}")
+        return JsonResponse({
+            'success': False,
+            'error': 'An unexpected error occurred'
+        }, status=500)

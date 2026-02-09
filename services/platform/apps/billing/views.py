@@ -1609,6 +1609,10 @@ def api_create_payment_intent(request: HttpRequest) -> JsonResponse:
     Expected payload:
     {
         "order_id": "uuid-string",
+        "amount_cents": 2999,
+        "currency": "RON",
+        "customer_id": 123,
+        "order_number": "ORD-2024-001",
         "gateway": "stripe",
         "metadata": {...}
     }
@@ -1618,19 +1622,57 @@ def api_create_payment_intent(request: HttpRequest) -> JsonResponse:
         # Parse request data
         data = json.loads(request.body)
         order_id = data.get('order_id')
+        amount_cents = data.get('amount_cents')
+        currency = data.get('currency', 'RON')
+        customer_id = data.get('customer_id')
+        order_number = data.get('order_number')
         gateway = data.get('gateway', 'stripe')
         metadata = data.get('metadata', {})
 
-        # Validate required fields
-        if not order_id:
+        # Enhanced input validation
+        if not order_id or not isinstance(order_id, str):
             return JsonResponse({
                 'success': False,
-                'error': 'order_id is required'
+                'error': 'order_id is required and must be a string'
+            }, status=400)
+
+        if not amount_cents or not isinstance(amount_cents, int):
+            return JsonResponse({
+                'success': False,
+                'error': 'amount_cents is required and must be an integer'
+            }, status=400)
+
+        if amount_cents <= 0 or amount_cents > 100000000:  # Max 1M RON
+            return JsonResponse({
+                'success': False,
+                'error': 'amount_cents must be between 1 and 100,000,000 (1M RON)'
+            }, status=400)
+
+        if not customer_id:
+            return JsonResponse({
+                'success': False,
+                'error': 'customer_id is required'
+            }, status=400)
+
+        if currency and currency not in ['RON', 'EUR', 'USD']:
+            return JsonResponse({
+                'success': False,
+                'error': 'currency must be one of: RON, EUR, USD'
+            }, status=400)
+
+        if gateway not in ['stripe', 'bank']:
+            return JsonResponse({
+                'success': False,
+                'error': 'gateway must be one of: stripe, bank'
             }, status=400)
 
         # Create payment intent using PaymentService
-        result = PaymentService.create_payment_intent(
+        result = PaymentService.create_payment_intent_direct(
             order_id=order_id,
+            amount_cents=amount_cents,
+            currency=currency,
+            customer_id=customer_id,
+            order_number=order_number,
             gateway=gateway,
             metadata=metadata
         )
@@ -1681,11 +1723,24 @@ def api_confirm_payment(request: HttpRequest) -> JsonResponse:
         payment_intent_id = data.get('payment_intent_id')
         gateway = data.get('gateway', 'stripe')
 
-        # Validate required fields
-        if not payment_intent_id:
+        # Enhanced input validation
+        if not payment_intent_id or not isinstance(payment_intent_id, str):
             return JsonResponse({
                 'success': False,
-                'error': 'payment_intent_id is required'
+                'error': 'payment_intent_id is required and must be a string'
+            }, status=400)
+
+        # Basic format validation for Stripe payment intent IDs
+        if gateway == 'stripe' and not payment_intent_id.startswith('pi_'):
+            return JsonResponse({
+                'success': False,
+                'error': 'Invalid Stripe payment_intent_id format'
+            }, status=400)
+
+        if gateway not in ['stripe', 'bank']:
+            return JsonResponse({
+                'success': False,
+                'error': 'gateway must be one of: stripe, bank'
             }, status=400)
 
         # Confirm payment using PaymentService
@@ -1694,17 +1749,19 @@ def api_confirm_payment(request: HttpRequest) -> JsonResponse:
             gateway=gateway
         )
 
-        if result['success']:
-            logger.info(f"✅ API: Confirmed payment {payment_intent_id} - status: {result['status']}")
+        if result.get('success', False):
+            result_status = result.get('status', 'unknown')
+            logger.info(f"✅ API: Confirmed payment {payment_intent_id} - status: {result_status}")
             return JsonResponse({
                 'success': True,
-                'status': result['status']
+                'status': result_status
             })
         else:
-            logger.error(f"❌ API: Failed to confirm payment: {result['error']}")
+            result_error = result.get('error', 'Unknown error')
+            logger.error(f"❌ API: Failed to confirm payment: {result_error}")
             return JsonResponse({
                 'success': False,
-                'error': result['error']
+                'error': result_error
             }, status=400)
 
     except json.JSONDecodeError:
@@ -1872,7 +1929,7 @@ def api_stripe_config(request: HttpRequest) -> JsonResponse:
         from apps.settings.services import SettingsService
 
         # Check if Stripe integration is enabled
-        stripe_enabled = SettingsService.get("integrations.stripe_enabled", default=False)
+        stripe_enabled = SettingsService.get_setting("integrations.stripe_enabled", default=False)
         if not stripe_enabled:
             logger.warning("⚠️ API: Stripe integration is disabled")
             return JsonResponse({
@@ -1881,7 +1938,7 @@ def api_stripe_config(request: HttpRequest) -> JsonResponse:
             }, status=503)
 
         # Get public configuration from settings system
-        publishable_key = SettingsService.get("integrations.stripe_publishable_key")
+        publishable_key = SettingsService.get_setting("integrations.stripe_publishable_key")
 
         config = {
             'publishable_key': publishable_key,

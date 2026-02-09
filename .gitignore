@@ -64,6 +64,7 @@ pnpm-lock.yaml
 
 # Development
 .coverage
+.coverage.*
 htmlcov/
 .pytest_cache/
 .mypy_cache/

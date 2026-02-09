@@ -96,11 +96,43 @@
     <!-- Provisioning Settings -->
     <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
       <h2 class="text-xl font-semibold text-white mb-6">⚙️ {% trans 'Provisioning Settings' %}</h2>
-      
+
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Default Service Plan -->
+        <div class="md:col-span-2">
+          <div class="mb-4">
+            <label for="id_default_service_plan" class="block text-sm font-medium text-slate-300 mb-2">
+              {% trans 'Default Service Plan' %}
+            </label>
+            {{ form.default_service_plan }}
+            {% if form.default_service_plan.help_text %}
+              <p class="mt-1 text-sm text-slate-400">{{ form.default_service_plan.help_text }}</p>
+            {% endif %}
+            {% if form.default_service_plan.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.default_service_plan.errors.0 }}</p>
+            {% endif %}
+          </div>
+        </div>
+
         <!-- Module -->
         <div>
           {% input_field "module" label="Provisioning Module" html_id="id_module" placeholder="e.g., cpanel, plesk, virtualmin" value=form.module.value help_text="e.g., cpanel, plesk, virtualmin" error=form.module.errors.0 %}
+        </div>
+
+        <!-- Module Config -->
+        <div>
+          <div class="mb-4">
+            <label for="id_module_config" class="block text-sm font-medium text-slate-300 mb-2">
+              {% trans 'Module Configuration' %}
+            </label>
+            {{ form.module_config }}
+            {% if form.module_config.help_text %}
+              <p class="mt-1 text-sm text-slate-400">{{ form.module_config.help_text }}</p>
+            {% endif %}
+            {% if form.module_config.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.module_config.errors.0 }}</p>
+            {% endif %}
+          </div>
         </div>
 
         <!-- Sort Order -->
@@ -154,6 +186,38 @@
 
         <div>
           {% input_field "meta_description" input_type="textarea" label="Meta Description" html_id="id_meta_description" placeholder="SEO description for search results" value=form.meta_description.value help_text="SEO description for search results" error=form.meta_description.errors.0 %}
+        </div>
+
+        <!-- Tags -->
+        <div>
+          <div class="mb-4">
+            <label for="id_tags" class="block text-sm font-medium text-slate-300 mb-2">
+              {% trans 'Tags' %}
+            </label>
+            {{ form.tags }}
+            {% if form.tags.help_text %}
+              <p class="mt-1 text-sm text-slate-400">{{ form.tags.help_text }}</p>
+            {% endif %}
+            {% if form.tags.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.tags.errors.0 }}</p>
+            {% endif %}
+          </div>
+        </div>
+
+        <!-- Meta -->
+        <div>
+          <div class="mb-4">
+            <label for="id_meta" class="block text-sm font-medium text-slate-300 mb-2">
+              {% trans 'Additional Metadata' %}
+            </label>
+            {{ form.meta }}
+            {% if form.meta.help_text %}
+              <p class="mt-1 text-sm text-slate-400">{{ form.meta.help_text }}</p>
+            {% endif %}
+            {% if form.meta.errors %}
+              <p class="mt-1 text-sm text-red-400">{{ form.meta.errors.0 }}</p>
+            {% endif %}
+          </div>
         </div>
       </div>
     </div>

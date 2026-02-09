@@ -43,16 +43,16 @@ urlpatterns = [
     # ===============================================================================
 
     # Payment Intent Management
-    path("api/create-payment-intent/", views.api_create_payment_intent, name="api_create_payment_intent"),
-    path("api/confirm-payment/", views.api_confirm_payment, name="api_confirm_payment"),
+    path("create-payment-intent/", views.api_create_payment_intent, name="api_create_payment_intent"),
+    path("confirm-payment/", views.api_confirm_payment, name="api_confirm_payment"),
 
     # Subscription Management
-    path("api/create-subscription/", views.api_create_subscription, name="api_create_subscription"),
+    path("create-subscription/", views.api_create_subscription, name="api_create_subscription"),
 
     # Payment Methods & Configuration
-    path("api/payment-methods/<str:customer_id>/", views.api_payment_methods, name="api_payment_methods"),
-    path("api/stripe-config/", views.api_stripe_config, name="api_stripe_config"),
+    path("payment-methods/<str:customer_id>/", views.api_payment_methods, name="api_payment_methods"),
+    path("stripe-config/", views.api_stripe_config, name="api_stripe_config"),
 
     # Refund Processing
-    path("api/process-refund/", views.api_process_refund, name="api_process_refund"),
+    path("process-refund/", views.api_process_refund, name="api_process_refund"),
 ]

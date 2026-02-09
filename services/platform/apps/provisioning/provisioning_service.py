@@ -55,3 +55,166 @@ class ProvisioningService:
         """Reactivate suspended services"""
         logger.info(f"⚙️ [Provisioning] Would reactivate services for customer {customer_id} - {reason}")
         # TODO: Implement service reactivation
+
+    @staticmethod
+    def provision_service(service: Service) -> dict[str, str]:
+        """
+        Provision a new service after order confirmation.
+        This triggers the actual infrastructure setup for the service.
+        """
+        from django.utils import timezone
+
+        try:
+            logger.info(f"🚀 [Provisioning] Provisioning service {service.id} ({service.service_name})")
+
+            # Update service status and track provisioning attempt
+            service.status = 'provisioning'
+            service.last_provisioning_attempt = timezone.now()
+            service.provisioning_errors = ''  # Clear previous errors
+            service.save(update_fields=['status', 'last_provisioning_attempt', 'provisioning_errors'])
+
+            logger.info(f"✅ [Provisioning] Service {service.id} provisioning initiated")
+
+            # Check if we have a server assigned and it has API access
+            if service.server:
+                server_info = f"Server: {service.server.name} ({service.server.control_panel})"
+                if not hasattr(service.server, 'api_url') or not service.server.api_url:
+                    # Server exists but no API configured
+                    error_msg = f"Server {service.server.name} has no API configured for {service.server.control_panel}"
+                    logger.warning(f"⚠️ [Provisioning] {error_msg}")
+                    service.provisioning_errors = error_msg
+                    service.save(update_fields=['provisioning_errors'])
+
+                    return {
+                        'status': 'pending_manual',
+                        'message': f'Manual provisioning required - {error_msg}',
+                        'server': server_info,
+                        'requires_action': True
+                    }
+
+                # Implement actual provisioning based on control panel type
+                if service.server.control_panel == 'Virtualmin':
+                    # Simulate Virtualmin provisioning attempt
+                    # In production, this would call VirtualminGateway
+                    try:
+                        # Examples of when provisioning would FAIL:
+                        # - Virtualmin server down/unreachable
+                        # - Server disk full/out of space
+                        # - Server overloaded/not responding
+                        # - Virtualmin service not running
+                        # - API authentication failure
+                        # - Domain already exists on server
+                        # - Username already taken
+                        # - Quota/limits exceeded
+                        # - Network timeout reaching server
+                        # - Invalid domain name format
+
+                        # Use actual VirtualminGateway
+                        from .virtualmin_gateway import VirtualminGateway, VirtualminConfig
+                        from .virtualmin_gateway import (
+                            VirtualminAuthError,
+                            VirtualminTransientError,
+                            VirtualminConflictExistsError,
+                            VirtualminQuotaExceededError
+                        )
+
+                        # Create gateway and test connection
+                        config = VirtualminConfig(server=service.server)
+                        gateway = VirtualminGateway(config)
+
+                        logger.info(f"📡 [Provisioning] Testing connection to {service.server.name}")
+                        health_result = gateway.test_connection()
+
+                        if health_result.is_err():
+                            # REAL INFRASTRUCTURE FAILURE -> FAILED STATUS
+                            error_msg = f"Server unreachable: {health_result.unwrap_err()}"
+                            logger.error(f"❌ [Provisioning] {error_msg}")
+                            service.status = 'failed'
+                            service.provisioning_errors = error_msg
+                            service.save(update_fields=['status', 'provisioning_errors'])
+
+                            return {
+                                'status': 'failed',
+                                'message': error_msg,
+                                'server': server_info
+                            }
+
+                        # Server is reachable, but domain creation not implemented yet
+                        logger.info(f"📡 [Provisioning] {service.server.name} is healthy - domain creation pending")
+                        service.provisioning_errors = "Server accessible - domain creation API pending implementation"
+                        service.save(update_fields=['provisioning_errors'])
+
+                        return {
+                            'status': 'pending_implementation',
+                            'message': 'Server healthy - domain creation pending implementation',
+                            'server': server_info,
+                            'gateway_status': 'connected'
+                        }
+
+                    except (VirtualminAuthError, VirtualminTransientError, VirtualminQuotaExceededError) as api_error:
+                        # REAL API/INFRASTRUCTURE FAILURES -> FAILED STATUS
+                        error_msg = f"Virtualmin error: {api_error}"
+                        logger.error(f"❌ [Provisioning] {error_msg}")
+                        service.status = 'failed'
+                        service.provisioning_errors = error_msg
+                        service.save(update_fields=['status', 'provisioning_errors'])
+
+                        return {
+                            'status': 'failed',
+                            'message': error_msg,
+                            'server': server_info,
+                            'error_type': type(api_error).__name__
+                        }
+
+                elif service.server.control_panel == 'Virtualizor':
+                    # VPS provisioning
+                    logger.info(f"📡 [Provisioning] Would call VirtualizorGateway for {service.server.name}")
+                    service.provisioning_errors = "Virtualizor gateway pending implementation"
+                    service.save(update_fields=['provisioning_errors'])
+
+                    return {
+                        'status': 'pending_implementation',
+                        'message': 'Virtualizor gateway pending implementation',
+                        'server': server_info
+                    }
+                else:
+                    # Unknown control panel
+                    logger.warning(f"⚠️ [Provisioning] Unknown control panel: {service.server.control_panel}")
+                    service.provisioning_errors = f"Unknown control panel: {service.server.control_panel}"
+                    service.save(update_fields=['provisioning_errors'])
+
+                    return {
+                        'status': 'pending_manual',
+                        'message': f'Unknown control panel type: {service.server.control_panel}',
+                        'server': server_info,
+                        'requires_action': True
+                    }
+            else:
+                # No server assigned
+                logger.warning(f"⚠️ [Provisioning] Service {service.id} has no server assigned")
+                service.provisioning_errors = "No server assigned. Manual server assignment required."
+                service.save(update_fields=['provisioning_errors'])
+
+                return {
+                    'status': 'pending_manual',
+                    'message': 'No server assigned - manual provisioning required',
+                    'requires_action': True
+                }
+
+        except Exception as e:
+            error_msg = f"Failed to provision service {service.id}: {e}"
+            logger.error(f"🔥 [Provisioning] {error_msg}")
+
+            # Update service status to failed with detailed error info for staff
+            service.status = 'failed'
+            service.last_provisioning_attempt = timezone.now()
+            service.provisioning_errors = error_msg
+            service.save(update_fields=['status', 'last_provisioning_attempt', 'provisioning_errors'])
+
+            # Log critical error for monitoring/alerting systems
+            logger.critical(f"💥 [PROVISIONING FAILURE] Service {service.id} ({service.service_name}) failed to provision: {error_msg}")
+
+            return {
+                'status': 'failed',
+                'error': error_msg
+            }

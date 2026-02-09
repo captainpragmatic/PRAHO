@@ -4,6 +4,7 @@ DRF views for product catalog, order management, and cart calculations.
 """
 
 import logging
+from decimal import Decimal
 
 # Constants
 ISO_COUNTRY_CODE_LENGTH = 2
@@ -11,6 +12,7 @@ IDEMPOTENCY_KEY_MIN_LENGTH = 16
 IDEMPOTENCY_KEY_MAX_LENGTH = 128
 
 from django.utils import timezone
+from django.db import transaction
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny
@@ -204,7 +206,7 @@ def calculate_cart_totals(request: Request, customer: Customer) -> Response:
         
         # 🔒 SECURITY: Calculate totals with proper VAT compliance
         from apps.customers.models import Customer
-        from apps.orders.vat_rules import OrderVATCalculator
+        from apps.orders.vat_rules import CustomerVATInfo, OrderVATCalculator
         
         # Get customer for VAT calculation - DEFAULT TO ROMANIAN SETTINGS for compliance
         try:
@@ -229,12 +231,16 @@ def calculate_cart_totals(request: Request, customer: Customer) -> Response:
         )
         
         # Calculate VAT with full compliance
+        customer_vat_info: CustomerVATInfo = {
+            'country': customer_country,
+            'is_business': is_business,
+            'vat_number': vat_number,
+            'customer_id': str(customer_id),
+            'order_id': 'cart-calculation'
+        }
         vat_result = OrderVATCalculator.calculate_vat(
             subtotal_cents=subtotal_cents,
-            customer_country=customer_country,
-            is_business=is_business,
-            vat_number=vat_number,
-            customer_id=str(customer_id)
+            customer_info=customer_vat_info
         )
         
         totals = {
@@ -380,13 +386,16 @@ def preflight_order(request: Request, customer: Customer) -> Response:
         
         logger.info(f"🔎 [API] VAT calculation inputs: subtotal={subtotal_cents}¢, country={country}, is_business={is_business}, vat_number={vat_number}")
 
+        customer_vat_info: CustomerVATInfo = {
+            'country': country,
+            'is_business': is_business,
+            'vat_number': vat_number or None,
+            'customer_id': str(customer.id),
+            'order_id': "preflight-preview",
+        }
         vat_result = OrderVATCalculator.calculate_vat(
             subtotal_cents=subtotal_cents,
-            customer_country=country,
-            is_business=is_business,
-            vat_number=vat_number or None,
-            customer_id=str(customer.id),
-            order_id="preflight-preview",
+            customer_info=customer_vat_info
         )
 
         logger.info(f"🔎 [API] VAT calculation result: subtotal={vat_result.subtotal_cents}¢, vat={vat_result.vat_cents}¢, total={vat_result.total_cents}¢, reasoning={vat_result.reasoning}")
@@ -721,4 +730,171 @@ def order_detail(request: Request, customer, order_id: str) -> Response:
         logger.exception(f"🔥 [API] Order detail failed: {e}")
         return Response({
             'error': 'Failed to load order'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@throttle_classes([OrderListThrottle])
+@require_customer_authentication
+def confirm_order(request: Request, customer, order_id: str) -> Response:
+    """
+    Confirm order after successful payment and trigger service provisioning.
+    """
+    try:
+        from apps.orders.models import Order
+        from apps.provisioning.services import ProvisioningService
+        from apps.audit.services import AuditService
+        from django.utils import timezone
+
+        # Get order and verify ownership
+        order = Order.objects.prefetch_related('items').get(
+            id=order_id,
+            customer_id=customer.id
+        )
+
+        # Check if order can be confirmed
+        if order.status not in ['pending', 'payment_processing']:
+            return Response({
+                'success': False,
+                'error': f'Order cannot be confirmed from status: {order.status}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        payment_intent_id = request.data.get('payment_intent_id')
+        payment_status = request.data.get('payment_status')
+
+        # Use atomic transaction for order confirmation and service creation
+        with transaction.atomic():
+            # Update order status to confirmed
+            old_status = order.status
+            order.status = 'confirmed'
+            order.payment_intent_id = payment_intent_id
+            order.save(update_fields=['status', 'payment_intent_id'])
+
+            logger.info(f"✅ Order {order.order_number} confirmed after payment")
+
+            # Log audit event
+            # API requests don't have a real user, just pass None
+            audit_user = None
+            if hasattr(request, 'user') and request.user.is_authenticated:
+                audit_user = request.user
+
+            AuditService.log_simple_event(
+                event_type="order_confirmed",
+                user=audit_user,
+                content_object=order,
+                description=f"Order {order.order_number} confirmed after payment",
+                old_values={'status': old_status},
+                new_values={'status': 'confirmed', 'payment_status': payment_status},
+                actor_type='customer',
+                metadata={
+                    'order_id': str(order.id),
+                    'order_number': order.order_number,
+                    'customer_id': str(customer.id),
+                    'payment_intent_id': payment_intent_id,
+                    'source_app': 'api',
+                }
+            )
+
+            # Trigger service provisioning for each order item
+            provisioning_results = []
+            for item in order.items.all():
+                if item.product.product_type in ['shared_hosting', 'vps', 'dedicated_server']:
+                    try:
+                        # Create service instance for the customer
+                        from apps.provisioning.models import Service
+
+                        # Check if product has a default service plan
+                        if not item.product.default_service_plan:
+                            logger.error(f"❌ Product {item.product.name} has no default_service_plan configured")
+                            provisioning_results.append({
+                                'product': item.product.name,
+                                'error': 'Product has no default service plan configured'
+                            })
+                            continue
+
+                        # Generate unique username
+                        import uuid
+                        username_suffix = str(uuid.uuid4()).replace('-', '')[:8]
+                        username = f"{customer.id}_{username_suffix}"
+
+                        # Auto-assign appropriate server
+                        from apps.provisioning.service_models import Server
+                        server = None
+
+                        # For shared hosting, assign a shared hosting server
+                        if item.product.product_type == 'shared_hosting':
+                            server = Server.objects.filter(
+                                server_type='shared_hosting',
+                                status='active'
+                            ).first()
+                        # For VPS, assign VPS host server
+                        elif item.product.product_type == 'vps':
+                            server = Server.objects.filter(
+                                server_type='vps_host',
+                                status='active'
+                            ).first()
+
+                        if not server:
+                            # Fallback to any active server
+                            server = Server.objects.filter(status='active').first()
+                            if server:
+                                logger.warning(f"⚠️ Using fallback server {server.name} for {item.product_name}")
+
+                        service = Service.objects.create(
+                            customer=customer,
+                            service_plan=item.product.default_service_plan,  # Use product's default service plan
+                            status='pending',
+                            service_name=item.product_name,
+                            domain=item.domain_name or '',
+                            username=username,
+                            billing_cycle='monthly',  # Default to monthly, can be enhanced later
+                            price=Decimal(str(item.unit_price_cents / 100)),  # Convert cents to decimal
+                            setup_fee_paid=item.setup_cents > 0,  # Mark as paid if there was a setup fee
+                            server=server,  # Assign the auto-selected server
+                            provisioning_data={
+                                'order_id': str(order.id),
+                                'order_number': order.order_number,
+                                'order_item_id': str(item.id),
+                                'config': item.config or {}
+                            }
+                        )
+
+                        # Queue provisioning task
+                        from apps.provisioning.tasks import queue_service_provisioning
+                        task_id = queue_service_provisioning(service)
+                        provisioning_results.append({
+                            'product': item.product.name,
+                            'service_id': str(service.id),
+                            'status': 'queued',
+                            'task_id': task_id
+                        })
+
+                        logger.info(f"🚀 Service provisioning initiated for {item.product.name}")
+
+                    except Exception as e:
+                        logger.error(f"❌ Failed to provision service for {item.product.name}: {e}")
+                        provisioning_results.append({
+                            'product': item.product.name,
+                            'error': str(e)
+                        })
+
+        return Response({
+            'success': True,
+            'order_id': str(order.id),
+            'order_number': order.order_number,
+            'status': order.status,
+            'provisioning': provisioning_results
+        })
+
+    except Order.DoesNotExist:
+        return Response({
+            'success': False,
+            'error': 'Order not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.exception(f"🔥 [API] Order confirmation failed: {e}")
+        return Response({
+            'success': False,
+            'error': f'Failed to confirm order: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -48,7 +48,7 @@ class StripeGateway(BasePaymentGateway):
             from apps.settings.services import SettingsService
 
             # Get encrypted Stripe secret key from settings system
-            api_key = SettingsService.get("integrations.stripe_secret_key")
+            api_key = SettingsService.get_setting("integrations.stripe_secret_key")
             if not api_key:
                 raise ValueError("Stripe secret key not configured in settings system")
 
@@ -76,15 +76,15 @@ class StripeGateway(BasePaymentGateway):
             from apps.settings.services import SettingsService
 
             # Check if Stripe integration is enabled
-            stripe_enabled = SettingsService.get("integrations.stripe_enabled", default=False)
+            stripe_enabled = SettingsService.get_setting("integrations.stripe_enabled", default=False)
             if not stripe_enabled:
                 self.logger.warning("⚠️ Stripe integration is disabled in settings")
                 return False
 
             # Check required encrypted settings
-            secret_key = SettingsService.get("integrations.stripe_secret_key")
-            publishable_key = SettingsService.get("integrations.stripe_publishable_key")
-            webhook_secret = SettingsService.get("integrations.stripe_webhook_secret")
+            secret_key = SettingsService.get_setting("integrations.stripe_secret_key")
+            publishable_key = SettingsService.get_setting("integrations.stripe_publishable_key")
+            webhook_secret = SettingsService.get_setting("integrations.stripe_webhook_secret")
 
             if not secret_key:
                 self.logger.error("❌ Stripe secret key not configured in settings system")
@@ -140,7 +140,7 @@ class StripeGateway(BasePaymentGateway):
                     **(metadata or {})
                 },
                 # Romanian business compliance
-                'statement_descriptor': 'PRAHO Hosting',
+                'statement_descriptor_suffix': 'PRAHO',
                 'receipt_email': None  # Will be set from customer data
             }
 
