@@ -1,0 +1,35 @@
+# ===============================================================================
+# PRAHO PLATFORM SERVICE - Package Configuration
+# ===============================================================================
+# Full Django application with database access, business logic, and admin interface
+# See root pyproject.toml for workspace configuration
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "praho-platform-service"
+version = "0.3.0"
+description = "PRAHO Platform Service - Admin platform with database access"
+requires-python = ">=3.11"
+authors = [
+    {name = "PragmaticHost Development Team", email = "dev@pragmatichost.com"}
+]
+
+# Platform inherits workspace dependencies and adds its own
+dependencies = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["apps", "config"]
+
+# ===============================================================================
+# UV CONFIGURATION - Service-specific settings
+# ===============================================================================
+
+[tool.uv]
+# This is a workspace member, not a standalone package
+package = true
+
+# Platform service uses the 'platform' dependency group from root
+dev-dependencies = []

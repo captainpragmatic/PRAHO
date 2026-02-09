@@ -1,6 +1,7 @@
 # ===============================================================================
-# PLATFORM SERVICE CI/CD - FULL DJANGO WITH DATABASE 🏢
+# PLATFORM SERVICE CI/CD - FULL DJANGO WITH DATABASE
 # ===============================================================================
+# Managed with uv (https://docs.astral.sh/uv/) - See ADR-0013 for details
 
 name: Platform Service CI/CD
 
@@ -9,17 +10,21 @@ on:
     branches: [ master, develop, 'feat/*', 'fix/*' ]
     paths:
       - 'services/platform/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
       - '.github/workflows/platform.yml'
   pull_request:
     branches: [ master, develop ]
     paths:
       - 'services/platform/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
       - '.github/workflows/platform.yml'
 
 jobs:
   platform-test:
     runs-on: ubuntu-latest
-    
+
     services:
       postgres:
         image: postgres:16
@@ -37,25 +42,19 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
       with:
-        python-version: '3.11'
-    
-    - name: Cache pip dependencies
-      uses: actions/cache@v3
-      with:
-        path: ~/.cache/pip
-        key: platform-${{ runner.os }}-pip-${{ hashFiles('services/platform/requirements/*.txt') }}
-        restore-keys: |
-          platform-${{ runner.os }}-pip-
-    
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+
+    - name: Set up Python
+      run: uv python install
+
     - name: Install platform dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r services/platform/requirements/dev.txt
-    
+      run: uv sync --group platform --group dev
+
     - name: Set up platform environment
       run: |
         export DATABASE_URL=postgres://postgres:postgres@localhost:5432/test_db
@@ -64,66 +63,66 @@ jobs:
         echo "DATABASE_URL=postgres://postgres:postgres@localhost:5432/test_db" >> $GITHUB_ENV
         echo "DJANGO_SETTINGS_MODULE=config.settings.test" >> $GITHUB_ENV
         echo "SECRET_KEY=test-secret-key-for-ci" >> $GITHUB_ENV
-    
+
     - name: Create database cache table
       run: |
         cd services/platform
-        PYTHONPATH=$(pwd) python manage.py createcachetable django_cache_table || echo "✅ Cache table already exists"
-    
+        PYTHONPATH=$(pwd) uv run python manage.py createcachetable django_cache_table || echo "Cache table already exists"
+
     - name: Run platform migrations
       run: |
         cd services/platform
-        PYTHONPATH=$(pwd) python manage.py migrate --no-input
-    
+        PYTHONPATH=$(pwd) uv run python manage.py migrate --no-input
+
     - name: Run platform type checking
       run: |
         cd services/platform
-        echo "🏷️ Running mypy type checking for platform..."
-        PYTHONPATH=$(pwd) python -m mypy apps/ --config-file ../../pyproject.toml --no-error-summary || echo "⚠️ Type checking completed with issues"
-    
+        echo "Running mypy type checking for platform..."
+        PYTHONPATH=$(pwd) uv run mypy apps/ --config-file ../../pyproject.toml --no-error-summary || echo "Type checking completed with issues"
+
     - name: Run platform unit tests
       run: |
         cd services/platform
-        echo "🧪 Running platform unit tests..."
-        PYTHONPATH=$(pwd) python manage.py test tests --verbosity=2 --parallel --keepdb
-    
+        echo "Running platform unit tests..."
+        PYTHONPATH=$(pwd) uv run python manage.py test tests --verbosity=2 --parallel --keepdb
+
     - name: Run platform database cache tests
       run: |
         cd services/platform
-        echo "🗄️ Testing database cache functionality..."
-        PYTHONPATH=$(pwd) python -c "
+        echo "Testing database cache functionality..."
+        PYTHONPATH=$(pwd) uv run python -c "
         import os
         os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.test')
         import django
         django.setup()
         from django.core.cache import cache
-        
+
         # Test cache operations
         cache.set('test_key', 'test_value', 300)
         result = cache.get('test_key')
         assert result == 'test_value', f'Expected test_value, got {result}'
-        print('✅ Database cache working correctly')
-        
+        print('Database cache working correctly')
+
         # Test cache deletion
         cache.delete('test_key')
         result = cache.get('test_key')
         assert result is None, f'Expected None after deletion, got {result}'
-        print('✅ Database cache deletion working correctly')
+        print('Database cache deletion working correctly')
         "
-    
+
     - name: Lint platform code
       run: |
         cd services/platform
-        echo "🧹 Running linting for platform service..."
-        PYTHONPATH=$(pwd) ruff check apps/ || echo "⚠️ Linting completed with issues"
-        PYTHONPATH=$(pwd) black --check apps/ || echo "⚠️ Code formatting check completed with issues"
-    
+        echo "Running linting for platform service..."
+        PYTHONPATH=$(pwd) uv run ruff check apps/ || echo "Linting completed with issues"
+        PYTHONPATH=$(pwd) uv run black --check apps/ || echo "Code formatting check completed with issues"
+
     - name: Check for hardcoded credentials
       run: |
-        echo "🔐 Checking for hardcoded credentials in platform..."
-        grep -r -i "password.*=" services/platform/ && echo "🔥 Found hardcoded credentials!" && exit 1 || echo "✅ No hardcoded credentials found"
-        grep -r -i "secret.*=" services/platform/ --exclude="*.md" && echo "🔥 Found hardcoded secrets!" && exit 1 || echo "✅ No hardcoded secrets found"
-    
+        echo "Checking for hardcoded credentials in platform..."
+        grep -r -i "password.*=" services/platform/ && echo "Found hardcoded credentials!" && exit 1 || echo "No hardcoded credentials found"
+        grep -r -i "secret.*=" services/platform/ --exclude="*.md" && echo "Found hardcoded secrets!" && exit 1 || echo "No hardcoded secrets found"
+
     - name: Upload platform artifacts
       uses: actions/upload-artifact@v4
       if: always()
@@ -137,48 +136,50 @@ jobs:
   platform-security:
     runs-on: ubuntu-latest
     needs: platform-test
-    
+
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
       with:
-        python-version: '3.11'
-    
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+
+    - name: Set up Python
+      run: uv python install
+
     - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r services/platform/requirements/dev.txt
-    
+      run: uv sync --group platform --group dev
+
     - name: Run security checks
       run: |
-        echo "🛡️ Running platform security validation..."
+        echo "Running platform security validation..."
         cd services/platform
-        
+
         # Verify platform can import its own models
-        PYTHONPATH=$(pwd) python -c "
+        PYTHONPATH=$(pwd) uv run python -c "
         try:
             from apps.billing.models import Invoice
-            print('✅ Platform can access billing models')
+            print('Platform can access billing models')
         except ImportError as e:
-            print(f'🔥 Platform cannot access billing models: {e}')
+            print(f'Platform cannot access billing models: {e}')
             exit(1)
         " || exit 1
-        
-        # Verify platform has database access  
-        PYTHONPATH=$(pwd) python -c "
+
+        # Verify platform has database access
+        PYTHONPATH=$(pwd) uv run python -c "
         import os
         os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.test')
         import django
         django.setup()
         from django.db import connection
-        
+
         try:
             with connection.cursor() as cursor:
                 cursor.execute('SELECT 1')
-                print('✅ Platform has database access')
+                print('Platform has database access')
         except Exception as e:
-            print(f'🔥 Platform database access failed: {e}')
+            print(f'Platform database access failed: {e}')
             exit(1)
         " || exit 1

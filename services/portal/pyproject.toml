@@ -1,0 +1,36 @@
+# ===============================================================================
+# PRAHO PORTAL SERVICE - Package Configuration
+# ===============================================================================
+# Lightweight API-only Django application - NO DATABASE ACCESS
+# Portal communicates with platform service via REST API only
+# See root pyproject.toml for workspace configuration
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "praho-portal-service"
+version = "0.3.0"
+description = "PRAHO Portal Service - Customer-facing API (no database access)"
+requires-python = ">=3.11"
+authors = [
+    {name = "PragmaticHost Development Team", email = "dev@pragmatichost.com"}
+]
+
+# Portal has minimal dependencies - NO database drivers!
+dependencies = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["apps", "config", "portal"]
+
+# ===============================================================================
+# UV CONFIGURATION - Service-specific settings
+# ===============================================================================
+
+[tool.uv]
+# This is a workspace member, not a standalone package
+package = true
+
+# Portal service uses the 'portal' dependency group from root
+dev-dependencies = []

@@ -1,3 +1,8 @@
+# ===============================================================================
+# INTEGRATION TESTS - Cross-service validation
+# ===============================================================================
+# Managed with uv (https://docs.astral.sh/uv/) - See ADR-0013 for details
+
 name: Integration Tests
 
 on:
@@ -6,6 +11,8 @@ on:
     paths:
       - 'services/**'
       - 'tests/integration/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
       - '.github/workflows/integration.yml'
       - 'deploy/**'
   pull_request:
@@ -13,13 +20,15 @@ on:
     paths:
       - 'services/**'
       - 'tests/integration/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
       - '.github/workflows/integration.yml'
       - 'deploy/**'
 
 jobs:
   integration-test:
     runs-on: ubuntu-latest
-    
+
     services:
       postgres:
         image: postgres:16
@@ -37,28 +46,19 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
       with:
-        python-version: '3.11'
-    
-    - name: Cache pip dependencies
-      uses: actions/cache@v3
-      with:
-        path: ~/.cache/pip
-        key: integration-${{ runner.os }}-pip-${{ hashFiles('services/platform/requirements/*.txt', 'services/portal/requirements.txt') }}
-        restore-keys: |
-          integration-${{ runner.os }}-pip-
-    
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+
+    - name: Set up Python
+      run: uv python install
+
     - name: Install all dependencies
-      run: |
-        python -m pip install --upgrade pip
-        # Install platform dependencies (full Django)
-        pip install -r services/platform/requirements/dev.txt
-        # Install portal dependencies (API-only)
-        pip install -r services/portal/requirements.txt
-    
+      run: uv sync --all-groups
+
     - name: Set up environment
       run: |
         export DATABASE_URL=postgres://postgres:postgres@localhost:5432/test_db
@@ -71,181 +71,181 @@ jobs:
         echo "SECRET_KEY=test-secret-key-for-integration" >> $GITHUB_ENV
         echo "PLATFORM_API_URL=http://localhost:8000" >> $GITHUB_ENV
         echo "PLATFORM_API_KEY=test-integration-key" >> $GITHUB_ENV
-    
+
     - name: Set up platform database
       run: |
         cd services/platform
-        echo "🗄️ Setting up platform database and cache..."
-        PYTHONPATH=$(pwd) python manage.py createcachetable django_cache_table || echo "Cache table exists"
-        PYTHONPATH=$(pwd) python manage.py migrate --no-input
-    
+        echo "Setting up platform database and cache..."
+        PYTHONPATH=$(pwd) uv run python manage.py createcachetable django_cache_table || echo "Cache table exists"
+        PYTHONPATH=$(pwd) uv run python manage.py migrate --no-input
+
     - name: Run service isolation security tests
       run: |
-        echo "🔒 Running comprehensive service isolation tests..."
-        
+        echo "Running comprehensive service isolation tests..."
+
         # Test 1: Platform can access its models
         echo "Testing platform model access..."
         cd services/platform
-        PYTHONPATH=$(pwd) python -c "
+        PYTHONPATH=$(pwd) uv run python -c "
         import os
         os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.test')
         import django
         django.setup()
-        
+
         try:
             from apps.billing.models import Invoice
-            print('✅ Platform can access billing models')
+            print('Platform can access billing models')
         except ImportError as e:
-            print(f'🔥 Platform cannot access its own models: {e}')
+            print(f'Platform cannot access its own models: {e}')
             exit(1)
         " || exit 1
-        
+
         # Test 2: Platform has database access
         echo "Testing platform database access..."
-        PYTHONPATH=$(pwd) python -c "
+        PYTHONPATH=$(pwd) uv run python -c "
         import os
         os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.test')
         import django
         django.setup()
         from django.db import connection
-        
+
         try:
             with connection.cursor() as cursor:
                 cursor.execute('SELECT 1')
-            print('✅ Platform has database access')
+            print('Platform has database access')
         except Exception as e:
-            print(f'🔥 Platform database access failed: {e}')
+            print(f'Platform database access failed: {e}')
             exit(1)
         " || exit 1
-        
+
         # Test 3: Portal cannot access platform models
         echo "Testing portal model isolation..."
         cd ../../services/portal
-        python -c "
+        uv run python -c "
         try:
             # This should fail - portal shouldn't be able to import platform models
             from apps.billing.models import Invoice
-            print('🔥 SECURITY BREACH: Portal can access platform models!')
+            print('SECURITY BREACH: Portal can access platform models!')
             exit(1)
         except ImportError:
-            print('✅ Portal properly isolated from platform models')
-        " || echo "✅ Portal isolation test passed"
-        
+            print('Portal properly isolated from platform models')
+        " || echo "Portal isolation test passed"
+
         # Test 4: Portal has no database drivers
         echo "Testing portal database driver isolation..."
-        python -c "
+        uv run python -c "
         try:
             import psycopg2
-            print('🔥 SECURITY BREACH: Portal has psycopg2 access!')
+            print('SECURITY BREACH: Portal has psycopg2 access!')
             exit(1)
         except ImportError:
-            print('✅ Portal properly isolated from database drivers')
-        " || echo "✅ Database driver isolation test passed"
-    
+            print('Portal properly isolated from database drivers')
+        " || echo "Database driver isolation test passed"
+
     - name: Test database cache functionality
       run: |
-        echo "🗄️ Testing platform database cache functionality..."
+        echo "Testing platform database cache functionality..."
         cd services/platform
-        PYTHONPATH=$(pwd) python -c "
+        PYTHONPATH=$(pwd) uv run python -c "
         import os
         os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.test')
         import django
         django.setup()
         from django.core.cache import cache
         from django.db import connection
-        
+
         # Verify cache table exists
         with connection.cursor() as cursor:
             cursor.execute(\"\"\"
                 SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
+                    SELECT FROM information_schema.tables
                     WHERE table_name = 'django_cache_table'
                 )
             \"\"\")
             exists = cursor.fetchone()[0]
             if not exists:
-                print('🔥 Cache table does not exist!')
+                print('Cache table does not exist!')
                 exit(1)
-            print('✅ Cache table exists')
-        
+            print('Cache table exists')
+
         # Test cache operations
         cache.set('integration_test_key', 'integration_test_value', 300)
         result = cache.get('integration_test_key')
         if result != 'integration_test_value':
-            print(f'🔥 Cache set/get failed. Expected: integration_test_value, Got: {result}')
+            print(f'Cache set/get failed. Expected: integration_test_value, Got: {result}')
             exit(1)
-        print('✅ Database cache set/get working')
-        
+        print('Database cache set/get working')
+
         # Test cache expiration
         cache.delete('integration_test_key')
         result = cache.get('integration_test_key')
         if result is not None:
-            print(f'🔥 Cache delete failed. Expected: None, Got: {result}')
+            print(f'Cache delete failed. Expected: None, Got: {result}')
             exit(1)
-        print('✅ Database cache delete working')
-        
-        print('✅ All database cache tests passed')
+        print('Database cache delete working')
+
+        print('All database cache tests passed')
         "
-    
+
     - name: Run integration test suite
       run: |
-        echo "🔗 Running integration tests..."
-        python -m pytest tests/integration/ -v --tb=short --maxfail=5
-    
+        echo "Running integration tests..."
+        uv run pytest tests/integration/ -v --tb=short --maxfail=5
+
     - name: Test Docker services integration
       run: |
-        echo "🐳 Testing Docker services can be built..."
-        
+        echo "Testing Docker services can be built..."
+
         # Test platform Docker build
         if [ -f "deploy/platform/Dockerfile" ]; then
           echo "Building platform Docker image..."
-          docker build -f deploy/platform/Dockerfile -t praho-platform:test . || echo "⚠️ Platform Docker build failed"
+          docker build -f deploy/platform/Dockerfile -t praho-platform:test . || echo "Platform Docker build failed"
         fi
-        
-        # Test portal Docker build  
+
+        # Test portal Docker build
         if [ -f "deploy/portal/Dockerfile" ]; then
           echo "Building portal Docker image..."
-          docker build -f deploy/portal/Dockerfile -t praho-portal:test . || echo "⚠️ Portal Docker build failed"
+          docker build -f deploy/portal/Dockerfile -t praho-portal:test . || echo "Portal Docker build failed"
         fi
-        
+
         # Test docker-compose validation
         if [ -f "deploy/docker-compose.services.yml" ]; then
           echo "Validating docker-compose configuration..."
           cd deploy
-          docker-compose -f docker-compose.services.yml config || echo "⚠️ Docker-compose validation failed"
+          docker-compose -f docker-compose.services.yml config || echo "Docker-compose validation failed"
           cd ..
         fi
-    
+
     - name: Performance benchmarking
       run: |
-        echo "⚡ Running basic performance tests..."
+        echo "Running basic performance tests..."
         cd services/platform
-        PYTHONPATH=$(pwd) python -c "
+        PYTHONPATH=$(pwd) uv run python -c "
         import os, time
         os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.test')
         import django
         django.setup()
         from django.core.cache import cache
-        
+
         # Benchmark cache operations
         start_time = time.time()
         for i in range(100):
             cache.set(f'bench_key_{i}', f'bench_value_{i}', 60)
         set_time = time.time() - start_time
-        
+
         start_time = time.time()
         for i in range(100):
             cache.get(f'bench_key_{i}')
         get_time = time.time() - start_time
-        
-        print(f'✅ Cache performance: 100 SETs in {set_time:.3f}s, 100 GETs in {get_time:.3f}s')
-        
+
+        print(f'Cache performance: 100 SETs in {set_time:.3f}s, 100 GETs in {get_time:.3f}s')
+
         # Cleanup
         for i in range(100):
             cache.delete(f'bench_key_{i}')
-        print('✅ Performance benchmarking completed')
+        print('Performance benchmarking completed')
         "
-    
+
     - name: Upload integration test reports
       uses: actions/upload-artifact@v4
       if: always()
@@ -255,32 +255,32 @@ jobs:
           tests/integration/reports/
           htmlcov/
         if-no-files-found: warn
-    
+
     - name: Comment PR with integration results
       if: github.event_name == 'pull_request' && always()
       uses: actions/github-script@v6
       with:
         script: |
-          const summary = `## 🔗 Integration Test Results
-          
-          ### ✅ Service Isolation Validated
-          - Platform ✅ Can access billing models and database
-          - Portal ✅ Properly isolated from platform models
-          - Portal ✅ No database driver access
-          - Database Cache ✅ Working correctly
-          
-          ### 🐳 Docker Integration
-          - Platform image build: ✅
-          - Portal image build: ✅
-          - Docker-compose validation: ✅
-          
-          ### ⚡ Performance
-          - Database cache operations: ✅ Benchmarked
-          - Integration test suite: ✅ Completed
-          
-          **Architecture validation complete!** 🎉
+          const summary = `## Integration Test Results
+
+          ### Service Isolation Validated
+          - Platform: Can access billing models and database
+          - Portal: Properly isolated from platform models
+          - Portal: No database driver access
+          - Database Cache: Working correctly
+
+          ### Docker Integration
+          - Platform image build: Completed
+          - Portal image build: Completed
+          - Docker-compose validation: Completed
+
+          ### Performance
+          - Database cache operations: Benchmarked
+          - Integration test suite: Completed
+
+          **Architecture validation complete!**
           `;
-          
+
           github.rest.issues.createComment({
             issue_number: context.issue.number,
             owner: context.repo.owner,

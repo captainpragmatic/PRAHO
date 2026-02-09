@@ -1,10 +1,11 @@
 # ===============================================================================
 # PRAHO PLATFORM - PYTHON PROJECT CONFIGURATION
 # ===============================================================================
+# Managed with uv (https://docs.astral.sh/uv/) - See ADR-0013 for migration details
 
 [build-system]
-requires = ["setuptools>=45", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "praho-platform"
@@ -19,32 +20,32 @@ keywords = ["hosting", "praho platform", "billing", "web hosting", "django", "ht
 classifiers = [
     # Development Phase
     "Development Status :: 3 - Alpha",
-    
+
     # Target Audience
     "Intended Audience :: Developers",
-    "Intended Audience :: System Administrators", 
+    "Intended Audience :: System Administrators",
     "Intended Audience :: Information Technology",
     "Intended Audience :: End Users/Desktop",
-    
+
     # Framework & Environment
     "Framework :: Django :: 5.2",
     "Environment :: Web Environment",
     "Environment :: Console",
-    
+
     # License
     "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
-    
+
     # Operating System
     "Operating System :: OS Independent",
     "Operating System :: POSIX :: Linux",
     "Operating System :: MacOS",
-    
+
     # Programming Language
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: JavaScript",
-    
+
     # Topic Categories
     "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
     "Topic :: Internet :: WWW/HTTP :: WSGI :: Application",
@@ -56,11 +57,182 @@ classifiers = [
     "Topic :: Communications :: Email",
     "Topic :: Database",
     "Topic :: Software Development :: Libraries :: Application Frameworks",
-    
+
     # Natural Language
     "Natural Language :: English",
     "Natural Language :: Romanian",
 ]
+
+# ===============================================================================
+# WORKSPACE DEPENDENCIES - Shared across all services
+# ===============================================================================
+# Core dependencies used by both platform and portal services
+dependencies = [
+    # Django framework
+    "Django>=5.2,<5.3",
+    "django-environ>=0.11.0",
+
+    # API framework
+    "djangorestframework>=3.14.0",
+
+    # HTTP client
+    "requests>=2.31.0",
+
+    # Date/Time handling
+    "python-dateutil>=2.8.0",
+    "pytz>=2023.3",
+
+    # Environment management
+    "python-dotenv>=1.0.0",
+]
+
+# ===============================================================================
+# DEPENDENCY GROUPS - Environment-specific packages
+# ===============================================================================
+
+[dependency-groups]
+# Development tools - testing, linting, type checking
+dev = [
+    # Testing
+    "pytest>=7.4.0",
+    "pytest-django>=4.5.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.11.0",
+    "factory-boy>=3.3.0",
+    "freezegun>=1.2.0",
+    "responses>=0.23.0",
+    "faker>=19.3.0",
+    "mixer>=7.2.0",
+    "tblib>=3.1.0",
+
+    # Code quality
+    "ruff>=0.8.0",
+    "black>=23.7.0",
+    "isort>=5.12.0",
+    "mypy>=1.5.0",
+    "django-stubs[compatible-mypy]>=4.2.0",
+    "types-requests>=2.31.0",
+    "types-python-dateutil>=2.8.0",
+    "pre-commit>=3.4.0",
+
+    # Documentation
+    "Sphinx>=7.1.0",
+    "sphinx-rtd-theme>=1.3.0",
+
+    # Performance profiling
+    "django-silk>=5.0.0",
+    "memory-profiler>=0.61.0",
+
+    # Debug tools
+    "django-debug-toolbar>=4.2.0",
+    "django-extensions>=3.2.0",
+    "werkzeug>=2.3.0",
+    "ipython>=8.15.0",
+    "coverage>=7.3.0",
+]
+
+# Production dependencies - server, monitoring, optimization
+prod = [
+    # Production WSGI server
+    "gunicorn>=21.2.0",
+    "gevent>=23.7.0",
+
+    # Production database optimizations
+    "django-cachalot>=2.6.0",
+
+    # Monitoring & Performance
+    "newrelic>=8.9.0",
+    "datadog>=0.47.0",
+
+    # Security enhancements
+    "django-csp>=3.8.0",
+    "django-ratelimit>=4.1.0",
+
+    # Task queue production
+    "supervisor>=4.2.0",
+
+    # PDF generation
+    "reportlab>=4.0.0",
+    "weasyprint>=60.0",
+]
+
+# Platform-specific dependencies (database, auth, billing, etc.)
+platform = [
+    # Database
+    "psycopg2-binary>=2.9.0",
+    "dj-database-url>=2.1.0",
+
+    # Authentication & Security
+    "django-allauth>=0.57.0",
+    "pyotp>=2.9.0",
+    "qrcode[pil]>=7.4.0",
+    "argon2-cffi>=23.1.0",
+    "django-ipware>=7.0.0",
+
+    # API extras
+    "django-filter>=23.0",
+    "drf-spectacular>=0.26.0",
+    "django-cors-headers>=4.3.0",
+
+    # File handling & Storage
+    "Pillow>=10.0.0",
+    "django-storages>=1.14.0",
+    "boto3>=1.28.0",
+
+    # PDF Generation
+    "reportlab>=3.6.0",
+
+    # Payments
+    "stripe>=6.0.0",
+
+    # Email
+    "django-ses>=3.5.0",
+
+    # Background task processing
+    "django-q2>=1.8.0",
+    "croniter>=6.0.0",
+
+    # Server provisioning & SSH
+    "paramiko>=4.0.0",
+
+    # Monitoring & Logging
+    "sentry-sdk[django]>=1.32.0",
+    "django-health-check>=3.17.0",
+
+    # Romanian VAT/Legal compliance
+    "xmltodict>=0.13.0",
+    "lxml>=4.9.0",
+
+    # Utilities
+    "python-slugify>=8.0.0",
+    "bleach>=6.0.0",
+    "markdown>=3.5.0",
+    "django-crispy-forms>=2.1.0",
+    "crispy-tailwind>=0.5.0",
+]
+
+# Portal-specific dependencies (minimal, no database)
+portal = [
+    # Production server only - portal is lightweight
+    "gunicorn>=21.2.0",
+]
+
+# ===============================================================================
+# UV WORKSPACE CONFIGURATION
+# ===============================================================================
+
+[tool.uv]
+# Define this as a workspace root
+package = false
+
+[tool.uv.workspace]
+# Workspace members - each service is a separate package
+members = ["services/platform", "services/portal"]
+
+[tool.uv.sources]
+# Workspace member references
+praho-platform-service = { workspace = true }
+praho-portal-service = { workspace = true }
 
 # ===============================================================================
 # CODE QUALITY CONFIGURATION

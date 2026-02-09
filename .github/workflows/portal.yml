@@ -1,6 +1,7 @@
 # ===============================================================================
-# PORTAL SERVICE CI/CD - API-ONLY, NO DATABASE ACCESS 🌐
+# PORTAL SERVICE CI/CD - API-ONLY, NO DATABASE ACCESS
 # ===============================================================================
+# Managed with uv (https://docs.astral.sh/uv/) - See ADR-0013 for details
 
 name: Portal Service CI/CD
 
@@ -9,41 +10,38 @@ on:
     branches: [ master, develop, 'feat/*', 'fix/*' ]
     paths:
       - 'services/portal/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
       - '.github/workflows/portal.yml'
   pull_request:
     branches: [ master, develop ]
     paths:
       - 'services/portal/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
       - '.github/workflows/portal.yml'
 
 jobs:
   portal-test:
     runs-on: ubuntu-latest
-    
-    # 🚨 NO DATABASE SERVICES - Portal should not access DB!
-    
+
+    # NO DATABASE SERVICES - Portal should not access DB!
+
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
       with:
-        python-version: '3.11'
-    
-    - name: Cache pip dependencies
-      uses: actions/cache@v3
-      with:
-        path: ~/.cache/pip
-        key: portal-${{ runner.os }}-pip-${{ hashFiles('services/portal/requirements.txt') }}
-        restore-keys: |
-          portal-${{ runner.os }}-pip-
-    
-    - name: Install portal dependencies
-      run: |
-        python -m pip install --upgrade pip
-        cd services/portal
-        pip install -r requirements.txt
-    
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+
+    - name: Set up Python
+      run: uv python install
+
+    - name: Install portal dependencies (minimal, no database)
+      run: uv sync --group portal --group dev
+
     - name: Set portal environment (no database!)
       run: |
         export DJANGO_SETTINGS_MODULE=config.settings
@@ -54,121 +52,121 @@ jobs:
         echo "SECRET_KEY=test-secret-key-for-ci" >> $GITHUB_ENV
         echo "PLATFORM_API_URL=http://mock-platform:8000" >> $GITHUB_ENV
         echo "PLATFORM_API_KEY=test-api-key" >> $GITHUB_ENV
-    
+
     - name: Validate portal has no database dependencies
       run: |
-        echo "🔒 Verifying portal has no database drivers..."
+        echo "Verifying portal has no database drivers..."
         cd services/portal
-        
-        # Check requirements.txt doesn't contain DB drivers
-        if grep -i "psycopg\|mysql\|sqlite" requirements.txt; then
-          echo "🔥 SECURITY FAILURE: Portal has database drivers in requirements!"
+
+        # Check pyproject.toml doesn't contain DB drivers
+        if grep -i "psycopg\|mysql\|sqlite" pyproject.toml 2>/dev/null; then
+          echo "SECURITY FAILURE: Portal has database drivers in pyproject.toml!"
           exit 1
         else
-          echo "✅ Portal requirements.txt has no database drivers"
+          echo "Portal pyproject.toml has no database drivers"
         fi
-        
+
         # Verify portal settings has no DATABASES config
         if grep -r "DATABASES.*=" config/settings* 2>/dev/null | grep -v "DATABASES = {}"; then
-          echo "🔥 SECURITY FAILURE: Portal has database configuration!"
+          echo "SECURITY FAILURE: Portal has database configuration!"
           exit 1
         else
-          echo "✅ Portal settings have no database configuration"
+          echo "Portal settings have no database configuration"
         fi
-    
+
     - name: Run portal type checking
       run: |
         cd services/portal
-        echo "🏷️ Running mypy type checking for portal..."
-        python -m mypy apps/ --config-file ../../pyproject.toml --no-error-summary || echo "⚠️ Type checking completed with issues"
-    
+        echo "Running mypy type checking for portal..."
+        uv run mypy apps/ --config-file ../../pyproject.toml --no-error-summary || echo "Type checking completed with issues"
+
     - name: Run portal unit tests (with database blocker)
       run: |
         cd services/portal
-        echo "🧪 Running portal unit tests with database access blocked..."
-        python -m pytest apps/ -v --tb=short --maxfail=10 -m "not db_required"
-    
+        echo "Running portal unit tests with database access blocked..."
+        uv run pytest apps/ -v --tb=short --maxfail=10 -m "not db_required"
+
     - name: Test portal API endpoints
       run: |
         cd services/portal
-        echo "🌐 Testing portal API endpoints..."
-        python -c "
+        echo "Testing portal API endpoints..."
+        uv run python -c "
         import os
         os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
-        
+
         try:
             import django
             django.setup()
-            
+
             # Test that Django starts without database
             from django.conf import settings
-            print(f'✅ Portal Django settings loaded: {settings.DEBUG}')
-            
+            print(f'Portal Django settings loaded: {settings.DEBUG}')
+
             # Verify no database configuration
             if hasattr(settings, 'DATABASES') and settings.DATABASES:
-                print('🔥 SECURITY FAILURE: Portal has database configuration!')
+                print('SECURITY FAILURE: Portal has database configuration!')
                 exit(1)
             else:
-                print('✅ Portal has no database configuration')
-                
+                print('Portal has no database configuration')
+
         except Exception as e:
             print(f'Portal Django setup failed: {e}')
             exit(1)
         "
-    
+
     - name: Lint portal code
       run: |
         cd services/portal
-        echo "🧹 Running linting for portal service..."
-        ruff check apps/ || echo "⚠️ Linting completed with issues"
-        black --check apps/ || echo "⚠️ Code formatting check completed with issues"
-    
+        echo "Running linting for portal service..."
+        uv run ruff check apps/ || echo "Linting completed with issues"
+        uv run black --check apps/ || echo "Code formatting check completed with issues"
+
     - name: Security validation - verify portal isolation
       run: |
-        echo "🛡️ Running portal security isolation tests..."
+        echo "Running portal security isolation tests..."
         cd services/portal
-        
+
         # Verify portal cannot import platform models
-        python -c "
+        uv run python -c "
         try:
             from apps.billing.models import Invoice
-            print('🔥 SECURITY FAILURE: Portal can import platform models!')
+            print('SECURITY FAILURE: Portal can import platform models!')
             exit(1)
         except ImportError:
-            print('✅ Portal properly isolated - cannot import platform models')
-        " || echo "✅ Portal isolation test passed"
-        
+            print('Portal properly isolated - cannot import platform models')
+        " || echo "Portal isolation test passed"
+
         # Verify portal cannot import database drivers
-        python -c "
+        uv run python -c "
         try:
             import psycopg2
-            print('🔥 SECURITY FAILURE: Portal can import psycopg2!')
+            print('SECURITY FAILURE: Portal can import psycopg2!')
             exit(1)
         except ImportError:
-            print('✅ Portal properly isolated - cannot import psycopg2')
-        " || echo "✅ Database driver isolation test passed"
-        
+            print('Portal properly isolated - cannot import psycopg2')
+        " || echo "Database driver isolation test passed"
+
         # Verify portal cannot connect to database (even if available)
-        python -c "
+        uv run python -c "
         import os
         os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
-        
+
         try:
             import django
             django.setup()
             from django.db import connection
-            
+
             try:
                 with connection.cursor() as cursor:
                     cursor.execute('SELECT 1')
-                print('🔥 SECURITY FAILURE: Portal can access database!')
+                print('SECURITY FAILURE: Portal can access database!')
                 exit(1)
             except Exception:
-                print('✅ Portal properly blocked from database access')
+                print('Portal properly blocked from database access')
         except Exception as e:
-            print(f'✅ Portal has no database connection: {e}')
+            print(f'Portal has no database connection: {e}')
         "
-    
+
     - name: Upload portal artifacts
       uses: actions/upload-artifact@v4
       if: always()
