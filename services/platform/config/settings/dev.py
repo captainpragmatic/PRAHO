@@ -43,6 +43,8 @@ INSTALLED_APPS += [
     "debug_toolbar",
 ]
 
+# Django Silk configuration is below after is_testing is defined
+
 # ===============================================================================
 # DATABASE FOR DEVELOPMENT (SQLite for speed)
 # ===============================================================================
@@ -101,6 +103,37 @@ else:
     RATELIMIT_ENABLE = os.environ.get("RATELIMIT_ENABLE", "true").lower() == "true"
 
 # ===============================================================================
+# DJANGO SILK PROFILER CONFIGURATION 📊
+# ===============================================================================
+
+# Enable Silk profiler for SQL and request profiling in development
+ENABLE_SILK_PROFILER = os.environ.get("ENABLE_SILK_PROFILER", "false").lower() == "true"
+
+if ENABLE_SILK_PROFILER and not is_testing:
+    INSTALLED_APPS += ["silk"]
+    # Insert Silk middleware after RequestIDMiddleware for proper correlation
+    MIDDLEWARE.insert(2, "silk.middleware.SilkyMiddleware")
+
+    # Silk configuration for performance profiling
+    SILKY_PYTHON_PROFILER = True  # Enable Python profiler
+    SILKY_PYTHON_PROFILER_BINARY = True  # Use binary profiler (faster)
+    SILKY_PYTHON_PROFILER_RESULT_PATH = str(BASE_DIR / "silk_profiles")
+    SILKY_MAX_REQUEST_BODY_SIZE = 1024  # Limit request body logging (1KB)
+    SILKY_MAX_RESPONSE_BODY_SIZE = 1024  # Limit response body logging (1KB)
+    SILKY_INTERCEPT_PERCENT = 100  # Profile all requests
+    SILKY_MAX_RECORDED_REQUESTS = 10000  # Keep last 10K requests
+    SILKY_META = True  # Enable meta profiling (profile the profiler)
+    SILKY_AUTHENTICATION = True  # Require authentication to view Silk
+    SILKY_AUTHORISATION = True  # Require staff status to view Silk
+    SILKY_ANALYZE_QUERIES = True  # Analyze SQL queries for optimization hints
+    SILKY_EXPLAIN_FLAGS = {  # PostgreSQL EXPLAIN flags
+        "format": "JSON",
+        "costs": True,
+        "verbose": True,
+        "buffers": True,
+    }
+
+# ===============================================================================
 # EMAIL BACKEND (Console for development)
 # ===============================================================================
 
@@ -124,7 +157,7 @@ if os.environ.get("USE_REDIS") != "true":
     SESSION_ENGINE = "django.contrib.sessions.backends.db"
 
 # ===============================================================================
-# LOGGING CONFIGURATION
+# LOGGING CONFIGURATION - Enhanced with Request ID Tracing
 # ===============================================================================
 
 LOGGING = {
@@ -139,11 +172,25 @@ LOGGING = {
             "format": "{levelname} {message}",
             "style": "{",
         },
+        "trace": {
+            "format": "[{request_id}] {levelname} {asctime} {module}: {message}",
+            "style": "{",
+        },
+    },
+    "filters": {
+        "add_request_id": {
+            "()": "apps.common.logging.RequestIDFilter",
+        },
     },
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "verbose",
+        },
+        "trace_console": {
+            "class": "logging.StreamHandler",
+            "formatter": "trace",
+            "filters": ["add_request_id"],
         },
     },
     "root": {
@@ -157,7 +204,12 @@ LOGGING = {
             "propagate": False,
         },
         "apps": {
-            "handlers": ["console"],
+            "handlers": ["trace_console"],
+            "level": "DEBUG",
+            "propagate": False,
+        },
+        "apps.common.logging": {
+            "handlers": ["trace_console"],
             "level": "DEBUG",
             "propagate": False,
         },

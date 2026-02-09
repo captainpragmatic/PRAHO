@@ -27,8 +27,13 @@ from django.utils.translation import gettext as _
 from apps.common.constants import HTTP_CLIENT_ERROR_THRESHOLD
 from apps.common.request_ip import get_safe_client_ip
 
+<<<<<<< HEAD
 # Security constants
 HMAC_TIMESTAMP_WINDOW_SECONDS = 300  # 5 minutes
+=======
+# Import logging utilities for request ID propagation
+from apps.common.logging import clear_request_id, set_request_id
+>>>>>>> origin/claude/trace-based-dynamic-analysis-5w7Pg
 
 # Import for session security - handle potential circular import gracefully
 try:
@@ -45,7 +50,16 @@ User = get_user_model()
 
 
 class RequestIDMiddleware:
-    """Add unique request ID for tracing and audit logs"""
+    """
+    Add unique request ID for tracing and audit logs.
+
+    This middleware:
+    1. Generates a unique UUID for each request
+    2. Stores it in request.META for access throughout the request
+    3. Sets it in thread-local storage for structured logging (RequestIDFilter)
+    4. Adds X-Request-ID header to response for client-side correlation
+    5. Cleans up thread-local storage after request completes
+    """
 
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
         self.get_response = get_response
@@ -55,11 +69,20 @@ class RequestIDMiddleware:
         request_id = str(uuid.uuid4())
         request.META["REQUEST_ID"] = request_id
 
-        # Add to response headers for debugging
-        response = self.get_response(request)
-        response["X-Request-ID"] = request_id
+        # Set in thread-local storage for RequestIDFilter logging
+        set_request_id(request_id)
 
-        return response
+        try:
+            # Process request
+            response = self.get_response(request)
+
+            # Add to response headers for debugging and client correlation
+            response["X-Request-ID"] = request_id
+
+            return response
+        finally:
+            # Clean up thread-local storage
+            clear_request_id()
 
 
 # ===============================================================================
