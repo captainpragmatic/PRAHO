@@ -25,6 +25,7 @@ DATABASES = {
     }
 }
 
+<<<<<<< HEAD
 # Use cache-based sessions (in-memory, auto-cleanup, no files)
 SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
 SESSION_CACHE_ALIAS = 'default'
@@ -48,16 +49,47 @@ CACHES = {
         }
     }
 }
+=======
+# Use signed cookies for session management (no DB required)
+SESSION_ENGINE = 'django.contrib.sessions.backends.signed_cookies'
+SESSION_COOKIE_SECURE = not DEBUG  # Secure in production, allow HTTP in debug
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'  # CSRF protection
+SESSION_COOKIE_AGE = 86400  # 24 hours
+>>>>>>> origin/claude/code-security-review-88rnF
 
 # ===============================================================================
 # BASIC DJANGO CONFIGURATION
 # ===============================================================================
 
+<<<<<<< HEAD
 # 🔒 SECURITY: No fallback secrets - must be set in environment
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
 
+=======
+>>>>>>> origin/claude/code-security-review-88rnF
 DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() == 'true'
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0']
+
+# Security: Require SECRET_KEY from environment in production
+_secret_key = os.environ.get('DJANGO_SECRET_KEY')
+if not _secret_key:
+    if DEBUG:
+        # Only allow insecure key in debug mode with explicit warning
+        import warnings
+        warnings.warn(
+            "DJANGO_SECRET_KEY not set! Using insecure default. "
+            "This is only acceptable in development.",
+            RuntimeWarning
+        )
+        _secret_key = 'django-insecure-dev-only-not-for-production'
+    else:
+        raise ValueError(
+            "DJANGO_SECRET_KEY environment variable is required in production. "
+            "Generate one with: python -c \"from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())\""
+        )
+SECRET_KEY = _secret_key
+
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
 # ===============================================================================
 # MINIMAL APPLICATIONS - NO ADMIN, NO BUSINESS MODELS
@@ -121,6 +153,7 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 # Platform service API endpoint
 PLATFORM_API_BASE_URL = os.environ.get(
+<<<<<<< HEAD
     'PLATFORM_API_BASE_URL', 
     'http://127.0.0.1:8700'
 )
@@ -129,6 +162,28 @@ PLATFORM_API_BASE_URL = os.environ.get(
 PLATFORM_API_TOKEN = os.environ.get('PLATFORM_API_TOKEN')  # Legacy token
 PLATFORM_API_SECRET = os.environ.get('PLATFORM_API_SECRET')  # HMAC secret - REQUIRED
 PLATFORM_API_TIMEOUT = int(os.environ.get('PLATFORM_API_TIMEOUT', '30'))  # 30 seconds
+=======
+    'PLATFORM_API_BASE_URL',
+    'http://127.0.0.1:8700/api/'
+)
+
+# Security: Require API token from environment in production
+_api_token = os.environ.get('PLATFORM_API_TOKEN')
+if not _api_token:
+    if DEBUG:
+        import warnings
+        warnings.warn(
+            "PLATFORM_API_TOKEN not set! Using insecure default. "
+            "This is only acceptable in development.",
+            RuntimeWarning
+        )
+        _api_token = 'dev-token-insecure-debug-only'
+    else:
+        raise ValueError(
+            "PLATFORM_API_TOKEN environment variable is required in production."
+        )
+PLATFORM_API_TOKEN = _api_token
+>>>>>>> origin/claude/code-security-review-88rnF
 
 # ===============================================================================
 # LOCALIZATION

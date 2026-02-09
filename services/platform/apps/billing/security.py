@@ -28,6 +28,29 @@ BLOCKED_IP_PATTERNS = [
 BLOCKED_PROTOCOLS = ["file", "ftp", "gopher", "ldap", "dict", "tftp", "ssh"]
 
 
+def _is_valid_domain_suffix(domain: str, allowed_domains: list[str]) -> bool:
+    """
+    Securely check if domain ends with an allowed domain suffix.
+    Prevents bypass via subdomains like 'evil-anaf.ro' or 'anaf.ro.evil.com'.
+    """
+    domain = domain.lower().strip()
+
+    # Remove port if present
+    if ":" in domain:
+        domain = domain.split(":")[0]
+
+    for allowed in allowed_domains:
+        allowed = allowed.lower()
+        # Exact match
+        if domain == allowed:
+            return True
+        # Valid subdomain (must end with .allowed_domain)
+        if domain.endswith(f".{allowed}"):
+            return True
+
+    return False
+
+
 def validate_efactura_url(url: str) -> str:
     """
     🔒 Validate e-Factura URLs to prevent SSRF attacks.
@@ -48,9 +71,9 @@ def validate_efactura_url(url: str) -> str:
     if parsed.scheme.lower() in BLOCKED_PROTOCOLS:
         raise ValidationError(f"Protocol '{parsed.scheme}' is blocked for security reasons")
 
-    # Check domain whitelist for e-Factura
+    # Check domain whitelist for e-Factura using secure suffix matching
     domain = parsed.netloc.lower()
-    if not any(allowed_domain in domain for allowed_domain in ALLOWED_EFACTURA_DOMAINS):
+    if not _is_valid_domain_suffix(domain, ALLOWED_EFACTURA_DOMAINS):
         raise ValidationError(
             f"Domain '{domain}' not in allowed e-Factura endpoints: {', '.join(ALLOWED_EFACTURA_DOMAINS)}"
         )
@@ -85,9 +108,9 @@ def validate_external_api_url(url: str, allowed_domains: list[str]) -> str:
     if parsed.scheme.lower() not in ["http", "https"]:
         raise ValidationError(f"Protocol '{parsed.scheme}' not allowed")
 
-    # Check domain whitelist
+    # Check domain whitelist using secure suffix matching
     domain = parsed.netloc.lower()
-    if not any(allowed_domain in domain for allowed_domain in allowed_domains):
+    if not _is_valid_domain_suffix(domain, allowed_domains):
         raise ValidationError(f"Domain '{domain}' not in allowed list")
 
     # Check for blocked IPs

@@ -309,10 +309,20 @@ class SecureInputValidator:
         return company_name.strip()
 
     @staticmethod
-    def validate_safe_url(url: str) -> str:
+    def validate_safe_url(url: str, return_pinned_ips: bool = False) -> str | tuple[str, list[str]]:
         """
-        Validate URL destination to prevent SSRF attacks
+        Validate URL destination to prevent SSRF attacks.
         A10 - Server-Side Request Forgery prevention
+
+        Args:
+            url: The URL to validate
+            return_pinned_ips: If True, return (url, validated_ips) for DNS pinning
+
+        Returns:
+            Validated URL string, or tuple of (url, pinned_ips) if return_pinned_ips=True
+
+        Note: When making HTTP requests, use the pinned IPs directly to prevent
+        DNS rebinding attacks between validation and request time.
         """
         if not url or not isinstance(url, str):
             raise ValidationError(_("Invalid URL format"))
@@ -329,10 +339,13 @@ class SecureInputValidator:
         try:
             parsed = urlparse(url)
             SecureInputValidator._validate_url_scheme(parsed)
-            SecureInputValidator._validate_url_hostname(parsed)
+            validated_ips = SecureInputValidator._validate_url_hostname(parsed)
             SecureInputValidator._validate_url_port(parsed)
 
-            logger.info(f"✅ [Security] Safe URL validated: {parsed.hostname}")
+            logger.info(f"✅ [Security] Safe URL validated: {parsed.hostname} -> {validated_ips}")
+
+            if return_pinned_ips:
+                return url, validated_ips
             return url
 
         except ValidationError:
@@ -350,32 +363,19 @@ class SecureInputValidator:
             raise ValidationError(_("Only HTTP and HTTPS URLs are allowed"))
 
     @staticmethod
-    def _validate_url_hostname(parsed: Any) -> None:
-        """🔒 Enhanced hostname validation with DNS rebinding protection"""
+    def _validate_url_hostname(parsed: Any) -> list[str]:
+        """
+        🔒 Enhanced hostname validation with DNS rebinding protection.
+
+        Returns list of validated IP addresses for connection pinning.
+        Callers should use these IPs directly to prevent DNS rebinding attacks.
+        """
         if not parsed.hostname:
             raise ValidationError(_("Invalid URL format"))
 
         hostname = parsed.hostname.lower()
 
-        # Security: Enhanced DNS rebinding protection
-        try:
-            # Resolve hostname to IP to prevent DNS rebinding attacks
-            resolved_ips = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
-            for ip_info in resolved_ips:
-                ip_str = ip_info[4][0]
-                try:
-                    ip = ipaddress.ip_address(ip_str)
-                    # Security: Block any resolved IP that points to private/internal ranges
-                    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved:
-                        raise ValidationError(_("URL destination resolves to blocked IP range"))
-                except ValueError:
-                    continue
-        except (TimeoutError, socket.gaierror):
-            # DNS resolution failed - could be suspicious
-            logger.warning(f"⚡ [Security] DNS resolution failed for hostname: {hostname}")
-            raise ValidationError(_("Unable to verify URL destination")) from None
-
-        # Block dangerous domains
+        # Block dangerous domains first (before DNS resolution)
         dangerous_domains = [
             "localhost",
             "127.0.0.1",
@@ -385,11 +385,10 @@ class SecureInputValidator:
             "link-local",
             "instance-data",
             "::1",
-            # Additional DNS rebinding protection patterns
             "10.",
             "172.",
             "192.168.",
-            "169.254.",  # Common private IP prefixes in hostnames
+            "169.254.",
         ]
 
         for dangerous in dangerous_domains:
@@ -401,9 +400,36 @@ class SecureInputValidator:
             ip = ipaddress.ip_address(hostname)
             if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved:
                 raise ValidationError(_("URL destination not allowed"))
+            # Direct IP provided, return it for pinning
+            return [str(ip)]
         except ValueError:
-            # Not an IP address, hostname validation completed above
+            # Not an IP address, proceed with DNS resolution
             pass
+
+        # Security: Resolve hostname and validate ALL resolved IPs
+        # Return validated IPs for connection pinning to prevent DNS rebinding
+        validated_ips: list[str] = []
+        try:
+            resolved_ips = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+            for ip_info in resolved_ips:
+                ip_str = ip_info[4][0]
+                try:
+                    ip = ipaddress.ip_address(ip_str)
+                    # Security: Block any resolved IP that points to private/internal ranges
+                    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved:
+                        raise ValidationError(_("URL destination resolves to blocked IP range"))
+                    validated_ips.append(str(ip))
+                except ValueError:
+                    continue
+
+            if not validated_ips:
+                raise ValidationError(_("No valid IP addresses resolved for URL"))
+
+        except (TimeoutError, socket.gaierror):
+            logger.warning(f"⚡ [Security] DNS resolution failed for hostname: {hostname}")
+            raise ValidationError(_("Unable to verify URL destination")) from None
+
+        return validated_ips
 
     @staticmethod
     def _validate_url_port(parsed: Any) -> None:
