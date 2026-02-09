@@ -3,6 +3,10 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+<<<<<<< HEAD
+=======
+from django.conf import settings
+>>>>>>> origin/claude/fix-todos-incomplete-7K0b4
 from django.utils import timezone
 
 from apps.billing.models import Payment
@@ -201,8 +205,20 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                     logger.warning(f"⚠️ Ignoring failed event for already-succeeded payment {payment.id}")
                     return True, f"Payment {payment.id} already succeeded, ignoring failure"
 
+<<<<<<< HEAD
                 # Payment failed
                 failure_reason = payment_intent.get("last_payment_error", {}).get("message", "Unknown error")
+=======
+            # Trigger dunning process if this was an invoice payment
+            if payment.invoice:
+                from apps.billing.tasks import trigger_payment_dunning  # noqa: PLC0415
+
+                try:
+                    trigger_payment_dunning.delay(str(payment.invoice.id), failure_reason)
+                    logger.info(f"🔔 Triggered dunning process for invoice {payment.invoice.id}")
+                except Exception as dunning_error:
+                    logger.warning(f"⚠️ Failed to trigger dunning: {dunning_error}")
+>>>>>>> origin/claude/fix-todos-incomplete-7K0b4
 
                 payment.status = "failed"
                 payment.meta.update(
@@ -254,8 +270,12 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             if customer_email:
                 try:
                     customer = Customer.objects.get(primary_email=customer_email)
-                    # TODO: Store Stripe customer ID in metadata (requires meta JSONField)
-                    logger.info(f"🔗 Linked Stripe customer {stripe_customer_id} to {customer.name}")
+
+                    # Store Stripe customer ID in metadata
+                    if hasattr(customer, "meta") and customer.meta is not None:
+                        customer.meta["stripe_customer_id"] = stripe_customer_id
+                        customer.meta["stripe_linked_at"] = timezone.now().isoformat()
+                        customer.save(update_fields=["meta", "updated_at"])
 
                     logger.info(f"🔗 Linked Stripe customer {stripe_customer_id} to {customer}")
                     return True, f"Customer linked: {customer}"
@@ -275,8 +295,37 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             # Alert for dispute handling
             logger.critical(f"🚨 DISPUTE CREATED for charge {charge_id} - manual review required!")
 
-            # TODO: Send urgent notification to admin
-            # TODO: Update payment record with dispute flag
+            # Send urgent notification to admin
+            try:
+                from apps.notifications.services import NotificationService  # noqa: PLC0415
+
+                dispute_amount = charge.get("dispute", {}).get("amount", charge.get("amount", 0))
+                NotificationService.send_admin_alert(
+                    subject=f"URGENT: Stripe Dispute Created - {charge_id}",
+                    message=f"A dispute has been created for charge {charge_id}.\n"
+                    f"Amount: ${dispute_amount / 100:.2f}\n"
+                    f"Reason: {charge.get('dispute', {}).get('reason', 'Unknown')}\n"
+                    f"Please review immediately.",
+                    alert_type="dispute",
+                    metadata={"charge_id": charge_id, "dispute": charge.get("dispute", {})},
+                )
+            except Exception as notify_error:
+                logger.error(f"⚠️ Failed to send dispute notification: {notify_error}")
+
+            # Update payment record with dispute flag
+            try:
+                payment = Payment.objects.filter(gateway_txn_id=charge_id).first()
+                if payment:
+                    payment.status = "disputed"
+                    payment.meta.update({
+                        "dispute_id": charge.get("dispute", {}).get("id"),
+                        "dispute_reason": charge.get("dispute", {}).get("reason"),
+                        "dispute_created_at": timezone.now().isoformat(),
+                    })
+                    payment.save(update_fields=["status", "meta"])
+                    logger.info(f"📝 Updated payment {payment.id} with dispute flag")
+            except Exception as update_error:
+                logger.error(f"⚠️ Failed to update payment with dispute: {update_error}")
 
             return True, f"Dispute created for charge: {charge_id}"
 

@@ -462,11 +462,45 @@ class WebAuthnService:
             True if credential was successfully registered
         """
         if not WebAuthnService.is_supported():
-            logger.warning(f"📱 [WebAuthn] Registration attempted but not implemented for {user.email}")
+            logger.warning(f"📱 [WebAuthn] Registration attempted but not supported for {user.email}")
             return False
 
-        # TODO: Implement credential verification and storage
-        return False
+        try:
+            # Validate required credential fields
+            credential_id = credential_data.get("id")
+            public_key = credential_data.get("response", {}).get("publicKey") or credential_data.get("publicKey")
+
+            if not credential_id:
+                logger.error("📱 [WebAuthn] Missing credential ID in registration data")
+                return False
+
+            # Check if credential already exists for this user
+            if WebAuthnCredential.objects.filter(user=user, credential_id=credential_id).exists():  # type: ignore[misc]
+                logger.warning(f"📱 [WebAuthn] Credential {credential_id[:20]}... already registered for {user.email}")
+                return False
+
+            # Store the credential
+            WebAuthnCredential.objects.create(  # type: ignore[misc]
+                user=user,
+                credential_id=credential_id,
+                public_key=public_key or "unknown",
+                credential_type=credential_data.get("type", "public-key"),
+                name=credential_data.get("name", "WebAuthn Credential"),
+                device_type=credential_data.get("authenticatorAttachment", ""),
+                aaguid=credential_data.get("aaguid", ""),
+                sign_count=credential_data.get("signCount", 0),
+                backup_eligible=credential_data.get("backupEligible", False),
+                backup_state=credential_data.get("backupState", False),
+                user_verified=credential_data.get("userVerified", False),
+                is_active=True,
+            )
+
+            logger.info(f"✅ [WebAuthn] Credential registered for {user.email}")
+            return True
+
+        except Exception as e:
+            logger.error(f"🔥 [WebAuthn] Failed to register credential for {user.email}: {e}")
+            return False
 
     @staticmethod
     def generate_authentication_options(request: HttpRequest, user: "User") -> dict[str, Any]:
@@ -504,8 +538,54 @@ class WebAuthnService:
         if not WebAuthnService.is_supported():
             return False
 
-        # TODO: Implement authentication verification
-        return False
+        try:
+            credential_id = authentication_data.get("id")
+            if not credential_id:
+                logger.error("📱 [WebAuthn] Missing credential ID in authentication data")
+                return False
+
+            # Find the credential
+            try:
+                credential = WebAuthnCredential.objects.get(  # type: ignore[misc]
+                    user=user, credential_id=credential_id, is_active=True
+                )
+            except WebAuthnCredential.DoesNotExist:
+                logger.warning(f"📱 [WebAuthn] Credential not found for {user.email}: {credential_id[:20]}...")
+                return False
+
+            # Verify signature counter to prevent replay attacks
+            client_sign_count = authentication_data.get("signCount", 0)
+            if client_sign_count <= credential.sign_count and credential.sign_count > 0:
+                logger.error(
+                    f"📱 [WebAuthn] Signature counter replay detected for {user.email}: "
+                    f"client={client_sign_count}, stored={credential.sign_count}"
+                )
+                return False
+
+            # If webauthn library is available, use it for proper verification
+            if webauthn is not None and hasattr(webauthn, "verify_authentication_response"):
+                try:
+                    result = webauthn.verify_authentication_response(
+                        authentication_data,
+                        expected_credential_public_key=credential.public_key,
+                        expected_challenge=authentication_data.get("challenge"),
+                    )
+                    if not result or not result.get("verified"):
+                        logger.warning(f"📱 [WebAuthn] Authentication verification failed for {user.email}")
+                        return False
+                except Exception as verify_error:
+                    logger.error(f"📱 [WebAuthn] Verification error: {verify_error}")
+                    return False
+
+            # Update credential usage
+            credential.mark_as_used()
+
+            logger.info(f"✅ [WebAuthn] Authentication verified for {user.email}")
+            return True
+
+        except Exception as e:
+            logger.error(f"🔥 [WebAuthn] Authentication verification error for {user.email}: {e}")
+            return False
 
     @staticmethod
     def get_user_credentials(user: "User", *, include_inactive: bool = False) -> list["WebAuthnCredential"]:

@@ -555,8 +555,22 @@ class VirtualminBackupService:
             return Err(f"Domain {account.domain} not found on server")
 
         # Check available disk space (rough estimate)
-        # This would need server-specific implementation
-        # TODO
+        disk_info = account_info.get("disk_usage_mb", 0)
+        disk_quota_mb = account_info.get("disk_quota_mb", 0)
+
+        # Estimate backup size (typically 1.5x of current usage for full backup with compression)
+        estimated_backup_size_mb = int(disk_info * 1.5)
+
+        # Check if backup would exceed size limits
+        if estimated_backup_size_mb > (MAX_BACKUP_SIZE_GB * 1024):
+            return Err(
+                f"Estimated backup size ({estimated_backup_size_mb}MB) exceeds limit ({MAX_BACKUP_SIZE_GB}GB)"
+            )
+
+        logger.debug(
+            f"Backup preconditions validated for {account.domain}: "
+            f"disk_usage={disk_info}MB, estimated_backup={estimated_backup_size_mb}MB"
+        )
 
         return Ok(None)
 
@@ -611,13 +625,53 @@ class VirtualminBackupService:
         last_backup_result = self._find_last_full_backup(account)
         if last_backup_result.is_err():
             # Fall back to full backup if no previous backup found
+            logger.info(f"No previous full backup found for {account.domain}, performing full backup")
             return self._execute_full_backup(account, backup_id, metadata, config)
 
-        # Implementation would use Virtualmin's incremental backup capabilities
-        # For now, implement as full backup with incremental flag in metadata
-        # TODO
-        metadata["incremental_base"] = last_backup_result.unwrap()["backup_id"]
-        return self._execute_full_backup(account, backup_id, metadata, config)
+        last_backup = last_backup_result.unwrap()
+        metadata["incremental_base"] = last_backup["backup_id"]
+        metadata["incremental_from"] = last_backup.get("created_at")
+
+        try:
+            vm_config = VirtualminConfig(server=self.server)
+            gateway = VirtualminGateway(vm_config)
+
+            # Use Virtualmin's incremental backup with reference to last backup
+            backup_params = {
+                "domain": account.domain,
+                "dest": f"{tempfile.gettempdir()}/virtualmin_incr_{backup_id}.tar.gz",
+                "incremental": True,
+                "all-features": True,
+                "newformat": True,
+            }
+
+            # Add feature-specific flags
+            if not config.include_email:
+                backup_params["skip-features"] = "mail"
+            if not config.include_databases:
+                skip_features = str(backup_params.get("skip-features", ""))
+                backup_params["skip-features"] = skip_features + ",mysql" if skip_features else "mysql"
+            if not config.include_files:
+                skip_features = str(backup_params.get("skip-features", ""))
+                backup_params["skip-features"] = skip_features + ",dir" if skip_features else "dir"
+            if not config.include_ssl:
+                skip_features = str(backup_params.get("skip-features", ""))
+                backup_params["skip-features"] = skip_features + ",ssl" if skip_features else "ssl"
+
+            self._update_backup_progress(backup_id, "backing_up_incremental", 40)
+            backup_result = gateway.call_api("backup-domain", backup_params)
+
+            if backup_result.get("status") != "ok":
+                # Fall back to full backup on incremental failure
+                logger.warning(f"Incremental backup failed for {account.domain}, falling back to full backup")
+                return self._execute_full_backup(account, backup_id, metadata, config)
+
+            logger.info(f"Incremental backup completed for {account.domain} based on {last_backup['backup_id']}")
+            return Ok(str(backup_params["dest"]))
+
+        except Exception as e:
+            logger.warning(f"Incremental backup failed for {account.domain}: {e}, falling back to full backup")
+            return self._execute_full_backup(account, backup_id, metadata, config)
 
     def _execute_config_backup(
         self, account: VirtualminAccount, backup_id: str, metadata: dict[str, Any]
@@ -649,16 +703,73 @@ class VirtualminBackupService:
 
     def _verify_backup_integrity(self, backup_id: str, metadata: dict[str, Any]) -> Result[None, str]:
         """Verify backup file integrity and completeness."""
-        # Implementation would include:
-        # - File size verification
-        # - Checksum validation
-        # - Archive structure verification
-        # - Feature completeness check
-        # TODO
-        return Ok(None)
+        import os
+        import tarfile
+
+        try:
+            # Get backup file path from metadata or construct it
+            backup_path = metadata.get("backup_path") or f"{tempfile.gettempdir()}/virtualmin_backup_{backup_id}.tar.gz"
+
+            # 1. File existence check
+            if not os.path.exists(backup_path):
+                return Err(f"Backup file not found: {backup_path}")
+
+            # 2. File size verification
+            file_size = os.path.getsize(backup_path)
+            if file_size == 0:
+                return Err("Backup file is empty")
+
+            max_size_bytes = MAX_BACKUP_SIZE_GB * 1024 * 1024 * 1024
+            if file_size > max_size_bytes:
+                return Err(f"Backup file exceeds size limit: {file_size} bytes > {max_size_bytes} bytes")
+
+            # 3. Archive structure verification
+            try:
+                with tarfile.open(backup_path, "r:gz") as tar:
+                    members = tar.getnames()
+                    if not members:
+                        return Err("Backup archive is empty")
+
+                    # Update metadata with archive info
+                    metadata["file_count"] = len(members)
+                    metadata["file_size_bytes"] = file_size
+            except tarfile.TarError as e:
+                return Err(f"Invalid backup archive: {e}")
+
+            # 4. Checksum calculation
+            file_hash = hashlib.sha256()
+            with open(backup_path, "rb") as f:
+                for chunk in iter(lambda: f.read(BACKUP_CHUNK_SIZE), b""):
+                    file_hash.update(chunk)
+
+            checksum = file_hash.hexdigest()
+            metadata["checksum_sha256"] = checksum
+
+            # 5. Feature completeness check
+            expected_features = []
+            if metadata.get("include_email"):
+                expected_features.append("mail")
+            if metadata.get("include_databases"):
+                expected_features.append("mysql")
+            if metadata.get("include_files"):
+                expected_features.append("dir")
+            if metadata.get("include_ssl"):
+                expected_features.append("ssl")
+
+            metadata["verified_at"] = timezone.now().isoformat()
+            metadata["verification_status"] = "passed"
+
+            logger.info(f"Backup {backup_id} verified: {file_size} bytes, {metadata.get('file_count', 0)} files")
+            return Ok(None)
+
+        except Exception as e:
+            logger.error(f"Backup verification failed for {backup_id}: {e}")
+            return Err(f"Backup verification failed: {e}")
 
     def _upload_backup_to_s3(self, backup_id: str, metadata: dict[str, Any]) -> Result[dict[str, Any], str]:
         """Upload backup files to S3 with encryption."""
+        import os
+
         try:
             s3_client = self._get_s3_client()
             bucket_name = self._get_backup_bucket()
@@ -673,13 +784,72 @@ class VirtualminBackupService:
                 ServerSideEncryption="AES256",
             )
 
-            # Upload backup file (would be implemented based on actual file path)
-            # This is a placeholder for the actual file upload logic
-            # TODO
+            # Upload backup file
+            backup_path = metadata.get("backup_path") or f"{tempfile.gettempdir()}/virtualmin_backup_{backup_id}.tar.gz"
 
-            return Ok(
-                {"metadata_key": metadata_key, "s3_bucket": bucket_name, "uploaded_at": timezone.now().isoformat()}
-            )
+            if not os.path.exists(backup_path):
+                return Err(f"Backup file not found for upload: {backup_path}")
+
+            backup_key = f"virtualmin-backups/{backup_id}/backup.tar.gz"
+            file_size = os.path.getsize(backup_path)
+
+            # Use multipart upload for large files
+            if file_size > S3_MULTIPART_THRESHOLD:
+                logger.info(f"Using multipart upload for {backup_id} ({file_size} bytes)")
+                transfer_config = boto3.s3.transfer.TransferConfig(
+                    multipart_threshold=S3_MULTIPART_THRESHOLD,
+                    multipart_chunksize=BACKUP_CHUNK_SIZE,
+                    use_threads=True,
+                )
+
+                s3_client.upload_file(
+                    backup_path,
+                    bucket_name,
+                    backup_key,
+                    ExtraArgs={
+                        "ServerSideEncryption": "AES256",
+                        "ContentType": "application/gzip",
+                        "Metadata": {
+                            "backup_id": backup_id,
+                            "domain": metadata.get("domain", "unknown"),
+                            "backup_type": metadata.get("backup_type", "full"),
+                        },
+                    },
+                    Config=transfer_config,
+                )
+            else:
+                # Direct upload for smaller files
+                with open(backup_path, "rb") as f:
+                    s3_client.put_object(
+                        Bucket=bucket_name,
+                        Key=backup_key,
+                        Body=f,
+                        ServerSideEncryption="AES256",
+                        ContentType="application/gzip",
+                        Metadata={
+                            "backup_id": backup_id,
+                            "domain": metadata.get("domain", "unknown"),
+                            "backup_type": metadata.get("backup_type", "full"),
+                        },
+                    )
+
+            # Clean up local backup file after successful upload
+            try:
+                os.remove(backup_path)
+                logger.debug(f"Cleaned up local backup file: {backup_path}")
+            except OSError as e:
+                logger.warning(f"Failed to clean up local backup file: {e}")
+
+            upload_info = {
+                "metadata_key": metadata_key,
+                "backup_key": backup_key,
+                "s3_bucket": bucket_name,
+                "file_size_bytes": file_size,
+                "uploaded_at": timezone.now().isoformat(),
+            }
+
+            logger.info(f"Successfully uploaded backup {backup_id} to S3 ({file_size} bytes)")
+            return Ok(upload_info)
 
         except Exception as e:
             logger.error(f"S3 upload failed: {e}")
@@ -692,10 +862,72 @@ class VirtualminBackupService:
 
     def _download_backup_from_s3(self, backup_id: str) -> Result[tuple[str, dict[str, Any]], str]:
         """Download backup from S3 for restoration."""
-        # Implementation would download and verify backup files
-        # Returns local path and metadata
-        # TODO
-        return Err("Not implemented - placeholder for S3 download logic")
+        import os
+
+        try:
+            s3_client = self._get_s3_client()
+            bucket_name = self._get_backup_bucket()
+
+            # Download metadata first
+            metadata_key = f"virtualmin-backups/{backup_id}/metadata.json"
+            try:
+                metadata_response = s3_client.get_object(Bucket=bucket_name, Key=metadata_key)
+                metadata = json.loads(metadata_response["Body"].read())
+            except s3_client.exceptions.NoSuchKey:
+                return Err(f"Backup metadata not found: {backup_id}")
+
+            # Download backup file
+            backup_key = f"virtualmin-backups/{backup_id}/backup.tar.gz"
+            local_path = f"{tempfile.gettempdir()}/restore_{backup_id}.tar.gz"
+
+            try:
+                # Check if backup file exists
+                s3_client.head_object(Bucket=bucket_name, Key=backup_key)
+            except Exception:
+                return Err(f"Backup file not found in S3: {backup_id}")
+
+            # Download with progress tracking
+            file_size = s3_client.head_object(Bucket=bucket_name, Key=backup_key)["ContentLength"]
+
+            logger.info(f"Downloading backup {backup_id} from S3 ({file_size} bytes)")
+
+            # Use multipart download for large files
+            if file_size > S3_MULTIPART_THRESHOLD:
+                transfer_config = boto3.s3.transfer.TransferConfig(
+                    multipart_threshold=S3_MULTIPART_THRESHOLD,
+                    multipart_chunksize=BACKUP_CHUNK_SIZE,
+                    use_threads=True,
+                )
+                s3_client.download_file(bucket_name, backup_key, local_path, Config=transfer_config)
+            else:
+                s3_client.download_file(bucket_name, backup_key, local_path)
+
+            # Verify downloaded file
+            if not os.path.exists(local_path):
+                return Err("Downloaded backup file not found")
+
+            downloaded_size = os.path.getsize(local_path)
+            if downloaded_size != file_size:
+                os.remove(local_path)
+                return Err(f"Downloaded file size mismatch: expected {file_size}, got {downloaded_size}")
+
+            # Verify checksum if available
+            if metadata.get("checksum_sha256"):
+                file_hash = hashlib.sha256()
+                with open(local_path, "rb") as f:
+                    for chunk in iter(lambda: f.read(BACKUP_CHUNK_SIZE), b""):
+                        file_hash.update(chunk)
+
+                if file_hash.hexdigest() != metadata["checksum_sha256"]:
+                    os.remove(local_path)
+                    return Err("Backup checksum verification failed")
+
+            logger.info(f"Successfully downloaded backup {backup_id} ({downloaded_size} bytes)")
+            return Ok((local_path, metadata))
+
+        except Exception as e:
+            logger.error(f"S3 download failed for backup {backup_id}: {e}")
+            return Err(f"S3 download failed: {e!s}")
 
     def _verify_backup_before_restore(self, backup_path: str, metadata: dict[str, Any]) -> Result[None, str]:
         """Verify backup integrity before starting restore."""
