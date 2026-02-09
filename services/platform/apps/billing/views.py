@@ -25,6 +25,7 @@ from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Count, Q, QuerySet, Sum
+from django.db.models.functions import ExtractMonth
 from django.http import (
     Http404,
     HttpRequest,
@@ -1394,10 +1395,11 @@ def billing_reports(request: HttpRequest) -> HttpResponse:
 
     customer_ids = _get_accessible_customer_ids(request.user)
 
-    # Monthly revenue
+    # Monthly revenue - using Django ORM ExtractMonth instead of deprecated .extra()
+    # to prevent SQL injection (OWASP A03:2021 - Injection)
     monthly_stats = (
         Invoice.objects.filter(customer_id__in=customer_ids, status="paid")
-        .extra(select={"month": "EXTRACT(month FROM created_at)"})
+        .annotate(month=ExtractMonth("created_at"))
         .values("month")
         .annotate(revenue=Sum("total_cents"), count=Count("id"))
     )

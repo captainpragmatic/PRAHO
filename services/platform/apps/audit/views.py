@@ -11,6 +11,7 @@ import uuid
 from datetime import timedelta
 from io import StringIO
 from typing import TYPE_CHECKING, Any, cast
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth import get_user_model, logout  # For GDPR deletion logout
@@ -183,9 +184,12 @@ def request_data_export(request: HttpRequest) -> HttpResponse:
     """Create a new GDPR data export request"""
     user = cast(User, request.user)  # Safe due to @login_required
 
-    # Add debugging info
+    # Add debugging info - sanitized to prevent sensitive data leakage (OWASP A09:2021)
     logger.info(f"🔍 [GDPR Export] Export request from {user.email}")
-    logger.info(f"🔍 [GDPR Export] POST data: {dict(request.POST)}")
+    # Only log safe keys, not full POST data to prevent credential/token leakage
+    safe_keys = ["include_profile", "include_customers", "include_billing", "include_tickets", "include_audit_logs"]
+    safe_post_data = {k: request.POST.get(k) for k in safe_keys if k in request.POST}
+    logger.info(f"🔍 [GDPR Export] POST data (sanitized): {safe_post_data}")
 
     try:
         # Get export scope from form
@@ -433,9 +437,12 @@ def update_consent(request: HttpRequest) -> HttpResponse:
     """Update specific GDPR consents"""
     user = cast(User, request.user)  # Safe due to @login_required
 
-    # Add debugging info
+    # Add debugging info - sanitized to prevent sensitive data leakage (OWASP A09:2021)
     logger.info(f"🔍 [GDPR Consent] Update request from {user.email}")
-    logger.info(f"🔍 [GDPR Consent] POST data: {dict(request.POST)}")
+    # Only log safe consent-related keys, not full POST data
+    safe_consent_keys = ["accepts_marketing", "gdpr_consent"]
+    safe_post_data = {k: request.POST.get(k) for k in safe_consent_keys if k in request.POST}
+    logger.info(f"🔍 [GDPR Consent] POST data (sanitized): {safe_post_data}")
 
     try:
         # Get current values for comparison
@@ -1119,9 +1126,12 @@ def load_saved_search(request: HttpRequest, query_id: uuid.UUID) -> HttpResponse
         search_query.usage_count += 1
         search_query.save(update_fields=["last_used_at", "usage_count"])
 
-        # Build URL with query parameters
+        # Build URL with query parameters - using urlencode for proper escaping
+        # to prevent URL injection attacks (OWASP A03:2021 - Injection)
         base_url = "/audit/logs/"
-        query_string = "&".join([f"{k}={v}" for k, v in search_query.query_params.items() if v])
+        # Filter out empty values and properly encode parameters
+        filtered_params = {k: v for k, v in search_query.query_params.items() if v}
+        query_string = urlencode(filtered_params) if filtered_params else ""
         redirect_url = f"{base_url}?{query_string}" if query_string else base_url
 
         messages.info(request, _('Loaded saved search: "{}"').format(search_query.name))

@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import secrets
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -583,9 +584,11 @@ class VirtualminBackupService:
             gateway = VirtualminGateway(vm_config)
 
             # Use Virtualmin's backup-domain command
+            # SECURITY: Add random token to prevent predictable temp file paths (OWASP A05:2021)
+            random_token = secrets.token_hex(8)
             backup_params = {
                 "domain": account.domain,
-                "dest": f"{tempfile.gettempdir()}/virtualmin_backup_{backup_id}.tar.gz",
+                "dest": f"{tempfile.gettempdir()}/virtualmin_backup_{backup_id}_{random_token}.tar.gz",
                 "all-features": True,
                 "all-virtualservers": False,
                 "newformat": True,
@@ -682,9 +685,11 @@ class VirtualminBackupService:
             gateway = VirtualminGateway(vm_config)
 
             # Backup only configuration, no user data
+            # SECURITY: Add random token to prevent predictable temp file paths (OWASP A05:2021)
+            random_token = secrets.token_hex(8)
             backup_params = {
                 "domain": account.domain,
-                "dest": f"{tempfile.gettempdir()}/virtualmin_config_{backup_id}.tar.gz",
+                "dest": f"{tempfile.gettempdir()}/virtualmin_config_{backup_id}_{random_token}.tar.gz",
                 "only-features": "virtualmin,dir",  # Config and basic structure only
                 "newformat": True,
             }

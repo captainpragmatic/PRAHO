@@ -29,6 +29,8 @@ API_RATE_LIMIT_MAX_CALLS = 50  # Max API calls per hour per server
 HTTP_SUCCESS_THRESHOLD = 400  # HTTP status codes below this are considered successful
 
 # Whitelisted server management domains for SSRF protection
+# SECURITY: localhost/127.0.0.1 removed to prevent SSRF attacks (OWASP A10:2021)
+# For development/testing, configure allowed domains via environment variables
 WHITELISTED_SERVER_MANAGEMENT_DOMAINS = [
     # Cloud providers
     "api.digitalocean.com",
@@ -47,10 +49,6 @@ WHITELISTED_SERVER_MANAGEMENT_DOMAINS = [
     "api.zap.ro",
     "api.romarg.ro",
     "api.netconcept.ro",
-    # Development/testing
-    "localhost",
-    "127.0.0.1",
-    "test.server-management.local",
 ]
 
 
