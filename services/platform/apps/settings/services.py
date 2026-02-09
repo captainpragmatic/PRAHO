@@ -309,6 +309,9 @@ class SettingsService:
         """
         📝 Update system setting with validation and caching
 
+        Uses select_for_update to prevent race conditions when multiple
+        processes try to update the same setting simultaneously.
+
         Args:
             key: Setting key
             value: New value
@@ -318,6 +321,8 @@ class SettingsService:
         Returns:
             Result with updated setting or validation error
         """
+        from django.db import IntegrityError
+
         try:
             # Infer data type
             data_type = cls._infer_data_type(value)
@@ -326,18 +331,27 @@ class SettingsService:
             json_value = cls._prepare_value_for_json(value, data_type)
             json_default = cls._prepare_value_for_json(cls.DEFAULT_SETTINGS.get(key, value), data_type)
 
-            # Get or create setting
-            setting, created = SystemSetting.objects.get_or_create(
-                key=key,
-                defaults={
-                    "name": cls._generate_name_from_key(key),
-                    "description": f"System setting: {key}",
-                    "category": key.split(".")[0] if "." in key else "system",
-                    "data_type": data_type,
-                    "value": json_value,
-                    "default_value": json_default,
-                },
-            )
+            # Try to get existing setting with lock first (most common case)
+            try:
+                setting = SystemSetting.objects.select_for_update().get(key=key)
+                created = False
+            except SystemSetting.DoesNotExist:
+                # Setting doesn't exist - create it with proper race condition handling
+                try:
+                    setting = SystemSetting.objects.create(
+                        key=key,
+                        name=cls._generate_name_from_key(key),
+                        description=f"System setting: {key}",
+                        category=key.split(".")[0] if "." in key else "system",
+                        data_type=data_type,
+                        value=json_value,
+                        default_value=json_default,
+                    )
+                    created = True
+                except IntegrityError:
+                    # Another process created it - get it with lock
+                    setting = SystemSetting.objects.select_for_update().get(key=key)
+                    created = False
 
             if not created:
                 # Prepare value for JSON serialization

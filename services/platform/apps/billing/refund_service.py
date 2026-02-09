@@ -159,25 +159,31 @@ class RefundService:
 
     @staticmethod
     def refund_order(order_id: Any, refund_data: RefundData) -> Result[RefundResult, str]:
-        """Refund an order with comprehensive validation"""
+        """Refund an order with comprehensive validation.
+
+        Uses select_for_update to prevent TOCTTOU race conditions where
+        concurrent refund requests could both pass validation before either
+        commits.
+        """
         try:
             # Normalize refund data
             RefundService._normalize_refund_data(refund_data)
 
-            # Get order
-            order_result = RefundService._get_order(order_id)
-            if order_result.is_err():
-                return Result.err(order_result.unwrap_err())
+            # Execute entire refund process within atomic block to prevent race conditions
+            with transaction.atomic():
+                # Get order with lock to prevent concurrent modifications
+                try:
+                    order = Order.objects.select_for_update().select_related("customer").get(id=order_id)
+                except Order.DoesNotExist:
+                    return Result.err("Failed to process refund: Order not found")
 
-            order = order_result.unwrap()
+                # Validate eligibility INSIDE the atomic block with lock held
+                validation_result = RefundService._validate_order_refund(order, refund_data)
+                if validation_result.is_err():
+                    return Result.err(validation_result.unwrap_err())
 
-            # Validate eligibility
-            validation_result = RefundService._validate_order_refund(order, refund_data)
-            if validation_result.is_err():
-                return Result.err(validation_result.unwrap_err())
-
-            # Process refund
-            return RefundService._execute_order_refund(order, refund_data)
+                # Process refund (already inside atomic block)
+                return RefundService._execute_order_refund_internal(order, refund_data)
 
         except Exception:
             # SECURITY: Don't expose internal error details to caller
@@ -248,47 +254,57 @@ class RefundService:
 
     @staticmethod
     def _execute_order_refund(order: Any, refund_data: RefundData) -> Result[RefundResult, str]:
-        """Execute the order refund transaction"""
+        """Execute the order refund transaction (legacy wrapper with its own transaction)"""
         with transaction.atomic():
-            refund_id = uuid.uuid4()
-            process_result = RefundService._process_bidirectional_refund(
-                order=order, invoice=None, refund_id=refund_id, refund_data=refund_data
+            return RefundService._execute_order_refund_internal(order, refund_data)
+
+    @staticmethod
+    def _execute_order_refund_internal(order: Any, refund_data: RefundData) -> Result[RefundResult, str]:
+        """Execute the order refund - must be called within an existing atomic block.
+
+        This internal method does NOT create its own transaction, allowing the caller
+        to wrap both validation and execution in a single atomic block with
+        select_for_update to prevent race conditions.
+        """
+        refund_id = uuid.uuid4()
+        process_result = RefundService._process_bidirectional_refund(
+            order=order, invoice=None, refund_id=refund_id, refund_data=refund_data
+        )
+
+        if process_result.is_err():
+            return Result.err(f"Failed to process refund: {process_result.error}")
+
+        result_data = process_result.unwrap()
+        actual_amount = RefundService._calculate_actual_refund_amount(order, refund_data)
+
+        # Log security event
+        log_security_event(
+            event_type="refund_processed",
+            details={
+                "refund_id": str(refund_id),
+                "entity_type": "order",
+                "entity_id": str(order.id),
+                "refund_type": refund_data.get("refund_type", "full"),
+                "amount_cents": actual_amount,
+                "reason": refund_data.get("reason", "customer_request"),
+                "critical_financial_operation": True,
+            },
+        )
+
+        return Result.ok(
+            RefundResult(
+                success=True,
+                refund_id=str(refund_id),
+                amount_refunded_cents=actual_amount,
+                refund_type=refund_data.get("refund_type", RefundType.FULL),
+                order_id=result_data.get("order_id"),
+                invoice_id=result_data.get("invoice_id"),
+                order_status_updated=result_data.get("order_status_updated", False),
+                invoice_status_updated=result_data.get("invoice_status_updated", False),
+                payment_refund_processed=result_data.get("payment_refund_processed", False),
+                audit_entries_created=1,
             )
-
-            if process_result.is_err():
-                return Result.err(f"Failed to process refund: {process_result.error}")
-
-            result_data = process_result.unwrap()
-            actual_amount = RefundService._calculate_actual_refund_amount(order, refund_data)
-
-            # Log security event
-            log_security_event(
-                event_type="refund_processed",
-                details={
-                    "refund_id": str(refund_id),
-                    "entity_type": "order",
-                    "entity_id": str(order.id),
-                    "refund_type": refund_data.get("refund_type", "full"),
-                    "amount_cents": actual_amount,
-                    "reason": refund_data.get("reason", "customer_request"),
-                    "critical_financial_operation": True,
-                },
-            )
-
-            return Result.ok(
-                RefundResult(
-                    success=True,
-                    refund_id=str(refund_id),
-                    amount_refunded_cents=actual_amount,
-                    refund_type=refund_data.get("refund_type", RefundType.FULL),
-                    order_id=result_data.get("order_id"),
-                    invoice_id=result_data.get("invoice_id"),
-                    order_status_updated=result_data.get("order_status_updated", False),
-                    invoice_status_updated=result_data.get("invoice_status_updated", False),
-                    payment_refund_processed=result_data.get("payment_refund_processed", False),
-                    audit_entries_created=1,
-                )
-            )
+        )
 
     @staticmethod
     def _calculate_actual_refund_amount(order: Any, refund_data: RefundData) -> int:
@@ -304,25 +320,31 @@ class RefundService:
 
     @staticmethod
     def refund_invoice(invoice_id: Any, refund_data: RefundData) -> Result[RefundResult, str]:
-        """Refund an invoice with comprehensive validation"""
+        """Refund an invoice with comprehensive validation.
+
+        Uses select_for_update to prevent TOCTTOU race conditions where
+        concurrent refund requests could both pass validation before either
+        commits.
+        """
         try:
             # Normalize refund data
             RefundService._normalize_refund_data(refund_data)
 
-            # Get invoice
-            invoice_result = RefundService._get_invoice(invoice_id)
-            if invoice_result.is_err():
-                return Result.err(invoice_result.unwrap_err())
+            # Execute entire refund process within atomic block to prevent race conditions
+            with transaction.atomic():
+                # Get invoice with lock to prevent concurrent modifications
+                try:
+                    invoice = Invoice.objects.select_for_update().select_related("order", "customer").get(id=invoice_id)
+                except Invoice.DoesNotExist:
+                    return Result.err("Failed to process refund: Invoice not found")
 
-            invoice = invoice_result.unwrap()
+                # Validate eligibility INSIDE the atomic block with lock held
+                validation_result = RefundService._validate_invoice_refund(invoice, refund_data)
+                if validation_result.is_err():
+                    return Result.err(validation_result.unwrap_err())
 
-            # Validate eligibility
-            validation_result = RefundService._validate_invoice_refund(invoice, refund_data)
-            if validation_result.is_err():
-                return Result.err(validation_result.unwrap_err())
-
-            # Process refund
-            return RefundService._execute_invoice_refund(invoice, refund_data)
+                # Process refund (already inside atomic block)
+                return RefundService._execute_invoice_refund_internal(invoice, refund_data)
 
         except Exception:
             # SECURITY: Don't expose internal error details
@@ -378,46 +400,56 @@ class RefundService:
 
     @staticmethod
     def _execute_invoice_refund(invoice: Any, refund_data: RefundData) -> Result[RefundResult, str]:
-        """Execute the invoice refund transaction"""
+        """Execute the invoice refund transaction (legacy wrapper with its own transaction)"""
         with transaction.atomic():
-            refund_id = uuid.uuid4()
-            process_result = RefundService._process_bidirectional_refund(
-                order=None, invoice=invoice, refund_id=refund_id, refund_data=refund_data
+            return RefundService._execute_invoice_refund_internal(invoice, refund_data)
+
+    @staticmethod
+    def _execute_invoice_refund_internal(invoice: Any, refund_data: RefundData) -> Result[RefundResult, str]:
+        """Execute the invoice refund - must be called within an existing atomic block.
+
+        This internal method does NOT create its own transaction, allowing the caller
+        to wrap both validation and execution in a single atomic block with
+        select_for_update to prevent race conditions.
+        """
+        refund_id = uuid.uuid4()
+        process_result = RefundService._process_bidirectional_refund(
+            order=None, invoice=invoice, refund_id=refund_id, refund_data=refund_data
+        )
+
+        if process_result.is_err():
+            return Result.err(f"Failed to process refund: {process_result.error}")
+
+        result_data = process_result.unwrap()
+
+        # Log security event
+        log_security_event(
+            event_type="refund_processed",
+            details={
+                "refund_id": str(refund_id),
+                "entity_type": "invoice",
+                "entity_id": str(invoice.id),
+                "refund_type": refund_data.get("refund_type", "full"),
+                "amount_cents": refund_data.get("amount_cents", refund_data.get("amount", 0)),
+                "reason": refund_data.get("reason", "customer_request"),
+                "critical_financial_operation": True,
+            },
+        )
+
+        return Result.ok(
+            RefundResult(
+                success=True,
+                refund_id=str(refund_id),
+                amount_refunded_cents=refund_data.get("amount_cents", refund_data.get("amount", 0)),
+                refund_type=refund_data.get("refund_type", RefundType.FULL),
+                order_id=result_data.get("order_id"),
+                invoice_id=result_data.get("invoice_id"),
+                order_status_updated=result_data.get("order_status_updated", False),
+                invoice_status_updated=result_data.get("invoice_status_updated", False),
+                payment_refund_processed=result_data.get("payment_refund_processed", False),
+                audit_entries_created=1,
             )
-
-            if process_result.is_err():
-                return Result.err(f"Failed to process refund: {process_result.error}")
-
-            result_data = process_result.unwrap()
-
-            # Log security event
-            log_security_event(
-                event_type="refund_processed",
-                details={
-                    "refund_id": str(refund_id),
-                    "entity_type": "invoice",
-                    "entity_id": str(invoice.id),
-                    "refund_type": refund_data.get("refund_type", "full"),
-                    "amount_cents": refund_data.get("amount_cents", refund_data.get("amount", 0)),
-                    "reason": refund_data.get("reason", "customer_request"),
-                    "critical_financial_operation": True,
-                },
-            )
-
-            return Result.ok(
-                RefundResult(
-                    success=True,
-                    refund_id=str(refund_id),
-                    amount_refunded_cents=refund_data.get("amount_cents", refund_data.get("amount", 0)),
-                    refund_type=refund_data.get("refund_type", RefundType.FULL),
-                    order_id=result_data.get("order_id"),
-                    invoice_id=result_data.get("invoice_id"),
-                    order_status_updated=result_data.get("order_status_updated", False),
-                    invoice_status_updated=result_data.get("invoice_status_updated", False),
-                    payment_refund_processed=result_data.get("payment_refund_processed", False),
-                    audit_entries_created=1,
-                )
-            )
+        )
 
     @staticmethod
     def get_refund_eligibility(entity_type: str, entity_id: Any, amount: int = 0) -> Result[RefundEligibility, str]:

@@ -163,7 +163,12 @@ class BaseWebhookProcessor(ABC):
         return Ok({"event_id": event_id, "event_type": event_type})
 
     def _check_duplicates(self, event_info: dict[str, str]) -> Result[dict[str, str], str]:
-        """Step 2: Check for duplicate webhook processing."""
+        """Step 2: Check for duplicate webhook processing.
+
+        Note: This is a preliminary check only. The authoritative duplicate check
+        happens inside _create_and_process_event within the atomic block, which uses
+        database constraints (unique_together) to prevent race conditions.
+        """
         event_id = event_info["event_id"]
 
         # source_name is guaranteed to be not None after __init__ validation
@@ -197,43 +202,71 @@ class BaseWebhookProcessor(ABC):
         return Ok(context)
 
     def _create_and_process_event(self, context: WebhookContext) -> Result[WebhookProcessingResult, str]:
-        """Step 5: Create webhook event record and process it."""
+        """Step 5: Create webhook event record and process it.
+
+        Uses database unique constraint (source, event_id) to prevent race conditions.
+        If a concurrent request creates the same event, IntegrityError is caught and
+        handled as a duplicate.
+        """
+        from django.db import IntegrityError
+
         event_id = context.event_info["event_id"]
         event_type = context.event_info["event_type"]
 
-        with transaction.atomic():
-            # source_name is guaranteed to be not None after __init__ validation
-            assert self.source_name is not None
-            webhook_event = WebhookEvent.objects.create(
-                source=self.source_name,
-                event_id=event_id,
-                event_type=event_type,
-                payload=context.payload,
-                signature_hash=(hashlib.sha256(context.signature.encode()).hexdigest() if context.signature else ""),
-                ip_address=context.ip_address,
-                user_agent=context.user_agent or "",  # Convert None to empty string for TextField
-                headers=context.headers,
-                status="pending",
-            )
+        # source_name is guaranteed to be not None after __init__ validation
+        assert self.source_name is not None
 
-            try:
-                success, message = self.handle_event(webhook_event)
+        try:
+            with transaction.atomic():
+                # Use select_for_update with NOWAIT or try-create pattern
+                # The unique_together constraint on (source, event_id) prevents duplicates
+                webhook_event = WebhookEvent.objects.create(
+                    source=self.source_name,
+                    event_id=event_id,
+                    event_type=event_type,
+                    payload=context.payload,
+                    signature_hash=(hashlib.sha256(context.signature.encode()).hexdigest() if context.signature else ""),
+                    ip_address=context.ip_address,
+                    user_agent=context.user_agent or "",  # Convert None to empty string for TextField
+                    headers=context.headers,
+                    status="pending",
+                )
 
-                if success:
-                    webhook_event.mark_processed()
-                    logger.info(f"✅ Processed {self.source_name} webhook {event_id}: {message}")
-                    return Ok(WebhookProcessingResult.success_result(message, webhook_event))
-                else:
-                    webhook_event.mark_failed(message)
-                    logger.error(f"❌ Failed {self.source_name} webhook {event_id}: {message}")
-                    return Ok(WebhookProcessingResult.error_result(message, webhook_event))
+                try:
+                    success, message = self.handle_event(webhook_event)
 
+<<<<<<< HEAD
             except Exception:
                 # SECURITY: Log full details internally but don't expose to caller
                 error_msg = "Processing error: internal failure"
                 webhook_event.mark_failed(error_msg)
                 logger.exception(f"💥 Exception processing {self.source_name} webhook {event_id}")
                 return Ok(WebhookProcessingResult.error_result(error_msg, webhook_event))
+=======
+                    if success:
+                        webhook_event.mark_processed()
+                        logger.info(f"✅ Processed {self.source_name} webhook {event_id}: {message}")
+                        return Ok(WebhookProcessingResult.success_result(message, webhook_event))
+                    else:
+                        webhook_event.mark_failed(message)
+                        logger.error(f"❌ Failed {self.source_name} webhook {event_id}: {message}")
+                        return Ok(WebhookProcessingResult.error_result(message, webhook_event))
+
+                except Exception as e:
+                    error_msg = f"Processing error: {e!s}"
+                    webhook_event.mark_failed(error_msg)
+                    logger.exception(f"💥 Exception processing {self.source_name} webhook {event_id}")
+                    return Ok(WebhookProcessingResult.error_result(error_msg, webhook_event))
+
+        except IntegrityError:
+            # Race condition: another request created this event first
+            # This is expected behavior - treat as duplicate
+            logger.info(f"🔄 Duplicate webhook {self.source_name}:{event_id} detected via constraint - skipping")
+            existing = WebhookEvent.objects.get(source=self.source_name, event_id=event_id)
+            return Ok(WebhookProcessingResult.success_result(
+                f"⏭️ Duplicate webhook skipped: {event_id}", existing
+            ))
+>>>>>>> origin/claude/fix-race-conditions-yreZe
 
     def extract_event_id(self, payload: dict[str, Any]) -> str | None:
         """🔍 Extract unique event ID from payload - override in subclasses"""

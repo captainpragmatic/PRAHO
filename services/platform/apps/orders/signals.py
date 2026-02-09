@@ -75,10 +75,23 @@ def handle_order_created_or_updated(sender: type[Order], instance: Order, create
 
 @receiver(pre_save, sender=Order)
 def store_original_order_values(sender: type[Order], instance: Order, **kwargs: Any) -> None:
-    """Store original values before saving for audit trail"""
+    """Store original values before saving for audit trail.
+
+    Note on Race Conditions:
+    This signal reads original values without locking. In theory, two concurrent updates
+    could both read the same "original" values. However:
+    1. Using select_for_update in signals can cause deadlocks
+    2. The worst case is slightly inaccurate audit trails (A->C instead of A->B->C)
+    3. Primary data integrity is maintained by Django's normal save() mechanism
+    4. For critical operations, use dedicated service methods with proper locking instead
+
+    The trade-off of occasional audit imprecision is acceptable vs. deadlock risk.
+    """
     try:
         if instance.pk:  # Only for existing orders
             try:
+                # Read current database state for comparison
+                # Note: No select_for_update to avoid deadlocks in signal handlers
                 original = Order.objects.get(pk=instance.pk)
                 instance._original_values = {  # type: ignore[attr-defined]
                     "status": original.status,
