@@ -69,6 +69,16 @@ class Payment(models.Model):
     gateway_txn_id = models.CharField(max_length=255, blank=True)
     reference_number = models.CharField(max_length=100, blank=True)
 
+    # Idempotency for safe retries and deduplication
+    idempotency_key = models.CharField(
+        max_length=64,
+        unique=True,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text=_("Unique key to prevent duplicate payment processing"),
+    )
+
     # Dates
     received_at = models.DateTimeField(default=timezone.now)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -101,6 +111,7 @@ class Payment(models.Model):
     def amount(self) -> Decimal:
         return Decimal(self.amount_cents) / 100
 
+<<<<<<< HEAD
     @property
     def stripe_payment_intent_id(self) -> str | None:
         """Get Stripe PaymentIntent ID from meta or gateway_txn_id"""
@@ -145,6 +156,29 @@ class Payment(models.Model):
     def is_stripe_payment(self) -> bool:
         """Check if this is a Stripe payment"""
         return self.payment_method == 'stripe'
+=======
+    @classmethod
+    def generate_idempotency_key(cls, prefix: str = "pay") -> str:
+        """Generate a unique idempotency key."""
+        import secrets
+
+        return f"{prefix}_{secrets.token_hex(24)}"
+
+    def set_idempotency_key(self, key: str | None = None) -> None:
+        """Set idempotency key, generating one if not provided."""
+        if key:
+            self.idempotency_key = key
+        elif not self.idempotency_key:
+            self.idempotency_key = self.generate_idempotency_key()
+
+    @classmethod
+    def get_by_idempotency_key(cls, key: str) -> "Payment | None":
+        """Find payment by idempotency key for deduplication."""
+        try:
+            return cls.objects.get(idempotency_key=key)
+        except cls.DoesNotExist:
+            return None
+>>>>>>> origin/claude/audit-billing-system-HEGuY
 
 
 class CreditLedger(models.Model):

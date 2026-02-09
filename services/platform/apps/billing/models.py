@@ -20,6 +20,12 @@ from .invoice_models import Invoice, InvoiceLine, InvoiceSequence
 from .payment_models import CreditLedger, Payment, PaymentCollectionRun, PaymentRetryAttempt, PaymentRetryPolicy
 from .proforma_models import ProformaInvoice, ProformaLine, ProformaSequence
 from .refund_models import Refund, RefundNote, RefundStatusHistory
+from .subscription_models import (
+    PriceGrandfathering,
+    Subscription,
+    SubscriptionChange,
+    SubscriptionItem,
+)
 from .tax_models import TaxRule, VATValidation
 from .validators import (
     DANGEROUS_FINANCIAL_PATTERNS,
@@ -52,6 +58,7 @@ LAST_DAY_OF_DECEMBER = 31  # Last day of December
 
 # Expose all models in __all__ for explicit imports
 __all__ = [
+    # Constants
     "DANGEROUS_FINANCIAL_PATTERNS",
     "DECEMBER",
     "FIRST_DAY_OF_MONTH",
@@ -64,24 +71,36 @@ __all__ = [
     "MAX_JSON_SIZE_BYTES",
     "MIN_FINANCIAL_AMOUNT_CENTS",
     "SENSITIVE_FINANCIAL_KEYS",
+    # Currency Models
     "CreditLedger",
     "Currency",
     "FXRate",
+    # Invoice Models
     "Invoice",
     "InvoiceLine",
     "InvoiceSequence",
+    # Payment Models
     "Payment",
     "PaymentCollectionRun",
     "PaymentRetryAttempt",
     "PaymentRetryPolicy",
+    # Proforma Models
     "ProformaInvoice",
     "ProformaLine",
     "ProformaSequence",
+    # Refund Models
     "Refund",
     "RefundNote",
     "RefundStatusHistory",
+    # Subscription Models
+    "PriceGrandfathering",
+    "Subscription",
+    "SubscriptionChange",
+    "SubscriptionItem",
+    # Tax Models
     "TaxRule",
     "VATValidation",
+    # Validators
     "log_security_event",
     "validate_financial_amount",
     "validate_financial_json",

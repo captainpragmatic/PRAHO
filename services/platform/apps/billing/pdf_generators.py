@@ -308,3 +308,72 @@ class RomanianProformaPDFGenerator(RomanianDocumentPDFGenerator):
             self.height - 6 * cm,
             str(_t("Valid until: {date}")).format(date=self.proforma.valid_until.strftime("%d.%m.%Y")),
         )
+
+
+# ===============================================================================
+# UTILITY FUNCTIONS
+# ===============================================================================
+
+
+def generate_invoice_pdf(invoice: Invoice) -> bytes:
+    """
+    Generate PDF bytes for an invoice.
+
+    Args:
+        invoice: Invoice model instance
+
+    Returns:
+        PDF content as bytes
+    """
+    generator = RomanianInvoicePDFGenerator(invoice)
+    generator._create_pdf_document()
+    generator.canvas.showPage()
+    generator.canvas.save()
+    generator.buffer.seek(0)
+    return generator.buffer.getvalue()
+
+
+def generate_proforma_pdf(proforma: ProformaInvoice) -> bytes:
+    """
+    Generate PDF bytes for a proforma invoice.
+
+    Args:
+        proforma: ProformaInvoice model instance
+
+    Returns:
+        PDF content as bytes
+    """
+    generator = RomanianProformaPDFGenerator(proforma)
+    generator._create_pdf_document()
+    generator.canvas.showPage()
+    generator.canvas.save()
+    generator.buffer.seek(0)
+    return generator.buffer.getvalue()
+
+
+def generate_invoice_pdf_response(invoice: Invoice) -> HttpResponse:
+    """
+    Generate HTTP response with invoice PDF.
+
+    Args:
+        invoice: Invoice model instance
+
+    Returns:
+        HttpResponse with PDF content
+    """
+    generator = RomanianInvoicePDFGenerator(invoice)
+    return generator.generate_response()
+
+
+def generate_proforma_pdf_response(proforma: ProformaInvoice) -> HttpResponse:
+    """
+    Generate HTTP response with proforma PDF.
+
+    Args:
+        proforma: ProformaInvoice model instance
+
+    Returns:
+        HttpResponse with PDF content
+    """
+    generator = RomanianProformaPDFGenerator(proforma)
+    return generator.generate_response()

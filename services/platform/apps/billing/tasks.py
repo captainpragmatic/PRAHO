@@ -386,3 +386,367 @@ def validate_vat_number_async(tax_profile_id: str) -> str:
 def process_auto_payment_async(invoice_id: str) -> str:
     """Queue auto-payment processing task."""
     return async_task("apps.billing.tasks.process_auto_payment", invoice_id, timeout=TASK_TIME_LIMIT)
+
+
+# ===============================================================================
+# RECURRING BILLING TASKS
+# ===============================================================================
+
+
+def run_daily_billing() -> dict[str, Any]:
+    """
+    Daily scheduled task to process subscription renewals.
+
+    This task should be scheduled to run daily (e.g., at 00:00 UTC).
+    It processes all subscriptions due for billing and generates invoices.
+
+    Schedule in Django-Q2:
+        Schedule.objects.create(
+            func='apps.billing.tasks.run_daily_billing',
+            schedule_type=Schedule.DAILY,
+            repeats=-1,  # Repeat forever
+            next_run=timezone.now().replace(hour=0, minute=0, second=0)
+        )
+
+    Returns:
+        Dictionary with billing run statistics
+    """
+    from apps.billing.subscription_service import RecurringBillingService
+
+    logger.info("📅 [Billing] Starting daily billing run")
+
+    try:
+        result = RecurringBillingService.run_billing_cycle()
+
+        logger.info(
+            f"📅 [Billing] Daily billing completed: "
+            f"{result['subscriptions_processed']} subscriptions, "
+            f"{result['invoices_created']} invoices, "
+            f"{result['payments_succeeded']}/{result['payments_attempted']} payments succeeded"
+        )
+
+        # Log the run
+        AuditService.log_simple_event(
+            event_type="daily_billing_completed",
+            user=None,
+            description=f"Daily billing run completed: {result['invoices_created']} invoices created",
+            actor_type="system",
+            metadata={
+                "subscriptions_processed": result["subscriptions_processed"],
+                "invoices_created": result["invoices_created"],
+                "payments_attempted": result["payments_attempted"],
+                "payments_succeeded": result["payments_succeeded"],
+                "payments_failed": result["payments_failed"],
+                "total_billed_cents": result["total_billed_cents"],
+                "errors": result["errors"][:10],  # Limit errors in metadata
+                "source_app": "billing",
+            },
+        )
+
+        return {
+            "success": True,
+            "result": result,
+            "message": f"Daily billing completed: {result['invoices_created']} invoices created",
+        }
+
+    except Exception as e:
+        logger.exception(f"💥 [Billing] Daily billing run failed: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def process_expired_trials() -> dict[str, Any]:
+    """
+    Process expired trial subscriptions.
+
+    Converts trials with payment methods to paid subscriptions,
+    cancels trials without payment methods.
+
+    Should run daily, after run_daily_billing.
+
+    Returns:
+        Dictionary with processing result
+    """
+    from apps.billing.subscription_service import RecurringBillingService
+
+    logger.info("⏰ [Trials] Processing expired trials")
+
+    try:
+        count = RecurringBillingService.handle_expired_trials()
+
+        logger.info(f"⏰ [Trials] Processed {count} expired trials")
+
+        AuditService.log_simple_event(
+            event_type="expired_trials_processed",
+            user=None,
+            description=f"Processed {count} expired trials",
+            actor_type="system",
+            metadata={
+                "trials_processed": count,
+                "source_app": "billing",
+            },
+        )
+
+        return {
+            "success": True,
+            "trials_processed": count,
+            "message": f"Processed {count} expired trials",
+        }
+
+    except Exception as e:
+        logger.exception(f"💥 [Trials] Error processing expired trials: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def process_grace_period_expirations() -> dict[str, Any]:
+    """
+    Handle subscriptions with expired grace periods.
+
+    Suspends or cancels subscriptions that have exhausted their grace period
+    after payment failures.
+
+    Should run daily.
+
+    Returns:
+        Dictionary with processing result
+    """
+    from apps.billing.subscription_service import RecurringBillingService
+
+    logger.info("⚠️ [Grace] Processing expired grace periods")
+
+    try:
+        count = RecurringBillingService.handle_grace_period_expirations()
+
+        logger.info(f"⚠️ [Grace] Processed {count} grace period expirations")
+
+        AuditService.log_simple_event(
+            event_type="grace_periods_processed",
+            user=None,
+            description=f"Processed {count} grace period expirations",
+            actor_type="system",
+            metadata={
+                "expirations_processed": count,
+                "source_app": "billing",
+            },
+        )
+
+        return {
+            "success": True,
+            "expirations_processed": count,
+            "message": f"Processed {count} grace period expirations",
+        }
+
+    except Exception as e:
+        logger.exception(f"💥 [Grace] Error processing grace periods: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def notify_expiring_grandfathering(days_ahead: int = 30) -> dict[str, Any]:
+    """
+    Send notifications for grandfathered prices expiring soon.
+
+    Args:
+        days_ahead: Number of days to look ahead for expiring grandfathering
+
+    Returns:
+        Dictionary with notification result
+    """
+    from apps.billing.subscription_service import GrandfatheringService
+
+    logger.info(f"📢 [Grandfathering] Checking for expiring grandfathering ({days_ahead} days)")
+
+    try:
+        expiring = GrandfatheringService.check_expiring_grandfathering(days_ahead)
+
+        notified_count = 0
+        for gf in expiring:
+            try:
+                # Send notification email
+                from apps.notifications.services import EmailService
+
+                EmailService.send_template_email(
+                    template_key="grandfathering_expiring",
+                    recipient=gf.customer.primary_email,
+                    context={
+                        "customer": gf.customer,
+                        "product": gf.product,
+                        "locked_price": gf.locked_price,
+                        "expires_at": gf.expires_at,
+                        "savings_percent": gf.savings_percent,
+                    },
+                )
+
+                # Mark as notified
+                gf.expiry_notified = True
+                gf.expiry_notified_at = timezone.now()
+                gf.save(update_fields=["expiry_notified", "expiry_notified_at"])
+
+                notified_count += 1
+
+            except Exception as e:
+                logger.error(f"Failed to notify customer {gf.customer_id} about expiring grandfathering: {e}")
+
+        logger.info(f"📢 [Grandfathering] Notified {notified_count} customers about expiring prices")
+
+        return {
+            "success": True,
+            "customers_notified": notified_count,
+            "total_expiring": len(expiring),
+            "message": f"Notified {notified_count} customers about expiring grandfathered prices",
+        }
+
+    except Exception as e:
+        logger.exception(f"💥 [Grandfathering] Error checking expiring grandfathering: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def run_payment_collection() -> dict[str, Any]:
+    """
+    Run payment collection for failed payments.
+
+    Processes retry attempts for subscriptions with failed payments.
+    Should run multiple times daily (e.g., every 4 hours).
+
+    Returns:
+        Dictionary with collection result
+    """
+    from apps.billing.payment_models import (
+        PaymentCollectionRun,
+        PaymentRetryAttempt,
+        PaymentRetryPolicy,
+    )
+
+    logger.info("💳 [Collection] Starting payment collection run")
+
+    try:
+        # Create collection run record
+        run = PaymentCollectionRun.objects.create(
+            run_type="automatic",
+        )
+
+        # Find pending retry attempts that are due
+        due_retries = PaymentRetryAttempt.objects.filter(
+            status="pending",
+            scheduled_at__lte=timezone.now(),
+        ).select_related("payment", "payment__customer", "payment__invoice", "policy")
+
+        run.total_scheduled = due_retries.count()
+
+        total_recovered_cents = 0
+        successful = 0
+        failed = 0
+
+        for retry in due_retries:
+            try:
+                run.total_processed += 1
+                retry.status = "processing"
+                retry.executed_at = timezone.now()
+                retry.save(update_fields=["status", "executed_at"])
+
+                # Attempt payment
+                # TODO: Implement actual payment processing via Stripe
+                logger.info(
+                    f"💳 [Collection] Would retry payment {retry.payment_id} "
+                    f"(attempt {retry.attempt_number})"
+                )
+
+                # For now, simulate success/failure
+                # In production, this would call the payment gateway
+                success = False  # Placeholder
+
+                if success:
+                    retry.status = "success"
+                    successful += 1
+                    total_recovered_cents += retry.payment.amount_cents
+
+                    # Update payment status
+                    retry.payment.status = "succeeded"
+                    retry.payment.save(update_fields=["status"])
+
+                else:
+                    retry.status = "failed"
+                    retry.failure_reason = "Payment declined"
+                    failed += 1
+
+                    # Schedule next retry if applicable
+                    if retry.policy and retry.attempt_number < retry.policy.max_attempts:
+                        next_retry_date = retry.policy.get_next_retry_date(
+                            timezone.now(), retry.attempt_number
+                        )
+                        if next_retry_date:
+                            PaymentRetryAttempt.objects.create(
+                                payment=retry.payment,
+                                policy=retry.policy,
+                                attempt_number=retry.attempt_number + 1,
+                                scheduled_at=next_retry_date,
+                                status="pending",
+                            )
+
+                retry.save()
+
+            except Exception as e:
+                logger.error(f"Error processing retry {retry.id}: {e}")
+                retry.status = "failed"
+                retry.failure_reason = str(e)
+                retry.save()
+                failed += 1
+
+        # Complete collection run
+        run.total_successful = successful
+        run.total_failed = failed
+        run.amount_recovered_cents = total_recovered_cents
+        run.completed_at = timezone.now()
+        run.status = "completed"
+        run.save()
+
+        logger.info(
+            f"💳 [Collection] Run completed: "
+            f"{successful} recovered, {failed} failed, "
+            f"{total_recovered_cents/100:.2f} total recovered"
+        )
+
+        return {
+            "success": True,
+            "run_id": str(run.id),
+            "total_processed": run.total_processed,
+            "successful": successful,
+            "failed": failed,
+            "amount_recovered_cents": total_recovered_cents,
+        }
+
+    except Exception as e:
+        logger.exception(f"💥 [Collection] Error running payment collection: {e}")
+        return {"success": False, "error": str(e)}
+
+
+# ===============================================================================
+# ASYNC WRAPPER FUNCTIONS FOR RECURRING BILLING
+# ===============================================================================
+
+
+def run_daily_billing_async() -> str:
+    """Queue daily billing task."""
+    return async_task("apps.billing.tasks.run_daily_billing", timeout=TASK_TIME_LIMIT * 2)
+
+
+def process_expired_trials_async() -> str:
+    """Queue expired trials processing task."""
+    return async_task("apps.billing.tasks.process_expired_trials", timeout=TASK_TIME_LIMIT)
+
+
+def process_grace_period_expirations_async() -> str:
+    """Queue grace period expiration processing task."""
+    return async_task("apps.billing.tasks.process_grace_period_expirations", timeout=TASK_TIME_LIMIT)
+
+
+def notify_expiring_grandfathering_async(days_ahead: int = 30) -> str:
+    """Queue grandfathering expiry notification task."""
+    return async_task(
+        "apps.billing.tasks.notify_expiring_grandfathering",
+        days_ahead,
+        timeout=TASK_TIME_LIMIT,
+    )
+
+
+def run_payment_collection_async() -> str:
+    """Queue payment collection task."""
+    return async_task("apps.billing.tasks.run_payment_collection", timeout=TASK_TIME_LIMIT * 2)
