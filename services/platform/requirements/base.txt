@@ -52,8 +52,9 @@ python-dotenv>=1.0.0  # Load .env files for local development
 # Payments
 stripe>=6.0.0
 
-# Email
-django-ses>=3.5.0  # AWS SES
+# Email - Multi-provider support with tracking
+django-anymail[amazon-ses,sendgrid,mailgun]>=11.0  # Universal email backend with ESP webhooks
+django-ses>=3.5.0  # AWS SES (fallback/direct)
 
 # Background task processing
 django-q2>=1.8.0  # Async task queue with database backend

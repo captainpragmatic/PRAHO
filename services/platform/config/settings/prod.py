@@ -197,18 +197,28 @@ LOGGING = {
 }
 
 # ===============================================================================
-# EMAIL CONFIGURATION (Production SMTP)
+# EMAIL CONFIGURATION (Production - Multi-Provider via Anymail)
 # ===============================================================================
 
-EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
-EMAIL_HOST = os.environ.get("EMAIL_HOST")
-EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+# Dynamic email backend selection based on EMAIL_PROVIDER env var
+_email_backends = {
+    "amazon_ses": "anymail.backends.amazon_ses.EmailBackend",
+    "sendgrid": "anymail.backends.sendgrid.EmailBackend",
+    "mailgun": "anymail.backends.mailgun.EmailBackend",
+    "smtp": "django.core.mail.backends.smtp.EmailBackend",
+}
+
+EMAIL_BACKEND = _email_backends.get(
+    os.environ.get("EMAIL_PROVIDER", "smtp"),
+    "django.core.mail.backends.smtp.EmailBackend"
+)
+
+# SMTP fallback configuration (also used by some ESPs)
 EMAIL_USE_TLS = True
-EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER")
-EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD")
+
 # Default from email for production
-DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "noreply@pragmatichost.com")
-SERVER_EMAIL = DEFAULT_FROM_EMAIL
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "PRAHO Platform <noreply@pragmatichost.com>")
+SERVER_EMAIL = os.environ.get("SERVER_EMAIL", DEFAULT_FROM_EMAIL)
 
 # ===============================================================================
 # CACHE CONFIGURATION (Redis for Production - with fallback to Database)

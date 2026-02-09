@@ -114,25 +114,26 @@ def validate_email_subject(subject: str) -> None:
 
 
 def encrypt_sensitive_content(content: str, key: str | None = None) -> str:
-    """🔒 Encrypt sensitive content (placeholder implementation)"""
-    # Graceful fallback when encryption is unavailable
-    if not ENCRYPTION_AVAILABLE:
+    """🔒 Encrypt sensitive content using settings_encryption module."""
+    if not ENCRYPTION_AVAILABLE or not content:
         return content
-    # Placeholder implementation for test compatibility
-    # In production, this would use proper encryption
-    return f"ENCRYPTED:{content}"
+    try:
+        encrypted = settings_encryption.encrypt_value(content)
+        return encrypted if encrypted else content
+    except Exception as e:
+        logger.debug(f"Encryption failed, returning original: {e}")
+        return content
 
 
 def decrypt_sensitive_content(encrypted_content: str, key: str | None = None) -> str:
-    """🔒 Decrypt sensitive content (placeholder implementation)"""
-    # Graceful fallback when encryption is unavailable
-    if not ENCRYPTION_AVAILABLE:
+    """🔒 Decrypt sensitive content using settings_encryption module."""
+    if not ENCRYPTION_AVAILABLE or not encrypted_content:
         return encrypted_content
-    # Placeholder implementation for test compatibility
-    # In production, this would use proper decryption
-    if encrypted_content.startswith("ENCRYPTED:"):
-        return encrypted_content[10:]  # Remove "ENCRYPTED:" prefix
-    return encrypted_content
+    try:
+        return str(settings_encryption.decrypt_if_needed(encrypted_content))
+    except Exception as e:
+        logger.debug(f"Decryption failed, returning original: {e}")
+        return encrypted_content
 
 
 # ===============================================================================
@@ -576,3 +577,296 @@ class EmailCampaign(models.Model):
                 logger.warning("GDPR compliance issue: Marketing campaign without consent configured")
             except Exception as e:  # pragma: no cover
                 logger.debug(f"Failed to log GDPR warning: {e}")
+
+
+# ===============================================================================
+# EMAIL SUPPRESSION LIST
+# ===============================================================================
+
+
+class EmailSuppression(models.Model):
+    """
+    Email suppression list for managing bounced, complained, and unsubscribed addresses.
+    Persisted suppression data for compliance and deliverability.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    # Suppressed email (hashed for privacy)
+    email_hash = models.CharField(
+        max_length=64,
+        unique=True,
+        db_index=True,
+        help_text=_("SHA-256 hash of the suppressed email address"),
+    )
+
+    # Original email (encrypted for GDPR compliance)
+    email_encrypted = models.TextField(
+        blank=True,
+        help_text=_("Encrypted original email (for support requests)"),
+    )
+
+    # Suppression reason
+    REASON_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+        ("hard_bounce", _("Hard Bounce")),
+        ("soft_bounce_threshold", _("Soft Bounce Threshold Exceeded")),
+        ("complaint", _("Spam Complaint")),
+        ("unsubscribe", _("User Unsubscribed")),
+        ("manual", _("Manually Suppressed")),
+        ("invalid", _("Invalid Email Address")),
+    )
+    reason = models.CharField(
+        max_length=30,
+        choices=REASON_CHOICES,
+        help_text=_("Reason for suppression"),
+    )
+
+    # Timing
+    suppressed_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=_("When suppression expires (null = permanent)"),
+    )
+
+    # Tracking
+    bounce_count = models.PositiveIntegerField(default=1)
+    last_bounce_at = models.DateTimeField(null=True, blank=True)
+
+    # Provider info
+    provider = models.CharField(max_length=50, blank=True)
+    provider_response = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = "email_suppression"
+        verbose_name = _("Email Suppression")
+        verbose_name_plural = _("Email Suppressions")
+        indexes: ClassVar[tuple[models.Index, ...]] = (
+            models.Index(fields=["reason"]),
+            models.Index(fields=["suppressed_at"]),
+            models.Index(fields=["expires_at"]),
+        )
+
+    def __str__(self) -> str:
+        return f"Suppressed: {self.email_hash[:8]}... ({self.get_reason_display()})"
+
+    @classmethod
+    def suppress(
+        cls,
+        email: str,
+        reason: str,
+        provider: str = "",
+        expires_days: int | None = None,
+    ) -> "EmailSuppression":
+        """
+        Add an email to the suppression list.
+
+        Args:
+            email: Email address to suppress
+            reason: Suppression reason code
+            provider: Email provider that reported the issue
+            expires_days: Days until suppression expires (None = permanent)
+        """
+        import hashlib
+
+        from django.db import transaction
+        from django.utils import timezone
+
+        email_hash = hashlib.sha256(email.lower().encode()).hexdigest()
+        expires_at = None
+        if expires_days:
+            expires_at = timezone.now() + timezone.timedelta(days=expires_days)
+
+        now = timezone.now()
+
+        # Use transaction with select_for_update to prevent TOCTOU race
+        with transaction.atomic():
+            # Try to get existing suppression with row lock
+            existing = cls.objects.select_for_update().filter(email_hash=email_hash).first()
+
+            if existing:
+                # Update existing - increment bounce count atomically
+                existing.reason = reason
+                existing.provider = provider
+                existing.expires_at = expires_at
+                existing.bounce_count = models.F("bounce_count") + 1
+                existing.last_bounce_at = now
+                existing.save()
+                # Refresh to get actual bounce_count value after F() expression
+                existing.refresh_from_db()
+                return existing
+            else:
+                # Create new suppression
+                return cls.objects.create(
+                    email_hash=email_hash,
+                    reason=reason,
+                    provider=provider,
+                    expires_at=expires_at,
+                    bounce_count=1,
+                    last_bounce_at=now,
+                )
+
+    @classmethod
+    def is_suppressed(cls, email: str) -> bool:
+        """Check if an email is currently suppressed."""
+        import hashlib
+
+        from django.utils import timezone
+
+        email_hash = hashlib.sha256(email.lower().encode()).hexdigest()
+
+        suppression = cls.objects.filter(email_hash=email_hash).first()
+        if not suppression:
+            return False
+
+        # Check if expired
+        if suppression.expires_at and suppression.expires_at < timezone.now():
+            suppression.delete()
+            return False
+
+        return True
+
+
+# ===============================================================================
+# EMAIL PREFERENCE (GDPR-Compliant)
+# ===============================================================================
+
+
+class EmailPreference(models.Model):
+    """
+    Customer email preferences for GDPR-compliant marketing and notification management.
+    Tracks per-category consent and unsubscribe history.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    # Customer reference
+    customer = models.OneToOneField(
+        "customers.Customer",
+        on_delete=models.CASCADE,
+        related_name="email_preferences",
+        help_text=_("Customer these preferences belong to"),
+    )
+
+    # Category preferences (all default to True except marketing)
+    transactional = models.BooleanField(
+        default=True,
+        help_text=_("Receive transactional emails (invoices, receipts)"),
+    )
+    billing = models.BooleanField(
+        default=True,
+        help_text=_("Receive billing notifications (payment reminders)"),
+    )
+    service = models.BooleanField(
+        default=True,
+        help_text=_("Receive service notifications (provisioning, changes)"),
+    )
+    security = models.BooleanField(
+        default=True,
+        help_text=_("Receive security alerts (login attempts, 2FA)"),
+    )
+    marketing = models.BooleanField(
+        default=False,
+        help_text=_("Receive marketing emails (requires explicit consent)"),
+    )
+    newsletter = models.BooleanField(
+        default=False,
+        help_text=_("Receive newsletter (requires explicit consent)"),
+    )
+    product_updates = models.BooleanField(
+        default=True,
+        help_text=_("Receive product update notifications"),
+    )
+
+    # GDPR tracking
+    marketing_consent_date = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=_("When marketing consent was given"),
+    )
+    marketing_consent_source = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text=_("How consent was obtained (signup, preference_center, etc.)"),
+    )
+
+    # Unsubscribe tracking
+    global_unsubscribe = models.BooleanField(
+        default=False,
+        help_text=_("Globally unsubscribed from all non-essential emails"),
+    )
+    unsubscribed_at = models.DateTimeField(null=True, blank=True)
+    unsubscribe_reason = models.CharField(max_length=255, blank=True)
+
+    # Delivery preferences
+    FREQUENCY_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+        ("immediate", _("Immediate")),
+        ("daily_digest", _("Daily Digest")),
+        ("weekly_digest", _("Weekly Digest")),
+    )
+    notification_frequency = models.CharField(
+        max_length=20,
+        choices=FREQUENCY_CHOICES,
+        default="immediate",
+        help_text=_("How often to receive non-urgent notifications"),
+    )
+
+    # Audit fields
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "email_preference"
+        verbose_name = _("Email Preference")
+        verbose_name_plural = _("Email Preferences")
+
+    def __str__(self) -> str:
+        return f"Email Preferences for {self.customer}"
+
+    def can_receive(self, category: str) -> bool:
+        """
+        Check if customer can receive emails of a specific category.
+
+        Transactional emails (billing, security) are always allowed.
+        Marketing requires explicit consent.
+        """
+        # Global unsubscribe blocks everything except critical transactional
+        if self.global_unsubscribe and category not in ("billing", "security", "transactional"):
+            return False
+
+        # Map category to preference field
+        category_map = {
+            "transactional": True,  # Always allowed
+            "billing": self.billing,
+            "service": self.service,
+            "security": True,  # Always allowed for security
+            "marketing": self.marketing,
+            "newsletter": self.newsletter,
+            "product_updates": self.product_updates,
+            # Aliases
+            "provisioning": self.service,
+            "support": self.service,
+            "welcome": self.transactional,
+            "renewal": self.billing,
+            "suspension": self.billing,
+            "termination": self.billing,
+            "domain": self.service,
+            "maintenance": self.service,
+            "compliance": True,  # Legal compliance always allowed
+            "system": self.transactional,
+        }
+
+        return category_map.get(category, True)
+
+    def update_marketing_consent(self, consent: bool, source: str = "") -> None:
+        """Update marketing consent with GDPR tracking."""
+        from django.utils import timezone
+
+        self.marketing = consent
+        if consent:
+            self.marketing_consent_date = timezone.now()
+            self.marketing_consent_source = source
+        else:
+            # Don't clear the date - keep for audit trail
+            pass
+        self.save(update_fields=["marketing", "marketing_consent_date", "marketing_consent_source", "updated_at"])

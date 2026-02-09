@@ -235,9 +235,93 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 10485760  # 10MB
 DATA_UPLOAD_MAX_MEMORY_SIZE = 10485760  # 10MB
 FILE_UPLOAD_PERMISSIONS = 0o644
 
-# Email security
+# ===============================================================================
+# EMAIL CONFIGURATION 📧
+# ===============================================================================
+
+# Email security settings
 EMAIL_USE_TLS = True
 EMAIL_USE_SSL = False  # Use TLS instead of SSL
+
+# Default email addresses
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "PRAHO Platform <noreply@pragmatichost.com>")
+SERVER_EMAIL = os.environ.get("SERVER_EMAIL", "server@pragmatichost.com")
+
+# Email provider configuration
+# Supported: 'smtp', 'amazon_ses', 'sendgrid', 'mailgun', 'console', 'locmem'
+EMAIL_PROVIDER = os.environ.get("EMAIL_PROVIDER", "smtp")
+
+# SMTP Configuration (fallback/default)
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "localhost")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", "30"))
+
+# ===============================================================================
+# ANYMAIL CONFIGURATION (Multi-Provider Email Backend)
+# ===============================================================================
+
+ANYMAIL = {
+    # Amazon SES configuration
+    "AMAZON_SES_CLIENT_PARAMS": {
+        "region_name": os.environ.get("AWS_SES_REGION", "eu-west-1"),
+    },
+    "AMAZON_SES_SESSION_PARAMS": {
+        "aws_access_key_id": os.environ.get("AWS_ACCESS_KEY_ID"),
+        "aws_secret_access_key": os.environ.get("AWS_SECRET_ACCESS_KEY"),
+    },
+    "AMAZON_SES_CONFIGURATION_SET": os.environ.get("AWS_SES_CONFIGURATION_SET"),
+
+    # SendGrid configuration
+    "SENDGRID_API_KEY": os.environ.get("SENDGRID_API_KEY"),
+
+    # Mailgun configuration
+    "MAILGUN_API_KEY": os.environ.get("MAILGUN_API_KEY"),
+    "MAILGUN_SENDER_DOMAIN": os.environ.get("MAILGUN_SENDER_DOMAIN"),
+    "MAILGUN_API_URL": os.environ.get("MAILGUN_API_URL", "https://api.eu.mailgun.net/v3"),
+
+    # Webhook configuration
+    "WEBHOOK_SECRET": os.environ.get("EMAIL_WEBHOOK_SECRET"),
+
+    # Tracking settings
+    "TRACK_OPENS": True,
+    "TRACK_CLICKS": True,
+
+    # Ignore unsupported features rather than raising errors
+    "IGNORE_UNSUPPORTED_FEATURES": True,
+}
+
+# Email rate limiting and throttling
+EMAIL_RATE_LIMIT = {
+    "MAX_PER_MINUTE": int(os.environ.get("EMAIL_MAX_PER_MINUTE", "50")),
+    "MAX_PER_HOUR": int(os.environ.get("EMAIL_MAX_PER_HOUR", "1000")),
+    "MAX_PER_DAY": int(os.environ.get("EMAIL_MAX_PER_DAY", "10000")),
+    "BURST_SIZE": int(os.environ.get("EMAIL_BURST_SIZE", "100")),
+}
+
+# Email retry configuration
+EMAIL_RETRY = {
+    "MAX_RETRIES": int(os.environ.get("EMAIL_MAX_RETRIES", "3")),
+    "RETRY_DELAY_SECONDS": int(os.environ.get("EMAIL_RETRY_DELAY", "60")),
+    "EXPONENTIAL_BACKOFF": True,
+}
+
+# Email template configuration
+EMAIL_TEMPLATES = {
+    "CACHE_TIMEOUT": int(os.environ.get("EMAIL_TEMPLATE_CACHE_TIMEOUT", "3600")),  # 1 hour
+    "STRICT_MODE": os.environ.get("EMAIL_TEMPLATE_STRICT_MODE", "false").lower() == "true",
+}
+
+# Email deliverability settings
+EMAIL_DELIVERABILITY = {
+    "REQUIRE_SPF": True,
+    "REQUIRE_DKIM": True,
+    "REQUIRE_DMARC": True,
+    "SOFT_BOUNCE_THRESHOLD": int(os.environ.get("EMAIL_SOFT_BOUNCE_THRESHOLD", "3")),
+    "HARD_BOUNCE_ACTION": "suppress",  # 'suppress' or 'warn'
+    "COMPLAINT_ACTION": "suppress",    # 'suppress' or 'warn'
+}
 
 # ===============================================================================
 # DJANGO REST FRAMEWORK

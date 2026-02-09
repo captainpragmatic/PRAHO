@@ -6,6 +6,7 @@ All endpoints require appropriate authentication and include rate limiting.
 from django.urls import path
 
 from . import views
+from . import webhooks
 
 app_name = "notifications"
 
@@ -29,4 +30,15 @@ urlpatterns = [
     # SECURITY MONITORING
     # ===============================================================================
     path("api/security/monitoring/", views.security_monitoring_api, name="security_monitoring"),
+    # ===============================================================================
+    # EMAIL WEBHOOKS (ESP Delivery Tracking)
+    # ===============================================================================
+    path("webhooks/anymail/", webhooks.AnymailWebhookView.as_view(), name="webhook_anymail"),
+    path("webhooks/ses/", webhooks.SESWebhookView.as_view(), name="webhook_ses"),
+    path("webhooks/sendgrid/", webhooks.SendGridWebhookView.as_view(), name="webhook_sendgrid"),
+    path("webhooks/mailgun/", webhooks.MailgunWebhookView.as_view(), name="webhook_mailgun"),
+    # ===============================================================================
+    # EMAIL UNSUBSCRIBE
+    # ===============================================================================
+    path("unsubscribe/", webhooks.UnsubscribeView.as_view(), name="unsubscribe"),
 ]
