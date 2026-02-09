@@ -74,6 +74,8 @@ urlpatterns = [
     path("notifications/", include("apps.notifications.urls")),
     # External integrations & webhooks
     path("integrations/", include("apps.integrations.urls")),
+    # Promotions & Coupons
+    path("promotions/", include("apps.promotions.urls")),
     # GDPR compliance and audit
     path("audit/", include("apps.audit.urls")),
     # System configuration (staff only)

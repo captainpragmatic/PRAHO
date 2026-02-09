@@ -47,6 +47,7 @@ LOCAL_APPS: list[str] = [
     "apps.integrations",  # 🔌 External service webhooks & deduplication
     "apps.audit",
     "apps.ui",
+    "apps.promotions",  # 🎁 Coupons, discounts, loyalty programs
     "apps.settings",  # ⚙️ System configuration management
     "apps.api",  # 🚀 Centralized API endpoints (Sentry/Stripe pattern)
 ]

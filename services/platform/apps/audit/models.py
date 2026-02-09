@@ -351,6 +351,7 @@ class AuditEvent(models.Model):
         ("bulk_operation_started", "Bulk Operation Started"),
         ("bulk_operation_completed", "Bulk Operation Completed"),
         # ======================================================================
+<<<<<<< HEAD
         # INFRASTRUCTURE & NODE DEPLOYMENT EVENTS
         # ======================================================================
         ("node_deployment_created", "Node Deployment Created"),
@@ -374,6 +375,73 @@ class AuditEvent(models.Model):
         ("node_region_toggled", "Node Region Toggled"),
         ("infrastructure_ssh_key_generated", "SSH Key Generated"),
         ("infrastructure_ssh_key_revoked", "SSH Key Revoked"),
+=======
+        # PROMOTIONS & COUPONS EVENTS
+        # ======================================================================
+        # Campaign management
+        ("promotion_campaign_created", "Promotion Campaign Created"),
+        ("promotion_campaign_updated", "Promotion Campaign Updated"),
+        ("promotion_campaign_activated", "Promotion Campaign Activated"),
+        ("promotion_campaign_paused", "Promotion Campaign Paused"),
+        ("promotion_campaign_cancelled", "Promotion Campaign Cancelled"),
+        ("promotion_campaign_completed", "Promotion Campaign Completed"),
+        # Coupon management
+        ("coupon_created", "Coupon Created"),
+        ("coupon_updated", "Coupon Updated"),
+        ("coupon_deleted", "Coupon Deleted"),
+        ("coupon_activated", "Coupon Activated"),
+        ("coupon_deactivated", "Coupon Deactivated"),
+        ("coupon_expired", "Coupon Expired"),
+        ("coupon_depleted", "Coupon Usage Limit Reached"),
+        ("coupon_batch_created", "Coupon Batch Created"),
+        # Coupon redemption
+        ("coupon_redemption_initiated", "Coupon Redemption Initiated"),
+        ("coupon_redemption_applied", "Coupon Redemption Applied"),
+        ("coupon_redemption_failed", "Coupon Redemption Failed"),
+        ("coupon_redemption_reversed", "Coupon Redemption Reversed"),
+        ("coupon_validation_failed", "Coupon Validation Failed"),
+        # Promotion rules
+        ("promotion_rule_created", "Promotion Rule Created"),
+        ("promotion_rule_updated", "Promotion Rule Updated"),
+        ("promotion_rule_activated", "Promotion Rule Activated"),
+        ("promotion_rule_deactivated", "Promotion Rule Deactivated"),
+        ("promotion_rule_applied", "Promotion Rule Applied"),
+        # Gift cards
+        ("gift_card_created", "Gift Card Created"),
+        ("gift_card_activated", "Gift Card Activated"),
+        ("gift_card_redeemed", "Gift Card Redeemed"),
+        ("gift_card_refunded", "Gift Card Refunded"),
+        ("gift_card_adjusted", "Gift Card Balance Adjusted"),
+        ("gift_card_expired", "Gift Card Expired"),
+        ("gift_card_cancelled", "Gift Card Cancelled"),
+        ("gift_card_depleted", "Gift Card Depleted"),
+        ("gift_card_status_changed", "Gift Card Status Changed"),
+        ("gift_card_transaction", "Gift Card Transaction"),
+        # Referrals
+        ("referral_code_created", "Referral Code Created"),
+        ("referral_code_updated", "Referral Code Updated"),
+        ("referral_created", "Referral Created"),
+        ("referral_qualified", "Referral Qualified"),
+        ("referral_rewarded", "Referral Rewarded"),
+        ("referral_expired", "Referral Expired"),
+        ("referral_cancelled", "Referral Cancelled"),
+        ("referral_updated", "Referral Updated"),
+        # Loyalty program
+        ("loyalty_program_created", "Loyalty Program Created"),
+        ("loyalty_program_updated", "Loyalty Program Updated"),
+        ("loyalty_tier_created", "Loyalty Tier Created"),
+        ("loyalty_tier_updated", "Loyalty Tier Updated"),
+        ("loyalty_member_enrolled", "Loyalty Member Enrolled"),
+        ("loyalty_tier_changed", "Loyalty Tier Changed"),
+        ("loyalty_points_earned", "Loyalty Points Earned"),
+        ("loyalty_points_redeemed", "Loyalty Points Redeemed"),
+        ("loyalty_points_expired", "Loyalty Points Expired"),
+        ("loyalty_points_adjusted", "Loyalty Points Adjusted"),
+        ("loyalty_points_bonus", "Loyalty Points Bonus"),
+        ("loyalty_points_refunded", "Loyalty Points Refunded"),
+        ("loyalty_tier_bonus", "Loyalty Tier Bonus"),
+        ("loyalty_transaction", "Loyalty Transaction"),
+>>>>>>> origin/claude/promotions-coupons-system-RK7WI
     )
 
     # Unique event ID
