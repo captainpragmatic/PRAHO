@@ -358,8 +358,9 @@ def _update_category_settings(request: HttpRequest, category_key: str) -> JsonRe
             converted_value = _convert_setting_value(str(value), setting.data_type)
             SettingsService.set_setting(setting_key, converted_value)
             updated_count += 1
-        except (SystemSetting.DoesNotExist, ValueError, TypeError) as e:
-            errors.append(f"Error updating {setting_key}: {e!s}")
+        except (SystemSetting.DoesNotExist, ValueError, TypeError):
+            # SECURITY: Don't expose internal error details
+            errors.append(f"Error updating {setting_key}")
 
     if errors:
         return JsonResponse({"success": False, "errors": errors}, status=400)
@@ -398,7 +399,8 @@ def category_management_partial(request: HttpRequest, category_key: str) -> Http
 
     except Exception as e:
         logger.error(f"💥 Error in category management partial: {e}")
-        return JsonResponse({"error": str(e)}, status=500)
+        # SECURITY: Don't expose internal error details
+        return JsonResponse({"error": "Internal error processing category settings"}, status=500)
 
 
 # ===============================================================================
@@ -474,7 +476,8 @@ def settings_health_check(request: HttpRequest) -> JsonResponse:
 
     except Exception as e:
         logger.error(f"💥 Settings health check failed: {e}")
-        return JsonResponse({"success": False, "status": "unhealthy", "error": str(e)}, status=500)
+        # SECURITY: Don't expose internal error details
+        return JsonResponse({"success": False, "status": "unhealthy", "error": "Health check failed"}, status=500)
 
 
 # ===============================================================================

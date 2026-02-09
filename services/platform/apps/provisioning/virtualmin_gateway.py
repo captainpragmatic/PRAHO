@@ -619,16 +619,18 @@ class VirtualminGateway:
             env_password = os.environ.get("VIRTUALMIN_ADMIN_PASSWORD")
 
             if env_username and env_password:
-                logger.info(
+                # SECURITY: Use DEBUG level to avoid credential exposure in production logs
+                logger.debug(
                     f"🔐 [Virtualmin Gateway] Using environment credentials for {self.server.hostname} (migration needed)"
                 )
                 return Ok((env_username, env_password))
 
             return Err("No valid credentials found in vault, server config, or environment")
 
-        except Exception as e:
-            logger.error(f"🔥 [Virtualmin Gateway] Credential retrieval failed: {e}")
-            return Err(f"Credential retrieval error: {e}")
+        except Exception:
+            # SECURITY: Don't expose exception details that could leak credential info
+            logger.exception("🔥 [Virtualmin Gateway] Credential retrieval failed")
+            return Err("Credential retrieval error")
 
     def call_with_auth_fallback(
         self, program: str, parameters: dict[str, Any] | None = None, use_fallback_auth: bool = True

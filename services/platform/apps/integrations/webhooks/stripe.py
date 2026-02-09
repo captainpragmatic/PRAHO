@@ -50,9 +50,20 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         return str(payload.get("type", ""))
 
     def verify_signature(self, payload: dict[str, Any], signature: str, headers: dict[str, str]) -> bool:
+<<<<<<< HEAD
         """🔐 Verify Stripe webhook signature using settings system"""
         try:
             from apps.settings.services import SettingsService
+=======
+        """🔐 Verify Stripe webhook signature using raw request body.
+
+        SECURITY FIX: Uses raw request body (_raw_body) instead of re-serialized JSON.
+        This prevents signature bypass attacks where JSON key ordering or whitespace
+        differences between the original request and re-serialization could allow
+        forged payloads to pass verification.
+        """
+        webhook_secret = getattr(settings, "STRIPE_WEBHOOK_SECRET", None)
+>>>>>>> origin/claude/security-audit-HT710
 
             # Get encrypted webhook secret from settings system
             webhook_secret = SettingsService.get("integrations.stripe_webhook_secret")
@@ -72,6 +83,23 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             logger.error(f"🔥 Error verifying Stripe webhook signature: {e}")
             return False
 
+<<<<<<< HEAD
+=======
+        # SECURITY: Use raw body from request, NOT re-serialized JSON
+        # The _raw_body is attached by WebhookView._parse_request()
+        raw_body = payload.get("_raw_body")
+        if raw_body is None:
+            # Fallback for backwards compatibility, but log warning
+            logger.warning("⚠️ No raw body available for signature verification - using re-serialized JSON (less secure)")
+            payload_body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        else:
+            payload_body = raw_body if isinstance(raw_body, bytes) else raw_body.encode("utf-8")
+
+        return verify_stripe_signature(
+            payload_body=payload_body, stripe_signature=signature, webhook_secret=webhook_secret
+        )
+
+>>>>>>> origin/claude/security-audit-HT710
     def __init__(self) -> None:
         super().__init__()
         # Event handler registry - maps event prefixes to handler methods
@@ -99,9 +127,10 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                 logger.info(f"⏭️ Skipping unknown Stripe event type: {event_type}")
                 return True, f"Skipped unknown event type: {event_type}"
 
-        except Exception as e:
+        except Exception:
             logger.exception(f"💥 Error handling Stripe event {event_type}")
-            return False, f"Handler error: {e!s}"
+            # SECURITY: Never expose internal exception details
+            return False, "Handler error: internal processing failure"
 
     def _find_event_handler(self, event_type: str) -> StripeEventHandler | None:
         """Find the appropriate handler for the given event type."""
@@ -111,66 +140,89 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         return None
 
     def handle_payment_intent_event(self, event_type: str, payload: dict[str, Any]) -> tuple[bool, str]:
-        """💳 Handle PaymentIntent events"""
+        """💳 Handle PaymentIntent events with race condition protection.
+
+        SECURITY FIX: Uses select_for_update() to prevent race conditions where
+        concurrent webhook deliveries could corrupt payment state.
+        """
+        from django.db import transaction
+
         payment_intent = payload.get("data", {}).get("object", {})
         stripe_payment_id = payment_intent.get("id")
 
         if not stripe_payment_id:
             return False, "Missing PaymentIntent ID"
 
-        # Find our Payment record by Stripe ID
-        try:
-            payment = Payment.objects.get(gateway_txn_id=stripe_payment_id)
-        except Payment.DoesNotExist:
-            # Payment not found - might be created outside our system
-            logger.warning(f"⚠️ Payment not found for Stripe PaymentIntent: {stripe_payment_id}")
-            return True, f"Payment not found (external): {stripe_payment_id}"
+        # SECURITY: Use atomic transaction with row locking to prevent race conditions
+        with transaction.atomic():
+            try:
+                # Lock the payment row to prevent concurrent updates
+                payment = Payment.objects.select_for_update().get(gateway_txn_id=stripe_payment_id)
+            except Payment.DoesNotExist:
+                # Payment not found - might be created outside our system
+                logger.warning(f"⚠️ Payment not found for Stripe PaymentIntent: {stripe_payment_id}")
+                return True, f"Payment not found (external): {stripe_payment_id}"
 
-        if event_type == "payment_intent.succeeded":
-            # Payment succeeded
-            payment.status = "succeeded"
-            payment.meta.update(
-                {
-                    "stripe_payment_intent": stripe_payment_id,
-                    "stripe_payment_method": payment_intent.get("payment_method"),
-                    "stripe_amount_received": payment_intent.get("amount_received"),
-                }
-            )
-            payment.save(update_fields=["status", "meta"])
+            # IDEMPOTENCY CHECK: Skip if already in terminal state
+            if payment.status in ("succeeded", "refunded") and event_type == "payment_intent.succeeded":
+                logger.info(f"⏭️ Payment {payment.id} already succeeded, skipping duplicate webhook")
+                return True, f"Payment {payment.id} already processed (idempotent)"
 
-            # Update associated invoice if exists
-            if payment.invoice:
-                payment.invoice.update_status_from_payments()
+            if event_type == "payment_intent.succeeded":
+                # Payment succeeded
+                payment.status = "succeeded"
+                payment.meta.update(
+                    {
+                        "stripe_payment_intent": stripe_payment_id,
+                        "stripe_payment_method": payment_intent.get("payment_method"),
+                        "stripe_amount_received": payment_intent.get("amount_received"),
+                    }
+                )
+                payment.save(update_fields=["status", "meta", "updated_at"])
 
+<<<<<<< HEAD
             # 🔔 NEW: Notify Portal of payment success
             self._notify_portal_payment_success(payment, payment_intent)
 
             logger.info(f"✅ Payment {payment.id} marked as succeeded from Stripe")
             return True, f"Payment {payment.id} succeeded"
+=======
+                # Update associated invoice if exists
+                if payment.invoice:
+                    payment.invoice.update_status_from_payments()
+>>>>>>> origin/claude/security-audit-HT710
 
-        elif event_type == "payment_intent.payment_failed":
-            # Payment failed
-            failure_reason = payment_intent.get("last_payment_error", {}).get("message", "Unknown error")
+                logger.info(f"✅ Payment {payment.id} marked as succeeded from Stripe")
+                return True, f"Payment {payment.id} succeeded"
 
-            payment.status = "failed"
-            payment.meta.update(
-                {
-                    "stripe_payment_intent": stripe_payment_id,
-                    "stripe_failure_reason": failure_reason,
-                }
-            )
-            payment.save(update_fields=["status", "meta"])
+            elif event_type == "payment_intent.payment_failed":
+                # IDEMPOTENCY: Don't overwrite succeeded status with failed
+                if payment.status == "succeeded":
+                    logger.warning(f"⚠️ Ignoring failed event for already-succeeded payment {payment.id}")
+                    return True, f"Payment {payment.id} already succeeded, ignoring failure"
 
-            # Trigger dunning process if this was an invoice payment
-            if payment.invoice:
-                # TODO: Trigger payment retry/dunning logic
-                pass
+                # Payment failed
+                failure_reason = payment_intent.get("last_payment_error", {}).get("message", "Unknown error")
 
-            logger.warning(f"❌ Payment {payment.id} marked as failed from Stripe: {failure_reason}")
-            return True, f"Payment {payment.id} failed: {failure_reason}"
+                payment.status = "failed"
+                payment.meta.update(
+                    {
+                        "stripe_payment_intent": stripe_payment_id,
+                        "stripe_failure_reason": failure_reason,
+                    }
+                )
+                payment.save(update_fields=["status", "meta", "updated_at"])
 
-        else:
-            return True, f"Skipped PaymentIntent event: {event_type}"
+                # Trigger dunning process if this was an invoice payment
+                if payment.invoice:
+                    # TODO: Trigger payment retry/dunning logic
+                    pass
+
+                logger.warning(f"❌ Payment {payment.id} marked as failed from Stripe")
+                return True, f"Payment {payment.id} failed"
+
+            else:
+                return True, f"Skipped PaymentIntent event: {event_type}"
 
     def handle_invoice_event(self, event_type: str, payload: dict[str, Any]) -> tuple[bool, str]:
         """🧾 Handle Stripe Invoice events"""

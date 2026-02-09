@@ -100,17 +100,26 @@ class WebhookView(View):
             else:
                 return self._create_error_response(result.error)
 
-        except Exception as e:
+        except Exception:
             logger.exception(f"💥 Critical error processing {self.source_name} webhook")
-            return JsonResponse({"status": "error", "message": f"Internal error: {e!s}"}, status=500)
+            # SECURITY: Never expose internal exception details to external callers
+            return JsonResponse({"status": "error", "message": "Internal processing error"}, status=500)
 
     def _parse_request(self, request: Any) -> Result[dict[str, Any], str]:
-        """Parse and validate the incoming request payload."""
+        """Parse and validate the incoming request payload.
+
+        SECURITY: Store raw body for signature verification before JSON parsing.
+        This prevents signature bypass attacks via JSON re-serialization differences.
+        """
         if request.content_type != "application/json":
             return Err("Content-Type must be application/json")
 
         try:
-            payload = json.loads(request.body)
+            # Store raw body for signature verification (SECURITY FIX)
+            raw_body = request.body
+            payload = json.loads(raw_body)
+            # Attach raw body to payload for downstream signature verification
+            payload["_raw_body"] = raw_body
             return Ok(payload)
         except json.JSONDecodeError:
             return Err("Invalid JSON payload")
@@ -353,9 +362,10 @@ def retry_webhook(request: HttpRequest, webhook_id: str | int) -> JsonResponse:
                 # Fallback for any unexpected cases
                 return JsonResponse({"error": "Unknown result type"}, status=500)  # type: ignore[unreachable]
 
-    except Exception as e:
+    except Exception:
         logger.exception(f"Error retrying webhook {webhook_id}")
-        return JsonResponse({"error": f"Internal error: {e!s}"}, status=500)
+        # SECURITY: Never expose internal exception details to external callers
+        return JsonResponse({"error": "Internal processing error"}, status=500)
 
 
 def _get_webhook_event(webhook_id: str | int) -> Result[WebhookEvent, str]:

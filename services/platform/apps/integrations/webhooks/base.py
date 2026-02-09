@@ -144,9 +144,10 @@ class BaseWebhookProcessor(ABC):
 
                     return WebhookProcessingResult.error_result(error_message).to_tuple()
 
-        except Exception as e:
+        except Exception:
             logger.exception(f"💥 Critical error processing {self.source_name} webhook")
-            return WebhookProcessingResult.error_result(f"Critical error: {e!s}").to_tuple()
+            # SECURITY: Never expose internal exception details
+            return WebhookProcessingResult.error_result("Critical error: internal processing failure").to_tuple()
 
     def _validate_payload(self, payload: dict[str, Any]) -> Result[dict[str, str], str]:
         """Step 1: Validate payload and extract event information."""
@@ -227,8 +228,9 @@ class BaseWebhookProcessor(ABC):
                     logger.error(f"❌ Failed {self.source_name} webhook {event_id}: {message}")
                     return Ok(WebhookProcessingResult.error_result(message, webhook_event))
 
-            except Exception as e:
-                error_msg = f"Processing error: {e!s}"
+            except Exception:
+                # SECURITY: Log full details internally but don't expose to caller
+                error_msg = "Processing error: internal failure"
                 webhook_event.mark_failed(error_msg)
                 logger.exception(f"💥 Exception processing {self.source_name} webhook {event_id}")
                 return Ok(WebhookProcessingResult.error_result(error_msg, webhook_event))

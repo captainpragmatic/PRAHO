@@ -179,8 +179,9 @@ class RefundService:
             # Process refund
             return RefundService._execute_order_refund(order, refund_data)
 
-        except Exception as e:
-            return Result.err(f"Unexpected error during refund processing: {e!s}")
+        except Exception:
+            # SECURITY: Don't expose internal error details to caller
+            return Result.err("Unexpected error during refund processing")
 
     @staticmethod
     def _normalize_refund_data(refund_data: RefundData) -> None:
@@ -190,14 +191,20 @@ class RefundService:
 
     @staticmethod
     def _get_order(order_id: Any) -> Result[Any, str]:
-        """Get order by ID with error handling"""
+        """Get order by ID with error handling and row locking.
+
+        SECURITY FIX: Uses select_for_update() to prevent race conditions
+        where concurrent refund requests could process the same order twice.
+        """
         try:
-            order = Order.objects.select_related("customer").get(id=order_id)
+            # SECURITY: Lock the order row to prevent concurrent refund processing
+            order = Order.objects.select_for_update().select_related("customer").get(id=order_id)
             return Result.ok(order)
         except Order.DoesNotExist:
             return Result.err("Failed to process refund: Order not found")
-        except Exception as e:
-            return Result.err(f"Failed to process refund: {e!s}")
+        except Exception:
+            # SECURITY: Don't expose internal error details
+            return Result.err("Failed to process refund: database error")
 
     @staticmethod
     def _validate_order_refund(order: Any, refund_data: RefundData) -> Result[None, str]:
@@ -317,19 +324,26 @@ class RefundService:
             # Process refund
             return RefundService._execute_invoice_refund(invoice, refund_data)
 
-        except Exception as e:
-            return Result.err(f"Failed to process refund: {e!s}")
+        except Exception:
+            # SECURITY: Don't expose internal error details
+            return Result.err("Failed to process refund: internal error")
 
     @staticmethod
     def _get_invoice(invoice_id: Any) -> Result[Any, str]:
-        """Get invoice by ID with error handling"""
+        """Get invoice by ID with error handling and row locking.
+
+        SECURITY FIX: Uses select_for_update() to prevent race conditions
+        where concurrent refund requests could process the same invoice twice.
+        """
         try:
-            invoice = Invoice.objects.select_related("order", "customer").get(id=invoice_id)
+            # SECURITY: Lock the invoice row to prevent concurrent refund processing
+            invoice = Invoice.objects.select_for_update().select_related("order", "customer").get(id=invoice_id)
             return Result.ok(invoice)
         except Invoice.DoesNotExist:
             return Result.err("Failed to process refund: Invoice not found")
-        except Exception as e:
-            return Result.err(f"Failed to process refund: {e!s}")
+        except Exception:
+            # SECURITY: Don't expose internal error details
+            return Result.err("Failed to process refund: database error")
 
     @staticmethod
     def _validate_invoice_refund(invoice: Any, refund_data: RefundData) -> Result[None, str]:
@@ -419,8 +433,9 @@ class RefundService:
             entity = entity_result.unwrap()
             return RefundService._check_entity_refund_eligibility(entity, entity_type)
 
-        except Exception as e:
-            return Result.err(f"Error checking eligibility: {e!s}")
+        except Exception:
+            # SECURITY: Don't expose internal error details
+            return Result.err("Error checking eligibility")
 
     @staticmethod
     def _get_entity_for_refund_check(entity_type: str, entity_id: Any) -> Result[Any, str]:
@@ -494,8 +509,9 @@ class RefundService:
             stats["total_amount"] = Decimal(stats["total_amount_cents"]) / 100
 
             return Result.ok(stats)
-        except Exception as e:
-            return Result.err(f"Error getting statistics: {e!s}")
+        except Exception:
+            # SECURITY: Don't expose internal error details
+            return Result.err("Error getting statistics")
 
     # Internal validation methods
     @staticmethod
@@ -525,8 +541,9 @@ class RefundService:
                 return Result.ok(amount_result)
 
             return Result.ok(RefundService._create_eligibility_result(False, "Order not eligible", 0, already_refunded))
-        except Exception as e:
-            return Result.err(f"Failed to validate eligibility: {e!s}")
+        except Exception:
+            # SECURITY: Don't expose internal error details
+            return Result.err("Failed to validate eligibility")
 
     @staticmethod
     def _check_order_status_eligibility(
@@ -665,8 +682,9 @@ class RefundService:
                 RefundService._create_eligibility_response(eligibility_status, reason, max_refundable, already_refunded)
             )
 
-        except Exception as e:
-            return Result.err(f"Failed to validate eligibility: {e!s}")
+        except Exception:
+            # SECURITY: Don't expose internal error details
+            return Result.err("Failed to validate eligibility")
 
     @staticmethod
     def _validate_refund_amount(refund_type: RefundType, amount: int, max_amount: Decimal) -> Result[None, str]:
@@ -722,8 +740,9 @@ class RefundService:
                     final_result["payment_refund_error"] = payment_result.error
 
             return Result.ok(final_result)
-        except Exception as e:
-            return Result.err(f"Failed to process refund: {e!s}")
+        except Exception:
+            # SECURITY: Don't expose internal error details
+            return Result.err("Failed to process refund")
 
     @staticmethod
     def _extract_refund_amount(refund_data: RefundData | None, kwargs: dict[str, Any]) -> int:
@@ -865,9 +884,9 @@ class RefundService:
                 return Result.ok(None)
 
             return Result.err("Order update failed")
-        except Exception as e:
-            # Return proper error message for tests with more detail
-            return Result.err(f"Failed to update order status: {e!s}")
+        except Exception:
+            # SECURITY: Don't expose internal error details
+            return Result.err("Failed to update order status")
 
     @staticmethod
     def _update_invoice_refund_status(
@@ -893,9 +912,9 @@ class RefundService:
                 return Result.ok(None)
 
             return Result.err("Invoice update failed")
-        except Exception as e:
-            # Log but don't fail the refund process
-            return Result.err(f"Invoice update failed: {e!s}")
+        except Exception:
+            # SECURITY: Don't expose internal error details
+            return Result.err("Invoice update failed")
 
     @staticmethod
     def _create_audit_entry(refund_id: Any, entity_type: str, entity_id: Any, refund_data: RefundData | None) -> None:
@@ -1006,8 +1025,9 @@ class RefundService:
                 RefundService._create_order_refund_eligibility(True, "Eligible", max_refundable, already_refunded)
             )
 
-        except Exception as e:
-            return Result.err(f"Failed to validate eligibility: {e!s}")
+        except Exception:
+            # SECURITY: Don't expose internal error details
+            return Result.err("Failed to validate eligibility")
 
     @staticmethod
     def _validate_and_prepare_invoice_refund(invoice: Any, refund_data: RefundData) -> Result[RefundEligibility, str]:
@@ -1053,8 +1073,9 @@ class RefundService:
                 RefundService._create_order_refund_eligibility(True, "Eligible", max_refundable, already_refunded)
             )
 
-        except Exception as e:
-            return Result.err(f"Failed to validate eligibility: {e!s}")
+        except Exception:
+            # SECURITY: Don't expose internal error details
+            return Result.err("Failed to validate eligibility")
 
     @staticmethod
     def _process_payment_refund(
@@ -1116,8 +1137,9 @@ class RefundService:
                 }
             )
 
-        except Exception as e:
-            return Result.err(f"Failed to process payment refund: {e!s}")
+        except Exception:
+            # SECURITY: Don't expose internal error details
+            return Result.err("Failed to process payment refund")
 
 
 class RefundQueryService:
@@ -1169,8 +1191,9 @@ class RefundQueryService:
                 "refunds_by_type": refunds_by_type,
             }
             return Result.ok(stats)
-        except Exception as e:
-            return Result.err(f"Error getting refund statistics: {e!s}")
+        except Exception:
+            # SECURITY: Don't expose internal error details
+            return Result.err("Error getting refund statistics")
 
     @staticmethod
     def get_entity_refunds(entity_type: str, entity_id: Any) -> Result[list[dict[str, Any]], str]:
@@ -1232,9 +1255,9 @@ class RefundQueryService:
             )
 
             return Result.ok(refunds)
-        except Exception as e:
-            # Return error for unexpected exceptions as some tests expect this
-            return Result.err(f"Failed to get refund history: {e!s}")
+        except Exception:
+            # SECURITY: Don't expose internal error details
+            return Result.err("Failed to get refund history")
 
 
 # Export all public interfaces
