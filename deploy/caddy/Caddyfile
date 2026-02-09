@@ -1,0 +1,92 @@
+# =============================================================================
+# PRAHO - Caddy Reverse Proxy Configuration
+# =============================================================================
+# Automatic HTTPS with Let's Encrypt
+# Routes: /admin, /api, /dashboard -> Platform | / -> Portal
+
+{$DOMAIN:localhost} {
+    # TLS configuration
+    tls {$ACME_EMAIL:admin@example.com}
+
+    # Security headers
+    header {
+        X-Frame-Options "DENY"
+        X-Content-Type-Options "nosniff"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+
+    # Compression
+    encode gzip zstd
+
+    # Static files (cached)
+    handle_path /static/* {
+        root * /srv/static
+        file_server
+        header Cache-Control "public, max-age=31536000, immutable"
+    }
+
+    handle_path /media/* {
+        root * /srv/media
+        file_server
+        header Cache-Control "public, max-age=86400"
+    }
+
+    handle_path /portal-static/* {
+        root * /srv/portal-static
+        file_server
+        header Cache-Control "public, max-age=31536000, immutable"
+    }
+
+    # Platform routes (admin, API, dashboard)
+    handle /admin/* {
+        reverse_proxy platform:8700 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    handle /api/* {
+        reverse_proxy platform:8700 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    handle /dashboard/* {
+        reverse_proxy platform:8700 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # Health checks
+    handle /health/* {
+        reverse_proxy platform:8700
+    }
+
+    handle /portal-health/* {
+        reverse_proxy portal:8701
+    }
+
+    # Portal handles everything else (customer-facing)
+    handle {
+        reverse_proxy portal:8701 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # Logging
+    log {
+        output file /data/access.log {
+            roll_size 100mb
+            roll_keep 5
+        }
+    }
+}

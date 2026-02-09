@@ -1,0 +1,145 @@
+# =============================================================================
+# PRAHO - SINGLE SERVER DEPLOYMENT (All Services)
+# =============================================================================
+# Deploy Platform + Portal + PostgreSQL + Caddy on a single server
+# Usage: docker-compose -f deploy/docker-compose.single-server.yml up -d
+#
+# Required environment variables in .env:
+#   - DOMAIN (e.g., praho.example.com)
+#   - DB_PASSWORD
+#   - SECRET_KEY
+#   - ACME_EMAIL (for Let's Encrypt)
+
+services:
+  # ===========================================================================
+  # DATABASE - PostgreSQL
+  # ===========================================================================
+  db:
+    image: postgres:15-alpine
+    container_name: praho_db
+    environment:
+      POSTGRES_DB: praho
+      POSTGRES_USER: praho
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U praho -d praho"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  # ===========================================================================
+  # PLATFORM SERVICE - Full Django Application
+  # ===========================================================================
+  platform:
+    image: ${REGISTRY:-}praho-platform:${VERSION:-latest}
+    build:
+      context: ..
+      dockerfile: deploy/platform/Dockerfile
+    container_name: praho_platform
+    environment:
+      - DEBUG=0
+      - DATABASE_URL=postgresql://praho:${DB_PASSWORD}@db:5432/praho
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY required}
+      - DJANGO_SETTINGS_MODULE=config.settings.prod
+      - ALLOWED_HOSTS=${DOMAIN:-localhost},platform
+      - CSRF_TRUSTED_ORIGINS=https://${DOMAIN:-localhost}
+      - SERVICE_NAME=platform
+    volumes:
+      - static_files:/app/staticfiles
+      - media_files:/app/media
+      - logs:/app/logs
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8700/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - internal
+      - web
+
+  # ===========================================================================
+  # PORTAL SERVICE - Lightweight Customer API
+  # ===========================================================================
+  portal:
+    image: ${REGISTRY:-}praho-portal:${VERSION:-latest}
+    build:
+      context: ..
+      dockerfile: deploy/portal/Dockerfile
+    container_name: praho_portal
+    environment:
+      - DEBUG=0
+      - PLATFORM_API_BASE_URL=http://platform:8700/api
+      - SECRET_KEY=${SECRET_KEY}
+      - DJANGO_SETTINGS_MODULE=config.settings
+      - ALLOWED_HOSTS=${DOMAIN:-localhost},portal
+      - CSRF_TRUSTED_ORIGINS=https://${DOMAIN:-localhost}
+      - SERVICE_NAME=portal
+    volumes:
+      - portal_static:/app/staticfiles
+      - portal_logs:/app/logs
+    depends_on:
+      platform:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8701/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - web
+
+  # ===========================================================================
+  # CADDY - Reverse Proxy with Automatic HTTPS
+  # ===========================================================================
+  caddy:
+    image: caddy:2-alpine
+    container_name: praho_caddy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+      - ACME_EMAIL=${ACME_EMAIL:-admin@example.com}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - static_files:/srv/static:ro
+      - media_files:/srv/media:ro
+      - portal_static:/srv/portal-static:ro
+    depends_on:
+      - platform
+      - portal
+    restart: unless-stopped
+    networks:
+      - web
+
+networks:
+  internal:
+    driver: bridge
+  web:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  static_files:
+  media_files:
+  logs:
+  portal_static:
+  portal_logs:
+  caddy_data:
+  caddy_config:

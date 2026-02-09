@@ -1,0 +1,21 @@
+# =============================================================================
+# PRAHO - Single Server Inventory
+# =============================================================================
+# All services on one server
+
+all:
+  hosts:
+    praho-server:
+      ansible_host: "{{ lookup('env', 'PRAHO_SERVER_IP') | default('your-server-ip', true) }}"
+      ansible_user: "{{ lookup('env', 'PRAHO_SSH_USER') | default('root', true) }}"
+      ansible_ssh_private_key_file: "{{ lookup('env', 'PRAHO_SSH_KEY') | default('~/.ssh/id_rsa', true) }}"
+
+  children:
+    praho:
+      hosts:
+        praho-server:
+      vars:
+        deploy_platform: true
+        deploy_portal: true
+        deploy_database: true
+        deploy_caddy: true

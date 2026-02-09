@@ -1,0 +1,68 @@
+# =============================================================================
+# PRAHO - Rollback Playbook
+# =============================================================================
+# Rolls back to a specific version or restores from backup
+#
+# Usage:
+#   ansible-playbook -i inventory/single-server.yml playbooks/rollback.yml -e version=v1.2.3
+#   ansible-playbook -i inventory/single-server.yml playbooks/rollback.yml -e restore_backup=true
+
+---
+- name: Rollback PRAHO
+  hosts: primary,praho
+  become: yes
+  gather_facts: no
+
+  vars:
+    version: ""
+    restore_backup: false
+
+  tasks:
+    - name: Validate input
+      assert:
+        that:
+          - version != "" or restore_backup
+        fail_msg: "Must specify either version (-e version=v1.2.3) or -e restore_backup=true"
+
+    - name: Rollback to version
+      when: version != ""
+      block:
+        - name: Create pre-rollback backup
+          command: "{{ project_root }}/scripts/backup.sh"
+
+        - name: Stop services
+          command: docker compose down
+          args:
+            chdir: "{{ project_root }}"
+
+        - name: Update version in environment
+          lineinfile:
+            path: "{{ project_root }}/.env"
+            regexp: "^VERSION="
+            line: "VERSION={{ version }}"
+
+        - name: Start services with new version
+          command: docker compose up -d
+          args:
+            chdir: "{{ project_root }}"
+
+        - name: Wait for services
+          pause:
+            seconds: 30
+
+        - name: Verify health
+          uri:
+            url: "http://localhost:{{ platform_port }}/health/"
+            status_code: 200
+          register: health_check
+          retries: 5
+          delay: 5
+
+    - name: Restore from latest backup
+      when: restore_backup
+      command: "{{ project_root }}/scripts/rollback.sh latest-backup"
+      register: restore_result
+
+    - name: Show rollback result
+      debug:
+        msg: "Rollback completed successfully"

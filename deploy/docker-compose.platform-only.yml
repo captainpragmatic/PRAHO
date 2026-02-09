@@ -1,0 +1,117 @@
+# =============================================================================
+# PRAHO - PLATFORM ONLY DEPLOYMENT
+# =============================================================================
+# Deploy Platform service only (with or without database)
+# Portal runs separately or not at all
+#
+# Profiles:
+#   - default: Platform only (external database)
+#   - with-db: Platform + PostgreSQL
+#   - with-caddy: Platform + Caddy reverse proxy
+#   - full: Platform + PostgreSQL + Caddy
+#
+# Usage:
+#   docker-compose -f docker-compose.platform-only.yml up -d              # Platform only
+#   docker-compose -f docker-compose.platform-only.yml --profile with-db up -d  # With DB
+#   docker-compose -f docker-compose.platform-only.yml --profile full up -d     # Full stack
+
+services:
+  # ===========================================================================
+  # DATABASE (optional - use profile: with-db or full)
+  # ===========================================================================
+  db:
+    image: postgres:15-alpine
+    container_name: praho_db
+    environment:
+      POSTGRES_DB: praho
+      POSTGRES_USER: praho
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U praho -d praho"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+    profiles:
+      - with-db
+      - full
+
+  # ===========================================================================
+  # PLATFORM SERVICE
+  # ===========================================================================
+  platform:
+    image: ${REGISTRY:-}praho-platform:${VERSION:-latest}
+    build:
+      context: ..
+      dockerfile: deploy/platform/Dockerfile
+    container_name: praho_platform
+    ports:
+      - "${PLATFORM_PORT:-8700}:8700"
+    environment:
+      - DEBUG=0
+      - DATABASE_URL=${DATABASE_URL:-postgresql://praho:${DB_PASSWORD}@db:5432/praho}
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY required}
+      - DJANGO_SETTINGS_MODULE=config.settings.prod
+      - ALLOWED_HOSTS=${DOMAIN:-localhost},platform
+      - CSRF_TRUSTED_ORIGINS=https://${DOMAIN:-localhost}
+      - SERVICE_NAME=platform
+    volumes:
+      - static_files:/app/staticfiles
+      - media_files:/app/media
+      - logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8700/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - internal
+      - web
+
+  # ===========================================================================
+  # CADDY (optional - use profile: with-caddy or full)
+  # ===========================================================================
+  caddy:
+    image: caddy:2-alpine
+    container_name: praho_caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+      - ACME_EMAIL=${ACME_EMAIL:-admin@example.com}
+    volumes:
+      - ./caddy/Caddyfile.platform:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - static_files:/srv/static:ro
+      - media_files:/srv/media:ro
+    depends_on:
+      - platform
+    restart: unless-stopped
+    networks:
+      - web
+    profiles:
+      - with-caddy
+      - full
+
+networks:
+  internal:
+    driver: bridge
+  web:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  static_files:
+  media_files:
+  logs:
+  caddy_data:
+  caddy_config:

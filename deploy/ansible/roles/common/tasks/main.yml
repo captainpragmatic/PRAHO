@@ -1,0 +1,88 @@
+# =============================================================================
+# PRAHO - Common Role Tasks
+# =============================================================================
+
+- name: Update apt cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: Install common packages
+  apt:
+    name:
+      - curl
+      - git
+      - htop
+      - vim
+      - ufw
+      - fail2ban
+      - unzip
+      - ca-certificates
+      - gnupg
+      - lsb-release
+    state: present
+
+- name: Create project user
+  user:
+    name: "{{ project_user }}"
+    group: "{{ project_group }}"
+    shell: /bin/bash
+    create_home: yes
+    state: present
+  register: created_user
+
+- name: Create project directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: "0755"
+  loop:
+    - "{{ project_root }}"
+    - "{{ project_root }}/deploy"
+    - "{{ project_root }}/backups"
+    - "{{ project_root }}/logs"
+    - "{{ project_root }}/scripts"
+
+- name: Configure firewall (UFW)
+  when: firewall_enabled
+  block:
+    - name: Reset UFW
+      ufw:
+        state: reset
+
+    - name: Allow SSH
+      ufw:
+        rule: allow
+        port: "22"
+        proto: tcp
+
+    - name: Allow HTTP
+      ufw:
+        rule: allow
+        port: "80"
+        proto: tcp
+
+    - name: Allow HTTPS
+      ufw:
+        rule: allow
+        port: "443"
+        proto: tcp
+
+    - name: Enable UFW
+      ufw:
+        state: enabled
+        policy: deny
+        direction: incoming
+
+- name: Configure fail2ban
+  template:
+    src: jail.local.j2
+    dest: /etc/fail2ban/jail.local
+    mode: "0644"
+  notify: restart fail2ban
+
+- name: Set timezone
+  timezone:
+    name: UTC

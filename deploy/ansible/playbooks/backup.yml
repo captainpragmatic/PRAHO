@@ -1,0 +1,31 @@
+# =============================================================================
+# PRAHO - Backup Playbook
+# =============================================================================
+# Creates database backup on the server
+#
+# Usage:
+#   ansible-playbook -i inventory/single-server.yml playbooks/backup.yml
+
+---
+- name: Backup PRAHO Database
+  hosts: primary,praho
+  become: yes
+  gather_facts: no
+
+  tasks:
+    - name: Run backup script
+      command: "{{ project_root }}/scripts/backup.sh"
+      register: backup_result
+
+    - name: Show backup result
+      debug:
+        var: backup_result.stdout_lines
+
+    - name: Fetch backup to local machine
+      fetch:
+        src: "{{ backup_directory }}/{{ item }}"
+        dest: "./backups/"
+        flat: yes
+      with_fileglob:
+        - "{{ backup_directory }}/praho_backup_*.sql.gz"
+      when: fetch_backup | default(false)

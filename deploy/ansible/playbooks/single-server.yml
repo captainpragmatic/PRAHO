@@ -1,0 +1,55 @@
+# =============================================================================
+# PRAHO - Single Server Deployment Playbook
+# =============================================================================
+# Deploys all services (Platform + Portal + DB + Caddy) on one server
+#
+# Usage:
+#   ansible-playbook -i inventory/single-server.yml playbooks/single-server.yml
+#
+# Required environment variables:
+#   PRAHO_SERVER_IP, PRAHO_DOMAIN, PRAHO_DB_PASSWORD, PRAHO_SECRET_KEY
+
+---
+- name: Deploy PRAHO - Single Server
+  hosts: praho
+  become: yes
+  gather_facts: yes
+
+  vars:
+    deploy_platform: true
+    deploy_portal: true
+    deploy_database: true
+    deploy_caddy: true
+
+  pre_tasks:
+    - name: Validate required variables
+      assert:
+        that:
+          - domain is defined and domain != 'praho.example.com'
+          - db_password is defined and db_password != 'changeme'
+          - secret_key is defined and secret_key != 'generate-a-strong-key'
+        fail_msg: "Required variables not set. Check environment variables."
+
+  roles:
+    - common
+    - docker
+    - praho
+
+  post_tasks:
+    - name: Run database migrations
+      command: docker exec praho_platform python manage.py migrate --noinput
+      when: deploy_platform and deploy_database
+
+    - name: Collect static files
+      command: docker exec praho_platform python manage.py collectstatic --noinput
+      when: deploy_platform
+
+    - name: Verify deployment
+      uri:
+        url: "https://{{ domain }}/health/"
+        status_code: 200
+        validate_certs: yes
+      register: final_health_check
+      retries: 5
+      delay: 10
+      until: final_health_check.status == 200

@@ -1,0 +1,62 @@
+# =============================================================================
+# PRAHO - CONTAINER SERVICE DEPLOYMENT (DigitalOcean App Platform, etc.)
+# =============================================================================
+# For managed container services with external database
+# Database and SSL handled by the cloud provider
+#
+# Required environment variables:
+#   - DATABASE_URL (managed PostgreSQL connection string)
+#   - SECRET_KEY
+#   - DOMAIN
+#   - PLATFORM_API_BASE_URL (for portal -> platform communication)
+
+services:
+  # ===========================================================================
+  # PLATFORM SERVICE
+  # ===========================================================================
+  platform:
+    image: ${REGISTRY:-}praho-platform:${VERSION:-latest}
+    build:
+      context: ..
+      dockerfile: deploy/platform/Dockerfile
+    environment:
+      - DEBUG=0
+      - DATABASE_URL=${DATABASE_URL:?DATABASE_URL required}
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY required}
+      - DJANGO_SETTINGS_MODULE=config.settings.prod
+      - ALLOWED_HOSTS=${DOMAIN:-localhost},*.ondigitalocean.app
+      - CSRF_TRUSTED_ORIGINS=https://${DOMAIN},https://*.ondigitalocean.app
+      - SERVICE_NAME=platform
+    expose:
+      - "8700"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8700/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ===========================================================================
+  # PORTAL SERVICE
+  # ===========================================================================
+  portal:
+    image: ${REGISTRY:-}praho-portal:${VERSION:-latest}
+    build:
+      context: ..
+      dockerfile: deploy/portal/Dockerfile
+    environment:
+      - DEBUG=0
+      - PLATFORM_API_BASE_URL=${PLATFORM_API_BASE_URL:-http://platform:8700/api}
+      - SECRET_KEY=${SECRET_KEY}
+      - DJANGO_SETTINGS_MODULE=config.settings
+      - ALLOWED_HOSTS=${DOMAIN:-localhost},*.ondigitalocean.app
+      - CSRF_TRUSTED_ORIGINS=https://${DOMAIN},https://*.ondigitalocean.app
+      - SERVICE_NAME=portal
+    expose:
+      - "8701"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8701/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s

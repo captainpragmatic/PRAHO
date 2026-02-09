@@ -1,0 +1,44 @@
+# =============================================================================
+# PRAHO - Ansible Global Variables
+# =============================================================================
+
+# Project settings
+project_name: praho
+project_user: praho
+project_group: praho
+project_root: /opt/praho
+
+# Domain and SSL
+domain: "{{ lookup('env', 'PRAHO_DOMAIN') | default('praho.example.com', true) }}"
+acme_email: "{{ lookup('env', 'PRAHO_ACME_EMAIL') | default('admin@example.com', true) }}"
+
+# Database
+db_name: praho
+db_user: praho
+db_password: "{{ lookup('env', 'PRAHO_DB_PASSWORD') | default('changeme', true) }}"
+db_host: localhost
+db_port: 5432
+
+# Application
+secret_key: "{{ lookup('env', 'PRAHO_SECRET_KEY') | default('generate-a-strong-key', true) }}"
+debug: false
+
+# Docker
+docker_compose_version: "2.24.0"
+praho_version: "{{ lookup('env', 'PRAHO_VERSION') | default('latest', true) }}"
+
+# Ports
+platform_port: 8700
+portal_port: 8701
+
+# Backup settings
+backup_enabled: true
+backup_retention_days: 30
+backup_directory: /opt/praho/backups
+
+# Firewall
+firewall_enabled: true
+allowed_ports:
+  - 22
+  - 80
+  - 443

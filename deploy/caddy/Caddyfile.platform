@@ -1,0 +1,48 @@
+# =============================================================================
+# PRAHO - Caddy Configuration for Platform-Only Deployment
+# =============================================================================
+
+{$DOMAIN:localhost} {
+    tls {$ACME_EMAIL:admin@example.com}
+
+    header {
+        X-Frame-Options "DENY"
+        X-Content-Type-Options "nosniff"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+
+    encode gzip zstd
+
+    handle_path /static/* {
+        root * /srv/static
+        file_server
+        header Cache-Control "public, max-age=31536000, immutable"
+    }
+
+    handle_path /media/* {
+        root * /srv/media
+        file_server
+        header Cache-Control "public, max-age=86400"
+    }
+
+    handle /health/* {
+        reverse_proxy platform:8700
+    }
+
+    handle {
+        reverse_proxy platform:8700 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    log {
+        output file /data/access.log {
+            roll_size 100mb
+            roll_keep 5
+        }
+    }
+}

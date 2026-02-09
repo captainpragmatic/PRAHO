@@ -1,0 +1,65 @@
+# =============================================================================
+# PRAHO - PORTAL ONLY DEPLOYMENT
+# =============================================================================
+# Deploy Portal service separately (connects to remote Platform API)
+# Use when Platform runs on a different server/container
+#
+# Required environment variables:
+#   - PLATFORM_API_BASE_URL (e.g., https://platform.example.com/api)
+#   - SECRET_KEY
+#   - DOMAIN
+
+services:
+  portal:
+    image: ${REGISTRY:-}praho-portal:${VERSION:-latest}
+    build:
+      context: ..
+      dockerfile: deploy/portal/Dockerfile
+    container_name: praho_portal
+    ports:
+      - "${PORTAL_PORT:-8701}:8701"
+    environment:
+      - DEBUG=0
+      - PLATFORM_API_BASE_URL=${PLATFORM_API_BASE_URL:?PLATFORM_API_BASE_URL required}
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY required}
+      - DJANGO_SETTINGS_MODULE=config.settings
+      - ALLOWED_HOSTS=${DOMAIN:-localhost},portal
+      - CSRF_TRUSTED_ORIGINS=https://${DOMAIN:-localhost}
+      - SERVICE_NAME=portal
+    volumes:
+      - portal_static:/app/staticfiles
+      - portal_logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8701/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # Optional: Caddy for standalone portal with HTTPS
+  caddy:
+    image: caddy:2-alpine
+    container_name: praho_portal_caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+      - ACME_EMAIL=${ACME_EMAIL:-admin@example.com}
+    volumes:
+      - ./caddy/Caddyfile.portal:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - portal_static:/srv/static:ro
+    depends_on:
+      - portal
+    restart: unless-stopped
+    profiles:
+      - with-caddy
+
+volumes:
+  portal_static:
+  portal_logs:
+  caddy_data:
+  caddy_config:

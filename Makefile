@@ -60,13 +60,38 @@ help:
 	@echo "  make test-security   - Validate service isolation"
 	@echo "  make lint-credentials - Check for hardcoded credentials"
 	@echo ""
-	@echo "🐳 DOCKER DEPLOYMENT:"
+	@echo "🐳 DOCKER (Dev):"
 	@echo "  make docker-build    - Build platform + portal Docker images"
 	@echo "  make docker-dev      - Start development services with hot reload"
 	@echo "  make docker-prod     - Start production services with nginx"
 	@echo "  make docker-stop     - Stop all Docker services"
 	@echo "  make docker-test     - Test Docker services health"
 	@echo "  make docker-clean    - Clean up Docker containers and images"
+	@echo ""
+	@echo "🚀 PRODUCTION DEPLOYMENT:"
+	@echo "  make deploy-single-server  - Deploy all services on single server"
+	@echo "  make deploy-platform       - Deploy platform service only"
+	@echo "  make deploy-portal         - Deploy portal service only"
+	@echo "  make deploy-container-service - Build for DigitalOcean/AWS"
+	@echo "  make deploy-stop           - Stop all deployment services"
+	@echo "  make deploy-status         - Show deployment status"
+	@echo "  make deploy-logs           - Show service logs"
+	@echo ""
+	@echo "💾 BACKUP & RESTORE:"
+	@echo "  make backup          - Create database backup"
+	@echo "  make backup-list     - List available backups"
+	@echo "  make restore         - Interactive restore from backup"
+	@echo "  make restore-latest  - Restore latest backup"
+	@echo ""
+	@echo "⏪ ROLLBACK:"
+	@echo "  make rollback VERSION=X - Roll back to version X"
+	@echo "  make rollback-db        - Restore latest database backup"
+	@echo "  make health-check       - Check service health"
+	@echo ""
+	@echo "📜 ANSIBLE:"
+	@echo "  make ansible-single-server - Deploy via Ansible (single server)"
+	@echo "  make ansible-two-servers   - Deploy via Ansible (distributed)"
+	@echo "  make ansible-backup        - Remote backup via Ansible"
 	@echo ""
 	@echo "⚙️  SETUP & MAINTENANCE:"
 	@echo "  make install         - Set up development environment"
@@ -414,3 +439,113 @@ clean:
 	rm -rf .mypy_cache/
 	rm -rf services/platform/staticfiles/
 	rm -rf services/portal/staticfiles/
+
+# ===============================================================================
+# PRODUCTION DEPLOYMENT 🚀
+# ===============================================================================
+
+.PHONY: deploy-single-server deploy-platform deploy-portal deploy-stop deploy-status deploy-logs backup restore rollback rollback-db health-check
+
+deploy-single-server:
+	@echo "🚀 [Deploy] Single server deployment (all services)..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@./deploy/scripts/deploy.sh single-server --build --migrate
+
+deploy-platform:
+	@echo "🚀 [Deploy] Platform service only..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@./deploy/scripts/deploy.sh platform-only --build
+
+deploy-portal:
+	@echo "🚀 [Deploy] Portal service only..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@./deploy/scripts/deploy.sh portal-only --build
+
+deploy-container-service:
+	@echo "🚀 [Deploy] Building for container service..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@./deploy/scripts/deploy.sh container-service --build
+
+deploy-stop:
+	@echo "🛑 [Deploy] Stopping deployment services..."
+	@docker compose -f deploy/docker-compose.single-server.yml down 2>/dev/null || true
+	@docker compose -f deploy/docker-compose.platform-only.yml down 2>/dev/null || true
+	@docker compose -f deploy/docker-compose.portal-only.yml down 2>/dev/null || true
+
+deploy-status:
+	@echo "📊 [Deploy] Service status..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@docker ps --filter "name=praho" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+deploy-logs:
+	@echo "📋 [Deploy] Service logs..."
+	@docker compose -f deploy/docker-compose.single-server.yml logs -f 2>/dev/null || \
+		docker compose -f deploy/docker-compose.services.yml logs -f
+
+# ===============================================================================
+# DATABASE BACKUP & RESTORE 💾
+# ===============================================================================
+
+backup:
+	@echo "💾 [Backup] Creating database backup..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@./deploy/scripts/backup.sh
+
+backup-list:
+	@echo "📋 [Backup] Listing available backups..."
+	@./deploy/scripts/backup.sh --list
+
+restore:
+	@echo "🔄 [Restore] Interactive database restore..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@./deploy/scripts/restore.sh
+
+restore-latest:
+	@echo "🔄 [Restore] Restoring latest backup..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@./deploy/scripts/restore.sh --latest
+
+# ===============================================================================
+# ROLLBACK PROCEDURES ⏪
+# ===============================================================================
+
+rollback:
+ifndef VERSION
+	@echo "❌ VERSION is required. Usage: make rollback VERSION=v1.2.3"
+	@exit 1
+endif
+	@echo "⏪ [Rollback] Rolling back to version $(VERSION)..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@./deploy/scripts/rollback.sh version $(VERSION)
+
+rollback-db:
+	@echo "⏪ [Rollback] Restoring database from latest backup..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@./deploy/scripts/rollback.sh database
+
+# ===============================================================================
+# HEALTH & MONITORING 🏥
+# ===============================================================================
+
+health-check:
+	@echo "🏥 [Health] Checking service health..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@./deploy/scripts/health-check.sh
+
+# ===============================================================================
+# ANSIBLE DEPLOYMENT 📜
+# ===============================================================================
+
+ansible-single-server:
+	@echo "📜 [Ansible] Single server deployment..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@cd deploy/ansible && ansible-playbook -i inventory/single-server.yml playbooks/single-server.yml
+
+ansible-two-servers:
+	@echo "📜 [Ansible] Two server deployment..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@cd deploy/ansible && ansible-playbook -i inventory/two-servers.yml playbooks/two-servers.yml
+
+ansible-backup:
+	@echo "📜 [Ansible] Remote backup..."
+	@cd deploy/ansible && ansible-playbook -i inventory/single-server.yml playbooks/backup.yml

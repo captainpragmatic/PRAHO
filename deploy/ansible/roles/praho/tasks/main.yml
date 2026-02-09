@@ -1,0 +1,103 @@
+# =============================================================================
+# PRAHO - Application Deployment Role
+# =============================================================================
+
+- name: Copy environment file
+  template:
+    src: env.j2
+    dest: "{{ project_root }}/.env"
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: "0600"
+
+- name: Copy docker-compose file
+  template:
+    src: docker-compose.yml.j2
+    dest: "{{ project_root }}/docker-compose.yml"
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: "0644"
+
+- name: Copy Caddyfile
+  template:
+    src: Caddyfile.j2
+    dest: "{{ project_root }}/Caddyfile"
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: "0644"
+  when: deploy_caddy
+
+- name: Copy backup script
+  template:
+    src: backup.sh.j2
+    dest: "{{ project_root }}/scripts/backup.sh"
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: "0755"
+  when: deploy_database and backup_enabled
+
+- name: Copy restore script
+  template:
+    src: restore.sh.j2
+    dest: "{{ project_root }}/scripts/restore.sh"
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: "0755"
+  when: deploy_database
+
+- name: Copy rollback script
+  template:
+    src: rollback.sh.j2
+    dest: "{{ project_root }}/scripts/rollback.sh"
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: "0755"
+
+- name: Pull Docker images
+  docker_image:
+    name: "{{ item }}"
+    source: pull
+    force_source: yes
+  loop:
+    - "postgres:15-alpine"
+    - "caddy:2-alpine"
+  when: deploy_database or deploy_caddy
+
+- name: Build and start services
+  community.docker.docker_compose_v2:
+    project_src: "{{ project_root }}"
+    state: present
+    pull: always
+    build: always
+  register: compose_result
+
+- name: Wait for services to be healthy
+  uri:
+    url: "http://localhost:{{ platform_port }}/health/"
+    status_code: 200
+  register: health_check
+  until: health_check.status == 200
+  retries: 30
+  delay: 5
+  when: deploy_platform
+
+- name: Setup backup cron job
+  cron:
+    name: "PRAHO database backup"
+    minute: "0"
+    hour: "2"
+    job: "{{ project_root }}/scripts/backup.sh >> {{ project_root }}/logs/backup.log 2>&1"
+    user: "{{ project_user }}"
+  when: deploy_database and backup_enabled
+
+- name: Display deployment info
+  debug:
+    msg: |
+      ================================================
+      PRAHO Deployment Complete!
+      ================================================
+      Domain: {{ domain }}
+      Platform: {{ 'Deployed' if deploy_platform else 'Not deployed' }}
+      Portal: {{ 'Deployed' if deploy_portal else 'Not deployed' }}
+      Database: {{ 'Deployed' if deploy_database else 'External' }}
+      ================================================
