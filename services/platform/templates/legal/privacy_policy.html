@@ -1,0 +1,461 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Privacy Policy" %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-8">
+    <!-- Header -->
+    <div class="mb-8">
+        <h1 class="text-3xl font-bold text-white mb-2">{% trans "Privacy Policy" %}</h1>
+        <p class="text-slate-400">
+            {% trans "Last updated" %}: {{ last_updated|date:"F j, Y" }} |
+            {% trans "Effective date" %}: {{ effective_date|date:"F j, Y" }}
+        </p>
+    </div>
+
+    <!-- Quick Navigation -->
+    <div class="bg-slate-800 rounded-lg p-6 mb-8 border border-slate-700">
+        <h2 class="text-lg font-semibold text-white mb-4">{% trans "Quick Navigation" %}</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+            <a href="#introduction" class="text-blue-400 hover:text-blue-300">1. {% trans "Introduction" %}</a>
+            <a href="#data-controller" class="text-blue-400 hover:text-blue-300">2. {% trans "Data Controller" %}</a>
+            <a href="#data-we-collect" class="text-blue-400 hover:text-blue-300">3. {% trans "Data We Collect" %}</a>
+            <a href="#legal-basis" class="text-blue-400 hover:text-blue-300">4. {% trans "Legal Basis for Processing" %}</a>
+            <a href="#how-we-use" class="text-blue-400 hover:text-blue-300">5. {% trans "How We Use Your Data" %}</a>
+            <a href="#data-sharing" class="text-blue-400 hover:text-blue-300">6. {% trans "Data Sharing" %}</a>
+            <a href="#your-rights" class="text-blue-400 hover:text-blue-300">7. {% trans "Your Rights (GDPR)" %}</a>
+            <a href="#data-retention" class="text-blue-400 hover:text-blue-300">8. {% trans "Data Retention" %}</a>
+            <a href="#security" class="text-blue-400 hover:text-blue-300">9. {% trans "Security Measures" %}</a>
+            <a href="#cookies" class="text-blue-400 hover:text-blue-300">10. {% trans "Cookies" %}</a>
+            <a href="#international" class="text-blue-400 hover:text-blue-300">11. {% trans "International Transfers" %}</a>
+            <a href="#contact" class="text-blue-400 hover:text-blue-300">12. {% trans "Contact Us" %}</a>
+        </div>
+    </div>
+
+    <!-- Content -->
+    <div class="prose prose-invert max-w-none space-y-8">
+
+        <!-- 1. Introduction -->
+        <section id="introduction" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">1. {% trans "Introduction" %}</h2>
+            <p class="text-slate-300 mb-4">
+                {% blocktrans %}
+                PragmaticHost SRL ("we", "us", "our") is committed to protecting your privacy and personal data.
+                This Privacy Policy explains how we collect, use, store, and protect your personal information
+                when you use our PRAHO Platform hosting services.
+                {% endblocktrans %}
+            </p>
+            <p class="text-slate-300 mb-4">
+                {% blocktrans %}
+                We comply with the General Data Protection Regulation (GDPR - EU 2016/679), Romanian Law 190/2018
+                implementing GDPR, and other applicable data protection legislation.
+                {% endblocktrans %}
+            </p>
+            <p class="text-slate-300">
+                {% blocktrans %}
+                By using our services, you acknowledge that you have read and understood this Privacy Policy.
+                {% endblocktrans %}
+            </p>
+        </section>
+
+        <!-- 2. Data Controller -->
+        <section id="data-controller" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">2. {% trans "Data Controller Information" %}</h2>
+            <div class="bg-slate-900/50 rounded p-4 mb-4">
+                <p class="text-slate-300"><strong class="text-white">{% trans "Company Name" %}:</strong> PragmaticHost SRL</p>
+                <p class="text-slate-300"><strong class="text-white">{% trans "Registration Number (CUI)" %}:</strong> RO12345678</p>
+                <p class="text-slate-300"><strong class="text-white">{% trans "Registered Address" %}:</strong> Str. Exemplu 123, București, România</p>
+                <p class="text-slate-300"><strong class="text-white">{% trans "Email" %}:</strong> contact@pragmatichost.com</p>
+                <p class="text-slate-300"><strong class="text-white">{% trans "Phone" %}:</strong> +40.21.123.4567</p>
+            </div>
+            <div class="bg-blue-900/30 rounded p-4 border border-blue-700">
+                <h3 class="text-lg font-medium text-blue-300 mb-2">{% trans "Data Protection Officer (DPO)" %}</h3>
+                <p class="text-slate-300"><strong class="text-white">{% trans "Email" %}:</strong> dpo@praho.com</p>
+                <p class="text-slate-300 text-sm mt-2">
+                    {% blocktrans %}
+                    For any privacy-related inquiries or to exercise your data protection rights,
+                    please contact our Data Protection Officer.
+                    {% endblocktrans %}
+                </p>
+            </div>
+        </section>
+
+        <!-- 3. Data We Collect -->
+        <section id="data-we-collect" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">3. {% trans "Personal Data We Collect" %}</h2>
+
+            <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "3.1 Information You Provide" %}</h3>
+            <ul class="list-disc list-inside text-slate-300 space-y-2">
+                <li><strong class="text-white">{% trans "Account Information" %}:</strong> {% trans "Name, email address, phone number, password" %}</li>
+                <li><strong class="text-white">{% trans "Billing Information" %}:</strong> {% trans "Company name, VAT number (CUI/CIF), billing address, payment details" %}</li>
+                <li><strong class="text-white">{% trans "Service Configuration" %}:</strong> {% trans "Domain names, hosting preferences, technical settings" %}</li>
+                <li><strong class="text-white">{% trans "Support Communications" %}:</strong> {% trans "Ticket content, emails, chat messages" %}</li>
+            </ul>
+
+            <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "3.2 Information Collected Automatically" %}</h3>
+            <ul class="list-disc list-inside text-slate-300 space-y-2">
+                <li><strong class="text-white">{% trans "Technical Data" %}:</strong> {% trans "IP address, browser type, device information, operating system" %}</li>
+                <li><strong class="text-white">{% trans "Usage Data" %}:</strong> {% trans "Pages visited, features used, session duration, click patterns" %}</li>
+                <li><strong class="text-white">{% trans "Security Data" %}:</strong> {% trans "Login attempts, authentication events, security alerts" %}</li>
+                <li><strong class="text-white">{% trans "Cookie Data" %}:</strong> {% trans "Session identifiers, preferences (see our" %} <a href="{% url 'cookie_policy' %}" class="text-blue-400 hover:text-blue-300">{% trans "Cookie Policy" %}</a>)</li>
+            </ul>
+
+            <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "3.3 Special Categories of Data" %}</h3>
+            <p class="text-slate-300">
+                {% blocktrans %}
+                We do not intentionally collect special categories of personal data (such as health data,
+                religious beliefs, or political opinions). If you provide such data in support tickets or
+                other communications, we will treat it with additional care.
+                {% endblocktrans %}
+            </p>
+        </section>
+
+        <!-- 4. Legal Basis -->
+        <section id="legal-basis" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">4. {% trans "Legal Basis for Processing" %}</h2>
+            <p class="text-slate-300 mb-4">{% trans "Under GDPR Article 6, we process your data based on the following legal grounds:" %}</p>
+
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="bg-slate-700">
+                        <tr>
+                            <th class="text-left p-3 text-white">{% trans "Processing Activity" %}</th>
+                            <th class="text-left p-3 text-white">{% trans "Legal Basis" %}</th>
+                            <th class="text-left p-3 text-white">{% trans "GDPR Article" %}</th>
+                        </tr>
+                    </thead>
+                    <tbody class="text-slate-300">
+                        <tr class="border-b border-slate-700">
+                            <td class="p-3">{% trans "Service provision" %}</td>
+                            <td class="p-3">{% trans "Contract performance" %}</td>
+                            <td class="p-3">Art. 6(1)(b)</td>
+                        </tr>
+                        <tr class="border-b border-slate-700">
+                            <td class="p-3">{% trans "Invoicing and VAT compliance" %}</td>
+                            <td class="p-3">{% trans "Legal obligation" %}</td>
+                            <td class="p-3">Art. 6(1)(c)</td>
+                        </tr>
+                        <tr class="border-b border-slate-700">
+                            <td class="p-3">{% trans "Security monitoring" %}</td>
+                            <td class="p-3">{% trans "Legitimate interest" %}</td>
+                            <td class="p-3">Art. 6(1)(f)</td>
+                        </tr>
+                        <tr class="border-b border-slate-700">
+                            <td class="p-3">{% trans "Marketing communications" %}</td>
+                            <td class="p-3">{% trans "Consent" %}</td>
+                            <td class="p-3">Art. 6(1)(a)</td>
+                        </tr>
+                        <tr class="border-b border-slate-700">
+                            <td class="p-3">{% trans "Analytics and improvement" %}</td>
+                            <td class="p-3">{% trans "Legitimate interest / Consent" %}</td>
+                            <td class="p-3">Art. 6(1)(f) / (a)</td>
+                        </tr>
+                        <tr>
+                            <td class="p-3">{% trans "Financial record retention (7 years)" %}</td>
+                            <td class="p-3">{% trans "Legal obligation (Romanian Law)" %}</td>
+                            <td class="p-3">Art. 6(1)(c)</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- 5. How We Use Your Data -->
+        <section id="how-we-use" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">5. {% trans "How We Use Your Personal Data" %}</h2>
+
+            <h3 class="text-lg font-medium text-white mt-4 mb-3">{% trans "5.1 Service Delivery" %}</h3>
+            <ul class="list-disc list-inside text-slate-300 space-y-1">
+                <li>{% trans "Creating and managing your hosting account" %}</li>
+                <li>{% trans "Provisioning and configuring hosting services" %}</li>
+                <li>{% trans "Processing payments and generating invoices" %}</li>
+                <li>{% trans "Providing technical support" %}</li>
+            </ul>
+
+            <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "5.2 Communication" %}</h3>
+            <ul class="list-disc list-inside text-slate-300 space-y-1">
+                <li>{% trans "Sending service-related notifications (required)" %}</li>
+                <li>{% trans "Responding to support requests" %}</li>
+                <li>{% trans "Sending marketing emails (with your consent)" %}</li>
+            </ul>
+
+            <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "5.3 Security and Compliance" %}</h3>
+            <ul class="list-disc list-inside text-slate-300 space-y-1">
+                <li>{% trans "Detecting and preventing fraud" %}</li>
+                <li>{% trans "Protecting against security threats" %}</li>
+                <li>{% trans "Complying with legal obligations" %}</li>
+                <li>{% trans "Maintaining audit logs for compliance" %}</li>
+            </ul>
+        </section>
+
+        <!-- 6. Data Sharing -->
+        <section id="data-sharing" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">6. {% trans "Data Sharing and Third Parties" %}</h2>
+            <p class="text-slate-300 mb-4">
+                {% blocktrans %}
+                We do not sell your personal data. We may share your data with:
+                {% endblocktrans %}
+            </p>
+
+            <ul class="list-disc list-inside text-slate-300 space-y-2">
+                <li><strong class="text-white">{% trans "Service Providers" %}:</strong> {% trans "Payment processors, email providers, infrastructure providers" %}</li>
+                <li><strong class="text-white">{% trans "Domain Registrars" %}:</strong> {% trans "When you register domain names" %}</li>
+                <li><strong class="text-white">{% trans "Legal Authorities" %}:</strong> {% trans "When required by law or court order" %}</li>
+                <li><strong class="text-white">{% trans "Business Partners" %}:</strong> {% trans "With your explicit consent only" %}</li>
+            </ul>
+
+            <p class="text-slate-300 mt-4">
+                {% blocktrans %}
+                All third-party processors are bound by Data Processing Agreements (DPAs) ensuring GDPR compliance.
+                {% endblocktrans %}
+                <a href="{% url 'data_processors' %}" class="text-blue-400 hover:text-blue-300">{% trans "View our Third-Party Data Processors" %}</a>
+            </p>
+        </section>
+
+        <!-- 7. Your Rights -->
+        <section id="your-rights" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">7. {% trans "Your Rights Under GDPR" %}</h2>
+            <p class="text-slate-300 mb-4">
+                {% blocktrans %}
+                Under the General Data Protection Regulation, you have the following rights:
+                {% endblocktrans %}
+            </p>
+
+            <div class="grid gap-4">
+                <div class="bg-slate-900/50 rounded p-4">
+                    <h4 class="text-white font-medium mb-1">{% trans "Right of Access" %} (Art. 15)</h4>
+                    <p class="text-slate-400 text-sm">{% trans "Request a copy of your personal data we hold." %}</p>
+                </div>
+                <div class="bg-slate-900/50 rounded p-4">
+                    <h4 class="text-white font-medium mb-1">{% trans "Right to Rectification" %} (Art. 16)</h4>
+                    <p class="text-slate-400 text-sm">{% trans "Request correction of inaccurate personal data." %}</p>
+                </div>
+                <div class="bg-slate-900/50 rounded p-4">
+                    <h4 class="text-white font-medium mb-1">{% trans "Right to Erasure" %} (Art. 17)</h4>
+                    <p class="text-slate-400 text-sm">{% trans "Request deletion of your personal data (\"Right to be Forgotten\")." %}</p>
+                </div>
+                <div class="bg-slate-900/50 rounded p-4">
+                    <h4 class="text-white font-medium mb-1">{% trans "Right to Restriction" %} (Art. 18)</h4>
+                    <p class="text-slate-400 text-sm">{% trans "Request restriction of processing in certain circumstances." %}</p>
+                </div>
+                <div class="bg-slate-900/50 rounded p-4">
+                    <h4 class="text-white font-medium mb-1">{% trans "Right to Data Portability" %} (Art. 20)</h4>
+                    <p class="text-slate-400 text-sm">{% trans "Receive your data in a machine-readable format." %}</p>
+                </div>
+                <div class="bg-slate-900/50 rounded p-4">
+                    <h4 class="text-white font-medium mb-1">{% trans "Right to Object" %} (Art. 21)</h4>
+                    <p class="text-slate-400 text-sm">{% trans "Object to processing based on legitimate interests or for marketing." %}</p>
+                </div>
+                <div class="bg-slate-900/50 rounded p-4">
+                    <h4 class="text-white font-medium mb-1">{% trans "Right to Withdraw Consent" %} (Art. 7)</h4>
+                    <p class="text-slate-400 text-sm">{% trans "Withdraw consent at any time for consent-based processing." %}</p>
+                </div>
+            </div>
+
+            <div class="bg-green-900/30 rounded p-4 mt-6 border border-green-700">
+                <h4 class="text-green-300 font-medium mb-2">{% trans "Exercise Your Rights" %}</h4>
+                <p class="text-slate-300 text-sm mb-2">
+                    {% blocktrans %}
+                    You can exercise your rights through our GDPR Privacy Dashboard or by contacting our DPO.
+                    {% endblocktrans %}
+                </p>
+                {% if user.is_authenticated %}
+                <a href="{% url 'audit:gdpr_dashboard' %}" class="inline-block bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm">
+                    {% trans "Go to GDPR Dashboard" %}
+                </a>
+                {% else %}
+                <a href="{% url 'users:login' %}?next={% url 'audit:gdpr_dashboard' %}" class="inline-block bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm">
+                    {% trans "Login to Access GDPR Dashboard" %}
+                </a>
+                {% endif %}
+            </div>
+        </section>
+
+        <!-- 8. Data Retention -->
+        <section id="data-retention" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">8. {% trans "Data Retention" %}</h2>
+            <p class="text-slate-300 mb-4">
+                {% blocktrans %}
+                We retain your personal data only as long as necessary for the purposes outlined in this policy:
+                {% endblocktrans %}
+            </p>
+
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="bg-slate-700">
+                        <tr>
+                            <th class="text-left p-3 text-white">{% trans "Data Type" %}</th>
+                            <th class="text-left p-3 text-white">{% trans "Retention Period" %}</th>
+                            <th class="text-left p-3 text-white">{% trans "Legal Basis" %}</th>
+                        </tr>
+                    </thead>
+                    <tbody class="text-slate-300">
+                        <tr class="border-b border-slate-700">
+                            <td class="p-3">{% trans "Account data" %}</td>
+                            <td class="p-3">{% trans "Duration of account + 2 years" %}</td>
+                            <td class="p-3">{% trans "Contract performance" %}</td>
+                        </tr>
+                        <tr class="border-b border-slate-700">
+                            <td class="p-3">{% trans "Financial records (invoices)" %}</td>
+                            <td class="p-3">{% trans "7 years" %}</td>
+                            <td class="p-3">{% trans "Romanian fiscal law" %}</td>
+                        </tr>
+                        <tr class="border-b border-slate-700">
+                            <td class="p-3">{% trans "Security logs" %}</td>
+                            <td class="p-3">{% trans "2 years" %}</td>
+                            <td class="p-3">{% trans "Legitimate interest" %}</td>
+                        </tr>
+                        <tr class="border-b border-slate-700">
+                            <td class="p-3">{% trans "Support tickets" %}</td>
+                            <td class="p-3">{% trans "5 years" %}</td>
+                            <td class="p-3">{% trans "Legitimate interest" %}</td>
+                        </tr>
+                        <tr>
+                            <td class="p-3">{% trans "Marketing consent records" %}</td>
+                            <td class="p-3">{% trans "Duration of consent + 3 years" %}</td>
+                            <td class="p-3">{% trans "Legal compliance" %}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- 9. Security -->
+        <section id="security" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">9. {% trans "Security Measures" %}</h2>
+            <p class="text-slate-300 mb-4">
+                {% blocktrans %}
+                We implement appropriate technical and organizational measures to protect your personal data:
+                {% endblocktrans %}
+            </p>
+
+            <div class="grid md:grid-cols-2 gap-4">
+                <div class="bg-slate-900/50 rounded p-4">
+                    <h4 class="text-white font-medium mb-2">{% trans "Encryption" %}</h4>
+                    <ul class="text-slate-400 text-sm space-y-1">
+                        <li>{% trans "TLS/HTTPS for data in transit" %}</li>
+                        <li>{% trans "AES-256 encryption for sensitive data at rest" %}</li>
+                        <li>{% trans "Encrypted backups" %}</li>
+                    </ul>
+                </div>
+                <div class="bg-slate-900/50 rounded p-4">
+                    <h4 class="text-white font-medium mb-2">{% trans "Access Control" %}</h4>
+                    <ul class="text-slate-400 text-sm space-y-1">
+                        <li>{% trans "Role-based access control (RBAC)" %}</li>
+                        <li>{% trans "Two-factor authentication (2FA)" %}</li>
+                        <li>{% trans "Account lockout protection" %}</li>
+                    </ul>
+                </div>
+                <div class="bg-slate-900/50 rounded p-4">
+                    <h4 class="text-white font-medium mb-2">{% trans "Monitoring" %}</h4>
+                    <ul class="text-slate-400 text-sm space-y-1">
+                        <li>{% trans "Comprehensive audit logging" %}</li>
+                        <li>{% trans "Real-time security alerts" %}</li>
+                        <li>{% trans "Regular security assessments" %}</li>
+                    </ul>
+                </div>
+                <div class="bg-slate-900/50 rounded p-4">
+                    <h4 class="text-white font-medium mb-2">{% trans "Compliance" %}</h4>
+                    <ul class="text-slate-400 text-sm space-y-1">
+                        <li>{% trans "Regular data protection training" %}</li>
+                        <li>{% trans "Incident response procedures" %}</li>
+                        <li>{% trans "Vendor security assessments" %}</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <!-- 10. Cookies -->
+        <section id="cookies" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">10. {% trans "Cookies and Tracking" %}</h2>
+            <p class="text-slate-300 mb-4">
+                {% blocktrans %}
+                We use cookies and similar technologies to operate our service and improve your experience.
+                For detailed information, please see our Cookie Policy.
+                {% endblocktrans %}
+            </p>
+            <a href="{% url 'cookie_policy' %}" class="inline-block bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm">
+                {% trans "View Cookie Policy" %}
+            </a>
+        </section>
+
+        <!-- 11. International Transfers -->
+        <section id="international" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">11. {% trans "International Data Transfers" %}</h2>
+            <p class="text-slate-300 mb-4">
+                {% blocktrans %}
+                Your data is primarily processed within the European Economic Area (EEA). If we transfer data
+                outside the EEA, we ensure adequate safeguards through:
+                {% endblocktrans %}
+            </p>
+            <ul class="list-disc list-inside text-slate-300 space-y-1">
+                <li>{% trans "EU-approved Standard Contractual Clauses (SCCs)" %}</li>
+                <li>{% trans "EU-US Data Privacy Framework (where applicable)" %}</li>
+                <li>{% trans "Binding Corporate Rules for processors" %}</li>
+            </ul>
+        </section>
+
+        <!-- 12. Contact -->
+        <section id="contact" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">12. {% trans "Contact Us" %}</h2>
+            <p class="text-slate-300 mb-4">
+                {% blocktrans %}
+                For questions about this Privacy Policy or to exercise your data protection rights:
+                {% endblocktrans %}
+            </p>
+
+            <div class="grid md:grid-cols-2 gap-6">
+                <div class="bg-slate-900/50 rounded p-4">
+                    <h4 class="text-white font-medium mb-2">{% trans "Data Protection Officer" %}</h4>
+                    <p class="text-slate-400 text-sm">dpo@praho.com</p>
+                </div>
+                <div class="bg-slate-900/50 rounded p-4">
+                    <h4 class="text-white font-medium mb-2">{% trans "General Inquiries" %}</h4>
+                    <p class="text-slate-400 text-sm">contact@pragmatichost.com</p>
+                    <p class="text-slate-400 text-sm">+40.21.123.4567</p>
+                </div>
+            </div>
+
+            <div class="bg-amber-900/30 rounded p-4 mt-6 border border-amber-700">
+                <h4 class="text-amber-300 font-medium mb-2">{% trans "Supervisory Authority" %}</h4>
+                <p class="text-slate-300 text-sm">
+                    {% blocktrans %}
+                    You have the right to lodge a complaint with the Romanian Data Protection Authority (ANSPDCP):
+                    {% endblocktrans %}
+                </p>
+                <p class="text-slate-400 text-sm mt-2">
+                    Autoritatea Nationala de Supraveghere a Prelucrarii Datelor cu Caracter Personal (ANSPDCP)<br>
+                    B-dul G-ral. Gheorghe Magheru 28-30, Sector 1, București<br>
+                    anspdcp@dataprotection.ro | www.dataprotection.ro
+                </p>
+            </div>
+        </section>
+
+        <!-- Changes to Policy -->
+        <section class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">{% trans "Changes to This Policy" %}</h2>
+            <p class="text-slate-300">
+                {% blocktrans %}
+                We may update this Privacy Policy from time to time. We will notify you of significant changes
+                by email or through our platform. The "Last updated" date at the top of this policy indicates
+                when it was last revised.
+                {% endblocktrans %}
+            </p>
+        </section>
+
+    </div>
+
+    <!-- Footer Links -->
+    <div class="mt-8 pt-6 border-t border-slate-700">
+        <div class="flex flex-wrap gap-4 text-sm">
+            <a href="{% url 'terms_of_service' %}" class="text-blue-400 hover:text-blue-300">{% trans "Terms of Service" %}</a>
+            <a href="{% url 'cookie_policy' %}" class="text-blue-400 hover:text-blue-300">{% trans "Cookie Policy" %}</a>
+            <a href="{% url 'data_processors' %}" class="text-blue-400 hover:text-blue-300">{% trans "Data Processors" %}</a>
+            {% if user.is_authenticated %}
+            <a href="{% url 'audit:gdpr_dashboard' %}" class="text-blue-400 hover:text-blue-300">{% trans "GDPR Dashboard" %}</a>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

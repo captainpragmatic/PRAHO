@@ -18,6 +18,15 @@ from django.views.generic import RedirectView
 # Import dashboard view
 from apps.common.views import dashboard_view
 
+# Import legal views
+from apps.common.legal_views import (
+    cookie_consent_update,
+    cookie_policy,
+    data_processors,
+    privacy_policy,
+    terms_of_service,
+)
+
 
 def root_redirect(request: HttpRequest) -> HttpResponseBase:
     """Redirect root URL based on authentication status"""
@@ -33,7 +42,19 @@ urlpatterns = [
     # Django admin interface
     path("admin/", admin.site.urls),
     # Dashboard - main app after login
+<<<<<<< HEAD
     path("dashboard/", dashboard_view, name="dashboard"),
+=======
+    path("app/", dashboard_view, name="dashboard"),
+    # ===============================================================================
+    # LEGAL & GDPR COMPLIANCE PAGES (Public access)
+    # ===============================================================================
+    path("privacy-policy/", privacy_policy, name="privacy_policy"),
+    path("terms-of-service/", terms_of_service, name="terms_of_service"),
+    path("cookie-policy/", cookie_policy, name="cookie_policy"),
+    path("data-processors/", data_processors, name="data_processors"),
+    path("api/cookie-consent/", cookie_consent_update, name="cookie_consent_update"),
+>>>>>>> origin/claude/gdpr-compliance-audit-4heye
     # Authentication URLs
     path("auth/", include("apps.users.urls")),
     # Backward-compatible alias expected by some tests

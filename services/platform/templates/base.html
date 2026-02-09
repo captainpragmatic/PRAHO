@@ -270,16 +270,44 @@
     <!-- Footer -->
     <footer class="bg-slate-800 border-t border-slate-700 mt-8 sm:mt-12 lg:mt-16 xl:mt-20">
       <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+        <!-- Legal Links -->
+        <div class="flex flex-wrap justify-center gap-4 mb-4 text-xs">
+          <a href="{% url 'privacy_policy' %}" class="text-slate-400 hover:text-blue-400 transition-colors">
+            {% trans 'Privacy Policy' %}
+          </a>
+          <span class="text-slate-600">|</span>
+          <a href="{% url 'terms_of_service' %}" class="text-slate-400 hover:text-blue-400 transition-colors">
+            {% trans 'Terms of Service' %}
+          </a>
+          <span class="text-slate-600">|</span>
+          <a href="{% url 'cookie_policy' %}" class="text-slate-400 hover:text-blue-400 transition-colors">
+            {% trans 'Cookie Policy' %}
+          </a>
+          <span class="text-slate-600">|</span>
+          <a href="{% url 'data_processors' %}" class="text-slate-400 hover:text-blue-400 transition-colors">
+            {% trans 'Data Processors' %}
+          </a>
+          {% if user.is_authenticated %}
+          <span class="text-slate-600">|</span>
+          <a href="{% url 'audit:gdpr_dashboard' %}" class="text-slate-400 hover:text-blue-400 transition-colors">
+            {% trans 'GDPR Rights' %}
+          </a>
+          {% endif %}
+        </div>
+
         <div class="text-center text-slate-400 text-sm">
           <p>
             © {{ current_year }} PRAHO Platform - {% trans 'PRAHO Really Automates Hosting Operations' %}
           </p>
           <p class="mt-2 text-xs">
-            <span class="text-blue-400">Django 5.2</span> | 
-            <span class="text-green-400">Python 3.13</span> | 
-            <span class="text-purple-400">PostgreSQL 16+</span> | 
-            <span class="text-yellow-400">HTMX</span> | 
+            <span class="text-blue-400">Django 5.2</span> |
+            <span class="text-green-400">Python 3.13</span> |
+            <span class="text-purple-400">PostgreSQL 16+</span> |
+            <span class="text-yellow-400">HTMX</span> |
             <span class="text-cyan-400">{% trans 'Version' %} {{ app_version|default:"1.0.0" }}</span>
+          </p>
+          <p class="mt-2 text-xs text-slate-500">
+            {% trans 'GDPR Compliant' %} | {% trans 'Romanian Law 190/2018' %}
           </p>
         </div>
       </div>
@@ -313,10 +341,20 @@
     }, 5000);
   </script>
 
+<<<<<<< HEAD
   <!-- Page-specific modals (before JS to ensure DOM availability) -->
   {% block extra_modals %}{% endblock %}
   
   {% block extra_js %}{% endblock %}
+=======
+  {% block extra_js %}{% endblock %}
+
+  <!-- Dangerous Action Confirmation Modal -->
+  {% include "components/dangerous_action_modal.html" %}
+
+  <!-- Cookie Consent Banner (GDPR Compliance) -->
+  {% include "components/cookie_consent_banner.html" %}
+>>>>>>> origin/claude/gdpr-compliance-audit-4heye
 </body>
 
 </html>

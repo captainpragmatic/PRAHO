@@ -1,0 +1,318 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Third-Party Data Processors" %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-8">
+    <!-- Header -->
+    <div class="mb-8">
+        <h1 class="text-3xl font-bold text-white mb-2">{% trans "Third-Party Data Processors" %}</h1>
+        <p class="text-slate-400">
+            {% trans "Last updated" %}: {{ last_updated|date:"F j, Y" }}
+        </p>
+    </div>
+
+    <!-- Introduction -->
+    <div class="bg-slate-800 rounded-lg p-6 mb-8 border border-slate-700">
+        <p class="text-slate-300">
+            {% blocktrans %}
+            Under GDPR Article 28, we are required to disclose the third-party data processors that help us
+            provide our services. All processors listed below are bound by Data Processing Agreements (DPAs)
+            ensuring GDPR compliance.
+            {% endblocktrans %}
+        </p>
+    </div>
+
+    <!-- Content -->
+    <div class="prose prose-invert max-w-none space-y-8">
+
+        <!-- Infrastructure & Hosting -->
+        <section class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4 flex items-center">
+                <span class="mr-2">&#128421;</span>
+                {% trans "Infrastructure & Hosting" %}
+            </h2>
+            <p class="text-slate-400 text-sm mb-4">
+                {% trans "These processors provide the infrastructure on which our platform runs." %}
+            </p>
+
+            <div class="space-y-4">
+                <div class="bg-slate-900/50 rounded p-4 border border-slate-700">
+                    <div class="flex flex-col md:flex-row md:justify-between md:items-start mb-2">
+                        <h3 class="text-lg font-medium text-white">Hetzner Online GmbH</h3>
+                        <span class="text-xs bg-green-700 text-green-100 px-2 py-1 rounded mt-1 md:mt-0">{% trans "EU-based" %}</span>
+                    </div>
+                    <p class="text-slate-300 text-sm mb-2">{% trans "Primary hosting infrastructure and dedicated servers" %}</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-slate-400">
+                        <div><strong class="text-slate-300">{% trans "Location" %}:</strong> Germany (EU)</div>
+                        <div><strong class="text-slate-300">{% trans "Data" %}:</strong> {% trans "Server logs, IP addresses" %}</div>
+                    </div>
+                    <a href="https://www.hetzner.com/legal/privacy-policy" target="_blank" rel="noopener"
+                       class="text-blue-400 hover:text-blue-300 text-xs mt-2 inline-block">{% trans "Privacy Policy" %} &rarr;</a>
+                </div>
+
+                <div class="bg-slate-900/50 rounded p-4 border border-slate-700">
+                    <div class="flex flex-col md:flex-row md:justify-between md:items-start mb-2">
+                        <h3 class="text-lg font-medium text-white">Cloudflare, Inc.</h3>
+                        <span class="text-xs bg-blue-700 text-blue-100 px-2 py-1 rounded mt-1 md:mt-0">{% trans "EU SCCs" %}</span>
+                    </div>
+                    <p class="text-slate-300 text-sm mb-2">{% trans "CDN, DDoS protection, and DNS services" %}</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-slate-400">
+                        <div><strong class="text-slate-300">{% trans "Location" %}:</strong> USA (EU SCCs in place)</div>
+                        <div><strong class="text-slate-300">{% trans "Data" %}:</strong> {% trans "IP addresses, HTTP logs" %}</div>
+                    </div>
+                    <a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noopener"
+                       class="text-blue-400 hover:text-blue-300 text-xs mt-2 inline-block">{% trans "Privacy Policy" %} &rarr;</a>
+                </div>
+            </div>
+        </section>
+
+        <!-- Payment Processing -->
+        <section class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4 flex items-center">
+                <span class="mr-2">&#128179;</span>
+                {% trans "Payment Processing" %}
+            </h2>
+            <p class="text-slate-400 text-sm mb-4">
+                {% trans "These processors handle payment transactions securely." %}
+            </p>
+
+            <div class="space-y-4">
+                <div class="bg-slate-900/50 rounded p-4 border border-slate-700">
+                    <div class="flex flex-col md:flex-row md:justify-between md:items-start mb-2">
+                        <h3 class="text-lg font-medium text-white">Stripe Payments Europe, Ltd.</h3>
+                        <span class="text-xs bg-green-700 text-green-100 px-2 py-1 rounded mt-1 md:mt-0">{% trans "EU-based" %}</span>
+                    </div>
+                    <p class="text-slate-300 text-sm mb-2">{% trans "Credit card and online payment processing" %}</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-slate-400">
+                        <div><strong class="text-slate-300">{% trans "Location" %}:</strong> Ireland (EU)</div>
+                        <div><strong class="text-slate-300">{% trans "Data" %}:</strong> {% trans "Name, email, card details, billing address" %}</div>
+                        <div><strong class="text-slate-300">{% trans "Certification" %}:</strong> PCI DSS Level 1</div>
+                    </div>
+                    <a href="https://stripe.com/privacy" target="_blank" rel="noopener"
+                       class="text-blue-400 hover:text-blue-300 text-xs mt-2 inline-block">{% trans "Privacy Policy" %} &rarr;</a>
+                </div>
+
+                <div class="bg-slate-900/50 rounded p-4 border border-slate-700">
+                    <div class="flex flex-col md:flex-row md:justify-between md:items-start mb-2">
+                        <h3 class="text-lg font-medium text-white">PayPal (Europe) S.a.r.l. et Cie, S.C.A.</h3>
+                        <span class="text-xs bg-green-700 text-green-100 px-2 py-1 rounded mt-1 md:mt-0">{% trans "EU-based" %}</span>
+                    </div>
+                    <p class="text-slate-300 text-sm mb-2">{% trans "Alternative payment processing" %}</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-slate-400">
+                        <div><strong class="text-slate-300">{% trans "Location" %}:</strong> Luxembourg (EU)</div>
+                        <div><strong class="text-slate-300">{% trans "Data" %}:</strong> {% trans "Name, email, transaction details" %}</div>
+                    </div>
+                    <a href="https://www.paypal.com/webapps/mpp/ua/privacy-full" target="_blank" rel="noopener"
+                       class="text-blue-400 hover:text-blue-300 text-xs mt-2 inline-block">{% trans "Privacy Policy" %} &rarr;</a>
+                </div>
+            </div>
+        </section>
+
+        <!-- Domain Registration -->
+        <section class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4 flex items-center">
+                <span class="mr-2">&#127760;</span>
+                {% trans "Domain Registration" %}
+            </h2>
+            <p class="text-slate-400 text-sm mb-4">
+                {% trans "These processors are involved in domain name registration services." %}
+            </p>
+
+            <div class="space-y-4">
+                <div class="bg-slate-900/50 rounded p-4 border border-slate-700">
+                    <div class="flex flex-col md:flex-row md:justify-between md:items-start mb-2">
+                        <h3 class="text-lg font-medium text-white">ROTLD (ICI Bucharest)</h3>
+                        <span class="text-xs bg-green-700 text-green-100 px-2 py-1 rounded mt-1 md:mt-0">{% trans "EU-based" %}</span>
+                    </div>
+                    <p class="text-slate-300 text-sm mb-2">{% trans ".RO domain registry (required by Romanian law)" %}</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-slate-400">
+                        <div><strong class="text-slate-300">{% trans "Location" %}:</strong> Romania (EU)</div>
+                        <div><strong class="text-slate-300">{% trans "Data" %}:</strong> {% trans "Registrant contact information" %}</div>
+                    </div>
+                    <a href="https://www.rotld.ro/politica-de-confidentialitate/" target="_blank" rel="noopener"
+                       class="text-blue-400 hover:text-blue-300 text-xs mt-2 inline-block">{% trans "Privacy Policy" %} &rarr;</a>
+                </div>
+
+                <div class="bg-slate-900/50 rounded p-4 border border-slate-700">
+                    <div class="flex flex-col md:flex-row md:justify-between md:items-start mb-2">
+                        <h3 class="text-lg font-medium text-white">OpenSRS (Tucows)</h3>
+                        <span class="text-xs bg-blue-700 text-blue-100 px-2 py-1 rounded mt-1 md:mt-0">{% trans "EU SCCs" %}</span>
+                    </div>
+                    <p class="text-slate-300 text-sm mb-2">{% trans "International domain registration" %}</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-slate-400">
+                        <div><strong class="text-slate-300">{% trans "Location" %}:</strong> Canada (EU SCCs in place)</div>
+                        <div><strong class="text-slate-300">{% trans "Data" %}:</strong> {% trans "Registrant/admin/tech contact details" %}</div>
+                    </div>
+                    <a href="https://opensrs.com/privacy-policy/" target="_blank" rel="noopener"
+                       class="text-blue-400 hover:text-blue-300 text-xs mt-2 inline-block">{% trans "Privacy Policy" %} &rarr;</a>
+                </div>
+            </div>
+        </section>
+
+        <!-- Email Services -->
+        <section class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4 flex items-center">
+                <span class="mr-2">&#9993;</span>
+                {% trans "Email Services" %}
+            </h2>
+            <p class="text-slate-400 text-sm mb-4">
+                {% trans "These processors handle transactional email delivery." %}
+            </p>
+
+            <div class="space-y-4">
+                <div class="bg-slate-900/50 rounded p-4 border border-slate-700">
+                    <div class="flex flex-col md:flex-row md:justify-between md:items-start mb-2">
+                        <h3 class="text-lg font-medium text-white">Mailgun Technologies, Inc.</h3>
+                        <span class="text-xs bg-blue-700 text-blue-100 px-2 py-1 rounded mt-1 md:mt-0">{% trans "EU SCCs" %}</span>
+                    </div>
+                    <p class="text-slate-300 text-sm mb-2">{% trans "Transactional email delivery (invoices, notifications)" %}</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-slate-400">
+                        <div><strong class="text-slate-300">{% trans "Location" %}:</strong> USA (EU region available)</div>
+                        <div><strong class="text-slate-300">{% trans "Data" %}:</strong> {% trans "Email addresses, message content" %}</div>
+                    </div>
+                    <a href="https://www.mailgun.com/privacy-policy/" target="_blank" rel="noopener"
+                       class="text-blue-400 hover:text-blue-300 text-xs mt-2 inline-block">{% trans "Privacy Policy" %} &rarr;</a>
+                </div>
+            </div>
+        </section>
+
+        <!-- Analytics -->
+        <section class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4 flex items-center">
+                <span class="mr-2">&#128200;</span>
+                {% trans "Analytics" %}
+            </h2>
+            <p class="text-slate-400 text-sm mb-4">
+                {% trans "These tools help us understand platform usage and improve our services." %}
+            </p>
+
+            <div class="space-y-4">
+                <div class="bg-slate-900/50 rounded p-4 border border-slate-700">
+                    <div class="flex flex-col md:flex-row md:justify-between md:items-start mb-2">
+                        <h3 class="text-lg font-medium text-white">Matomo (Self-hosted)</h3>
+                        <span class="text-xs bg-green-700 text-green-100 px-2 py-1 rounded mt-1 md:mt-0">{% trans "Self-hosted" %}</span>
+                    </div>
+                    <p class="text-slate-300 text-sm mb-2">{% trans "Privacy-focused website analytics" %}</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-slate-400">
+                        <div><strong class="text-slate-300">{% trans "Location" %}:</strong> {% trans "Our EU servers (no third-party)" %}</div>
+                        <div><strong class="text-slate-300">{% trans "Data" %}:</strong> {% trans "Page views, anonymized IP, device info" %}</div>
+                    </div>
+                    <p class="text-green-400 text-xs mt-2">
+                        {% trans "Data is not shared with third parties." %}
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <!-- SSL Certificates -->
+        <section class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4 flex items-center">
+                <span class="mr-2">&#128274;</span>
+                {% trans "SSL Certificates" %}
+            </h2>
+            <p class="text-slate-400 text-sm mb-4">
+                {% trans "Certificate authorities that issue SSL certificates for our customers." %}
+            </p>
+
+            <div class="space-y-4">
+                <div class="bg-slate-900/50 rounded p-4 border border-slate-700">
+                    <div class="flex flex-col md:flex-row md:justify-between md:items-start mb-2">
+                        <h3 class="text-lg font-medium text-white">Let's Encrypt (ISRG)</h3>
+                        <span class="text-xs bg-blue-700 text-blue-100 px-2 py-1 rounded mt-1 md:mt-0">{% trans "Public Benefit" %}</span>
+                    </div>
+                    <p class="text-slate-300 text-sm mb-2">{% trans "Free SSL certificate issuance" %}</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-slate-400">
+                        <div><strong class="text-slate-300">{% trans "Location" %}:</strong> USA</div>
+                        <div><strong class="text-slate-300">{% trans "Data" %}:</strong> {% trans "Domain names, account email" %}</div>
+                    </div>
+                    <a href="https://letsencrypt.org/privacy/" target="_blank" rel="noopener"
+                       class="text-blue-400 hover:text-blue-300 text-xs mt-2 inline-block">{% trans "Privacy Policy" %} &rarr;</a>
+                </div>
+            </div>
+        </section>
+
+        <!-- Transfer Mechanisms -->
+        <section class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">{% trans "International Transfer Safeguards" %}</h2>
+            <p class="text-slate-300 mb-4">
+                {% blocktrans %}
+                For processors located outside the EEA, we ensure data protection through:
+                {% endblocktrans %}
+            </p>
+
+            <div class="grid md:grid-cols-2 gap-4">
+                <div class="bg-slate-900/50 rounded p-4">
+                    <h4 class="text-white font-medium mb-2">{% trans "EU SCCs" %}</h4>
+                    <p class="text-slate-400 text-sm">
+                        {% blocktrans %}
+                        Standard Contractual Clauses approved by the European Commission for international data transfers.
+                        {% endblocktrans %}
+                    </p>
+                </div>
+                <div class="bg-slate-900/50 rounded p-4">
+                    <h4 class="text-white font-medium mb-2">{% trans "EU-US DPF" %}</h4>
+                    <p class="text-slate-400 text-sm">
+                        {% blocktrans %}
+                        EU-US Data Privacy Framework certification where applicable.
+                        {% endblocktrans %}
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Data Processing Agreements -->
+        <section class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">{% trans "Data Processing Agreements" %}</h2>
+            <p class="text-slate-300 mb-4">
+                {% blocktrans %}
+                All processors listed above have signed Data Processing Agreements (DPAs) with us that include:
+                {% endblocktrans %}
+            </p>
+            <ul class="list-disc list-inside text-slate-300 space-y-1">
+                <li>{% trans "Clear description of processing activities" %}</li>
+                <li>{% trans "Obligations regarding data security" %}</li>
+                <li>{% trans "Sub-processor notification requirements" %}</li>
+                <li>{% trans "Data subject rights assistance" %}</li>
+                <li>{% trans "Audit rights" %}</li>
+                <li>{% trans "Data deletion upon termination" %}</li>
+            </ul>
+        </section>
+
+        <!-- Updates -->
+        <section class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">{% trans "Updates to This List" %}</h2>
+            <p class="text-slate-300">
+                {% blocktrans %}
+                We may update this list as we add or change service providers. Material changes will be
+                communicated through our platform and may be reflected in our Privacy Policy updates.
+                {% endblocktrans %}
+            </p>
+        </section>
+
+        <!-- Contact -->
+        <section class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">{% trans "Questions?" %}</h2>
+            <p class="text-slate-300 mb-4">
+                {% blocktrans %}
+                If you have questions about our data processors or require copies of relevant DPAs, please contact:
+                {% endblocktrans %}
+            </p>
+            <div class="bg-slate-900/50 rounded p-4">
+                <p class="text-slate-300"><strong class="text-white">{% trans "Data Protection Officer" %}:</strong> dpo@praho.com</p>
+            </div>
+        </section>
+
+    </div>
+
+    <!-- Footer Links -->
+    <div class="mt-8 pt-6 border-t border-slate-700">
+        <div class="flex flex-wrap gap-4 text-sm">
+            <a href="{% url 'privacy_policy' %}" class="text-blue-400 hover:text-blue-300">{% trans "Privacy Policy" %}</a>
+            <a href="{% url 'terms_of_service' %}" class="text-blue-400 hover:text-blue-300">{% trans "Terms of Service" %}</a>
+            <a href="{% url 'cookie_policy' %}" class="text-blue-400 hover:text-blue-300">{% trans "Cookie Policy" %}</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,369 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Terms of Service" %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-8">
+    <!-- Header -->
+    <div class="mb-8">
+        <h1 class="text-3xl font-bold text-white mb-2">{% trans "Terms of Service" %}</h1>
+        <p class="text-slate-400">
+            {% trans "Last updated" %}: {{ last_updated|date:"F j, Y" }} |
+            {% trans "Effective date" %}: {{ effective_date|date:"F j, Y" }}
+        </p>
+    </div>
+
+    <!-- Quick Navigation -->
+    <div class="bg-slate-800 rounded-lg p-6 mb-8 border border-slate-700">
+        <h2 class="text-lg font-semibold text-white mb-4">{% trans "Quick Navigation" %}</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+            <a href="#acceptance" class="text-blue-400 hover:text-blue-300">1. {% trans "Acceptance of Terms" %}</a>
+            <a href="#services" class="text-blue-400 hover:text-blue-300">2. {% trans "Description of Services" %}</a>
+            <a href="#account" class="text-blue-400 hover:text-blue-300">3. {% trans "Account Registration" %}</a>
+            <a href="#payment" class="text-blue-400 hover:text-blue-300">4. {% trans "Payment Terms" %}</a>
+            <a href="#acceptable-use" class="text-blue-400 hover:text-blue-300">5. {% trans "Acceptable Use Policy" %}</a>
+            <a href="#intellectual-property" class="text-blue-400 hover:text-blue-300">6. {% trans "Intellectual Property" %}</a>
+            <a href="#data-protection" class="text-blue-400 hover:text-blue-300">7. {% trans "Data Protection" %}</a>
+            <a href="#warranties" class="text-blue-400 hover:text-blue-300">8. {% trans "Warranties & Disclaimers" %}</a>
+            <a href="#liability" class="text-blue-400 hover:text-blue-300">9. {% trans "Limitation of Liability" %}</a>
+            <a href="#termination" class="text-blue-400 hover:text-blue-300">10. {% trans "Termination" %}</a>
+            <a href="#governing-law" class="text-blue-400 hover:text-blue-300">11. {% trans "Governing Law" %}</a>
+            <a href="#contact" class="text-blue-400 hover:text-blue-300">12. {% trans "Contact Information" %}</a>
+        </div>
+    </div>
+
+    <!-- Content -->
+    <div class="prose prose-invert max-w-none space-y-8">
+
+        <!-- 1. Acceptance of Terms -->
+        <section id="acceptance" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">1. {% trans "Acceptance of Terms" %}</h2>
+            <p class="text-slate-300 mb-4">
+                {% blocktrans %}
+                By accessing or using the PRAHO Platform services provided by PragmaticHost SRL ("Company", "we", "us", "our"),
+                you ("Customer", "you", "your") agree to be bound by these Terms of Service ("Terms").
+                {% endblocktrans %}
+            </p>
+            <p class="text-slate-300 mb-4">
+                {% blocktrans %}
+                If you do not agree to these Terms, you may not access or use our services. These Terms constitute
+                a legally binding agreement between you and PragmaticHost SRL.
+                {% endblocktrans %}
+            </p>
+            <div class="bg-amber-900/30 rounded p-4 border border-amber-700">
+                <p class="text-amber-300 text-sm">
+                    {% blocktrans %}
+                    IMPORTANT: By creating an account or using our services, you confirm that you are at least 18 years old
+                    and have the legal capacity to enter into binding contracts.
+                    {% endblocktrans %}
+                </p>
+            </div>
+        </section>
+
+        <!-- 2. Description of Services -->
+        <section id="services" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">2. {% trans "Description of Services" %}</h2>
+            <p class="text-slate-300 mb-4">
+                {% blocktrans %}
+                PragmaticHost SRL provides web hosting and related services through the PRAHO Platform, including but not limited to:
+                {% endblocktrans %}
+            </p>
+            <ul class="list-disc list-inside text-slate-300 space-y-2">
+                <li>{% trans "Shared and VPS web hosting" %}</li>
+                <li>{% trans "Domain name registration and management" %}</li>
+                <li>{% trans "Email hosting services" %}</li>
+                <li>{% trans "SSL certificate provisioning" %}</li>
+                <li>{% trans "Technical support services" %}</li>
+                <li>{% trans "Automated backup solutions" %}</li>
+            </ul>
+            <p class="text-slate-300 mt-4">
+                {% blocktrans %}
+                Service specifications, features, and limitations are described in the specific service plans
+                available on our platform.
+                {% endblocktrans %}
+            </p>
+        </section>
+
+        <!-- 3. Account Registration -->
+        <section id="account" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">3. {% trans "Account Registration and Security" %}</h2>
+
+            <h3 class="text-lg font-medium text-white mt-4 mb-3">{% trans "3.1 Registration Requirements" %}</h3>
+            <p class="text-slate-300 mb-4">
+                {% blocktrans %}
+                To use our services, you must create an account by providing accurate, current, and complete information.
+                You agree to update your information promptly if it changes.
+                {% endblocktrans %}
+            </p>
+
+            <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "3.2 Account Security" %}</h3>
+            <ul class="list-disc list-inside text-slate-300 space-y-2">
+                <li>{% trans "You are responsible for maintaining the confidentiality of your account credentials." %}</li>
+                <li>{% trans "You must immediately notify us of any unauthorized access to your account." %}</li>
+                <li>{% trans "We strongly recommend enabling two-factor authentication (2FA)." %}</li>
+                <li>{% trans "You are responsible for all activities that occur under your account." %}</li>
+            </ul>
+
+            <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "3.3 Business Customers" %}</h3>
+            <p class="text-slate-300">
+                {% blocktrans %}
+                Business customers must provide accurate company information, including VAT registration number (CUI/CIF)
+                for Romanian companies. This information is required for invoicing and tax compliance.
+                {% endblocktrans %}
+            </p>
+        </section>
+
+        <!-- 4. Payment Terms -->
+        <section id="payment" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">4. {% trans "Payment Terms" %}</h2>
+
+            <h3 class="text-lg font-medium text-white mt-4 mb-3">{% trans "4.1 Pricing and Fees" %}</h3>
+            <p class="text-slate-300 mb-4">
+                {% blocktrans %}
+                All prices are displayed in Romanian Lei (RON) and include VAT (19%) for Romanian customers.
+                Prices may change with 30 days' prior notice.
+                {% endblocktrans %}
+            </p>
+
+            <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "4.2 Payment Methods" %}</h3>
+            <ul class="list-disc list-inside text-slate-300 space-y-2">
+                <li>{% trans "Bank transfer (Romanian and international)" %}</li>
+                <li>{% trans "Credit/debit cards (Visa, Mastercard)" %}</li>
+                <li>{% trans "PayPal (where available)" %}</li>
+            </ul>
+
+            <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "4.3 Billing Cycle" %}</h3>
+            <p class="text-slate-300 mb-4">
+                {% blocktrans %}
+                Services are billed in advance according to the billing cycle selected (monthly, annually, etc.).
+                Proforma invoices are issued before service activation; fiscal invoices are issued upon payment.
+                {% endblocktrans %}
+            </p>
+
+            <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "4.4 Late Payment" %}</h3>
+            <p class="text-slate-300">
+                {% blocktrans %}
+                Invoices are due within 14 days of issue. Late payments may result in service suspension.
+                We reserve the right to charge interest on overdue amounts at the legal rate.
+                {% endblocktrans %}
+            </p>
+
+            <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "4.5 Refund Policy" %}</h3>
+            <p class="text-slate-300">
+                {% blocktrans %}
+                We offer a 30-day money-back guarantee for new hosting services. Domain registration fees,
+                SSL certificates, and add-on services are non-refundable. Refund requests must be submitted
+                through the support ticket system.
+                {% endblocktrans %}
+            </p>
+        </section>
+
+        <!-- 5. Acceptable Use Policy -->
+        <section id="acceptable-use" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">5. {% trans "Acceptable Use Policy" %}</h2>
+            <p class="text-slate-300 mb-4">
+                {% blocktrans %}
+                You agree to use our services only for lawful purposes and in compliance with these Terms.
+                You must NOT use our services to:
+                {% endblocktrans %}
+            </p>
+
+            <div class="bg-red-900/30 rounded p-4 border border-red-700 mb-4">
+                <h4 class="text-red-300 font-medium mb-2">{% trans "Prohibited Activities" %}</h4>
+                <ul class="list-disc list-inside text-slate-300 space-y-1 text-sm">
+                    <li>{% trans "Host or distribute malware, viruses, or malicious code" %}</li>
+                    <li>{% trans "Send spam or unsolicited bulk emails" %}</li>
+                    <li>{% trans "Infringe intellectual property rights" %}</li>
+                    <li>{% trans "Host illegal content under Romanian or EU law" %}</li>
+                    <li>{% trans "Engage in phishing or fraudulent activities" %}</li>
+                    <li>{% trans "Attack or attempt to breach other systems" %}</li>
+                    <li>{% trans "Consume excessive resources affecting other customers" %}</li>
+                    <li>{% trans "Host content promoting violence or hatred" %}</li>
+                    <li>{% trans "Operate cryptocurrency mining without authorization" %}</li>
+                </ul>
+            </div>
+
+            <p class="text-slate-300">
+                {% blocktrans %}
+                Violation of this policy may result in immediate service termination without refund.
+                We reserve the right to remove content that violates these terms.
+                {% endblocktrans %}
+            </p>
+        </section>
+
+        <!-- 6. Intellectual Property -->
+        <section id="intellectual-property" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">6. {% trans "Intellectual Property" %}</h2>
+
+            <h3 class="text-lg font-medium text-white mt-4 mb-3">{% trans "6.1 Our Property" %}</h3>
+            <p class="text-slate-300 mb-4">
+                {% blocktrans %}
+                The PRAHO Platform, including its software, design, logos, and documentation, is owned by
+                PragmaticHost SRL and protected by intellectual property laws.
+                {% endblocktrans %}
+            </p>
+
+            <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "6.2 Your Content" %}</h3>
+            <p class="text-slate-300">
+                {% blocktrans %}
+                You retain all rights to the content you upload to our services. By using our services,
+                you grant us a limited license to store and transmit your content as necessary to provide the services.
+                {% endblocktrans %}
+            </p>
+        </section>
+
+        <!-- 7. Data Protection -->
+        <section id="data-protection" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">7. {% trans "Data Protection and Privacy" %}</h2>
+            <p class="text-slate-300 mb-4">
+                {% blocktrans %}
+                We process personal data in accordance with the General Data Protection Regulation (GDPR)
+                and Romanian Law 190/2018. Please review our Privacy Policy for detailed information about
+                how we collect, use, and protect your data.
+                {% endblocktrans %}
+            </p>
+            <a href="{% url 'privacy_policy' %}" class="inline-block bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm">
+                {% trans "View Privacy Policy" %}
+            </a>
+
+            <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "7.1 Customer Data Responsibility" %}</h3>
+            <p class="text-slate-300">
+                {% blocktrans %}
+                If you collect personal data through services hosted on our platform, you are the data controller
+                for that data and are responsible for compliance with applicable data protection laws.
+                {% endblocktrans %}
+            </p>
+        </section>
+
+        <!-- 8. Warranties & Disclaimers -->
+        <section id="warranties" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">8. {% trans "Warranties and Disclaimers" %}</h2>
+
+            <h3 class="text-lg font-medium text-white mt-4 mb-3">{% trans "8.1 Service Level" %}</h3>
+            <p class="text-slate-300 mb-4">
+                {% blocktrans %}
+                We strive to maintain 99.9% uptime for our hosting services. Service credits may be issued
+                for downtime exceeding this threshold, as specified in our Service Level Agreement.
+                {% endblocktrans %}
+            </p>
+
+            <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "8.2 Disclaimer" %}</h3>
+            <div class="bg-amber-900/30 rounded p-4 border border-amber-700">
+                <p class="text-slate-300 text-sm">
+                    {% blocktrans %}
+                    SERVICES ARE PROVIDED "AS IS" WITHOUT WARRANTIES OF ANY KIND, EXPRESS OR IMPLIED,
+                    INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE,
+                    AND NON-INFRINGEMENT. WE DO NOT WARRANT THAT SERVICES WILL BE UNINTERRUPTED OR ERROR-FREE.
+                    {% endblocktrans %}
+                </p>
+            </div>
+        </section>
+
+        <!-- 9. Limitation of Liability -->
+        <section id="liability" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">9. {% trans "Limitation of Liability" %}</h2>
+            <p class="text-slate-300 mb-4">
+                {% blocktrans %}
+                To the maximum extent permitted by Romanian law:
+                {% endblocktrans %}
+            </p>
+            <ul class="list-disc list-inside text-slate-300 space-y-2">
+                <li>{% trans "We shall not be liable for indirect, incidental, special, or consequential damages." %}</li>
+                <li>{% trans "Our total liability shall not exceed the fees paid by you in the 12 months preceding the claim." %}</li>
+                <li>{% trans "We are not liable for data loss; you are responsible for maintaining backups." %}</li>
+            </ul>
+        </section>
+
+        <!-- 10. Termination -->
+        <section id="termination" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">10. {% trans "Termination" %}</h2>
+
+            <h3 class="text-lg font-medium text-white mt-4 mb-3">{% trans "10.1 By Customer" %}</h3>
+            <p class="text-slate-300 mb-4">
+                {% blocktrans %}
+                You may cancel your services at any time through the customer portal or by contacting support.
+                Prepaid fees are non-refundable except as specified in our refund policy.
+                {% endblocktrans %}
+            </p>
+
+            <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "10.2 By Company" %}</h3>
+            <p class="text-slate-300 mb-4">
+                {% blocktrans %}
+                We may suspend or terminate services immediately if you:
+                {% endblocktrans %}
+            </p>
+            <ul class="list-disc list-inside text-slate-300 space-y-1">
+                <li>{% trans "Violate these Terms or Acceptable Use Policy" %}</li>
+                <li>{% trans "Fail to pay invoices within 30 days" %}</li>
+                <li>{% trans "Engage in illegal activities" %}</li>
+            </ul>
+
+            <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "10.3 Data After Termination" %}</h3>
+            <p class="text-slate-300">
+                {% blocktrans %}
+                Upon termination, we will retain your data for 30 days to allow for retrieval.
+                After this period, data may be permanently deleted unless legally required to be retained.
+                {% endblocktrans %}
+            </p>
+        </section>
+
+        <!-- 11. Governing Law -->
+        <section id="governing-law" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">11. {% trans "Governing Law and Disputes" %}</h2>
+            <p class="text-slate-300 mb-4">
+                {% blocktrans %}
+                These Terms shall be governed by and construed in accordance with the laws of Romania.
+                {% endblocktrans %}
+            </p>
+            <p class="text-slate-300 mb-4">
+                {% blocktrans %}
+                Any disputes arising from these Terms shall be submitted to the exclusive jurisdiction of
+                the courts of Bucharest, Romania.
+                {% endblocktrans %}
+            </p>
+            <p class="text-slate-300">
+                {% blocktrans %}
+                For consumers in the EU, this does not affect your statutory rights or your right to bring
+                claims before the courts of your country of residence.
+                {% endblocktrans %}
+            </p>
+        </section>
+
+        <!-- 12. Contact Information -->
+        <section id="contact" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">12. {% trans "Contact Information" %}</h2>
+            <div class="bg-slate-900/50 rounded p-4">
+                <p class="text-slate-300"><strong class="text-white">{% trans "Company" %}:</strong> PragmaticHost SRL</p>
+                <p class="text-slate-300"><strong class="text-white">{% trans "Registration Number" %}:</strong> RO12345678</p>
+                <p class="text-slate-300"><strong class="text-white">{% trans "Address" %}:</strong> Str. Exemplu 123, București, România</p>
+                <p class="text-slate-300"><strong class="text-white">{% trans "Email" %}:</strong> contact@pragmatichost.com</p>
+                <p class="text-slate-300"><strong class="text-white">{% trans "Phone" %}:</strong> +40.21.123.4567</p>
+                <p class="text-slate-300"><strong class="text-white">{% trans "Support" %}:</strong> support@pragmatichost.com</p>
+            </div>
+        </section>
+
+        <!-- Changes to Terms -->
+        <section class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+            <h2 class="text-xl font-semibold text-white mb-4">{% trans "Changes to These Terms" %}</h2>
+            <p class="text-slate-300">
+                {% blocktrans %}
+                We reserve the right to modify these Terms at any time. We will notify you of material changes
+                at least 30 days before they take effect. Your continued use of our services after changes
+                become effective constitutes acceptance of the modified Terms.
+                {% endblocktrans %}
+            </p>
+        </section>
+
+    </div>
+
+    <!-- Footer Links -->
+    <div class="mt-8 pt-6 border-t border-slate-700">
+        <div class="flex flex-wrap gap-4 text-sm">
+            <a href="{% url 'privacy_policy' %}" class="text-blue-400 hover:text-blue-300">{% trans "Privacy Policy" %}</a>
+            <a href="{% url 'cookie_policy' %}" class="text-blue-400 hover:text-blue-300">{% trans "Cookie Policy" %}</a>
+            <a href="{% url 'data_processors' %}" class="text-blue-400 hover:text-blue-300">{% trans "Data Processors" %}</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

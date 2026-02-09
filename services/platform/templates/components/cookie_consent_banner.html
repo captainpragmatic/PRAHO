@@ -1,0 +1,310 @@
+{% load i18n %}
+{# Cookie Consent Banner - GDPR Compliant #}
+{# This component should be included in base.html before closing </body> tag #}
+
+<div id="cookie-consent-banner"
+     x-data="cookieConsent()"
+     x-show="showBanner"
+     x-cloak
+     x-transition:enter="transition ease-out duration-300"
+     x-transition:enter-start="opacity-0 translate-y-4"
+     x-transition:enter-end="opacity-100 translate-y-0"
+     x-transition:leave="transition ease-in duration-200"
+     x-transition:leave-start="opacity-100 translate-y-0"
+     x-transition:leave-end="opacity-0 translate-y-4"
+     class="fixed bottom-0 inset-x-0 z-50 p-4">
+
+    <div class="max-w-4xl mx-auto bg-slate-800 rounded-lg shadow-2xl border border-slate-700 overflow-hidden">
+        <!-- Main Banner -->
+        <div x-show="!showPreferences" class="p-6">
+            <div class="flex flex-col md:flex-row md:items-center gap-4">
+                <div class="flex-1">
+                    <h3 class="text-lg font-semibold text-white mb-2">
+                        &#127850; {% trans "We Value Your Privacy" %}
+                    </h3>
+                    <p class="text-slate-300 text-sm">
+                        {% blocktrans %}
+                        We use cookies to enhance your browsing experience, analyze site traffic, and personalize content.
+                        By clicking "Accept All", you consent to our use of cookies.
+                        {% endblocktrans %}
+                        <a href="{% url 'cookie_policy' %}" class="text-blue-400 hover:text-blue-300 underline">
+                            {% trans "Learn more" %}
+                        </a>
+                    </p>
+                </div>
+                <div class="flex flex-col sm:flex-row gap-2">
+                    <button @click="acceptEssential()"
+                            class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded text-sm font-medium transition-colors">
+                        {% trans "Essential Only" %}
+                    </button>
+                    <button @click="showPreferences = true"
+                            class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded text-sm font-medium transition-colors">
+                        {% trans "Customize" %}
+                    </button>
+                    <button @click="acceptAll()"
+                            class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-medium transition-colors">
+                        {% trans "Accept All" %}
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Preferences Panel -->
+        <div x-show="showPreferences"
+             x-transition:enter="transition ease-out duration-200"
+             x-transition:enter-start="opacity-0"
+             x-transition:enter-end="opacity-100"
+             class="p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-semibold text-white">{% trans "Cookie Preferences" %}</h3>
+                <button @click="showPreferences = false" class="text-slate-400 hover:text-white">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+
+            <div class="space-y-4">
+                <!-- Essential Cookies (Always On) -->
+                <div class="flex items-center justify-between p-3 bg-slate-900/50 rounded border border-slate-700">
+                    <div>
+                        <h4 class="text-white font-medium">{% trans "Essential Cookies" %}</h4>
+                        <p class="text-slate-400 text-xs mt-1">
+                            {% trans "Required for the website to function. Cannot be disabled." %}
+                        </p>
+                    </div>
+                    <span class="bg-green-700 text-green-100 text-xs px-2 py-1 rounded">{% trans "Always On" %}</span>
+                </div>
+
+                <!-- Functional Cookies -->
+                <div class="flex items-center justify-between p-3 bg-slate-900/50 rounded border border-slate-700">
+                    <div class="flex-1">
+                        <h4 class="text-white font-medium">{% trans "Functional Cookies" %}</h4>
+                        <p class="text-slate-400 text-xs mt-1">
+                            {% trans "Remember your preferences and provide enhanced features." %}
+                        </p>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer ml-4">
+                        <input type="checkbox" x-model="preferences.functional" class="sr-only peer">
+                        <div class="w-11 h-6 bg-slate-600 peer-focus:outline-none rounded-full peer
+                                    peer-checked:after:translate-x-full peer-checked:after:border-white
+                                    after:content-[''] after:absolute after:top-[2px] after:left-[2px]
+                                    after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all
+                                    peer-checked:bg-blue-600"></div>
+                    </label>
+                </div>
+
+                <!-- Analytics Cookies -->
+                <div class="flex items-center justify-between p-3 bg-slate-900/50 rounded border border-slate-700">
+                    <div class="flex-1">
+                        <h4 class="text-white font-medium">{% trans "Analytics Cookies" %}</h4>
+                        <p class="text-slate-400 text-xs mt-1">
+                            {% trans "Help us understand how visitors interact with our website." %}
+                        </p>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer ml-4">
+                        <input type="checkbox" x-model="preferences.analytics" class="sr-only peer">
+                        <div class="w-11 h-6 bg-slate-600 peer-focus:outline-none rounded-full peer
+                                    peer-checked:after:translate-x-full peer-checked:after:border-white
+                                    after:content-[''] after:absolute after:top-[2px] after:left-[2px]
+                                    after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all
+                                    peer-checked:bg-blue-600"></div>
+                    </label>
+                </div>
+
+                <!-- Marketing Cookies -->
+                <div class="flex items-center justify-between p-3 bg-slate-900/50 rounded border border-slate-700">
+                    <div class="flex-1">
+                        <h4 class="text-white font-medium">{% trans "Marketing Cookies" %}</h4>
+                        <p class="text-slate-400 text-xs mt-1">
+                            {% trans "Track visitors across websites to display relevant advertisements." %}
+                        </p>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer ml-4">
+                        <input type="checkbox" x-model="preferences.marketing" class="sr-only peer">
+                        <div class="w-11 h-6 bg-slate-600 peer-focus:outline-none rounded-full peer
+                                    peer-checked:after:translate-x-full peer-checked:after:border-white
+                                    after:content-[''] after:absolute after:top-[2px] after:left-[2px]
+                                    after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all
+                                    peer-checked:bg-blue-600"></div>
+                    </label>
+                </div>
+            </div>
+
+            <div class="flex flex-col sm:flex-row gap-2 mt-6">
+                <button @click="rejectAll()"
+                        class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded text-sm font-medium transition-colors">
+                    {% trans "Reject All" %}
+                </button>
+                <button @click="savePreferences()"
+                        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-medium transition-colors flex-1">
+                    {% trans "Save Preferences" %}
+                </button>
+            </div>
+
+            <p class="text-slate-500 text-xs mt-4 text-center">
+                {% trans "You can change your preferences at any time from the" %}
+                <a href="{% url 'cookie_policy' %}" class="text-blue-400 hover:text-blue-300">{% trans "Cookie Policy" %}</a>
+                {% trans "page." %}
+            </p>
+        </div>
+    </div>
+</div>
+
+<script>
+    function cookieConsent() {
+        return {
+            showBanner: false,
+            showPreferences: false,
+            preferences: {
+                essential: true, // Always true
+                functional: false,
+                analytics: false,
+                marketing: false
+            },
+
+            init() {
+                // Check if consent was already given
+                const consent = this.getConsentCookie();
+                if (!consent) {
+                    // Show banner if no consent cookie exists
+                    this.showBanner = true;
+                } else {
+                    // Load saved preferences
+                    this.preferences = { ...this.preferences, ...consent };
+                    this.applyConsent();
+                }
+
+                // Expose method to show preferences from cookie policy page
+                window.showCookiePreferences = () => {
+                    this.showBanner = true;
+                    this.showPreferences = true;
+                };
+            },
+
+            getConsentCookie() {
+                const cookies = document.cookie.split(';');
+                for (let cookie of cookies) {
+                    const [name, value] = cookie.trim().split('=');
+                    if (name === 'cookie_consent') {
+                        try {
+                            return JSON.parse(decodeURIComponent(value));
+                        } catch {
+                            return null;
+                        }
+                    }
+                }
+                return null;
+            },
+
+            setConsentCookie(preferences) {
+                const expires = new Date();
+                expires.setFullYear(expires.getFullYear() + 1);
+                document.cookie = `cookie_consent=${encodeURIComponent(JSON.stringify(preferences))};expires=${expires.toUTCString()};path=/;SameSite=Lax`;
+            },
+
+            acceptAll() {
+                this.preferences = {
+                    essential: true,
+                    functional: true,
+                    analytics: true,
+                    marketing: true
+                };
+                this.saveAndClose('accepted_all');
+            },
+
+            acceptEssential() {
+                this.preferences = {
+                    essential: true,
+                    functional: false,
+                    analytics: false,
+                    marketing: false
+                };
+                this.saveAndClose('accepted_essential');
+            },
+
+            rejectAll() {
+                this.preferences = {
+                    essential: true,
+                    functional: false,
+                    analytics: false,
+                    marketing: false
+                };
+                this.saveAndClose('accepted_essential');
+            },
+
+            savePreferences() {
+                this.saveAndClose('customized');
+            },
+
+            saveAndClose(status) {
+                const data = {
+                    ...this.preferences,
+                    status: status,
+                    timestamp: new Date().toISOString()
+                };
+
+                this.setConsentCookie(data);
+                this.applyConsent();
+                this.sendConsentToServer(data);
+
+                this.showBanner = false;
+                this.showPreferences = false;
+            },
+
+            applyConsent() {
+                // Apply consent settings
+                // This is where you would enable/disable analytics, etc.
+                if (this.preferences.analytics) {
+                    // Enable analytics (e.g., Matomo)
+                    this.enableAnalytics();
+                }
+
+                // Dispatch event for other scripts to react to consent changes
+                window.dispatchEvent(new CustomEvent('cookieConsentUpdated', {
+                    detail: this.preferences
+                }));
+            },
+
+            enableAnalytics() {
+                // Example: Enable Matomo analytics
+                // This would be replaced with actual analytics initialization
+                console.log('Analytics enabled');
+            },
+
+            async sendConsentToServer(data) {
+                try {
+                    const response = await fetch('{% url "cookie_consent_update" %}', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': this.getCsrfToken()
+                        },
+                        body: JSON.stringify(data)
+                    });
+
+                    if (!response.ok) {
+                        console.error('Failed to save consent to server');
+                    }
+                } catch (error) {
+                    console.error('Error saving consent:', error);
+                }
+            },
+
+            getCsrfToken() {
+                const cookies = document.cookie.split(';');
+                for (let cookie of cookies) {
+                    const [name, value] = cookie.trim().split('=');
+                    if (name === 'csrftoken') {
+                        return value;
+                    }
+                }
+                return '';
+            }
+        };
+    }
+</script>
+
+<style>
+    [x-cloak] { display: none !important; }
+</style>

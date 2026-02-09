@@ -733,6 +733,7 @@ class ComplianceLog(models.Model):
         return f"{self.compliance_type}: {self.reference_id}"
 
 
+<<<<<<< HEAD
 class SIEMHashChainState(models.Model):
     """
     Track SIEM hash chain state for tamper-proof logging.
@@ -747,11 +748,50 @@ class SIEMHashChainState(models.Model):
     sequence_number = models.BigIntegerField(default=0, db_index=True)
     last_hash = models.CharField(max_length=128, blank=True)
     last_event_id = models.UUIDField(null=True, blank=True)
+=======
+class CookieConsent(models.Model):
+    """
+    Track cookie consent preferences for GDPR compliance.
+    Stores both authenticated user consent and anonymous visitor consent via cookie ID.
+    """
+
+    CONSENT_STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+        ("pending", "Pending"),
+        ("accepted_all", "Accepted All"),
+        ("accepted_essential", "Essential Only"),
+        ("customized", "Customized"),
+        ("withdrawn", "Withdrawn"),
+    )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    # User identification (one of these should be set)
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, null=True, blank=True, related_name="cookie_consents"
+    )
+    cookie_id = models.CharField(
+        max_length=64, blank=True, db_index=True, help_text="Anonymous visitor identifier from cookie"
+    )
+
+    # Consent status
+    status = models.CharField(max_length=20, choices=CONSENT_STATUS_CHOICES, default="pending")
+
+    # Individual category consents
+    essential_cookies = models.BooleanField(default=True, help_text="Always required")
+    functional_cookies = models.BooleanField(default=False)
+    analytics_cookies = models.BooleanField(default=False)
+    marketing_cookies = models.BooleanField(default=False)
+
+    # Metadata
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True)
+>>>>>>> origin/claude/gdpr-compliance-audit-4heye
 
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+<<<<<<< HEAD
     # Configuration
     hash_algorithm = models.CharField(max_length=20, default="sha256")
     is_active = models.BooleanField(default=True)
@@ -893,3 +933,35 @@ class SIEMExportLog(models.Model):
 
     def __str__(self) -> str:
         return f"SIEM Export ({self.export_format}) - {self.status}"
+=======
+    # Consent version (for tracking policy updates)
+    consent_version = models.CharField(max_length=20, default="1.0")
+
+    class Meta:
+        db_table = "audit_cookie_consent"
+        ordering: ClassVar[tuple[str, ...]] = ("-updated_at",)
+        indexes: ClassVar[tuple[models.Index, ...]] = (
+            models.Index(fields=["user", "-updated_at"]),
+            models.Index(fields=["cookie_id", "-updated_at"]),
+            models.Index(fields=["status", "-created_at"]),
+        )
+
+    def __str__(self) -> str:
+        identifier = self.user.email if self.user else f"cookie:{self.cookie_id[:8]}..."
+        return f"Cookie consent: {identifier} ({self.status})"
+
+    @property
+    def has_analytics_consent(self) -> bool:
+        """Check if analytics cookies are consented."""
+        return self.status in ("accepted_all", "customized") and self.analytics_cookies
+
+    @property
+    def has_functional_consent(self) -> bool:
+        """Check if functional cookies are consented."""
+        return self.status in ("accepted_all", "customized") and self.functional_cookies
+
+    @property
+    def has_marketing_consent(self) -> bool:
+        """Check if marketing cookies are consented."""
+        return self.status in ("accepted_all", "customized") and self.marketing_cookies
+>>>>>>> origin/claude/gdpr-compliance-audit-4heye
