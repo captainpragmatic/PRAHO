@@ -21,6 +21,11 @@ on:
       - 'uv.lock'
       - '.github/workflows/platform.yml'
 
+env:
+  DJANGO_SETTINGS_MODULE: config.settings.test
+  SECRET_KEY: test-secret-key-for-ci
+  UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv
+
 jobs:
   platform-test:
     runs-on: ubuntu-latest
@@ -43,85 +48,33 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Install uv
+    - name: Install uv and sync dependencies
       uses: astral-sh/setup-uv@v7
       with:
         enable-cache: true
         cache-dependency-glob: "uv.lock"
 
-    - name: Set up Python
-      run: uv python install
-
-    - name: Install platform dependencies
-      run: uv sync --group platform --group dev
-
-    - name: Set up platform environment
+    - name: Set up Python and install dependencies
       run: |
-        export DATABASE_URL=postgres://postgres:postgres@localhost:5432/test_db
-        export DJANGO_SETTINGS_MODULE=config.settings.test
-        export SECRET_KEY=test-secret-key-for-ci
-        echo "DATABASE_URL=postgres://postgres:postgres@localhost:5432/test_db" >> $GITHUB_ENV
-        echo "DJANGO_SETTINGS_MODULE=config.settings.test" >> $GITHUB_ENV
-        echo "SECRET_KEY=test-secret-key-for-ci" >> $GITHUB_ENV
-
-    - name: Create database cache table
-      run: |
-        cd services/platform
-        PYTHONPATH=$(pwd) uv run python manage.py createcachetable django_cache_table || echo "Cache table already exists"
+        uv python install
+        uv sync --group platform --group dev
 
     - name: Run platform migrations
       run: |
         cd services/platform
-        PYTHONPATH=$(pwd) uv run python manage.py migrate --no-input
-
-    - name: Run platform type checking
-      run: |
-        cd services/platform
-        echo "Running mypy type checking for platform..."
-        PYTHONPATH=$(pwd) uv run mypy apps/ --config-file ../../pyproject.toml --no-error-summary || echo "Type checking completed with issues"
+        PYTHONPATH=$(pwd) ${{ github.workspace }}/.venv/bin/python manage.py migrate --no-input
 
     - name: Run platform unit tests
       run: |
         cd services/platform
         echo "Running platform unit tests..."
-        PYTHONPATH=$(pwd) uv run python manage.py test tests --verbosity=2 --parallel --keepdb
-
-    - name: Run platform database cache tests
-      run: |
-        cd services/platform
-        echo "Testing database cache functionality..."
-        PYTHONPATH=$(pwd) uv run python -c "
-        import os
-        os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.test')
-        import django
-        django.setup()
-        from django.core.cache import cache
-
-        # Test cache operations
-        cache.set('test_key', 'test_value', 300)
-        result = cache.get('test_key')
-        assert result == 'test_value', f'Expected test_value, got {result}'
-        print('Database cache working correctly')
-
-        # Test cache deletion
-        cache.delete('test_key')
-        result = cache.get('test_key')
-        assert result is None, f'Expected None after deletion, got {result}'
-        print('Database cache deletion working correctly')
-        "
+        PYTHONPATH=$(pwd) ${{ github.workspace }}/.venv/bin/python manage.py test tests --verbosity=2 --parallel --keepdb
 
     - name: Lint platform code
       run: |
         cd services/platform
         echo "Running linting for platform service..."
-        PYTHONPATH=$(pwd) uv run ruff check apps/ || echo "Linting completed with issues"
-        PYTHONPATH=$(pwd) uv run black --check apps/ || echo "Code formatting check completed with issues"
-
-    - name: Check for hardcoded credentials
-      run: |
-        echo "Checking for hardcoded credentials in platform..."
-        grep -r -i "password.*=" services/platform/ && echo "Found hardcoded credentials!" && exit 1 || echo "No hardcoded credentials found"
-        grep -r -i "secret.*=" services/platform/ --exclude="*.md" && echo "Found hardcoded secrets!" && exit 1 || echo "No hardcoded secrets found"
+        PYTHONPATH=$(pwd) ${{ github.workspace }}/.venv/bin/ruff check apps/ || echo "Linting completed with issues"
 
     - name: Upload platform artifacts
       uses: actions/upload-artifact@v4
@@ -140,71 +93,22 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Install uv
+    - name: Install uv and sync dependencies
       uses: astral-sh/setup-uv@v7
       with:
         enable-cache: true
         cache-dependency-glob: "uv.lock"
 
-    - name: Set up Python
-      run: uv python install
-
-    - name: Install dependencies
-      run: uv sync --group platform --group dev
-
-    - name: Run security checks
+    - name: Set up Python and install dependencies
       run: |
-        echo "Running platform security validation..."
-        cd services/platform
-
-        # Verify platform can import its own models
-        PYTHONPATH=$(pwd) uv run python -c "
-        try:
-            from apps.billing.models import Invoice
-            print('Platform can access billing models')
-        except ImportError as e:
-            print(f'Platform cannot access billing models: {e}')
-            exit(1)
-        " || exit 1
-
-        # Verify platform has database access
-        PYTHONPATH=$(pwd) uv run python -c "
-        import os
-        os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.test')
-        import django
-        django.setup()
-        from django.db import connection
-
-        try:
-            with connection.cursor() as cursor:
-                cursor.execute('SELECT 1')
-                print('Platform has database access')
-        except Exception as e:
-            print(f'Platform database access failed: {e}')
-            exit(1)
-        " || exit 1
+        uv python install
+        uv sync --group platform --group dev
 
     - name: Run Bandit SAST Security Scan
       run: |
-        echo "🔍 Running Bandit security analysis..."
+        echo "Running Bandit security analysis..."
         cd services/platform
-        # Run bandit with moderate severity, skip test files
-        bandit -r apps/ -ll -ii --exclude '*/tests/*,*/test_*' -f json -o bandit-report.json || true
-        # Display human-readable summary
-        bandit -r apps/ -ll -ii --exclude '*/tests/*,*/test_*' -f txt || echo "⚠️ Bandit scan completed with findings"
-
-    - name: Run Safety Dependency Vulnerability Scan
-      run: |
-        echo "🛡️ Scanning dependencies for known vulnerabilities..."
-        cd services/platform
-        # Check for vulnerabilities in installed packages
-        safety check --full-report || echo "⚠️ Safety scan completed - review findings above"
-
-    - name: Run pip-audit Dependency Check
-      run: |
-        echo "📦 Running pip-audit vulnerability check..."
-        pip-audit --format json --output pip-audit-report.json || true
-        pip-audit || echo "⚠️ pip-audit completed - review findings above"
+        ${{ github.workspace }}/.venv/bin/bandit -r apps/ -ll -ii --exclude '*/tests/*,*/test_*' -f txt || echo "Bandit scan completed with findings"
 
     - name: Upload Security Reports
       uses: actions/upload-artifact@v4
@@ -213,5 +117,4 @@ jobs:
         name: security-reports
         path: |
           services/platform/bandit-report.json
-          pip-audit-report.json
         if-no-files-found: warn

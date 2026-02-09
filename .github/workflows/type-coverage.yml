@@ -6,102 +6,79 @@ on:
     paths:
       - 'services/platform/**'
       - 'pyproject.toml'
+      - 'uv.lock'
       - 'scripts/type_coverage_report.py'
   pull_request:
     branches: [ master, develop ]
     paths:
       - 'services/platform/**'
       - 'pyproject.toml'
+      - 'uv.lock'
       - 'scripts/type_coverage_report.py'
+
+env:
+  DJANGO_SETTINGS_MODULE: config.settings.test
+  SECRET_KEY: test-secret-key-for-ci
+  UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv
 
 jobs:
   type-check:
     runs-on: ubuntu-latest
-    
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: test_db
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
 
     steps:
     - uses: actions/checkout@v4
 
-    - name: Install uv
+    - name: Install uv and sync dependencies
       uses: astral-sh/setup-uv@v7
       with:
         enable-cache: true
         cache-dependency-glob: "uv.lock"
 
-    - name: Set up Python
-      run: uv python install
-
-    - name: Install dependencies
-      run: uv sync --group platform --group dev
-    
-    - name: Set up Django settings
+    - name: Set up Python and install dependencies
       run: |
-        export DJANGO_SETTINGS_MODULE=config.settings.test
-        export DATABASE_URL=postgres://postgres:postgres@localhost:5432/test_db
-        echo "DJANGO_SETTINGS_MODULE=config.settings.test" >> $GITHUB_ENV
-        echo "DATABASE_URL=postgres://postgres:postgres@localhost:5432/test_db" >> $GITHUB_ENV
-    
-    - name: Set up platform database
-      run: |
-        cd services/platform
-        PYTHONPATH=$(pwd) uv run python manage.py createcachetable django_cache_table || echo "Cache table exists"
-        PYTHONPATH=$(pwd) uv run python manage.py migrate --no-input
+        uv python install
+        uv sync --group platform --group dev
 
     - name: Run type coverage check
       run: |
-        echo "🔍 Running type coverage analysis..."
+        echo "Running type coverage analysis..."
         cd services/platform
-        PYTHONPATH=$(pwd) uv run python ../../scripts/type_coverage_report.py || echo "Warning: Type coverage script failed, continuing..."
+        PYTHONPATH=$(pwd) ${{ github.workspace }}/.venv/bin/python ../../scripts/type_coverage_report.py || echo "Warning: Type coverage script failed, continuing..."
 
     - name: Run mypy type checking
       run: |
-        echo "🏷️ Running mypy type checking..."
+        echo "Running mypy type checking..."
         cd services/platform
-        PYTHONPATH=$(pwd) uv run mypy apps/ --config-file ../../pyproject.toml --no-error-summary > mypy_errors.txt || true
+        PYTHONPATH=$(pwd) ${{ github.workspace }}/.venv/bin/mypy apps/ --config-file ../../pyproject.toml --no-error-summary > mypy_errors.txt || true
         echo "Mypy output saved to mypy_errors.txt"
         head -20 mypy_errors.txt || echo "No mypy output file or file is empty"
-    
+
     - name: Count type errors
       run: |
         cd services/platform
-        # Count errors with better error handling
         if [ -f mypy_errors.txt ]; then
           ERROR_COUNT=$(grep -c "error:" mypy_errors.txt || echo "0")
         else
           ERROR_COUNT="0"
         fi
-        
-        # Validate that ERROR_COUNT is a number
+
         if ! [[ "$ERROR_COUNT" =~ ^[0-9]+$ ]]; then
           echo "Warning: Invalid error count '$ERROR_COUNT', setting to 0"
           ERROR_COUNT="0"
         fi
-        
+
         echo "Type errors: $ERROR_COUNT"
         echo "ERROR_COUNT=$ERROR_COUNT" >> $GITHUB_ENV
-    
+
     - name: Check type error threshold
       run: |
         if [ "$ERROR_COUNT" -gt 50 ]; then
-          echo "❌ Type errors ($ERROR_COUNT) exceed threshold (50)"
+          echo "Type errors ($ERROR_COUNT) exceed threshold (50)"
           exit 1
         else
-          echo "✅ Type errors ($ERROR_COUNT) within threshold (50)"
+          echo "Type errors ($ERROR_COUNT) within threshold (50)"
         fi
-    
+
     - name: Upload type coverage report
       uses: actions/upload-artifact@v4
       if: always()
@@ -111,50 +88,3 @@ jobs:
           services/platform/type_coverage_report.json
           services/platform/mypy_errors.txt
         if-no-files-found: warn
-    
-    - name: Comment PR with type coverage
-      if: github.event_name == 'pull_request'
-      uses: actions/github-script@v6
-      with:
-        script: |
-          const fs = require('fs');
-          let summary = `## 📊 Type Coverage Report\n\n`;
-          
-          try {
-            if (fs.existsSync('type_coverage_report.json')) {
-              const report = JSON.parse(fs.readFileSync('type_coverage_report.json', 'utf8'));
-              
-              summary += `**Total Type Errors**: ${report.overall_summary.total_type_errors}
-          **Target**: ${report.overall_summary.target_errors} errors
-          **Status**: ${report.overall_summary.phase_3_status}
-          
-          ### 🎯 App Breakdown
-          | App | Files | Errors | Coverage |
-          |-----|--------|--------|----------|
-          ${report.app_breakdown.map(app => 
-            `| ${app.app} | ${app.total_files} files | ${app.error_count} errors | ${app.type_coverage?.toFixed(1) || 'N/A'}% |`
-          ).join('\n')}
-          
-          ### 🚀 Recommendations
-          ${report.recommendations.map(rec => `- ${rec}`).join('\n')}`;
-            } else {
-              summary += `**Type Errors**: ${process.env.ERROR_COUNT || 'Unknown'}
-          
-          ⚠️ Detailed type coverage report not available.
-          
-          View the [workflow run](${context.payload.pull_request.html_url}/checks) for more details.`;
-            }
-          } catch (error) {
-            summary += `**Type Errors**: ${process.env.ERROR_COUNT || 'Unknown'}
-          
-          ❌ Error generating detailed report: ${error.message}
-          
-          View the [workflow run](${context.payload.pull_request.html_url}/checks) for more details.`;
-          }
-          
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: summary
-          });

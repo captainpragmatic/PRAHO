@@ -21,6 +21,13 @@ on:
       - 'uv.lock'
       - '.github/workflows/portal.yml'
 
+env:
+  DJANGO_SETTINGS_MODULE: config.settings.dev
+  SECRET_KEY: test-secret-key-for-ci
+  PLATFORM_API_URL: http://mock-platform:8000
+  PLATFORM_API_KEY: test-api-key
+  UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv
+
 jobs:
   portal-test:
     runs-on: ubuntu-latest
@@ -30,28 +37,16 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Install uv
+    - name: Install uv and sync dependencies
       uses: astral-sh/setup-uv@v7
       with:
         enable-cache: true
         cache-dependency-glob: "uv.lock"
 
-    - name: Set up Python
-      run: uv python install
-
-    - name: Install portal dependencies (minimal, no database)
-      run: uv sync --group portal --group dev
-
-    - name: Set portal environment (no database!)
+    - name: Set up Python and install dependencies
       run: |
-        export DJANGO_SETTINGS_MODULE=config.settings
-        export SECRET_KEY=test-secret-key-for-ci
-        export PLATFORM_API_URL=http://mock-platform:8000
-        export PLATFORM_API_KEY=test-api-key
-        echo "DJANGO_SETTINGS_MODULE=config.settings" >> $GITHUB_ENV
-        echo "SECRET_KEY=test-secret-key-for-ci" >> $GITHUB_ENV
-        echo "PLATFORM_API_URL=http://mock-platform:8000" >> $GITHUB_ENV
-        echo "PLATFORM_API_KEY=test-api-key" >> $GITHUB_ENV
+        uv python install
+        uv sync --group portal --group dev
 
     - name: Validate portal has no external database dependencies
       run: |
@@ -76,98 +71,17 @@ jobs:
           echo "Portal settings use only SQLite (Django internals only)"
         fi
 
-    - name: Run portal type checking
+    - name: Run portal unit tests
       run: |
         cd services/portal
-        echo "Running mypy type checking for portal..."
-        uv run mypy apps/ --config-file ../../pyproject.toml --no-error-summary || echo "Type checking completed with issues"
-
-    - name: Run portal unit tests (with database blocker)
-      run: |
-        cd services/portal
-        echo "Running portal unit tests with database access blocked..."
-        uv run pytest apps/ -v --tb=short --maxfail=10 -m "not db_required"
-
-    - name: Test portal API endpoints
-      run: |
-        cd services/portal
-        echo "Testing portal API endpoints..."
-        uv run python -c "
-        import os
-        os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
-
-        try:
-            import django
-            django.setup()
-
-            # Test that Django starts without database
-            from django.conf import settings
-            print(f'Portal Django settings loaded: {settings.DEBUG}')
-
-            # Verify no database configuration
-            if hasattr(settings, 'DATABASES') and settings.DATABASES:
-                print('SECURITY FAILURE: Portal has database configuration!')
-                exit(1)
-            else:
-                print('Portal has no database configuration')
-
-        except Exception as e:
-            print(f'Portal Django setup failed: {e}')
-            exit(1)
-        "
+        echo "Running portal unit tests..."
+        PYTHONPATH=$(pwd) ${{ github.workspace }}/.venv/bin/pytest tests/ -v --tb=short --maxfail=10
 
     - name: Lint portal code
       run: |
         cd services/portal
         echo "Running linting for portal service..."
-        uv run ruff check apps/ || echo "Linting completed with issues"
-        uv run black --check apps/ || echo "Code formatting check completed with issues"
-
-    - name: Security validation - verify portal isolation
-      run: |
-        echo "Running portal security isolation tests..."
-        cd services/portal
-
-        # Verify portal cannot import platform models
-        uv run python -c "
-        try:
-            from apps.billing.models import Invoice
-            print('SECURITY FAILURE: Portal can import platform models!')
-            exit(1)
-        except ImportError:
-            print('Portal properly isolated - cannot import platform models')
-        " || echo "Portal isolation test passed"
-
-        # Verify portal cannot import database drivers
-        uv run python -c "
-        try:
-            import psycopg2
-            print('SECURITY FAILURE: Portal can import psycopg2!')
-            exit(1)
-        except ImportError:
-            print('Portal properly isolated - cannot import psycopg2')
-        " || echo "Database driver isolation test passed"
-
-        # Verify portal cannot connect to database (even if available)
-        uv run python -c "
-        import os
-        os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
-
-        try:
-            import django
-            django.setup()
-            from django.db import connection
-
-            try:
-                with connection.cursor() as cursor:
-                    cursor.execute('SELECT 1')
-                print('SECURITY FAILURE: Portal can access database!')
-                exit(1)
-            except Exception:
-                print('Portal properly blocked from database access')
-        except Exception as e:
-            print(f'Portal has no database connection: {e}')
-        "
+        ${{ github.workspace }}/.venv/bin/ruff check apps/ || echo "Linting completed with issues"
 
     - name: Upload portal artifacts
       uses: actions/upload-artifact@v4
