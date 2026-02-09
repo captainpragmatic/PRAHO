@@ -211,18 +211,68 @@ DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "noreply@pragmatichost
 SERVER_EMAIL = DEFAULT_FROM_EMAIL
 
 # ===============================================================================
-# CACHE CONFIGURATION (Database Production - optimized settings)
+# CACHE CONFIGURATION (Redis for Production - with fallback to Database)
 # ===============================================================================
 
-CACHES["default"].update(
-    {
-        "OPTIONS": {
-            "MAX_ENTRIES": 50000,  # Higher limit for production
-            "CULL_FREQUENCY": 4,   # More aggressive culling
+# Use Redis for production caching if available
+if REDIS_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL,
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+                "SOCKET_CONNECT_TIMEOUT": 5,
+                "SOCKET_TIMEOUT": 5,
+                "CONNECTION_POOL_KWARGS": {
+                    "max_connections": 50,
+                    "retry_on_timeout": True,
+                },
+                "COMPRESSOR": "django_redis.compressors.zlib.ZlibCompressor",
+            },
+            "KEY_PREFIX": "praho",
+            "VERSION": CACHE_VERSION,
+            "TIMEOUT": 3600,  # 1 hour default
         },
-        "TIMEOUT": 3600,  # 1 hour timeout for production
+        # Separate cache for sessions (more persistent)
+        "sessions": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL,
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+                "db": 1,  # Separate Redis DB for sessions
+            },
+            "KEY_PREFIX": "praho_session",
+            "TIMEOUT": 86400,  # 24 hours for sessions
+        },
+        # Rate limiting cache (very short TTL)
+        "ratelimit": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL,
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+                "db": 2,  # Separate Redis DB for rate limiting
+            },
+            "KEY_PREFIX": "praho_rate",
+            "TIMEOUT": 60,
+        },
     }
-)
+    # Use Redis for sessions
+    SESSION_CACHE_ALIAS = "sessions"
+else:
+    # Fallback to database cache
+    CACHES["default"].update(
+        {
+            "OPTIONS": {
+                "MAX_ENTRIES": 50000,  # Higher limit for production
+                "CULL_FREQUENCY": 4,   # More aggressive culling
+            },
+            "TIMEOUT": 3600,  # 1 hour timeout for production
+        }
+    )
+
+# Rate limiting cache alias
+RATELIMIT_USE_CACHE = "ratelimit" if REDIS_URL else "default"
 
 
 # ===============================================================================

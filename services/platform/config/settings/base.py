@@ -475,3 +475,192 @@ Q_CLUSTER = {
     "recycle": 500,  # Restart workers after 500 tasks
     "sync": False,  # Async execution
 }
+
+# ===============================================================================
+# 🚀 PERFORMANCE & SCALABILITY CONFIGURATION
+# ===============================================================================
+
+# Cache version for invalidation (increment to invalidate all caches)
+CACHE_VERSION = int(os.environ.get("CACHE_VERSION", "1"))
+
+# ===============================================================================
+# REDIS CACHE CONFIGURATION (Production) 🔄
+# ===============================================================================
+
+# Redis URL for caching (if available, otherwise falls back to database cache)
+REDIS_URL = os.environ.get("REDIS_URL")
+
+# Redis cache configuration (used when REDIS_URL is set)
+REDIS_CACHE_CONFIG = {
+    "BACKEND": "django.core.cache.backends.redis.RedisCache",
+    "LOCATION": REDIS_URL,
+    "OPTIONS": {
+        "CLIENT_CLASS": "django_redis.client.DefaultClient",
+        "SOCKET_CONNECT_TIMEOUT": 5,
+        "SOCKET_TIMEOUT": 5,
+        "CONNECTION_POOL_KWARGS": {
+            "max_connections": 50,
+            "retry_on_timeout": True,
+        },
+        "COMPRESSOR": "django_redis.compressors.zlib.ZlibCompressor",
+    },
+    "KEY_PREFIX": "praho",
+    "VERSION": CACHE_VERSION,
+}
+
+# ===============================================================================
+# DRF THROTTLING CONFIGURATION 🚦
+# ===============================================================================
+
+# Rate limiting rates for different scopes
+THROTTLE_RATES = {
+    # Authentication endpoints - very restrictive
+    "login": "5/minute",
+    "password_reset": "3/minute",
+    "2fa_verify": "10/minute",
+
+    # Customer-based rates (per customer account)
+    "customer": os.environ.get("THROTTLE_RATE_CUSTOMER", "100/minute"),
+    "customer_burst": "30/10s",
+
+    # Anonymous rates
+    "anon": "20/minute",
+    "anon_burst": "10/10s",
+
+    # Standard authenticated rates
+    "user": "60/minute",
+    "user_burst": "20/10s",
+
+    # Service operations
+    "provision": "10/minute",
+    "backup": "5/minute",
+    "sync": "30/minute",
+
+    # Financial operations
+    "payment": "30/minute",
+    "invoice": "60/minute",
+    "refund": "10/minute",
+
+    # Sustained rates (hourly limits)
+    "sustained": "1000/hour",
+    "sustained_premium": "5000/hour",
+}
+
+# Add throttling classes to REST_FRAMEWORK
+REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = [
+    "apps.common.performance.rate_limiting.CustomerRateThrottle",
+    "apps.common.performance.rate_limiting.BurstRateThrottle",
+]
+REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = THROTTLE_RATES
+
+# ===============================================================================
+# CONNECTION POOLING CONFIGURATION 🔌
+# ===============================================================================
+
+# HTTP connection pool settings for external services
+HTTP_CONNECTION_POOL = {
+    "pool_connections": int(os.environ.get("HTTP_POOL_CONNECTIONS", "10")),
+    "pool_maxsize": int(os.environ.get("HTTP_POOL_MAXSIZE", "20")),
+    "max_retries": int(os.environ.get("HTTP_MAX_RETRIES", "3")),
+    "backoff_factor": float(os.environ.get("HTTP_BACKOFF_FACTOR", "0.5")),
+    "timeout_connect": float(os.environ.get("HTTP_TIMEOUT_CONNECT", "10.0")),
+    "timeout_read": float(os.environ.get("HTTP_TIMEOUT_READ", "30.0")),
+}
+
+# Service-specific connection pool overrides
+CONNECTION_POOL_OVERRIDES = {
+    "virtualmin": {
+        "pool_connections": 5,
+        "pool_maxsize": 10,
+        "timeout_connect": 15.0,
+        "timeout_read": 60.0,
+    },
+    "stripe": {
+        "pool_connections": 10,
+        "pool_maxsize": 20,
+        "timeout_connect": 10.0,
+        "timeout_read": 30.0,
+    },
+    "efactura": {
+        "pool_connections": 3,
+        "pool_maxsize": 5,
+        "timeout_read": 60.0,
+    },
+}
+
+# ===============================================================================
+# RESOURCE QUOTAS CONFIGURATION 📊
+# ===============================================================================
+
+# Enable/disable quota enforcement
+QUOTA_ENFORCEMENT_ENABLED = os.environ.get("QUOTA_ENFORCEMENT_ENABLED", "true").lower() == "true"
+
+# Default quotas by customer tier
+CUSTOMER_QUOTA_TIERS = {
+    "basic": {
+        "api_requests": 10000,  # per month
+        "storage_mb": 5120,  # 5 GB
+        "bandwidth_mb": 102400,  # 100 GB
+        "services": 3,
+        "domains": 5,
+        "email_accounts": 10,
+        "databases": 3,
+        "users": 2,
+    },
+    "professional": {
+        "api_requests": 100000,
+        "storage_mb": 51200,  # 50 GB
+        "bandwidth_mb": 512000,  # 500 GB
+        "services": 10,
+        "domains": 25,
+        "email_accounts": 100,
+        "databases": 25,
+        "users": 10,
+    },
+    "enterprise": {
+        "api_requests": 1000000,
+        "storage_mb": 512000,  # 500 GB
+        "bandwidth_mb": 5120000,  # 5 TB
+        "services": 100,
+        "domains": 500,
+        "email_accounts": 1000,
+        "databases": 250,
+        "users": 100,
+    },
+}
+
+# ===============================================================================
+# ASYNC TASK PROCESSING CONFIGURATION ⚡
+# ===============================================================================
+
+# Task priority queue configuration
+TASK_PRIORITIES = {
+    "critical": {"timeout": 60, "retry": 120, "max_retries": 5},
+    "high": {"timeout": 180, "retry": 300, "max_retries": 3},
+    "normal": {"timeout": 300, "retry": 600, "max_retries": 3},
+    "low": {"timeout": 600, "retry": 1800, "max_retries": 2},
+    "background": {"timeout": 1800, "retry": 3600, "max_retries": 1},
+}
+
+# Bulk operation settings
+BULK_OPERATION_BATCH_SIZE = int(os.environ.get("BULK_BATCH_SIZE", "100"))
+BULK_OPERATION_USE_TRANSACTION = True
+
+# ===============================================================================
+# QUERY OPTIMIZATION CONFIGURATION 🔍
+# ===============================================================================
+
+# Enable query profiling in development/staging
+QUERY_PROFILING_ENABLED = os.environ.get("QUERY_PROFILING_ENABLED", "false").lower() == "true"
+QUERY_PROFILING_THRESHOLD = int(os.environ.get("QUERY_PROFILING_THRESHOLD", "5"))
+
+# N+1 query detection warning threshold
+N_PLUS_ONE_THRESHOLD = int(os.environ.get("N_PLUS_ONE_THRESHOLD", "10"))
+
+# ===============================================================================
+# DISTRIBUTED LOCKING CONFIGURATION 🔐
+# ===============================================================================
+
+# Lock timeout defaults (seconds)
+DISTRIBUTED_LOCK_TIMEOUT = int(os.environ.get("DISTRIBUTED_LOCK_TIMEOUT", "300"))
+DISTRIBUTED_LOCK_BLOCKING_TIMEOUT = int(os.environ.get("DISTRIBUTED_LOCK_BLOCKING_TIMEOUT", "30"))
