@@ -3,6 +3,11 @@
 
 -r base.txt
 
+# Security Analysis Tools (SAST)
+bandit>=1.7.0  # Python security linter
+safety>=2.3.0  # Dependency vulnerability scanner
+pip-audit>=2.6.0  # Alternative vulnerability scanner
+
 # Development tools
 pytest>=7.4.0
 pytest-django>=4.5.0

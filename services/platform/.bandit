@@ -1,0 +1,26 @@
+# Bandit Security Linter Configuration
+# https://bandit.readthedocs.io/en/latest/config.html
+
+[bandit]
+# Exclude test directories
+exclude_dirs = tests,test,migrations
+
+# Skip specific tests (with justification)
+skips = B101,B311
+
+# B101: assert_used - We use assert in tests and type narrowing
+# B311: random - We use secrets module for security-sensitive randomness
+
+# Target directories
+targets = apps
+
+# Severity and confidence levels
+# Only report medium+ severity with medium+ confidence
+severity = medium
+confidence = medium
+
+# Output format options (can be overridden via CLI)
+format = txt
+
+# Enable all tests by default, then exclude via skips above
+include =

@@ -166,9 +166,15 @@ jobs:
             print(f'Platform cannot access billing models: {e}')
             exit(1)
         " || exit 1
+<<<<<<< HEAD
 
         # Verify platform has database access
         PYTHONPATH=$(pwd) uv run python -c "
+=======
+        
+        # Verify platform has database access
+        PYTHONPATH=$(pwd) python -c "
+>>>>>>> origin/claude/security-compliance-implementation-8WNIQ
         import os
         os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.test')
         import django
@@ -183,3 +189,35 @@ jobs:
             print(f'Platform database access failed: {e}')
             exit(1)
         " || exit 1
+
+    - name: Run Bandit SAST Security Scan
+      run: |
+        echo "🔍 Running Bandit security analysis..."
+        cd services/platform
+        # Run bandit with moderate severity, skip test files
+        bandit -r apps/ -ll -ii --exclude '*/tests/*,*/test_*' -f json -o bandit-report.json || true
+        # Display human-readable summary
+        bandit -r apps/ -ll -ii --exclude '*/tests/*,*/test_*' -f txt || echo "⚠️ Bandit scan completed with findings"
+
+    - name: Run Safety Dependency Vulnerability Scan
+      run: |
+        echo "🛡️ Scanning dependencies for known vulnerabilities..."
+        cd services/platform
+        # Check for vulnerabilities in installed packages
+        safety check --full-report || echo "⚠️ Safety scan completed - review findings above"
+
+    - name: Run pip-audit Dependency Check
+      run: |
+        echo "📦 Running pip-audit vulnerability check..."
+        pip-audit --format json --output pip-audit-report.json || true
+        pip-audit || echo "⚠️ pip-audit completed - review findings above"
+
+    - name: Upload Security Reports
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: security-reports
+        path: |
+          services/platform/bandit-report.json
+          pip-audit-report.json
+        if-no-files-found: warn
