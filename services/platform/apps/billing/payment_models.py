@@ -171,7 +171,7 @@ class Payment(models.Model):
             self.idempotency_key = self.generate_idempotency_key()
 
     @classmethod
-    def get_by_idempotency_key(cls, key: str) -> "Payment | None":
+    def get_by_idempotency_key(cls, key: str) -> Payment | None:
         """Find payment by idempotency key for deduplication."""
         try:
             return cls.objects.get(idempotency_key=key)

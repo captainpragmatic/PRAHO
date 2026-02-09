@@ -1184,7 +1184,7 @@ class PDFGeneratorIntegrationTestCase(TestCase):
         responses = []
         
         # Create multiple generators
-        for i in range(3):
+        for _i in range(3):
             generators.append(RomanianInvoicePDFGenerator(self.invoice))
         
         # Generate PDFs

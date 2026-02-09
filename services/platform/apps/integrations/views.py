@@ -13,6 +13,7 @@ from django.views.decorators.http import require_http_methods
 from django_ratelimit.decorators import ratelimit  # type: ignore[import-untyped]
 
 from apps.audit.services import RateLimitEventData, SecurityAuditService
+from apps.common.request_ip import get_safe_client_ip
 from apps.common.types import Err, Ok, Result
 
 from .models import WebhookEvent
@@ -111,15 +112,16 @@ class WebhookView(View):
         SECURITY: Store raw body for signature verification before JSON parsing.
         This prevents signature bypass attacks via JSON re-serialization differences.
         """
-        if request.content_type != "application/json":
+        content_type = request.content_type or ""
+        if not content_type.startswith("application/json"):
             return Err("Content-Type must be application/json")
 
         try:
             # Store raw body for signature verification (SECURITY FIX)
             raw_body = request.body
             payload = json.loads(raw_body)
-            # Attach raw body to payload for downstream signature verification
-            payload["_raw_body"] = raw_body
+            # Attach raw body to request for downstream signature verification
+            request._raw_body = raw_body  # type: ignore[attr-defined]
             return Ok(payload)
         except json.JSONDecodeError:
             return Err("Invalid JSON payload")
@@ -130,6 +132,7 @@ class WebhookView(View):
             {
                 "payload": payload,
                 "signature": self.extract_signature(request),
+                "raw_body": getattr(request, "_raw_body", b""),
                 "ip_address": self.get_client_ip(request),
                 "user_agent": request.META.get("HTTP_USER_AGENT", ""),
                 "headers": dict(request.headers),
@@ -156,6 +159,7 @@ class WebhookView(View):
             payload=context["payload"],
             signature=context["signature"],
             headers=context["headers"],
+            raw_body=context.get("raw_body", b""),
             ip_address=context["ip_address"],
             user_agent=context["user_agent"],
         )
@@ -185,9 +189,7 @@ class WebhookView(View):
 
     def get_client_ip(self, request: Any) -> str:
         """🌐 Get client IP address"""
-        x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
-        ip = x_forwarded_for.split(",")[0] if x_forwarded_for else request.META.get("REMOTE_ADDR")
-        return ip  # type: ignore[no-any-return]
+        return get_safe_client_ip(request)
 
 
 class StripeWebhookView(WebhookView):

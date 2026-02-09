@@ -21,9 +21,9 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("billing", "0009_alter_refundstatushistory_previous_status"),
-        ("customers", "0003_rename_payment_method_field"),
-        ("products", "0002_alter_product_options_alter_productbundle_options_and_more"),
+        ("billing", "0002_initial"),
+        ("customers", "0002_initial"),
+        ("products", "0002_product_default_service_plan"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

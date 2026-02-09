@@ -66,11 +66,23 @@ if is_testing:
     # Remove debug toolbar from apps and middleware during testing
     INSTALLED_APPS = [app for app in INSTALLED_APPS if app != "debug_toolbar"]
     MIDDLEWARE = [mw for mw in MIDDLEWARE if "debug_toolbar" not in mw]
-    
+
     DEBUG_TOOLBAR_CONFIG = {
         "SHOW_TOOLBAR_CALLBACK": lambda request: False,
         "IS_RUNNING_TESTS": True,
     }
+
+    # Keep DB-backed sessions in tests so cache.clear() in security tests
+    # does not wipe authentication session state.
+    SESSION_ENGINE = "django.contrib.sessions.backends.db"
+
+    # Reduce log noise and timing jitter in security/performance tests.
+    LOGGING['root']['level'] = 'ERROR'
+    LOGGING['loggers']['apps']['level'] = 'ERROR'
+    if 'django' in LOGGING.get('loggers', {}):
+        LOGGING['loggers']['django']['level'] = 'ERROR'
+    if 'urllib3' in LOGGING.get('loggers', {}):
+        LOGGING['loggers']['urllib3']['level'] = 'WARNING'
 
 # Development platform API URL
 PLATFORM_API_BASE_URL = "http://localhost:8700/api"
@@ -116,5 +128,6 @@ CACHES = {
 }
 
 # Development logging
-LOGGING['root']['level'] = 'DEBUG'
-LOGGING['loggers']['apps']['level'] = 'DEBUG'
+if not is_testing:
+    LOGGING['root']['level'] = 'DEBUG'
+    LOGGING['loggers']['apps']['level'] = 'DEBUG'

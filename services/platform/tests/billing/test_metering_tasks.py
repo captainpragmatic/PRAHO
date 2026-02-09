@@ -9,48 +9,44 @@ Tests all scheduled and async tasks with mocked dependencies.
 from __future__ import annotations
 
 import uuid
-from decimal import Decimal
 from datetime import timedelta
-from unittest.mock import patch, MagicMock, PropertyMock
+from decimal import Decimal
+from unittest.mock import MagicMock, patch
 
 from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
-from apps.billing.models import Currency
 from apps.billing.metering_models import (
-    UsageMeter,
-    UsageEvent,
-    UsageAggregation,
-    Subscription,
-    SubscriptionItem,
     BillingCycle,
-    UsageThreshold,
-    UsageAlert,
+    UsageAggregation,
+    UsageEvent,
+    UsageMeter,
 )
 from apps.billing.metering_tasks import (
-    update_aggregation_for_event,
-    process_pending_usage_events,
     advance_billing_cycles,
-    close_expired_billing_cycles,
-    rate_pending_aggregations,
-    generate_pending_invoices,
-    run_billing_cycle_workflow,
-    check_usage_thresholds,
-    send_usage_alert_notification,
     check_all_usage_thresholds,
+    check_usage_thresholds,
+    check_usage_thresholds_async,
+    close_expired_billing_cycles,
+    collect_service_usage,
+    collect_virtualmin_usage,
+    generate_pending_invoices,
+    process_pending_usage_events,
+    rate_pending_aggregations,
+    register_scheduled_tasks,
+    run_billing_cycle_workflow,
+    send_usage_alert_notification,
+    send_usage_alert_notification_async,
     sync_aggregation_to_stripe,
+    sync_aggregation_to_stripe_async,
     sync_billing_cycle_to_stripe,
     sync_pending_to_stripe,
-    collect_virtualmin_usage,
-    collect_service_usage,
+    update_aggregation_for_event,
     update_aggregation_for_event_async,
-    check_usage_thresholds_async,
-    send_usage_alert_notification_async,
-    sync_aggregation_to_stripe_async,
-    register_scheduled_tasks,
 )
+from apps.billing.models import Currency, Subscription, SubscriptionItem
 from apps.customers.models import Customer
-from apps.provisioning.models import ServicePlan
+from apps.products.models import Product
 
 
 class UpdateAggregationForEventTestCase(TransactionTestCase):
@@ -72,19 +68,24 @@ class UpdateAggregationForEventTestCase(TransactionTestCase):
             aggregation_type="sum",
             unit="requests",
         )
-        self.service_plan = ServicePlan.objects.create(
+        self.product = Product.objects.create(
+            slug="basic-agg-evt",
             name="Basic",
-            plan_type="shared_hosting",
-            price_monthly=Decimal("29.99"),
-        )
-        self.subscription = Subscription.objects.create(
-            customer=self.customer,
-            service_plan=self.service_plan,
-            currency=self.currency,
-            status="active",
-            billing_interval="monthly",
+            product_type="shared_hosting",
         )
         now = timezone.now()
+        self.subscription = Subscription.objects.create(
+            customer=self.customer,
+            product=self.product,
+            currency=self.currency,
+            subscription_number="SUB-AGGEVT-001",
+            status="active",
+            billing_cycle="monthly",
+            unit_price_cents=2999,
+            current_period_start=now,
+            current_period_end=now + timedelta(days=30),
+            next_billing_date=now + timedelta(days=30),
+        )
         self.billing_cycle = BillingCycle.objects.create(
             subscription=self.subscription,
             period_start=now,
@@ -164,7 +165,7 @@ class ProcessPendingUsageEventsTestCase(TestCase):
         mock_service.process_pending_events.return_value = (10, 0)
         mock_service_class.return_value = mock_service
 
-        result = process_pending_usage_events(limit=50, meter_id="meter123")
+        process_pending_usage_events(limit=50, meter_id="meter123")
 
         mock_service.process_pending_events.assert_called_once_with(
             meter_id="meter123", limit=50
@@ -196,17 +197,23 @@ class BillingCycleTasksTestCase(TransactionTestCase):
             primary_email="test@example.com",
             status="active",
         )
-        self.service_plan = ServicePlan.objects.create(
+        self.product = Product.objects.create(
+            slug="basic-bctask",
             name="Basic",
-            plan_type="shared_hosting",
-            price_monthly=Decimal("29.99"),
+            product_type="shared_hosting",
         )
+        now = timezone.now()
         self.subscription = Subscription.objects.create(
             customer=self.customer,
-            service_plan=self.service_plan,
+            product=self.product,
             currency=self.currency,
+            subscription_number="SUB-BCTASK-001",
             status="active",
-            billing_interval="monthly",
+            billing_cycle="monthly",
+            unit_price_cents=2999,
+            current_period_start=now,
+            current_period_end=now + timedelta(days=30),
+            next_billing_date=now + timedelta(days=30),
         )
 
     @patch("apps.audit.services.AuditService")
@@ -269,17 +276,23 @@ class RatePendingAggregationsTestCase(TransactionTestCase):
             aggregation_type="sum",
             unit="requests",
         )
-        self.service_plan = ServicePlan.objects.create(
+        self.product = Product.objects.create(
+            slug="basic-rate",
             name="Basic",
-            plan_type="shared_hosting",
-            price_monthly=Decimal("29.99"),
+            product_type="shared_hosting",
         )
+        now = timezone.now()
         self.subscription = Subscription.objects.create(
             customer=self.customer,
-            service_plan=self.service_plan,
+            product=self.product,
             currency=self.currency,
+            subscription_number="SUB-RATE-001",
             status="active",
-            billing_interval="monthly",
+            billing_cycle="monthly",
+            unit_price_cents=2999,
+            current_period_start=now,
+            current_period_end=now + timedelta(days=30),
+            next_billing_date=now + timedelta(days=30),
         )
 
     @patch("apps.billing.metering_service.RatingEngine")
@@ -302,7 +315,7 @@ class RatePendingAggregationsTestCase(TransactionTestCase):
         """Test rating all pending aggregations."""
         # Create a closed billing cycle
         now = timezone.now()
-        cycle = BillingCycle.objects.create(
+        BillingCycle.objects.create(
             subscription=self.subscription,
             period_start=now - timedelta(days=30),
             period_end=now,
@@ -373,17 +386,23 @@ class AlertTasksTestCase(TransactionTestCase):
             aggregation_type="sum",
             unit="requests",
         )
-        self.service_plan = ServicePlan.objects.create(
+        self.product = Product.objects.create(
+            slug="basic-alert",
             name="Basic",
-            plan_type="shared_hosting",
-            price_monthly=Decimal("29.99"),
+            product_type="shared_hosting",
         )
+        now = timezone.now()
         self.subscription = Subscription.objects.create(
             customer=self.customer,
-            service_plan=self.service_plan,
+            product=self.product,
             currency=self.currency,
+            subscription_number="SUB-ALERT-001",
             status="active",
-            billing_interval="monthly",
+            billing_cycle="monthly",
+            unit_price_cents=2999,
+            current_period_start=now,
+            current_period_end=now + timedelta(days=30),
+            next_billing_date=now + timedelta(days=30),
         )
 
     @patch("apps.billing.metering_service.UsageAlertService")
@@ -424,10 +443,10 @@ class AlertTasksTestCase(TransactionTestCase):
     def test_check_all_usage_thresholds(self, mock_service_class):
         """Test checking all usage thresholds."""
         # Create subscription item
-        item = SubscriptionItem.objects.create(
+        SubscriptionItem.objects.create(
             subscription=self.subscription,
-            meter=self.meter,
-            is_active=True,
+            product=self.product,
+            unit_price_cents=2999,
         )
 
         mock_service = MagicMock()
@@ -461,18 +480,24 @@ class StripeSyncTasksTestCase(TransactionTestCase):
             stripe_meter_id="meter_abc",
             stripe_meter_event_name="api_requests",
         )
-        self.service_plan = ServicePlan.objects.create(
+        self.product = Product.objects.create(
+            slug="basic-stripe",
             name="Basic",
-            plan_type="shared_hosting",
-            price_monthly=Decimal("29.99"),
+            product_type="shared_hosting",
         )
+        now = timezone.now()
         self.subscription = Subscription.objects.create(
             customer=self.customer,
-            service_plan=self.service_plan,
+            product=self.product,
             currency=self.currency,
+            subscription_number="SUB-STRIPE-001",
             status="active",
-            billing_interval="monthly",
-            stripe_customer_id="cus_abc123",
+            billing_cycle="monthly",
+            unit_price_cents=2999,
+            current_period_start=now,
+            current_period_end=now + timedelta(days=30),
+            next_billing_date=now + timedelta(days=30),
+            stripe_subscription_id="sub_abc123",
         )
         now = timezone.now()
         self.billing_cycle = BillingCycle.objects.create(
@@ -582,13 +607,13 @@ class VirtualminUsageCollectionTestCase(TransactionTestCase):
     ):
         """Test successful Virtualmin usage collection."""
         # Create real meters
-        disk_meter = UsageMeter.objects.create(
+        UsageMeter.objects.create(
             name="disk_usage_gb",
             display_name="Disk Usage",
             aggregation_type="last",
             unit="gb",
         )
-        bw_meter = UsageMeter.objects.create(
+        UsageMeter.objects.create(
             name="bandwidth_gb",
             display_name="Bandwidth",
             aggregation_type="sum",

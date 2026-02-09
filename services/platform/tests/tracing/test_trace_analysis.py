@@ -100,7 +100,8 @@ class TestRequestIDFilter(TestCase):
         result = filter_instance.filter(record)
 
         assert result is True
-        assert record.request_id == "no-request-id"
+        # After clear_request_id(), attribute is None (not absent)
+        assert record.request_id is None
 
     def test_request_id_thread_local_isolation(self):
         """Test that request IDs are properly isolated in thread-local storage."""

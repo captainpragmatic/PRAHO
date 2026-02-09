@@ -24,6 +24,7 @@ from apps.infrastructure.provider_config import (
     is_provider_supported,
     map_terraform_outputs_to_deployment,
     run_provider_command,
+    validate_provider_prerequisites,
 )
 
 
@@ -535,3 +536,73 @@ class TestEdgeCases(TestCase):
 
                 call_kwargs = mock_run.call_args.kwargs
                 self.assertEqual(call_kwargs["timeout"], 600)
+
+
+class TestValidateProviderPrerequisites(TestCase):
+    """Tests for validate_provider_prerequisites()."""
+
+    @mock.patch("apps.infrastructure.provider_config.shutil.which")
+    @mock.patch("apps.infrastructure.provider_config.Path.is_dir", return_value=True)
+    def test_valid_provider_passes(self, mock_is_dir, mock_which):
+        """All prerequisites met should return Ok."""
+        mock_which.side_effect = lambda tool: f"/usr/bin/{tool}"
+
+        result = validate_provider_prerequisites("hetzner")
+        self.assertTrue(result.is_ok())
+        details = result.unwrap()
+        self.assertEqual(details["provider"], "hetzner")
+        self.assertIn("cli_tool", details)
+        self.assertIn("terraform_path", details)
+
+    def test_unknown_provider_fails(self):
+        """Unknown provider should return Err."""
+        result = validate_provider_prerequisites("nonexistent_provider")
+        self.assertTrue(result.is_err())
+        self.assertIn("Unknown provider", result.unwrap_err())
+
+    @mock.patch("apps.infrastructure.provider_config.shutil.which", return_value=None)
+    def test_missing_cli_tool_fails(self, mock_which):
+        """Missing CLI tool should return Err."""
+        result = validate_provider_prerequisites("hetzner")
+        self.assertTrue(result.is_err())
+        self.assertIn("CLI tool", result.unwrap_err())
+
+    @mock.patch("apps.infrastructure.provider_config.shutil.which")
+    def test_missing_terraform_fails(self, mock_which):
+        """Missing terraform binary should return Err."""
+        # CLI tool found, but terraform not found
+        def side_effect(tool):
+            if tool == "hcloud":
+                return "/usr/bin/hcloud"
+            return None  # terraform not found
+
+        mock_which.side_effect = side_effect
+
+        result = validate_provider_prerequisites("hetzner")
+        self.assertTrue(result.is_err())
+        self.assertIn("Terraform binary not found", result.unwrap_err())
+
+    @mock.patch("apps.infrastructure.provider_config.shutil.which")
+    @mock.patch("apps.infrastructure.provider_config.Path.is_dir", return_value=False)
+    def test_missing_terraform_module_fails(self, mock_is_dir, mock_which):
+        """Missing terraform module directory should return Err."""
+        mock_which.side_effect = lambda tool: f"/usr/bin/{tool}"
+
+        result = validate_provider_prerequisites("hetzner")
+        self.assertTrue(result.is_err())
+        self.assertIn("Terraform module not found", result.unwrap_err())
+
+    def test_all_configured_providers_have_terraform_modules(self):
+        """All providers in PROVIDER_CONFIG should have terraform module dirs on disk."""
+        import os
+        from pathlib import Path
+
+        modules_base = Path(__file__).parent.parent.parent.parent / "infrastructure" / "terraform" / "modules"
+
+        for provider_type, config in PROVIDER_CONFIG.items():
+            module_name = config.get("terraform_module", provider_type)
+            module_path = modules_base / module_name
+            self.assertTrue(
+                module_path.is_dir(),
+                f"Terraform module directory missing for provider '{provider_type}': {module_path}",
+            )

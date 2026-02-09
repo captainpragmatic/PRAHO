@@ -26,6 +26,7 @@ import os
 import shutil
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from apps.common.types import Err, Ok, Result
@@ -471,6 +472,67 @@ def map_terraform_outputs_to_deployment(
 # =============================================================================
 # Credential Helpers
 # =============================================================================
+
+
+def validate_provider_prerequisites(
+    provider_type: str,
+    base_terraform_path: str | None = None,
+) -> Result[dict[str, Any], str]:
+    """
+    Validate all prerequisites for a provider deployment.
+
+    Checks:
+    - Provider config exists
+    - CLI tool is installed and accessible
+    - Terraform binary is available
+    - Provider terraform module exists on disk
+
+    Args:
+        provider_type: Provider type key (e.g., "hetzner", "digitalocean")
+        base_terraform_path: Base path to terraform modules. If None, uses default.
+
+    Returns:
+        Result with validation details dict or error message
+    """
+    # 1. Check provider config exists
+    config = get_provider_config(provider_type)
+    if not config:
+        return Err(f"Unknown provider: {provider_type}")
+
+    details: dict[str, Any] = {"provider": provider_type}
+
+    # 2. Check CLI tool is available
+    cli_tool = config.get("cli", {}).get("tool", "")
+    cli_path = shutil.which(cli_tool) if cli_tool else None
+    if not cli_path:
+        return Err(
+            f"CLI tool '{cli_tool}' not found for provider '{provider_type}'. "
+            f"Please install it before deploying."
+        )
+    details["cli_tool"] = cli_tool
+    details["cli_path"] = cli_path
+
+    # 3. Check terraform is available
+    terraform_path = shutil.which("terraform")
+    if not terraform_path:
+        return Err("Terraform binary not found. Please install Terraform >= 1.5.0.")
+    details["terraform_path"] = terraform_path
+
+    # 4. Check terraform module directory exists
+    if base_terraform_path is None:
+        base_terraform_path = str(
+            Path(__file__).parent.parent.parent / "infrastructure" / "terraform" / "modules"
+        )
+    module_name = config.get("terraform_module", provider_type)
+    module_path = Path(base_terraform_path) / module_name
+    if not module_path.is_dir():
+        return Err(
+            f"Terraform module not found at '{module_path}' for provider '{provider_type}'."
+        )
+    details["module_path"] = str(module_path)
+
+    logger.info(f"✅ [Provider:{provider_type}] All prerequisites validated")
+    return Ok(details)
 
 
 def get_credentials_for_provider(

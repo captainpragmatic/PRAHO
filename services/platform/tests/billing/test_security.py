@@ -3,21 +3,25 @@
 Tests all OWASP Top 10 security enhancements implemented for the billing system.
 """
 
-from decimal import Decimal
-from unittest.mock import patch
-from django.test import TestCase, Client
-from django.contrib.auth import get_user_model
-from django.core.exceptions import ValidationError, PermissionDenied
-from django.urls import reverse
-from django.utils import timezone
 from datetime import timedelta
+from unittest.mock import patch
+
+from django.contrib.auth import get_user_model
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.test import TestCase
+from django.utils import timezone
 
 from apps.billing.models import (
-    Currency, Invoice, InvoiceSequence, ProformaInvoice, ProformaSequence,
-    validate_financial_json, validate_financial_amount, validate_financial_text_field,
-    log_security_event
+    Currency,
+    Invoice,
+    InvoiceSequence,
+    ProformaInvoice,
+    log_security_event,
+    validate_financial_amount,
+    validate_financial_json,
+    validate_financial_text_field,
 )
-from apps.billing.security import validate_efactura_url, validate_external_api_url, sanitize_financial_input
+from apps.billing.security import sanitize_financial_input, validate_efactura_url, validate_external_api_url
 from apps.billing.views import _validate_financial_document_access
 from apps.customers.models import Customer
 
@@ -235,7 +239,7 @@ class BillingModelSecurityTests(TestCase):
         """🔒 Test that sequence operations are logged"""
         sequence = InvoiceSequence.objects.create(scope="test", last_value=0)
         
-        number = sequence.get_next_number(user_email="admin@test.com")
+        sequence.get_next_number(user_email="admin@test.com")
         
         # Should log the sequence increment
         mock_log.assert_called()

@@ -5,17 +5,19 @@ Tests authentication, cart operations, and order creation flows.
 
 import json
 from unittest.mock import patch, Mock
-from django.test import TestCase, Client
+from django.test import SimpleTestCase, Client, override_settings
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.contrib.messages.middleware import MessageMiddleware
 from django.http import HttpRequest
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.api_client.services import PlatformAPIError
 from apps.orders.views import require_customer_authentication
 
 
-class TestOrderViews(TestCase):
+@override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
+class TestOrderViews(SimpleTestCase):
     """Test order-related views and authentication"""
     
     def setUp(self):
@@ -285,7 +287,8 @@ class TestOrderViews(TestCase):
         self.assertEqual(response.status_code, 405)  # Method not allowed
 
 
-class TestOrderViewsIntegration(TestCase):
+@override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
+class TestOrderViewsIntegration(SimpleTestCase):
     """Integration tests for order flow"""
     
     def setUp(self):
@@ -333,18 +336,21 @@ class TestOrderViewsIntegration(TestCase):
         pass  # Placeholder for session persistence test
 
 
-class TestOrderViewsSecurity(TestCase):
+@override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
+class TestOrderViewsSecurity(SimpleTestCase):
     """Security tests for order views"""
     
     def test_csrf_protection_on_state_changing_operations(self):
         """Test CSRF protection on POST operations"""
-        session = self.client.session
+        client = Client(enforce_csrf_checks=True)
+        session = client.session
         session['customer_id'] = 123
         session['user_id'] = 456
+        session['authenticated_at'] = timezone.now().isoformat()
         session.save()
         
         # Test without CSRF token
-        response = self.client.post('/order/cart/add/', {
+        response = client.post('/order/cart/add/', {
             'product_slug': 'test-product',
             'quantity': 1
         })

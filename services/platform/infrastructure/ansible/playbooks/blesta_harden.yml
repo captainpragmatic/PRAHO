@@ -1,0 +1,167 @@
+# Blesta Hardening Playbook
+# Security hardening for Blesta hosting nodes
+---
+- name: Harden Blesta server
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    # Firewall configuration
+    - name: Install UFW
+      ansible.builtin.apt:
+        name: ufw
+        state: present
+
+    - name: Allow SSH
+      community.general.ufw:
+        rule: allow
+        port: "22"
+        proto: tcp
+
+    - name: Allow HTTP
+      community.general.ufw:
+        rule: allow
+        port: "80"
+        proto: tcp
+
+    - name: Allow HTTPS
+      community.general.ufw:
+        rule: allow
+        port: "443"
+        proto: tcp
+
+    - name: Allow SMTP ports
+      community.general.ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - "25"
+        - "465"
+        - "587"
+
+    - name: Allow IMAP/POP3 ports
+      community.general.ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - "993"
+        - "995"
+
+    - name: Allow DNS
+      community.general.ufw:
+        rule: allow
+        port: "53"
+
+    - name: Enable UFW
+      community.general.ufw:
+        state: enabled
+        policy: deny
+
+    # Fail2ban
+    - name: Install fail2ban
+      ansible.builtin.apt:
+        name: fail2ban
+        state: present
+
+    - name: Configure fail2ban for Apache
+      ansible.builtin.copy:
+        content: |
+          [sshd]
+          enabled = true
+          port = ssh
+          filter = sshd
+          logpath = /var/log/auth.log
+          maxretry = 5
+          bantime = 3600
+
+          [apache-auth]
+          enabled = true
+          port = http,https
+          filter = apache-auth
+          logpath = /var/log/apache2/*error.log
+          maxretry = 5
+          bantime = 3600
+        dest: /etc/fail2ban/jail.local
+        mode: '0644'
+      notify: Restart fail2ban
+
+    # Auto-updates
+    - name: Install unattended-upgrades
+      ansible.builtin.apt:
+        name: unattended-upgrades
+        state: present
+
+    - name: Enable unattended security upgrades
+      ansible.builtin.copy:
+        content: |
+          APT::Periodic::Update-Package-Lists "1";
+          APT::Periodic::Unattended-Upgrade "1";
+          APT::Periodic::AutocleanInterval "7";
+        dest: /etc/apt/apt.conf.d/20auto-upgrades
+        mode: '0644'
+
+    # Apache security headers
+    - name: Configure Apache security headers
+      ansible.builtin.copy:
+        content: |
+          <IfModule mod_headers.c>
+              Header always set X-Content-Type-Options "nosniff"
+              Header always set X-Frame-Options "SAMEORIGIN"
+              Header always set X-XSS-Protection "1; mode=block"
+              Header always set Referrer-Policy "strict-origin-when-cross-origin"
+          </IfModule>
+
+          ServerTokens Prod
+          ServerSignature Off
+        dest: /etc/apache2/conf-available/security-headers.conf
+        mode: '0644'
+      notify: Enable security headers
+
+    # SSH hardening
+    - name: Harden SSH configuration
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+      loop:
+        - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication no' }
+        - { regexp: '^#?PermitRootLogin', line: 'PermitRootLogin prohibit-password' }
+        - { regexp: '^#?X11Forwarding', line: 'X11Forwarding no' }
+        - { regexp: '^#?MaxAuthTries', line: 'MaxAuthTries 3' }
+      notify: Restart SSH
+
+    - name: Create hardening marker
+      ansible.builtin.copy:
+        content: |
+          PRAHO_HARDENED=true
+          FIREWALL=ufw
+          FAIL2BAN=true
+          AUTO_UPDATES=true
+          SSH_HARDENED=true
+          CONFIG_DATE={{ ansible_date_time.iso8601 }}
+        dest: /etc/praho-harden-config
+        mode: '0644'
+
+  handlers:
+    - name: Restart fail2ban
+      ansible.builtin.service:
+        name: fail2ban
+        state: restarted
+
+    - name: Enable security headers
+      ansible.builtin.command: a2enconf security-headers
+      changed_when: true
+      notify: Restart Apache
+
+    - name: Restart Apache
+      ansible.builtin.service:
+        name: apache2
+        state: restarted
+
+    - name: Restart SSH
+      ansible.builtin.service:
+        name: sshd
+        state: restarted

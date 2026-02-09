@@ -1,0 +1,135 @@
+# Backup Configuration Playbook for Blesta
+# Configures local (and S3) backups for Blesta databases and files
+---
+- name: Configure Blesta backups
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    backup_local_path: "/var/backups/blesta"
+    backup_retention_days: 7
+    backup_schedule: "0 2 * * *"
+    blesta_install_dir: "/var/www/blesta"
+    blesta_db_name: "blesta"
+
+  tasks:
+    # Local backup setup
+    - name: Create backup directory
+      ansible.builtin.file:
+        path: "{{ backup_local_path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      when: backup_enabled
+
+    # Blesta backup script
+    - name: Create Blesta backup script
+      ansible.builtin.copy:
+        content: |
+          #!/bin/bash
+          # PRAHO Blesta Backup Script
+          # Backs up database and application files
+
+          BACKUP_DIR="{{ backup_local_path }}"
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          DB_NAME="{{ blesta_db_name }}"
+          INSTALL_DIR="{{ blesta_install_dir }}"
+
+          # Create timestamped backup directory
+          BACKUP_PATH="$BACKUP_DIR/$TIMESTAMP"
+          mkdir -p "$BACKUP_PATH"
+
+          # Dump database
+          mysqldump --single-transaction "$DB_NAME" | gzip > "$BACKUP_PATH/database.sql.gz"
+
+          # Backup Blesta uploads and configuration
+          if [ -d "$INSTALL_DIR/uploads" ]; then
+              tar czf "$BACKUP_PATH/uploads.tar.gz" -C "$INSTALL_DIR" uploads
+          fi
+
+          if [ -f "$INSTALL_DIR/config/blesta.php" ]; then
+              cp "$INSTALL_DIR/config/blesta.php" "$BACKUP_PATH/blesta.php.bak"
+          fi
+
+          # Create backup manifest
+          echo "BACKUP_DATE=$TIMESTAMP" > "$BACKUP_PATH/manifest"
+          echo "DB_NAME=$DB_NAME" >> "$BACKUP_PATH/manifest"
+          echo "BACKUP_TYPE=full" >> "$BACKUP_PATH/manifest"
+
+          echo "Backup completed: $BACKUP_PATH"
+        dest: /usr/local/bin/praho-blesta-backup.sh
+        mode: '0755'
+      when: backup_enabled
+
+    - name: Schedule Blesta backup cron job
+      ansible.builtin.cron:
+        name: "PRAHO Blesta backup"
+        minute: "0"
+        hour: "2"
+        job: "/usr/local/bin/praho-blesta-backup.sh >> /var/log/praho-blesta-backup.log 2>&1"
+      when: backup_enabled
+
+    # Cleanup script for local backups
+    - name: Create backup cleanup script
+      ansible.builtin.copy:
+        content: |
+          #!/bin/bash
+          # PRAHO Blesta Backup Cleanup Script
+          BACKUP_DIR="{{ backup_local_path }}"
+          RETENTION_DAYS={{ backup_retention_days }}
+
+          if [ -d "$BACKUP_DIR" ]; then
+              find "$BACKUP_DIR" -maxdepth 1 -type d -mtime +$RETENTION_DAYS -exec rm -rf {} +
+              echo "Cleanup completed: $(date)"
+          fi
+        dest: /usr/local/bin/praho-blesta-backup-cleanup.sh
+        mode: '0755'
+      when: backup_storage == 'local'
+
+    - name: Schedule backup cleanup cron job
+      ansible.builtin.cron:
+        name: "PRAHO Blesta backup cleanup"
+        minute: "30"
+        hour: "4"
+        job: "/usr/local/bin/praho-blesta-backup-cleanup.sh >> /var/log/praho-blesta-backup-cleanup.log 2>&1"
+      when: backup_storage == 'local'
+
+    # S3 backup support
+    - name: Install AWS CLI for S3 backups
+      ansible.builtin.apt:
+        name: awscli
+        state: present
+      when: backup_enabled and backup_storage == 's3'
+
+    - name: Create S3 backup sync script for Blesta
+      ansible.builtin.template:
+        src: templates/s3_backup_sync.sh.j2
+        dest: /usr/local/bin/praho-s3-backup-sync.sh
+        mode: '0755'
+      vars:
+        backup_local_path: "{{ backup_local_path }}"
+      when: backup_enabled and backup_storage == 's3'
+
+    - name: Schedule S3 backup sync cron job
+      ansible.builtin.cron:
+        name: "PRAHO S3 backup sync"
+        minute: "30"
+        hour: "3"
+        job: "/usr/local/bin/praho-s3-backup-sync.sh >> /var/log/praho-s3-backup.log 2>&1"
+      when: backup_enabled and backup_storage == 's3'
+
+    # Verification
+    - name: Create backup configuration marker
+      ansible.builtin.copy:
+        content: |
+          PRAHO_BACKUP_CONFIGURED=true
+          BACKUP_STORAGE={{ backup_storage }}
+          BACKUP_PATH={{ backup_local_path if backup_storage == 'local' else 's3://' + backup_s3_bucket | default('not-configured') }}
+          BACKUP_RETENTION_DAYS={{ backup_retention_days }}
+          BACKUP_SCHEDULE={{ backup_schedule }}
+          PANEL=blesta
+          CONFIG_DATE={{ ansible_date_time.iso8601 }}
+        dest: /etc/praho-backup-config
+        mode: '0644'

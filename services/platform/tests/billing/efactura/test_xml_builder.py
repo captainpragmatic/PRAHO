@@ -2,10 +2,7 @@
 Tests for UBL 2.1 XML Builder with CIUS-RO compliance.
 """
 
-from decimal import Decimal
-from unittest.mock import MagicMock, patch
 
-import pytest
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from lxml import etree

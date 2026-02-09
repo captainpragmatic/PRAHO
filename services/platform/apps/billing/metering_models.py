@@ -18,9 +18,9 @@ import uuid
 from decimal import Decimal
 from typing import Any, ClassVar
 
-from django.core.validators import MaxValueValidator, MinValueValidator
-from django.db import models, transaction
-from django.db.models import F, Sum
+from django.core.validators import MaxValueValidator
+from django.db import models
+from django.db.models import Sum
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -603,266 +603,9 @@ class UsageAggregation(models.Model):
 
 
 # ===============================================================================
-# SUBSCRIPTION & BILLING CYCLE MODELS
+# BILLING CYCLE MODELS
 # ===============================================================================
-
-
-class Subscription(models.Model):
-    """
-    Customer subscription to a service plan with usage-based components.
-
-    Combines fixed recurring charges with metered usage billing.
-    """
-
-    STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
-        ("trialing", _("Trialing")),
-        ("active", _("Active")),
-        ("past_due", _("Past Due")),
-        ("paused", _("Paused")),
-        ("canceled", _("Canceled")),
-        ("expired", _("Expired")),
-    )
-
-    BILLING_INTERVAL_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
-        ("monthly", _("Monthly")),
-        ("quarterly", _("Quarterly")),
-        ("semi_annual", _("Semi-Annual")),
-        ("annual", _("Annual")),
-    )
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-
-    # Core relationships
-    customer = models.ForeignKey(
-        "customers.Customer",
-        on_delete=models.CASCADE,
-        related_name="subscriptions"
-    )
-    service_plan = models.ForeignKey(
-        "provisioning.ServicePlan",
-        on_delete=models.PROTECT,
-        related_name="subscriptions"
-    )
-    service = models.ForeignKey(
-        "provisioning.Service",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="subscriptions",
-        help_text=_("Linked provisioned service")
-    )
-
-    # Stripe integration
-    stripe_subscription_id = models.CharField(
-        max_length=100,
-        blank=True,
-        db_index=True,
-        help_text=_("Stripe Subscription ID")
-    )
-    stripe_customer_id = models.CharField(
-        max_length=100,
-        blank=True,
-        help_text=_("Stripe Customer ID")
-    )
-
-    # Status
-    status = models.CharField(
-        max_length=20,
-        choices=STATUS_CHOICES,
-        default="active"
-    )
-
-    # Billing configuration
-    billing_interval = models.CharField(
-        max_length=20,
-        choices=BILLING_INTERVAL_CHOICES,
-        default="monthly"
-    )
-    currency = models.ForeignKey(
-        Currency,
-        on_delete=models.PROTECT,
-        help_text=_("Billing currency")
-    )
-
-    # Pricing
-    base_price_cents = models.BigIntegerField(
-        default=0,
-        help_text=_("Fixed recurring charge per billing period")
-    )
-
-    # Lifecycle dates
-    created_at = models.DateTimeField(auto_now_add=True)
-    started_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text=_("When subscription became active")
-    )
-    trial_ends_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text=_("When trial period ends")
-    )
-    current_period_start = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text=_("Start of current billing period")
-    )
-    current_period_end = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text=_("End of current billing period")
-    )
-    canceled_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text=_("When subscription was canceled")
-    )
-    cancel_at_period_end = models.BooleanField(
-        default=False,
-        help_text=_("Cancel at end of current period (not immediately)")
-    )
-    ended_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text=_("When subscription fully ended")
-    )
-
-    # Payment
-    payment_method = models.CharField(
-        max_length=50,
-        blank=True,
-        help_text=_("Default payment method for this subscription")
-    )
-    auto_renew = models.BooleanField(
-        default=True,
-        help_text=_("Automatically renew at period end")
-    )
-
-    # Metadata
-    meta = models.JSONField(default=dict, blank=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        db_table = "subscriptions"
-        verbose_name = _("Subscription")
-        verbose_name_plural = _("Subscriptions")
-        ordering = ("-created_at",)
-        indexes = (
-            models.Index(fields=["customer", "status"]),
-            models.Index(fields=["status", "-created_at"]),
-            models.Index(fields=["stripe_subscription_id"]),
-            models.Index(fields=["current_period_end", "status"]),
-            models.Index(fields=["service_plan", "status"]),
-        )
-
-    def __str__(self) -> str:
-        return f"{self.customer} - {self.service_plan.name} ({self.status})"
-
-    @property
-    def base_price(self) -> Decimal:
-        """Return base price as Decimal"""
-        return Decimal(self.base_price_cents) / 100
-
-    @property
-    def is_active(self) -> bool:
-        """Check if subscription is active or trialing"""
-        return self.status in ("active", "trialing")
-
-    def get_current_billing_cycle(self) -> "BillingCycle | None":
-        """Get the current billing cycle for this subscription"""
-        return self.billing_cycles.filter(
-            period_start__lte=timezone.now(),
-            period_end__gt=timezone.now()
-        ).first()
-
-
-class SubscriptionItem(models.Model):
-    """
-    Individual metered component of a subscription.
-
-    Links a subscription to a usage meter with pricing configuration.
-    """
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-
-    subscription = models.ForeignKey(
-        Subscription,
-        on_delete=models.CASCADE,
-        related_name="items"
-    )
-    meter = models.ForeignKey(
-        UsageMeter,
-        on_delete=models.PROTECT,
-        related_name="subscription_items"
-    )
-
-    # Stripe integration
-    stripe_subscription_item_id = models.CharField(
-        max_length=100,
-        blank=True,
-        help_text=_("Stripe Subscription Item ID")
-    )
-    stripe_price_id = models.CharField(
-        max_length=100,
-        blank=True,
-        help_text=_("Stripe Price ID for this metered item")
-    )
-
-    # Included allowance (from plan)
-    included_quantity = models.DecimalField(
-        max_digits=18,
-        decimal_places=8,
-        default=Decimal("0"),
-        help_text=_("Quantity included in base subscription (no extra charge)")
-    )
-
-    # Pricing tier reference
-    pricing_tier = models.ForeignKey(
-        "billing.PricingTier",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="subscription_items",
-        help_text=_("Pricing tier for overage charges")
-    )
-
-    # Override pricing (if not using tier)
-    unit_price_cents = models.BigIntegerField(
-        null=True,
-        blank=True,
-        help_text=_("Override price per unit in cents")
-    )
-
-    # Configuration
-    is_active = models.BooleanField(default=True)
-
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        db_table = "subscription_items"
-        verbose_name = _("Subscription Item")
-        verbose_name_plural = _("Subscription Items")
-        constraints = [
-            models.UniqueConstraint(
-                fields=["subscription", "meter"],
-                name="unique_subscription_meter"
-            ),
-        ]
-        indexes = (
-            models.Index(fields=["subscription", "is_active"]),
-            models.Index(fields=["meter", "is_active"]),
-        )
-
-    def __str__(self) -> str:
-        return f"{self.subscription} - {self.meter.name}"
-
-    @property
-    def unit_price(self) -> Decimal | None:
-        """Return unit price as Decimal"""
-        if self.unit_price_cents is not None:
-            return Decimal(self.unit_price_cents) / 100
-        return None
+# Note: Subscription and SubscriptionItem are defined in subscription_models.py
 
 
 class BillingCycle(models.Model):
@@ -884,7 +627,7 @@ class BillingCycle(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     subscription = models.ForeignKey(
-        Subscription,
+        "billing.Subscription",
         on_delete=models.CASCADE,
         related_name="billing_cycles"
     )
@@ -1333,7 +1076,7 @@ class UsageAlert(models.Model):
         related_name="usage_alerts"
     )
     subscription = models.ForeignKey(
-        Subscription,
+        "billing.Subscription",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,

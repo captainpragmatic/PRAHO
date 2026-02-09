@@ -5,7 +5,6 @@ Provides role-based access control decorators for views.
 
 import logging
 from collections.abc import Callable
-from contextlib import suppress
 from functools import wraps
 from typing import Any
 
@@ -21,6 +20,18 @@ from apps.users.models import User
 logger = logging.getLogger(__name__)
 
 
+def _build_login_url(request: HttpRequest) -> str:
+    """Build login URL with optional return path."""
+    login_url = "/users/login/"
+    full_path_getter = getattr(request, "get_full_path", None)
+    if callable(full_path_getter):
+        try:
+            login_url += f"?next={full_path_getter()}"
+        except (TypeError, ValueError):
+            logger.debug("Could not append next parameter to login URL")
+    return login_url
+
+
 def staff_required(view_func: Callable[..., HttpResponse]) -> Callable[..., HttpResponse]:
     """
     Decorator that requires user to be staff (is_staff=True or staff_role is not None)
@@ -31,10 +42,7 @@ def staff_required(view_func: Callable[..., HttpResponse]) -> Callable[..., Http
     def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         # Unauthenticated -> login redirect
         if not request.user.is_authenticated:
-            login_url = "/users/login/"
-            with suppress(Exception):
-                login_url += f"?next={request.get_full_path()}"
-            return HttpResponseRedirect(login_url)
+            return HttpResponseRedirect(_build_login_url(request))
 
         user = request.user
         # Authenticated but non-staff -> redirect to dashboard with message (orders tests)
@@ -56,10 +64,7 @@ def admin_required(view_func: Callable[..., HttpResponse]) -> Callable[..., Http
     @wraps(view_func)
     def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         if not request.user.is_authenticated:
-            login_url = "/users/login/"
-            with suppress(Exception):
-                login_url += f"?next={request.get_full_path()}"
-            return HttpResponseRedirect(login_url)
+            return HttpResponseRedirect(_build_login_url(request))
 
         user = request.user
         # Check if user is admin
@@ -77,10 +82,7 @@ def staff_required_strict(view_func: Callable[..., HttpResponse]) -> Callable[..
     @wraps(view_func)
     def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         if not request.user.is_authenticated:
-            login_url = "/users/login/"
-            with suppress(Exception):
-                login_url += f"?next={request.get_full_path()}"
-            return HttpResponseRedirect(login_url)
+            return HttpResponseRedirect(_build_login_url(request))
 
         user = request.user
         if not (user.is_staff or bool(getattr(user, "staff_role", "")) or getattr(user, "is_superuser", False)):

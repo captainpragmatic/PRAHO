@@ -36,13 +36,13 @@ class EFacturaAuditService:
 
     @staticmethod
     def log_xml_generated(
-        invoice: "Invoice",
-        document: "EFacturaDocument",
+        invoice: Invoice,
+        document: EFacturaDocument,
         xml_hash: str = "",
     ) -> None:
         """Log successful XML generation."""
         try:
-            from apps.audit.services import AuditContext, AuditService, BusinessEventData, BillingAuditService
+            from apps.audit.services import AuditContext, BillingAuditService, BusinessEventData
 
             event_data = BusinessEventData(
                 event_type="invoice_xml_generated",
@@ -65,9 +65,9 @@ class EFacturaAuditService:
 
     @staticmethod
     def log_validation_result(
-        invoice: "Invoice",
-        document: "EFacturaDocument",
-        validation_result: "ValidationResult",
+        invoice: Invoice,
+        document: EFacturaDocument,
+        validation_result: ValidationResult,
     ) -> None:
         """Log XML validation result."""
         try:
@@ -102,15 +102,21 @@ class EFacturaAuditService:
 
     @staticmethod
     def log_submission_attempt(
-        invoice: "Invoice",
-        document: "EFacturaDocument",
+        invoice: Invoice,
+        document: EFacturaDocument,
         success: bool,
         upload_index: str = "",
         error_message: str = "",
     ) -> None:
         """Log e-Factura submission attempt."""
         try:
-            from apps.audit.services import AuditContext, AuditService, BusinessEventData, BillingAuditService, ComplianceEventRequest
+            from apps.audit.services import (
+                AuditContext,
+                AuditService,
+                BillingAuditService,
+                BusinessEventData,
+                ComplianceEventRequest,
+            )
 
             event_type = "efactura_submitted" if success else "efactura_submission_failed"
 
@@ -155,14 +161,14 @@ class EFacturaAuditService:
 
     @staticmethod
     def log_status_change(
-        invoice: "Invoice",
-        document: "EFacturaDocument",
+        invoice: Invoice,
+        document: EFacturaDocument,
         old_status: str,
         new_status: str,
     ) -> None:
         """Log e-Factura status change."""
         try:
-            from apps.audit.services import AuditContext, BusinessEventData, BillingAuditService
+            from apps.audit.services import AuditContext, BillingAuditService, BusinessEventData
 
             event_data = BusinessEventData(
                 event_type="invoice_status_changed",
@@ -184,13 +190,19 @@ class EFacturaAuditService:
 
     @staticmethod
     def log_accepted(
-        invoice: "Invoice",
-        document: "EFacturaDocument",
+        invoice: Invoice,
+        document: EFacturaDocument,
         download_id: str = "",
     ) -> None:
         """Log e-Factura acceptance by ANAF."""
         try:
-            from apps.audit.services import AuditContext, AuditService, BusinessEventData, BillingAuditService, ComplianceEventRequest
+            from apps.audit.services import (
+                AuditContext,
+                AuditService,
+                BillingAuditService,
+                BusinessEventData,
+                ComplianceEventRequest,
+            )
 
             # Log as business event
             event_data = BusinessEventData(
@@ -236,14 +248,20 @@ class EFacturaAuditService:
 
     @staticmethod
     def log_rejected(
-        invoice: "Invoice",
-        document: "EFacturaDocument",
+        invoice: Invoice,
+        document: EFacturaDocument,
         errors: list[dict],
     ) -> None:
         """Log e-Factura rejection by ANAF."""
         try:
             from apps.audit.models import AuditAlert
-            from apps.audit.services import AuditContext, AuditService, BusinessEventData, BillingAuditService, ComplianceEventRequest
+            from apps.audit.services import (
+                AuditContext,
+                AuditService,
+                BillingAuditService,
+                BusinessEventData,
+                ComplianceEventRequest,
+            )
 
             # Log as business event with high severity
             event_data = BusinessEventData(
@@ -294,14 +312,14 @@ class EFacturaAuditService:
 
     @staticmethod
     def log_retry_scheduled(
-        invoice: "Invoice",
-        document: "EFacturaDocument",
+        invoice: Invoice,
+        document: EFacturaDocument,
         retry_count: int,
         next_retry_at: Any,
     ) -> None:
         """Log retry scheduling."""
         try:
-            from apps.audit.services import AuditContext, BusinessEventData, BillingAuditService
+            from apps.audit.services import AuditContext, BillingAuditService, BusinessEventData
 
             event_data = BusinessEventData(
                 event_type="efactura_submitted",  # Reuse existing event type
@@ -323,8 +341,8 @@ class EFacturaAuditService:
 
     @staticmethod
     def log_deadline_warning(
-        invoice: "Invoice",
-        document: "EFacturaDocument",
+        invoice: Invoice,
+        document: EFacturaDocument,
         hours_remaining: float,
     ) -> None:
         """Log deadline warning."""
@@ -368,13 +386,13 @@ class EFacturaAuditService:
 
     @staticmethod
     def log_download_completed(
-        invoice: "Invoice",
-        document: "EFacturaDocument",
+        invoice: Invoice,
+        document: EFacturaDocument,
         file_path: str,
     ) -> None:
         """Log successful response download."""
         try:
-            from apps.audit.services import AuditContext, BusinessEventData, BillingAuditService
+            from apps.audit.services import AuditContext, BillingAuditService, BusinessEventData
 
             event_data = BusinessEventData(
                 event_type="invoice_pdf_generated",  # Reuse existing type

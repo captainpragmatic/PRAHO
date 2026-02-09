@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans "e-Factura Dashboard" %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+  <!-- Header -->
+  <div class="sm:flex sm:items-center mb-6">
+    <div class="sm:flex-auto">
+      <h1 class="text-3xl font-bold text-white">
+        🇷🇴 {% trans "e-Factura Compliance Dashboard" %}
+      </h1>
+      <p class="mt-2 text-slate-400">
+        {% trans "Monitor electronic invoice submissions to ANAF" %}
+      </p>
+    </div>
+    <div class="mt-4 sm:ml-16 sm:mt-0 sm:flex-none flex gap-3">
+      <a href="{% url 'billing:invoice_list' %}" class="inline-flex items-center rounded-md bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600">
+        {% trans "Back to Billing" %}
+      </a>
+    </div>
+  </div>
+
+  <!-- Deadline Alert Banner -->
+  {% if approaching_deadlines %}
+  <div class="bg-red-900 border border-red-700 rounded-lg p-4 mb-6">
+    <div class="flex items-start">
+      <div class="flex-shrink-0">
+        <span class="text-red-300 text-xl">🚨</span>
+      </div>
+      <div class="ml-3">
+        <h3 class="text-sm font-medium text-red-200">{% trans "Approaching Deadlines" %}</h3>
+        <div class="mt-1 text-sm text-red-300">
+          <p>{{ approaching_deadlines|length }} {% trans "invoice(s) approaching the 5-day e-Factura submission deadline." %}</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Status Summary Cards -->
+  <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 mb-8">
+    {% for card in status_cards %}
+    <a href="?status={{ card.key }}" class="bg-slate-800 rounded-lg p-4 border {% if status_filter == card.key %}border-{{ card.color }}-500{% else %}border-slate-700{% endif %} hover:border-{{ card.color }}-500 transition-colors cursor-pointer">
+      <div class="text-center">
+        <div class="text-2xl mb-1">{{ card.icon }}</div>
+        <p class="text-xs font-medium text-slate-400">{{ card.label }}</p>
+        <p class="text-xl font-bold text-white">{{ card.count }}</p>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+
+  <!-- Queue Sections -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+    <!-- Submission Queue -->
+    <div class="bg-slate-800 rounded-lg border border-slate-700">
+      <div class="px-4 py-3 border-b border-slate-700">
+        <h3 class="text-sm font-semibold text-blue-300">📋 {% trans "Submission Queue" %}</h3>
+      </div>
+      <div class="p-4">
+        {% if pending_submissions %}
+        <ul class="space-y-2">
+          {% for doc in pending_submissions %}
+          <li class="flex items-center justify-between">
+            <a href="{% url 'billing:efactura_document_detail' pk=doc.pk %}" class="text-sm text-slate-300 hover:text-white truncate">
+              {{ doc.invoice.number }}
+            </a>
+            <span class="text-xs text-blue-400">{% trans "queued" %}</span>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-sm text-slate-500">{% trans "No pending submissions" %}</p>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Awaiting Response -->
+    <div class="bg-slate-800 rounded-lg border border-slate-700">
+      <div class="px-4 py-3 border-b border-slate-700">
+        <h3 class="text-sm font-semibold text-indigo-300">📤 {% trans "Awaiting Response" %}</h3>
+      </div>
+      <div class="p-4">
+        {% if awaiting_response %}
+        <ul class="space-y-2">
+          {% for doc in awaiting_response %}
+          <li class="flex items-center justify-between">
+            <a href="{% url 'billing:efactura_document_detail' pk=doc.pk %}" class="text-sm text-slate-300 hover:text-white truncate">
+              {{ doc.invoice.number }}
+            </a>
+            <span class="text-xs text-indigo-400">{{ doc.status }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-sm text-slate-500">{% trans "No documents awaiting response" %}</p>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Retry Queue -->
+    <div class="bg-slate-800 rounded-lg border border-slate-700">
+      <div class="px-4 py-3 border-b border-slate-700">
+        <h3 class="text-sm font-semibold text-orange-300">🔄 {% trans "Retry Queue" %}</h3>
+      </div>
+      <div class="p-4">
+        {% if retry_queue %}
+        <ul class="space-y-2">
+          {% for doc in retry_queue %}
+          <li class="flex items-center justify-between">
+            <a href="{% url 'billing:efactura_document_detail' pk=doc.pk %}" class="text-sm text-slate-300 hover:text-white truncate">
+              {{ doc.invoice.number }}
+            </a>
+            <span class="text-xs text-orange-400">{% trans "retry" %} #{{ doc.retry_count }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-sm text-slate-500">{% trans "No documents ready for retry" %}</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- All Documents Table -->
+  <div class="bg-slate-800 rounded-lg border border-slate-700">
+    <div class="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
+      <h3 class="text-sm font-semibold text-white">📄 {% trans "All Documents" %} ({{ total_documents }})</h3>
+      <div class="flex items-center gap-3">
+        <!-- Status Filter -->
+        <select onchange="window.location.href='?status=' + this.value" class="bg-slate-700 text-sm text-slate-300 rounded border-slate-600 px-2 py-1">
+          <option value="">{% trans "All Statuses" %}</option>
+          {% for value, label in status_choices %}
+          <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        {% if status_filter %}
+        <a href="{% url 'billing:efactura_dashboard' %}" class="text-xs text-slate-400 hover:text-white">{% trans "Clear filter" %}</a>
+        {% endif %}
+      </div>
+    </div>
+
+    <div id="documents-list" hx-get="{% url 'billing:efactura_documents_htmx' %}{% if status_filter %}?status={{ status_filter }}{% endif %}" hx-trigger="load" hx-swap="innerHTML">
+      {% include "billing/partials/efactura_document_list.html" %}
+    </div>
+  </div>
+</div>
+{% endblock %}

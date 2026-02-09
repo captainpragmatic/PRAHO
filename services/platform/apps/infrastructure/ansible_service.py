@@ -54,13 +54,24 @@ class AnsibleService:
     - Handles SSH key management
     """
 
-    # Playbook execution order
-    PLAYBOOK_ORDER = [
-        "common_base.yml",
-        "virtualmin.yml",
-        "virtualmin_harden.yml",
-        "virtualmin_backup.yml",
-    ]
+    # Panel-aware playbook execution order
+    PANEL_PLAYBOOKS: dict[str, list[str]] = {
+        "virtualmin": [
+            "common_base.yml",
+            "virtualmin.yml",
+            "virtualmin_harden.yml",
+            "virtualmin_backup.yml",
+        ],
+        "blesta": [
+            "common_base.yml",
+            "blesta.yml",
+            "blesta_harden.yml",
+            "blesta_backup.yml",
+        ],
+    }
+
+    # Default playbook order (backwards compatibility)
+    PLAYBOOK_ORDER = PANEL_PLAYBOOKS["virtualmin"]
 
     def __init__(self, timeout: int = 1800) -> None:
         """Initialize Ansible service"""
@@ -78,10 +89,15 @@ class AnsibleService:
             raise RuntimeError("ansible-playbook not found. Please install Ansible.")
         return ansible_path
 
+    def get_playbook_order(self, panel_type: str = "virtualmin") -> list[str]:
+        """Get ordered playbooks for a panel type."""
+        return self.PANEL_PLAYBOOKS.get(panel_type, self.PANEL_PLAYBOOKS["virtualmin"])
+
     def run_all_playbooks(
         self,
         deployment: NodeDeployment,
         extra_vars: dict[str, Any] | None = None,
+        panel_type: str = "virtualmin",
     ) -> Result[list[AnsibleResult], str]:
         """
         Run all playbooks in order for a deployment.
@@ -89,13 +105,15 @@ class AnsibleService:
         Args:
             deployment: NodeDeployment instance
             extra_vars: Additional variables to pass to playbooks
+            panel_type: Panel type to determine playbook order
 
         Returns:
             Result with list of AnsibleResult or error
         """
         results: list[AnsibleResult] = []
+        playbook_order = self.get_playbook_order(panel_type)
 
-        for playbook in self.PLAYBOOK_ORDER:
+        for playbook in playbook_order:
             logger.info(f"📜 [Ansible] Running playbook: {playbook} for {deployment.hostname}")
 
             result = self.run_playbook(deployment, playbook, extra_vars)
@@ -252,7 +270,7 @@ ansible_python_interpreter=/usr/bin/python3
         backup_retention = SettingsService.get_setting("node_deployment.backup_retention_days", 7)
         backup_schedule = SettingsService.get_setting("node_deployment.backup_schedule", "0 2 * * *")
 
-        vars_dict = {
+        vars_dict: dict[str, Any] = {
             # Deployment info
             "deployment_id": str(deployment.id),
             "inventory_hostname": deployment.hostname,
@@ -267,6 +285,14 @@ ansible_python_interpreter=/usr/bin/python3
             # Force hostname setting
             "virtualmin_force_hostname": True,
         }
+
+        # Add S3 backup settings when S3 storage is configured
+        if backup_storage == "s3":
+            vars_dict.update({
+                "backup_s3_bucket": SettingsService.get_setting("node_deployment.backup_s3_bucket", ""),
+                "backup_s3_region": SettingsService.get_setting("node_deployment.backup_s3_region", "eu-central-1"),
+                "backup_s3_prefix": SettingsService.get_setting("node_deployment.backup_s3_prefix", "backups/"),
+            })
 
         # Add FQDN if DNS zone is configured
         if deployment.dns_zone:

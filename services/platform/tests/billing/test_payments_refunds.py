@@ -3,10 +3,9 @@ Comprehensive tests for RefundService
 Tests the critical financial refund system with bidirectional synchronization.
 """
 
-import pytest
 import uuid
 
-import unittest
+import pytest
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
@@ -336,7 +335,6 @@ class RefundEdgeCasesTestCase(TestCase):
 
 
 
-import unittest
 class TestRefundServiceWithFixtures:
     """Pytest-style tests with fixtures for more complex scenarios"""
     

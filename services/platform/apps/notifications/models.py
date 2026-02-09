@@ -529,7 +529,7 @@ class EmailCampaign(models.Model):
         "users.User",
         on_delete=models.SET_NULL,
         null=True,
-        related_name="created_campaigns",
+        related_name="created_email_campaigns",
         help_text=_("User who created this campaign"),
     )
 

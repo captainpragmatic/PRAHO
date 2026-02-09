@@ -14,10 +14,10 @@ from django.utils import timezone
 
 from apps.orders.models import Order
 
+from .currency_models import Currency
 from .gateways import PaymentGatewayFactory
 from .gateways.base import PaymentConfirmResult, PaymentIntentResult, SubscriptionResult
 from .models import Payment
-from .currency_models import Currency
 
 logger = logging.getLogger(__name__)
 

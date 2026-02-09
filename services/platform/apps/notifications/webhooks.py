@@ -14,6 +14,8 @@ Security:
 - Audit logging
 """
 
+import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -81,14 +83,12 @@ class AnymailWebhookView(View):
         auth_header = request.META.get("HTTP_AUTHORIZATION", "")
         if auth_header.startswith("Basic "):
             # Basic auth - compare with secret
-            import base64
-
             try:
                 credentials = base64.b64decode(auth_header[6:]).decode()
                 if credentials.endswith(f":{webhook_secret}"):
                     return True
-            except Exception:
-                pass
+            except (binascii.Error, UnicodeDecodeError, ValueError):
+                logger.debug("Invalid basic auth payload in Anymail webhook signature")
 
         return False
 

@@ -17,6 +17,7 @@ Security References:
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import json
 import logging
@@ -107,8 +108,8 @@ class AES256Cipher:
                 key_bytes = base64.urlsafe_b64decode(aes_key)
                 if len(key_bytes) == AES_KEY_SIZE:
                     return key_bytes
-            except Exception:
-                pass
+            except (binascii.Error, TypeError, ValueError):
+                logger.debug("Invalid DJANGO_AES256_KEY value; falling back to derived key")
 
         # Derive from master key
         master_key = (
@@ -150,14 +151,9 @@ class AES256Cipher:
 
     def _get_fernet_key(self) -> bytes | None:
         """Get Fernet key for legacy decryption compatibility."""
-        try:
-            fernet_key = os.environ.get("DJANGO_ENCRYPTION_KEY") or getattr(
-                settings, "ENCRYPTION_KEY", None
-            )
-            if fernet_key:
-                return fernet_key.encode() if isinstance(fernet_key, str) else fernet_key
-        except Exception:
-            pass
+        fernet_key = os.environ.get("DJANGO_ENCRYPTION_KEY") or getattr(settings, "ENCRYPTION_KEY", None)
+        if fernet_key:
+            return fernet_key.encode() if isinstance(fernet_key, str) else fernet_key
         return None
 
     def _validate_key(self) -> None:

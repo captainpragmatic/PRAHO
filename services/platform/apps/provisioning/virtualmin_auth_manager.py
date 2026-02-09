@@ -9,7 +9,6 @@ ACL authentication potentially being "fixed" by Virtualmin updates.
 
 from __future__ import annotations
 
-import contextlib
 import logging
 from dataclasses import dataclass
 from enum import Enum
@@ -348,8 +347,10 @@ class VirtualminAuthenticationManager:
     def _disconnect_ssh(self) -> None:
         """Close SSH connection"""
         if self._ssh_client:
-            with contextlib.suppress(BaseException):
+            try:
                 self._ssh_client.close()
+            except (OSError, paramiko.SSHException):
+                logger.debug(f"⚠️ [SSH] Error closing SSH client for {self.server.hostname}")
             self._ssh_client = None
 
     def _get_auth_method_priority(self) -> list[AuthMethod]:

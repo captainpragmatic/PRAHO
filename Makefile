@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install dev dev-platform dev-portal dev-all test test-platform test-portal test-integration test-e2e test-security install-frontend build-css watch-css migrate fixtures fixtures-light clean lint lint-platform lint-portal type-check pre-commit
+.PHONY: help install dev dev-platform dev-portal dev-all test test-platform test-portal test-integration test-e2e test-security install-frontend build-css watch-css migrate fixtures fixtures-light clean lint lint-platform lint-portal lint-security lint-credentials type-check pre-commit
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -53,6 +53,7 @@ help:
 	@echo "  make lint            - Lint all services"
 	@echo "  make lint-platform   - Lint platform service only"
 	@echo "  make lint-portal     - Lint portal service only"
+	@echo "  make lint-security   - Security vulnerabilities (Semgrep + credentials)"
 	@echo "  make type-check      - Type check all services"
 	@echo "  make pre-commit      - Run pre-commit hooks"
 	@echo ""
@@ -308,6 +309,32 @@ lint:
 	@echo "📋 Phase 2: Portal service"  
 	@$(MAKE) lint-portal
 	@echo "🎉 All services linting complete!"
+
+lint-security:
+	@echo "🔒 [Security] Static security analysis..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@SEMGREP_BIN=""; SEMGREP_EXIT=0; \
+	if [ -x "$(PWD)/.venv/bin/semgrep" ]; then \
+		SEMGREP_BIN="$(PWD)/.venv/bin/semgrep"; \
+	elif command -v semgrep >/dev/null 2>&1; then \
+		SEMGREP_BIN="$$(command -v semgrep)"; \
+	else \
+		echo "❌ semgrep not found (.venv or PATH)"; \
+		echo "👉 Install with one of:"; \
+		echo "   .venv/bin/pip install semgrep"; \
+		echo "   brew install semgrep"; \
+		exit 1; \
+	fi; \
+	echo "🔎 Using Semgrep: $$SEMGREP_BIN"; \
+	echo "🧪 1/2: Semgrep scan (blocking)..."; \
+	"$$SEMGREP_BIN" scan --config=auto --exclude=tests --error services/platform services/portal || SEMGREP_EXIT=$$?; \
+	echo "🧪 2/2: Hardcoded credentials check..."; \
+	$(MAKE) lint-credentials; \
+	if [ $$SEMGREP_EXIT -ne 0 ]; then \
+		echo "❌ Semgrep reported findings (exit $$SEMGREP_EXIT)."; \
+		exit $$SEMGREP_EXIT; \
+	fi
+	@echo "✅ Security linting complete!"
 
 lint-credentials:
 	@echo "🔑 [Credentials] Hardcoded credentials security check..."

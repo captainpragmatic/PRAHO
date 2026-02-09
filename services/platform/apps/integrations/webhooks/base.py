@@ -57,6 +57,7 @@ class WebhookContext:
     payload: dict[str, Any]
     signature: str
     headers: dict[str, str]
+    raw_body: bytes | None
     ip_address: str | None
     user_agent: str | None
     event_info: dict[str, str]
@@ -68,6 +69,7 @@ class WebhookRequestMetadata:
 
     signature: str
     headers: dict[str, str]
+    raw_body: bytes | None
     ip_address: str | None
     user_agent: str | None
 
@@ -104,6 +106,7 @@ class BaseWebhookProcessor(ABC):
         payload: dict[str, Any],
         signature: str = "",
         headers: dict[str, str] | None = None,
+        raw_body: bytes | None = None,
         ip_address: str | None = None,
         user_agent: str | None = None,
     ) -> tuple[bool, str, WebhookEvent | None]:
@@ -116,7 +119,7 @@ class BaseWebhookProcessor(ABC):
         headers = headers or {}
 
         try:
-            metadata = WebhookRequestMetadata(signature, headers, ip_address, user_agent)
+            metadata = WebhookRequestMetadata(signature, headers, raw_body, ip_address, user_agent)
             result = (
                 self._validate_payload(payload)
                 .and_then(lambda event_info: self._check_duplicates(event_info))
@@ -188,6 +191,7 @@ class BaseWebhookProcessor(ABC):
             payload=payload,
             signature=metadata.signature,
             headers=metadata.headers,
+            raw_body=metadata.raw_body,
             ip_address=metadata.ip_address,
             user_agent=metadata.user_agent,
             event_info=event_info,
@@ -196,7 +200,7 @@ class BaseWebhookProcessor(ABC):
 
     def _verify_signature_with_context(self, context: WebhookContext) -> Result[WebhookContext, str]:
         """Step 4: Verify webhook signature using context."""
-        if not self.verify_signature(context.payload, context.signature, context.headers):
+        if not self.verify_signature(context.payload, context.signature, context.headers, context.raw_body):
             return Err("❌ Invalid webhook signature")
 
         return Ok(context)
@@ -228,7 +232,7 @@ class BaseWebhookProcessor(ABC):
                     signature_hash=(hashlib.sha256(context.signature.encode()).hexdigest() if context.signature else ""),
                     ip_address=context.ip_address,
                     user_agent=context.user_agent or "",  # Convert None to empty string for TextField
-                    headers=context.headers,
+                    headers=self._sanitize_headers(context.headers),
                     status="pending",
                 )
 
@@ -269,8 +273,33 @@ class BaseWebhookProcessor(ABC):
         return payload.get("type")
 
     @abstractmethod
-    def verify_signature(self, payload: dict[str, Any], signature: str, headers: dict[str, str]) -> bool:
+    def verify_signature(
+        self, payload: dict[str, Any], signature: str, headers: dict[str, str], raw_body: bytes | None = None
+    ) -> bool:
         """🔐 Verify webhook signature - must be implemented by subclasses"""
+
+    @staticmethod
+    def _sanitize_headers(headers: dict[str, str]) -> dict[str, str]:
+        """Redact sensitive headers before storing."""
+        if not headers:
+            return {}
+        sensitive = {
+            "authorization",
+            "cookie",
+            "set-cookie",
+            "stripe-signature",
+            "paypal-auth-assertion",
+            "x-signature",
+            "x-hub-signature",
+            "x-hub-signature-256",
+        }
+        sanitized: dict[str, str] = {}
+        for key, value in headers.items():
+            if key.lower() in sensitive:
+                sanitized[key] = "[REDACTED]"
+            else:
+                sanitized[key] = value
+        return sanitized
 
     def handle_event(self, webhook_event: WebhookEvent) -> tuple[bool, str]:
         """
@@ -519,14 +548,12 @@ def get_webhook_processor(source: str) -> BaseWebhookProcessor | None:
     🏭 Factory function to get appropriate webhook processor
     """
     # Import here to avoid circular imports
-    from .stripe import StripeWebhookProcessor  # Factory pattern avoids circular imports  # noqa: PLC0415
-    # from .virtualmin import VirtualminWebhookProcessor  # TODO: Implement  # noqa: ERA001
-    # from .paypal import PayPalWebhookProcessor  # TODO: Implement  # noqa: ERA001
+    from .efactura import EFacturaWebhookProcessor  # noqa: PLC0415
+    from .stripe import StripeWebhookProcessor  # noqa: PLC0415
 
     processors = {
         "stripe": StripeWebhookProcessor,
-        # 'virtualmin': VirtualminWebhookProcessor,  # noqa: ERA001
-        # 'paypal': PayPalWebhookProcessor,  # noqa: ERA001
+        "efactura": EFacturaWebhookProcessor,
     }
 
     processor_class = processors.get(source)

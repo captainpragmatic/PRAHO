@@ -2,14 +2,12 @@
 Test billing signal handlers with cross-app integration
 """
 
-from decimal import Decimal
-from unittest.mock import patch, MagicMock
-from django.test import TestCase, override_settings
-from apps.users.models import User
+from unittest.mock import patch
+
+from django.test import TestCase
 
 from apps.billing.models import Currency, Invoice, Payment
 from apps.customers.models import Customer
-
 
 # TODO: Consider adding integration tests for Django-Q2 task processing
 

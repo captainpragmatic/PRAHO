@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib
 import uuid
 from datetime import timedelta
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.conf import settings
@@ -23,10 +23,10 @@ from django.db.models import Q
 from django.utils import timezone
 
 if TYPE_CHECKING:
-    from apps.billing.invoice_models import Invoice
+    pass
 
 
-class EFacturaStatus(str, Enum):
+class EFacturaStatus(StrEnum):
     """e-Factura document status enumeration."""
 
     DRAFT = "draft"  # XML generated, not submitted
@@ -52,7 +52,7 @@ class EFacturaStatus(str, Enum):
         return {cls.ERROR.value, cls.QUEUED.value}
 
 
-class EFacturaDocumentType(str, Enum):
+class EFacturaDocumentType(StrEnum):
     """e-Factura document type enumeration."""
 
     INVOICE = "invoice"
@@ -338,19 +338,19 @@ class EFacturaDocument(models.Model):
     # --- Query Methods ---
 
     @classmethod
-    def get_pending_submissions(cls, limit: int = 100) -> models.QuerySet["EFacturaDocument"]:
+    def get_pending_submissions(cls, limit: int = 100) -> models.QuerySet[EFacturaDocument]:
         """Get documents queued for submission."""
         return cls.objects.filter(status=EFacturaStatus.QUEUED.value).order_by("created_at")[:limit]
 
     @classmethod
-    def get_awaiting_response(cls, limit: int = 100) -> models.QuerySet["EFacturaDocument"]:
+    def get_awaiting_response(cls, limit: int = 100) -> models.QuerySet[EFacturaDocument]:
         """Get documents awaiting ANAF response."""
         return cls.objects.filter(status__in=[EFacturaStatus.SUBMITTED.value, EFacturaStatus.PROCESSING.value]).order_by(
             "submitted_at"
         )[:limit]
 
     @classmethod
-    def get_ready_for_retry(cls) -> models.QuerySet["EFacturaDocument"]:
+    def get_ready_for_retry(cls) -> models.QuerySet[EFacturaDocument]:
         """Get documents ready for retry."""
         now = timezone.now()
         return cls.objects.filter(
@@ -358,7 +358,7 @@ class EFacturaDocument(models.Model):
         ).order_by("next_retry_at")
 
     @classmethod
-    def get_stale_submissions(cls, hours: int = 24) -> models.QuerySet["EFacturaDocument"]:
+    def get_stale_submissions(cls, hours: int = 24) -> models.QuerySet[EFacturaDocument]:
         """Get submissions that have been pending for too long."""
         cutoff = timezone.now() - timedelta(hours=hours)
         return cls.objects.filter(

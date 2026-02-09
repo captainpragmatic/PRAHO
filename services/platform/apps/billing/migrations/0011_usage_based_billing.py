@@ -12,8 +12,8 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ("billing", "0010_add_subscriptions_and_grandfathering"),
-        ("customers", "0003_rename_payment_method_field"),
-        ("provisioning", "0013_usage_based_billing"),
+        ("customers", "0002_initial"),
+        ("provisioning", "0014_usage_based_billing"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
@@ -102,176 +102,6 @@ class Migration(migrations.Migration):
                 "verbose_name_plural": "Pricing Tiers",
                 "db_table": "pricing_tiers",
                 "ordering": ("meter", "name"),
-            },
-        ),
-        migrations.CreateModel(
-            name="Subscription",
-            fields=[
-                (
-                    "id",
-                    models.UUIDField(
-                        default=uuid.uuid4,
-                        editable=False,
-                        primary_key=True,
-                        serialize=False,
-                    ),
-                ),
-                (
-                    "stripe_subscription_id",
-                    models.CharField(
-                        blank=True,
-                        db_index=True,
-                        help_text="Stripe Subscription ID",
-                        max_length=100,
-                    ),
-                ),
-                (
-                    "stripe_customer_id",
-                    models.CharField(
-                        blank=True, help_text="Stripe Customer ID", max_length=100
-                    ),
-                ),
-                (
-                    "status",
-                    models.CharField(
-                        choices=[
-                            ("trialing", "Trialing"),
-                            ("active", "Active"),
-                            ("past_due", "Past Due"),
-                            ("paused", "Paused"),
-                            ("canceled", "Canceled"),
-                            ("expired", "Expired"),
-                        ],
-                        default="active",
-                        max_length=20,
-                    ),
-                ),
-                (
-                    "billing_interval",
-                    models.CharField(
-                        choices=[
-                            ("monthly", "Monthly"),
-                            ("quarterly", "Quarterly"),
-                            ("semi_annual", "Semi-Annual"),
-                            ("annual", "Annual"),
-                        ],
-                        default="monthly",
-                        max_length=20,
-                    ),
-                ),
-                (
-                    "base_price_cents",
-                    models.BigIntegerField(
-                        default=0, help_text="Fixed recurring charge per billing period"
-                    ),
-                ),
-                ("created_at", models.DateTimeField(auto_now_add=True)),
-                (
-                    "started_at",
-                    models.DateTimeField(
-                        blank=True,
-                        help_text="When subscription became active",
-                        null=True,
-                    ),
-                ),
-                (
-                    "trial_ends_at",
-                    models.DateTimeField(
-                        blank=True, help_text="When trial period ends", null=True
-                    ),
-                ),
-                (
-                    "current_period_start",
-                    models.DateTimeField(
-                        blank=True,
-                        help_text="Start of current billing period",
-                        null=True,
-                    ),
-                ),
-                (
-                    "current_period_end",
-                    models.DateTimeField(
-                        blank=True, help_text="End of current billing period", null=True
-                    ),
-                ),
-                (
-                    "canceled_at",
-                    models.DateTimeField(
-                        blank=True,
-                        help_text="When subscription was canceled",
-                        null=True,
-                    ),
-                ),
-                (
-                    "cancel_at_period_end",
-                    models.BooleanField(
-                        default=False,
-                        help_text="Cancel at end of current period (not immediately)",
-                    ),
-                ),
-                (
-                    "ended_at",
-                    models.DateTimeField(
-                        blank=True, help_text="When subscription fully ended", null=True
-                    ),
-                ),
-                (
-                    "payment_method",
-                    models.CharField(
-                        blank=True,
-                        help_text="Default payment method for this subscription",
-                        max_length=50,
-                    ),
-                ),
-                (
-                    "auto_renew",
-                    models.BooleanField(
-                        default=True, help_text="Automatically renew at period end"
-                    ),
-                ),
-                ("meta", models.JSONField(blank=True, default=dict)),
-                ("updated_at", models.DateTimeField(auto_now=True)),
-                (
-                    "currency",
-                    models.ForeignKey(
-                        help_text="Billing currency",
-                        on_delete=django.db.models.deletion.PROTECT,
-                        to="billing.currency",
-                    ),
-                ),
-                (
-                    "customer",
-                    models.ForeignKey(
-                        on_delete=django.db.models.deletion.CASCADE,
-                        related_name="subscriptions",
-                        to="customers.customer",
-                    ),
-                ),
-                (
-                    "service",
-                    models.ForeignKey(
-                        blank=True,
-                        help_text="Linked provisioned service",
-                        null=True,
-                        on_delete=django.db.models.deletion.SET_NULL,
-                        related_name="subscriptions",
-                        to="provisioning.service",
-                    ),
-                ),
-                (
-                    "service_plan",
-                    models.ForeignKey(
-                        on_delete=django.db.models.deletion.PROTECT,
-                        related_name="subscriptions",
-                        to="provisioning.serviceplan",
-                    ),
-                ),
-            ],
-            options={
-                "verbose_name": "Subscription",
-                "verbose_name_plural": "Subscriptions",
-                "db_table": "subscriptions",
-                "ordering": ("-created_at",),
             },
         ),
         migrations.CreateModel(
@@ -914,88 +744,6 @@ class Migration(migrations.Migration):
                 to="billing.usagemeter",
             ),
         ),
-        migrations.CreateModel(
-            name="SubscriptionItem",
-            fields=[
-                (
-                    "id",
-                    models.UUIDField(
-                        default=uuid.uuid4,
-                        editable=False,
-                        primary_key=True,
-                        serialize=False,
-                    ),
-                ),
-                (
-                    "stripe_subscription_item_id",
-                    models.CharField(
-                        blank=True,
-                        help_text="Stripe Subscription Item ID",
-                        max_length=100,
-                    ),
-                ),
-                (
-                    "stripe_price_id",
-                    models.CharField(
-                        blank=True,
-                        help_text="Stripe Price ID for this metered item",
-                        max_length=100,
-                    ),
-                ),
-                (
-                    "included_quantity",
-                    models.DecimalField(
-                        decimal_places=8,
-                        default=Decimal("0"),
-                        help_text="Quantity included in base subscription (no extra charge)",
-                        max_digits=18,
-                    ),
-                ),
-                (
-                    "unit_price_cents",
-                    models.BigIntegerField(
-                        blank=True,
-                        help_text="Override price per unit in cents",
-                        null=True,
-                    ),
-                ),
-                ("is_active", models.BooleanField(default=True)),
-                ("created_at", models.DateTimeField(auto_now_add=True)),
-                ("updated_at", models.DateTimeField(auto_now=True)),
-                (
-                    "pricing_tier",
-                    models.ForeignKey(
-                        blank=True,
-                        help_text="Pricing tier for overage charges",
-                        null=True,
-                        on_delete=django.db.models.deletion.SET_NULL,
-                        related_name="subscription_items",
-                        to="billing.pricingtier",
-                    ),
-                ),
-                (
-                    "subscription",
-                    models.ForeignKey(
-                        on_delete=django.db.models.deletion.CASCADE,
-                        related_name="items",
-                        to="billing.subscription",
-                    ),
-                ),
-                (
-                    "meter",
-                    models.ForeignKey(
-                        on_delete=django.db.models.deletion.PROTECT,
-                        related_name="subscription_items",
-                        to="billing.usagemeter",
-                    ),
-                ),
-            ],
-            options={
-                "verbose_name": "Subscription Item",
-                "verbose_name_plural": "Subscription Items",
-                "db_table": "subscription_items",
-            },
-        ),
         migrations.AddField(
             model_name="pricingtier",
             name="meter",
@@ -1320,37 +1068,6 @@ class Migration(migrations.Migration):
             },
         ),
         migrations.AddIndex(
-            model_name="subscription",
-            index=models.Index(
-                fields=["customer", "status"], name="subscriptio_custome_34b933_idx"
-            ),
-        ),
-        migrations.AddIndex(
-            model_name="subscription",
-            index=models.Index(
-                fields=["status", "-created_at"], name="subscriptio_status_a71460_idx"
-            ),
-        ),
-        migrations.AddIndex(
-            model_name="subscription",
-            index=models.Index(
-                fields=["stripe_subscription_id"], name="subscriptio_stripe__aa726e_idx"
-            ),
-        ),
-        migrations.AddIndex(
-            model_name="subscription",
-            index=models.Index(
-                fields=["current_period_end", "status"],
-                name="subscriptio_current_d55448_idx",
-            ),
-        ),
-        migrations.AddIndex(
-            model_name="subscription",
-            index=models.Index(
-                fields=["service_plan", "status"], name="subscriptio_service_512b17_idx"
-            ),
-        ),
-        migrations.AddIndex(
             model_name="billingcycle",
             index=models.Index(
                 fields=["subscription", "-period_start"],
@@ -1468,25 +1185,6 @@ class Migration(migrations.Migration):
             constraint=models.UniqueConstraint(
                 fields=("meter", "customer", "billing_cycle"),
                 name="unique_meter_customer_cycle",
-            ),
-        ),
-        migrations.AddIndex(
-            model_name="subscriptionitem",
-            index=models.Index(
-                fields=["subscription", "is_active"],
-                name="subscriptio_subscri_108463_idx",
-            ),
-        ),
-        migrations.AddIndex(
-            model_name="subscriptionitem",
-            index=models.Index(
-                fields=["meter", "is_active"], name="subscriptio_meter_i_f9e3b5_idx"
-            ),
-        ),
-        migrations.AddConstraint(
-            model_name="subscriptionitem",
-            constraint=models.UniqueConstraint(
-                fields=("subscription", "meter"), name="unique_subscription_meter"
             ),
         ),
         migrations.AddIndex(

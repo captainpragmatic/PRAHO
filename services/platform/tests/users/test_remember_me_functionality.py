@@ -17,7 +17,9 @@ class RememberMeFunctionalityTest(TestCase):
         self.client = Client()
         self.user = User.objects.create_user(
             email="test@example.com",
-            password="testpass123"
+            password="testpass123",
+            is_staff=True,
+            staff_role="support",
         )
         self.login_url = reverse("users:login")
 

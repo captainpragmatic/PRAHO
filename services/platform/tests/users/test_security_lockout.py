@@ -35,7 +35,9 @@ class AccountLockoutTestCase(TestCase):
             email='test@example.com',
             password='TestPassword123!',
             first_name='Test',
-            last_name='User'
+            last_name='User',
+            is_staff=True,
+            staff_role='admin',
         )
         self.login_url = reverse('users:login')
         # Clear any existing cache/rate limiting data

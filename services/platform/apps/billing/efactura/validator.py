@@ -165,7 +165,7 @@ class CIUSROValidator:
     def validate_file(self, file_path: str) -> ValidationResult:
         """Validate XML from file path."""
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 return self.validate(f.read())
         except OSError as e:
             result = ValidationResult(is_valid=False)
@@ -378,13 +378,13 @@ class CIUSROValidator:
             # BR-21: Line ID
             line_id = self._get_text(line, ".//cbc:ID")
             if not line_id:
-                result.add_error("BR-21", f"Line ID is mandatory", line_path)
+                result.add_error("BR-21", "Line ID is mandatory", line_path)
 
             # BR-22: Invoiced/Credited quantity
             qty_tag = "CreditedQuantity" if is_credit_note else "InvoicedQuantity"
             quantity = self._get_text(line, f".//cbc:{qty_tag}")
             if not quantity:
-                result.add_error("BR-22", f"Quantity is mandatory", line_path)
+                result.add_error("BR-22", "Quantity is mandatory", line_path)
 
             # BR-25: Line extension amount
             line_amount = self._get_text(line, ".//cbc:LineExtensionAmount")

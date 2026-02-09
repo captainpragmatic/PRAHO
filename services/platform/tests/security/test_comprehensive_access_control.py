@@ -283,12 +283,12 @@ class ComprehensiveAccessControlTestCase(TestCase):
         """Test that customers cannot create internal notes on tickets"""
         # Login as customer
         self.client.login(email='customer@example.com', password='customerpass123')
-        
-        # Try to create internal note
+
+        # Try to create internal note using reply_action (the view reads reply_action, not is_internal)
         url = reverse('tickets:reply', args=[self.ticket.pk])
         response = self.client.post(url, {
             'reply': 'This is an internal note',
-            'is_internal': 'on'
+            'reply_action': 'internal_note'
         })
         
         # Should be redirected back to ticket with error message
@@ -378,12 +378,12 @@ class ComprehensiveAccessControlTestCase(TestCase):
         """Test that staff users can create internal notes on tickets"""
         # Login as staff
         self.client.login(email='staff@praho.ro', password='staffpass123')
-        
-        # Create internal note
+
+        # Create internal note using reply_action (the view reads reply_action, not is_internal)
         url = reverse('tickets:reply', args=[self.ticket.pk])
         response = self.client.post(url, {
             'reply': 'This is a staff internal note',
-            'is_internal': 'on'
+            'reply_action': 'internal_note'
         })
         
         # Should be successful (redirect or success response)

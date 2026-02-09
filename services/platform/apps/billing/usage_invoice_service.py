@@ -14,10 +14,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
 from django.utils import timezone
 
@@ -35,11 +36,11 @@ class Result:
     _error: str | None
 
     @classmethod
-    def ok(cls, value: Any) -> "Result":
+    def ok(cls, value: Any) -> Result:
         return cls(_value=value, _error=None)
 
     @classmethod
-    def err(cls, error: str) -> "Result":
+    def err(cls, error: str) -> Result:
         return cls(_value=None, _error=error)
 
     def is_ok(self) -> bool:
@@ -70,7 +71,7 @@ class UsageInvoiceService:
     - Integrating with existing invoice workflow
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Use centralized config for defaults
         self.default_vat_rate = billing_config.DEFAULT_VAT_RATE
 
@@ -81,9 +82,8 @@ class UsageInvoiceService:
         The billing cycle must be in 'closed' or 'rated' status.
         All usage aggregations must be rated.
         """
-        from .metering_models import BillingCycle, UsageAggregation
         from .invoice_models import Invoice, InvoiceLine, InvoiceSequence
-        from .currency_models import Currency
+        from .metering_models import BillingCycle, UsageAggregation
         from .payment_models import CreditLedger
 
         try:
@@ -203,7 +203,7 @@ class UsageInvoiceService:
                     invoice=invoice,
                     kind="service",
                     description=(
-                        f"{subscription.service_plan.name} - "
+                        f"{subscription.product.name} - "
                         f"{billing_cycle.period_start.strftime('%d.%m.%Y')} to "
                         f"{billing_cycle.period_end.strftime('%d.%m.%Y')}"
                     ),
@@ -221,7 +221,7 @@ class UsageInvoiceService:
                     line = InvoiceLine.objects.create(
                         invoice=invoice,
                         kind="service",
-                        service=subscription.service,
+                        service=None,
                         description=description,
                         quantity=agg.overage_value,
                         unit_price_cents=self._get_unit_price_cents(agg),
@@ -311,6 +311,7 @@ class UsageInvoiceService:
     def _get_customer_credit_balance(self, customer: Any) -> int:
         """Get customer's available credit balance in cents"""
         from django.db.models import Sum
+
         from .payment_models import CreditLedger
 
         result = CreditLedger.objects.filter(
@@ -334,8 +335,8 @@ class UsageInvoiceService:
                         country != billing_config.DEFAULT_COUNTRY_CODE):
                     return Decimal("0")
 
-        except Exception:
-            pass
+        except (ImportError, ObjectDoesNotExist, AttributeError, TypeError, ValueError):
+            logger.debug("Could not resolve customer reverse-charge VAT profile")
 
         # Use TaxRule if available, otherwise fall back to default
         customer_country = getattr(customer, "country", billing_config.DEFAULT_COUNTRY_CODE)
@@ -371,16 +372,16 @@ class UsageInvoiceService:
                 address["region"] = billing_addr.region or ""
                 address["postal"] = billing_addr.postal_code or ""
                 address["country"] = billing_addr.country_code or billing_config.DEFAULT_COUNTRY_CODE
-        except Exception:
-            pass
+        except (ImportError, ObjectDoesNotExist, AttributeError, TypeError, ValueError):
+            logger.debug("Could not resolve customer billing address")
 
         # Try to get tax ID from tax profile
         try:
             from apps.customers.models import CustomerTaxProfile
             tax_profile = CustomerTaxProfile.objects.get(customer=customer)
             address["tax_id"] = tax_profile.cui or tax_profile.vat_number or ""
-        except Exception:
-            pass
+        except (ImportError, ObjectDoesNotExist, AttributeError, TypeError, ValueError):
+            logger.debug("Could not resolve customer tax profile for tax ID")
 
         return address
 
@@ -464,8 +465,10 @@ class BillingCycleManager:
         """
         Create a new billing cycle for a subscription.
         """
-        from .metering_models import Subscription, BillingCycle
         from dateutil.relativedelta import relativedelta
+
+        from .metering_models import BillingCycle
+        from .subscription_models import Subscription
 
         try:
             subscription = Subscription.objects.get(id=subscription_id)
@@ -478,10 +481,7 @@ class BillingCycleManager:
         # Determine period start
         if period_start is None:
             # Use current period end as new start, or now if no current period
-            if subscription.current_period_end:
-                period_start = subscription.current_period_end
-            else:
-                period_start = timezone.now()
+            period_start = subscription.current_period_end or timezone.now()
 
         # Calculate period end based on billing interval
         interval_map = {
@@ -490,7 +490,7 @@ class BillingCycleManager:
             "semi_annual": relativedelta(months=6),
             "annual": relativedelta(years=1),
         }
-        delta = interval_map.get(subscription.billing_interval, relativedelta(months=1))
+        delta = interval_map.get(subscription.billing_cycle, relativedelta(months=1))
         period_end = period_start + delta
 
         # Check for existing cycle
@@ -508,7 +508,7 @@ class BillingCycleManager:
                 period_start=period_start,
                 period_end=period_end,
                 status="active",
-                base_charge_cents=subscription.base_price_cents,
+                base_charge_cents=subscription.unit_price_cents,
             )
 
             # Update subscription's current period
@@ -528,7 +528,7 @@ class BillingCycleManager:
                     "subscription_id": str(subscription.id),
                     "period_start": period_start.isoformat(),
                     "period_end": period_end.isoformat(),
-                    "base_charge_cents": subscription.base_price_cents,
+                    "base_charge_cents": subscription.unit_price_cents,
                 },
             )
 
@@ -540,7 +540,7 @@ class BillingCycleManager:
 
         Returns: (created_count, error_count, errors)
         """
-        from .metering_models import Subscription
+        from .subscription_models import Subscription
 
         active_subscriptions = Subscription.objects.filter(
             status__in=("active", "trialing")

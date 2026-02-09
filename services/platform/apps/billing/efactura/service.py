@@ -32,7 +32,6 @@ from .client import (
     AuthenticationError,
     EFacturaClient,
     EFacturaClientError,
-    EFacturaConfig,
     NetworkError,
 )
 from .models import EFacturaDocument, EFacturaDocumentType, EFacturaStatus
@@ -59,11 +58,11 @@ class SubmissionResult:
             self.errors = []
 
     @classmethod
-    def ok(cls, document: EFacturaDocument) -> "SubmissionResult":
+    def ok(cls, document: EFacturaDocument) -> SubmissionResult:
         return cls(success=True, document=document)
 
     @classmethod
-    def error(cls, message: str, errors: list[dict] | None = None) -> "SubmissionResult":
+    def error(cls, message: str, errors: list[dict] | None = None) -> SubmissionResult:
         return cls(success=False, error_message=message, errors=errors or [])
 
 
@@ -103,7 +102,7 @@ class EFacturaService:
     # --- Main Workflow Methods ---
 
     @transaction.atomic
-    def submit_invoice(self, invoice: "Invoice", validate_first: bool = True) -> SubmissionResult:
+    def submit_invoice(self, invoice: Invoice, validate_first: bool = False) -> SubmissionResult:
         """
         Submit an invoice to e-Factura.
 
@@ -212,6 +211,7 @@ class EFacturaService:
             if response.is_accepted:
                 document.mark_accepted(response.download_id, response.raw_response)
                 self._log_audit_event(document.invoice, document, "efactura_accepted")
+                self._record_webhook_event(document, "accepted", response.raw_response)
                 return StatusCheckResult(
                     status="accepted",
                     is_terminal=True,
@@ -221,6 +221,7 @@ class EFacturaService:
             elif response.is_rejected:
                 document.mark_rejected(response.errors, response.raw_response)
                 self._log_audit_event(document.invoice, document, "efactura_rejected")
+                self._record_webhook_event(document, "rejected", response.raw_response)
                 return StatusCheckResult(
                     status="rejected",
                     is_terminal=True,
@@ -382,7 +383,7 @@ class EFacturaService:
         """Check if e-Factura is enabled in settings."""
         return getattr(settings, "EFACTURA_ENABLED", False)
 
-    def _requires_efactura(self, invoice: "Invoice") -> bool:
+    def _requires_efactura(self, invoice: Invoice) -> bool:
         """Check if invoice requires e-Factura submission."""
         # Romanian B2B invoices require e-Factura
         if invoice.bill_to_country != "RO":
@@ -395,21 +396,18 @@ class EFacturaService:
 
         # Minimum amount check (e.g., simplified invoices under 100 RON might be exempt)
         min_amount = getattr(settings, "EFACTURA_MINIMUM_AMOUNT_CENTS", 0)
-        if invoice.total_cents < min_amount:
-            return False
+        return not invoice.total_cents < min_amount
 
-        return True
-
-    def _get_existing_document(self, invoice: "Invoice") -> EFacturaDocument | None:
+    def _get_existing_document(self, invoice: Invoice) -> EFacturaDocument | None:
         """Get existing e-Factura document for invoice."""
         try:
             return invoice.efactura_document
         except EFacturaDocument.DoesNotExist:
             return None
 
-    def _get_or_create_document(self, invoice: "Invoice") -> EFacturaDocument:
+    def _get_or_create_document(self, invoice: Invoice) -> EFacturaDocument:
         """Get or create EFacturaDocument for invoice."""
-        document, created = EFacturaDocument.objects.get_or_create(
+        document, _created = EFacturaDocument.objects.get_or_create(
             invoice=invoice,
             defaults={
                 "document_type": EFacturaDocumentType.INVOICE.value,
@@ -419,7 +417,7 @@ class EFacturaService:
         )
         return document
 
-    def _generate_xml(self, invoice: "Invoice", document: EFacturaDocument) -> str | None:
+    def _generate_xml(self, invoice: Invoice, document: EFacturaDocument) -> str | None:
         """Generate UBL XML for invoice."""
         try:
             if document.document_type == EFacturaDocumentType.CREDIT_NOTE.value:
@@ -454,7 +452,7 @@ class EFacturaService:
 
     def _log_audit_event(
         self,
-        invoice: "Invoice",
+        invoice: Invoice,
         document: EFacturaDocument,
         event_type: str,
     ) -> None:
@@ -488,9 +486,28 @@ class EFacturaService:
         except Exception as e:
             logger.warning(f"Failed to log audit event: {e}")
 
+    def _record_webhook_event(
+        self,
+        document: EFacturaDocument,
+        status: str,
+        response_data: dict | None = None,
+    ) -> None:
+        """Record ANAF response as WebhookEvent for deduplication and audit."""
+        try:
+            from apps.integrations.webhooks.efactura import record_anaf_response  # noqa: PLC0415
+
+            record_anaf_response(
+                document_id=str(document.id),
+                anaf_upload_index=document.anaf_upload_index,
+                status=status,
+                response_data=response_data,
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ [e-Factura] Failed to record webhook event: {e}")
+
 
 # Convenience function for quick submission
-def submit_invoice_to_efactura(invoice: "Invoice") -> SubmissionResult:
+def submit_invoice_to_efactura(invoice: Invoice) -> SubmissionResult:
     """
     Submit an invoice to e-Factura.
 

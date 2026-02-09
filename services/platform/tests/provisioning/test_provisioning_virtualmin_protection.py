@@ -375,12 +375,12 @@ class VirtualminAccountProtectionTestCase(TestCase):
         
         result = provisioning_service.delete_account(self.virtualmin_account)
         self.assertTrue(result.is_err())
-        self.assertIn('must be terminated before deletion', result.unwrap_err())
-        
+        self.assertIn('must be terminated or in error state before deletion', result.unwrap_err())
+
         # Test with suspended account (should be blocked)
         self.virtualmin_account.status = 'suspended'
         self.virtualmin_account.save()
-        
+
         result = provisioning_service.delete_account(self.virtualmin_account)
         self.assertTrue(result.is_err())
-        self.assertIn('must be terminated before deletion', result.unwrap_err())
+        self.assertIn('must be terminated or in error state before deletion', result.unwrap_err())

@@ -14,7 +14,7 @@ class Migration(migrations.Migration):
     """
 
     dependencies = [
-        ('provisioning', '0012_add_virtualmin_domain_uniqueness'),
+        ('provisioning', '0004_service_provisioning_task_id'),
     ]
 
     operations = [

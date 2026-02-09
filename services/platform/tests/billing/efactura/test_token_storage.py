@@ -12,15 +12,14 @@ Tests cover:
 """
 
 from datetime import timedelta
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 
 from django.core.cache import cache
-from django.test import TestCase, override_settings
+from django.test import TestCase
 from django.utils import timezone
 
 from apps.billing.efactura.token_storage import (
     OAuthToken,
-    OAuthTokenManager,
     TokenStorageService,
 )
 
@@ -579,7 +578,7 @@ class TokenStorageServiceTestCase(TestCase):
         token = service.get_refreshable_token()
 
         self.assertIsNotNone(token)
-        self.assertEqual(token.refresh_token, "refresh-token")
+        self.assertEqual(token.decrypted_refresh_token, "refresh-token")
 
 
 class TokenStorageEdgeCasesTestCase(TestCase):
@@ -608,8 +607,8 @@ class TokenStorageEdgeCasesTestCase(TestCase):
         token1 = OAuthToken.objects.get_valid_token("11111111")
         token2 = OAuthToken.objects.get_valid_token("22222222")
 
-        self.assertEqual(token1.access_token, "token-1")
-        self.assertEqual(token2.access_token, "token-2")
+        self.assertEqual(token1.decrypted_access_token, "token-1")
+        self.assertEqual(token2.decrypted_access_token, "token-2")
 
     def test_environment_field(self):
         """Test environment field is stored correctly."""

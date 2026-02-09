@@ -13,20 +13,30 @@ Usage:
 """
 
 from tests.factories.billing_factories import (
+    CurrencyFactory,
+    CustomerFactory,
+    InvoiceFactory,
+    InvoiceLineFactory,
     PaymentCreationRequest,
     create_currency,
     create_customer,
     create_invoice,
+    create_invoice_line,
     create_payment,
     create_payment_legacy,
 )
 
 __all__ = [
     # Billing factories
+    'CurrencyFactory',
+    'CustomerFactory',
+    'InvoiceFactory',
+    'InvoiceLineFactory',
     'PaymentCreationRequest',
     'create_currency',
     'create_customer',
     'create_invoice',
+    'create_invoice_line',
     'create_payment',
     'create_payment_legacy',
 ]

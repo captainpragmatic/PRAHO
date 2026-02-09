@@ -299,7 +299,6 @@ def generate_e_factura_xml(invoice: Invoice) -> str:
     try:
         # Build e-Factura XML structure according to Romanian ANAF specifications
         customer = invoice.customer
-        items = invoice.items.all() if hasattr(invoice, "items") else []
 
         # Calculate totals
         total_without_vat = Decimal(invoice.subtotal_cents or 0) / 100

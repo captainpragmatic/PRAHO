@@ -18,7 +18,7 @@ class OrderInputValidator:
     
     # Romanian hosting provider specific configurations
     ALLOWED_BILLING_PERIODS = {
-        'monthly', 'quarterly', 'semiannual', 'annual', 'biennial', 'triennial'
+        'monthly', 'quarterly', 'semiannual', 'annual', 'yearly', 'biennial', 'triennial'
     }
     
     # Domain validation with international support

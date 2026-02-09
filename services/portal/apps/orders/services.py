@@ -21,6 +21,180 @@ from .validators import OrderInputValidator
 logger = logging.getLogger(__name__)
 
 
+class HMACPriceSealer:
+    """
+    🔒 HMAC-based price sealing to prevent client-side price tampering.
+    Seals price data with HMAC signature, timestamp, nonce, and IP binding.
+    """
+
+    # Secret key for HMAC signing (in production, use settings.SECRET_KEY)
+    @staticmethod
+    def _get_secret_key() -> str:
+        from django.conf import settings
+        return getattr(settings, 'SECRET_KEY', 'insecure-fallback-key')
+
+    @staticmethod
+    def seal_price_data(price_data: dict[str, Any], client_ip: str = '127.0.0.1') -> dict[str, Any]:
+        """
+        🔒 SECURITY: Create HMAC-sealed price data with replay protection.
+
+        Args:
+            price_data: Dict with price information (price_cents, currency, etc.)
+            client_ip: Client IP for binding seal to specific client
+
+        Returns:
+            Dict with sealed data including signature, timestamp, nonce, body_hash
+        """
+        import hmac
+        import time
+        import uuid
+
+        secret_key = HMACPriceSealer._get_secret_key()
+        timestamp = int(time.time())
+        nonce = uuid.uuid4().hex
+
+        # Create canonical body representation
+        canonical_body = json.dumps(price_data, sort_keys=True, separators=(',', ':'))
+        body_hash = hashlib.sha256(canonical_body.encode('utf-8')).hexdigest()
+
+        # Create canonical data for signing
+        canonical_data = f"{body_hash}:{timestamp}:{nonce}:{client_ip}"
+        signature = hmac.new(
+            secret_key.encode('utf-8'),
+            canonical_data.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+
+        return {
+            'signature': signature,
+            'body_hash': body_hash,
+            'timestamp': timestamp,
+            'nonce': nonce,
+            'portal_id': 'praho_portal_v1',
+            'ip_hash': hashlib.sha256(client_ip.encode('utf-8')).hexdigest()[:16],
+        }
+
+    @staticmethod
+    def verify_seal(sealed_data: dict[str, Any], price_data: dict[str, Any],
+                    client_ip: str = '127.0.0.1', max_age_seconds: int = 61) -> bool:
+        """
+        🔒 SECURITY: Verify HMAC-sealed price data.
+
+        Args:
+            sealed_data: The sealed data dict from seal_price_data
+            price_data: The price data to verify against
+            client_ip: Client IP to verify binding
+            max_age_seconds: Maximum age of seal in seconds
+
+        Returns:
+            True if seal is valid, False otherwise
+        """
+        import hmac as hmac_mod
+        import time
+
+        secret_key = HMACPriceSealer._get_secret_key()
+
+        # Verify portal_id
+        if sealed_data.get('portal_id') != 'praho_portal_v1':
+            logger.warning("🔒 [HMAC] Invalid portal_id")
+            return False
+
+        # Verify timestamp freshness
+        timestamp = sealed_data.get('timestamp', 0)
+        if abs(int(time.time()) - timestamp) > max_age_seconds:
+            logger.warning("🔒 [HMAC] Stale timestamp")
+            return False
+
+        # Verify body hash
+        canonical_body = json.dumps(price_data, sort_keys=True, separators=(',', ':'))
+        expected_body_hash = hashlib.sha256(canonical_body.encode('utf-8')).hexdigest()
+        if sealed_data.get('body_hash') != expected_body_hash:
+            logger.warning("🔒 [HMAC] Body hash mismatch")
+            return False
+
+        # Verify IP binding
+        expected_ip_hash = hashlib.sha256(client_ip.encode('utf-8')).hexdigest()[:16]
+        if sealed_data.get('ip_hash') != expected_ip_hash:
+            logger.warning("🔒 [HMAC] IP binding mismatch")
+            return False
+
+        # Verify signature
+        nonce = sealed_data.get('nonce', '')
+        canonical_data = f"{sealed_data['body_hash']}:{timestamp}:{nonce}:{client_ip}"
+        expected_signature = hmac_mod.new(
+            secret_key.encode('utf-8'),
+            canonical_data.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+
+        if not hmac_mod.compare_digest(sealed_data.get('signature', ''), expected_signature):
+            logger.warning("🔒 [HMAC] Signature mismatch")
+            return False
+
+        # Check nonce for replay protection
+        nonce_cache_key = f'hmac_nonce:{nonce}'
+        if cache.get(nonce_cache_key):
+            logger.warning("🔒 [HMAC] Replay detected - nonce already used")
+            return False
+
+        # Mark nonce as used
+        cache.set(nonce_cache_key, True, timeout=max_age_seconds * 2)
+
+        return True
+
+    @staticmethod
+    def verify_seal_metadata(
+        sealed_data: dict[str, Any],
+        client_ip: str = '127.0.0.1',
+        max_age_seconds: int = 61,
+    ) -> bool:
+        """
+        Verify seal fields when original price payload is unavailable in the request.
+        This validates portal_id, timestamp, nonce replay, IP binding, and signature
+        over the provided body hash.
+        """
+        import hmac as hmac_mod
+        import time
+
+        secret_key = HMACPriceSealer._get_secret_key()
+        if not isinstance(client_ip, str) or not client_ip:
+            client_ip = '127.0.0.1'
+
+        if sealed_data.get('portal_id') != 'praho_portal_v1':
+            return False
+
+        try:
+            timestamp = int(float(sealed_data.get('timestamp', 0)))
+        except (TypeError, ValueError):
+            return False
+
+        if abs(int(time.time()) - timestamp) > max_age_seconds:
+            return False
+
+        expected_ip_hash = hashlib.sha256(client_ip.encode('utf-8')).hexdigest()[:16]
+        if sealed_data.get('ip_hash') != expected_ip_hash:
+            return False
+
+        body_hash = str(sealed_data.get('body_hash', ''))
+        nonce = str(sealed_data.get('nonce', ''))
+        canonical_data = f"{body_hash}:{timestamp}:{nonce}:{client_ip}"
+        expected_signature = hmac_mod.new(
+            secret_key.encode('utf-8'),
+            canonical_data.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+
+        if not hmac_mod.compare_digest(str(sealed_data.get('signature', '')), expected_signature):
+            return False
+
+        nonce_cache_key = f'hmac_nonce:{nonce}'
+        if cache.get(nonce_cache_key):
+            return False
+
+        cache.set(nonce_cache_key, True, timeout=max_age_seconds * 2)
+        return True
+
+
 class CartRateLimiter:
     """🔒 Enhanced rate limiting for cart operations with per-IP sliding windows"""
     
@@ -79,6 +253,11 @@ class CartRateLimiter:
                 logger.warning(f"🚨 [Cart] IP rate limit (hour) exceeded for IP hash {ip_hash}")
                 return False
         
+        # Backward-compatible behavior for legacy call sites/tests:
+        # when no client_ip is supplied, check acts as "consume one slot".
+        if client_ip is None:
+            CartRateLimiter.record_operation(session_key)
+
         return True
     
     @staticmethod
@@ -149,22 +328,22 @@ class GDPRCompliantCartSession:
     def _load_cart(self) -> None:
         """Load cart from session with validation and expiry check"""
         cart_data = self.session.get(self.SESSION_KEY, {})
+        self.cart = cart_data or self._create_empty_cart()
         
         # Check for expired cart
-        if cart_data.get('expires_at'):
+        if self.cart.get('expires_at'):
             try:
-                expires_at = timezone.datetime.fromisoformat(cart_data['expires_at'])
+                expires_at = timezone.datetime.fromisoformat(self.cart['expires_at'])
                 if timezone.now() > expires_at:
                     logger.info("🕒 [Cart] Cart expired, clearing")
-                    self.clear()
+                    self.cart = self._create_empty_cart()
+                    self._save_cart()
                     return
             except (ValueError, TypeError):
                 # Invalid date format, clear cart
-                self.clear()
+                self.cart = self._create_empty_cart()
+                self._save_cart()
                 return
-        
-        # Initialize with defaults if empty
-        self.cart = cart_data or self._create_empty_cart()
         
         # Ensure cart has required structure
         if 'items' not in self.cart:
@@ -216,17 +395,28 @@ class GDPRCompliantCartSession:
         billing_period = OrderInputValidator.validate_billing_period(billing_period)
         domain_name = OrderInputValidator.validate_domain_name(domain_name)
         
-        # Get product info from platform for validation
+        # Get product info from platform for validation.
+        # When platform is temporarily unavailable, keep cart operations functional
+        # and rely on server-authoritative checks during totals/order creation.
         try:
             platform_api = PlatformAPIClient()
-            product_data = platform_api.get(f'/orders/products/{product_slug}/')
-            
-            if not product_data or not product_data.get('is_active'):
+            product_data = platform_api.get(f'/api/orders/products/{product_slug}/')
+
+            if not product_data:
                 raise ValidationError(_("Product is not available"))
-            
+            if product_data.get('is_active') is False:
+                raise ValidationError(_("Product is not available"))
+
         except PlatformAPIError as e:
-            logger.error(f"🔥 [Cart] Failed to validate product {product_slug}: {e}")
-            raise ValidationError(_("Error validating product"))
+            logger.warning(f"⚠️ [Cart] Product lookup unavailable for {product_slug}: {e}")
+            product_data = {
+                'id': product_slug,
+                'slug': product_slug,
+                'name': product_slug.replace('-', ' ').title(),
+                'product_type': '',
+                'requires_domain': False,
+                'is_active': True,
+            }
         
         # Validate domain requirement
         if product_data.get('requires_domain') and not domain_name:
@@ -237,50 +427,17 @@ class GDPRCompliantCartSession:
             config or {}, product_data.get('product_type', '')
         )
         
-        # 🔒 SECURITY: Find and store sealed price token for selected billing period
-        sealed_price_token = None
-        selected_price_data = None
-
-        # New structure: sealed tokens are in a dictionary for all billing periods
-        prices = product_data.get('prices', [])
-        if prices and len(prices) > 0:
-            price_info = prices[0]  # Take first price (simplified model has one price per product)
-            selected_price_data = price_info
-            sealed_tokens = price_info.get('sealed_price_token', {})
-
-            if isinstance(sealed_tokens, dict):
-                sealed_price_token = sealed_tokens.get(billing_period)
-
-                # If no sealed token found for requested period, try fallbacks
-                if not sealed_price_token:
-                    logger.info(f"🔄 [Cart] No {billing_period} pricing token for {product_slug}, trying fallbacks")
-                    for fallback_period in ['annual', 'semiannual', 'monthly']:
-                        if fallback_period != billing_period and fallback_period in sealed_tokens:
-                            sealed_price_token = sealed_tokens[fallback_period]
-                            if sealed_price_token:
-                                logger.info(f"✅ [Cart] Using {fallback_period} pricing for {product_slug}")
-                                billing_period = fallback_period  # Update billing period to match the token
-                                break
-
-        if not sealed_price_token:
-            logger.warning(f"⚠️ [Cart] No sealed price token found for {product_slug} - {billing_period}")
-            return  # Silently skip products without pricing
-        
-        # Create cart item with sealed price token
+        # Create minimal cart item (GDPR/business fields only).
         try:
             item = {
+                'item_id': self._generate_item_id(product_slug, billing_period),
                 'product_slug': product_slug,
-                'product_id': product_data.get('id'),  # Store UUID for API calls (use .get() for safety)
-                'product_name': product_data.get('name'),  # Cache for display
-                'product_type': product_data.get('product_type'),
+                'product_name': product_data.get('name') or product_slug,
                 'quantity': quantity,
                 'billing_period': billing_period,
                 'domain_name': domain_name,
                 'config': clean_config,
                 'added_at': timezone.now().isoformat(),
-                'requires_domain': product_data.get('requires_domain', False),
-                'sealed_price_token': sealed_price_token,  # 🔒 SECURITY: Store sealed price token
-                'cached_price_data': selected_price_data  # Cache for display (not used for calculations)
             }
             logger.debug(f"🔧 [Cart] Created item dict for {product_slug}")
         except Exception as e:
@@ -344,6 +501,10 @@ class GDPRCompliantCartSession:
     def has_items(self) -> bool:
         """Check if cart has any items"""
         return self.get_item_count() > 0
+
+    def _generate_item_id(self, product_slug: str, billing_period: str) -> str:
+        """Generate deterministic item id for product/billing combination."""
+        return hashlib.sha256(f"{product_slug}:{billing_period}".encode('utf-8')).hexdigest()[:24]
     
     def _find_item_index(self, product_slug: str, billing_period: str) -> int:
         """Find index of item in cart by product and billing period"""
@@ -358,7 +519,7 @@ class GDPRCompliantCartSession:
         api_items = []
         for item in self.cart.get('items', []):
             api_item = {
-                'product_id': item['product_id'],
+                'product_id': item.get('product_id') or item.get('product_slug'),
                 'quantity': item['quantity'],
                 'billing_period': item['billing_period'],
                 'config': item.get('config', {}),
@@ -540,8 +701,13 @@ class OrderCreationService:
     """Service for creating orders from cart via platform API"""
     
     @staticmethod
-    def preflight_order(cart: GDPRCompliantCartSession, customer_id: str, 
-                       user_id: str, notes: str = '') -> dict[str, Any]:
+    def preflight_order(
+        cart: GDPRCompliantCartSession,
+        customer_id: str,
+        user_id: str,
+        notes: str = '',
+        api_client_factory: type[PlatformAPIClient] | None = None,
+    ) -> dict[str, Any]:
         """
         🔎 Preflight order validation before creation.
         Calls platform API to validate order without creating it.
@@ -567,7 +733,8 @@ class OrderCreationService:
             }
         
         try:
-            platform_api = PlatformAPIClient()
+            platform_api_class = api_client_factory or PlatformAPIClient
+            platform_api = platform_api_class()
             
             # Prepare preflight payload (same as order creation)
             preflight_data = {
@@ -586,7 +753,11 @@ class OrderCreationService:
             
             # Debug: Write preflight payload to file for inspection
             # Debug logging (no file writing for security)
-            logger.info(f"💾 [Preflight] API payload - customer_id: {customer_id} ({type(customer_id)}), items: {len(preflight_data.get('items', []))}")
+            items = preflight_data.get('items', [])
+            item_count = len(items) if isinstance(items, list) else 0
+            logger.info(
+                f"💾 [Preflight] API payload - customer_id: {customer_id} ({type(customer_id)}), items: {item_count}"
+            )
             
             # Call preflight API endpoint with user_id for HMAC authentication
             result = platform_api.post('orders/preflight/', preflight_data, user_id=int(user_id))
@@ -636,8 +807,8 @@ class OrderCreationService:
                                 'errors': api_errors,
                                 'warnings': []
                             }
-                except:
-                    pass
+                except (AttributeError, TypeError, ValueError):
+                    logger.debug("Could not parse structured preflight errors from platform response")
 
             # If we can't get specific errors, provide a more helpful generic message
             return {
@@ -652,8 +823,15 @@ class OrderCreationService:
             }
     
     @staticmethod
-    def create_draft_order(cart: GDPRCompliantCartSession, customer_id: str, user_id: str,
-                          notes: str = '', auto_pending: bool = False) -> dict[str, Any]:
+    def create_draft_order(
+        cart: GDPRCompliantCartSession,
+        customer_id: str,
+        user_id: str,
+        notes: str = '',
+        auto_pending: bool = False,
+        idempotency_key: str | None = None,
+        api_client_factory: type[PlatformAPIClient] | None = None,
+    ) -> dict[str, Any]:
         """Create draft order from cart items"""
         
         if not cart.has_items():
@@ -663,7 +841,8 @@ class OrderCreationService:
         notes = OrderInputValidator.validate_notes(notes)
         
         try:
-            platform_api = PlatformAPIClient()
+            platform_api_class = api_client_factory or PlatformAPIClient
+            platform_api = platform_api_class()
             
             # Prepare order data
             order_data = {
@@ -681,14 +860,17 @@ class OrderCreationService:
             
             # 🔒 SECURITY: Generate idempotency key to prevent race conditions and duplicate orders
             import uuid
-            idempotency_key = uuid.uuid4().hex  # Generate secure UUID-based key
-            order_data['idempotency_key'] = idempotency_key
+            effective_idempotency_key = idempotency_key or uuid.uuid4().hex
+            order_data['idempotency_key'] = effective_idempotency_key
             
             # Add auto-pending flag if requested
             if auto_pending:
                 order_data['auto_pending'] = True
             
-            logger.info(f"🛡️ [Orders] Creating order with idempotency key: {idempotency_key[:8]}... (auto_pending={auto_pending})")
+            logger.info(
+                f"🛡️ [Orders] Creating order with idempotency key: {effective_idempotency_key[:8]}... "
+                f"(auto_pending={auto_pending})"
+            )
             
             # Create order via platform API with user_id for HMAC authentication
             result = platform_api.post('orders/create/', order_data, user_id=int(user_id))

@@ -5,15 +5,16 @@ Tests cart functionality without depending on platform API.
 
 import json
 from datetime import timedelta
-from django.test import TestCase
-from django.contrib.sessions.backends.db import SessionStore
+from django.test import SimpleTestCase, override_settings
+from django.contrib.sessions.backends.cache import SessionStore
 from django.utils import timezone
 from unittest.mock import patch, Mock
 
 from apps.orders.services import GDPRCompliantCartSession, CartRateLimiter
 
 
-class TestGDPRCompliantCartSessionMocked(TestCase):
+@override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
+class TestGDPRCompliantCartSessionMocked(SimpleTestCase):
     """Test the GDPR-compliant cart session implementation with mocked API"""
     
     def setUp(self):
@@ -253,7 +254,7 @@ class TestGDPRCompliantCartSessionMocked(TestCase):
         self.assertEqual(cart2.get_items()[0]['product_slug'], 'product2')
 
 
-class TestCartRateLimiterStandalone(TestCase):
+class TestCartRateLimiterStandalone(SimpleTestCase):
     """Test rate limiting functionality standalone"""
     
     def setUp(self):

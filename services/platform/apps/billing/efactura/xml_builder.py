@@ -15,7 +15,7 @@ import logging
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from django.conf import settings
 from lxml import etree
@@ -93,13 +93,12 @@ class CompanyInfo:
 class XMLBuilderError(Exception):
     """Exception raised when XML building fails."""
 
-    pass
 
 
 class BaseUBLBuilder:
     """Base class for UBL document builders."""
 
-    def __init__(self, invoice: "Invoice"):
+    def __init__(self, invoice: Invoice):
         self.invoice = invoice
         self.root: etree._Element | None = None
         self._supplier: CompanyInfo | None = None
@@ -125,16 +124,19 @@ class BaseUBLBuilder:
     def _get_customer_info(self) -> CompanyInfo:
         """Get customer (buyer) information from invoice."""
         if self._customer is None:
+            bill_to_country = getattr(self.invoice, "bill_to_country", None) or "RO"
+            street = getattr(self.invoice, "bill_to_street", None) or getattr(self.invoice, "bill_to_address1", "") or ""
+            postal_code = getattr(self.invoice, "bill_to_postal_code", None) or getattr(self.invoice, "bill_to_postal", "") or ""
             self._customer = CompanyInfo(
-                name=self.invoice.bill_to_name or "",
-                tax_id=self.invoice.bill_to_tax_id or "",
+                name=getattr(self.invoice, "bill_to_name", "") or "",
+                tax_id=getattr(self.invoice, "bill_to_tax_id", "") or "",
                 registration_number=getattr(self.invoice, "bill_to_registration_number", "") or "",
-                street=self.invoice.bill_to_street or "",
-                city=self.invoice.bill_to_city or "",
-                postal_code=self.invoice.bill_to_postal_code or "",
-                country_code=self.invoice.bill_to_country or "RO",
-                country_name=self._get_country_name(self.invoice.bill_to_country or "RO"),
-                email=self.invoice.bill_to_email or "",
+                street=street,
+                city=getattr(self.invoice, "bill_to_city", "") or "",
+                postal_code=postal_code,
+                country_code=bill_to_country,
+                country_name=self._get_country_name(bill_to_country),
+                email=getattr(self.invoice, "bill_to_email", "") or "",
                 phone=getattr(self.invoice, "bill_to_phone", "") or "",
             )
         return self._customer
@@ -227,7 +229,11 @@ class BaseUBLBuilder:
             return TAX_CATEGORY_REVERSE_CHARGE
 
         # Check for zero rate
-        if self.invoice.tax_total_cents == 0:
+        tax_total_cents = getattr(self.invoice, "tax_total_cents", None)
+        if tax_total_cents is None:
+            tax_total_cents = getattr(self.invoice, "tax_cents", 0)
+
+        if tax_total_cents == 0:
             return TAX_CATEGORY_ZERO
 
         # Default to standard rate
@@ -326,12 +332,13 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         self._add_legal_monetary_total()
         self._add_invoice_lines()
 
-        return etree.tostring(
+        xml_body = etree.tostring(
             self.root,
             pretty_print=True,
-            xml_declaration=True,
+            xml_declaration=False,
             encoding="UTF-8",
         ).decode("utf-8")
+        return f'<?xml version="1.0" encoding="UTF-8"?>\n{xml_body.lstrip()}'
 
     def _validate_invoice(self) -> None:
         """Validate invoice has required data for e-Factura."""
@@ -341,7 +348,7 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
             errors.append("Invoice number is required")
 
         if not self.invoice.issued_at:
-            errors.append("Invoice issue date is required")
+            errors.append("Issue date is required")
 
         if not self.invoice.bill_to_name:
             errors.append("Customer name is required")
@@ -377,7 +384,7 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
 
     def _add_document_metadata(self) -> None:
         """Add invoice document metadata."""
-        # CustomizationID (CIUS-RO) - Mandatory
+        # Mandatory CIUS-RO customization identifier.
         self._add_cbc(self.root, "CustomizationID", CIUS_RO_CUSTOMIZATION_ID)
 
         # ProfileID (PEPPOL BIS) - Mandatory
@@ -397,14 +404,12 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         self._add_cbc(self.root, "InvoiceTypeCode", INVOICE_TYPE_COMMERCIAL)
 
         # Note - Optional
-        if self.invoice.notes:
-            self._add_cbc(self.root, "Note", self.invoice.notes[:1000])  # Limit to 1000 chars
+        notes = getattr(self.invoice, "notes", "")
+        if notes:
+            self._add_cbc(self.root, "Note", notes[:1000])  # Limit to 1000 chars
 
         # Document Currency Code - Mandatory
         self._add_cbc(self.root, "DocumentCurrencyCode", self.invoice.currency.code)
-
-        # Tax Currency Code - Optional (use if different from document currency)
-        # self._add_cbc(self.root, "TaxCurrencyCode", "RON")
 
         # Buyer Reference - Optional but useful
         if hasattr(self.invoice, "customer_reference") and self.invoice.customer_reference:
@@ -416,9 +421,6 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         party = self._add_cac(supplier_party, "Party")
 
         supplier = self._get_supplier_info()
-
-        # EndpointID (for PEPPOL routing) - Optional
-        # self._add_cbc(party, "EndpointID", supplier.vat_number, schemeID="9947")
 
         # PartyIdentification with CUI - Mandatory for Romania
         party_id = self._add_cac(party, "PartyIdentification")
@@ -432,7 +434,7 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         # PostalAddress - Mandatory
         self._add_postal_address(party, supplier)
 
-        # PartyTaxScheme (VAT) - Mandatory
+        # Mandatory VAT tax scheme details.
         self._add_party_tax_scheme(party, supplier.vat_number)
 
         # PartyLegalEntity - Mandatory
@@ -519,7 +521,9 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         tax_total = self._add_cac(self.root, "TaxTotal")
 
         # Total tax amount
-        tax_amount_cents = self.invoice.tax_total_cents or 0
+        tax_amount_cents = getattr(self.invoice, "tax_total_cents", None)
+        if tax_amount_cents is None:
+            tax_amount_cents = getattr(self.invoice, "tax_cents", 0)
         tax_amount = Decimal(tax_amount_cents) / 100
         tax_amount_elem = self._add_cbc(tax_total, "TaxAmount", self._format_amount(tax_amount))
         tax_amount_elem.set("currencyID", self.invoice.currency.code)
@@ -572,7 +576,7 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         for idx, line in enumerate(self.invoice.lines.all().order_by("id"), start=1):
             self._add_invoice_line(idx, line)
 
-    def _add_invoice_line(self, line_id: int, line: "InvoiceLine") -> None:
+    def _add_invoice_line(self, line_id: int, line: InvoiceLine) -> None:
         """Add a single InvoiceLine element."""
         invoice_line = self._add_cac(self.root, "InvoiceLine")
 
@@ -600,7 +604,7 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         # Price
         self._add_line_price(invoice_line, line)
 
-    def _add_line_item(self, parent: etree._Element, line: "InvoiceLine") -> None:
+    def _add_line_item(self, parent: etree._Element, line: InvoiceLine) -> None:
         """Add Item element to invoice line."""
         item = self._add_cac(parent, "Item")
 
@@ -619,16 +623,13 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
 
         # Get line-specific tax rate or default
         tax_rate = getattr(line, "tax_rate", None)
-        if tax_rate is not None:
-            percent = Decimal(str(tax_rate)) * 100
-        else:
-            percent = self._get_tax_rate()
+        percent = Decimal(str(tax_rate)) * 100 if tax_rate is not None else self._get_tax_rate()
         self._add_cbc(tax_category, "Percent", self._format_percent(percent))
 
         tax_scheme = self._add_cac(tax_category, "TaxScheme")
         self._add_cbc(tax_scheme, "ID", "VAT")
 
-    def _add_line_price(self, parent: etree._Element, line: "InvoiceLine") -> None:
+    def _add_line_price(self, parent: etree._Element, line: InvoiceLine) -> None:
         """Add Price element to invoice line."""
         price = self._add_cac(parent, "Price")
 
@@ -636,7 +637,7 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         price_amount = self._add_cbc(price, "PriceAmount", self._format_amount(unit_price))
         price_amount.set("currencyID", self.invoice.currency.code)
 
-    def _get_unit_code(self, line: "InvoiceLine") -> str:
+    def _get_unit_code(self, line: InvoiceLine) -> str:
         """Get UN/ECE unit code for the line item."""
         # Check for unit type on line
         unit_type = getattr(line, "unit_type", None)
@@ -665,7 +666,7 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         xml_string = builder.build()
     """
 
-    def __init__(self, invoice: "Invoice", original_invoice: "Invoice" | None = None):
+    def __init__(self, invoice: Invoice, original_invoice: Invoice | None = None):
         super().__init__(invoice)
         self.original_invoice = original_invoice
 
@@ -681,12 +682,13 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         self._add_legal_monetary_total()
         self._add_credit_note_lines()
 
-        return etree.tostring(
+        xml_body = etree.tostring(
             self.root,
             pretty_print=True,
-            xml_declaration=True,
+            xml_declaration=False,
             encoding="UTF-8",
         ).decode("utf-8")
+        return f'<?xml version="1.0" encoding="UTF-8"?>\n{xml_body.lstrip()}'
 
     def _validate_invoice(self) -> None:
         """Validate credit note has required data."""
@@ -724,8 +726,9 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         self._add_cbc(self.root, "IssueDate", self._format_date(self.invoice.issued_at.date()))
         self._add_cbc(self.root, "CreditNoteTypeCode", INVOICE_TYPE_CREDIT_NOTE)
 
-        if self.invoice.notes:
-            self._add_cbc(self.root, "Note", self.invoice.notes[:1000])
+        notes = getattr(self.invoice, "notes", "")
+        if notes:
+            self._add_cbc(self.root, "Note", notes[:1000])
 
         self._add_cbc(self.root, "DocumentCurrencyCode", self.invoice.currency.code)
 
@@ -781,7 +784,9 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         """Add TaxTotal element."""
         tax_total = self._add_cac(self.root, "TaxTotal")
 
-        tax_amount_cents = self.invoice.tax_total_cents or 0
+        tax_amount_cents = getattr(self.invoice, "tax_total_cents", None)
+        if tax_amount_cents is None:
+            tax_amount_cents = getattr(self.invoice, "tax_cents", 0)
         tax_amount = Decimal(tax_amount_cents) / 100
         tax_amount_elem = self._add_cbc(tax_total, "TaxAmount", self._format_amount(tax_amount))
         tax_amount_elem.set("currencyID", self.invoice.currency.code)
@@ -826,7 +831,7 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         for idx, line in enumerate(self.invoice.lines.all().order_by("id"), start=1):
             self._add_credit_note_line(idx, line)
 
-    def _add_credit_note_line(self, line_id: int, line: "InvoiceLine") -> None:
+    def _add_credit_note_line(self, line_id: int, line: InvoiceLine) -> None:
         """Add a single CreditNoteLine element."""
         cn_line = self._add_cac(self.root, "CreditNoteLine")
 

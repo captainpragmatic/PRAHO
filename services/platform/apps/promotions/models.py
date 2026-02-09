@@ -171,7 +171,7 @@ class PromotionCampaign(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name="created_campaigns",
+        related_name="created_promotion_campaigns",
     )
 
     class Meta:

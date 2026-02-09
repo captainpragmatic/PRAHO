@@ -3,14 +3,13 @@
 # ===============================================================================
 
 from decimal import Decimal
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.messages.middleware import MessageMiddleware
 from django.contrib.sessions.middleware import SessionMiddleware
-from django.core.exceptions import PermissionDenied
-from django.http import Http404, HttpResponse, JsonResponse
-from django.test import Client, RequestFactory, TestCase
+from django.http import Http404, HttpResponse
+from django.test import RequestFactory, TestCase
 from django.utils import timezone
 
 from apps.billing.models import (
@@ -20,14 +19,11 @@ from apps.billing.models import (
 )
 from apps.billing.views import (
     _create_proforma_with_sequence,
-    _get_accessible_customer_ids,
-    _get_customers_for_edit_form,
     _handle_proforma_create_post,
-    _validate_financial_document_access_with_redirect as _validate_financial_document_access,
     _validate_proforma_edit_access,
     proforma_detail,
-    proforma_pdf,
 )
+
 # Note: Some helper functions may have been moved to services or removed in refactoring
 from apps.customers.models import Customer
 from apps.users.models import CustomerMembership, User
@@ -70,8 +66,8 @@ class ProformaViewsTestCase(TestCase):
 
     def add_middleware_to_request(self, request):
         """Add required middleware to request"""
-        from django.contrib.sessions.middleware import SessionMiddleware
         from django.contrib.messages.middleware import MessageMiddleware
+        from django.contrib.sessions.middleware import SessionMiddleware
         from django.http import HttpResponse
         
         middleware = SessionMiddleware(lambda req: HttpResponse())

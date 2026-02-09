@@ -6,8 +6,8 @@ to ensure DRY compliance and easy maintenance.
 """
 
 from decimal import Decimal, InvalidOperation
-from django.conf import settings
 
+from django.conf import settings
 
 # ===============================================================================
 # HELPER: SAFE VALUE PARSING
@@ -180,6 +180,7 @@ def get_payment_due_date(issue_date=None):
         datetime: Due date
     """
     from datetime import timedelta
+
     from django.utils import timezone
 
     if issue_date is None:

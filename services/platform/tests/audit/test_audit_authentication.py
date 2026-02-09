@@ -371,22 +371,24 @@ class AuthenticationViewsIntegrationTest(TestCase):
         """Set up test data"""
         self.user = User.objects.create_user(
             email='view@example.com',
-            password='testpass123'
+            password='testpass123',
+            is_staff=True,
+            staff_role='admin',
         )
-    
+
     def test_login_view_creates_audit_event(self):
         """Test that login view creates proper audit events"""
         # Clear existing audit events
         AuditEvent.objects.all().delete()
-        
-        # Login via view
+
+        # Login via view (staff user required for platform login)
         response = self.client.post(reverse('users:login'), {
             'email': 'view@example.com',
             'password': 'testpass123'
         })
-        
+
         self.assertEqual(response.status_code, 302)  # Redirect on success
-        
+
         # Check audit event was created (might be from signal or view)
         audit_events = AuditEvent.objects.filter(user=self.user, action='login_success')
         self.assertGreaterEqual(audit_events.count(), 1)

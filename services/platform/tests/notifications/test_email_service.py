@@ -41,6 +41,11 @@ class EmailServiceBasicTests(TestCase):
 
     def setUp(self):
         """Set up test fixtures."""
+        # Clear suppression list and cache to avoid cross-test contamination
+        EmailSuppression.objects.all().delete()
+        from django.core.cache import cache
+        cache.clear()
+
         self.template = EmailTemplate.objects.create(
             key="test_template",
             locale="en",
@@ -118,6 +123,11 @@ class EmailServiceTemplateTests(TestCase):
 
     def setUp(self):
         """Set up test fixtures."""
+        # Clear suppression list and cache to avoid cross-test contamination
+        EmailSuppression.objects.all().delete()
+        from django.core.cache import cache
+        cache.clear()
+
         self.template_en = EmailTemplate.objects.create(
             key="welcome",
             locale="en",

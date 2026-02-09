@@ -3,13 +3,12 @@
 # ===============================================================================
 
 from decimal import Decimal
-from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.messages.middleware import MessageMiddleware
 from django.contrib.sessions.middleware import SessionMiddleware
-from django.http import Http404, HttpResponse, JsonResponse
-from django.test import Client, RequestFactory, TestCase
+from django.http import HttpResponse, JsonResponse
+from django.test import RequestFactory, TestCase
 from django.utils import timezone
 
 from apps.billing.models import (

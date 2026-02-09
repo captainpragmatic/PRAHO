@@ -9,9 +9,9 @@ Tests cover:
 - Validation and edge cases
 """
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from decimal import Decimal
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import patch
 
 from django.test import TestCase, override_settings
 from django.utils import timezone
@@ -174,6 +174,7 @@ class EFacturaSettingsTestCase(TestCase):
     def setUp(self):
         self.settings = EFacturaSettings()
 
+    @override_settings(EFACTURA_ENABLED=None)
     def test_default_enabled(self):
         """Test e-Factura is enabled by default."""
         self.assertTrue(self.settings.enabled)

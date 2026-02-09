@@ -15,15 +15,13 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     pass
 
-from contextlib import suppress
-
 from django.contrib import messages
 from django.contrib.auth import REDIRECT_FIELD_NAME
 from django.contrib.auth.decorators import login_required
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.db.models import Count, Q, QuerySet, Sum
 from django.db.models.functions import ExtractMonth
 from django.http import (
@@ -61,6 +59,8 @@ from .models import (
     ProformaLine,
     ProformaSequence,
 )
+
+logger = logging.getLogger(__name__)
 from .payment_service import PaymentService
 from .services import (
     log_security_event,
@@ -68,6 +68,7 @@ from .services import (
 )
 
 # Customer access function removed - platform is staff-only
+MAX_PAYMENT_AMOUNT_CENTS = 100_000_000
 
 
 def _validate_financial_document_access(
@@ -157,9 +158,12 @@ def _validate_financial_document_access_with_redirect(
         if isinstance(result, HttpResponseForbidden):
             if not hasattr(request, "user") or not isinstance(request.user, User) or not request.user.is_authenticated:
                 login_url = reverse("users:login")
-                if hasattr(request, "get_full_path") and callable(request.get_full_path):
-                    with suppress(Exception):
-                        login_url += f"?{REDIRECT_FIELD_NAME}={request.get_full_path()}"
+                full_path_getter = getattr(request, "get_full_path", None)
+                if callable(full_path_getter):
+                    try:
+                        login_url += f"?{REDIRECT_FIELD_NAME}={full_path_getter()}"
+                    except (TypeError, ValueError):
+                        logger.debug("Could not append redirect path to login URL")
                 redirect_response = HttpResponseRedirect(login_url)
             else:
                 redirect_response = HttpResponseRedirect(reverse("billing:invoice_list"))
@@ -171,9 +175,12 @@ def _validate_financial_document_access_with_redirect(
             redirect_response = HttpResponseRedirect(reverse("users:login"))  # type: ignore[unreachable]
         elif not hasattr(request, "user") or not isinstance(request.user, User) or not request.user.is_authenticated:
             login_url = reverse("users:login")
-            if hasattr(request, "get_full_path") and callable(request.get_full_path):
-                with suppress(Exception):
-                    login_url += f"?{REDIRECT_FIELD_NAME}={request.get_full_path()}"
+            full_path_getter = getattr(request, "get_full_path", None)
+            if callable(full_path_getter):
+                try:
+                    login_url += f"?{REDIRECT_FIELD_NAME}={full_path_getter()}"
+                except (TypeError, ValueError):
+                    logger.debug("Could not append redirect path to login URL")
             redirect_response = HttpResponseRedirect(login_url)
         else:
             redirect_response = HttpResponseRedirect(reverse("billing:invoice_list"))
@@ -598,7 +605,9 @@ def invoice_detail(request: HttpRequest, pk: int) -> HttpResponse:
     """
     invoice = get_object_or_404(Invoice, pk=pk)
 
-    # Staff access - no customer restrictions needed
+    access_denied = _validate_financial_document_access_with_redirect(request, invoice, action="view")
+    if access_denied:
+        return access_denied
 
     # Get invoice items and payments
     items = invoice.lines.all()
@@ -617,7 +626,7 @@ def invoice_detail(request: HttpRequest, pk: int) -> HttpResponse:
 def _create_proforma_with_sequence(customer: Customer, valid_until: datetime) -> ProformaInvoice:
     """Create a new proforma with proper sequence number."""
     with transaction.atomic():
-        sequence, created = ProformaSequence.objects.get_or_create(scope="default")
+        sequence, _created = ProformaSequence.objects.get_or_create(scope="default")
         proforma_number = sequence.get_next_number("PRO")
 
         # Create proforma
@@ -713,7 +722,9 @@ def proforma_detail(request: HttpRequest, pk: int) -> HttpResponse:
     """
     proforma = get_object_or_404(ProformaInvoice, pk=pk)
 
-    # Staff access - no customer restrictions needed
+    access_denied = _validate_financial_document_access_with_redirect(request, proforma, action="view")
+    if access_denied:
+        return access_denied
 
     # Get proforma lines
     lines = proforma.lines.all()
@@ -758,7 +769,7 @@ def proforma_to_invoice(request: HttpRequest, pk: int) -> HttpResponse:
 
     if request.method == "POST":
         # Get next invoice number
-        sequence, created = InvoiceSequence.objects.get_or_create(scope="default")
+        sequence, _created = InvoiceSequence.objects.get_or_create(scope="default")
         invoice_number = sequence.get_next_number("INV")
 
         # Create invoice from proforma
@@ -842,7 +853,7 @@ def process_proforma_payment(request: HttpRequest, pk: int) -> HttpResponse:
             invoice = existing_invoice
         else:
             # Convert proforma to invoice
-            sequence, created = InvoiceSequence.objects.get_or_create(scope="default")
+            sequence, _created = InvoiceSequence.objects.get_or_create(scope="default")
             invoice_number = sequence.get_next_number("INV")
 
             # Create invoice from proforma
@@ -860,8 +871,6 @@ def process_proforma_payment(request: HttpRequest, pk: int) -> HttpResponse:
             )
 
             # Copy all line items
-            from apps.billing.models import InvoiceLine  # noqa: PLC0415
-
             for proforma_line in proforma.lines.all():
                 InvoiceLine.objects.create(
                     invoice=invoice,
@@ -1604,7 +1613,7 @@ This ticket was automatically created from a customer refund request.
 
 @csrf_exempt
 @require_http_methods(["POST"])
-def api_create_payment_intent(request: HttpRequest) -> JsonResponse:
+def api_create_payment_intent(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911
     """
     🔐 API: Create payment intent for Portal checkout
 
@@ -1644,7 +1653,7 @@ def api_create_payment_intent(request: HttpRequest) -> JsonResponse:
                 'error': 'amount_cents is required and must be an integer'
             }, status=400)
 
-        if amount_cents <= 0 or amount_cents > 100000000:  # Max 1M RON
+        if amount_cents <= 0 or amount_cents > MAX_PAYMENT_AMOUNT_CENTS:  # Max 1M RON
             return JsonResponse({
                 'success': False,
                 'error': 'amount_cents must be between 1 and 100,000,000 (1M RON)'
@@ -1708,7 +1717,7 @@ def api_create_payment_intent(request: HttpRequest) -> JsonResponse:
 
 @csrf_exempt
 @require_http_methods(["POST"])
-def api_confirm_payment(request: HttpRequest) -> JsonResponse:
+def api_confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911
     """
     🔐 API: Confirm payment status
 
@@ -1928,7 +1937,7 @@ def api_stripe_config(request: HttpRequest) -> JsonResponse:
     """
     logger = logging.getLogger(__name__)
     try:
-        from apps.settings.services import SettingsService
+        from apps.settings.services import SettingsService  # noqa: PLC0415
 
         # Check if Stripe integration is enabled
         stripe_enabled = SettingsService.get_setting("integrations.stripe_enabled", default=False)
@@ -1974,3 +1983,205 @@ def api_stripe_config(request: HttpRequest) -> JsonResponse:
             'success': False,
             'error': 'Internal server error'
         }, status=500)
+
+
+# ===============================================================================
+# E-FACTURA COMPLIANCE DASHBOARD 🇷🇴
+# ===============================================================================
+
+
+@billing_staff_required
+def efactura_dashboard(request: HttpRequest) -> HttpResponse:
+    """
+    🇷🇴 e-Factura Compliance Dashboard
+
+    Shows document statuses, submission queue, deadlines, retry queue, and metrics.
+
+    Query Budget: 6 queries
+    1. Status summary (aggregate)
+    2. Pending submissions
+    3. Awaiting response
+    4. Ready for retry
+    5. Approaching deadlines
+    6. Recent documents (paginated)
+    """
+    from apps.billing.efactura.models import EFacturaDocument, EFacturaStatus  # noqa: PLC0415
+    from apps.billing.efactura.service import EFacturaService  # noqa: PLC0415
+
+    # 1. Status summary - count by status
+    status_counts: dict[str, int] = {}
+    for status_row in (
+        EFacturaDocument.objects.values("status").annotate(count=Count("id")).order_by()
+    ):
+        status_counts[status_row["status"]] = status_row["count"]
+
+    total_documents = sum(status_counts.values())
+
+    # Build status cards data
+    status_cards = [
+        {"key": "draft", "label": _("Draft"), "count": status_counts.get("draft", 0), "color": "slate", "icon": "📝"},
+        {"key": "queued", "label": _("Queued"), "count": status_counts.get("queued", 0), "color": "blue", "icon": "📋"},
+        {"key": "submitted", "label": _("Submitted"), "count": status_counts.get("submitted", 0), "color": "indigo", "icon": "📤"},
+        {"key": "processing", "label": _("Processing"), "count": status_counts.get("processing", 0), "color": "yellow", "icon": "⏳"},
+        {"key": "accepted", "label": _("Accepted"), "count": status_counts.get("accepted", 0), "color": "green", "icon": "✅"},
+        {"key": "rejected", "label": _("Rejected"), "count": status_counts.get("rejected", 0), "color": "red", "icon": "❌"},
+        {"key": "error", "label": _("Error"), "count": status_counts.get("error", 0), "color": "orange", "icon": "⚠️"},
+    ]
+
+    # 2-4. Queue data
+    pending_submissions = EFacturaDocument.get_pending_submissions(limit=10).select_related("invoice")
+    awaiting_response = EFacturaDocument.get_awaiting_response(limit=10).select_related("invoice")
+    retry_queue = EFacturaDocument.get_ready_for_retry().select_related("invoice")
+
+    # 5. Approaching deadlines
+    service = EFacturaService()
+    approaching_deadlines = service.check_approaching_deadlines(hours=48)
+
+    # 6. Recent documents (paginated)
+    documents_qs = EFacturaDocument.objects.select_related("invoice").order_by("-created_at")
+
+    # Apply status filter if provided
+    status_filter = request.GET.get("status", "")
+    if status_filter and status_filter in [s.value for s in EFacturaStatus]:
+        documents_qs = documents_qs.filter(status=status_filter)
+
+    paginator = Paginator(documents_qs, 20)
+    page_number = request.GET.get("page", 1)
+    documents_page = paginator.get_page(page_number)
+
+    context = {
+        "status_cards": status_cards,
+        "total_documents": total_documents,
+        "pending_submissions": pending_submissions,
+        "awaiting_response": awaiting_response,
+        "retry_queue": retry_queue,
+        "approaching_deadlines": approaching_deadlines,
+        "documents_page": documents_page,
+        "status_filter": status_filter,
+        "status_choices": EFacturaStatus.choices(),
+    }
+
+    return render(request, "billing/efactura_dashboard.html", context)
+
+
+@billing_staff_required
+def efactura_document_detail(request: HttpRequest, pk: str) -> HttpResponse:
+    """
+    📋 e-Factura Document Detail
+
+    Shows full document lifecycle, XML content, ANAF response, and retry history.
+    """
+    from apps.billing.efactura.models import EFacturaDocument  # noqa: PLC0415
+
+    document = get_object_or_404(EFacturaDocument.objects.select_related("invoice"), pk=pk)
+
+    # Get related webhook events for audit trail
+    webhook_events = []
+    try:
+        from apps.integrations.models import WebhookEvent  # noqa: PLC0415
+    except ImportError:
+        WebhookEvent = None
+
+    if WebhookEvent is not None:
+        try:
+            webhook_events = list(
+                WebhookEvent.objects.filter(
+                    source="efactura",
+                    event_id__startswith=document.anaf_upload_index,
+                ).order_by("-received_at")[:20]
+            )
+        except DatabaseError as exc:
+            logger.warning(f"Could not load webhook audit trail for e-Factura document {pk}: {exc}")
+
+    context = {
+        "document": document,
+        "invoice": document.invoice,
+        "webhook_events": webhook_events,
+        "can_retry": document.can_retry,
+        "is_terminal": document.is_terminal,
+        "submission_deadline": document.submission_deadline,
+        "is_deadline_approaching": document.is_deadline_approaching,
+    }
+
+    return render(request, "billing/efactura_document_detail.html", context)
+
+
+@billing_staff_required
+@require_POST
+def efactura_submit(request: HttpRequest, pk: int) -> HttpResponse:
+    """
+    📤 Submit invoice to e-Factura
+
+    Queues the invoice for e-Factura submission via the service layer.
+    """
+    from apps.billing.efactura.service import EFacturaService  # noqa: PLC0415
+
+    invoice = get_object_or_404(Invoice, pk=pk)
+
+    service = EFacturaService()
+    result = service.submit_invoice(invoice)
+
+    if result.success:
+        messages.success(request, _("Invoice queued for e-Factura submission."))
+    else:
+        messages.error(request, _(f"e-Factura submission failed: {result.message}"))
+
+    return redirect("billing:efactura_dashboard")
+
+
+@billing_staff_required
+@require_POST
+def efactura_retry(request: HttpRequest, pk: str) -> HttpResponse:
+    """
+    🔄 Retry failed e-Factura submission
+    """
+    from apps.billing.efactura.models import EFacturaDocument  # noqa: PLC0415
+    from apps.billing.efactura.service import EFacturaService  # noqa: PLC0415
+
+    document = get_object_or_404(EFacturaDocument, pk=pk)
+
+    if not document.can_retry:
+        messages.error(request, _("This document cannot be retried."))
+        return redirect("billing:efactura_document_detail", pk=pk)
+
+    service = EFacturaService()
+    result = service.retry_failed_submission(document)
+
+    if result.success:
+        messages.success(request, _("Retry queued successfully."))
+    else:
+        messages.error(request, _(f"Retry failed: {result.message}"))
+
+    return redirect("billing:efactura_document_detail", pk=pk)
+
+
+@billing_staff_required
+def efactura_documents_htmx(request: HttpRequest) -> HttpResponse:
+    """
+    🚀 HTMX partial for filtered/paginated e-Factura document list
+    """
+    from apps.billing.efactura.models import EFacturaDocument, EFacturaStatus  # noqa: PLC0415
+
+    documents_qs = EFacturaDocument.objects.select_related("invoice").order_by("-created_at")
+
+    status_filter = request.GET.get("status", "")
+    if status_filter and status_filter in [s.value for s in EFacturaStatus]:
+        documents_qs = documents_qs.filter(status=status_filter)
+
+    search = request.GET.get("q", "").strip()
+    if search:
+        documents_qs = documents_qs.filter(
+            Q(invoice__number__icontains=search)
+            | Q(anaf_upload_index__icontains=search)
+        )
+
+    paginator = Paginator(documents_qs, 20)
+    page_number = request.GET.get("page", 1)
+    documents_page = paginator.get_page(page_number)
+
+    context = {
+        "documents_page": documents_page,
+        "status_filter": status_filter,
+    }
+
+    return render(request, "billing/partials/efactura_document_list.html", context)

@@ -13,12 +13,10 @@ Download schemas from:
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
-from django.conf import settings as django_settings
 from lxml import etree
 
 from .settings import efactura_settings
@@ -27,6 +25,7 @@ if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
+XML_ERROR_LEVEL_THRESHOLD = 2
 
 
 @dataclass
@@ -85,7 +84,6 @@ class XSDValidationResult:
 class XSDSchemaNotFoundError(Exception):
     """Raised when XSD schema files are not found."""
 
-    pass
 
 
 class XSDValidator:
@@ -187,17 +185,25 @@ class XSDValidator:
                 message=entry.message,
                 domain=str(entry.domain_name),
                 type_name=str(entry.type_name),
-                level="error" if entry.level >= 2 else "warning",
+                level="error" if entry.level >= XML_ERROR_LEVEL_THRESHOLD else "warning",
             )
 
-            if entry.level >= 2:  # ERROR or FATAL
+            if entry.level >= XML_ERROR_LEVEL_THRESHOLD:  # ERROR or FATAL
                 errors.append(error)
             else:
                 warnings.append(error)
 
         return errors, warnings
 
-    def validate(self, xml_content: str | bytes) -> XSDValidationResult:
+    def _get_setting(self, key: str, default: object = None) -> object:
+        """
+        Backward-compatible settings accessor for tests and legacy callers.
+
+        Uses attributes exposed by efactura_settings.
+        """
+        return getattr(efactura_settings, key, default)
+
+    def validate(self, xml_content: str | bytes) -> XSDValidationResult:  # noqa: PLR0911
         """
         Validate XML content against appropriate XSD schema.
 
@@ -207,7 +213,7 @@ class XSDValidator:
         Returns:
             XSDValidationResult with validation status and errors
         """
-        if not efactura_settings.xsd_validation_enabled:
+        if not self._get_setting("xsd_validation_enabled", True):
             logger.debug("XSD validation is disabled")
             return XSDValidationResult(is_valid=True, schema_version="disabled")
 
@@ -216,7 +222,20 @@ class XSDValidator:
             if isinstance(xml_content, str):
                 xml_content = xml_content.encode("utf-8")
 
-            xml_doc = etree.fromstring(xml_content)
+            if b"<!doctype" in xml_content.lower():
+                return XSDValidationResult(
+                    is_valid=False,
+                    errors=[
+                        XSDValidationError(
+                            line=1,
+                            column=1,
+                            message="DOCTYPE declarations are not allowed.",
+                        )
+                    ],
+                )
+
+            parser = etree.XMLParser(resolve_entities=False, no_network=True, huge_tree=False)
+            xml_doc = etree.fromstring(xml_content, parser=parser)
 
             # Detect document type
             doc_type = self._detect_document_type(xml_doc)
@@ -235,10 +254,7 @@ class XSDValidator:
 
             # Select appropriate schema
             try:
-                if doc_type == "invoice":
-                    schema = self.invoice_schema
-                else:
-                    schema = self.credit_note_schema
+                schema = self.invoice_schema if doc_type == "invoice" else self.credit_note_schema
             except XSDSchemaNotFoundError as e:
                 logger.warning(f"XSD schemas not available: {e}")
                 return XSDValidationResult(
@@ -315,7 +331,7 @@ class XSDValidator:
                     )
                 ],
             )
-        except IOError as e:
+        except OSError as e:
             return XSDValidationResult(
                 is_valid=False,
                 errors=[

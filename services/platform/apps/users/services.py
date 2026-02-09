@@ -14,6 +14,7 @@ from django.contrib.sessions.models import Session
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.mail import send_mail
+from django.core.signing import BadSignature
 from django.db import transaction
 from django.http import HttpRequest
 from django.template.loader import render_to_string
@@ -1252,8 +1253,9 @@ class SessionSecurityService:
                     if session_user_id == str(user_id) and session.session_key != keep_session_key:
                         session.delete()
                         count += 1
-                except Exception:  # noqa: S112
-                    # Skip invalid/corrupted sessions during cleanup - intentionally silent
+                except (BadSignature, TypeError, UnicodeDecodeError, ValueError):
+                    # Skip invalid/corrupted sessions during cleanup
+                    logger.debug("Skipping undecodable session while invalidating other user sessions")
                     continue
 
             logger.info(f"🗑️ [SessionSecurity] Invalidated {count} other sessions for user {user_id}")
@@ -1274,8 +1276,9 @@ class SessionSecurityService:
                     if session_user_id == str(user_id):
                         session.delete()
                         count += 1
-                except Exception:  # noqa: S112
-                    # Skip invalid/corrupted sessions during cleanup - intentionally silent
+                except (BadSignature, TypeError, UnicodeDecodeError, ValueError):
+                    # Skip invalid/corrupted sessions during cleanup
+                    logger.debug("Skipping undecodable session while invalidating all user sessions")
                     continue
 
             logger.warning(f"🗑️ [SessionSecurity] Invalidated {count} sessions for user {user_id}")

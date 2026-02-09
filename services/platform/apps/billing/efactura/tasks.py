@@ -17,10 +17,39 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from django.conf import settings
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
+
+# Expose imports at module scope for patching in tests
+try:
+    from apps.billing.invoice_models import Invoice  # type: ignore
+    InvoiceDoesNotExist = Invoice.DoesNotExist  # type: ignore[attr-defined]
+except Exception:  # pragma: no cover - import guard for test/runtime isolation
+    Invoice = None  # type: ignore
+    InvoiceDoesNotExist = Exception  # type: ignore
+
+try:
+    from django_q.models import Schedule  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    Schedule = None  # type: ignore
+
+try:
+    from django_q.tasks import async_task  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    async_task = None  # type: ignore
+
+try:
+    from .models import EFacturaDocument  # type: ignore
+    EFacturaDocumentDoesNotExist = EFacturaDocument.DoesNotExist  # type: ignore[attr-defined]
+except Exception:  # pragma: no cover - import guard for test/runtime isolation
+    EFacturaDocument = None  # type: ignore
+    EFacturaDocumentDoesNotExist = Exception  # type: ignore
+
+try:
+    from .service import EFacturaService  # type: ignore
+except Exception:  # pragma: no cover - import guard for test/runtime isolation
+    EFacturaService = None  # type: ignore
 
 # Task timeout in seconds
 TASK_TIMEOUT = 300  # 5 minutes
@@ -36,18 +65,18 @@ def submit_efactura_task(invoice_id: str) -> dict[str, Any]:
     Returns:
         Dict with result status and details
     """
-    from apps.billing.invoice_models import Invoice
-
-    from .service import EFacturaService
-
     logger.info(f"[e-Factura Task] Starting submission for invoice {invoice_id}")
 
     try:
+        if Invoice is None:
+            raise RuntimeError("Invoice model unavailable")
         invoice = Invoice.objects.get(id=invoice_id)
-    except Invoice.DoesNotExist:
+    except InvoiceDoesNotExist:
         logger.error(f"[e-Factura Task] Invoice {invoice_id} not found")
         return {"success": False, "error": "Invoice not found", "invoice_id": invoice_id}
 
+    if EFacturaService is None:
+        raise RuntimeError("EFacturaService unavailable")
     service = EFacturaService()
     result = service.submit_invoice(invoice)
 
@@ -80,17 +109,18 @@ def poll_efactura_status_task(document_id: str) -> dict[str, Any]:
     Returns:
         Dict with status result
     """
-    from .models import EFacturaDocument
-    from .service import EFacturaService
-
     logger.info(f"[e-Factura Task] Polling status for document {document_id}")
 
     try:
+        if EFacturaDocument is None:
+            raise RuntimeError("EFacturaDocument model unavailable")
         document = EFacturaDocument.objects.select_related("invoice").get(id=document_id)
-    except EFacturaDocument.DoesNotExist:
+    except EFacturaDocumentDoesNotExist:
         logger.error(f"[e-Factura Task] Document {document_id} not found")
         return {"success": False, "error": "Document not found", "document_id": document_id}
 
+    if EFacturaService is None:
+        raise RuntimeError("EFacturaService unavailable")
     service = EFacturaService()
     result = service.check_status(document)
 
@@ -114,10 +144,10 @@ def poll_all_pending_status_task() -> dict[str, Any]:
     Returns:
         Dict with summary of polled documents
     """
-    from .service import EFacturaService
-
     logger.info("[e-Factura Task] Polling status for all pending documents")
 
+    if EFacturaService is None:
+        raise RuntimeError("EFacturaService unavailable")
     service = EFacturaService()
     results = service.poll_awaiting_documents(limit=100)
 
@@ -138,10 +168,10 @@ def process_efactura_retries_task() -> dict[str, Any]:
     Returns:
         Dict with summary of retried documents
     """
-    from .service import EFacturaService
-
     logger.info("[e-Factura Task] Processing retries")
 
+    if EFacturaService is None:
+        raise RuntimeError("EFacturaService unavailable")
     service = EFacturaService()
     results = service.process_retries()
 
@@ -162,10 +192,10 @@ def process_pending_submissions_task() -> dict[str, Any]:
     Returns:
         Dict with summary
     """
-    from .service import EFacturaService
-
     logger.info("[e-Factura Task] Processing pending submissions")
 
+    if EFacturaService is None:
+        raise RuntimeError("EFacturaService unavailable")
     service = EFacturaService()
     results = service.process_pending_submissions(limit=50)
 
@@ -186,10 +216,10 @@ def check_efactura_deadlines_task() -> dict[str, Any]:
     Returns:
         Dict with list of invoices approaching deadline
     """
-    from .service import EFacturaService
-
     logger.info("[e-Factura Task] Checking e-Factura deadlines")
 
+    if EFacturaService is None:
+        raise RuntimeError("EFacturaService unavailable")
     service = EFacturaService()
     approaching = service.check_approaching_deadlines(hours=24)
 
@@ -217,19 +247,22 @@ def download_efactura_response_task(document_id: str) -> dict[str, Any]:
     Returns:
         Dict with download result
     """
-    from .models import EFacturaDocument, EFacturaStatus
-    from .service import EFacturaService
+    from .models import EFacturaStatus
 
     logger.info(f"[e-Factura Task] Downloading response for document {document_id}")
 
     try:
+        if EFacturaDocument is None:
+            raise RuntimeError("EFacturaDocument model unavailable")
         document = EFacturaDocument.objects.get(id=document_id)
-    except EFacturaDocument.DoesNotExist:
+    except EFacturaDocumentDoesNotExist:
         return {"success": False, "error": "Document not found"}
 
     if document.status != EFacturaStatus.ACCEPTED.value:
         return {"success": False, "error": "Document not accepted yet"}
 
+    if EFacturaService is None:
+        raise RuntimeError("EFacturaService unavailable")
     service = EFacturaService()
     content = service.download_response(document)
 
@@ -278,9 +311,9 @@ def schedule_efactura_tasks() -> None:
     Call this during application startup to set up scheduled tasks.
     """
     try:
-        from django_q.models import Schedule
-
         # Poll status every 15 minutes
+        if Schedule is None:
+            raise ImportError("Django-Q not installed")
         Schedule.objects.update_or_create(
             name="efactura_poll_status",
             defaults={
@@ -340,8 +373,8 @@ def queue_efactura_submission(invoice_id: str) -> str | None:
         Task ID if queued, None if failed
     """
     try:
-        from django_q.tasks import async_task
-
+        if async_task is None:
+            raise ImportError("Django-Q not installed")
         task_id = async_task(
             "apps.billing.efactura.tasks.submit_efactura_task",
             str(invoice_id),
@@ -370,8 +403,8 @@ def queue_status_poll(document_id: str) -> str | None:
         Task ID if queued, None if failed
     """
     try:
-        from django_q.tasks import async_task
-
+        if async_task is None:
+            raise ImportError("Django-Q not installed")
         task_id = async_task(
             "apps.billing.efactura.tasks.poll_efactura_status_task",
             str(document_id),

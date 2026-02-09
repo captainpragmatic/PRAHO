@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans "e-Factura" %} {{ document.invoice.number }} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+  <!-- Header -->
+  <div class="sm:flex sm:items-center mb-6">
+    <div class="sm:flex-auto">
+      <h1 class="text-3xl font-bold text-white">
+        📄 {% trans "e-Factura" %}: {{ document.invoice.number }}
+      </h1>
+      <p class="mt-2 text-slate-400">
+        {% trans "Document ID" %}: {{ document.id }}
+      </p>
+    </div>
+    <div class="mt-4 sm:ml-16 sm:mt-0 sm:flex-none flex gap-3">
+      <a href="{% url 'billing:efactura_dashboard' %}" class="inline-flex items-center rounded-md bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600">
+        {% trans "Back to Dashboard" %}
+      </a>
+      <a href="{% url 'billing:invoice_detail' pk=invoice.pk %}" class="inline-flex items-center rounded-md bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600">
+        {% trans "View Invoice" %}
+      </a>
+      {% if can_retry %}
+      <form method="post" action="{% url 'billing:efactura_retry' pk=document.pk %}">
+        {% csrf_token %}
+        <button type="submit" class="inline-flex items-center rounded-md bg-orange-600 px-3 py-2 text-sm font-semibold text-white hover:bg-orange-500" hx-confirm="{% trans 'Retry this e-Factura submission?' %}">
+          🔄 {% trans "Retry Submission" %}
+        </button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Deadline Warning -->
+  {% if is_deadline_approaching and not is_terminal %}
+  <div class="bg-amber-900 border border-amber-700 rounded-lg p-4 mb-6">
+    <div class="flex items-start">
+      <span class="text-amber-300 text-xl mr-3">⏰</span>
+      <div>
+        <h3 class="text-sm font-medium text-amber-200">{% trans "Deadline Approaching" %}</h3>
+        <p class="mt-1 text-sm text-amber-300">
+          {% trans "Submission deadline" %}: {{ submission_deadline|date:"d M Y H:i" }}
+        </p>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- Document Status Card -->
+    <div class="lg:col-span-2 space-y-6">
+      <!-- Status & Metadata -->
+      <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+        <h2 class="text-lg font-semibold text-white mb-4">{% trans "Document Status" %}</h2>
+        <dl class="grid grid-cols-2 gap-4">
+          <div>
+            <dt class="text-sm text-slate-400">{% trans "Status" %}</dt>
+            <dd class="mt-1">
+              {% if document.status == "accepted" %}
+                <span class="inline-flex items-center rounded-full bg-green-900 px-3 py-1 text-sm font-medium text-green-300">✅ {% trans "Accepted" %}</span>
+              {% elif document.status == "rejected" %}
+                <span class="inline-flex items-center rounded-full bg-red-900 px-3 py-1 text-sm font-medium text-red-300">❌ {% trans "Rejected" %}</span>
+              {% elif document.status == "error" %}
+                <span class="inline-flex items-center rounded-full bg-orange-900 px-3 py-1 text-sm font-medium text-orange-300">⚠️ {% trans "Error" %}</span>
+              {% elif document.status == "processing" %}
+                <span class="inline-flex items-center rounded-full bg-yellow-900 px-3 py-1 text-sm font-medium text-yellow-300">⏳ {% trans "Processing" %}</span>
+              {% elif document.status == "submitted" %}
+                <span class="inline-flex items-center rounded-full bg-indigo-900 px-3 py-1 text-sm font-medium text-indigo-300">📤 {% trans "Submitted" %}</span>
+              {% elif document.status == "queued" %}
+                <span class="inline-flex items-center rounded-full bg-blue-900 px-3 py-1 text-sm font-medium text-blue-300">📋 {% trans "Queued" %}</span>
+              {% else %}
+                <span class="inline-flex items-center rounded-full bg-slate-700 px-3 py-1 text-sm font-medium text-slate-300">📝 {% trans "Draft" %}</span>
+              {% endif %}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-sm text-slate-400">{% trans "Environment" %}</dt>
+            <dd class="mt-1 text-sm text-white">{{ document.environment }}</dd>
+          </div>
+          <div>
+            <dt class="text-sm text-slate-400">{% trans "ANAF Upload Index" %}</dt>
+            <dd class="mt-1 text-sm text-white font-mono">{{ document.anaf_upload_index|default:"-" }}</dd>
+          </div>
+          <div>
+            <dt class="text-sm text-slate-400">{% trans "ANAF Download ID" %}</dt>
+            <dd class="mt-1 text-sm text-white font-mono">{{ document.anaf_download_id|default:"-" }}</dd>
+          </div>
+          <div>
+            <dt class="text-sm text-slate-400">{% trans "Submitted At" %}</dt>
+            <dd class="mt-1 text-sm text-white">{{ document.submitted_at|date:"d M Y H:i"|default:"-" }}</dd>
+          </div>
+          <div>
+            <dt class="text-sm text-slate-400">{% trans "Response At" %}</dt>
+            <dd class="mt-1 text-sm text-white">{{ document.response_at|date:"d M Y H:i"|default:"-" }}</dd>
+          </div>
+          <div>
+            <dt class="text-sm text-slate-400">{% trans "Retry Count" %}</dt>
+            <dd class="mt-1 text-sm text-white">{{ document.retry_count }} / {{ document.MAX_RETRIES }}</dd>
+          </div>
+          <div>
+            <dt class="text-sm text-slate-400">{% trans "Next Retry" %}</dt>
+            <dd class="mt-1 text-sm text-white">{{ document.next_retry_at|date:"d M Y H:i"|default:"-" }}</dd>
+          </div>
+        </dl>
+      </div>
+
+      <!-- Validation Errors -->
+      {% if document.validation_errors %}
+      <div class="bg-slate-800 rounded-lg border border-red-700 p-6">
+        <h2 class="text-lg font-semibold text-red-300 mb-4">❌ {% trans "Validation Errors" %}</h2>
+        <ul class="space-y-2">
+          {% for error in document.validation_errors %}
+          <li class="text-sm text-red-200 bg-red-900/30 rounded p-2">
+            {{ error.message|default:error }}
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+
+      <!-- Last Error -->
+      {% if document.last_error %}
+      <div class="bg-slate-800 rounded-lg border border-orange-700 p-6">
+        <h2 class="text-lg font-semibold text-orange-300 mb-4">⚠️ {% trans "Last Error" %}</h2>
+        <pre class="text-sm text-orange-200 whitespace-pre-wrap">{{ document.last_error }}</pre>
+      </div>
+      {% endif %}
+
+      <!-- ANAF Response -->
+      {% if document.anaf_response %}
+      <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+        <h2 class="text-lg font-semibold text-white mb-4">📨 {% trans "ANAF Response" %}</h2>
+        <pre class="text-xs text-slate-300 bg-slate-900 rounded p-4 overflow-x-auto max-h-64 overflow-y-auto">{{ document.anaf_response|pprint }}</pre>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Sidebar -->
+    <div class="space-y-6">
+      <!-- Timeline -->
+      <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+        <h2 class="text-lg font-semibold text-white mb-4">📅 {% trans "Timeline" %}</h2>
+        <ol class="space-y-3">
+          <li class="flex items-start">
+            <span class="text-slate-500 text-xs w-24 flex-shrink-0">{{ document.created_at|date:"d/m H:i" }}</span>
+            <span class="text-sm text-slate-300">{% trans "Created" %}</span>
+          </li>
+          {% if document.xml_generated_at %}
+          <li class="flex items-start">
+            <span class="text-slate-500 text-xs w-24 flex-shrink-0">{{ document.xml_generated_at|date:"d/m H:i" }}</span>
+            <span class="text-sm text-slate-300">{% trans "XML Generated" %}</span>
+          </li>
+          {% endif %}
+          {% if document.submitted_at %}
+          <li class="flex items-start">
+            <span class="text-slate-500 text-xs w-24 flex-shrink-0">{{ document.submitted_at|date:"d/m H:i" }}</span>
+            <span class="text-sm text-slate-300">{% trans "Submitted to ANAF" %}</span>
+          </li>
+          {% endif %}
+          {% if document.response_at %}
+          <li class="flex items-start">
+            <span class="text-slate-500 text-xs w-24 flex-shrink-0">{{ document.response_at|date:"d/m H:i" }}</span>
+            <span class="text-sm text-slate-300">{% trans "ANAF Response" %}: {{ document.status }}</span>
+          </li>
+          {% endif %}
+        </ol>
+      </div>
+
+      <!-- Webhook Events -->
+      {% if webhook_events %}
+      <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+        <h2 class="text-lg font-semibold text-white mb-4">🔔 {% trans "Webhook Events" %}</h2>
+        <ul class="space-y-2">
+          {% for event in webhook_events %}
+          <li class="text-sm">
+            <span class="text-slate-500">{{ event.received_at|date:"d/m H:i" }}</span>
+            <span class="text-slate-300 ml-2">{{ event.event_type }}</span>
+            <span class="{% if event.status == 'processed' %}text-green-400{% else %}text-red-400{% endif %} ml-1 text-xs">{{ event.status }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+
+      <!-- XML Hash -->
+      {% if document.xml_hash %}
+      <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+        <h2 class="text-lg font-semibold text-white mb-4">🔐 {% trans "Integrity" %}</h2>
+        <dl>
+          <dt class="text-xs text-slate-400">{% trans "XML SHA-256" %}</dt>
+          <dd class="mt-1 text-xs text-slate-300 font-mono break-all">{{ document.xml_hash }}</dd>
+        </dl>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -9,43 +9,39 @@ UsageAlertService, UsageInvoiceService, and BillingCycleManager.
 
 from __future__ import annotations
 
-import uuid
-from decimal import Decimal
 from datetime import timedelta
-from unittest.mock import patch, MagicMock
+from decimal import Decimal
+from unittest.mock import patch
 
-from django.test import TestCase, TransactionTestCase
+from django.test import TransactionTestCase
 from django.utils import timezone
 
 from apps.billing.models import (
+    BillingCycle,
+    CreditLedger,
     Currency,
     Invoice,
-    InvoiceLine,
     InvoiceSequence,
-    CreditLedger,
-    UsageMeter,
-    UsageEvent,
-    UsageAggregation,
-    Subscription,
-    SubscriptionItem,
-    BillingCycle,
     PricingTier,
     PricingTierBracket,
-    UsageThreshold,
+    Subscription,
+    SubscriptionItem,
+    UsageAggregation,
     UsageAlert,
+    UsageEvent,
+    UsageMeter,
+    UsageThreshold,
 )
 from apps.billing.services import (
+    BillingCycleManager,
     MeteringService,
-    AggregationService,
     RatingEngine,
     UsageAlertService,
     UsageEventData,
     UsageInvoiceService,
-    BillingCycleManager,
 )
 from apps.customers.models import Customer
-from apps.provisioning.models import ServicePlan, Service
-from apps.users.models import User
+from apps.products.models import Product
 
 
 class MeteringServiceTestCase(TransactionTestCase):
@@ -302,7 +298,7 @@ class MeteringServiceTestCase(TransactionTestCase):
             ),
         ]
 
-        results, success, errors = self.service.record_bulk_events(events)
+        _results, success, errors = self.service.record_bulk_events(events)
 
         self.assertEqual(success, 2)
         self.assertEqual(errors, 1)
@@ -332,21 +328,26 @@ class RatingEngineTestCase(TransactionTestCase):
             rounding_increment=Decimal("1"),
         )
 
-        self.service_plan = ServicePlan.objects.create(
+        self.product = Product.objects.create(
+            slug="basic-rating",
             name="Basic",
-            plan_type="shared_hosting",
-            price_monthly=Decimal("29.99"),
-        )
-
-        self.subscription = Subscription.objects.create(
-            customer=self.customer,
-            service_plan=self.service_plan,
-            currency=self.currency,
-            status="active",
-            billing_interval="monthly",
+            product_type="shared_hosting",
         )
 
         now = timezone.now()
+        self.subscription = Subscription.objects.create(
+            customer=self.customer,
+            product=self.product,
+            currency=self.currency,
+            subscription_number="SUB-RATING-001",
+            status="active",
+            billing_cycle="monthly",
+            unit_price_cents=2999,
+            current_period_start=now,
+            current_period_end=now + timedelta(days=30),
+            next_billing_date=now + timedelta(days=30),
+        )
+
         self.billing_cycle = BillingCycle.objects.create(
             subscription=self.subscription,
             period_start=now,
@@ -358,11 +359,10 @@ class RatingEngineTestCase(TransactionTestCase):
 
     def test_rate_aggregation_per_unit(self):
         """Test per-unit pricing rating."""
-        # Create subscription item with included quantity and overage price
+        # Create subscription item with overage price
         SubscriptionItem.objects.create(
             subscription=self.subscription,
-            meter=self.meter,
-            included_quantity=Decimal("100"),  # 100 GB included
+            product=self.product,
             unit_price_cents=50,  # 0.50 per GB overage
         )
 
@@ -385,17 +385,16 @@ class RatingEngineTestCase(TransactionTestCase):
         aggregation.refresh_from_db()
 
         self.assertEqual(aggregation.billable_value, Decimal("150"))
-        self.assertEqual(aggregation.included_allowance, Decimal("100"))
-        self.assertEqual(aggregation.overage_value, Decimal("50"))
-        self.assertEqual(aggregation.charge_cents, 2500)  # 50 * 50 cents
+        self.assertEqual(aggregation.included_allowance, Decimal("0"))
+        self.assertEqual(aggregation.overage_value, Decimal("150"))
+        self.assertEqual(aggregation.charge_cents, 7500)  # 150 * 50 cents
         self.assertEqual(aggregation.status, "rated")
 
-    def test_rate_aggregation_no_overage(self):
-        """Test rating with usage within allowance."""
+    def test_rate_aggregation_all_billable(self):
+        """Test rating where all usage is billable (no included allowance)."""
         SubscriptionItem.objects.create(
             subscription=self.subscription,
-            meter=self.meter,
-            included_quantity=Decimal("100"),
+            product=self.product,
             unit_price_cents=50,
         )
 
@@ -407,7 +406,7 @@ class RatingEngineTestCase(TransactionTestCase):
             billing_cycle=self.billing_cycle,
             period_start=now,
             period_end=now + timedelta(days=30),
-            total_value=Decimal("80"),  # Under allowance
+            total_value=Decimal("80"),
             status="pending_rating",
         )
 
@@ -416,12 +415,12 @@ class RatingEngineTestCase(TransactionTestCase):
         self.assertTrue(result.is_ok())
         aggregation.refresh_from_db()
 
-        self.assertEqual(aggregation.overage_value, Decimal("0"))
-        self.assertEqual(aggregation.charge_cents, 0)
+        self.assertEqual(aggregation.overage_value, Decimal("80"))
+        self.assertEqual(aggregation.charge_cents, 4000)  # 80 * 50 cents
 
     def test_rate_aggregation_with_default_tier(self):
         """Test rating using default pricing tier."""
-        tier = PricingTier.objects.create(
+        PricingTier.objects.create(
             name="Default Bandwidth",
             meter=self.meter,
             pricing_model="per_unit",
@@ -458,18 +457,11 @@ class RatingEngineTestCase(TransactionTestCase):
             unit="gb",
         )
 
+        # Single subscription item - all aggregations use same unit price
         SubscriptionItem.objects.create(
             subscription=self.subscription,
-            meter=self.meter,
-            included_quantity=Decimal("100"),
+            product=self.product,
             unit_price_cents=50,
-        )
-
-        SubscriptionItem.objects.create(
-            subscription=self.subscription,
-            meter=meter2,
-            included_quantity=Decimal("10"),
-            unit_price_cents=100,
         )
 
         now = timezone.now()
@@ -502,8 +494,8 @@ class RatingEngineTestCase(TransactionTestCase):
         data = result.unwrap()
 
         self.assertEqual(data["rated_count"], 2)
-        # 50 GB bandwidth overage * 50 cents + 5 GB storage overage * 100 cents
-        self.assertEqual(data["total_usage_charge_cents"], 2500 + 500)
+        # 150 GB bandwidth * 50 cents + 15 GB storage * 50 cents
+        self.assertEqual(data["total_usage_charge_cents"], 7500 + 750)
 
     def test_apply_rounding_up(self):
         """Test rounding up mode."""
@@ -668,25 +660,29 @@ class UsageInvoiceServiceTestCase(TransactionTestCase):
             unit="gb",
         )
 
-        self.service_plan = ServicePlan.objects.create(
+        self.product = Product.objects.create(
+            slug="basic-hosting-inv",
             name="Basic Hosting",
-            plan_type="shared_hosting",
-            price_monthly=Decimal("29.99"),
+            product_type="shared_hosting",
         )
 
+        now = timezone.now()
         self.subscription = Subscription.objects.create(
             customer=self.customer,
-            service_plan=self.service_plan,
+            product=self.product,
             currency=self.currency,
+            subscription_number="SUB-INV-001",
             status="active",
-            billing_interval="monthly",
-            base_price_cents=2999,
+            billing_cycle="monthly",
+            unit_price_cents=2999,
+            current_period_start=now - timedelta(days=30),
+            current_period_end=now,
+            next_billing_date=now,
         )
 
         SubscriptionItem.objects.create(
             subscription=self.subscription,
-            meter=self.meter,
-            included_quantity=Decimal("100"),
+            product=self.product,
             unit_price_cents=50,
         )
 
@@ -798,19 +794,24 @@ class BillingCycleManagerTestCase(TransactionTestCase):
             status="active",
         )
 
-        self.service_plan = ServicePlan.objects.create(
+        self.product = Product.objects.create(
+            slug="basic-bcmgr",
             name="Basic",
-            plan_type="shared_hosting",
-            price_monthly=Decimal("29.99"),
+            product_type="shared_hosting",
         )
 
+        now = timezone.now()
         self.subscription = Subscription.objects.create(
             customer=self.customer,
-            service_plan=self.service_plan,
+            product=self.product,
             currency=self.currency,
+            subscription_number="SUB-BCMGR-001",
             status="active",
-            billing_interval="monthly",
-            base_price_cents=2999,
+            billing_cycle="monthly",
+            unit_price_cents=2999,
+            current_period_start=now,
+            current_period_end=now + timedelta(days=30),
+            next_billing_date=now + timedelta(days=30),
         )
 
         self.manager = BillingCycleManager()
@@ -831,17 +832,17 @@ class BillingCycleManagerTestCase(TransactionTestCase):
         self.assertEqual(cycle.status, "active")
         self.assertEqual(cycle.base_charge_cents, 2999)
 
-        # Verify period end is 1 month later
+        # Verify period end is approximately 1 month later
         expected_end = now + timedelta(days=30)
         self.assertAlmostEqual(
             cycle.period_end.timestamp(),
             expected_end.timestamp(),
-            delta=86400  # Within 1 day
+            delta=86400 * 3  # Within 3 days (months vary 28-31 days)
         )
 
     def test_create_billing_cycle_quarterly(self):
         """Test creating quarterly billing cycle."""
-        self.subscription.billing_interval = "quarterly"
+        self.subscription.billing_cycle = "quarterly"
         self.subscription.save()
 
         now = timezone.now()
@@ -921,24 +922,30 @@ class UsageAlertServiceTestCase(TransactionTestCase):
             unit="gb",
         )
 
-        self.service_plan = ServicePlan.objects.create(
+        self.product = Product.objects.create(
+            slug="basic-alert-svc",
             name="Basic",
-            plan_type="shared_hosting",
-            price_monthly=Decimal("29.99"),
+            product_type="shared_hosting",
         )
 
+        now = timezone.now()
         self.subscription = Subscription.objects.create(
             customer=self.customer,
-            service_plan=self.service_plan,
+            product=self.product,
             currency=self.currency,
+            subscription_number="SUB-ALERTSVC-001",
             status="active",
-            billing_interval="monthly",
+            billing_cycle="monthly",
+            unit_price_cents=2999,
+            current_period_start=now,
+            current_period_end=now + timedelta(days=30),
+            next_billing_date=now + timedelta(days=30),
         )
 
         SubscriptionItem.objects.create(
             subscription=self.subscription,
-            meter=self.meter,
-            included_quantity=Decimal("100"),
+            product=self.product,
+            unit_price_cents=2999,
         )
 
         now = timezone.now()
@@ -963,11 +970,11 @@ class UsageAlertServiceTestCase(TransactionTestCase):
         self.service = UsageAlertService()
 
     def test_check_thresholds_no_breach(self):
-        """Test threshold check with no breach."""
+        """Test threshold check with no breach (absolute threshold above usage)."""
         UsageThreshold.objects.create(
             meter=self.meter,
-            threshold_type="percentage",
-            threshold_value=Decimal("90"),  # 90% threshold
+            threshold_type="absolute",
+            threshold_value=Decimal("100"),  # 100 GB absolute, usage is 80
             is_active=True,
         )
 
@@ -980,11 +987,11 @@ class UsageAlertServiceTestCase(TransactionTestCase):
         self.assertEqual(len(alerts), 0)
 
     def test_check_thresholds_breach(self):
-        """Test threshold check with breach."""
+        """Test threshold check with breach (absolute threshold below usage)."""
         UsageThreshold.objects.create(
             meter=self.meter,
-            threshold_type="percentage",
-            threshold_value=Decimal("75"),  # 75% threshold
+            threshold_type="absolute",
+            threshold_value=Decimal("50"),  # 50 GB absolute, usage is 80
             is_active=True,
             notify_customer=True,
         )
@@ -1017,10 +1024,10 @@ class UsageAlertServiceTestCase(TransactionTestCase):
 
     def test_check_thresholds_no_duplicate(self):
         """Test no duplicate alerts created."""
-        threshold = UsageThreshold.objects.create(
+        UsageThreshold.objects.create(
             meter=self.meter,
-            threshold_type="percentage",
-            threshold_value=Decimal("75"),
+            threshold_type="absolute",
+            threshold_value=Decimal("50"),  # 50 GB, usage is 80
             is_active=True,
             repeat_notification=False,
         )

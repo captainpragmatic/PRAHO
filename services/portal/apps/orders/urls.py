@@ -24,7 +24,7 @@ urlpatterns = [
     path('cart/calculate/', views.calculate_totals_htmx, name='calculate_totals'),
     
     # Order creation (POST)
-    path('order/create/', views.create_order, name='create_order'),
+    path('create/', views.create_order, name='create_order'),
     path('process-payment/', views.process_payment, name='process_payment'),
     
     # HTMX partials

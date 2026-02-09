@@ -14,12 +14,10 @@ This module provides scheduled and async tasks for:
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 
-from django.utils import timezone
-from django_q.tasks import async_task, schedule
+from django_q.tasks import async_task
 
 from apps.audit.services import AuditService
 
@@ -191,7 +189,7 @@ def rate_pending_aggregations(billing_cycle_id: str | None = None) -> dict[str, 
 
     Can be run for a specific billing cycle or all pending.
     """
-    from .metering_models import UsageAggregation, BillingCycle
+    from .metering_models import BillingCycle
     from .metering_service import RatingEngine
 
     logger.info(f"Rating pending aggregations (cycle={billing_cycle_id})")
@@ -359,8 +357,8 @@ def check_all_usage_thresholds() -> dict[str, Any]:
 
     Should be run periodically (e.g., every 15 minutes).
     """
-    from .metering_models import Subscription, SubscriptionItem
     from .metering_service import UsageAlertService
+    from .subscription_models import Subscription
 
     logger.info("Checking all usage thresholds")
 
@@ -374,10 +372,10 @@ def check_all_usage_thresholds() -> dict[str, Any]:
         ).prefetch_related("items")
 
         for subscription in active_subs:
-            for item in subscription.items.filter(is_active=True):
+            for item in subscription.items.all():
                 alerts = service.check_thresholds(
                     str(subscription.customer_id),
-                    str(item.meter_id),
+                    str(item.product_id),
                     str(subscription.id)
                 )
                 total_alerts += len(alerts)
@@ -506,6 +504,7 @@ def collect_virtualmin_usage() -> dict[str, Any]:
     Uses iterator() for memory-efficient processing of large datasets.
     """
     from apps.provisioning.models import VirtualminAccount
+
     from .metering_models import UsageMeter
     from .metering_service import MeteringService, UsageEventData
 
@@ -621,15 +620,15 @@ def collect_service_usage() -> dict[str, Any]:
     Uses iterator() for memory-efficient processing of large datasets.
     """
     from apps.provisioning.models import Service
-    from .metering_service import MeteringService, UsageEventData
 
-    logger.info("Collecting service usage data")
+    from .metering_service import MeteringService, UsageEventData
 
     try:
         metering_service = MeteringService()
 
         # Get count first (single query for reporting)
         total_services = Service.objects.filter(status="active").count()
+        logger.info("Collecting service usage data from %s active services", total_services)
 
         # Use iterator() for memory-efficient processing
         services = Service.objects.filter(
@@ -752,7 +751,7 @@ def sync_aggregation_to_stripe_async(aggregation_id: str) -> str:
 # ===============================================================================
 
 
-def register_scheduled_tasks():
+def register_scheduled_tasks() -> None:
     """
     Register all scheduled tasks with Django-Q.
 

@@ -436,6 +436,6 @@ class SSHConnectionPool:
                 for conn, _ in connections:
                     try:
                         conn.close()
-                    except Exception:
-                        pass
+                    except OSError:
+                        logger.debug("Connection close failed during pool shutdown")
             self._connections.clear()

@@ -335,7 +335,7 @@ class Command(BaseCommand):
                     self.stdout.write(f"⏭️  Skipping existing: {key}")
                     continue
 
-                setting, created = SystemSetting.objects.update_or_create(
+                _setting, created = SystemSetting.objects.update_or_create(
                     key=key,
                     defaults={
                         "name": setting_def["name"],

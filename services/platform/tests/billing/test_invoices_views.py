@@ -3,13 +3,13 @@
 # ===============================================================================
 
 from decimal import Decimal
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.messages.middleware import MessageMiddleware
 from django.contrib.sessions.middleware import SessionMiddleware
-from django.http import Http404, HttpResponse, JsonResponse
-from django.test import Client, RequestFactory, TestCase
+from django.http import Http404, HttpResponse
+from django.test import RequestFactory, TestCase
 from django.utils import timezone
 
 from apps.billing.models import (
@@ -19,10 +19,10 @@ from apps.billing.models import (
     Payment,
 )
 from apps.billing.views import (
-    billing_list,
     _validate_financial_document_access_with_redirect as _validate_financial_document_access,
+)
+from apps.billing.views import (
     invoice_detail,
-    invoice_pdf,
     proforma_to_invoice,
 )
 from apps.customers.models import Customer
@@ -84,8 +84,8 @@ class InvoiceDetailViewTestCase(TestCase):
 
     def add_middleware_to_request(self, request):
         """Add required middleware to request"""
-        from django.contrib.sessions.middleware import SessionMiddleware
         from django.contrib.messages.middleware import MessageMiddleware
+        from django.contrib.sessions.middleware import SessionMiddleware
         from django.http import HttpResponse
         
         middleware = SessionMiddleware(lambda req: HttpResponse())

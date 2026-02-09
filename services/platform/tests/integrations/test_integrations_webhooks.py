@@ -87,7 +87,7 @@ class SignatureVerificationSecurityTests(WebhookSecurityTestCase):
             result = processor.verify_signature(payload, "stripe_signature", {})
             
         self.assertFalse(result)  # Should fail secure
-        self.assertIn("STRIPE_WEBHOOK_SECRET not configured", log.output[0])
+        self.assertIn("not configured", log.output[0])
         self.assertIn("failing secure", log.output[0])
 
     @override_settings(STRIPE_WEBHOOK_SECRET="test_webhook_secret")

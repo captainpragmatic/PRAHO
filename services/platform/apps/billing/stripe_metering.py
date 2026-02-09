@@ -34,11 +34,11 @@ class Result:
     _error: str | None
 
     @classmethod
-    def ok(cls, value: Any) -> "Result":
+    def ok(cls, value: Any) -> Result:
         return cls(_value=value, _error=None)
 
     @classmethod
-    def err(cls, error: str) -> "Result":
+    def err(cls, error: str) -> Result:
         return cls(_value=None, _error=error)
 
     def is_ok(self) -> bool:
@@ -76,7 +76,7 @@ class StripeMeterService:
     Each meter aggregates events and can be linked to prices.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.stripe = get_stripe()
 
     def create_meter(
@@ -173,7 +173,7 @@ class StripeMeterEventService:
     Each event represents a unit of usage to be billed.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.stripe = get_stripe()
 
     def report_usage(
@@ -287,7 +287,7 @@ class StripeSubscriptionMeterService:
     Links Stripe subscriptions to meters for usage-based billing.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.stripe = get_stripe()
 
     def create_metered_subscription(
@@ -416,7 +416,7 @@ class StripeUsageSyncService:
     3. Stripe invoices → Local billing records
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.stripe = get_stripe()
         self.event_service = StripeMeterEventService()
 
@@ -440,13 +440,19 @@ class StripeUsageSyncService:
         if not meter.stripe_meter_event_name:
             return Result.err(f"Meter {meter.name} has no Stripe event name configured")
 
-        subscription = aggregation.subscription
-        stripe_customer_id = subscription.stripe_customer_id if subscription else None
+        stripe_customer_id = None
 
-        if not stripe_customer_id:
-            # Try to get from customer
-            customer = aggregation.customer
-            stripe_customer_id = getattr(customer, "stripe_customer_id", None)
+        # Try to get from customer's payment methods
+        customer = aggregation.customer
+        if customer:
+            payment_method = getattr(customer, "payment_methods", None)
+            if payment_method:
+                default_pm = payment_method.filter(is_active=True, stripe_customer_id__gt="").first()
+                if default_pm:
+                    stripe_customer_id = default_pm.stripe_customer_id
+            # Fallback to customer-level attribute if exists
+            if not stripe_customer_id:
+                stripe_customer_id = getattr(customer, "stripe_customer_id", None)
 
         if not stripe_customer_id:
             return Result.err("No Stripe customer ID found")
@@ -526,7 +532,7 @@ class StripeMeterWebhookHandler:
     Processes webhook events related to usage billing.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.stripe = get_stripe()
 
     def handle_event(self, event: Any) -> Result:
@@ -622,13 +628,12 @@ class StripeMeterWebhookHandler:
         logger.info(f"Stripe invoice finalized: {invoice_data.id}")
 
         # Update local billing cycle if linked
-        from .metering_models import BillingCycle
 
         # Try to find billing cycle by Stripe subscription
         subscription_id = invoice_data.get("subscription")
         if subscription_id:
             try:
-                from .metering_models import Subscription
+                from .subscription_models import Subscription
                 subscription = Subscription.objects.get(
                     stripe_subscription_id=subscription_id
                 )

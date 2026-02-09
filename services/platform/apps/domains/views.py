@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
 from typing import Any, cast
 
@@ -655,8 +654,10 @@ def registrar_sync_all(request: HttpRequest) -> HttpResponse:
     messages.success(request, _(f"✅ Synced {count} registrar(s)"))
     # Support HTMX redirects if applicable
     response = redirect("domains:registrar_list")
-    with contextlib.suppress(Exception):
+    try:
         response["HX-Redirect"] = reverse("domains:registrar_list")
+    except (TypeError, ValueError, KeyError):
+        logger.debug("Could not set HX-Redirect header for registrar sync response")
     return response
 
 

@@ -18,12 +18,13 @@ if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
+DEFAULT_TOKEN_TYPE = "Bearer"  # noqa: S105
 
 
 class OAuthTokenManager(models.Manager["OAuthToken"]):
     """Manager for OAuth tokens."""
 
-    def get_valid_token(self, cui: str) -> "OAuthToken | None":
+    def get_valid_token(self, cui: str) -> OAuthToken | None:
         """Get a valid (non-expired) token for a CUI."""
         now = timezone.now()
         return (
@@ -36,7 +37,7 @@ class OAuthTokenManager(models.Manager["OAuthToken"]):
             .first()
         )
 
-    def get_refreshable_token(self, cui: str) -> "OAuthToken | None":
+    def get_refreshable_token(self, cui: str) -> OAuthToken | None:
         """Get a token that can be refreshed (has refresh token)."""
         return (
             self.filter(
@@ -83,7 +84,7 @@ class OAuthToken(models.Model):
 
     token_type = models.CharField(
         max_length=50,
-        default="Bearer",
+        default=DEFAULT_TOKEN_TYPE,
         help_text="Token type (usually Bearer)",
     )
 
@@ -252,11 +253,11 @@ class OAuthToken(models.Model):
         access_token: str,
         expires_in: int,
         refresh_token: str = "",
-        token_type: str = "Bearer",
+        token_type: str = DEFAULT_TOKEN_TYPE,
         scope: str = "",
         environment: str = "test",
         refresh_expires_in: int | None = None,
-    ) -> "OAuthToken":
+    ) -> OAuthToken:
         """
         Store a new OAuth token.
 
@@ -395,7 +396,7 @@ class TokenStorageService:
         access_token: str,
         expires_in: int,
         refresh_token: str = "",
-        token_type: str = "Bearer",
+        token_type: str = DEFAULT_TOKEN_TYPE,
         scope: str = "",
         cui: str | None = None,
     ) -> OAuthToken:

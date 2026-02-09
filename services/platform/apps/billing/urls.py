@@ -30,6 +30,12 @@ urlpatterns = [
     path("invoices/<int:pk>/refund-request/", views.invoice_refund_request, name="invoice_refund_request"),
     # Romanian e-Factura integration
     path("invoices/<int:pk>/e-factura/", views.generate_e_factura, name="e_factura"),
+    # e-Factura Compliance Dashboard
+    path("e-factura/", views.efactura_dashboard, name="efactura_dashboard"),
+    path("e-factura/documents/", views.efactura_documents_htmx, name="efactura_documents_htmx"),
+    path("e-factura/<str:pk>/", views.efactura_document_detail, name="efactura_document_detail"),
+    path("e-factura/<int:pk>/submit/", views.efactura_submit, name="efactura_submit"),
+    path("e-factura/<str:pk>/retry/", views.efactura_retry, name="efactura_retry"),
     # Payment management
     path("payments/", views.payment_list, name="payment_list"),
     path("invoices/<int:pk>/pay/", views.process_payment, name="process_payment"),

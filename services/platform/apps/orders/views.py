@@ -1206,7 +1206,7 @@ def _handle_unit_price_update(
     if manual_unit_price_changed:
         # Security check: Validate price override limits
         if product_price and updated_item.unit_price_cents > 0:
-            base_price = product_price.amount_cents
+            base_price = product_price.monthly_price_cents
             if base_price > 0:  # Avoid division by zero
                 price_ratio = updated_item.unit_price_cents / base_price
                 if price_ratio > MAX_PRICE_OVERRIDE_MULTIPLIER:  # More than 10x the base price

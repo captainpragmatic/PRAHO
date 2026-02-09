@@ -14,11 +14,10 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, TypedDict
 
 from django.db import transaction
-from django.db.models import Q
 from django.utils import timezone
 
 from apps.common.types import Err, Ok, Result
@@ -33,7 +32,6 @@ from .subscription_models import (
     PriceGrandfathering,
     Subscription,
     SubscriptionChange,
-    SubscriptionItem,
 )
 from .validators import log_security_event
 
@@ -180,10 +178,7 @@ class ProrationService:
         now = timezone.now()
 
         # Calculate days remaining
-        if subscription.current_period_end <= now:
-            days_remaining = 0
-        else:
-            days_remaining = (subscription.current_period_end - now).days
+        days_remaining = 0 if subscription.current_period_end <= now else (subscription.current_period_end - now).days
 
         return ProrationService.calculate_proration(
             old_price_cents=subscription.effective_price_cents,
@@ -829,7 +824,6 @@ class RecurringBillingService:
     def _generate_renewal_invoice(subscription: Subscription) -> Result[Invoice, str]:
         """Generate a renewal invoice for a subscription."""
         try:
-            from .currency_models import Currency
 
             sequence, _ = InvoiceSequence.objects.get_or_create(scope="default")
 

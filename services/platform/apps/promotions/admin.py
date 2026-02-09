@@ -169,7 +169,7 @@ class CouponAdmin(admin.ModelAdmin):
     )
     search_fields = ("code", "name", "description")
     readonly_fields = ("total_uses", "total_discount_cents", "created_at", "updated_at", "created_by")
-    autocomplete_fields = ("campaign", "assigned_customer", "currency")
+    raw_id_fields = ("campaign", "assigned_customer", "currency")
     date_hierarchy = "created_at"
     inlines = [CouponRedemptionInline]
 
@@ -370,7 +370,7 @@ class GiftCardAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
     )
-    autocomplete_fields = ("purchased_by", "redeemed_by", "purchase_order", "currency")
+    raw_id_fields = ("purchased_by", "redeemed_by", "purchase_order", "currency")
     date_hierarchy = "created_at"
     inlines = [GiftCardTransactionInline]
 
@@ -429,7 +429,7 @@ class ReferralCodeAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
     )
-    autocomplete_fields = ("owner", "referee_coupon")
+    raw_id_fields = ("owner", "referee_coupon")
 
     def rewards_display(self, obj):
         return f"{obj.total_rewards_cents / 100:.2f}"
@@ -486,7 +486,7 @@ class LoyaltyProgramAdmin(admin.ModelAdmin):
     list_filter = ("is_active", "currency")
     search_fields = ("name", "description")
     readonly_fields = ("created_at", "updated_at")
-    autocomplete_fields = ("currency",)
+    raw_id_fields = ("currency",)
     inlines = [LoyaltyTierInline]
 
     def member_count(self, obj):
@@ -538,7 +538,7 @@ class CustomerLoyaltyAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
     )
-    autocomplete_fields = ("customer", "program", "current_tier")
+    raw_id_fields = ("customer", "program", "current_tier")
     date_hierarchy = "enrolled_at"
     inlines = [LoyaltyTransactionInline]
 

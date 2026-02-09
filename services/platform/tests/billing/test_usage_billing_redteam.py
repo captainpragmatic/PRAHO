@@ -14,27 +14,29 @@ during security review:
 """
 
 import uuid
-from datetime import timedelta
-from decimal import Decimal, InvalidOperation
-from unittest.mock import patch, MagicMock
+from datetime import datetime, timedelta
+from decimal import Decimal
+from unittest.mock import patch
 
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.db.models import Max
-from django.test import TestCase, TransactionTestCase, override_settings
+from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
-from apps.billing.metering_models import (
-    UsageMeter,
-    UsageEvent,
-    UsageAggregation,
-    BillingCycle,
-    UsageAlert,
-    Subscription,
-)
-from apps.billing.models import Currency
 from apps.billing import config as billing_config
+from apps.billing.metering_models import (
+    BillingCycle,
+    UsageAggregation,
+    UsageAlert,
+    UsageEvent,
+    UsageMeter,
+    UsageThreshold,
+)
+from apps.billing.metering_service import MeteringService, UsageAlertService, UsageEventData
+from apps.billing.models import Currency, Subscription
+from apps.billing.stripe_metering import StripeUsageSyncService
 from apps.customers.models import Customer
-from apps.provisioning.models import ServicePlan
+from apps.products.models import Product
 
 
 class ConfigValidationRedTeamTestCase(TestCase):
@@ -117,7 +119,7 @@ class IdempotencyRedTeamTestCase(TransactionTestCase):
         idempotency_key = str(uuid.uuid4())
 
         # First event succeeds
-        event1 = UsageEvent.objects.create(
+        UsageEvent.objects.create(
             meter=self.meter,
             customer=self.customer,
             value=Decimal("10"),
@@ -126,7 +128,7 @@ class IdempotencyRedTeamTestCase(TransactionTestCase):
         )
 
         # Second event with same key should fail
-        with self.assertRaises(IntegrityError):
+        with transaction.atomic(), self.assertRaises(IntegrityError):
             UsageEvent.objects.create(
                 meter=self.meter,
                 customer=self.customer,
@@ -254,9 +256,7 @@ class InvoiceCalculationRedTeamTestCase(TestCase):
         This test documents the current behavior - consider adding validation
         if negative values should be rejected.
         """
-        from apps.billing.metering_service import MeteringService, UsageEventData
-
-        meter = UsageMeter.objects.create(
+        UsageMeter.objects.create(
             name="negative_test",
             display_name="Negative Test",
             aggregation_type="sum",
@@ -296,17 +296,23 @@ class BillingCycleBoundaryTestCase(TestCase):
             symbol="lei",
             decimals=2,
         )
-        self.service_plan = ServicePlan.objects.create(
+        self.product = Product.objects.create(
+            slug="test-plan-bc",
             name="Test Plan",
-            plan_type="shared_hosting",
-            price_monthly=Decimal("29.99"),
+            product_type="shared_hosting",
         )
+        now = timezone.now()
         self.subscription = Subscription.objects.create(
             customer=self.customer,
-            service_plan=self.service_plan,
+            product=self.product,
             currency=self.currency,
+            subscription_number="SUB-BC-RT001",
             status="active",
-            billing_interval="monthly",
+            billing_cycle="monthly",
+            unit_price_cents=2999,
+            current_period_start=now,
+            current_period_end=now + timedelta(days=30),
+            next_billing_date=now + timedelta(days=30),
         )
 
     def test_overlapping_billing_cycles_allowed(self):
@@ -320,7 +326,7 @@ class BillingCycleBoundaryTestCase(TestCase):
         """
         now = timezone.now()
 
-        cycle1 = BillingCycle.objects.create(
+        BillingCycle.objects.create(
             subscription=self.subscription,
             period_start=now,
             period_end=now + timedelta(days=30),
@@ -328,7 +334,7 @@ class BillingCycleBoundaryTestCase(TestCase):
         )
 
         # FINDING: Overlapping cycles are currently ALLOWED
-        cycle2 = BillingCycle.objects.create(
+        BillingCycle.objects.create(
             subscription=self.subscription,
             period_start=now + timedelta(days=15),  # Overlaps with cycle1
             period_end=now + timedelta(days=45),
@@ -361,8 +367,6 @@ class BillingCycleBoundaryTestCase(TestCase):
 
     def test_leap_year_billing_cycle(self):
         """Test billing cycle crossing leap day."""
-        from datetime import datetime
-
         # February in a leap year
         leap_year_feb = timezone.make_aware(datetime(2024, 2, 1, 0, 0, 0))
         cycle = BillingCycle.objects.create(
@@ -401,18 +405,24 @@ class StripeSyncFailureTestCase(TestCase):
             symbol="lei",
             decimals=2,
         )
-        self.service_plan = ServicePlan.objects.create(
+        self.product = Product.objects.create(
+            slug="test-plan-stripe",
             name="Test Plan",
-            plan_type="shared_hosting",
-            price_monthly=Decimal("29.99"),
+            product_type="shared_hosting",
         )
+        now = timezone.now()
         self.subscription = Subscription.objects.create(
             customer=self.customer,
-            service_plan=self.service_plan,
+            product=self.product,
             currency=self.currency,
+            subscription_number="SUB-STRIPE-RT001",
             status="active",
-            billing_interval="monthly",
-            stripe_customer_id="cus_test123",
+            billing_cycle="monthly",
+            unit_price_cents=2999,
+            current_period_start=now,
+            current_period_end=now + timedelta(days=30),
+            next_billing_date=now + timedelta(days=30),
+            stripe_subscription_id="sub_test123",
         )
         now = timezone.now()
         self.billing_cycle = BillingCycle.objects.create(
@@ -436,8 +446,6 @@ class StripeSyncFailureTestCase(TestCase):
     @patch("apps.billing.stripe_metering.get_stripe")
     def test_stripe_not_configured(self, mock_get_stripe):
         """Test handling when Stripe is not configured."""
-        from apps.billing.stripe_metering import StripeUsageSyncService
-
         mock_get_stripe.return_value = None
 
         service = StripeUsageSyncService()
@@ -448,8 +456,6 @@ class StripeSyncFailureTestCase(TestCase):
 
     def test_sync_nonexistent_aggregation(self):
         """Test syncing with invalid aggregation ID."""
-        from apps.billing.stripe_metering import StripeUsageSyncService
-
         service = StripeUsageSyncService()
         result = service.sync_aggregation_to_stripe(str(uuid.uuid4()))
 
@@ -477,23 +483,27 @@ class UsageAlertRedTeamTestCase(TestCase):
             symbol="lei",
             decimals=2,
         )
-        self.service_plan = ServicePlan.objects.create(
+        self.product = Product.objects.create(
+            slug="test-plan-alert",
             name="Test Plan",
-            plan_type="shared_hosting",
-            price_monthly=Decimal("29.99"),
+            product_type="shared_hosting",
         )
+        now = timezone.now()
         self.subscription = Subscription.objects.create(
             customer=self.customer,
-            service_plan=self.service_plan,
+            product=self.product,
             currency=self.currency,
+            subscription_number="SUB-ALERT-RT001",
             status="active",
-            billing_interval="monthly",
+            billing_cycle="monthly",
+            unit_price_cents=2999,
+            current_period_start=now,
+            current_period_end=now + timedelta(days=30),
+            next_billing_date=now + timedelta(days=30),
         )
 
     def test_alert_creation_requires_threshold(self):
         """Test that UsageAlert requires a UsageThreshold FK."""
-        from apps.billing.metering_models import UsageThreshold
-
         # Create threshold
         threshold = UsageThreshold.objects.create(
             meter=self.meter,
@@ -515,9 +525,6 @@ class UsageAlertRedTeamTestCase(TestCase):
 
     def test_alert_cooldown_mechanism(self):
         """Test that alert cooldown mechanism exists."""
-        from apps.billing.metering_service import UsageAlertService
-        from apps.billing.metering_models import UsageThreshold
-
         # Create threshold
         threshold = UsageThreshold.objects.create(
             meter=self.meter,
@@ -527,7 +534,7 @@ class UsageAlertRedTeamTestCase(TestCase):
         )
 
         # Create a recent alert
-        recent_alert = UsageAlert.objects.create(
+        UsageAlert.objects.create(
             threshold=threshold,
             customer=self.customer,
             subscription=self.subscription,
@@ -562,8 +569,6 @@ class MeteringServiceEdgeCasesTestCase(TestCase):
 
     def test_future_timestamp_rejected(self):
         """Test that future timestamps beyond grace period are rejected."""
-        from apps.billing.metering_service import MeteringService, UsageEventData
-
         service = MeteringService()
         future_time = timezone.now() + timedelta(hours=1)  # 1 hour in future
 
@@ -579,8 +584,6 @@ class MeteringServiceEdgeCasesTestCase(TestCase):
 
     def test_very_old_timestamp_rejected(self):
         """Test that timestamps beyond grace period are rejected."""
-        from apps.billing.metering_service import MeteringService, UsageEventData
-
         service = MeteringService()
         old_time = timezone.now() - timedelta(days=30)  # 30 days ago
 
@@ -596,8 +599,6 @@ class MeteringServiceEdgeCasesTestCase(TestCase):
 
     def test_nonexistent_meter_rejected(self):
         """Test that events for nonexistent meters are rejected."""
-        from apps.billing.metering_service import MeteringService, UsageEventData
-
         service = MeteringService()
         result = service.record_event(UsageEventData(
             meter_name="nonexistent_meter",
@@ -609,8 +610,6 @@ class MeteringServiceEdgeCasesTestCase(TestCase):
 
     def test_nonexistent_customer_rejected(self):
         """Test that events for nonexistent customers are rejected."""
-        from apps.billing.metering_service import MeteringService, UsageEventData
-
         service = MeteringService()
         result = service.record_event(UsageEventData(
             meter_name="edge_test",
@@ -622,9 +621,7 @@ class MeteringServiceEdgeCasesTestCase(TestCase):
 
     def test_inactive_meter_rejected(self):
         """Test that events for inactive meters are rejected."""
-        from apps.billing.metering_service import MeteringService, UsageEventData
-
-        inactive_meter = UsageMeter.objects.create(
+        UsageMeter.objects.create(
             name="inactive_meter",
             display_name="Inactive Meter",
             aggregation_type="sum",
@@ -663,17 +660,23 @@ class AggregationConsistencyTestCase(TransactionTestCase):
             symbol="lei",
             decimals=2,
         )
-        self.service_plan = ServicePlan.objects.create(
+        self.product = Product.objects.create(
+            slug="test-plan-aggcons",
             name="Test Plan",
-            plan_type="shared_hosting",
-            price_monthly=Decimal("29.99"),
+            product_type="shared_hosting",
         )
+        now = timezone.now()
         self.subscription = Subscription.objects.create(
             customer=self.customer,
-            service_plan=self.service_plan,
+            product=self.product,
             currency=self.currency,
+            subscription_number="SUB-AGGCONS-RT001",
             status="active",
-            billing_interval="monthly",
+            billing_cycle="monthly",
+            unit_price_cents=2999,
+            current_period_start=now,
+            current_period_end=now + timedelta(days=30),
+            next_billing_date=now + timedelta(days=30),
         )
 
     def test_aggregation_recalculation_consistency(self):

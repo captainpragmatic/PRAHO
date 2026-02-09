@@ -50,7 +50,9 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         """🏷️ Extract Stripe event type"""
         return str(payload.get("type", ""))
 
-    def verify_signature(self, payload: dict[str, Any], signature: str, headers: dict[str, str]) -> bool:
+    def verify_signature(
+        self, payload: dict[str, Any], signature: str, headers: dict[str, str], raw_body: bytes | None = None
+    ) -> bool:
         """🔐 Verify Stripe webhook signature using settings system.
 
         SECURITY FIX: Uses raw request body (_raw_body) instead of re-serialized JSON
@@ -62,7 +64,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             from apps.settings.services import SettingsService
 
             # Get encrypted webhook secret from settings system
-            webhook_secret = SettingsService.get("integrations.stripe_webhook_secret")
+            webhook_secret = SettingsService.get_setting("integrations.stripe_webhook_secret")
 
             if not webhook_secret:
                 # Fallback to Django settings
@@ -74,8 +76,6 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                 return False
 
             # SECURITY: Use raw body from request, NOT re-serialized JSON
-            # The _raw_body is attached by WebhookView._parse_request()
-            raw_body = payload.get("_raw_body")
             if raw_body is None:
                 # Fallback for backwards compatibility, but log warning
                 logger.warning("⚠️ No raw body available for signature verification - using re-serialized JSON (less secure)")
@@ -200,9 +200,9 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                 # Trigger dunning process if this was an invoice payment
                 if payment.invoice:
                     try:
-                        from apps.billing.tasks import trigger_payment_dunning  # noqa: PLC0415
+                        from apps.billing.tasks import start_dunning_process_async  # noqa: PLC0415
 
-                        trigger_payment_dunning.delay(str(payment.invoice.id), failure_reason)
+                        start_dunning_process_async(str(payment.invoice.id))
                         logger.info(f"🔔 Triggered dunning process for invoice {payment.invoice.id}")
                     except Exception as dunning_error:
                         logger.warning(f"⚠️ Failed to trigger dunning: {dunning_error}")

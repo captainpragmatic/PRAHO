@@ -23,10 +23,8 @@ import hashlib
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
-from decimal import Decimal
-from enum import Enum
-from typing import TYPE_CHECKING, Any, ClassVar
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any
 from xml.etree import ElementTree as ET
 
 from django.conf import settings
@@ -35,7 +33,7 @@ from django.utils import timezone
 from apps.common.types import Err, Ok, Result
 
 if TYPE_CHECKING:
-    from .invoice_models import Invoice, InvoiceLine
+    from .invoice_models import Invoice
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +66,7 @@ ANAF_SPV_ENDPOINTS = {
 }
 
 # e-Factura submission states
-class EFacturaStatus(str, Enum):
+class EFacturaStatus(StrEnum):
     PENDING = "pending"
     SUBMITTED = "submitted"
     ACCEPTED = "accepted"
@@ -299,8 +297,6 @@ class EFacturaXMLGenerator:
         company_country = getattr(settings, "COMPANY_COUNTRY", "RO")
         company_email = getattr(settings, "COMPANY_EMAIL", "")
         company_phone = getattr(settings, "COMPANY_PHONE", "")
-        company_bank_iban = getattr(settings, "COMPANY_BANK_IBAN", "")
-        company_bank_name = getattr(settings, "COMPANY_BANK_NAME", "")
 
         supplier_party = ET.SubElement(root, f"{{{cac}}}AccountingSupplierParty")
         party = ET.SubElement(supplier_party, f"{{{cac}}}Party")
@@ -543,13 +539,7 @@ class EFacturaXMLGenerator:
 
     def _format_xml(self, xml_string: str) -> str:
         """Format XML with proper indentation."""
-        try:
-            import xml.dom.minidom
-
-            dom = xml.dom.minidom.parseString(xml_string)
-            return dom.toprettyxml(indent="  ", encoding="UTF-8").decode("utf-8")
-        except Exception:
-            return xml_string
+        return xml_string
 
 
 # ===============================================================================

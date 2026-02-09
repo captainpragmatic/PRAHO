@@ -10,6 +10,7 @@ on:
     branches: [ master, develop, 'feat/*', 'fix/*' ]
     paths:
       - 'services/**'
+      - 'scripts/**'
       - 'tests/integration/**'
       - 'pyproject.toml'
       - 'uv.lock'
@@ -19,6 +20,7 @@ on:
     branches: [ master, develop ]
     paths:
       - 'services/**'
+      - 'scripts/**'
       - 'tests/integration/**'
       - 'pyproject.toml'
       - 'uv.lock'
@@ -26,6 +28,35 @@ on:
       - 'deploy/**'
 
 jobs:
+  error-handling-scan:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+
+    - name: Set up Python
+      run: uv python install
+
+    - name: Run error handling scanner (non-blocking)
+      run: |
+        echo "Running non-blocking error handling scanner..."
+        uv run python scripts/error_handling_scan.py --min-severity medium --exclude-tests --json > error-handling-scan.json || true
+
+    - name: Upload error handling scan report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: error-handling-scan-report
+        path: error-handling-scan.json
+        if-no-files-found: warn
+
   integration-test:
     runs-on: ubuntu-latest
 

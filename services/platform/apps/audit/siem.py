@@ -25,7 +25,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from queue import Queue
+from queue import Empty, Full, Queue
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.conf import settings
@@ -563,8 +563,8 @@ class SIEMTransport:
             if self._socket:
                 try:
                     self._socket.close()
-                except Exception:
-                    pass
+                except OSError as exc:
+                    logger.debug(f"⚠️ [SIEM] Socket close error during disconnect: {exc}")
                 self._socket = None
 
     def send(self, message: str) -> bool:
@@ -778,7 +778,7 @@ class SIEMService:
         while not self._buffer.empty() and len(batch) < self.config.batch_size:
             try:
                 batch.append(self._buffer.get_nowait())
-            except Exception:
+            except Empty:
                 break
 
         if batch:
@@ -823,7 +823,7 @@ class SIEMService:
             else:
                 try:
                     self._buffer.put_nowait(formatted)
-                except Exception:
+                except Full:
                     # Buffer full - send synchronously
                     return self.transport.send(formatted)
 

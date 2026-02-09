@@ -54,12 +54,43 @@
         - { regexp: '^backup_compression=', line: 'backup_compression=1' }
         - { regexp: '^backup_increment=', line: 'backup_increment=0' }  # Full backups
 
-    # TODO: S3_BACKUP - Future S3 backup destination
-    # - name: Configure S3 backup destination
-    #   ansible.builtin.template:
-    #     src: templates/s3_backup_config.j2
-    #     dest: /etc/webmin/virtual-server/backup-s3.conf
-    #   when: backup_storage == 's3'
+    # S3 backup configuration
+    - name: Install AWS CLI for S3 backups
+      ansible.builtin.apt:
+        name: awscli
+        state: present
+      when: backup_enabled and backup_storage == 's3'
+
+    - name: Create AWS credentials directory
+      ansible.builtin.file:
+        path: /root/.aws
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      when: backup_enabled and backup_storage == 's3'
+
+    - name: Set S3 backup destination in Virtualmin
+      ansible.builtin.lineinfile:
+        path: /etc/webmin/virtual-server/config
+        regexp: '^backup_dest='
+        line: "backup_dest=s3://{{ backup_s3_bucket }}/{{ backup_s3_prefix }}{{ inventory_hostname }}/"
+      when: backup_storage == 's3'
+
+    - name: Create S3 backup sync script
+      ansible.builtin.template:
+        src: templates/s3_backup_sync.sh.j2
+        dest: /usr/local/bin/praho-s3-backup-sync.sh
+        mode: '0755'
+      when: backup_enabled and backup_storage == 's3'
+
+    - name: Schedule S3 backup sync cron job
+      ansible.builtin.cron:
+        name: "PRAHO S3 backup sync"
+        minute: "30"
+        hour: "3"
+        job: "/usr/local/bin/praho-s3-backup-sync.sh >> /var/log/praho-s3-backup.log 2>&1"
+      when: backup_enabled and backup_storage == 's3'
 
     # Cleanup script for local backups
     - name: Create backup cleanup script

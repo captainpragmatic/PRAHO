@@ -10,11 +10,11 @@ import pytest
 from django.core.exceptions import ValidationError
 
 from apps.billing.validators import (
+    DANGEROUS_FINANCIAL_PATTERNS,
     MAX_FINANCIAL_AMOUNT_CENTS,
     MAX_JSON_DEPTH,
     MAX_JSON_SIZE_BYTES,
     MIN_FINANCIAL_AMOUNT_CENTS,
-    DANGEROUS_FINANCIAL_PATTERNS,
     SENSITIVE_FINANCIAL_KEYS,
     validate_financial_amount,
     validate_financial_json,
@@ -249,7 +249,6 @@ class TestDangerousPatterns:
 
     def test_code_execution_patterns(self):
         """Code execution patterns should be included"""
-        import re
         patterns_found = False
         for pattern in DANGEROUS_FINANCIAL_PATTERNS:
             if 'eval' in pattern or 'exec' in pattern:

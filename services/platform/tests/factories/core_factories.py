@@ -4,7 +4,7 @@
 """
 Comprehensive test factories for all major models in the PRAHO Platform.
 
-These factories use factory_boy for consistent, maintainable test data generation
+These factories provide consistent, maintainable test data generation
 with proper relationships and realistic Romanian business data.
 """
 
@@ -15,8 +15,9 @@ from typing import Any
 
 from django.contrib.auth import get_user_model
 from django.utils import timezone
+from django.utils.text import slugify
 
-from apps.billing.models import Currency, Invoice, InvoiceLine, Payment, Proforma
+from apps.billing.models import Currency, Invoice, InvoiceLine, Payment, ProformaInvoice
 from apps.customers.models import (
     Customer,
     CustomerAddress,
@@ -24,7 +25,7 @@ from apps.customers.models import (
     CustomerTaxProfile,
 )
 from apps.orders.models import Order, OrderItem
-from apps.products.models import Product, ProductCategory
+from apps.products.models import Product
 
 User = get_user_model()
 
@@ -188,8 +189,7 @@ def create_individual_customer(
     customer = Customer.objects.create(
         name=f'{first_name} {last_name}',
         customer_type='individual',
-        first_name=first_name,
-        last_name=last_name,
+        company_name='',
         primary_email=email,
         primary_phone='+40722123456',
         data_processing_consent=True,
@@ -225,26 +225,10 @@ def create_individual_customer(
 class ProductCreationRequest:
     """Parameter object for product creation"""
     name: str = 'Web Hosting Standard'
-    sku: str = 'WH-STD-001'
+    slug: str = ''
     description: str = 'Standard web hosting package'
-    price_cents: int = 9900  # 99.00 RON
-    currency_code: str = 'RON'
-    billing_cycle: str = 'monthly'
+    product_type: str = 'shared_hosting'
     is_active: bool = True
-    category_name: str = 'Web Hosting'
-
-
-def create_product_category(name: str = 'Web Hosting') -> ProductCategory:
-    """Create a product category."""
-    category, _ = ProductCategory.objects.get_or_create(
-        name=name,
-        defaults={
-            'slug': name.lower().replace(' ', '-'),
-            'description': f'{name} products',
-            'is_active': True,
-        }
-    )
-    return category
 
 
 def create_product(request: ProductCreationRequest | None = None) -> Product:
@@ -252,24 +236,21 @@ def create_product(request: ProductCreationRequest | None = None) -> Product:
     if request is None:
         request = ProductCreationRequest()
 
-    category = create_product_category(request.category_name)
+    slug = request.slug or slugify(request.name)
 
-    # Generate unique SKU if already exists
-    sku = request.sku
+    # Generate unique slug if already exists
+    base_slug = slug
     counter = 1
-    while Product.objects.filter(sku=sku).exists():
-        sku = f"{request.sku}-{counter}"
+    while Product.objects.filter(slug=slug).exists():
+        slug = f"{base_slug}-{counter}"
         counter += 1
 
     return Product.objects.create(
         name=request.name,
-        sku=sku,
+        slug=slug,
         description=request.description,
-        price_cents=request.price_cents,
-        currency_code=request.currency_code,
-        billing_cycle=request.billing_cycle,
+        product_type=request.product_type,
         is_active=request.is_active,
-        category=category,
     )
 
 
@@ -278,20 +259,19 @@ def create_hosting_products() -> list[Product]:
     products = []
 
     product_configs = [
-        ('Web Hosting Basic', 'WH-BASIC', 4900, 'Basic web hosting - 5GB storage'),
-        ('Web Hosting Standard', 'WH-STD', 9900, 'Standard web hosting - 20GB storage'),
-        ('Web Hosting Premium', 'WH-PREM', 19900, 'Premium web hosting - 50GB storage'),
-        ('VPS Basic', 'VPS-BASIC', 29900, 'Basic VPS - 2 vCPU, 4GB RAM'),
-        ('VPS Standard', 'VPS-STD', 59900, 'Standard VPS - 4 vCPU, 8GB RAM'),
-        ('Domain Registration .ro', 'DOM-RO', 4500, '.ro domain registration - 1 year'),
-        ('SSL Certificate', 'SSL-STD', 9900, 'Standard SSL certificate - 1 year'),
+        ('Web Hosting Basic', 'shared_hosting', 'Basic web hosting - 5GB storage'),
+        ('Web Hosting Standard', 'shared_hosting', 'Standard web hosting - 20GB storage'),
+        ('Web Hosting Premium', 'shared_hosting', 'Premium web hosting - 50GB storage'),
+        ('VPS Basic', 'vps', 'Basic VPS - 2 vCPU, 4GB RAM'),
+        ('VPS Standard', 'vps', 'Standard VPS - 4 vCPU, 8GB RAM'),
+        ('Domain Registration .ro', 'domain', '.ro domain registration - 1 year'),
+        ('SSL Certificate', 'ssl', 'Standard SSL certificate - 1 year'),
     ]
 
-    for name, sku, price, desc in product_configs:
+    for name, product_type, desc in product_configs:
         products.append(create_product(ProductCreationRequest(
             name=name,
-            sku=sku,
-            price_cents=price,
+            product_type=product_type,
             description=desc,
         )))
 
@@ -307,8 +287,7 @@ class OrderCreationRequest:
     """Parameter object for order creation"""
     customer: Customer | None = None
     status: str = 'draft'
-    currency_code: str = 'RON'
-    created_by: User | None = None
+    currency: Currency | None = None
     items: list[tuple[Product, int]] = field(default_factory=list)  # (product, quantity) pairs
 
 
@@ -320,14 +299,13 @@ def create_order(request: OrderCreationRequest | None = None) -> Order:
     if request.customer is None:
         request.customer = create_full_customer()
 
-    if request.created_by is None:
-        request.created_by = create_admin_user(username=f'admin_order_{timezone.now().timestamp()}')
+    if request.currency is None:
+        request.currency = create_ron_currency()
 
     order = Order.objects.create(
         customer=request.customer,
         status=request.status,
-        currency_code=request.currency_code,
-        created_by=request.created_by,
+        currency=request.currency,
     )
 
     for product, quantity in request.items:
@@ -335,10 +313,10 @@ def create_order(request: OrderCreationRequest | None = None) -> Order:
             order=order,
             product=product,
             product_name=product.name,
-            product_sku=product.sku,
+            product_type=product.product_type,
             quantity=quantity,
-            unit_price_cents=product.price_cents,
-            total_cents=product.price_cents * quantity,
+            unit_price_cents=9900,
+            line_total_cents=9900 * quantity,
         )
 
     return order
@@ -376,9 +354,8 @@ class InvoiceCreationRequest:
     status: str = 'issued'
     total_cents: int = 10000
     subtotal_cents: int = 8403  # Before 19% VAT
-    vat_cents: int = 1597  # 19% VAT
+    tax_cents: int = 1597  # 19% VAT
     due_days: int = 30
-    order: Order | None = None
 
 
 def create_ron_currency() -> Currency:
@@ -430,9 +407,8 @@ def create_full_invoice(request: InvoiceCreationRequest | None = None) -> Invoic
         status=request.status,
         total_cents=request.total_cents,
         subtotal_cents=request.subtotal_cents,
-        vat_cents=request.vat_cents,
+        tax_cents=request.tax_cents,
         due_at=timezone.now() + timedelta(days=request.due_days),
-        order=request.order,
     )
 
     # Add a line item
@@ -441,7 +417,7 @@ def create_full_invoice(request: InvoiceCreationRequest | None = None) -> Invoic
         description='Web Hosting Standard - 1 month',
         quantity=1,
         unit_price_cents=request.subtotal_cents,
-        total_cents=request.subtotal_cents,
+        line_total_cents=request.subtotal_cents,
     )
 
     return invoice
@@ -488,7 +464,7 @@ def create_proforma(
     customer: Customer | None = None,
     currency: Currency | None = None,
     total_cents: int = 10000
-) -> Proforma:
+) -> ProformaInvoice:
     """Create a proforma invoice."""
     if customer is None:
         customer = create_full_customer()
@@ -496,13 +472,17 @@ def create_proforma(
     if currency is None:
         currency = create_ron_currency()
 
-    return Proforma.objects.create(
+    subtotal = int(total_cents / 1.19)
+    tax = total_cents - subtotal
+
+    return ProformaInvoice.objects.create(
         customer=customer,
         currency=currency,
-        number=f'PRO-{timezone.now().year}-{Proforma.objects.count() + 1:05d}',
+        number=f'PRO-{timezone.now().year}-{ProformaInvoice.objects.count() + 1:05d}',
         status='draft',
         total_cents=total_cents,
-        subtotal_cents=int(total_cents / 1.19),
+        subtotal_cents=subtotal,
+        tax_cents=tax,
         valid_until=timezone.now() + timedelta(days=30),
     )
 
@@ -522,16 +502,15 @@ def create_complete_order_to_invoice_flow(
     order = create_order_with_items(customer=customer, num_items=2)
 
     # Calculate totals
-    subtotal = sum(item.total_cents for item in order.items.all())
+    subtotal = sum(item.line_total_cents for item in order.items.all())
     vat = int(subtotal * Decimal('0.19'))
     total = subtotal + vat
 
     # Create invoice from order
     invoice = create_full_invoice(InvoiceCreationRequest(
         customer=customer,
-        order=order,
         subtotal_cents=subtotal,
-        vat_cents=vat,
+        tax_cents=vat,
         total_cents=total,
     ))
 

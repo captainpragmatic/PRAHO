@@ -34,6 +34,11 @@ urlpatterns = [
     # User management (admin)
     path("users/", views.UserListView.as_view(), name="user_list"),
     path("users/<int:pk>/", views.UserDetailView.as_view(), name="user_detail"),
+    # Password reset
+    path("password-reset/", views.password_reset_view, name="password_reset"),
+    path("password-reset/done/", views.password_reset_done_view, name="password_reset_done"),
+    path("password-reset-confirm/<uidb64>/<token>/", views.password_reset_confirm_view, name="password_reset_confirm"),
+    path("password-reset/complete/", views.password_reset_complete_view, name="password_reset_complete"),
     # API endpoints
     path("api/check-email/", views.api_check_email, name="api_check_email"),
 ]

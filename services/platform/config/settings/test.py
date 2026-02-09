@@ -86,8 +86,6 @@ class DisableMigrations:
         return None
 
 
-# Uncomment to disable migrations in tests (faster but risky)
-# MIGRATION_MODULES = DisableMigrations()
 
 # ===============================================================================
 # PASSWORD HASHER (Fast for tests)

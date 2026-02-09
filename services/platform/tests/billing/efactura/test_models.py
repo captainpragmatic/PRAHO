@@ -3,10 +3,8 @@ Tests for EFacturaDocument model.
 """
 
 from datetime import timedelta
-from unittest.mock import MagicMock, patch
 
-import pytest
-from django.test import TestCase, override_settings
+from django.test import TestCase
 from django.utils import timezone
 
 from apps.billing.efactura.models import EFacturaDocument, EFacturaDocumentType, EFacturaStatus

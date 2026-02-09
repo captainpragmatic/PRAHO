@@ -22,13 +22,12 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
-from django.db.models import F, Q, Sum
+from django.db.models import F, Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 if TYPE_CHECKING:
-    from apps.customers.models import Customer
-    from apps.products.models import Product
+    pass
 
 from .currency_models import Currency
 from .validators import log_security_event, validate_financial_amount
@@ -411,9 +410,7 @@ class Subscription(models.Model):
         """Check if subscription has grandfathered pricing."""
         if self.locked_price_cents is None:
             return False
-        if self.locked_price_expires_at and timezone.now() > self.locked_price_expires_at:
-            return False
-        return True
+        return not (self.locked_price_expires_at and timezone.now() > self.locked_price_expires_at)
 
     # =========================================================================
     # STATUS PROPERTIES
@@ -608,8 +605,6 @@ class Subscription(models.Model):
 
     def renew(self, user: Any = None) -> None:
         """Renew subscription for next billing period."""
-        now = timezone.now()
-
         with transaction.atomic():
             self.current_period_start = self.current_period_end
             self.current_period_end = self.current_period_start + timedelta(days=self.cycle_days)
@@ -842,10 +837,7 @@ class SubscriptionChange(models.Model):
         now = timezone.now()
 
         # Calculate days remaining in current period
-        if sub.current_period_end <= now:
-            days_remaining = 0
-        else:
-            days_remaining = (sub.current_period_end - now).days
+        days_remaining = 0 if sub.current_period_end <= now else (sub.current_period_end - now).days
 
         days_in_period = sub.cycle_days
 
@@ -1023,9 +1015,7 @@ class PriceGrandfathering(models.Model):
         """Check if grandfathering has expired."""
         if not self.is_active:
             return True
-        if self.expires_at and timezone.now() > self.expires_at:
-            return True
-        return False
+        return bool(self.expires_at and timezone.now() > self.expires_at)
 
     def expire(self, user: Any = None) -> None:
         """Manually expire this grandfathering."""

@@ -9,7 +9,7 @@ Tests cover:
 - Edge cases and error handling
 """
 
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import patch
 
 from django.test import TestCase, override_settings
 from lxml import etree

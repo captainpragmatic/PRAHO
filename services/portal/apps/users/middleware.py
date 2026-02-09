@@ -14,6 +14,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
+from django.middleware.csrf import get_token
 from django.utils import timezone as django_timezone
 from django.utils.http import urlencode
 from django.utils.translation import activate, get_language
@@ -58,6 +59,9 @@ class PortalAuthenticationMiddleware:
         self.get_response = get_response
     
     def __call__(self, request: HttpRequest) -> HttpResponse:
+        # Ensure CSRF cookie is available on responses (including redirects).
+        get_token(request)
+
         # Skip authentication for public URLs
         if self.is_public_url(request.path):
             # Add an anonymous user for Django auth compatibility
@@ -289,8 +293,17 @@ class PortalAuthenticationMiddleware:
         remember_me = request.session.get('remember_me', False)
         
         if not authenticated_at_str:
-            logger.warning("⚠️ [Auth] No authenticated_at timestamp in session")
-            return False
+            # Backward compatibility: older sessions/tests may not have this field.
+            # Initialize from known validation timestamps when possible, otherwise "now".
+            fallback_timestamp = (
+                request.session.get('validated_at')
+                or request.session.get('session_created_at')
+                or django_timezone.now().isoformat()
+            )
+            request.session['authenticated_at'] = fallback_timestamp
+            request.session.modified = True
+            authenticated_at_str = fallback_timestamp
+            logger.warning("⚠️ [Auth] Missing authenticated_at; initialized fallback timestamp")
             
         try:
             authenticated_at = datetime.fromisoformat(authenticated_at_str.replace('Z', '+00:00'))

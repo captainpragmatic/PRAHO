@@ -10,31 +10,29 @@ Subscription, BillingCycle, PricingTier, UsageThreshold, UsageAlert.
 from __future__ import annotations
 
 import uuid
-from decimal import Decimal
 from datetime import timedelta
+from decimal import Decimal
 
+from django.db import IntegrityError, transaction
 from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
-from django.db import IntegrityError
-from django.core.exceptions import ValidationError
 
 from apps.billing.models import (
-    Currency,
-    Invoice,
-    InvoiceLine,
-    UsageMeter,
-    UsageEvent,
-    UsageAggregation,
-    Subscription,
-    SubscriptionItem,
     BillingCycle,
+    Currency,
     PricingTier,
     PricingTierBracket,
-    UsageThreshold,
+    Subscription,
+    SubscriptionItem,
+    UsageAggregation,
     UsageAlert,
+    UsageEvent,
+    UsageMeter,
+    UsageThreshold,
 )
 from apps.customers.models import Customer
-from apps.provisioning.models import ServicePlan, Service
+from apps.products.models import Product
+from apps.provisioning.models import ServicePlan
 from apps.users.models import User
 
 
@@ -206,7 +204,7 @@ class UsageEventModelTestCase(TransactionTestCase):
             idempotency_key="duplicate-key",
         )
 
-        with self.assertRaises(IntegrityError):
+        with transaction.atomic(), self.assertRaises(IntegrityError):
             UsageEvent.objects.create(
                 meter=self.meter,
                 customer=self.customer,
@@ -288,12 +286,16 @@ class SubscriptionModelTestCase(TransactionTestCase):
             status="active",
         )
 
-        self.service_plan = ServicePlan.objects.create(
+        self.product = Product.objects.create(
+            slug="basic-hosting",
             name="Basic Hosting",
-            plan_type="shared_hosting",
-            price_monthly=Decimal("29.99"),
-            disk_space_gb=10,
-            bandwidth_gb=100,
+            product_type="shared_hosting",
+        )
+
+        self.product2 = Product.objects.create(
+            slug="bandwidth-addon",
+            name="Bandwidth Add-on",
+            product_type="addon",
         )
 
         self.meter = UsageMeter.objects.create(
@@ -303,109 +305,83 @@ class SubscriptionModelTestCase(TransactionTestCase):
             unit="gb",
         )
 
+    def _make_subscription(self, **kwargs):
+        """Helper to create a subscription with canonical fields."""
+        now = timezone.now()
+        defaults = {
+            "customer": self.customer,
+            "product": self.product,
+            "currency": self.currency,
+            "subscription_number": f"SUB-{uuid.uuid4().hex[:8].upper()}",
+            "status": "active",
+            "billing_cycle": "monthly",
+            "unit_price_cents": 2999,
+            "current_period_start": now,
+            "current_period_end": now + timedelta(days=30),
+            "next_billing_date": now + timedelta(days=30),
+        }
+        defaults.update(kwargs)
+        return Subscription.objects.create(**defaults)
+
     def test_create_subscription(self):
         """Test creating a subscription."""
-        subscription = Subscription.objects.create(
-            customer=self.customer,
-            service_plan=self.service_plan,
-            currency=self.currency,
-            status="active",
-            billing_interval="monthly",
-            base_price_cents=2999,
-            started_at=timezone.now(),
-            current_period_start=timezone.now(),
-            current_period_end=timezone.now() + timedelta(days=30),
+        now = timezone.now()
+        subscription = self._make_subscription(
+            started_at=now,
         )
 
         self.assertEqual(subscription.customer, self.customer)
         self.assertEqual(subscription.status, "active")
-        self.assertEqual(subscription.base_price, Decimal("29.99"))
+        self.assertEqual(subscription.effective_price, Decimal("29.99"))
         self.assertTrue(subscription.is_active)
 
     def test_subscription_statuses(self):
         """Test all subscription statuses."""
-        statuses = ["trialing", "active", "past_due", "paused", "canceled", "expired"]
+        statuses = ["trialing", "active", "past_due", "paused", "cancelled", "expired"]
 
         for status in statuses:
-            sub = Subscription.objects.create(
-                customer=self.customer,
-                service_plan=self.service_plan,
-                currency=self.currency,
-                status=status,
-                billing_interval="monthly",
-            )
+            sub = self._make_subscription(status=status)
             self.assertEqual(sub.status, status)
 
     def test_subscription_is_active(self):
         """Test is_active property."""
-        active_sub = Subscription.objects.create(
-            customer=self.customer,
-            service_plan=self.service_plan,
-            currency=self.currency,
-            status="active",
-            billing_interval="monthly",
-        )
+        active_sub = self._make_subscription(status="active")
         self.assertTrue(active_sub.is_active)
 
-        trial_sub = Subscription.objects.create(
-            customer=self.customer,
-            service_plan=self.service_plan,
-            currency=self.currency,
-            status="trialing",
-            billing_interval="monthly",
-        )
+        trial_sub = self._make_subscription(status="trialing")
         self.assertTrue(trial_sub.is_active)
 
-        canceled_sub = Subscription.objects.create(
-            customer=self.customer,
-            service_plan=self.service_plan,
-            currency=self.currency,
-            status="canceled",
-            billing_interval="monthly",
-        )
-        self.assertFalse(canceled_sub.is_active)
+        cancelled_sub = self._make_subscription(status="cancelled")
+        self.assertFalse(cancelled_sub.is_active)
 
     def test_subscription_item(self):
-        """Test subscription items with meters."""
-        subscription = Subscription.objects.create(
-            customer=self.customer,
-            service_plan=self.service_plan,
-            currency=self.currency,
-            status="active",
-            billing_interval="monthly",
-        )
+        """Test subscription items with products."""
+        subscription = self._make_subscription()
 
         item = SubscriptionItem.objects.create(
             subscription=subscription,
-            meter=self.meter,
-            included_quantity=Decimal("100"),  # 100 GB included
-            unit_price_cents=50,  # 0.50 per GB overage
+            product=self.product2,
+            unit_price_cents=50,  # 0.50 per unit
         )
 
-        self.assertEqual(item.included_quantity, Decimal("100"))
-        self.assertEqual(item.unit_price, Decimal("0.50"))
+        self.assertEqual(item.effective_price_cents, 50)
+        self.assertEqual(item.line_total_cents, 50)
 
     def test_subscription_item_unique_constraint(self):
-        """Test subscription can only have one item per meter."""
-        subscription = Subscription.objects.create(
-            customer=self.customer,
-            service_plan=self.service_plan,
-            currency=self.currency,
-            status="active",
-            billing_interval="monthly",
-        )
+        """Test subscription can only have one item per product."""
+        subscription = self._make_subscription()
 
         SubscriptionItem.objects.create(
             subscription=subscription,
-            meter=self.meter,
-            included_quantity=Decimal("100"),
+            product=self.product2,
+            unit_price_cents=50,
         )
 
-        with self.assertRaises(IntegrityError):
+        with transaction.atomic(), self.assertRaises(IntegrityError):
             SubscriptionItem.objects.create(
                 subscription=subscription,
-                meter=self.meter,
-                included_quantity=Decimal("200"),
+                product=self.product2,
+                unit_price_cents=100,
             )
 
 
@@ -425,19 +401,24 @@ class BillingCycleModelTestCase(TransactionTestCase):
             status="active",
         )
 
-        self.service_plan = ServicePlan.objects.create(
+        self.product = Product.objects.create(
+            slug="basic-hosting-bc",
             name="Basic Hosting",
-            plan_type="shared_hosting",
-            price_monthly=Decimal("29.99"),
+            product_type="shared_hosting",
         )
 
+        now = timezone.now()
         self.subscription = Subscription.objects.create(
             customer=self.customer,
-            service_plan=self.service_plan,
+            product=self.product,
             currency=self.currency,
+            subscription_number="SUB-BC-TEST001",
             status="active",
-            billing_interval="monthly",
-            base_price_cents=2999,
+            billing_cycle="monthly",
+            unit_price_cents=2999,
+            current_period_start=now,
+            current_period_end=now + timedelta(days=30),
+            next_billing_date=now + timedelta(days=30),
         )
 
     def test_create_billing_cycle(self):
@@ -543,18 +524,24 @@ class UsageAggregationModelTestCase(TransactionTestCase):
             status="active",
         )
 
-        self.service_plan = ServicePlan.objects.create(
+        self.product = Product.objects.create(
+            slug="basic-agg",
             name="Basic",
-            plan_type="shared_hosting",
-            price_monthly=Decimal("29.99"),
+            product_type="shared_hosting",
         )
 
+        now = timezone.now()
         self.subscription = Subscription.objects.create(
             customer=self.customer,
-            service_plan=self.service_plan,
+            product=self.product,
             currency=self.currency,
+            subscription_number="SUB-AGG-TEST001",
             status="active",
-            billing_interval="monthly",
+            billing_cycle="monthly",
+            unit_price_cents=2999,
+            current_period_start=now,
+            current_period_end=now + timedelta(days=30),
+            next_billing_date=now + timedelta(days=30),
         )
 
         self.meter = UsageMeter.objects.create(
@@ -621,7 +608,7 @@ class UsageAggregationModelTestCase(TransactionTestCase):
             period_end=now + timedelta(days=30),
         )
 
-        with self.assertRaises(IntegrityError):
+        with transaction.atomic(), self.assertRaises(IntegrityError):
             UsageAggregation.objects.create(
                 meter=self.meter,
                 customer=self.customer,

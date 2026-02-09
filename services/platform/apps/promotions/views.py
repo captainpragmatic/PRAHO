@@ -27,7 +27,7 @@ from django.views.generic import (
     TemplateView,
     UpdateView,
 )
-from ratelimit.decorators import ratelimit
+from django_ratelimit.decorators import ratelimit  # type: ignore[import-untyped]
 
 from .models import (
     Coupon,

@@ -276,10 +276,8 @@ class APISecurityLinter:
         return "\n".join(report)
 
 
-def main() -> None:
+def main() -> int:
     """Run security linter from command line"""
-    import sys
-    
     platform_root = Path(__file__).parent.parent.parent
     api_root = platform_root / "apps" / "api"
     
@@ -293,19 +291,18 @@ def main() -> None:
     report = linter.generate_report()
     print(report)
     
-    # Exit with error code if violations found
     if linter.violations:
         critical_count = len([v for v in linter.violations if v.severity == 'CRITICAL'])
         if critical_count > 0:
             print("\n❌ CRITICAL violations found. Build should fail.")
-            sys.exit(1)
+            return 1
         else:
             print("\n⚠️ Security violations found but no critical issues.")
-            sys.exit(2)
+            return 2
     else:
         print("\n✅ No security violations detected.")
-        sys.exit(0)
+        return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

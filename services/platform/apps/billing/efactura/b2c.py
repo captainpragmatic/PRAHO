@@ -195,7 +195,7 @@ class CNPValidator:
     @classmethod
     def _calculate_check_digit(cls, cnp_12: str) -> int:
         """Calculate check digit for first 12 digits of CNP."""
-        total = sum(int(d) * w for d, w in zip(cnp_12, cls.CHECK_WEIGHTS))
+        total = sum(int(d) * w for d, w in zip(cnp_12, cls.CHECK_WEIGHTS, strict=False))
         remainder = total % 11
         return 1 if remainder == 10 else remainder
 
@@ -261,9 +261,6 @@ class B2CDetector:
         # Not B2C if not Romanian
         if bill_to_country != "RO":
             return B2CInvoiceInfo(is_b2c=False)
-
-        # This is a B2C invoice
-        is_b2c = True
 
         # Check if B2C e-Factura is enabled
         if not self._settings.b2c_enabled:

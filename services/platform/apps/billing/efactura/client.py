@@ -15,14 +15,12 @@ Reference:
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from enum import Enum
+from enum import StrEnum
 from typing import Any, ClassVar
 from urllib.parse import urlencode
 
@@ -34,7 +32,7 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
-class EFacturaEnvironment(str, Enum):
+class EFacturaEnvironment(StrEnum):
     """ANAF API environment."""
 
     TEST = "test"
@@ -64,7 +62,7 @@ class EFacturaConfig:
     retry_delay: float = 1.0
 
     @classmethod
-    def from_settings(cls) -> "EFacturaConfig":
+    def from_settings(cls) -> EFacturaConfig:
         """Create config from Django settings."""
         env_str = getattr(settings, "EFACTURA_ENVIRONMENT", "test")
         environment = EFacturaEnvironment.PRODUCTION if env_str == "production" else EFacturaEnvironment.TEST
@@ -114,7 +112,7 @@ class TokenResponse:
         return timezone.now() >= self.expires_at
 
     @classmethod
-    def from_dict(cls, data: dict) -> "TokenResponse":
+    def from_dict(cls, data: dict) -> TokenResponse:
         return cls(
             access_token=data.get("access_token", ""),
             token_type=data.get("token_type", "Bearer"),
@@ -135,7 +133,7 @@ class UploadResponse:
     raw_response: dict = field(default_factory=dict)
 
     @classmethod
-    def from_response(cls, response: requests.Response) -> "UploadResponse":
+    def from_response(cls, response: requests.Response) -> UploadResponse:
         """Parse upload response."""
         try:
             data = response.json() if response.text else {}
@@ -166,7 +164,7 @@ class UploadResponse:
             )
 
     @classmethod
-    def error(cls, message: str) -> "UploadResponse":
+    def error(cls, message: str) -> UploadResponse:
         """Create error response."""
         return cls(success=False, message=message, errors=[message])
 
@@ -193,7 +191,7 @@ class StatusResponse:
         return self.status.lower() == "nok"
 
     @classmethod
-    def from_response(cls, response: requests.Response) -> "StatusResponse":
+    def from_response(cls, response: requests.Response) -> StatusResponse:
         """Parse status response."""
         try:
             data = response.json() if response.text else {}
@@ -217,7 +215,7 @@ class StatusResponse:
         )
 
     @classmethod
-    def error(cls, message: str) -> "StatusResponse":
+    def error(cls, message: str) -> StatusResponse:
         """Create error response."""
         return cls(status="error", errors=[{"message": message}])
 
@@ -235,7 +233,7 @@ class MessageInfo:
     details: str = ""
 
     @classmethod
-    def from_dict(cls, data: dict) -> "MessageInfo":
+    def from_dict(cls, data: dict) -> MessageInfo:
         return cls(
             message_id=data.get("id", ""),
             upload_index=data.get("id_solicitare", ""),
@@ -250,31 +248,26 @@ class MessageInfo:
 class EFacturaClientError(Exception):
     """Base exception for e-Factura client errors."""
 
-    pass
 
 
 class AuthenticationError(EFacturaClientError):
     """Authentication failed."""
 
-    pass
 
 
 class NetworkError(EFacturaClientError):
     """Network communication failed."""
 
-    pass
 
 
 class ValidationError(EFacturaClientError):
     """XML validation failed."""
 
-    pass
 
 
 class RateLimitError(EFacturaClientError):
     """Rate limit exceeded."""
 
-    pass
 
 
 class EFacturaClient:
@@ -295,7 +288,7 @@ class EFacturaClient:
     """
 
     # Token cache key prefix
-    TOKEN_CACHE_KEY: ClassVar[str] = "efactura_token_{env}"
+    TOKEN_CACHE_KEY: ClassVar[str] = "efactura_token_{env}"  # noqa: S105
 
     def __init__(self, config: EFacturaConfig | None = None):
         self.config = config or EFacturaConfig.from_settings()
@@ -319,7 +312,7 @@ class EFacturaClient:
             self._session.close()
             self._session = None
 
-    def __enter__(self) -> "EFacturaClient":
+    def __enter__(self) -> EFacturaClient:
         return self
 
     def __exit__(self, *args: Any) -> None:

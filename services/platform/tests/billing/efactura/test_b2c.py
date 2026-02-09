@@ -9,7 +9,7 @@ Tests cover:
 """
 
 from datetime import date
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock
 
 from django.test import TestCase
 
@@ -29,7 +29,7 @@ class CNPValidatorTestCase(TestCase):
         """Test valid CNP for male born in 1900s."""
         # This is a valid test CNP (fictional)
         # 1 = male, 1900s; 85 01 01 = Jan 1, 1985; 12 = Cluj; 345 = serial; 6 = check
-        result = CNPValidator.validate("1850101123456")
+        CNPValidator.validate("1850101123456")
         # Note: check digit may not match, so we use a real calculation
         # For testing, let's use a simplified approach
 
@@ -121,7 +121,7 @@ class CNPValidatorTestCase(TestCase):
         """Test check digit when result is 10."""
         # When sum % 11 = 10, check digit should be 1
         # This tests the edge case in calculation
-        pass  # Would need specific CNP to trigger this
+        # Would need specific CNP to trigger this
 
     def test_format_cnp(self):
         """Test CNP formatting for display."""

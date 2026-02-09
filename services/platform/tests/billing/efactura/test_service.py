@@ -2,8 +2,7 @@
 Tests for e-Factura service.
 """
 
-from datetime import timedelta
-from unittest.mock import MagicMock, Mock, patch, PropertyMock
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
 from django.test import TestCase, override_settings
@@ -13,18 +12,16 @@ from apps.billing.efactura.client import (
     AuthenticationError,
     EFacturaClient,
     NetworkError,
-    StatusResponse,
     UploadResponse,
 )
-from apps.billing.efactura.models import EFacturaDocument, EFacturaDocumentType, EFacturaStatus
+from apps.billing.efactura.models import EFacturaDocument, EFacturaStatus
 from apps.billing.efactura.service import (
     EFacturaService,
     StatusCheckResult,
     SubmissionResult,
     submit_invoice_to_efactura,
 )
-from apps.billing.efactura.validator import ValidationResult, ValidationError as ValidatorError
-from apps.billing.efactura.xml_builder import XMLBuilderError
+from apps.billing.efactura.validator import ValidationResult
 
 
 class SubmissionResultTestCase(TestCase):
@@ -120,7 +117,7 @@ class EFacturaServiceTestCase(TestCase):
     def test_init_with_default_client(self):
         """Test service creates default client if none provided."""
         with patch("apps.billing.efactura.service.EFacturaClient") as mock_client_class:
-            service = EFacturaService()
+            EFacturaService()
             mock_client_class.assert_called_once()
 
     @override_settings(EFACTURA_ENABLED=False)

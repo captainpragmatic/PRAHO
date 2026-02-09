@@ -80,16 +80,15 @@ def _get_customer_data(customer_id: str, user_id: int) -> tuple[list[Any], str |
         profile = api_client.get_customer_profile(user_id)
         if profile and profile.get('first_name'):
             greeting_name = profile.get('first_name')
-    except Exception:
-        pass
+    except PlatformAPIError as e:
+        logger.debug(f"⚠️ [Dashboard] Failed to load profile for greeting name: {e}")
 
     if not greeting_name and customers:
-        try:
-            contact_first = customers[0].get('contact_person', {}).get('first_name')
+        contact_person = getattr(customers[0], "contact_person", None)
+        if isinstance(contact_person, DictAsObj):
+            contact_first = getattr(contact_person, "first_name", None)
             if contact_first:
                 greeting_name = contact_first
-        except Exception:
-            pass
     
     return customers, greeting_name
 
@@ -103,7 +102,8 @@ def _get_ticket_data(ticket_api: TicketAPIClient, customer_id: str, user_id: int
         recent_tickets = [DictAsObj(ticket) for ticket in raw_tickets]
         tickets_summary = ticket_api.get_tickets_summary(customer_id, user_id)
         open_tickets_count = tickets_summary.get('open_tickets', len(recent_tickets))
-    except Exception:
+    except (PlatformAPIError, KeyError, TypeError, ValueError) as e:
+        logger.debug(f"⚠️ [Dashboard] Failed to load ticket data: {e}")
         open_tickets_count = len(recent_tickets)
     
     return recent_tickets, open_tickets_count
@@ -114,7 +114,8 @@ def _get_services_data(services_api: ServicesAPIClient, customer_id: str, user_i
     try:
         services_summary = services_api.get_services_summary(customer_id, user_id)
         return services_summary.get('active_services', 0)
-    except Exception:
+    except (PlatformAPIError, KeyError, TypeError, ValueError) as e:
+        logger.debug(f"⚠️ [Dashboard] Failed to load services summary: {e}")
         return 0
 
 

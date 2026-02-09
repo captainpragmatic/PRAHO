@@ -71,12 +71,14 @@ class TestInvoiceNumberGeneration(TestCase):
 
     def test_invoice_number_current_year(self):
         """Test invoice number generation for current year"""
+        from datetime import datetime
         result = generate_invoice_number()
-        
-        # Should start with current year (2025)
-        self.assertTrue(result.startswith('2025'))
+        current_year = str(datetime.now().year)
+
+        # Should start with current year
+        self.assertTrue(result.startswith(current_year))
         # Should have the expected format: YYYY-NNNNNN
-        self.assertRegex(result, r'2025-\d{6}')
+        self.assertRegex(result, rf'{current_year}-\d{{6}}')
 
     def test_invoice_number_specific_year(self):
         """Test invoice number generation for specific year"""
@@ -88,13 +90,15 @@ class TestInvoiceNumberGeneration(TestCase):
 
     def test_invoice_number_uniqueness(self):
         """Test that invoice numbers have expected format"""
+        from datetime import datetime
+        current_year = str(datetime.now().year)
         # Generate multiple invoice numbers - they might not be unique due to implementation
         numbers = [generate_invoice_number() for _ in range(3)]
-        
+
         # All should have the current year prefix
         for number in numbers:
-            self.assertTrue(number.startswith('2025-'))
-            self.assertRegex(number, r'2025-\d{6}')
+            self.assertTrue(number.startswith(f'{current_year}-'))
+            self.assertRegex(number, rf'{current_year}-\d{{6}}')
 
 
 class TestDueDateCalculation(TestCase):

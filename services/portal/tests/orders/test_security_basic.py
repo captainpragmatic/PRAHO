@@ -7,8 +7,8 @@ import json
 import time
 from unittest.mock import patch, Mock
 
-from django.test import TestCase, Client, override_settings
-from django.contrib.sessions.backends.db import SessionStore
+from django.test import SimpleTestCase, Client, override_settings
+from django.contrib.sessions.backends.cache import SessionStore
 from django.core.cache import cache
 from django.utils import timezone
 
@@ -24,7 +24,8 @@ except ImportError:
     OrderSecurityHardening = None
 
 
-class OrderRateLimitingTestCase(TestCase):
+@override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
+class OrderRateLimitingTestCase(SimpleTestCase):
     """
     🔒 Rate Limiting Security Tests
     Tests session and IP-based rate limiting
@@ -106,7 +107,8 @@ class OrderRateLimitingTestCase(TestCase):
         )
 
 
-class OrderDoSHardeningTestCase(TestCase):
+@override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
+class OrderDoSHardeningTestCase(SimpleTestCase):
     """
     🔒 DoS Hardening Security Tests
     Tests request validation and fail-closed behavior
@@ -183,7 +185,8 @@ class OrderDoSHardeningTestCase(TestCase):
         self.assertEqual(response.status_code, 503)
 
 
-class OrderCartVersioningTestCase(TestCase):
+@override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
+class OrderCartVersioningTestCase(SimpleTestCase):
     """
     🔒 Cart Versioning Security Tests
     Tests cart version generation and stale mutation detection
@@ -243,7 +246,8 @@ class OrderCartVersioningTestCase(TestCase):
                           "Version should change after clearing cart")
 
 
-class OrderEnumerationProtectionTestCase(TestCase):
+@override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
+class OrderEnumerationProtectionTestCase(SimpleTestCase):
     """
     🔒 Enumeration Attack Protection Tests
     Tests that customer data endpoints are properly protected
@@ -295,7 +299,8 @@ class OrderEnumerationProtectionTestCase(TestCase):
                                f"GET should not be allowed on {endpoint}")
 
 
-class OrderSessionSecurityTestCase(TestCase):
+@override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
+class OrderSessionSecurityTestCase(SimpleTestCase):
     """
     🔒 Session Security Tests
     Tests CSRF protection and session isolation

@@ -11,9 +11,9 @@ Tests cover:
 """
 
 import time
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import patch
 
-from django.test import TestCase, override_settings
+from django.test import TestCase
 
 from apps.billing.efactura.metrics import (
     EFacturaMetrics,
@@ -236,9 +236,8 @@ class EFacturaMetricsContextManagersTestCase(TestCase):
 
     def test_time_submission_error(self):
         """Test time_submission context manager on error."""
-        with self.assertRaises(ValueError):
-            with self.metrics.time_submission(document_type="invoice"):
-                raise ValueError("Test error")
+        with self.assertRaises(ValueError), self.metrics.time_submission(document_type="invoice"):
+            raise ValueError("Test error")
 
     def test_time_api_request(self):
         """Test time_api_request context manager."""
@@ -248,7 +247,7 @@ class EFacturaMetricsContextManagersTestCase(TestCase):
 
     def test_time_api_request_default_status(self):
         """Test time_api_request uses default status code."""
-        with self.metrics.time_api_request(endpoint="upload") as context:
+        with self.metrics.time_api_request(endpoint="upload"):
             pass  # Don't set status_code
 
 
@@ -314,7 +313,6 @@ class MetricsWithPrometheusTestCase(TestCase):
         """Test real metrics are created when prometheus available."""
         # This is a structural test - we can't easily verify without
         # actually having prometheus_client
-        pass
 
 
 class MetricsWithoutPrometheusTestCase(TestCase):
@@ -394,10 +392,9 @@ class MetricsIntegrationTestCase(TestCase):
         metrics.record_validation("schematron", True)
 
         # Submit
-        with metrics.time_submission("invoice"):
-            with metrics.time_api_request("upload") as ctx:
-                ctx["status_code"] = 200
-                time.sleep(0.01)
+        with metrics.time_submission("invoice"), metrics.time_api_request("upload") as ctx:
+            ctx["status_code"] = 200
+            time.sleep(0.01)
 
         # Check status
         metrics.record_status_check("success", 0.3)

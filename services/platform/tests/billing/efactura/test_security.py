@@ -14,7 +14,6 @@ Test categories:
 - Error handling edge cases
 """
 
-import os
 from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import Mock, patch
@@ -22,11 +21,10 @@ from unittest.mock import Mock, patch
 from django.core.cache import cache
 from django.test import TestCase
 from django.utils import timezone
-from lxml import etree
 
 from apps.billing.efactura.b2c import B2CDetector, CNPValidator
 from apps.billing.efactura.quota import ANAFQuotaTracker, QuotaEndpoint
-from apps.billing.efactura.settings import EFacturaSettings, VATRateConfig, VATCategory
+from apps.billing.efactura.settings import EFacturaSettings, VATCategory, VATRateConfig
 from apps.billing.efactura.token_storage import OAuthToken, TokenStorageService
 from apps.billing.efactura.xsd_validator import CanonicalXMLGenerator, XSDValidator
 
@@ -349,7 +347,7 @@ class ErrorHandlingTestCase(TestCase):
 
     def test_token_storage_with_db_unavailable(self):
         """Test token storage handles DB issues gracefully."""
-        service = TokenStorageService()
+        TokenStorageService()
         # Without proper DB, should return None, not crash
         with patch.object(OAuthToken.objects, 'get_valid_token', side_effect=Exception("DB error")):
             # The service should handle this gracefully
@@ -361,7 +359,7 @@ class ErrorHandlingTestCase(TestCase):
         # Should handle cache issues gracefully
         with patch('django.core.cache.cache.get', side_effect=Exception("Cache error")):
             try:
-                usage = tracker.get_current_usage(QuotaEndpoint.STATUS, "12345678")
+                tracker.get_current_usage(QuotaEndpoint.STATUS, "12345678")
             except Exception:
                 pass  # May raise, that's acceptable behavior
 
@@ -410,10 +408,10 @@ class ConcurrencyTestCase(TestCase):
 
     def test_concurrent_token_storage(self):
         """Test concurrent token storage for same CUI."""
-        expires_at = timezone.now() + timedelta(hours=1)
+        timezone.now() + timedelta(hours=1)
 
         # Simulate concurrent creates
-        token1 = OAuthToken.store_token(
+        OAuthToken.store_token(
             cui="12345678",
             access_token="token-1",
             expires_in=3600,
@@ -453,7 +451,7 @@ class EnvironmentIsolationTestCase(TestCase):
         """Test test and production URLs are different."""
         settings = EFacturaSettings()
         with patch.object(settings, "_get_string", return_value="test"):
-            test_url = settings.api_base_url
+            settings.api_base_url
 
         with patch.object(settings, "_get_string", return_value="production"):
             # Refresh environment

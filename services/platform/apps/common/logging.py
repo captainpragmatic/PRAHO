@@ -788,8 +788,8 @@ class PerformanceProfiler:
         try:
             if hasattr(cache, "_cache"):
                 cache_stats = {"type": type(cache._cache).__name__}
-        except Exception:
-            pass
+        except (AttributeError, TypeError):
+            logger.debug("Cache backend does not expose internal cache stats")
 
         return PerformanceSnapshot(
             timestamp=datetime.now(),

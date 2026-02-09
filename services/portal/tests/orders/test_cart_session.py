@@ -5,16 +5,16 @@ Tests cart functionality, GDPR compliance, and security measures.
 
 import json
 from datetime import timedelta
-from django.test import TestCase
-from django.contrib.sessions.models import Session
-from django.contrib.sessions.backends.db import SessionStore
+from django.test import SimpleTestCase, override_settings
+from django.contrib.sessions.backends.cache import SessionStore
 from django.utils import timezone
 from unittest.mock import patch, Mock
 
 from apps.orders.services import GDPRCompliantCartSession, CartRateLimiter
 
 
-class TestGDPRCompliantCartSession(TestCase):
+@override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
+class TestGDPRCompliantCartSession(SimpleTestCase):
     """Test the GDPR-compliant cart session implementation"""
     
     def setUp(self):
@@ -189,7 +189,7 @@ class TestGDPRCompliantCartSession(TestCase):
         self.assertEqual(cart2.get_items()[0]['product_slug'], 'product2')
 
 
-class TestCartRateLimiter(TestCase):
+class TestCartRateLimiter(SimpleTestCase):
     """Test rate limiting functionality"""
     
     def test_rate_limit_allows_normal_usage(self):

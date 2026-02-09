@@ -5,15 +5,16 @@ Tests core components without complex integration.
 
 import json
 from datetime import timedelta
-from django.test import TestCase, Client
-from django.contrib.sessions.backends.db import SessionStore
+from django.test import SimpleTestCase, Client, override_settings
+from django.contrib.sessions.backends.cache import SessionStore
 from django.utils import timezone
 from unittest.mock import patch, Mock
 
 from apps.orders.services import CartRateLimiter
 
 
-class TestBasicOrderFunctionality(TestCase):
+@override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
+class TestBasicOrderFunctionality(SimpleTestCase):
     """Test basic order functionality"""
     
     def setUp(self):
@@ -117,29 +118,32 @@ class TestBasicOrderFunctionality(TestCase):
     
     def test_csrf_protection_on_post_endpoints(self):
         """Test CSRF protection is enabled for POST operations"""
-        
+
+        csrf_client = Client(enforce_csrf_checks=True)
+
         # Create authenticated session with all required fields
-        session = self.client.session
+        session = csrf_client.session
         session['customer_id'] = 123
         session['user_id'] = 456
         session['authenticated_at'] = timezone.now().isoformat()
         session.save()
         
         # Test add to cart without CSRF token
-        response = self.client.post('/order/cart/add/', {
+        response = csrf_client.post('/order/cart/add/', {
             'product_slug': 'test-product',
             'quantity': 1
         })
         self.assertEqual(response.status_code, 403)  # CSRF failure
         
         # Test create order without CSRF token
-        response = self.client.post('/order/create/', {
+        response = csrf_client.post('/order/create/', {
             'notes': 'Test order'
         })
         self.assertEqual(response.status_code, 403)  # CSRF failure
 
 
-class TestSessionCartBasics(TestCase):
+@override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
+class TestSessionCartBasics(SimpleTestCase):
     """Test session cart basic functionality without API calls"""
     
     def setUp(self):
@@ -174,7 +178,7 @@ class TestSessionCartBasics(TestCase):
         self.assertEqual(cart.get_total_quantity(), 0)
 
 
-class TestOrderInputValidation(TestCase):
+class TestOrderInputValidation(SimpleTestCase):
     """Test order input validation without API dependencies"""
     
     def test_validator_import(self):
@@ -206,7 +210,7 @@ class TestOrderInputValidation(TestCase):
             OrderInputValidator.validate_billing_period('invalid')
 
 
-class TestOrderServiceIntegration(TestCase):
+class TestOrderServiceIntegration(SimpleTestCase):
     """Test order service integration points"""
     
     def test_cart_calculation_service_import(self):

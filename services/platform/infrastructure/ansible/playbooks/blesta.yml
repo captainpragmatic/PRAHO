@@ -1,0 +1,166 @@
+# Blesta Installation Playbook
+# Installs and configures Blesta billing/hosting panel
+---
+- name: Install Blesta
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    blesta_install_dir: "/var/www/blesta"
+    blesta_web_root: "/var/www/blesta/public_html"
+    php_version: "8.2"
+    mysql_root_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+    blesta_db_name: "blesta"
+    blesta_db_user: "blesta"
+    blesta_db_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+
+  tasks:
+    # Web server setup
+    - name: Install Apache and PHP
+      ansible.builtin.apt:
+        name:
+          - "apache2"
+          - "libapache2-mod-php{{ php_version }}"
+          - "php{{ php_version }}"
+          - "php{{ php_version }}-mysql"
+          - "php{{ php_version }}-curl"
+          - "php{{ php_version }}-gd"
+          - "php{{ php_version }}-mbstring"
+          - "php{{ php_version }}-xml"
+          - "php{{ php_version }}-zip"
+          - "php{{ php_version }}-imap"
+          - "php{{ php_version }}-intl"
+          - "php{{ php_version }}-soap"
+          - "php{{ php_version }}-bcmath"
+        state: present
+        update_cache: true
+
+    - name: Enable Apache modules
+      ansible.builtin.command: "a2enmod {{ item }}"
+      loop:
+        - rewrite
+        - ssl
+        - headers
+      changed_when: true
+      notify: Restart Apache
+
+    # Database setup
+    - name: Install MariaDB
+      ansible.builtin.apt:
+        name:
+          - mariadb-server
+          - mariadb-client
+          - python3-mysqldb
+        state: present
+
+    - name: Start MariaDB
+      ansible.builtin.service:
+        name: mariadb
+        state: started
+        enabled: true
+
+    - name: Create Blesta database
+      community.mysql.mysql_db:
+        name: "{{ blesta_db_name }}"
+        state: present
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+
+    - name: Create Blesta database user
+      community.mysql.mysql_user:
+        name: "{{ blesta_db_user }}"
+        password: "{{ blesta_db_password }}"
+        priv: "{{ blesta_db_name }}.*:ALL"
+        state: present
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+
+    # Blesta installation directory
+    - name: Create Blesta directory
+      ansible.builtin.file:
+        path: "{{ blesta_install_dir }}"
+        state: directory
+        owner: www-data
+        group: www-data
+        mode: '0755'
+
+    # Apache virtual host configuration
+    - name: Configure Apache virtual host for Blesta
+      ansible.builtin.copy:
+        content: |
+          <VirtualHost *:80>
+              ServerName {{ inventory_hostname }}
+              DocumentRoot {{ blesta_web_root }}
+
+              <Directory {{ blesta_web_root }}>
+                  Options -Indexes +FollowSymLinks
+                  AllowOverride All
+                  Require all granted
+              </Directory>
+
+              ErrorLog ${APACHE_LOG_DIR}/blesta_error.log
+              CustomLog ${APACHE_LOG_DIR}/blesta_access.log combined
+          </VirtualHost>
+        dest: /etc/apache2/sites-available/blesta.conf
+        mode: '0644'
+      notify: Restart Apache
+
+    - name: Enable Blesta site
+      ansible.builtin.command: a2ensite blesta
+      changed_when: true
+      notify: Restart Apache
+
+    - name: Disable default site
+      ansible.builtin.command: a2dissite 000-default
+      changed_when: true
+      notify: Restart Apache
+
+    # PHP configuration
+    - name: Configure PHP for Blesta
+      ansible.builtin.lineinfile:
+        path: "/etc/php/{{ php_version }}/apache2/php.ini"
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+      loop:
+        - { regexp: '^max_execution_time', line: 'max_execution_time = 600' }
+        - { regexp: '^max_input_time', line: 'max_input_time = 600' }
+        - { regexp: '^memory_limit', line: 'memory_limit = 256M' }
+        - { regexp: '^upload_max_filesize', line: 'upload_max_filesize = 64M' }
+        - { regexp: '^post_max_size', line: 'post_max_size = 64M' }
+      notify: Restart Apache
+
+    # Blesta cron job
+    - name: Configure Blesta cron job
+      ansible.builtin.cron:
+        name: "Blesta cron"
+        minute: "*/5"
+        job: "php {{ blesta_install_dir }}/index.php cron > /dev/null 2>&1"
+        user: www-data
+
+    # Save credentials
+    - name: Save Blesta database credentials
+      ansible.builtin.copy:
+        content: |
+          BLESTA_DB_HOST=localhost
+          BLESTA_DB_NAME={{ blesta_db_name }}
+          BLESTA_DB_USER={{ blesta_db_user }}
+          BLESTA_DB_PASS={{ blesta_db_password }}
+          BLESTA_INSTALL_DIR={{ blesta_install_dir }}
+          CONFIG_DATE={{ ansible_date_time.iso8601 }}
+        dest: /etc/praho-blesta-config
+        mode: '0600'
+
+    - name: Create Blesta installation marker
+      ansible.builtin.copy:
+        content: |
+          PRAHO_PANEL=blesta
+          PRAHO_PANEL_CONFIGURED=true
+          PANEL_URL=https://{{ inventory_hostname }}
+          CONFIG_DATE={{ ansible_date_time.iso8601 }}
+        dest: /etc/praho-panel-config
+        mode: '0644'
+
+  handlers:
+    - name: Restart Apache
+      ansible.builtin.service:
+        name: apache2
+        state: restarted

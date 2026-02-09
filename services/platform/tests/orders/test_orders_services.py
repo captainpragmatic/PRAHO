@@ -106,7 +106,9 @@ class OrderNumberingServiceTestCase(TestCase):
         order_number = OrderNumberingService.generate_order_number(self.customer)
         
         # Should follow format: ORD-YYYY-CUSTOMER_ID_PREFIX-XXXX
-        self.assertTrue(order_number.startswith("ORD-2025-"))
+        from datetime import datetime
+        current_year = str(datetime.now().year)
+        self.assertTrue(order_number.startswith(f"ORD-{current_year}-"))
         self.assertTrue(order_number.endswith("-0001"))
         self.assertIn(str(self.customer.pk).replace('-', '')[:8].upper(), order_number)
 

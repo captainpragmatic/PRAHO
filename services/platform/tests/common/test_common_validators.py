@@ -376,13 +376,13 @@ class TestRomanianVATCalculations(TestCase):
     """Test Romanian VAT calculations"""
 
     def test_standard_vat_calculation(self):
-        """Test standard 19% VAT calculation"""
+        """Test standard 21% VAT calculation"""
         amount = Decimal('100.00')
         result = calculate_romanian_vat(amount)
 
         self.assertIsInstance(result, dict)
         self.assertEqual(result['amount_with_vat'], Decimal('100.00'))
-        self.assertEqual(result['vat_rate'], 19)
+        self.assertEqual(result['vat_rate'], 21)
         # The function assumes the amount includes VAT and calculates backwards
         self.assertIn('amount_without_vat', result)
         self.assertIn('vat_amount', result)

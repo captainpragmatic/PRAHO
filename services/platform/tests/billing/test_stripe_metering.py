@@ -9,32 +9,30 @@ and StripeMeterWebhookHandler with mocked Stripe API.
 
 from __future__ import annotations
 
-import uuid
-from decimal import Decimal
 from datetime import timedelta
-from unittest.mock import patch, MagicMock, PropertyMock
+from decimal import Decimal
+from unittest.mock import MagicMock, patch
 
 from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
 from apps.billing.models import (
-    Currency,
-    UsageMeter,
-    UsageEvent,
-    UsageAggregation,
-    Subscription,
-    SubscriptionItem,
     BillingCycle,
+    Currency,
+    Subscription,
+    UsageAggregation,
+    UsageMeter,
 )
 from apps.billing.stripe_metering import (
-    StripeMeterService,
     StripeMeterEventService,
+    StripeMeterService,
+    StripeMeterWebhookHandler,
     StripeSubscriptionMeterService,
     StripeUsageSyncService,
-    StripeMeterWebhookHandler,
 )
+from apps.customers.contact_models import CustomerPaymentMethod
 from apps.customers.models import Customer
-from apps.provisioning.models import ServicePlan
+from apps.products.models import Product
 
 
 class StripeMeterServiceTestCase(TestCase):
@@ -234,7 +232,7 @@ class StripeMeterEventServiceTestCase(TestCase):
             },
         ]
 
-        success, errors, error_messages = service.report_bulk_usage(events)
+        success, errors, _error_messages = service.report_bulk_usage(events)
 
         self.assertEqual(success, 2)
         self.assertEqual(errors, 1)
@@ -255,6 +253,15 @@ class StripeUsageSyncServiceTestCase(TransactionTestCase):
             status="active",
         )
 
+        # Set up payment method with Stripe customer ID for sync tests
+        CustomerPaymentMethod.objects.create(
+            customer=self.customer,
+            method_type="stripe_card",
+            stripe_customer_id="cus_test123",
+            display_name="Test Card",
+            is_active=True,
+        )
+
         self.meter = UsageMeter.objects.create(
             name="bandwidth",
             display_name="Bandwidth",
@@ -264,19 +271,25 @@ class StripeUsageSyncServiceTestCase(TransactionTestCase):
             stripe_meter_event_name="bandwidth_usage",
         )
 
-        self.service_plan = ServicePlan.objects.create(
+        self.product = Product.objects.create(
+            slug="basic-stripe-sync",
             name="Basic",
-            plan_type="shared_hosting",
-            price_monthly=Decimal("29.99"),
+            product_type="shared_hosting",
         )
 
+        now = timezone.now()
         self.subscription = Subscription.objects.create(
             customer=self.customer,
-            service_plan=self.service_plan,
+            product=self.product,
             currency=self.currency,
+            subscription_number="SUB-STRIPESYNC-001",
             status="active",
-            billing_interval="monthly",
-            stripe_customer_id="cus_test123",
+            billing_cycle="monthly",
+            unit_price_cents=2999,
+            current_period_start=now,
+            current_period_end=now + timedelta(days=30),
+            next_billing_date=now + timedelta(days=30),
+            stripe_subscription_id="sub_test123",
         )
 
         now = timezone.now()

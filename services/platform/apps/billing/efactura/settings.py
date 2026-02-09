@@ -19,16 +19,15 @@ import zoneinfo
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from functools import cached_property
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 from django.conf import settings as django_settings
-from django.core.cache import cache
 from django.utils import timezone
 
 if TYPE_CHECKING:
-    from zoneinfo import ZoneInfo
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +78,7 @@ UNIT_CODES = {
 ROMANIA_TIMEZONE = zoneinfo.ZoneInfo("Europe/Bucharest")
 
 
-class VATCategory(str, Enum):
+class VATCategory(StrEnum):
     """VAT category codes per UNCL5305."""
 
     STANDARD = "S"          # Standard rate
@@ -95,7 +94,7 @@ class VATCategory(str, Enum):
         return [(c.value, c.name.replace("_", " ").title()) for c in cls]
 
 
-class EFacturaEnvironment(str, Enum):
+class EFacturaEnvironment(StrEnum):
     """ANAF API environments."""
 
     TEST = "test"
@@ -127,7 +126,7 @@ class EFacturaSettingKeys:
 
     # OAuth2 credentials
     CLIENT_ID = "efactura.oauth.client_id"
-    CLIENT_SECRET = "efactura.oauth.client_secret"
+    CLIENT_SECRET = "efactura.oauth.client_secret"  # noqa: S105
     REDIRECT_URI = "efactura.oauth.redirect_uri"
 
     # Company information

@@ -125,6 +125,9 @@ class OrderSecurityHardening:
         # Check for suspiciously long individual field values
         if hasattr(request, 'POST'):
             for field_name, field_value in request.POST.items():
+                if field_name == 'config':
+                    # Large JSON config blobs are handled by total request-size validation (413).
+                    continue
                 if isinstance(field_value, str) and len(field_value) > 10000:  # 10KB per field
                     logger.warning(f"🚨 [Security] Oversized field blocked: {field_name} ({len(field_value)} chars)")
                     

@@ -421,7 +421,7 @@ def _handle_ticket_reply_post(request: HttpRequest, ticket: Ticket) -> HttpRespo
         author_name=user.get_full_name(),
         author_email=user.email,
         is_public=is_public,
-        reply_action=reply_data.reply_action if user.is_staff_user else None,  # Only staff get reply actions
+        reply_action=reply_data.reply_action if user.is_staff_user else "",  # Only staff get reply actions
         sets_waiting_on_customer=(reply_data.reply_action == "reply_and_wait"),
     )
 

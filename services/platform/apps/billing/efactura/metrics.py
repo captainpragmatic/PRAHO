@@ -15,10 +15,11 @@ from __future__ import annotations
 import functools
 import logging
 import time
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, Callable, Generator
+from typing import TYPE_CHECKING, Any
 
-from .settings import efactura_settings
+from .settings import CIUS_RO_VERSION, efactura_settings
 
 if TYPE_CHECKING:
     pass
@@ -38,7 +39,7 @@ except ImportError:
 class NoOpMetric:
     """No-op metric for when prometheus_client is not installed."""
 
-    def labels(self, *args: Any, **kwargs: Any) -> "NoOpMetric":
+    def labels(self, *args: Any, **kwargs: Any) -> NoOpMetric:
         return self
 
     def inc(self, amount: float = 1) -> None:
@@ -65,7 +66,7 @@ def _create_counter(name: str, description: str, labels: list[str]) -> Any:
     return NoOpMetric()
 
 
-def _create_histogram(name: str, description: str, labels: list[str], buckets: tuple = None) -> Any:
+def _create_histogram(name: str, description: str, labels: list[str], buckets: tuple | None = None) -> Any:
     """Create a Prometheus histogram or no-op."""
     if PROMETHEUS_AVAILABLE and efactura_settings.metrics_enabled:
         prefix = efactura_settings.metrics_prefix
@@ -144,7 +145,7 @@ class EFacturaMetrics:
         self.validations_total = _create_counter(
             "validations_total",
             "Total number of XML validations",
-            ["type", "result"],  # type: xsd, schematron, cius-ro
+            ["type", "result"],  # values: xsd, schematron, cius-ro
         )
 
         self.validation_errors_total = _create_counter(
@@ -256,8 +257,6 @@ class EFacturaMetrics:
 
     def set_info(self) -> None:
         """Set info metric with current configuration."""
-        from .settings import CIUS_RO_VERSION
-
         self.info.info({
             "cius_ro_version": CIUS_RO_VERSION,
             "environment": efactura_settings.environment.value,

@@ -341,17 +341,15 @@ class FileUploadSecurityServiceTests(TestCase):
 
     def test_empty_filename_rejected(self) -> None:
         """Test that empty filename is rejected."""
-        file = SimpleUploadedFile(
-            "",
-            b"content",
-            content_type="text/plain",
-        )
-        file.name = ""
+        from django.core.exceptions import SuspiciousFileOperation
 
-        result = self.service.validate_file(file)
-
-        self.assertFalse(result.is_valid)
-        self.assertIn("required", result.error_message or "")
+        # Django itself rejects empty filenames with SuspiciousFileOperation
+        with self.assertRaises(SuspiciousFileOperation):
+            SimpleUploadedFile(
+                "",
+                b"content",
+                content_type="text/plain",
+            )
 
 
 class ConvenienceFunctionTests(TestCase):

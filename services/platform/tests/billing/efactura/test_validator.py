@@ -254,8 +254,8 @@ class CIUSROValidatorTestCase(TestCase):
     def test_validate_customization_id_warning(self):
         """Test that incorrect CustomizationID generates warning."""
         xml = self._get_minimal_valid_xml().replace(
-            CIUS_RO_CUSTOMIZATION_ID := "urn:cen.eu:en16931:2017#compliant#urn:efactura.mfinante.ro:CIUS-RO:1.0.1",
-            "urn:wrong:customization"
+            "urn:cen.eu:en16931:2017#compliant#urn:efactura.mfinante.ro:CIUS-RO:1.0.1",
+            "urn:wrong:customization",
         )
         result = self.validator.validate(xml)
 

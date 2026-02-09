@@ -2,15 +2,15 @@
 Tests for e-Factura async tasks.
 """
 
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
-from django.test import TestCase, override_settings
-from django.utils import timezone
+from django.test import TestCase
 
 from apps.billing.efactura.models import EFacturaDocument, EFacturaStatus
-from apps.billing.efactura.service import SubmissionResult, StatusCheckResult
+from apps.billing.efactura.service import StatusCheckResult, SubmissionResult
 from apps.billing.efactura.tasks import (
+    TASK_TIMEOUT,
     check_efactura_deadlines_task,
     download_efactura_response_task,
     poll_all_pending_status_task,
@@ -21,7 +21,6 @@ from apps.billing.efactura.tasks import (
     queue_status_poll,
     schedule_efactura_tasks,
     submit_efactura_task,
-    TASK_TIMEOUT,
 )
 
 

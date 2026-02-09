@@ -15,11 +15,12 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date, timedelta
-from enum import Enum
+from datetime import timedelta
+from enum import StrEnum
 from functools import wraps
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from django.core.cache import cache
 from django.utils import timezone
@@ -32,7 +33,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class QuotaEndpoint(str, Enum):
+class QuotaEndpoint(StrEnum):
     """ANAF API endpoints with quotas."""
 
     UPLOAD = "upload"

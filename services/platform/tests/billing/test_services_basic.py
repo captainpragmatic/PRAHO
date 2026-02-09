@@ -7,7 +7,6 @@ from __future__ import annotations
 import uuid
 from unittest.mock import Mock, patch
 
-import unittest
 from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
@@ -24,9 +23,9 @@ from apps.billing.services import (
     RefundStatus,
     RefundType,
 )
+from apps.common.types import Err
 from apps.customers.models import Customer
 from apps.users.models import User
-from apps.common.types import Ok, Err
 
 
 class RefundServiceComprehensiveTestCase(TestCase):
@@ -114,7 +113,6 @@ class RefundServiceComprehensiveTestCase(TestCase):
     @patch('apps.orders.models.Order.objects.select_related')
     def test_refund_order_not_eligible(self, mock_select_related: Mock, mock_validate: Mock) -> None:
         """Test refund_order when order is not eligible for refund"""
-        from apps.common.types import Err
         
         mock_order = Mock()
         mock_order.id = uuid.uuid4()

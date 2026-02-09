@@ -202,34 +202,34 @@ class CrossServiceHMACIntegrationTestCase(SimpleTestCase):
             PLATFORM_API_SECRET="integration-test-hmac-secret-key-2024",
             PORTAL_ID="portal-integration-test",
             PLATFORM_API_BASE_URL="http://localhost:8000"
-        ):
-            def make_authenticated_request(request_id: int) -> Dict[str, Any]:
+        ), patch('requests.request') as mock_request:
+            # Single shared mock avoids per-thread patching races.
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                'success': True,
+                'user': {'id': 0, 'email': 'user@example.com'},
+                'authenticated': True
+            }
+            mock_request.return_value = mock_response
+
+            def make_authenticated_request(request_id: int) -> None:
                 """Make a single authenticated request"""
                 client = PlatformAPIClient()
-
-                with patch('requests.request') as mock_request:
-                    mock_response = Mock()
-                    mock_response.status_code = 200
-                    mock_response.json.return_value = {
-                        'success': True,
-                        'user': {'id': request_id, 'email': f'user{request_id}@example.com'},
-                        'authenticated': True
-                    }
-                    mock_request.return_value = mock_response
-
-                    client.authenticate_customer(f'user{request_id}@example.com', 'password123')
-
-                    # Return the headers used
-                    call_args = mock_request.call_args
-                    return call_args.kwargs['headers'] if call_args else {}
+                client.authenticate_customer(f'user{request_id}@example.com', 'password123')
 
             # Make 10 concurrent requests
             with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                 futures = [executor.submit(make_authenticated_request, i) for i in range(10)]
-                headers_list = [future.result() for future in concurrent.futures.as_completed(futures)]
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()  # propagate any exceptions
 
-            # Extract nonces from all requests
-            nonces = [headers.get('X-Nonce') for headers in headers_list if headers.get('X-Nonce')]
+            # Extract nonces from ALL recorded calls
+            nonces = [
+                call.kwargs['headers'].get('X-Nonce')
+                for call in mock_request.call_args_list
+                if call.kwargs.get('headers', {}).get('X-Nonce')
+            ]
 
             # All nonces should be unique
             self.assertEqual(len(nonces), len(set(nonces)), "Nonces should be unique across concurrent requests")

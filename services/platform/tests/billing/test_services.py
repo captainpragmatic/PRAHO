@@ -15,8 +15,6 @@ Priority Areas from Coverage Analysis:
 
 from __future__ import annotations
 
-import pytest
-import unittest
 import uuid
 from typing import Any
 from unittest.mock import Mock, patch
@@ -34,7 +32,6 @@ from apps.billing.services import (
     RefundService,
     RefundType,
 )
-
 from apps.common.types import Err, Ok
 from apps.customers.models import Customer
 from apps.users.models import CustomerMembership, User
@@ -108,8 +105,8 @@ class RefundServiceComprehensiveCoverageTestCase(TransactionTestCase):
 
     def _create_test_order(self) -> Any:
         """Create a real order for testing."""
-        from apps.orders.models import Order
         from apps.billing.models import Currency
+        from apps.orders.models import Order
         
         # Get or create RON currency
         currency, _ = Currency.objects.get_or_create(

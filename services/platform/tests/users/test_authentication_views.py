@@ -266,18 +266,18 @@ class LoginViewTest(BaseViewTestCase):
     def test_login_ip_tracking(self, mock_get_ip: Mock) -> None:
         """Test IP address tracking during login"""
         mock_get_ip.return_value = '192.168.1.1'
-        
+
         self.client.post(reverse('users:login'), {
-            'email': 'test@example.com',
-            'password': 'testpass123'
+            'email': 'staff@example.com',
+            'password': 'staffpass123'
         })
-        
+
         # Check IP was saved
-        self.user.refresh_from_db()
-        self.assertEqual(self.user.last_login_ip, '192.168.1.1')
-        
+        self.staff_user.refresh_from_db()
+        self.assertEqual(self.staff_user.last_login_ip, '192.168.1.1')
+
         # Check login log has IP
-        login_log = UserLoginLog.objects.filter(user=self.user, status='success').first()
+        login_log = UserLoginLog.objects.filter(user=self.staff_user, status='success').first()
         self.assertEqual(login_log.ip_address, '192.168.1.1')
 
 

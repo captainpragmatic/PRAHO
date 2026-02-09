@@ -26,6 +26,7 @@ from apps.infrastructure.provider_config import (
     get_provider_config,
     map_terraform_outputs_to_deployment,
     run_provider_command,
+    validate_provider_prerequisites,
 )
 from apps.infrastructure.registration_service import get_registration_service
 from apps.infrastructure.ssh_key_manager import get_ssh_key_manager
@@ -91,7 +92,7 @@ class NodeDeploymentService:
         "terraform_apply": (30, "Provisioning infrastructure"),
         "update_deployment": (50, "Updating deployment records"),
         "ansible_base": (55, "Running base configuration"),
-        "ansible_virtualmin": (65, "Installing Virtualmin"),
+        "ansible_panel": (65, "Installing control panel"),
         "ansible_harden": (75, "Hardening server"),
         "ansible_backup": (80, "Configuring backups"),
         "validation": (85, "Validating node"),
@@ -164,6 +165,16 @@ class NodeDeploymentService:
             # Check if deployment is enabled
             if not SettingsService.get_setting("node_deployment.enabled", True):
                 return Err("Node deployment is disabled in settings")
+
+            # Validate provider prerequisites (CLI tools, Terraform, modules)
+            provider_type = deployment.provider.provider_type
+            prereq_result = validate_provider_prerequisites(provider_type)
+            if prereq_result.is_err():
+                self._mark_failed(
+                    deployment,
+                    f"Provider prerequisites check failed: {prereq_result.unwrap_err()}",
+                )
+                return Err(f"Provider prerequisites check failed: {prereq_result.unwrap_err()}")
 
             # Transition to provisioning
             if not deployment.transition_to("provisioning_node"):
@@ -274,13 +285,14 @@ class NodeDeploymentService:
             deployment.transition_to("running_ansible")
             deployment.save()
 
-            # Stage 7-10: Run Ansible playbooks
-            ansible_playbooks = [
-                ("ansible_base", "common_base.yml"),
-                ("ansible_virtualmin", "virtualmin.yml"),
-                ("ansible_harden", "virtualmin_harden.yml"),
-                ("ansible_backup", "virtualmin_backup.yml"),
-            ]
+            # Stage 7-10: Run Ansible playbooks (panel-aware)
+            panel_type = "virtualmin"
+            if hasattr(deployment, "panel_type") and deployment.panel_type:
+                panel_type = deployment.panel_type.panel_type if hasattr(deployment.panel_type, "panel_type") else str(deployment.panel_type)
+
+            playbook_names = self._ansible.get_playbook_order(panel_type)
+            stage_keys = ["ansible_base", "ansible_panel", "ansible_harden", "ansible_backup"]
+            ansible_playbooks = list(zip(stage_keys, playbook_names))
 
             for stage_name, playbook in ansible_playbooks:
                 report_progress(stage_name)

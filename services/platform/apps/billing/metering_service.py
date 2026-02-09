@@ -15,11 +15,11 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from decimal import Decimal, ROUND_UP, ROUND_DOWN, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation
 from typing import Any, TypeVar
 
 from django.db import transaction
-from django.db.models import Sum, Max, Count, F, Q
+from django.db.models import F, Q
 from django.utils import timezone
 
 from apps.audit.services import AuditService
@@ -33,6 +33,81 @@ T = TypeVar("T")
 E = TypeVar("E")
 
 
+def _parse_decimal(value: Any) -> Decimal:
+    if value is None or value == "":
+        return Decimal("0")
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return Decimal("0")
+
+
+def _get_subscription_item_for_meter(subscription: Any, meter: Any) -> Any | None:
+    if not subscription or not meter:
+        return None
+
+    from .subscription_models import SubscriptionItem
+
+    items = SubscriptionItem.objects.filter(
+        subscription=subscription,
+        product__is_active=True
+    )
+    if not items.exists():
+        return None
+
+    active_items = items.filter(meta__is_active=True)
+    if active_items.exists():
+        items = active_items
+
+    meter_id = str(meter.id)
+    candidates = items.filter(
+        Q(meta__meter_id=meter_id)
+        | Q(meta__meter_name=meter.name)
+        | Q(product__meta__meter_id=meter_id)
+        | Q(product__meta__meter_name=meter.name)
+        | Q(product__slug=meter.name)
+        | Q(product__name=meter.display_name)
+    )
+
+    return candidates.first() or items.first()
+
+
+def _get_allowance_from_subscription_item(sub_item: Any | None) -> Decimal:
+    if not sub_item:
+        return Decimal("0")
+
+    meta = sub_item.meta or {}
+    for key in ("included_quantity", "included_allowance", "allowance", "included"):
+        if key in meta:
+            return _parse_decimal(meta.get(key))
+
+    product_meta = getattr(sub_item.product, "meta", None) or {}
+    for key in ("included_quantity", "included_allowance", "allowance", "included"):
+        if key in product_meta:
+            return _parse_decimal(product_meta.get(key))
+
+    return Decimal("0")
+
+
+def _get_allowance_from_service_plan(meter: Any, service_plan: Any | None) -> Decimal:
+    if not service_plan or not meter:
+        return Decimal("0")
+
+    category = meter.category
+    if category == "storage" and service_plan.disk_space_gb:
+        return _parse_decimal(service_plan.disk_space_gb)
+    if category == "bandwidth" and service_plan.bandwidth_gb:
+        return _parse_decimal(service_plan.bandwidth_gb)
+    if category == "email" and service_plan.email_accounts:
+        return _parse_decimal(service_plan.email_accounts)
+    if category == "database" and service_plan.databases:
+        return _parse_decimal(service_plan.databases)
+    if category == "domain" and service_plan.domains:
+        return _parse_decimal(service_plan.domains)
+
+    return Decimal("0")
+
+
 @dataclass
 class Result:
     """Result pattern for operations that can fail"""
@@ -40,11 +115,11 @@ class Result:
     _error: str | None
 
     @classmethod
-    def ok(cls, value: Any) -> "Result":
+    def ok(cls, value: Any) -> Result:
         return cls(_value=value, _error=None)
 
     @classmethod
-    def err(cls, error: str) -> "Result":
+    def err(cls, error: str) -> Result:
         return cls(_value=None, _error=error)
 
     def is_ok(self) -> bool:
@@ -142,7 +217,7 @@ class MeteringService:
             service = None
 
             if event_data.subscription_id:
-                from .metering_models import Subscription
+                from .subscription_models import Subscription
                 try:
                     subscription = Subscription.objects.get(id=event_data.subscription_id)
                 except Subscription.DoesNotExist:
@@ -254,7 +329,8 @@ class MeteringService:
     def _update_aggregation_sync(self, event: Any) -> None:
         """Synchronously update aggregation for an event"""
         try:
-            from .metering_models import UsageAggregation, BillingCycle, Subscription
+            from .metering_models import UsageAggregation
+            from .subscription_models import Subscription
 
             # Find the billing cycle for this event
             subscription = event.subscription
@@ -281,7 +357,7 @@ class MeteringService:
                 return
 
             # Get or create aggregation
-            aggregation, created = UsageAggregation.objects.get_or_create(
+            aggregation, _created = UsageAggregation.objects.get_or_create(
                 meter=event.meter,
                 customer=event.customer,
                 billing_cycle=billing_cycle,
@@ -455,7 +531,7 @@ class AggregationService:
         """
         Get a summary of customer usage for a period.
         """
-        from .metering_models import UsageAggregation, UsageMeter
+        from .metering_models import UsageAggregation
 
         query = UsageAggregation.objects.filter(customer_id=customer_id)
 
@@ -508,7 +584,7 @@ class RatingEngine:
         """
         Calculate charges for a usage aggregation.
         """
-        from .metering_models import UsageAggregation, SubscriptionItem, PricingTier
+        from .metering_models import PricingTier, UsageAggregation
 
         try:
             aggregation = UsageAggregation.objects.select_related(
@@ -531,16 +607,16 @@ class RatingEngine:
         unit_price_cents = None
 
         if subscription:
-            sub_item = SubscriptionItem.objects.filter(
-                subscription=subscription,
-                meter=meter,
-                is_active=True
-            ).first()
+            sub_item = _get_subscription_item_for_meter(subscription, meter)
 
             if sub_item:
-                included_quantity = sub_item.included_quantity
-                pricing_tier = sub_item.pricing_tier
-                unit_price_cents = sub_item.unit_price_cents
+                included_quantity = _get_allowance_from_subscription_item(sub_item)
+                pricing_tier = None
+                unit_price_cents = sub_item.effective_price_cents
+
+            service_plan = getattr(subscription.product, "default_service_plan", None)
+            if included_quantity <= 0:
+                included_quantity = _get_allowance_from_service_plan(meter, service_plan)
 
         # Calculate billable value after rounding
         billable_value = self._apply_rounding(
@@ -778,11 +854,13 @@ class UsageAlertService:
 
         Returns list of created alerts.
         """
-        from .metering_models import (
-            UsageThreshold, UsageAlert, UsageAggregation,
-            Subscription, SubscriptionItem
-        )
         from apps.customers.models import Customer
+
+        from .metering_models import (
+            UsageAggregation,
+            UsageAlert,
+            UsageThreshold,
+        )
 
         try:
             customer = Customer.objects.get(id=customer_id)
@@ -809,22 +887,29 @@ class UsageAlertService:
         subscription = aggregation.subscription
 
         if subscription:
-            sub_item = SubscriptionItem.objects.filter(
-                subscription=subscription,
-                meter_id=meter_id,
-                is_active=True
-            ).first()
-            if sub_item:
-                allowance = sub_item.included_quantity
+            sub_item = _get_subscription_item_for_meter(subscription, aggregation.meter)
+            allowance = _get_allowance_from_subscription_item(sub_item)
+
+        if allowance <= 0:
+            allowance = _parse_decimal(aggregation.included_allowance)
+
+        service_plan = None
+        if subscription:
+            service_plan = getattr(subscription.product, "default_service_plan", None)
+            if allowance <= 0:
+                allowance = _get_allowance_from_service_plan(aggregation.meter, service_plan)
 
         # Get applicable thresholds
         thresholds = UsageThreshold.objects.filter(
             meter_id=meter_id,
             is_active=True
-        ).filter(
-            Q(service_plan__isnull=True) |
-            Q(service_plan=subscription.service_plan if subscription else None)
         )
+        if service_plan:
+            thresholds = thresholds.filter(
+                Q(service_plan__isnull=True) | Q(service_plan=service_plan)
+            )
+        else:
+            thresholds = thresholds.filter(Q(service_plan__isnull=True))
 
         created_alerts = []
 

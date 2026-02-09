@@ -3,7 +3,7 @@ Tests for ANAF e-Factura API client.
 """
 
 from datetime import timedelta
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 
 from django.test import TestCase, override_settings
 from django.utils import timezone
@@ -11,7 +11,6 @@ from django.utils import timezone
 from apps.billing.efactura.client import (
     AuthenticationError,
     EFacturaClient,
-    EFacturaClientError,
     EFacturaConfig,
     EFacturaEnvironment,
     MessageInfo,

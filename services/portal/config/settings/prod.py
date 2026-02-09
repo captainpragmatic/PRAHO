@@ -3,6 +3,7 @@ Production settings for PRAHO Portal Service
 """
 
 import os
+from urllib.parse import urlsplit
 
 from .base import *  # noqa: F403
 
@@ -23,8 +24,17 @@ if not SECRET_KEY:
 ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "portal.pragmatichost.com").split(",")
 
 # Platform API configuration
-PLATFORM_API_BASE_URL = os.environ.get("PLATFORM_API_BASE_URL", "http://platform:8700/api")
+PLATFORM_API_BASE_URL = os.environ.get("PLATFORM_API_BASE_URL", "https://platform:8700/api")
 PLATFORM_API_SECRET = os.environ.get("PLATFORM_API_SECRET")
+# Escape hatch for controlled environments; keep secure-by-default behavior.
+PLATFORM_API_ALLOW_INSECURE_HTTP = os.environ.get("PLATFORM_API_ALLOW_INSECURE_HTTP", "False").lower() in {
+    "1", "true", "yes"
+}
+if not PLATFORM_API_ALLOW_INSECURE_HTTP and urlsplit(PLATFORM_API_BASE_URL).scheme.lower() != "https":
+    raise ValueError(
+        "SECURITY ERROR: PLATFORM_API_BASE_URL must use HTTPS in production. "
+        "Set PLATFORM_API_ALLOW_INSECURE_HTTP=true only for controlled internal environments."
+    )
 if not PLATFORM_API_SECRET:
     raise ValueError(
         "SECURITY ERROR: PLATFORM_API_SECRET must be set in production.\n"
