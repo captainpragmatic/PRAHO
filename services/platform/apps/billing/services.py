@@ -137,20 +137,12 @@ class InvoiceService:
                         # Another process created it - get it with lock
                         sequence = InvoiceSequence.objects.select_for_update().get(scope="default")
 
-<<<<<<< HEAD
-            # Calculate totals using current Romanian VAT rate (21%)
-            from apps.common.tax_service import TaxService
-            vat_rate = TaxService.get_vat_rate('RO', as_decimal=True)
-            subtotal_amount = Decimal(order.total_cents) / 100
-            tax_amount = subtotal_amount * vat_rate
-            total_amount = subtotal_amount + tax_amount
-=======
-                # Calculate totals (assuming 19% VAT for Romania)
-                vat_rate = Decimal("0.19")
+                # Calculate totals using current Romanian VAT rate
+                from apps.common.tax_service import TaxService
+                vat_rate = TaxService.get_vat_rate('RO', as_decimal=True)
                 subtotal_amount = Decimal(order.total_cents) / 100
                 tax_amount = subtotal_amount * vat_rate
                 total_amount = subtotal_amount + tax_amount
->>>>>>> origin/claude/fix-race-conditions-yreZe
 
                 # Create invoice - all within the same atomic block to ensure consistency
                 invoice = Invoice.objects.create(

@@ -111,7 +111,6 @@ class Payment(models.Model):
     def amount(self) -> Decimal:
         return Decimal(self.amount_cents) / 100
 
-<<<<<<< HEAD
     @property
     def stripe_payment_intent_id(self) -> str | None:
         """Get Stripe PaymentIntent ID from meta or gateway_txn_id"""
@@ -156,7 +155,7 @@ class Payment(models.Model):
     def is_stripe_payment(self) -> bool:
         """Check if this is a Stripe payment"""
         return self.payment_method == 'stripe'
-=======
+
     @classmethod
     def generate_idempotency_key(cls, prefix: str = "pay") -> str:
         """Generate a unique idempotency key."""
@@ -178,7 +177,6 @@ class Payment(models.Model):
             return cls.objects.get(idempotency_key=key)
         except cls.DoesNotExist:
             return None
->>>>>>> origin/claude/audit-billing-system-HEGuY
 
 
 class CreditLedger(models.Model):

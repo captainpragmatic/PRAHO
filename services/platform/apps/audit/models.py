@@ -351,7 +351,6 @@ class AuditEvent(models.Model):
         ("bulk_operation_started", "Bulk Operation Started"),
         ("bulk_operation_completed", "Bulk Operation Completed"),
         # ======================================================================
-<<<<<<< HEAD
         # INFRASTRUCTURE & NODE DEPLOYMENT EVENTS
         # ======================================================================
         ("node_deployment_created", "Node Deployment Created"),
@@ -375,7 +374,7 @@ class AuditEvent(models.Model):
         ("node_region_toggled", "Node Region Toggled"),
         ("infrastructure_ssh_key_generated", "SSH Key Generated"),
         ("infrastructure_ssh_key_revoked", "SSH Key Revoked"),
-=======
+        # ======================================================================
         # PROMOTIONS & COUPONS EVENTS
         # ======================================================================
         # Campaign management
@@ -441,7 +440,6 @@ class AuditEvent(models.Model):
         ("loyalty_points_refunded", "Loyalty Points Refunded"),
         ("loyalty_tier_bonus", "Loyalty Tier Bonus"),
         ("loyalty_transaction", "Loyalty Transaction"),
->>>>>>> origin/claude/promotions-coupons-system-RK7WI
     )
 
     # Unique event ID
@@ -801,7 +799,6 @@ class ComplianceLog(models.Model):
         return f"{self.compliance_type}: {self.reference_id}"
 
 
-<<<<<<< HEAD
 class SIEMHashChainState(models.Model):
     """
     Track SIEM hash chain state for tamper-proof logging.
@@ -816,50 +813,11 @@ class SIEMHashChainState(models.Model):
     sequence_number = models.BigIntegerField(default=0, db_index=True)
     last_hash = models.CharField(max_length=128, blank=True)
     last_event_id = models.UUIDField(null=True, blank=True)
-=======
-class CookieConsent(models.Model):
-    """
-    Track cookie consent preferences for GDPR compliance.
-    Stores both authenticated user consent and anonymous visitor consent via cookie ID.
-    """
-
-    CONSENT_STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
-        ("pending", "Pending"),
-        ("accepted_all", "Accepted All"),
-        ("accepted_essential", "Essential Only"),
-        ("customized", "Customized"),
-        ("withdrawn", "Withdrawn"),
-    )
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-
-    # User identification (one of these should be set)
-    user = models.ForeignKey(
-        User, on_delete=models.CASCADE, null=True, blank=True, related_name="cookie_consents"
-    )
-    cookie_id = models.CharField(
-        max_length=64, blank=True, db_index=True, help_text="Anonymous visitor identifier from cookie"
-    )
-
-    # Consent status
-    status = models.CharField(max_length=20, choices=CONSENT_STATUS_CHOICES, default="pending")
-
-    # Individual category consents
-    essential_cookies = models.BooleanField(default=True, help_text="Always required")
-    functional_cookies = models.BooleanField(default=False)
-    analytics_cookies = models.BooleanField(default=False)
-    marketing_cookies = models.BooleanField(default=False)
-
-    # Metadata
-    ip_address = models.GenericIPAddressField(null=True, blank=True)
-    user_agent = models.TextField(blank=True)
->>>>>>> origin/claude/gdpr-compliance-audit-4heye
 
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-<<<<<<< HEAD
     # Configuration
     hash_algorithm = models.CharField(max_length=20, default="sha256")
     is_active = models.BooleanField(default=True)
@@ -1001,7 +959,49 @@ class SIEMExportLog(models.Model):
 
     def __str__(self) -> str:
         return f"SIEM Export ({self.export_format}) - {self.status}"
-=======
+
+
+class CookieConsent(models.Model):
+    """
+    Track cookie consent preferences for GDPR compliance.
+    Stores both authenticated user consent and anonymous visitor consent via cookie ID.
+    """
+
+    CONSENT_STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
+        ("pending", "Pending"),
+        ("accepted_all", "Accepted All"),
+        ("accepted_essential", "Essential Only"),
+        ("customized", "Customized"),
+        ("withdrawn", "Withdrawn"),
+    )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    # User identification (one of these should be set)
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, null=True, blank=True, related_name="cookie_consents"
+    )
+    cookie_id = models.CharField(
+        max_length=64, blank=True, db_index=True, help_text="Anonymous visitor identifier from cookie"
+    )
+
+    # Consent status
+    status = models.CharField(max_length=20, choices=CONSENT_STATUS_CHOICES, default="pending")
+
+    # Individual category consents
+    essential_cookies = models.BooleanField(default=True, help_text="Always required")
+    functional_cookies = models.BooleanField(default=False)
+    analytics_cookies = models.BooleanField(default=False)
+    marketing_cookies = models.BooleanField(default=False)
+
+    # Metadata
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True)
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
     # Consent version (for tracking policy updates)
     consent_version = models.CharField(max_length=20, default="1.0")
 
@@ -1032,4 +1032,3 @@ class SIEMExportLog(models.Model):
     def has_marketing_consent(self) -> bool:
         """Check if marketing cookies are consented."""
         return self.status in ("accepted_all", "customized") and self.marketing_cookies
->>>>>>> origin/claude/gdpr-compliance-audit-4heye

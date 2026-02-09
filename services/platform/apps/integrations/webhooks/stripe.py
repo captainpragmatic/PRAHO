@@ -3,10 +3,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-<<<<<<< HEAD
-=======
 from django.conf import settings
->>>>>>> origin/claude/fix-todos-incomplete-7K0b4
 from django.utils import timezone
 
 from apps.billing.models import Payment
@@ -54,31 +51,37 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         return str(payload.get("type", ""))
 
     def verify_signature(self, payload: dict[str, Any], signature: str, headers: dict[str, str]) -> bool:
-<<<<<<< HEAD
-        """🔐 Verify Stripe webhook signature using settings system"""
+        """🔐 Verify Stripe webhook signature using settings system.
+
+        SECURITY FIX: Uses raw request body (_raw_body) instead of re-serialized JSON
+        when available. This prevents signature bypass attacks where JSON key ordering
+        or whitespace differences between the original request and re-serialization
+        could allow forged payloads to pass verification.
+        """
         try:
             from apps.settings.services import SettingsService
-=======
-        """🔐 Verify Stripe webhook signature using raw request body.
-
-        SECURITY FIX: Uses raw request body (_raw_body) instead of re-serialized JSON.
-        This prevents signature bypass attacks where JSON key ordering or whitespace
-        differences between the original request and re-serialization could allow
-        forged payloads to pass verification.
-        """
-        webhook_secret = getattr(settings, "STRIPE_WEBHOOK_SECRET", None)
->>>>>>> origin/claude/security-audit-HT710
 
             # Get encrypted webhook secret from settings system
             webhook_secret = SettingsService.get("integrations.stripe_webhook_secret")
+
+            if not webhook_secret:
+                # Fallback to Django settings
+                webhook_secret = getattr(settings, "STRIPE_WEBHOOK_SECRET", None)
 
             if not webhook_secret:
                 # Fail secure when secret is not configured
                 logger.error("Stripe webhook secret not configured in settings system - failing secure")
                 return False
 
-            # Get raw payload for signature verification
-            payload_body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+            # SECURITY: Use raw body from request, NOT re-serialized JSON
+            # The _raw_body is attached by WebhookView._parse_request()
+            raw_body = payload.get("_raw_body")
+            if raw_body is None:
+                # Fallback for backwards compatibility, but log warning
+                logger.warning("⚠️ No raw body available for signature verification - using re-serialized JSON (less secure)")
+                payload_body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+            else:
+                payload_body = raw_body if isinstance(raw_body, bytes) else raw_body.encode("utf-8")
 
             return verify_stripe_signature(
                 payload_body=payload_body, stripe_signature=signature, webhook_secret=webhook_secret
@@ -86,24 +89,6 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         except Exception as e:
             logger.error(f"🔥 Error verifying Stripe webhook signature: {e}")
             return False
-
-<<<<<<< HEAD
-=======
-        # SECURITY: Use raw body from request, NOT re-serialized JSON
-        # The _raw_body is attached by WebhookView._parse_request()
-        raw_body = payload.get("_raw_body")
-        if raw_body is None:
-            # Fallback for backwards compatibility, but log warning
-            logger.warning("⚠️ No raw body available for signature verification - using re-serialized JSON (less secure)")
-            payload_body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-        else:
-            payload_body = raw_body if isinstance(raw_body, bytes) else raw_body.encode("utf-8")
-
-        return verify_stripe_signature(
-            payload_body=payload_body, stripe_signature=signature, webhook_secret=webhook_secret
-        )
-
->>>>>>> origin/claude/security-audit-HT710
     def __init__(self) -> None:
         super().__init__()
         # Event handler registry - maps event prefixes to handler methods
@@ -184,17 +169,12 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                 )
                 payment.save(update_fields=["status", "meta", "updated_at"])
 
-<<<<<<< HEAD
-            # 🔔 NEW: Notify Portal of payment success
-            self._notify_portal_payment_success(payment, payment_intent)
-
-            logger.info(f"✅ Payment {payment.id} marked as succeeded from Stripe")
-            return True, f"Payment {payment.id} succeeded"
-=======
                 # Update associated invoice if exists
                 if payment.invoice:
                     payment.invoice.update_status_from_payments()
->>>>>>> origin/claude/security-audit-HT710
+
+                # 🔔 Notify Portal of payment success
+                self._notify_portal_payment_success(payment, payment_intent)
 
                 logger.info(f"✅ Payment {payment.id} marked as succeeded from Stripe")
                 return True, f"Payment {payment.id} succeeded"
@@ -205,20 +185,8 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                     logger.warning(f"⚠️ Ignoring failed event for already-succeeded payment {payment.id}")
                     return True, f"Payment {payment.id} already succeeded, ignoring failure"
 
-<<<<<<< HEAD
                 # Payment failed
                 failure_reason = payment_intent.get("last_payment_error", {}).get("message", "Unknown error")
-=======
-            # Trigger dunning process if this was an invoice payment
-            if payment.invoice:
-                from apps.billing.tasks import trigger_payment_dunning  # noqa: PLC0415
-
-                try:
-                    trigger_payment_dunning.delay(str(payment.invoice.id), failure_reason)
-                    logger.info(f"🔔 Triggered dunning process for invoice {payment.invoice.id}")
-                except Exception as dunning_error:
-                    logger.warning(f"⚠️ Failed to trigger dunning: {dunning_error}")
->>>>>>> origin/claude/fix-todos-incomplete-7K0b4
 
                 payment.status = "failed"
                 payment.meta.update(
@@ -231,8 +199,13 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
 
                 # Trigger dunning process if this was an invoice payment
                 if payment.invoice:
-                    # TODO: Trigger payment retry/dunning logic
-                    pass
+                    try:
+                        from apps.billing.tasks import trigger_payment_dunning  # noqa: PLC0415
+
+                        trigger_payment_dunning.delay(str(payment.invoice.id), failure_reason)
+                        logger.info(f"🔔 Triggered dunning process for invoice {payment.invoice.id}")
+                    except Exception as dunning_error:
+                        logger.warning(f"⚠️ Failed to trigger dunning: {dunning_error}")
 
                 logger.warning(f"❌ Payment {payment.id} marked as failed from Stripe")
                 return True, f"Payment {payment.id} failed"

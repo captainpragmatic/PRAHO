@@ -198,11 +198,67 @@ class ProvisioningService:
             return {"success": False, "error": str(e), "services_suspended": 0}
 
     @staticmethod
-<<<<<<< HEAD
-    def reactivate_services_for_customer(customer_id: int, reason: str = "payment_received") -> None:
-        """Reactivate suspended services"""
-        logger.info(f"⚙️ [Provisioning] Would reactivate services for customer {customer_id} - {reason}")
-        # TODO: Implement service reactivation
+    def reactivate_services_for_customer(customer_id: int, reason: str = "payment_received") -> dict[str, Any]:
+        """
+        Reactivate suspended services for customer.
+
+        Args:
+            customer_id: Customer ID whose services should be reactivated
+            reason: Reason for reactivation (e.g., 'payment_received', 'issue_resolved')
+
+        Returns:
+            Dictionary with reactivation results
+        """
+        from apps.audit.services import AuditService  # noqa: PLC0415
+        from apps.customers.models import Customer  # noqa: PLC0415
+        from apps.provisioning.models import Service  # noqa: PLC0415
+
+        results = {"success": True, "customer_id": customer_id, "services_reactivated": 0, "errors": []}
+
+        try:
+            customer = Customer.objects.get(id=customer_id)
+            suspended_services = Service.objects.filter(customer=customer, status="suspended")
+
+            with transaction.atomic():
+                for service in suspended_services:
+                    try:
+                        service.status = "active"
+                        service.suspended_at = None
+                        service.suspension_reason = ""
+                        service.reactivated_at = timezone.now()
+                        service.save(
+                            update_fields=["status", "suspended_at", "suspension_reason", "reactivated_at", "updated_at"]
+                        )
+                        results["services_reactivated"] += 1
+                    except Exception as e:
+                        results["errors"].append({"service_id": str(service.id), "error": str(e)})
+
+            AuditService.log_simple_event(
+                event_type="customer_services_reactivated",
+                user=None,
+                content_object=customer,
+                description=f"Reactivated {results['services_reactivated']} services for customer: {reason}",
+                actor_type="system",
+                metadata={
+                    "customer_id": str(customer.id),
+                    "reason": reason,
+                    "services_reactivated": results["services_reactivated"],
+                    "source_app": "provisioning",
+                },
+            )
+
+            logger.info(
+                f"✅ [Provisioning] Reactivated {results['services_reactivated']} services "
+                f"for customer {customer_id} - {reason}"
+            )
+            return results
+
+        except Customer.DoesNotExist:
+            logger.error(f"🔥 [Provisioning] Customer {customer_id} not found")
+            return {"success": False, "error": "Customer not found", "services_reactivated": 0}
+        except Exception as e:
+            logger.error(f"🔥 [Provisioning] Failed to reactivate services for customer {customer_id}: {e}")
+            return {"success": False, "error": str(e), "services_reactivated": 0}
 
     @staticmethod
     def provision_service(service: Service) -> dict[str, str]:
@@ -242,22 +298,7 @@ class ProvisioningService:
 
                 # Implement actual provisioning based on control panel type
                 if service.server.control_panel == 'Virtualmin':
-                    # Simulate Virtualmin provisioning attempt
-                    # In production, this would call VirtualminGateway
                     try:
-                        # Examples of when provisioning would FAIL:
-                        # - Virtualmin server down/unreachable
-                        # - Server disk full/out of space
-                        # - Server overloaded/not responding
-                        # - Virtualmin service not running
-                        # - API authentication failure
-                        # - Domain already exists on server
-                        # - Username already taken
-                        # - Quota/limits exceeded
-                        # - Network timeout reaching server
-                        # - Invalid domain name format
-
-                        # Use actual VirtualminGateway
                         from .virtualmin_gateway import VirtualminGateway, VirtualminConfig
                         from .virtualmin_gateway import (
                             VirtualminAuthError,
@@ -366,66 +407,3 @@ class ProvisioningService:
                 'status': 'failed',
                 'error': error_msg
             }
-=======
-    def reactivate_services_for_customer(customer_id: int, reason: str = "payment_received") -> dict[str, Any]:
-        """
-        Reactivate suspended services for customer.
-
-        Args:
-            customer_id: Customer ID whose services should be reactivated
-            reason: Reason for reactivation (e.g., 'payment_received', 'issue_resolved')
-
-        Returns:
-            Dictionary with reactivation results
-        """
-        from apps.audit.services import AuditService  # noqa: PLC0415
-        from apps.customers.models import Customer  # noqa: PLC0415
-        from apps.provisioning.models import Service  # noqa: PLC0415
-
-        results = {"success": True, "customer_id": customer_id, "services_reactivated": 0, "errors": []}
-
-        try:
-            customer = Customer.objects.get(id=customer_id)
-            suspended_services = Service.objects.filter(customer=customer, status="suspended")
-
-            with transaction.atomic():
-                for service in suspended_services:
-                    try:
-                        service.status = "active"
-                        service.suspended_at = None
-                        service.suspension_reason = ""
-                        service.reactivated_at = timezone.now()
-                        service.save(
-                            update_fields=["status", "suspended_at", "suspension_reason", "reactivated_at", "updated_at"]
-                        )
-                        results["services_reactivated"] += 1
-                    except Exception as e:
-                        results["errors"].append({"service_id": str(service.id), "error": str(e)})
-
-            AuditService.log_simple_event(
-                event_type="customer_services_reactivated",
-                user=None,
-                content_object=customer,
-                description=f"Reactivated {results['services_reactivated']} services for customer: {reason}",
-                actor_type="system",
-                metadata={
-                    "customer_id": str(customer.id),
-                    "reason": reason,
-                    "services_reactivated": results["services_reactivated"],
-                    "source_app": "provisioning",
-                },
-            )
-
-            logger.info(
-                f"✅ [Provisioning] Reactivated {results['services_reactivated']} services "
-                f"for customer {customer_id} - {reason}"
-            )
-            return results
-
-        except Customer.DoesNotExist:
-            logger.error(f"🔥 [Provisioning] Customer {customer_id} not found")
-            return {"success": False, "error": "Customer not found", "services_reactivated": 0}
-        except Exception as e:
-            logger.error(f"🔥 [Provisioning] Failed to reactivate services for customer {customer_id}: {e}")
-            return {"success": False, "error": str(e), "services_reactivated": 0}
->>>>>>> origin/claude/fix-todos-incomplete-7K0b4

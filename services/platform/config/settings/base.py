@@ -562,7 +562,6 @@ Q_CLUSTER = {
 }
 
 # ===============================================================================
-<<<<<<< HEAD
 # 🚀 PERFORMANCE & SCALABILITY CONFIGURATION
 # ===============================================================================
 
@@ -750,7 +749,8 @@ N_PLUS_ONE_THRESHOLD = int(os.environ.get("N_PLUS_ONE_THRESHOLD", "10"))
 # Lock timeout defaults (seconds)
 DISTRIBUTED_LOCK_TIMEOUT = int(os.environ.get("DISTRIBUTED_LOCK_TIMEOUT", "300"))
 DISTRIBUTED_LOCK_BLOCKING_TIMEOUT = int(os.environ.get("DISTRIBUTED_LOCK_BLOCKING_TIMEOUT", "30"))
-=======
+
+# ===============================================================================
 # API CLIENT TIMEOUT CONFIGURATIONS ⏱️
 # ===============================================================================
 
@@ -772,4 +772,3 @@ API_TIMEOUTS = {
 
 # Portal service specific timeout (can be overridden)
 PORTAL_API_TIMEOUT = int(os.environ.get('PORTAL_API_TIMEOUT', '30'))
->>>>>>> origin/claude/improve-code-structure-gfBbo

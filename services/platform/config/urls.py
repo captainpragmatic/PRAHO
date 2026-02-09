@@ -42,10 +42,8 @@ urlpatterns = [
     # Django admin interface
     path("admin/", admin.site.urls),
     # Dashboard - main app after login
-<<<<<<< HEAD
     path("dashboard/", dashboard_view, name="dashboard"),
-=======
-    path("app/", dashboard_view, name="dashboard"),
+    path("app/", dashboard_view, name="dashboard_alias"),
     # ===============================================================================
     # LEGAL & GDPR COMPLIANCE PAGES (Public access)
     # ===============================================================================
@@ -54,7 +52,6 @@ urlpatterns = [
     path("cookie-policy/", cookie_policy, name="cookie_policy"),
     path("data-processors/", data_processors, name="data_processors"),
     path("api/cookie-consent/", cookie_consent_update, name="cookie_consent_update"),
->>>>>>> origin/claude/gdpr-compliance-audit-4heye
     # Authentication URLs
     path("auth/", include("apps.users.urls")),
     # Backward-compatible alias expected by some tests

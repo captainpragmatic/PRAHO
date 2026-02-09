@@ -235,14 +235,6 @@ class BaseWebhookProcessor(ABC):
                 try:
                     success, message = self.handle_event(webhook_event)
 
-<<<<<<< HEAD
-            except Exception:
-                # SECURITY: Log full details internally but don't expose to caller
-                error_msg = "Processing error: internal failure"
-                webhook_event.mark_failed(error_msg)
-                logger.exception(f"💥 Exception processing {self.source_name} webhook {event_id}")
-                return Ok(WebhookProcessingResult.error_result(error_msg, webhook_event))
-=======
                     if success:
                         webhook_event.mark_processed()
                         logger.info(f"✅ Processed {self.source_name} webhook {event_id}: {message}")
@@ -252,8 +244,9 @@ class BaseWebhookProcessor(ABC):
                         logger.error(f"❌ Failed {self.source_name} webhook {event_id}: {message}")
                         return Ok(WebhookProcessingResult.error_result(message, webhook_event))
 
-                except Exception as e:
-                    error_msg = f"Processing error: {e!s}"
+                except Exception:
+                    # SECURITY: Log full details internally but don't expose to caller
+                    error_msg = "Processing error: internal failure"
                     webhook_event.mark_failed(error_msg)
                     logger.exception(f"💥 Exception processing {self.source_name} webhook {event_id}")
                     return Ok(WebhookProcessingResult.error_result(error_msg, webhook_event))
@@ -266,7 +259,6 @@ class BaseWebhookProcessor(ABC):
             return Ok(WebhookProcessingResult.success_result(
                 f"⏭️ Duplicate webhook skipped: {event_id}", existing
             ))
->>>>>>> origin/claude/fix-race-conditions-yreZe
 
     def extract_event_id(self, payload: dict[str, Any]) -> str | None:
         """🔍 Extract unique event ID from payload - override in subclasses"""

@@ -27,13 +27,11 @@ from django.utils.translation import gettext as _
 from apps.common.constants import HTTP_CLIENT_ERROR_THRESHOLD
 from apps.common.request_ip import get_safe_client_ip
 
-<<<<<<< HEAD
 # Security constants
 HMAC_TIMESTAMP_WINDOW_SECONDS = 300  # 5 minutes
-=======
+
 # Import logging utilities for request ID propagation
 from apps.common.logging import clear_request_id, set_request_id
->>>>>>> origin/claude/trace-based-dynamic-analysis-5w7Pg
 
 # Import for session security - handle potential circular import gracefully
 try:

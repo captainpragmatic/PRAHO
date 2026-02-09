@@ -166,15 +166,9 @@ jobs:
             print(f'Platform cannot access billing models: {e}')
             exit(1)
         " || exit 1
-<<<<<<< HEAD
 
         # Verify platform has database access
         PYTHONPATH=$(pwd) uv run python -c "
-=======
-        
-        # Verify platform has database access
-        PYTHONPATH=$(pwd) python -c "
->>>>>>> origin/claude/security-compliance-implementation-8WNIQ
         import os
         os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.test')
         import django

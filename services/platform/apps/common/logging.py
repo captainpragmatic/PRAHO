@@ -1,18 +1,13 @@
 """
-<<<<<<< HEAD
-Logging utilities for PRAHO Platform
-
-This module provides logging filters and utilities for:
-- Request ID injection into log records
-- Structured logging support
-- SIEM-compatible log formatting
-=======
 Trace-Based Dynamic Analysis and Logging Infrastructure for PRAHO Platform.
 
 This module provides comprehensive runtime tracing, logging, and debugging tools
 for analyzing system behavior at runtime. It includes:
 
 - RequestIDFilter: Structured logging with request correlation
+- SecurityEventFilter: Security-related log event filtering
+- SensitiveDataFilter: Sensitive data redaction in logs
+- StructuredLogAdapter: Structured context logging
 - QueryTracer: Database query monitoring and N+1 detection
 - MethodTracer: Execution timing and call graph analysis
 - PerformanceProfiler: Resource usage tracking
@@ -30,17 +25,10 @@ Usage:
     @MethodTracer.trace
     def my_function():
         pass
->>>>>>> origin/claude/trace-based-dynamic-analysis-5w7Pg
 """
 
 from __future__ import annotations
 
-<<<<<<< HEAD
-import logging
-import threading
-from typing import Any
-
-=======
 import contextlib
 import functools
 import logging
@@ -56,12 +44,34 @@ from typing import Any, TypeVar
 
 from django.conf import settings
 from django.db import connection, reset_queries
->>>>>>> origin/claude/trace-based-dynamic-analysis-5w7Pg
 
 # Thread-local storage for request context
 _request_context = threading.local()
 
-<<<<<<< HEAD
+logger = logging.getLogger(__name__)
+
+F = TypeVar("F", bound=Callable[..., Any])
+
+
+# =============================================================================
+# REQUEST CONTEXT FUNCTIONS
+# =============================================================================
+
+
+def set_request_id(request_id: str) -> None:
+    """Set the current request ID in thread-local storage."""
+    _request_context.request_id = request_id
+
+
+def get_request_id() -> str | None:
+    """Get the current request ID from thread-local storage."""
+    return getattr(_request_context, "request_id", None)
+
+
+def clear_request_id() -> None:
+    """Clear the request ID from thread-local storage."""
+    _request_context.request_id = None
+
 
 def set_request_context(**kwargs: Any) -> None:
     """Set request context for the current thread"""
@@ -85,22 +95,16 @@ def clear_request_context() -> None:
     for attr in ["request_id", "user_id", "user_email", "ip_address", "session_id"]:
         if hasattr(_request_context, attr):
             delattr(_request_context, attr)
-=======
-logger = logging.getLogger(__name__)
-
-F = TypeVar("F", bound=Callable[..., Any])
 
 
 # =============================================================================
 # REQUEST ID FILTER - Structured Logging with Request Correlation
 # =============================================================================
->>>>>>> origin/claude/trace-based-dynamic-analysis-5w7Pg
 
 
 class RequestIDFilter(logging.Filter):
     """
-<<<<<<< HEAD
-    Add request ID to log records.
+    Add request ID and context to log records.
 
     This filter injects the request ID from thread-local storage
     into every log record, enabling request tracing across logs.
@@ -109,17 +113,17 @@ class RequestIDFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         """Add request_id attribute to log record"""
         if not hasattr(record, "request_id"):
-            record.request_id = getattr(_request_context, "request_id", "-")
+            record.request_id = getattr(_request_context, "request_id", "-")  # type: ignore[attr-defined]
 
         # Add other context if available
         if not hasattr(record, "user_id"):
-            record.user_id = getattr(_request_context, "user_id", None)
+            record.user_id = getattr(_request_context, "user_id", None)  # type: ignore[attr-defined]
         if not hasattr(record, "user_email"):
-            record.user_email = getattr(_request_context, "user_email", None)
+            record.user_email = getattr(_request_context, "user_email", None)  # type: ignore[attr-defined]
         if not hasattr(record, "ip_address"):
-            record.ip_address = getattr(_request_context, "ip_address", None)
+            record.ip_address = getattr(_request_context, "ip_address", None)  # type: ignore[attr-defined]
         if not hasattr(record, "session_id"):
-            record.session_id = getattr(_request_context, "session_id", None)
+            record.session_id = getattr(_request_context, "session_id", None)  # type: ignore[attr-defined]
 
         return True
 
@@ -157,7 +161,7 @@ class SecurityEventFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         """Filter for security events"""
         # Check if from security logger
-        if any(record.name.startswith(logger) for logger in self.SECURITY_LOGGERS):
+        if any(record.name.startswith(sec_logger) for sec_logger in self.SECURITY_LOGGERS):
             return True
 
         # Check for security keywords in message
@@ -252,49 +256,6 @@ def get_logger(name: str, **context: Any) -> StructuredLogAdapter:
         StructuredLogAdapter with context
     """
     return StructuredLogAdapter(logging.getLogger(name), context)
-=======
-    Logging filter that adds request_id to log records for request correlation.
-
-    This filter extracts the request ID from thread-local storage (set by
-    RequestIDMiddleware) and adds it to each log record. This enables
-    tracing logs across a single request in production.
-
-    Usage in settings:
-        LOGGING = {
-            "filters": {
-                "add_request_id": {
-                    "()": "apps.common.logging.RequestIDFilter",
-                },
-            },
-            "handlers": {
-                "console": {
-                    "filters": ["add_request_id"],
-                    ...
-                },
-            },
-        }
-    """
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        """Add request_id to the log record."""
-        request_id = getattr(_request_context, "request_id", None)
-        record.request_id = request_id or "no-request-id"  # type: ignore[attr-defined]
-        return True
-
-
-def set_request_id(request_id: str) -> None:
-    """Set the current request ID in thread-local storage."""
-    _request_context.request_id = request_id
-
-
-def get_request_id() -> str | None:
-    """Get the current request ID from thread-local storage."""
-    return getattr(_request_context, "request_id", None)
-
-
-def clear_request_id() -> None:
-    """Clear the request ID from thread-local storage."""
-    _request_context.request_id = None
 
 
 # =============================================================================
@@ -1117,11 +1078,20 @@ def trace_execution(func: F) -> F:
 # =============================================================================
 
 __all__ = [
-    # Request ID
+    # Request ID & Context
     "RequestIDFilter",
     "set_request_id",
     "get_request_id",
     "clear_request_id",
+    "set_request_context",
+    "get_request_context",
+    "clear_request_context",
+    # Security Filters
+    "SecurityEventFilter",
+    "SensitiveDataFilter",
+    # Structured Logging
+    "StructuredLogAdapter",
+    "get_logger",
     # Query Tracing
     "QueryTracer",
     "QueryInfo",
@@ -1140,4 +1110,3 @@ __all__ = [
     "assert_max_queries",
     "trace_execution",
 ]
->>>>>>> origin/claude/trace-based-dynamic-analysis-5w7Pg

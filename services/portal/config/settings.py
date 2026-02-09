@@ -25,7 +25,6 @@ DATABASES = {
     }
 }
 
-<<<<<<< HEAD
 # Use cache-based sessions (in-memory, auto-cleanup, no files)
 SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
 SESSION_CACHE_ALIAS = 'default'
@@ -36,7 +35,7 @@ SESSION_COOKIE_SAMESITE = 'Lax'  # Prevent CSRF while allowing normal navigation
 SESSION_SAVE_EVERY_REQUEST = False  # Only save when modified
 
 # Custom session age settings for middleware
-SESSION_COOKIE_AGE_DEFAULT = 24 * 60 * 60  # 24 hours 
+SESSION_COOKIE_AGE_DEFAULT = 24 * 60 * 60  # 24 hours
 SESSION_COOKIE_AGE_REMEMBER_ME = 30 * 24 * 60 * 60  # 30 days
 
 # Cache configuration for sessions (in-memory)
@@ -49,25 +48,11 @@ CACHES = {
         }
     }
 }
-=======
-# Use signed cookies for session management (no DB required)
-SESSION_ENGINE = 'django.contrib.sessions.backends.signed_cookies'
-SESSION_COOKIE_SECURE = not DEBUG  # Secure in production, allow HTTP in debug
-SESSION_COOKIE_HTTPONLY = True
-SESSION_COOKIE_SAMESITE = 'Lax'  # CSRF protection
-SESSION_COOKIE_AGE = 86400  # 24 hours
->>>>>>> origin/claude/code-security-review-88rnF
 
 # ===============================================================================
 # BASIC DJANGO CONFIGURATION
 # ===============================================================================
 
-<<<<<<< HEAD
-# 🔒 SECURITY: No fallback secrets - must be set in environment
-SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
-
-=======
->>>>>>> origin/claude/code-security-review-88rnF
 DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() == 'true'
 
 # Security: Require SECRET_KEY from environment in production
@@ -153,22 +138,12 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 # Platform service API endpoint
 PLATFORM_API_BASE_URL = os.environ.get(
-<<<<<<< HEAD
-<<<<<<< HEAD
-    'PLATFORM_API_BASE_URL', 
+    'PLATFORM_API_BASE_URL',
     'http://127.0.0.1:8700'
 )
 
 # 🔒 SECURITY: API authentication - no fallback secrets
-PLATFORM_API_TOKEN = os.environ.get('PLATFORM_API_TOKEN')  # Legacy token
 PLATFORM_API_SECRET = os.environ.get('PLATFORM_API_SECRET')  # HMAC secret - REQUIRED
-PLATFORM_API_TIMEOUT = int(os.environ.get('PLATFORM_API_TIMEOUT', '30'))  # 30 seconds
-=======
-=======
->>>>>>> origin/claude/improve-code-structure-gfBbo
-    'PLATFORM_API_BASE_URL',
-    'http://127.0.0.1:8700/api/'
-)
 
 # Security: Require API token from environment in production
 _api_token = os.environ.get('PLATFORM_API_TOKEN')
@@ -186,7 +161,7 @@ if not _api_token:
             "PLATFORM_API_TOKEN environment variable is required in production."
         )
 PLATFORM_API_TOKEN = _api_token
->>>>>>> origin/claude/code-security-review-88rnF
+PLATFORM_API_TIMEOUT = int(os.environ.get('PLATFORM_API_TIMEOUT', '30'))  # 30 seconds
 
 # API request timeout (seconds) - externalized for production tuning
 PORTAL_API_TIMEOUT = int(os.environ.get('PORTAL_API_TIMEOUT', '30'))
