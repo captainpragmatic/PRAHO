@@ -495,6 +495,8 @@ class VirtualminValidator:
             # Template management
             "get-template",
             "list-templates",
+            # Monitoring
+            "list-bandwidth",
             # System info
             "list-plans",
             "get-plan",

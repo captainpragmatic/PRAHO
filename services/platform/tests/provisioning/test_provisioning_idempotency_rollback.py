@@ -27,6 +27,7 @@ from apps.provisioning.virtualmin_models import (
 from apps.provisioning.virtualmin_service import (
     VirtualminProvisioningService,
 )
+from tests.mocks.virtualmin_mock import MockVirtualminGateway
 
 
 class IdempotencyManagerTest(TestCase):
@@ -423,7 +424,7 @@ class DeleteAccountIdempotencyTest(TestCase):
 
 
 class RollbackMechanismTest(TestCase):
-    """Test rollback mechanisms in provisioning operations"""
+    """Test rollback mechanisms using MockVirtualminGateway for realistic API simulation."""
 
     def setUp(self):
         """Set up test data"""
@@ -471,15 +472,11 @@ class RollbackMechanismTest(TestCase):
 
     @patch('apps.provisioning.virtualmin_service.VirtualminGateway')
     def test_execute_rollback_success(self, mock_gateway_class):
-        """Test successful rollback execution"""
-        # Create mock response
-        mock_response = MagicMock()
-        mock_response.success = True
-        mock_response.data = {}
-
-        mock_gateway = MagicMock()
-        mock_gateway.call.return_value = Ok(mock_response)
-        mock_gateway_class.return_value = mock_gateway
+        """Test successful rollback execution using MockVirtualminGateway"""
+        mock_gw = MockVirtualminGateway()
+        # Seed the domain so delete-domain succeeds
+        mock_gw.seed_domain("test.example.com")
+        mock_gateway_class.return_value = mock_gw
 
         service = VirtualminProvisioningService(self.server)
         gateway = service._get_gateway()
@@ -500,24 +497,19 @@ class RollbackMechanismTest(TestCase):
         self.assertEqual(rollback_details["successful_operations"], 1)
         self.assertEqual(rollback_details["failed_operations"], 0)
 
+        # Verify domain was actually removed from mock state
+        self.assertIsNone(mock_gw.get_domain_state("test.example.com"))
+        # Verify call was logged
+        self.assertEqual(len(mock_gw.get_calls("delete-domain")), 1)
+
     @patch('apps.provisioning.virtualmin_service.VirtualminGateway')
     def test_execute_rollback_partial(self, mock_gateway_class):
-        """Test partial rollback when some operations fail"""
-        # First call succeeds, second fails
-        mock_response_success = MagicMock()
-        mock_response_success.success = True
-        mock_response_success.data = {}
-
-        mock_response_fail = MagicMock()
-        mock_response_fail.success = False
-        mock_response_fail.data = {"error": "Failed"}
-
-        mock_gateway = MagicMock()
-        mock_gateway.call.side_effect = [
-            Ok(mock_response_success),
-            Ok(mock_response_fail),
-        ]
-        mock_gateway_class.return_value = mock_gateway
+        """Test partial rollback: first op succeeds (domain exists), second fails (domain missing)"""
+        mock_gw = MockVirtualminGateway()
+        # Seed only the first domain
+        mock_gw.seed_domain("test.example.com")
+        # Do NOT seed test2.example.com so enable-domain returns not-found error
+        mock_gateway_class.return_value = mock_gw
 
         service = VirtualminProvisioningService(self.server)
         gateway = service._get_gateway()
@@ -545,10 +537,11 @@ class RollbackMechanismTest(TestCase):
 
     @patch('apps.provisioning.virtualmin_service.VirtualminGateway')
     def test_execute_rollback_handles_exceptions(self, mock_gateway_class):
-        """Test rollback continues after individual operation exceptions"""
-        mock_gateway = MagicMock()
-        mock_gateway.call.side_effect = Exception("Connection error")
-        mock_gateway_class.return_value = mock_gateway
+        """Test rollback continues after operation exceptions using fail_operations"""
+        mock_gw = MockVirtualminGateway(
+            fail_operations={"delete-domain": "Connection error"}
+        )
+        mock_gateway_class.return_value = mock_gw
 
         service = VirtualminProvisioningService(self.server)
         gateway = service._get_gateway()
