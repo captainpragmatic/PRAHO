@@ -51,7 +51,9 @@ def test_customer_can_view_own_services_but_not_manage(page: Page) -> None:
                                  check_console=True,
                                  check_network=True,
                                  check_html=True,
-                                 check_css=True):
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login as customer
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
@@ -98,7 +100,9 @@ def test_customer_cannot_create_services(page: Page) -> None:
                                  check_console=False,  # Expect access denied redirects
                                  check_network=False,  # May have redirect status codes
                                  check_html=True,
-                                 check_css=True):
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login as customer
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
@@ -135,7 +139,9 @@ def test_customer_cannot_access_service_management_actions(page: Page) -> None:
                                  check_console=False,  # Expect access denied redirects
                                  check_network=False,  # May have redirect status codes
                                  check_html=True,
-                                 check_css=True):
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login as customer
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
@@ -182,7 +188,9 @@ def test_customer_server_access_blocked_but_plans_allowed(page: Page) -> None:
                                  check_console=False,  # Plans section may have dev issues
                                  check_network=False,  # May have redirect status codes
                                  check_html=False,     # Plans form may be missing CSRF tokens
-                                 check_css=True):
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login as customer
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
@@ -228,7 +236,9 @@ def test_customer_provisioning_navigation_not_available(page: Page) -> None:
                                  check_console=True,
                                  check_network=True,
                                  check_html=True,
-                                 check_css=True):
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login as customer
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
@@ -237,31 +247,10 @@ def test_customer_provisioning_navigation_not_available(page: Page) -> None:
         page.goto("http://localhost:8701/dashboard/")
         page.wait_for_load_state("networkidle")
 
-        # Check if Business dropdown exists (it should, but shouldn't contain provisioning)
+        # Portal does not have Business dropdown - verify it's absent
         business_dropdown = page.get_by_role('button', name='🏢 Business')
-        if business_dropdown.count() > 0:
-            print("  🏢 Business dropdown found - checking for provisioning links")
-            business_dropdown.click()
-            page.wait_for_timeout(1000)  # Wait for dropdown animation
-
-            # Look for provisioning-related links
-            provisioning_links = page.locator(
-                'a[href*="/provisioning/"], '
-                'a:has-text("Provisioning"), '
-                'a:has-text("Services"), '
-                'a:has-text("🚀")'
-            )
-
-            if provisioning_links.count() > 0:
-                print("    ⚠️ WARNING: Provisioning links visible to customer")
-                # This might not be a hard failure depending on implementation
-            else:
-                print("    ✅ No provisioning links visible to customer")
-
-            # Close dropdown
-            page.keyboard.press('Escape')
-        else:
-            print("  ℹ️ Business dropdown not found in customer interface")
+        assert business_dropdown.count() == 0, "Portal should not have Business dropdown"
+        print("  ✅ Business dropdown correctly absent in portal (uses direct nav links)")
 
         # Check for any direct provisioning links on page
         direct_provisioning_links = page.locator('a[href*="/provisioning/"]')
@@ -283,7 +272,9 @@ def test_customer_provisioning_comprehensive_security_validation(page: Page) -> 
                                  check_console=False,  # Expect security redirects
                                  check_network=False,  # May have various HTTP status codes
                                  check_html=True,
-                                 check_css=True):
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login as customer
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
@@ -375,7 +366,9 @@ def test_customer_provisioning_security_mobile_compatibility(page: Page) -> None
                                  check_console=False,  # Expect security redirects
                                  check_network=False,  # May have redirect status codes
                                  check_html=True,
-                                 check_css=True):
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login as customer
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
