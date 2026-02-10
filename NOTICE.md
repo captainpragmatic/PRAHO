@@ -1,25 +1,25 @@
-Pragmatic Hosting - NOTICE
+PRAHO Platform - NOTICE
 
-This project, "Pragmatic Hosting", includes software and other
-components covered by various open source licenses. The primary
-license for our project is the GNU Affero General Public License v3
-(AGPL-3.0-or-later).
+This project, "PRAHO", includes software and other components covered
+by various open source licenses. The primary license for this project
+is the GNU General Public License v3 or later (GPL-3.0-or-later).
 
 Attributions and third-party components:
 
 - Django — BSD-3-Clause
+- Django REST Framework — BSD-3-Clause
 - HTMX — MIT
 - Tailwind CSS — MIT
-- RQ (Redis Queue) — BSD-3-Clause
+- Alpine.js — MIT
 - psycopg2 — LGPL or BSD (depending on packaging)
 - pytest — MIT
 - django-debug-toolbar — BSD
+- cryptography — Apache-2.0 / BSD-3-Clause
+- Stripe Python SDK — MIT
 
 If you distribute this software (or make it available for use over a
-network), you must comply with the terms of the AGPL-3.0-or-later for
+network), you must comply with the terms of the GPL-3.0-or-later for
 this project's code. For third-party components, consult their
-respective licenses above; the specific license text for third-party
-packages can be found in the package distributions or the package
-repositories.
+respective licenses above.
 
-Contact: Pragmatic Hosting <contact@pragmatichost.com>
+Contact: PRAHO <contact@pragmatichost.com>
