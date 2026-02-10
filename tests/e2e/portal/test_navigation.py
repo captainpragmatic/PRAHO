@@ -146,15 +146,20 @@ def test_navigation_header_interactions(page: Page) -> None:
         ]
 
         successful_tests = 0
+        skipped_users: list[str] = []
         for email, password, user_type in test_cases:
             try:
-                _test_user_navigation_interactions(page, email, password, user_type)
-                successful_tests += 1
+                if _test_user_navigation_interactions(page, email, password, user_type):
+                    successful_tests += 1
+                else:
+                    skipped_users.append(user_type)
             except Exception as e:
                 print(f"    ❌ {user_type} navigation test failed: {str(e)[:100]}")
 
-        # Require at least one successful test (preferably superuser)
-        assert successful_tests > 0, "At least one user type must successfully complete navigation tests"
+        # Require all user scenarios to complete successfully
+        if skipped_users:
+            pytest.fail(f"Navigation scenarios skipped due login/session issues: {', '.join(skipped_users)}")
+        assert successful_tests == len(test_cases), "All user types must successfully complete navigation tests"
 
     # End on a clean state - only if we're logged in
     try:
@@ -166,8 +171,8 @@ def test_navigation_header_interactions(page: Page) -> None:
     print("  ✅ Navigation header interaction testing completed!")
 
 
-def _test_user_navigation_interactions(page: Page, email: str, password: str, user_type: str) -> None:
-    """Test navigation interactions for a single user type"""
+def _test_user_navigation_interactions(page: Page, email: str, password: str, user_type: str) -> bool:
+    """Test navigation interactions for a single user type and return success status."""
     print(f"\n  👤 Testing navigation header for {user_type}")
 
     # Start fresh for each user type - clear session and go to login
@@ -176,7 +181,7 @@ def _test_user_navigation_interactions(page: Page, email: str, password: str, us
     # Login with current user - skip this user type if login fails
     if not login_user(page, email, password):
         print(f"    ⚠️  Skipping {user_type} - login failed for {email}")
-        return
+        return False
 
     print(f"    🔘 Testing navigation elements for {user_type}...")
 
@@ -195,6 +200,7 @@ def _test_user_navigation_interactions(page: Page, email: str, password: str, us
 
     user_total_clicked, user_total_found = _test_navigation_elements(page, navigation_elements, user_type)
     print(f"    📊 {user_type.title()} summary: Found {user_total_found} nav elements, clicked {user_total_clicked}")
+    return True
 
 
 def _test_navigation_elements(page: Page, navigation_elements: list, user_type: str) -> tuple[int, int]:

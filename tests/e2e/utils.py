@@ -1092,6 +1092,10 @@ class ComprehensivePageMonitor:
     def __init__(self, page: Page, context: str = "", 
                  config: PageQualityConfig | None = None,
                  **kwargs: Any):
+        # Explicit opt-outs for exceptional flows (e.g., known broken third-party pages)
+        allow_accessibility_skip = bool(kwargs.pop("allow_accessibility_skip", False))
+        allow_auth_error_ignores = bool(kwargs.pop("allow_auth_error_ignores", False))
+
         # Use default config if none provided
         if config is None:
             config = PageQualityConfig()
@@ -1110,8 +1114,17 @@ class ComprehensivePageMonitor:
         self.check_css = config.check_css
         self.check_accessibility = config.check_accessibility
         self.check_performance = config.check_performance
-        self.ignore_patterns = config.ignore_patterns
+        self.ignore_patterns = list(config.ignore_patterns)
         self.console_messages: list[str] = []
+
+        # Security hardening: never suppress auth/access-denied/not-found errors by default.
+        if not allow_auth_error_ignores and self.ignore_patterns:
+            blocked_patterns = {"401", "403", "404", "forbidden", "unauthorized"}
+            self.ignore_patterns = [p for p in self.ignore_patterns if p.lower() not in blocked_patterns]
+
+        # Quality hardening: keep accessibility checks enabled unless explicitly opted out.
+        if not self.check_accessibility and self.check_html and self.check_css and not allow_accessibility_skip:
+            self.check_accessibility = True
     
     def __enter__(self):
         if self.check_console:
