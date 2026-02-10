@@ -13,6 +13,8 @@ from typing import Any
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
+from apps.common.validators import log_security_event
+
 logger = logging.getLogger(__name__)
 
 # ===============================================================================
@@ -128,26 +130,6 @@ def validate_invoice_sequence_increment() -> None:
             "critical_financial_operation": True,
         },
     )
-
-
-def log_security_event(
-    event_type: str, details: dict[str, Any], request_ip: str | None = None, user_email: str | None = None
-) -> None:
-    """🔒 Log security events for financial operations monitoring and auditing"""
-    log_data = {
-        "event_type": event_type,
-        "timestamp": timezone.now().isoformat(),
-        "details": details,
-        "financial_operation": True,
-        "compliance_audit": True,
-    }
-
-    if request_ip:
-        log_data["request_ip"] = request_ip
-    if user_email:
-        log_data["user_email"] = user_email
-
-    logger.info(f"🔒 [Billing Security] {event_type}: {log_data}")
 
 
 # ===============================================================================

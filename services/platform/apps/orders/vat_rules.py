@@ -12,7 +12,7 @@ from typing import TypedDict
 
 from django.utils import timezone
 
-from apps.audit.services import AuditService
+from apps.common.validators import log_security_event
 
 logger = logging.getLogger(__name__)
 
@@ -232,11 +232,13 @@ class OrderVATCalculator:
         """🔒 Log VAT calculation for compliance audit"""
         
         try:
-            AuditService.log_event_legacy(
-                event_type='order_vat_calculation',
-                user=None,  # System calculation
-                description=f"VAT calculated: {result.scenario.value} - {result.reasoning}",
-                metadata=result.audit_data,
+            log_security_event(
+                event_type="order_vat_calculation",
+                details={
+                    "scenario": result.scenario.value,
+                    "reasoning": result.reasoning,
+                    **result.audit_data,
+                },
             )
             
             logger.info(

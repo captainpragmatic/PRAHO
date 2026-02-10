@@ -41,9 +41,9 @@ def handle_setting_saved(sender: Any, instance: SystemSetting, created: bool, **
 
         # Log audit event
         action = "create" if created else "update"
-        AuditService.log_event_legacy(
+        AuditService.log_simple_event(
             event_type=action,
-            user=None,  # Will be set by the service layer when user context is available
+            user=None,
             content_object=instance,
             description=f"System setting {action}: {instance.key}",
             metadata={
@@ -85,7 +85,7 @@ def handle_setting_deleted(sender: Any, instance: SystemSetting, **kwargs: Any) 
         SettingsService._clear_setting_cache(instance.key)
 
         # Log audit event
-        AuditService.log_event_legacy(
+        AuditService.log_simple_event(
             event_type="delete",
             user=None,
             content_object=instance,

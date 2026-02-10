@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install dev dev-platform dev-portal dev-all test test-platform test-portal test-integration test-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security install-frontend build-css watch-css migrate fixtures fixtures-light clean lint lint-platform lint-portal lint-security lint-credentials type-check pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod
+.PHONY: help install dev dev-platform dev-portal dev-all test test-platform test-portal test-integration test-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security install-frontend build-css watch-css migrate fixtures fixtures-light clean lint lint-platform lint-portal lint-security lint-credentials lint-audit type-check pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -329,15 +329,23 @@ fixtures-light:
 lint-platform:
 	@echo "🏗️ [Platform] Comprehensive code quality check..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "🔍 1/3: Performance & Security Analysis (Ruff)..."
+	@echo "🔍 1/4: Performance & Security Analysis (Ruff)..."
 	@cd services/platform && $(PWD)/.venv/bin/ruff check . --statistics || echo "⚠️ Ruff check skipped"
 	@echo ""
-	@echo "🏷️  2/3: Type Safety Check (MyPy)..."
+	@echo "🏷️  2/4: Type Safety Check (MyPy)..."
 	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/mypy apps/ --config-file=../../pyproject.toml 2>/dev/null || echo "⚠️ MyPy check skipped"
 	@echo ""
-	@echo "📊 3/3: Django Check..."
+	@echo "📊 3/4: Django Check..."
 	@$(PYTHON_PLATFORM_MANAGE) check --deploy --settings=config.settings.dev
+	@echo ""
+	@echo "🔒 4/4: Audit Coverage Check..."
+	@$(MAKE) lint-audit
 	@echo "✅ Platform linting complete!"
+
+lint-audit:
+	@echo "🔒 [Audit] Coverage scanner..."
+	@$(PYTHON_SHARED) scripts/audit_coverage_scan.py --min-severity=medium --exclude-tests services/platform/apps
+	@echo "✅ Audit coverage check complete!"
 
 lint-portal:
 	@echo "🌐 [Portal] Code quality check (NO database access)..."

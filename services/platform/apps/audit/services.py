@@ -20,7 +20,6 @@ from django.utils import timezone
 
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.types import EmailAddress, Err, Ok, Result
-from apps.common.validators import log_security_event
 from apps.tickets.models import Ticket  # Import for GDPR data export
 
 from .models import (
@@ -4425,8 +4424,8 @@ class DomainsAuditService:
             **context.metadata,
         }
 
-        # Log to security system
-        log_security_event(f"domain_{security_action}", security_event_metadata)
+        # Log to security system (audit event created below via AuditService.log_event)
+        logger.info(f"🔒 [Security] domain_{security_action}: {security_event_metadata}")
 
         # Enhanced context for audit system
         enhanced_context = AuditContext(
@@ -4504,8 +4503,8 @@ class SecurityAuditService:
                 "last_login": user.last_login.isoformat() if user.last_login else None,
             }
 
-        # Log security event
-        log_security_event(event_type="rate_limit_violation", details=metadata, request_ip=event_data["ip_address"])
+        # Log security event (audit event created below via AuditEvent.objects.create)
+        logger.info(f"🔒 [Security] rate_limit_violation: {metadata}")
 
         return AuditEvent.objects.create(
             category="security_event",
