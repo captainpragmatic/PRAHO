@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install dev dev-platform dev-portal dev-all test test-platform test-portal test-integration test-e2e test-security install-frontend build-css watch-css migrate fixtures fixtures-light clean lint lint-platform lint-portal lint-security lint-credentials type-check pre-commit
+.PHONY: help install dev dev-platform dev-portal dev-all test test-platform test-portal test-integration test-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security install-frontend build-css watch-css migrate fixtures fixtures-light clean lint lint-platform lint-portal lint-security lint-credentials type-check pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -38,7 +38,10 @@ help:
 	@echo "  make test-platform-pytest - Test platform service with pytest"
 	@echo "  make test-portal     - Test portal service (NO DB access)"
 	@echo "  make test-integration - Test platform→portal API communication"
-	@echo "  make test-e2e        - End-to-end tests across services"
+	@echo "  make test-e2e        - All E2E tests (requires both services)"
+	@echo "  make test-e2e-platform - Platform staff E2E tests (:8700)"
+	@echo "  make test-e2e-portal   - Portal customer E2E tests (:8701)"
+	@echo "  make test-e2e-orm      - ORM E2E tests (no server needed)"
 	@echo "  make test-security   - Validate service isolation"
 	@echo ""
 	@echo "🔧 DATABASE & ASSETS:"
@@ -89,7 +92,21 @@ help:
 	@echo "  make rollback-db        - Restore latest database backup"
 	@echo "  make health-check       - Check service health"
 	@echo ""
-	@echo "📜 ANSIBLE:"
+	@echo "☁️  INFRASTRUCTURE (Terraform → Hetzner):"
+	@echo "  make infra-init            - Initialize Terraform"
+	@echo "  make infra-plan ENV=dev    - Plan infrastructure changes"
+	@echo "  make infra-dev             - Provision dev server"
+	@echo "  make infra-staging         - Provision staging servers"
+	@echo "  make infra-prod            - Provision production servers"
+	@echo "  make infra-destroy-dev     - Destroy dev server"
+	@echo ""
+	@echo "🚀 ENVIRONMENT DEPLOYMENT (Ansible):"
+	@echo "  make deploy-dev            - Deploy PRAHO to dev (Docker)"
+	@echo "  make deploy-dev-native     - Deploy PRAHO to dev (native, no Docker)"
+	@echo "  make deploy-staging        - Deploy PRAHO to staging"
+	@echo "  make deploy-prod           - Deploy PRAHO to production"
+	@echo ""
+	@echo "📜 ANSIBLE (generic):"
 	@echo "  make ansible-single-server - Deploy via Ansible (single server)"
 	@echo "  make ansible-two-servers   - Deploy via Ansible (distributed)"
 	@echo "  make ansible-backup        - Remote backup via Ansible"
@@ -230,6 +247,40 @@ test-security:
 	@echo "🧪 Running portal database access prevention test..."
 	@cd services/portal && env -u PYTHONPATH $(PWD)/.venv/bin/python -m pytest conftest.py::test_db_access_blocked -v || echo "✅ Database access properly blocked"
 	@echo "🎉 All security isolation tests passed!"
+
+test-e2e:
+	@echo "🎭 [E2E] Running all end-to-end tests..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "⚠️  Requires both services running (make dev)"
+	@echo "🧪 Checking if services are available..."
+	@curl -sf http://localhost:8700/auth/login/ > /dev/null 2>&1 || (echo "❌ Platform service not running on :8700. Run 'make dev' first." && exit 1)
+	@curl -sf http://localhost:8701/login/ > /dev/null 2>&1 || (echo "❌ Portal service not running on :8701. Run 'make dev' first." && exit 1)
+	@echo "✅ Both services are running"
+	@echo "🎭 Running Playwright E2E tests..."
+	@PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/python -m pytest tests/e2e/ -v
+	@echo "✅ E2E tests completed!"
+
+test-e2e-platform:
+	@echo "🎭 [E2E Platform] Running platform staff E2E tests..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "⚠️  Requires platform service running (make dev-platform)"
+	@curl -sf http://localhost:8700/auth/login/ > /dev/null 2>&1 || (echo "❌ Platform service not running on :8700." && exit 1)
+	@PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/python -m pytest tests/e2e/platform/ -v
+	@echo "✅ Platform E2E tests completed!"
+
+test-e2e-portal:
+	@echo "🎭 [E2E Portal] Running portal customer E2E tests..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "⚠️  Requires portal service running (make dev-portal)"
+	@curl -sf http://localhost:8701/login/ > /dev/null 2>&1 || (echo "❌ Portal service not running on :8701." && exit 1)
+	@PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/python -m pytest tests/e2e/portal/ -v
+	@echo "✅ Portal E2E tests completed!"
+
+test-e2e-orm:
+	@echo "🎭 [E2E ORM] Running ORM-based E2E tests (no server needed)..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/python -m pytest tests/e2e/orm/ -v
+	@echo "✅ ORM E2E tests completed!"
 
 test:
 	@echo "🔄 [All Tests] Running comprehensive test suite (post Redis removal)..."
@@ -555,6 +606,77 @@ health-check:
 	@echo "🏥 [Health] Checking service health..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@./deploy/scripts/health-check.sh
+
+# ===============================================================================
+# INFRASTRUCTURE PROVISIONING (Terraform → Hetzner) ☁️
+# ===============================================================================
+
+.PHONY: infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev
+
+infra-init:
+	@echo "☁️ [Infra] Initializing Terraform..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@terraform -chdir=deploy/terraform init
+
+infra-plan:
+	@echo "☁️ [Infra] Planning infrastructure for $(ENV)..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+ifndef ENV
+	@echo "❌ ENV is required. Usage: make infra-plan ENV=dev"
+	@exit 1
+endif
+	@terraform -chdir=deploy/terraform workspace select $(ENV) 2>/dev/null || terraform -chdir=deploy/terraform workspace new $(ENV)
+	@terraform -chdir=deploy/terraform plan -var="environment=$(ENV)"
+
+infra-dev:
+	@echo "☁️ [Infra] Provisioning dev server on Hetzner..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@terraform -chdir=deploy/terraform workspace select dev 2>/dev/null || terraform -chdir=deploy/terraform workspace new dev
+	@terraform -chdir=deploy/terraform apply -var="environment=dev"
+
+infra-staging:
+	@echo "☁️ [Infra] Provisioning staging servers on Hetzner..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@terraform -chdir=deploy/terraform workspace select staging 2>/dev/null || terraform -chdir=deploy/terraform workspace new staging
+	@terraform -chdir=deploy/terraform apply -var="environment=staging"
+
+infra-prod:
+	@echo "☁️ [Infra] Provisioning production servers on Hetzner..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@terraform -chdir=deploy/terraform workspace select prod 2>/dev/null || terraform -chdir=deploy/terraform workspace new prod
+	@terraform -chdir=deploy/terraform apply -var="environment=prod"
+
+infra-destroy-dev:
+	@echo "☁️ [Infra] Destroying dev infrastructure..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@terraform -chdir=deploy/terraform workspace select dev
+	@terraform -chdir=deploy/terraform destroy -var="environment=dev"
+
+# ===============================================================================
+# ENVIRONMENT DEPLOYMENT (Ansible) 🚀
+# ===============================================================================
+
+.PHONY: deploy-dev deploy-dev-native deploy-staging deploy-prod
+
+deploy-dev:
+	@echo "🚀 [Deploy] Deploying PRAHO to dev (Docker)..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@cd deploy/ansible && ansible-playbook -i inventory/dev.yml playbooks/single-server.yml
+
+deploy-dev-native:
+	@echo "🚀 [Deploy] Deploying PRAHO to dev (native)..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@cd deploy/ansible && ansible-playbook -i inventory/dev.yml playbooks/native-single-server.yml
+
+deploy-staging:
+	@echo "🚀 [Deploy] Deploying PRAHO to staging..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@cd deploy/ansible && ansible-playbook -i inventory/staging.yml playbooks/two-servers.yml
+
+deploy-prod:
+	@echo "🚀 [Deploy] Deploying PRAHO to production..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@cd deploy/ansible && ansible-playbook -i inventory/prod.yml playbooks/two-servers.yml
 
 # ===============================================================================
 # ANSIBLE DEPLOYMENT 📜

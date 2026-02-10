@@ -1,0 +1,41 @@
+# =============================================================================
+# PRAHO - Production Environment Inventory
+# =============================================================================
+# Two-server topology:
+#   Primary:   Platform + DB + Caddy  (cpx31: 4 vCPU, 8GB)
+#   Secondary: Portal + Caddy         (cpx31: 4 vCPU, 8GB)
+#
+# Set server IPs via:
+#   export PRAHO_PROD_PLATFORM_IP=<ip-from-terraform-output>
+#   export PRAHO_PROD_PORTAL_IP=<ip-from-terraform-output>
+
+all:
+  children:
+    primary:
+      hosts:
+        praho-prod-platform:
+          ansible_host: "{{ lookup('env', 'PRAHO_PROD_PLATFORM_IP') | default('your-prod-platform-ip', true) }}"
+          ansible_user: "{{ lookup('env', 'PRAHO_SSH_USER') | default('root', true) }}"
+          ansible_ssh_private_key_file: "{{ lookup('env', 'PRAHO_SSH_KEY') | default('~/.ssh/id_rsa', true) }}"
+      vars:
+        deploy_platform: true
+        deploy_portal: false
+        deploy_database: true
+        deploy_caddy: true
+        is_primary: true
+        environment: prod
+
+    secondary:
+      hosts:
+        praho-prod-portal:
+          ansible_host: "{{ lookup('env', 'PRAHO_PROD_PORTAL_IP') | default('your-prod-portal-ip', true) }}"
+          ansible_user: "{{ lookup('env', 'PRAHO_SSH_USER') | default('root', true) }}"
+          ansible_ssh_private_key_file: "{{ lookup('env', 'PRAHO_SSH_KEY') | default('~/.ssh/id_rsa', true) }}"
+      vars:
+        deploy_platform: false
+        deploy_portal: true
+        deploy_database: false
+        deploy_caddy: true
+        is_primary: false
+        environment: prod
+        platform_api_url: "https://{{ hostvars['praho-prod-platform']['domain'] }}/api"

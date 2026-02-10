@@ -1,0 +1,38 @@
+# =============================================================================
+# PRAHO - Production Environment Variables
+# =============================================================================
+# Overrides for group_vars/all.yml in production environment
+
+# Application
+django_settings_module: config.settings.prod
+debug: false
+environment: prod
+
+# Domain
+domain: "{{ lookup('env', 'PRAHO_DOMAIN') | default('pragmatichost.com', true) }}"
+
+# Docker
+praho_version: "{{ lookup('env', 'PRAHO_VERSION') | default('latest', true) }}"
+
+# Resources
+gunicorn_workers_platform: 4
+gunicorn_workers_portal: 2
+
+# Backup (strict retention for production)
+backup_enabled: true
+backup_retention_days: 90
+
+# Firewall (stricter in production)
+firewall_enabled: true
+allowed_ports:
+  - 22
+  - 80
+  - 443
+
+# Monitoring
+sentry_environment: production
+log_level: WARNING
+
+# Security
+session_cookie_secure: true
+csrf_cookie_secure: true

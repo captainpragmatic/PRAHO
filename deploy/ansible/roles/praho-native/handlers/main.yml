@@ -1,0 +1,32 @@
+# =============================================================================
+# PRAHO Native Deployment - Handlers
+# =============================================================================
+
+- name: systemd daemon-reload
+  systemd:
+    daemon_reload: yes
+
+- name: restart postgresql
+  service:
+    name: postgresql
+    state: restarted
+
+- name: restart caddy
+  service:
+    name: caddy
+    state: restarted
+
+- name: restart praho-platform
+  systemd:
+    name: praho-platform
+    state: restarted
+
+- name: restart praho-portal
+  systemd:
+    name: praho-portal
+    state: restarted
+
+- name: restart praho-qcluster
+  systemd:
+    name: praho-qcluster
+    state: restarted

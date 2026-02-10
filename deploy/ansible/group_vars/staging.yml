@@ -1,0 +1,27 @@
+# =============================================================================
+# PRAHO - Staging Environment Variables
+# =============================================================================
+# Overrides for group_vars/all.yml in staging environment
+
+# Application
+django_settings_module: config.settings.staging
+debug: false
+environment: staging
+
+# Domain
+domain: "{{ lookup('env', 'PRAHO_STAGING_DOMAIN') | default('staging.pragmatichost.com', true) }}"
+
+# Docker
+praho_version: "{{ lookup('env', 'PRAHO_VERSION') | default('latest', true) }}"
+
+# Resources
+gunicorn_workers_platform: 3
+gunicorn_workers_portal: 2
+
+# Backup
+backup_enabled: true
+backup_retention_days: 14
+
+# Monitoring
+sentry_environment: staging
+log_level: INFO

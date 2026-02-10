@@ -12,6 +12,7 @@ Centralizes common functionality like:
 """
 
 
+import os
 import time
 from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
@@ -24,18 +25,22 @@ from playwright.sync_api import Page, ViewportSize
 # TEST CONFIGURATION
 # ===============================================================================
 
-# Base URL for the application
-BASE_URL = "http://localhost:8701"
+# Portal (customer-facing) at :8701
+BASE_URL = os.environ.get("PORTAL_BASE_URL", "http://localhost:8701")
 
-# Auth URL paths (PRAHO uses both /auth/ and /users/ as aliases)
-# Using /auth/ as primary since that's where logout redirects
-LOGIN_URL = "/auth/login/"
-LOGOUT_URL = "/auth/logout/"
+# Auth URL paths for Portal service
+LOGIN_URL = "/login/"
+LOGOUT_URL = "/logout/"
+REGISTER_URL = "/register/"
 
-# Also support /users/ paths for backwards compatibility
+# Platform (staff backend) at :8700
+PLATFORM_BASE_URL = os.environ.get("PLATFORM_BASE_URL", "http://localhost:8700")
+PLATFORM_LOGIN_URL = "/auth/login/"
+PLATFORM_LOGOUT_URL = "/auth/logout/"
+
 def is_login_url(url: str) -> bool:
-    """Check if URL is a login page (supports both /auth/ and /users/ paths)"""
-    return "/auth/login/" in url or "/users/login/" in url
+    """Check if URL is a login page"""
+    return "/login/" in url and "/logout/" not in url
 
 def is_logged_in_url(url: str) -> bool:
     """Check if URL indicates successful login (user is in authenticated area)"""
@@ -54,6 +59,116 @@ LEGACY_CUSTOMER_EMAIL = "customer@pragmatichost.com"
 LEGACY_CUSTOMER_PASSWORD = "admin123"
 CUSTOMER2_EMAIL = "customer2@pragmatichost.com"
 CUSTOMER2_PASSWORD = "admin123"
+
+# Staff credentials for platform (reuse E2E admin)
+STAFF_EMAIL = SUPERUSER_EMAIL
+STAFF_PASSWORD = SUPERUSER_PASSWORD
+
+
+# ===============================================================================
+# PLATFORM AUTHENTICATION UTILITIES
+# ===============================================================================
+
+def login_platform_user(page: Page, email: str | None = None, password: str | None = None) -> bool:
+    """
+    Login to the platform (staff backend) at :8700.
+
+    Args:
+        page: Playwright page object
+        email: Staff email (defaults to STAFF_EMAIL)
+        password: Staff password (defaults to STAFF_PASSWORD)
+
+    Returns:
+        bool: True if login successful, False otherwise
+    """
+    email = email or STAFF_EMAIL
+    password = password or STAFF_PASSWORD
+    print(f"🔐 Logging in to platform as {email}")
+
+    try:
+        page.goto(f"{PLATFORM_BASE_URL}{PLATFORM_LOGIN_URL}", timeout=10000)
+        page.wait_for_load_state("networkidle", timeout=5000)
+    except Exception as e:
+        print(f"❌ Cannot navigate to platform login: {str(e)[:50]}")
+        return False
+
+    try:
+        # Platform login form may use 'email' or 'username' field
+        email_field = page.locator('input[name="email"], input[name="username"]')
+        email_field.first.fill(email)
+        page.locator('input[name="password"]').fill(password)
+        page.locator('button[type="submit"], input[type="submit"]').first.click()
+        page.wait_for_load_state("networkidle", timeout=10000)
+    except Exception as e:
+        print(f"❌ Cannot fill platform login form: {str(e)[:50]}")
+        return False
+
+    # Check we left the login page
+    if PLATFORM_LOGIN_URL not in page.url:
+        print(f"✅ Successfully logged in to platform as {email}")
+        return True
+
+    print(f"❌ Platform login failed for {email}, still on {page.url}")
+    return False
+
+
+def logout_platform_user(page: Page) -> bool:
+    """Logout from the platform (staff backend)."""
+    print("🚪 Logging out from platform")
+    try:
+        page.goto(f"{PLATFORM_BASE_URL}{PLATFORM_LOGOUT_URL}")
+        page.wait_for_load_state("networkidle", timeout=3000)
+        if PLATFORM_LOGIN_URL in page.url or "/auth/login/" in page.url:
+            print("✅ Successfully logged out from platform")
+            return True
+        return False
+    except Exception as e:
+        print(f"❌ Platform logout error: {str(e)[:100]}")
+        return False
+
+
+def ensure_fresh_platform_session(page: Page) -> None:
+    """Ensure a fresh session on the platform service."""
+    print("🔄 Ensuring fresh platform session")
+    current_url = page.url
+    if PLATFORM_LOGIN_URL in current_url:
+        print("  ✅ Already on platform login page")
+        return
+    try:
+        logout_platform_user(page)
+    except Exception:
+        pass
+    page.goto(f"{PLATFORM_BASE_URL}{PLATFORM_LOGIN_URL}", timeout=10000)
+    page.wait_for_load_state("networkidle", timeout=5000)
+    print("  ✅ Navigated to platform login page")
+
+
+def navigate_to_platform_page(page: Page, path: str, expected_url_fragment: str | None = None) -> bool:
+    """
+    Navigate to a page on the platform service.
+
+    Args:
+        page: Playwright page object
+        path: URL path relative to PLATFORM_BASE_URL
+        expected_url_fragment: Optional fragment to verify navigation
+
+    Returns:
+        bool: True if navigation successful
+    """
+    full_url = f"{PLATFORM_BASE_URL}{path}"
+    print(f"🔗 Navigating to platform {full_url}")
+    try:
+        page.goto(full_url)
+        page.wait_for_load_state("networkidle")
+        expected_fragment = expected_url_fragment or path
+        if expected_fragment in page.url:
+            print(f"✅ Successfully navigated to platform {path}")
+            return True
+        print(f"❌ Platform navigation failed, expected {expected_fragment}, got {page.url}")
+        return False
+    except Exception as e:
+        print(f"❌ Platform navigation error: {str(e)[:100]}")
+        return False
 
 
 # ===============================================================================
@@ -383,10 +498,10 @@ def navigate_to_dashboard(page: Page) -> bool:
     print("🏠 Navigating to dashboard")
     
     try:
-        page.goto(f"{BASE_URL}/app/")
+        page.goto(f"{BASE_URL}/dashboard/")
         page.wait_for_load_state("networkidle")
-        
-        if "/app/" in page.url:
+
+        if is_logged_in_url(page.url):
             print("✅ Successfully navigated to dashboard")
             return True
         else:
@@ -1083,18 +1198,6 @@ class ConsoleMonitor:
 
 
 # ===============================================================================
-# PYTEST CONFIGURATION
-# ===============================================================================
-
-def pytest_configure(config):
-    """Configure pytest-playwright settings for all E2E tests."""
-    # These settings apply to all E2E tests
-    config.option.headed = False  # Run headless by default (set to True for debugging)
-    config.option.slowmo = 0      # No slowdown by default (increase for debugging)
-    config.option.browser = "chromium"  # Default browser
-
-
-# ===============================================================================
 # SEMANTIC VALIDATION UTILITIES
 # ===============================================================================
 
@@ -1301,7 +1404,7 @@ def verify_dashboard_functionality(page: Page, user_type: str) -> bool:
     print(f"📊 Verifying dashboard functionality for {user_type}")
     
     # Verify we're on the dashboard
-    if "/app/" not in page.url:
+    if not is_logged_in_url(page.url):
         print("❌ Not on dashboard page")
         return False
     

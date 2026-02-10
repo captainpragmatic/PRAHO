@@ -1,0 +1,78 @@
+# =============================================================================
+# PRAHO - Native Single Server Deployment Playbook
+# =============================================================================
+# Deploys PRAHO natively (PostgreSQL + uv + systemd + Caddy) - no Docker.
+# Intended for dev/staging on resource-constrained servers (4 GB RAM).
+#
+# Usage:
+#   ansible-playbook -i inventory/dev.yml playbooks/native-single-server.yml
+#
+# Required environment variables:
+#   PRAHO_DEV_DOMAIN (or defaults to dev.pragmatichost.com)
+#   PRAHO_DB_PASSWORD
+#   PRAHO_SECRET_KEY
+
+---
+- name: Deploy PRAHO - Native Single Server
+  hosts: praho
+  become: yes
+  gather_facts: yes
+
+  pre_tasks:
+    - name: Validate Ubuntu version
+      assert:
+        that:
+          - ansible_distribution == 'Ubuntu'
+          - ansible_distribution_version is version('22.04', '>=')
+        fail_msg: "Requires Ubuntu >= 22.04 (found {{ ansible_distribution }} {{ ansible_distribution_version }})"
+
+    - name: Validate required variables
+      assert:
+        that:
+          - domain is defined and domain != 'praho.example.com'
+          - db_password is defined and db_password != 'changeme'
+          - secret_key is defined and secret_key != 'generate-a-strong-key'
+        fail_msg: "Required variables not set. Export PRAHO_DB_PASSWORD, PRAHO_SECRET_KEY, and PRAHO_DEV_DOMAIN."
+
+  roles:
+    - common
+    - praho-native
+
+  post_tasks:
+    - name: Verify platform HTTP
+      uri:
+        url: "http://localhost:{{ platform_port }}/health/"
+        status_code: 200
+      register: post_platform_check
+      retries: 3
+      delay: 5
+      until: post_platform_check.status == 200
+
+    - name: Verify portal HTTP
+      uri:
+        url: "http://localhost:{{ portal_port }}/"
+        status_code:
+          - 200
+          - 302
+      register: post_portal_check
+      retries: 3
+      delay: 5
+      until: post_portal_check.status in [200, 302]
+
+    - name: Verify HTTPS endpoint
+      uri:
+        url: "https://{{ domain }}/health/"
+        status_code: 200
+        validate_certs: yes
+      register: post_https_check
+      retries: 10
+      delay: 10
+      until: post_https_check.status == 200
+      ignore_errors: yes
+
+    - name: Report HTTPS status
+      debug:
+        msg: >-
+          {{ 'HTTPS is live at https://' ~ domain ~ '/health/'
+             if post_https_check.status | default(0) == 200
+             else 'HTTPS not yet available (DNS may need propagation). Check: curl https://' ~ domain ~ '/health/' }}

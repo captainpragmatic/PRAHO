@@ -133,6 +133,21 @@ services/portal/.pytest_cache/
 services/portal/__pycache__/
 services/portal/static/dist/
 
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfstate.*.backup
+terraform.tfvars
+*.auto.tfvars
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
 # Django Q logs
 django_q.log
 

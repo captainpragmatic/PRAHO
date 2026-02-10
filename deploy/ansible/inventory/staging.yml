@@ -1,0 +1,41 @@
+# =============================================================================
+# PRAHO - Staging Environment Inventory
+# =============================================================================
+# Two-server topology mirroring production:
+#   Primary:   Platform + DB + Caddy
+#   Secondary: Portal + Caddy
+#
+# Set server IPs via:
+#   export PRAHO_STAGING_PLATFORM_IP=<ip-from-terraform-output>
+#   export PRAHO_STAGING_PORTAL_IP=<ip-from-terraform-output>
+
+all:
+  children:
+    primary:
+      hosts:
+        praho-staging-platform:
+          ansible_host: "{{ lookup('env', 'PRAHO_STAGING_PLATFORM_IP') | default('your-staging-platform-ip', true) }}"
+          ansible_user: "{{ lookup('env', 'PRAHO_SSH_USER') | default('root', true) }}"
+          ansible_ssh_private_key_file: "{{ lookup('env', 'PRAHO_SSH_KEY') | default('~/.ssh/id_rsa', true) }}"
+      vars:
+        deploy_platform: true
+        deploy_portal: false
+        deploy_database: true
+        deploy_caddy: true
+        is_primary: true
+        environment: staging
+
+    secondary:
+      hosts:
+        praho-staging-portal:
+          ansible_host: "{{ lookup('env', 'PRAHO_STAGING_PORTAL_IP') | default('your-staging-portal-ip', true) }}"
+          ansible_user: "{{ lookup('env', 'PRAHO_SSH_USER') | default('root', true) }}"
+          ansible_ssh_private_key_file: "{{ lookup('env', 'PRAHO_SSH_KEY') | default('~/.ssh/id_rsa', true) }}"
+      vars:
+        deploy_platform: false
+        deploy_portal: true
+        deploy_database: false
+        deploy_caddy: true
+        is_primary: false
+        environment: staging
+        platform_api_url: "https://{{ hostvars['praho-staging-platform']['domain'] }}/api"

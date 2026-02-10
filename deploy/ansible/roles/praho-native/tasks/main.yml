@@ -1,0 +1,445 @@
+# =============================================================================
+# PRAHO Native Deployment Role
+# =============================================================================
+# Deploys PRAHO directly on the host with PostgreSQL + uv + systemd + Caddy.
+# No Docker required.
+
+# ---------------------------------------------------------------------------
+# 1. PostgreSQL 15
+# ---------------------------------------------------------------------------
+
+- name: Add PostgreSQL APT signing key
+  apt_key:
+    url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
+    state: present
+
+- name: Add PostgreSQL APT repository
+  apt_repository:
+    repo: "deb http://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main"
+    state: present
+
+- name: Install PostgreSQL 15
+  apt:
+    name:
+      - postgresql-15
+      - postgresql-client-15
+      - libpq-dev
+    state: present
+    update_cache: yes
+
+- name: Ensure PostgreSQL is started and enabled
+  service:
+    name: postgresql
+    state: started
+    enabled: yes
+
+- name: Create PostgreSQL user
+  become_user: postgres
+  community.postgresql.postgresql_user:
+    name: "{{ db_user }}"
+    password: "{{ db_password }}"
+    role_attr_flags: CREATEDB
+    state: present
+
+- name: Create PostgreSQL database
+  become_user: postgres
+  community.postgresql.postgresql_db:
+    name: "{{ db_name }}"
+    owner: "{{ db_user }}"
+    encoding: UTF-8
+    lc_collate: en_US.UTF-8
+    lc_ctype: en_US.UTF-8
+    state: present
+
+# ---------------------------------------------------------------------------
+# 2. Python 3.11 + build dependencies
+# ---------------------------------------------------------------------------
+
+- name: Install prerequisites for deadsnakes PPA
+  apt:
+    name:
+      - software-properties-common
+      - acl
+    state: present
+
+- name: Add deadsnakes PPA
+  apt_repository:
+    repo: "ppa:deadsnakes/ppa"
+    state: present
+
+- name: Install Python {{ python_version }} and build dependencies
+  apt:
+    name:
+      - "python{{ python_version }}"
+      - "python{{ python_version }}-dev"
+      - "python{{ python_version }}-venv"
+      - build-essential
+      - gettext
+    state: present
+    update_cache: yes
+
+# ---------------------------------------------------------------------------
+# 3. uv package manager
+# ---------------------------------------------------------------------------
+
+- name: Install uv
+  shell: curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+  args:
+    creates: /usr/local/bin/uv
+
+- name: Verify uv is available
+  command: /usr/local/bin/uv --version
+  changed_when: false
+
+# ---------------------------------------------------------------------------
+# 4. Code deployment
+# ---------------------------------------------------------------------------
+
+- name: Create source directory
+  file:
+    path: "{{ project_root }}/src"
+    state: directory
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: "0755"
+
+- name: Create static and media directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: "0755"
+  loop:
+    - "{{ project_root }}/static"
+    - "{{ project_root }}/media"
+
+- name: Deploy code via rsync
+  synchronize:
+    src: "{{ playbook_dir }}/../../../"
+    dest: "{{ project_root }}/src/"
+    delete: yes
+    rsync_opts:
+      - "--exclude=.git"
+      - "--exclude=.venv"
+      - "--exclude=__pycache__"
+      - "--exclude=node_modules"
+      - "--exclude=*.pyc"
+      - "--exclude=.env"
+      - "--exclude=db.sqlite3"
+      - "--exclude=.mypy_cache"
+      - "--exclude=.pytest_cache"
+      - "--exclude=htmlcov"
+      - "--exclude=.ruff_cache"
+  when: deploy_method == 'rsync'
+  notify:
+    - restart praho-platform
+    - restart praho-portal
+    - restart praho-qcluster
+
+- name: Deploy code via git
+  git:
+    repo: "{{ praho_git_repo }}"
+    dest: "{{ project_root }}/src"
+    version: "{{ praho_git_branch }}"
+    force: yes
+  become_user: "{{ project_user }}"
+  when: deploy_method == 'git'
+  notify:
+    - restart praho-platform
+    - restart praho-portal
+    - restart praho-qcluster
+
+- name: Set source ownership
+  file:
+    path: "{{ project_root }}/src"
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    recurse: yes
+
+# ---------------------------------------------------------------------------
+# 5. Virtual environment + dependencies
+# ---------------------------------------------------------------------------
+
+- name: Create virtualenv with uv
+  command: >
+    /usr/local/bin/uv venv
+    --python python{{ python_version }}
+    {{ project_root }}/.venv
+  args:
+    creates: "{{ project_root }}/.venv/bin/python"
+  become_user: "{{ project_user }}"
+
+- name: Install dependencies with uv
+  command: >
+    /usr/local/bin/uv sync
+    --group platform
+    --group prod
+    --frozen
+  args:
+    chdir: "{{ project_root }}/src"
+  become_user: "{{ project_user }}"
+  environment:
+    UV_PROJECT_ENVIRONMENT: "{{ project_root }}/.venv"
+
+# ---------------------------------------------------------------------------
+# 6. Environment file
+# ---------------------------------------------------------------------------
+
+- name: Template environment file
+  template:
+    src: env.native.j2
+    dest: "{{ project_root }}/.env"
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: "0600"
+  notify:
+    - restart praho-platform
+    - restart praho-portal
+    - restart praho-qcluster
+
+# ---------------------------------------------------------------------------
+# 7. Django setup
+# ---------------------------------------------------------------------------
+
+- name: Set Django environment variables
+  set_fact:
+    django_env:
+      PYTHONPATH: "{{ project_root }}/src/services/platform"
+      DJANGO_SETTINGS_MODULE: "{{ django_settings_module }}"
+      DATABASE_URL: "postgresql://{{ db_user }}:{{ db_password }}@localhost:{{ db_port }}/{{ db_name }}"
+      SECRET_KEY: "{{ secret_key }}"
+      STATIC_ROOT: "{{ project_root }}/static"
+      MEDIA_ROOT: "{{ project_root }}/media"
+      ALLOWED_HOSTS: "{{ domain }},localhost,127.0.0.1"
+
+- name: Run database migrations
+  command: >
+    {{ project_root }}/.venv/bin/python manage.py migrate --noinput
+  args:
+    chdir: "{{ project_root }}/src/services/platform"
+  become_user: "{{ project_user }}"
+  environment: "{{ django_env }}"
+
+- name: Create database cache table
+  command: >
+    {{ project_root }}/.venv/bin/python manage.py createcachetable
+  args:
+    chdir: "{{ project_root }}/src/services/platform"
+  become_user: "{{ project_user }}"
+  environment: "{{ django_env }}"
+  failed_when: false
+
+- name: Collect static files
+  command: >
+    {{ project_root }}/.venv/bin/python manage.py collectstatic --noinput
+  args:
+    chdir: "{{ project_root }}/src/services/platform"
+  become_user: "{{ project_user }}"
+  environment: "{{ django_env }}"
+
+- name: Setup categories
+  command: >
+    {{ project_root }}/.venv/bin/python manage.py setup_categories
+  args:
+    chdir: "{{ project_root }}/src/services/platform"
+  become_user: "{{ project_user }}"
+  environment: "{{ django_env }}"
+  failed_when: false
+
+- name: Setup default settings
+  command: >
+    {{ project_root }}/.venv/bin/python manage.py setup_default_settings
+  args:
+    chdir: "{{ project_root }}/src/services/platform"
+  become_user: "{{ project_user }}"
+  environment: "{{ django_env }}"
+  failed_when: false
+
+- name: Setup scheduled tasks
+  command: >
+    {{ project_root }}/.venv/bin/python manage.py setup_scheduled_tasks
+  args:
+    chdir: "{{ project_root }}/src/services/platform"
+  become_user: "{{ project_user }}"
+  environment: "{{ django_env }}"
+  failed_when: false
+
+# ---------------------------------------------------------------------------
+# 8. Caddy reverse proxy
+# ---------------------------------------------------------------------------
+
+- name: Install Caddy APT prerequisites
+  apt:
+    name:
+      - debian-keyring
+      - debian-archive-keyring
+      - apt-transport-https
+    state: present
+
+- name: Add Caddy GPG key
+  shell: curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+  args:
+    creates: /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+
+- name: Add Caddy APT repository
+  shell: curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
+  args:
+    creates: /etc/apt/sources.list.d/caddy-stable.list
+
+- name: Install Caddy
+  apt:
+    name: caddy
+    state: present
+    update_cache: yes
+
+- name: Create Caddy log directory
+  file:
+    path: /var/log/caddy
+    state: directory
+    owner: caddy
+    group: caddy
+    mode: "0755"
+
+- name: Template Caddyfile
+  template:
+    src: Caddyfile.native.j2
+    dest: /etc/caddy/Caddyfile
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "caddy validate --config %s --adapter caddyfile"
+  notify: restart caddy
+
+# ---------------------------------------------------------------------------
+# 9. Systemd services
+# ---------------------------------------------------------------------------
+
+- name: Template praho-platform systemd unit
+  template:
+    src: praho-platform.service.j2
+    dest: /etc/systemd/system/praho-platform.service
+    mode: "0644"
+  notify:
+    - systemd daemon-reload
+    - restart praho-platform
+
+- name: Template praho-portal systemd unit
+  template:
+    src: praho-portal.service.j2
+    dest: /etc/systemd/system/praho-portal.service
+    mode: "0644"
+  notify:
+    - systemd daemon-reload
+    - restart praho-portal
+
+- name: Template praho-qcluster systemd unit
+  template:
+    src: praho-qcluster.service.j2
+    dest: /etc/systemd/system/praho-qcluster.service
+    mode: "0644"
+  notify:
+    - systemd daemon-reload
+    - restart praho-qcluster
+
+- name: Reload systemd daemon
+  systemd:
+    daemon_reload: yes
+
+- name: Enable and start PRAHO services
+  systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: yes
+  loop:
+    - praho-platform
+    - praho-portal
+    - praho-qcluster
+
+- name: Enable and start Caddy
+  systemd:
+    name: caddy
+    state: started
+    enabled: yes
+
+# ---------------------------------------------------------------------------
+# 10. Backup and utility scripts
+# ---------------------------------------------------------------------------
+
+- name: Template backup script
+  template:
+    src: backup-native.sh.j2
+    dest: "{{ project_root }}/scripts/backup.sh"
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: "0755"
+  when: backup_enabled
+
+- name: Template restore script
+  template:
+    src: restore-native.sh.j2
+    dest: "{{ project_root }}/scripts/restore.sh"
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: "0755"
+
+- name: Template health check script
+  template:
+    src: health-check.sh.j2
+    dest: "{{ project_root }}/scripts/health-check.sh"
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: "0755"
+
+- name: Setup backup cron job
+  cron:
+    name: "PRAHO database backup"
+    minute: "0"
+    hour: "2"
+    job: "{{ project_root }}/scripts/backup.sh >> {{ project_root }}/logs/backup.log 2>&1"
+    user: "{{ project_user }}"
+  when: backup_enabled
+
+# ---------------------------------------------------------------------------
+# 11. Health check
+# ---------------------------------------------------------------------------
+
+- name: Wait for platform to be healthy
+  uri:
+    url: "http://localhost:{{ platform_port }}/health/"
+    status_code: 200
+  register: platform_health
+  until: platform_health.status == 200
+  retries: 30
+  delay: 5
+
+- name: Wait for portal to respond
+  uri:
+    url: "http://localhost:{{ portal_port }}/"
+    status_code:
+      - 200
+      - 302
+  register: portal_health
+  until: portal_health.status in [200, 302]
+  retries: 15
+  delay: 5
+
+- name: Display deployment info
+  debug:
+    msg: |
+      ================================================
+      PRAHO Native Deployment Complete!
+      ================================================
+      Domain:    {{ domain }}
+      Platform:  http://localhost:{{ platform_port }}
+      Portal:    http://localhost:{{ portal_port }}
+      Q-Cluster: running ({{ qcluster_workers }} workers)
+      Database:  PostgreSQL 15 (localhost:{{ db_port }})
+      Method:    {{ deploy_method }}
+      ================================================
+      Useful commands:
+        systemctl status praho-platform praho-portal praho-qcluster
+        journalctl -u praho-platform -f
+        {{ project_root }}/scripts/health-check.sh
+        {{ project_root }}/scripts/backup.sh
+      ================================================

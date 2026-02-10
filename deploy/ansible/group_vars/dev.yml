@@ -1,0 +1,35 @@
+# =============================================================================
+# PRAHO - Dev Environment Variables
+# =============================================================================
+# Overrides for group_vars/all.yml in dev environment
+
+# Application
+django_settings_module: config.settings.dev
+debug: true
+environment: dev
+
+# Domain
+domain: "{{ lookup('env', 'PRAHO_DEV_DOMAIN') | default('dev.pragmatichost.com', true) }}"
+
+# Docker
+praho_version: "{{ lookup('env', 'PRAHO_VERSION') | default('latest', true) }}"
+
+# Resources (smaller for dev)
+gunicorn_workers_platform: 2
+gunicorn_workers_portal: 1
+
+# Backup (less frequent in dev)
+backup_enabled: false
+backup_retention_days: 7
+
+# Native deployment
+deploy_method: rsync
+praho_git_branch: master
+qcluster_workers: 1
+platform_memory_max: 1G
+portal_memory_max: 512M
+qcluster_memory_max: 256M
+
+# Monitoring
+sentry_environment: development
+log_level: DEBUG

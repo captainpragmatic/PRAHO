@@ -1,0 +1,34 @@
+# =============================================================================
+# PRAHO Native Deployment - Default Variables
+# =============================================================================
+# Override in group_vars/<env>.yml or inventory host_vars
+
+# Deployment method: rsync (dev) or git (prod/staging)
+deploy_method: rsync
+
+# Git settings (used when deploy_method: git)
+praho_git_repo: "https://github.com/your-org/praho.git"
+praho_git_branch: master
+
+# Python
+python_version: "3.11"
+
+# Gunicorn
+gunicorn_workers_platform: 2
+gunicorn_workers_portal: 1
+gunicorn_timeout_platform: 120
+gunicorn_timeout_portal: 60
+
+# Django-Q2
+qcluster_workers: 2
+
+# Systemd memory limits
+platform_memory_max: 1G
+portal_memory_max: 512M
+qcluster_memory_max: 512M
+
+# Django
+django_settings_module: config.settings.prod
+
+# PostgreSQL
+db_port: 5432

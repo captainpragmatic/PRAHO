@@ -569,7 +569,7 @@ def test_signup_then_login_flow(page: Page) -> None:
         page.wait_for_timeout(1000)
 
         current_url = page.url
-        if "/app/" in current_url:
+        if "/dashboard/" in current_url:
             print("    Successfully logged in with new account")
         elif is_login_url(current_url):
             # Check for error messages
@@ -595,7 +595,7 @@ def test_customer_can_view_orders_list(page: Page) -> None:
     Test that logged-in customers can view their orders list.
 
     This test verifies:
-    1. Customer can access /app/orders/ after login
+    1. Customer can access /order/ after login
     2. Orders list page displays correctly
     3. Customer sees appropriate order status filters
     """
@@ -614,13 +614,13 @@ def test_customer_can_view_orders_list(page: Page) -> None:
         assert login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD), "Customer login should succeed"
 
         # Navigate to orders
-        page.goto(f"{BASE_URL}/app/orders/")
+        page.goto(f"{BASE_URL}/order/")
         page.wait_for_load_state("networkidle")
 
         # Verify we're on orders page or allowed to access
         current_url = page.url
 
-        if "/app/orders/" in current_url:
+        if "/order/" in current_url:
             print("    Customer can access orders page")
 
             # Check for orders list elements
@@ -670,10 +670,10 @@ def test_customer_order_list_shows_correct_data(page: Page) -> None:
         assert login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD), "Customer login should succeed"
 
         # Navigate to orders
-        page.goto(f"{BASE_URL}/app/orders/")
+        page.goto(f"{BASE_URL}/order/")
         page.wait_for_load_state("networkidle")
 
-        if "/app/orders/" not in page.url:
+        if "/order/" not in page.url:
             print("    Cannot access orders page - skipping data tests")
             return
 
@@ -815,14 +815,14 @@ def test_complete_new_customer_journey(page: Page) -> None:
 
         current_url = page.url
 
-        if "/app/" in current_url:
+        if "/dashboard/" in current_url:
             print("    Step 5: Successfully logged in to dashboard")
 
             # Step 6: Navigate to orders
-            page.goto(f"{BASE_URL}/app/orders/")
+            page.goto(f"{BASE_URL}/order/")
             page.wait_for_load_state("networkidle")
 
-            if "/app/orders/" in page.url:
+            if "/order/" in page.url:
                 print("    Step 6: Successfully accessed orders section")
 
                 # Verify orders page content for new customer
@@ -1103,8 +1103,8 @@ def test_signup_with_special_characters_in_company_name(page: Page) -> None:
     Test signup with special characters in company name.
 
     Romanian company names may include special characters like:
-    - & (și)
-    - Diacritics (ă, â, î, ș, ț)
+    - & (si)
+    - Diacritics (a, a, i, s, t)
     - Quotes in legal names
     """
     print("Testing signup with special characters in company name")
