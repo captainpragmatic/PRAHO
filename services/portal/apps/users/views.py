@@ -225,7 +225,15 @@ def login_view(request: HttpRequest) -> HttpResponse:
                     request.session['email'] = email
                     request.session['authenticated_at'] = timezone.now().isoformat()
                     request.session['remember_me'] = remember_me
-                    
+
+                    # Fetch and cache user's customer memberships for role-based access
+                    try:
+                        memberships = _get_user_customer_memberships(request)
+                        if memberships:
+                            request.session['user_memberships'] = memberships
+                    except Exception:
+                        logger.debug("Could not fetch memberships on login")
+
                     # Set session expiry based on remember me checkbox
                     if remember_me:
                         session_age = settings.SESSION_COOKIE_AGE_REMEMBER_ME  # 30 days

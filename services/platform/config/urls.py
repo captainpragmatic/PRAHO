@@ -67,6 +67,8 @@ urlpatterns = [
     path("tickets/", include("apps.tickets.urls")),
     path("provisioning/", include("apps.provisioning.urls")),
     path("domains/", include("apps.domains.urls")),
+    # Infrastructure management
+    path("infrastructure/", include("apps.infrastructure.urls")),
     # Notifications (admin/staff tools)
     path("notifications/", include("apps.notifications.urls")),
     # External integrations & webhooks
