@@ -165,9 +165,9 @@ def test_staff_service_creation_workflow(page: Page) -> None:
             # Check if we're on create page
             if "/create/" in page.url:
                 # Look for form elements
-                customer_select = page.locator('select[name="customer_id"], select:has(option)')
+                customer_select = page.locator('select[name="customer_id"]')
                 domain_input = page.locator('input[name="domain"], input[placeholder*="domain"]')
-                plan_select = page.locator('select[name="plan_id"], select:has(option)')
+                plan_select = page.locator('select[name="plan_id"]')
 
                 if customer_select.count() > 0 and domain_input.count() > 0:
                     print("  ✅ Service creation form elements found")
