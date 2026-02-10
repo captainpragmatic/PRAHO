@@ -31,5 +31,4 @@ packages = ["apps", "config"]
 # This is a workspace member, not a standalone package
 package = true
 
-# Platform service uses the 'platform' dependency group from root
-dev-dependencies = []
+# Platform service uses dependency groups from root pyproject.toml

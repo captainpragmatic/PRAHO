@@ -105,15 +105,12 @@ help:
 install:
 	@echo "🔧 Setting up PRAHO services development environment..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "📦 Creating virtual environment..."
-	python3 -m venv .venv
-	.venv/bin/pip install --upgrade pip
-	@echo ""
-	@echo "📋 Installing platform dependencies (with database drivers)..."
-	.venv/bin/pip install -r services/platform/requirements/dev.txt
-	@echo ""
-	@echo "📋 Installing portal dependencies (NO database drivers)..."
-	.venv/bin/pip install -r services/portal/requirements.txt
+	@if ! command -v uv >/dev/null 2>&1; then \
+		echo "📦 Installing uv..."; \
+		curl -LsSf https://astral.sh/uv/install.sh | sh; \
+	fi
+	@echo "📦 Syncing all dependency groups via uv..."
+	uv sync --all-groups
 	@echo ""
 	@echo "✅ Environment ready! Services isolated with scoped PYTHONPATH"
 	@echo "🔒 Security: Portal cannot import platform code"
@@ -321,7 +318,7 @@ lint-security:
 	else \
 		echo "❌ semgrep not found (.venv or PATH)"; \
 		echo "👉 Install with one of:"; \
-		echo "   .venv/bin/pip install semgrep"; \
+		echo "   uv pip install semgrep"; \
 		echo "   brew install semgrep"; \
 		exit 1; \
 	fi; \
@@ -366,7 +363,7 @@ pre-commit:
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@if ! command -v .venv/bin/pre-commit >/dev/null 2>&1; then \
 		echo "❌ pre-commit not found. Installing..."; \
-		.venv/bin/pip install pre-commit; \
+		uv sync --group dev; \
 		.venv/bin/pre-commit install || echo "⚠️ Pre-commit config not found"; \
 	fi
 	@.venv/bin/pre-commit run --all-files || echo "⚠️ Pre-commit hooks skipped"

@@ -59,16 +59,11 @@ jobs:
         uv python install
         uv sync --group platform --group dev
 
-    - name: Run platform migrations
-      run: |
-        cd services/platform
-        PYTHONPATH=$(pwd) ${{ github.workspace }}/.venv/bin/python manage.py migrate --no-input
-
     - name: Run platform unit tests
       run: |
         cd services/platform
         echo "Running platform unit tests..."
-        PYTHONPATH=$(pwd) ${{ github.workspace }}/.venv/bin/python manage.py test tests --verbosity=2 --parallel --keepdb
+        PYTHONPATH=$(pwd) ${{ github.workspace }}/.venv/bin/python manage.py test tests --verbosity=2
 
     - name: Lint platform code
       run: |

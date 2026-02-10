@@ -32,5 +32,4 @@ packages = ["apps", "config", "portal"]
 # This is a workspace member, not a standalone package
 package = true
 
-# Portal service uses the 'portal' dependency group from root
-dev-dependencies = []
+# Portal service uses dependency groups from root pyproject.toml

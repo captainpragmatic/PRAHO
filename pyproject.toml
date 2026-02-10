@@ -146,7 +146,6 @@ prod = [
 
     # Security enhancements
     "django-csp>=3.8.0",
-    "django-ratelimit>=4.1.0",
 
     # Task queue production
     "supervisor>=4.2.0",
@@ -203,6 +202,9 @@ platform = [
     "xmltodict>=0.13.0",
     "lxml>=4.9.0",
 
+    # Rate limiting (imported at module level in views)
+    "django-ratelimit>=4.1.0",
+
     # Utilities
     "python-slugify>=8.0.0",
     "bleach>=6.0.0",
@@ -215,6 +217,12 @@ platform = [
 portal = [
     # Production server only - portal is lightweight
     "gunicorn>=21.2.0",
+
+    # IP address detection (used in rate limiting middleware)
+    "django-ipware>=7.0.0",
+
+    # HTML sanitization (used in shared UI template tags)
+    "bleach>=6.0.0",
 ]
 
 # ===============================================================================

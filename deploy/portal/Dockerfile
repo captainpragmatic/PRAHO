@@ -38,13 +38,13 @@ RUN apt-get update \
 # ===============================================================================
 WORKDIR /app
 
-# Copy portal service requirements (minimal, no DB drivers)
-COPY services/portal/requirements.docker.txt ./requirements.txt
+# Copy workspace lockfile and pyproject files for dependency resolution
+COPY pyproject.toml uv.lock ./
+COPY services/portal/pyproject.toml ./services/portal/pyproject.toml
 
-# Install minimal Python dependencies (without constraints to avoid extras issues)
-RUN pip install --upgrade pip \
-    && pip install -r requirements.txt \
-    && pip cache purge
+# Install uv and sync portal production dependencies
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && ~/.local/bin/uv sync --group portal --no-dev --frozen
 
 # Copy portal service code
 COPY services/portal/ ./

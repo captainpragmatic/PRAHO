@@ -41,13 +41,13 @@ RUN apt-get update \
 # ===============================================================================
 WORKDIR /app
 
-# Copy platform service requirements first (for better caching)
-COPY services/platform/requirements/ ./requirements/
+# Copy workspace lockfile and pyproject files for dependency resolution
+COPY pyproject.toml uv.lock ./
+COPY services/platform/pyproject.toml ./services/platform/pyproject.toml
 
-# Install Python dependencies (production requirements already have correct versions)
-RUN pip install --upgrade pip \
-    && pip install -r requirements/prod.txt \
-    && pip cache purge
+# Install uv and sync platform production dependencies
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && ~/.local/bin/uv sync --group platform --no-dev --frozen
 
 # Copy platform service code (includes assets/ and static/)
 COPY services/platform/ ./

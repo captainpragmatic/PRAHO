@@ -2004,6 +2004,7 @@ platform = [
     { name = "django-health-check" },
     { name = "django-ipware" },
     { name = "django-q2" },
+    { name = "django-ratelimit" },
     { name = "django-ses" },
     { name = "django-storages" },
     { name = "drf-spectacular" },
@@ -2021,13 +2022,14 @@ platform = [
     { name = "xmltodict" },
 ]
 portal = [
+    { name = "bleach" },
+    { name = "django-ipware" },
     { name = "gunicorn" },
 ]
 prod = [
     { name = "datadog" },
     { name = "django-cachalot" },
     { name = "django-csp" },
-    { name = "django-ratelimit" },
     { name = "gevent" },
     { name = "gunicorn" },
     { name = "newrelic" },
@@ -2091,6 +2093,7 @@ platform = [
     { name = "django-health-check", specifier = ">=3.17.0" },
     { name = "django-ipware", specifier = ">=7.0.0" },
     { name = "django-q2", specifier = ">=1.8.0" },
+    { name = "django-ratelimit", specifier = ">=4.1.0" },
     { name = "django-ses", specifier = ">=3.5.0" },
     { name = "django-storages", specifier = ">=1.14.0" },
     { name = "drf-spectacular", specifier = ">=0.26.0" },
@@ -2107,12 +2110,15 @@ platform = [
     { name = "stripe", specifier = ">=6.0.0" },
     { name = "xmltodict", specifier = ">=0.13.0" },
 ]
-portal = [{ name = "gunicorn", specifier = ">=21.2.0" }]
+portal = [
+    { name = "bleach", specifier = ">=6.0.0" },
+    { name = "django-ipware", specifier = ">=7.0.0" },
+    { name = "gunicorn", specifier = ">=21.2.0" },
+]
 prod = [
     { name = "datadog", specifier = ">=0.47.0" },
     { name = "django-cachalot", specifier = ">=2.6.0" },
     { name = "django-csp", specifier = ">=3.8.0" },
-    { name = "django-ratelimit", specifier = ">=4.1.0" },
     { name = "gevent", specifier = ">=23.7.0" },
     { name = "gunicorn", specifier = ">=21.2.0" },
     { name = "newrelic", specifier = ">=8.9.0" },
@@ -2126,20 +2132,10 @@ name = "praho-platform-service"
 version = "0.3.0"
 source = { editable = "services/platform" }
 
-[package.metadata]
-
-[package.metadata.requires-dev]
-dev = []
-
 [[package]]
 name = "praho-portal-service"
 version = "0.3.0"
 source = { editable = "services/portal" }
-
-[package.metadata]
-
-[package.metadata.requires-dev]
-dev = []
 
 [[package]]
 name = "pre-commit"
