@@ -106,12 +106,12 @@ def login_platform_user(page: Page, email: str | None = None, password: str | No
             page.context.clear_cookies()
             _dismiss_cookie_consent(page, PLATFORM_BASE_URL)
 
-            # Small delay to let cookie clear take effect
-            page.wait_for_timeout(300)
+            # Delay between attempts to avoid rate limiting from rapid test execution
+            page.wait_for_timeout(1000)
 
         try:
             page.goto(f"{PLATFORM_BASE_URL}{PLATFORM_LOGIN_URL}", timeout=10000)
-            page.wait_for_load_state("networkidle", timeout=5000)
+            page.wait_for_load_state("networkidle", timeout=8000)
         except Exception as e:
             print(f"❌ Cannot navigate to platform login: {str(e)[:50]}")
             if attempt < 2:
@@ -129,17 +129,19 @@ def login_platform_user(page: Page, email: str | None = None, password: str | No
             email_input.wait_for(state="visible", timeout=5000)
             print("  ✅ Login form visible")
 
-            # Fill form fields
-            page.fill('input[name="email"]', email)
+            # Fill form fields using the detected input element
+            email_input.fill(email)
+            page.wait_for_timeout(200)  # Give browser time to register input
             page.fill('input[name="password"]', password)
+            page.wait_for_timeout(200)  # Give browser time to register input
 
             # Click submit and wait for navigation with longer timeout
             page.click('button[type="submit"]')
             try:
-                page.wait_for_url(lambda url: PLATFORM_LOGIN_URL not in url, timeout=15000)  # Increased from 10s to 15s
+                page.wait_for_url(lambda url: PLATFORM_LOGIN_URL not in url, timeout=15000)
             except Exception:
                 # Fallback: wait for networkidle and check manually
-                page.wait_for_load_state("networkidle", timeout=5000)
+                page.wait_for_load_state("networkidle", timeout=8000)
 
         except Exception as e:
             print(f"❌ Cannot fill platform login form: {str(e)[:50]}")
@@ -149,6 +151,8 @@ def login_platform_user(page: Page, email: str | None = None, password: str | No
 
         # Check we left the login page
         if PLATFORM_LOGIN_URL not in page.url:
+            # Verify we're actually on a dashboard/authenticated page
+            page.wait_for_load_state("networkidle", timeout=5000)
             print(f"✅ Successfully logged in to platform as {email}")
             return True
 
@@ -298,15 +302,14 @@ def login_user_with_retry(page: Page, email: str, password: str, max_attempts: i
 
         # Clear and fill form fields
         try:
-            email_field = page.locator('input[name="email"]')
             password_field = page.locator('input[name="password"]')
 
             # Clear fields first
-            email_field.clear()
+            email_input.clear()
             password_field.clear()
 
             # Fill with explicit wait between actions
-            email_field.fill(email)
+            email_input.fill(email)
             page.wait_for_timeout(500)  # Small delay
             password_field.fill(password)
             page.wait_for_timeout(500)  # Small delay
@@ -404,7 +407,7 @@ def login_user(page: Page, email: str, password: str) -> bool:
 
     # Fill login form
     try:
-        page.fill('input[name="email"]', email)
+        email_input.fill(email)
         page.fill('input[name="password"]', password)
         page.click('button[type="submit"]')
     except Exception as e:

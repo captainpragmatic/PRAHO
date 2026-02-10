@@ -51,6 +51,11 @@ def create_audit_event(
     metadata: dict | None = None,
 ) -> AuditEvent:
     """Create an audit event for a promotion-related action via the audit service."""
+    audit_metadata = dict(metadata or {})
+    audit_metadata["category"] = category
+    audit_metadata["severity"] = severity
+    audit_metadata["is_sensitive"] = is_sensitive
+
     return AuditService.log_simple_event(
         event_type=action,
         user=user,
@@ -58,7 +63,7 @@ def create_audit_event(
         description=description,
         old_values=old_values,
         new_values=new_values,
-        metadata=metadata,
+        metadata=audit_metadata,
     )
 
 

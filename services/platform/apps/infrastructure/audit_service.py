@@ -475,6 +475,7 @@ class InfrastructureAuditService:
 
         audit_metadata = dict(metadata or {})
         audit_metadata["category"] = cls.CATEGORY
+        audit_metadata["severity"] = severity
         audit_metadata["is_sensitive"] = is_sensitive
         if user_agent:
             audit_metadata["user_agent"] = user_agent
