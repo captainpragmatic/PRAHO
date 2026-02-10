@@ -477,8 +477,8 @@ def analyze_code(
         else:
             return analyzer.analyze_file(source)
     elif isinstance(source, str):
-        # Check if it's a path (skip empty strings which Path("") resolves to cwd)
-        path = Path(source) if source.strip() else None
+        # Check if it's a path (skip empty/multiline strings — newlines mean source code, not a path)
+        path = Path(source) if source.strip() and "\n" not in source else None
         if path is not None and path.exists():
             if path.is_dir():
                 return analyzer.analyze_directory(path)
