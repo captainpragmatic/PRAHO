@@ -24,7 +24,7 @@ This guide covers all deployment scenarios for PRAHO, from single-server setups 
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/your-org/PRAHO.git
+git clone https://github.com/captainpragmatic/PRAHO.git
 cd PRAHO
 
 # 2. Copy and configure environment
