@@ -99,7 +99,7 @@ def test_signup_page_loads_correctly(page: Page) -> None:
     with ComprehensivePageMonitor(
         page,
         "signup page load",
-        check_console=False,
+        check_console=False,  # Alpine.js CSP eval errors expected on signup forms
         check_network=True,
         check_html=True,
         check_css=True,
@@ -184,7 +184,7 @@ def test_signup_page_has_romanian_business_context(page: Page) -> None:
     with ComprehensivePageMonitor(
         page,
         "signup Romanian context",
-        check_console=False,
+        check_console=False,  # Alpine.js CSP eval errors expected on signup forms
         check_network=True,
         check_html=False,  # May have minor HTML issues
         check_css=True,
@@ -248,7 +248,7 @@ def test_signup_form_validation_required_fields(page: Page) -> None:
     with ComprehensivePageMonitor(
         page,
         "signup form validation",
-        check_console=False,  # Validation may cause console messages
+        check_console=False,  # Alpine.js CSP eval errors expected on signup forms
         check_network=True,
         check_html=False,
         check_css=True,
@@ -300,7 +300,7 @@ def test_signup_form_email_validation(page: Page) -> None:
     with ComprehensivePageMonitor(
         page,
         "signup email validation",
-        check_console=False,
+        check_console=False,  # Alpine.js CSP eval errors expected on signup forms
         check_network=True,
         check_html=False,
         check_css=True,
@@ -346,7 +346,7 @@ def test_signup_form_password_validation(page: Page) -> None:
     with ComprehensivePageMonitor(
         page,
         "signup password validation",
-        check_console=False,
+        check_console=False,  # Alpine.js CSP eval errors expected on signup forms
         check_network=True,
         check_html=False,
         check_css=True,
@@ -416,7 +416,7 @@ def test_signup_form_successful_submission(page: Page) -> None:
     with ComprehensivePageMonitor(
         page,
         "signup form submission",
-        check_console=False,  # May have form processing messages
+        check_console=False,  # Alpine.js CSP eval errors expected on signup forms
         check_network=True,
         check_html=False,
         check_css=True,
@@ -516,7 +516,7 @@ def test_signup_then_login_flow(page: Page) -> None:
     with ComprehensivePageMonitor(
         page,
         "signup then login flow",
-        check_console=False,
+        check_console=False,  # Alpine.js CSP eval errors expected on signup forms
         check_network=True,
         check_html=False,
         check_css=True,
@@ -604,7 +604,7 @@ def test_customer_can_view_orders_list(page: Page) -> None:
     with ComprehensivePageMonitor(
         page,
         "customer order list",
-        check_console=False,
+        check_console=False,  # Alpine.js CSP eval errors expected on signup forms
         check_network=True,
         check_html=False,
         check_css=True,
@@ -660,7 +660,7 @@ def test_customer_order_list_shows_correct_data(page: Page) -> None:
     with ComprehensivePageMonitor(
         page,
         "customer order data",
-        check_console=False,
+        check_console=False,  # Alpine.js CSP eval errors expected on signup forms
         check_network=True,
         check_html=False,
         check_css=True,
@@ -742,7 +742,7 @@ def test_complete_new_customer_journey(page: Page) -> None:
     with ComprehensivePageMonitor(
         page,
         "complete customer journey",
-        check_console=False,
+        check_console=False,  # Alpine.js CSP eval errors expected on signup forms
         check_network=True,
         check_html=False,
         check_css=True,
@@ -862,7 +862,7 @@ def test_signup_page_mobile_responsiveness(page: Page) -> None:
     with ComprehensivePageMonitor(
         page,
         "signup mobile responsiveness",
-        check_console=False,
+        check_console=False,  # Alpine.js CSP eval errors expected on signup forms
         check_network=True,
         check_html=False,
         check_css=True,
@@ -928,7 +928,7 @@ def test_signup_across_responsive_breakpoints(page: Page) -> None:
     with ComprehensivePageMonitor(
         page,
         "signup responsive breakpoints",
-        check_console=False,
+        check_console=False,  # Alpine.js CSP eval errors expected on signup forms
         check_network=True,
         check_html=False,
         check_css=True,
@@ -987,7 +987,7 @@ def test_signup_rate_limiting_indication(page: Page) -> None:
     with ComprehensivePageMonitor(
         page,
         "signup rate limiting",
-        check_console=False,
+        check_console=False,  # Alpine.js CSP eval errors expected on signup forms
         check_network=True,
         check_html=False,
         check_css=True,
@@ -1023,7 +1023,7 @@ def test_signup_enumeration_protection(page: Page) -> None:
     with ComprehensivePageMonitor(
         page,
         "signup enumeration protection",
-        check_console=False,
+        check_console=False,  # Alpine.js CSP eval errors expected on signup forms
         check_network=True,
         check_html=False,
         check_css=True,
@@ -1112,7 +1112,7 @@ def test_signup_with_special_characters_in_company_name(page: Page) -> None:
     with ComprehensivePageMonitor(
         page,
         "signup special characters",
-        check_console=False,
+        check_console=False,  # Alpine.js CSP eval errors expected on signup forms
         check_network=True,
         check_html=False,
         check_css=True,

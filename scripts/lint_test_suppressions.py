@@ -123,6 +123,7 @@ RULES: list[dict] = [
         "name": "bare except swallowing errors",
         "severity": MEDIUM,
         "regex": r"except\s*:\s*\n\s*(pass|continue|return\s+(?:None|False))",
+        "multiline": True,
         "message": "Bare except clause silently swallows all errors in test code. "
                    "This hides real failures.",
         "fix_hint": "Catch specific exceptions, or let the error propagate to fail the test.",
@@ -168,18 +169,34 @@ def scan_file(filepath: Path) -> list[Finding]:
     lines = content.splitlines()
 
     for rule in RULES:
-        pattern = re.compile(rule["regex"])
-        for i, line in enumerate(lines, start=1):
-            if pattern.search(line):
+        if rule.get("multiline"):
+            # Multi-line rules match against the full file content
+            pattern = re.compile(rule["regex"], re.MULTILINE)
+            for match in pattern.finditer(content):
+                line_num = content[:match.start()].count("\n") + 1
+                matched_line = lines[line_num - 1] if line_num <= len(lines) else ""
                 findings.append(Finding(
                     file=relative_path,
-                    line=i,
+                    line=line_num,
                     severity=rule["severity"],
                     pattern=rule["id"],
-                    code=line.strip(),
+                    code=matched_line.strip(),
                     message=rule["message"],
                     fix_hint=rule["fix_hint"],
                 ))
+        else:
+            pattern = re.compile(rule["regex"])
+            for i, line in enumerate(lines, start=1):
+                if pattern.search(line):
+                    findings.append(Finding(
+                        file=relative_path,
+                        line=i,
+                        severity=rule["severity"],
+                        pattern=rule["id"],
+                        code=line.strip(),
+                        message=rule["message"],
+                        fix_hint=rule["fix_hint"],
+                    ))
 
     return findings
 
@@ -282,14 +299,16 @@ def main() -> int:
 
     has_failures = any(f.severity in active for f in findings)
     if has_failures:
-        print(f"\n❌ Test suppression lint failed (threshold: {args.fail_on})")
-        print("   See ADR-0014: docs/adrs/ADR-0014-no-test-suppression-policy.md")
+        if not args.json:
+            print(f"\n❌ Test suppression lint failed (threshold: {args.fail_on})")
+            print("   See ADR-0014: docs/adrs/ADR-0014-no-test-suppression-policy.md")
         return 1
 
-    if findings:
-        print(f"\n⚠️  {len(findings)} finding(s) below threshold — review recommended")
-    else:
-        print("\n✅ No test suppression patterns found")
+    if not args.json:
+        if findings:
+            print(f"\n⚠️  {len(findings)} finding(s) below threshold — review recommended")
+        else:
+            print("\n✅ No test suppression patterns found")
 
     return 0
 

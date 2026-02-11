@@ -56,7 +56,7 @@ def test_navigation_cross_page_flow(page: Page) -> None:
         # Login as superuser for maximum navigation access
         ensure_fresh_session(page)
         if not login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD):
-            pytest.skip("Cannot login as superuser")
+            pytest.skip("Login precondition failed — TODO: check E2E service health")
 
     try:
         require_authentication(page)
@@ -328,7 +328,7 @@ def test_navigation_menu_visibility_by_role(page: Page) -> None:
         print("\n  👑 Testing superuser navigation access")
         ensure_fresh_session(page)
         if not login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD):
-            pytest.skip("Cannot login as superuser")
+            pytest.skip("Login precondition failed — TODO: check E2E service health")
 
         try:
             require_authentication(page)
@@ -347,7 +347,7 @@ def test_navigation_menu_visibility_by_role(page: Page) -> None:
         print("\n  👤 Testing customer navigation restrictions")
         ensure_fresh_session(page)
         if not login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD):
-            pytest.skip("Cannot login as customer")
+            pytest.skip("Login precondition failed — TODO: check E2E service health")
 
         try:
             require_authentication(page)

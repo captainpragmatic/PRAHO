@@ -163,7 +163,7 @@ def test_customer_invoices_functionality(page: Page) -> None:
         # Ensure fresh session and login as customer
         ensure_fresh_session(page)
         if not login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD):
-            pytest.skip("Cannot login as customer")
+            pytest.skip("Login precondition failed — TODO: check E2E service health")
 
         try:
             # Verify customer invoice functionality

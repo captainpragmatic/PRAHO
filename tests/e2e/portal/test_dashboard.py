@@ -45,7 +45,7 @@ def test_superuser_dashboard_functionality(page: Page) -> None:
         # Ensure fresh session and login
         ensure_fresh_session(page)
         if not login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD):
-            pytest.skip("Cannot login as superuser")
+            pytest.skip("Login precondition failed — TODO: check E2E service health")
 
         try:
             # Verify dashboard functionality using semantic validation
@@ -70,7 +70,7 @@ def test_customer_dashboard_functionality(page: Page) -> None:
         # Ensure fresh session and login
         ensure_fresh_session(page)
         if not login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD):
-            pytest.skip("Cannot login as customer")
+            pytest.skip("Login precondition failed — TODO: check E2E service health")
 
         try:
             # Verify dashboard functionality using semantic validation
@@ -110,7 +110,7 @@ def test_dashboard_role_based_content(page: Page) -> None:
             ensure_fresh_session(page)
 
             if not login_user(page, email, password):
-                pytest.skip(f"Cannot login as {user_type}")
+                pytest.skip("Login precondition failed — TODO: check E2E service health")
 
             try:
                 # Verify role-based content is displayed correctly
@@ -142,7 +142,7 @@ def test_dashboard_actions_and_interactions(page: Page) -> None:
         # Login as superuser for maximum dashboard access
         ensure_fresh_session(page)
         if not login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD):
-            pytest.skip("Cannot login as superuser")
+            pytest.skip("Login precondition failed — TODO: check E2E service health")
 
         try:
             require_authentication(page)
@@ -228,7 +228,7 @@ def test_dashboard_mobile_responsiveness(page: Page) -> None:
         # Login as superuser for full dashboard access
         ensure_fresh_session(page)
         if not login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD):
-            pytest.skip("Cannot login as superuser")
+            pytest.skip("Login precondition failed — TODO: check E2E service health")
 
         try:
             require_authentication(page)
@@ -292,7 +292,7 @@ def test_dashboard_mobile_specific_features(page: Page) -> None:
         # Login as superuser
         ensure_fresh_session(page)
         if not login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD):
-            pytest.skip("Cannot login as superuser")
+            pytest.skip("Login precondition failed — TODO: check E2E service health")
 
         try:
             require_authentication(page)
