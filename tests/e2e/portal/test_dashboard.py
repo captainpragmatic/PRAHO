@@ -96,6 +96,7 @@ def test_dashboard_role_based_content(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,  # Keep fast for multi-user test
+                                 allow_accessibility_skip=True,
                                  check_performance=False):   # Keep fast for multi-user test
         users = [
             (SUPERUSER_EMAIL, SUPERUSER_PASSWORD, "superuser"),
@@ -286,6 +287,7 @@ def test_dashboard_mobile_specific_features(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,  # Keep fast for focused test
+                                 allow_accessibility_skip=True,
                                  check_performance=False):   # Keep fast for focused test
         # Login as superuser
         ensure_fresh_session(page)

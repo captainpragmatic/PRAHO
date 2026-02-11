@@ -181,10 +181,10 @@ def logout_platform_user(page: Page) -> bool:
 def ensure_fresh_platform_session(page: Page) -> None:
     """Ensure a fresh session on the platform service."""
     print("🔄 Ensuring fresh platform session")
-    # Clear all cookies for a truly fresh start
+    # Navigate away first to stop any background JS (HTMX polling, fetch)
+    # that would fire 401s after cookies are cleared.
+    page.goto("about:blank")
     page.context.clear_cookies()
-    # Small delay to let cookie clear take effect
-    page.wait_for_timeout(300)
     _dismiss_cookie_consent(page, PLATFORM_BASE_URL)
     # Small delay to let cookie consent dismissal take effect
     page.wait_for_timeout(300)
@@ -522,13 +522,11 @@ def ensure_fresh_session(page: Page) -> None:
     """
     print("🔄 Ensuring fresh session")
 
-    # Clear all cookies for a truly fresh start
+    # Navigate away first to stop any background JS (HTMX polling, fetch)
+    # that would fire 401s after cookies are cleared.
+    page.goto("about:blank")
     page.context.clear_cookies()
-    # Small delay to let cookie clear take effect
-    page.wait_for_timeout(300)
     _dismiss_cookie_consent(page, BASE_URL)
-    # Small delay to let cookie consent dismissal take effect
-    page.wait_for_timeout(300)
 
     # Wait for server to be ready and navigate to login page
     if not wait_for_server_ready(page):

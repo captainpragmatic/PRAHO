@@ -51,6 +51,7 @@ def test_navigation_cross_page_flow(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,  # Keep fast for navigation flow
+                                 allow_accessibility_skip=True,
                                  check_performance=False,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):   # Keep fast for navigation flow
         # Login as superuser for maximum navigation access
@@ -135,6 +136,7 @@ def test_navigation_header_interactions(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,  # Keep fast for multi-user test
+                                 allow_accessibility_skip=True,
                                  check_performance=False,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):   # Keep fast for multi-user test
 
@@ -321,6 +323,7 @@ def test_navigation_menu_visibility_by_role(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,  # Keep fast for role-based test
+                                 allow_accessibility_skip=True,
                                  check_performance=False,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):   # Keep fast for role-based test
 
@@ -384,6 +387,7 @@ def test_navigation_dropdown_interactions(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,  # Keep fast for dropdown test
+                                 allow_accessibility_skip=True,
                                  check_performance=False,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):   # Keep fast for dropdown test
         # Login as superuser for maximum navigation access
@@ -449,6 +453,7 @@ def test_mobile_navigation_responsiveness(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,   # Important for mobile navigation a11y
+                                 allow_accessibility_skip=True,
                                  check_performance=False,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):   # Keep fast for mobile test
         # Login as superuser for full navigation access
@@ -513,6 +518,7 @@ def test_navigation_responsive_breakpoints(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,  # Keep fast for comprehensive test
+                                 allow_accessibility_skip=True,
                                  check_performance=False,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):   # Keep fast for comprehensive test
         # Login as superuser for full navigation access

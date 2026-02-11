@@ -530,6 +530,13 @@ class PortalServiceHMACMiddleware:
             is_valid, error_msg = self._validate_hmac_signature(request)
             
             if not is_valid:
+                # Allow session-authenticated staff users to access API endpoints.
+                # Platform templates (e.g., ticket form) make fetch() calls to /api/
+                # using the browser session — these don't carry HMAC headers.
+                if getattr(request, 'user', None) and getattr(request.user, 'is_authenticated', False) and getattr(request.user, 'is_staff', False):
+                    logger.debug(f"🔓 [HMAC Auth] Allowing session-authenticated staff user {request.user.email} for {request.path}")
+                    return self.get_response(request)
+
                 logger.warning(f"🔥 [HMAC Auth] Authentication failed from {get_safe_client_ip(request)}: {error_msg}")
                 return HttpResponse(
                     json.dumps({'error': 'HMAC authentication failed'}),

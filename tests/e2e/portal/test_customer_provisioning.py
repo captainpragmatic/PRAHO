@@ -53,6 +53,7 @@ def test_customer_can_view_own_services_but_not_manage(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
+                                 allow_accessibility_skip=True,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login as customer
         ensure_fresh_session(page)
@@ -102,6 +103,7 @@ def test_customer_cannot_create_services(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
+                                 allow_accessibility_skip=True,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login as customer
         ensure_fresh_session(page)
@@ -150,6 +152,7 @@ def test_customer_cannot_access_service_management_actions(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
+                                 allow_accessibility_skip=True,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login as customer
         ensure_fresh_session(page)
@@ -204,6 +207,7 @@ def test_customer_server_access_blocked_but_plans_allowed(page: Page) -> None:
                                  check_html=False,     # Plans form may be missing CSRF tokens
                                  check_css=True,
                                  check_accessibility=False,
+                                 allow_accessibility_skip=True,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login as customer
         ensure_fresh_session(page)
@@ -252,6 +256,7 @@ def test_customer_provisioning_navigation_not_available(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
+                                 allow_accessibility_skip=True,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login as customer
         ensure_fresh_session(page)
@@ -288,6 +293,7 @@ def test_customer_provisioning_comprehensive_security_validation(page: Page) -> 
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
+                                 allow_accessibility_skip=True,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login as customer
         ensure_fresh_session(page)
@@ -392,6 +398,7 @@ def test_customer_provisioning_security_mobile_compatibility(page: Page) -> None
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
+                                 allow_accessibility_skip=True,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login as customer
         ensure_fresh_session(page)

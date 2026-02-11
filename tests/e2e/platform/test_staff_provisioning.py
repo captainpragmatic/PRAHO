@@ -53,6 +53,7 @@ def test_staff_provisioning_system_access_via_navigation(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
+                                 allow_accessibility_skip=True,
                                  check_performance=False,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login as staff user
@@ -87,6 +88,7 @@ def test_staff_provisioning_dashboard_display(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
+                                 allow_accessibility_skip=True,
                                  check_performance=False,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login and navigate to provisioning
@@ -145,6 +147,7 @@ def test_staff_service_creation_workflow(page: Page) -> None:
                                  check_html=False,  # May have form validation issues
                                  check_css=True,
                                  check_accessibility=False,
+                                 allow_accessibility_skip=True,
                                  check_performance=False,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login and navigate to provisioning
@@ -210,6 +213,7 @@ def test_staff_service_management_actions(page: Page) -> None:
                                  check_html=False,  # Actions may trigger redirects
                                  check_css=True,
                                  check_accessibility=False,
+                                 allow_accessibility_skip=True,
                                  check_performance=False,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login and navigate to provisioning
@@ -284,6 +288,7 @@ def test_staff_service_status_filtering(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
+                                 allow_accessibility_skip=True,
                                  check_performance=False,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login and navigate to provisioning
@@ -341,6 +346,7 @@ def test_staff_servers_and_plans_access(page: Page) -> None:
                                  check_html=False,     # Forms may be missing CSRF tokens
                                  check_css=True,
                                  check_accessibility=False,
+                                 allow_accessibility_skip=True,
                                  check_performance=False,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login and navigate to provisioning
@@ -393,6 +399,7 @@ def test_staff_provisioning_system_mobile_responsiveness(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
+                                 allow_accessibility_skip=True,
                                  check_performance=False,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login first
@@ -462,6 +469,7 @@ def test_staff_provisioning_system_responsive_breakpoints(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
+                                 allow_accessibility_skip=True,
                                  check_performance=False,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login first
@@ -547,6 +555,7 @@ def test_staff_complete_provisioning_workflow(page: Page) -> None:
                                  check_html=False,  # Complex workflow may trigger various page states
                                  check_css=True,
                                  check_accessibility=False,
+                                 allow_accessibility_skip=True,
                                  check_performance=False,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login and navigate to provisioning

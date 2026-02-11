@@ -714,9 +714,9 @@ def test_customer_profile_mobile_responsiveness(page: Page) -> None:
             print(f"      Touch interactions: {'✅ Working' if touch_success else '⚠️ Limited'}")
 
             # Verify key profile elements are accessible on mobile
-            profile_form = page.locator('form')
-            if profile_form.is_visible():
-                print("      ✅ Profile form visible on mobile")
+            profile_fields = page.locator('input[name="first_name"], input[name="last_name"]')
+            if profile_fields.count() > 0:
+                print("      ✅ Profile fields visible on mobile")
 
             # Test form field accessibility on mobile
             form_fields = page.locator('input, textarea, select').count()

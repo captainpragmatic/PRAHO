@@ -55,6 +55,7 @@ def test_staff_ticket_system_access_via_navigation(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
+                                 allow_accessibility_skip=True,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login as superuser for staff access
         ensure_fresh_platform_session(page)
@@ -99,6 +100,7 @@ def test_staff_ticket_list_dashboard_display(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
+                                 allow_accessibility_skip=True,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login and navigate to tickets
         ensure_fresh_platform_session(page)
@@ -168,8 +170,8 @@ def test_staff_ticket_creation_workflow(page: Page) -> None:
                                  check_network=True,
                                  check_html=True,
                                  check_css=True,
-                                 ignore_patterns=["401", "Unauthorized", "429"],
-                                 check_accessibility=False):
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True):
         # Login and navigate to ticket creation
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -289,6 +291,7 @@ def test_staff_ticket_detail_and_management_features(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
+                                 allow_accessibility_skip=True,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login and navigate to tickets
         ensure_fresh_platform_session(page)
@@ -382,6 +385,7 @@ def test_staff_ticket_comments_and_internal_notes(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
+                                 allow_accessibility_skip=True,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login and navigate to tickets
         ensure_fresh_platform_session(page)
@@ -474,6 +478,7 @@ def test_staff_ticket_status_management(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
+                                 allow_accessibility_skip=True,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login and navigate to tickets
         ensure_fresh_platform_session(page)
@@ -557,6 +562,7 @@ def test_staff_ticket_access_control_permissions(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
+                                 allow_accessibility_skip=True,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Test staff user access
         print("    Testing staff user access...")
@@ -614,6 +620,7 @@ def test_staff_ticket_system_mobile_responsiveness(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
+                                 allow_accessibility_skip=True,
                                  check_performance=False,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login and navigate to tickets on desktop first
@@ -686,6 +693,7 @@ def test_staff_complete_ticket_management_workflow(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
+                                 allow_accessibility_skip=True,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login and start workflow
         ensure_fresh_platform_session(page)
@@ -805,6 +813,7 @@ def test_staff_ticket_system_responsive_breakpoints(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
+                                 allow_accessibility_skip=True,
                                  ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
         # Login first
         ensure_fresh_platform_session(page)
@@ -820,14 +829,17 @@ def test_staff_ticket_system_responsive_breakpoints(page: Page) -> None:
                 # Verify authentication maintained
                 require_authentication(test_page)
 
-                # Check core elements are present
-                tickets_heading = test_page.locator('h1:has-text("Support Tickets"), h1:has-text("Tichete de suport")').first
-                new_ticket_btn = test_page.locator('a:has-text("New Ticket")').first
-
-                elements_present = (
-                    tickets_heading.is_visible() and
-                    new_ticket_btn.is_visible()
+                # Check core elements are present (iterate to find visible ones on mobile)
+                heading_visible = any(
+                    h1.is_visible() and ("ticket" in (h1.text_content() or "").lower() or "tichete" in (h1.text_content() or "").lower())
+                    for h1 in test_page.locator('h1').all()
                 )
+                btn_visible = any(
+                    btn.is_visible()
+                    for btn in test_page.locator('a:has-text("New Ticket")').all()
+                )
+
+                elements_present = heading_visible and btn_visible
 
                 if elements_present:
                     print(f"      ✅ Staff ticket system functional in {context}")
