@@ -126,6 +126,58 @@
     </div>
   </div>
 
+  <!-- Export History -->
+  {% if exports %}
+  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
+    <div class="p-6">
+      <h3 class="text-lg font-medium text-white mb-4">
+        📋 {% trans 'Export History' %}
+      </h3>
+
+      <div class="space-y-3">
+        {% for export in exports %}
+        <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
+          <div class="flex items-center">
+            {% if export.status == 'completed' %}
+              <span class="text-green-400 mr-3">✅</span>
+            {% elif export.status == 'processing' %}
+              <span class="text-yellow-400 mr-3 animate-pulse">⏳</span>
+            {% elif export.status == 'pending' %}
+              <span class="text-blue-400 mr-3">🕐</span>
+            {% else %}
+              <span class="text-red-400 mr-3">❌</span>
+            {% endif %}
+            <div>
+              <div class="text-sm text-white">
+                {% trans 'Export Request' %} — {{ export.requested_at|truncatechars:10 }}
+              </div>
+              <div class="text-xs text-slate-400">
+                {% if export.status == 'completed' and export.file_size %}
+                  {{ export.record_count }} {% trans 'records' %} · {{ export.file_size|filesizeformat }}
+                {% elif export.status == 'pending' %}
+                  {% trans 'Queued for processing' %}
+                {% elif export.status == 'processing' %}
+                  {% trans 'Processing your data...' %}
+                {% else %}
+                  {% trans 'Export failed' %}
+                {% endif %}
+              </div>
+            </div>
+          </div>
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+            {% if export.status == 'completed' %}bg-green-100 text-green-800
+            {% elif export.status == 'processing' %}bg-yellow-100 text-yellow-800
+            {% elif export.status == 'pending' %}bg-blue-100 text-blue-800
+            {% else %}bg-red-100 text-red-800{% endif %}">
+            {{ export.status|title }}
+          </span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   <!-- Legal Information -->
   <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg">
     <div class="p-6">

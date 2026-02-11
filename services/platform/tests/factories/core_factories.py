@@ -36,7 +36,13 @@ User = get_user_model()
 
 @dataclass
 class UserCreationRequest:
-    """Parameter object for user creation"""
+    """Parameter object for user creation.
+
+    Note: User model is email-based (username=None on the model).
+    The 'username' field here is kept for backward-compat in test call sites
+    but is NOT stored on the model — only used to derive a unique email
+    when the caller doesn't supply one.
+    """
     username: str = 'testuser'
     email: str = 'test@pragmatichost.com'
     password: str = 'SecureTestPass123!'
@@ -48,20 +54,25 @@ class UserCreationRequest:
 
 
 def create_user(request: UserCreationRequest | None = None) -> User:
-    """Create a user with sensible defaults."""
+    """Create a user with sensible defaults.
+
+    Deduplicates on email (the model's USERNAME_FIELD). The 'username'
+    field on UserCreationRequest is NOT a model field — it's only used
+    to derive a unique email if the default email collides.
+    """
     if request is None:
         request = UserCreationRequest()
 
-    # Generate unique username if already exists
-    username = request.username
+    # Generate unique email if already exists
+    email = request.email
     counter = 1
-    while User.objects.filter(username=username).exists():
-        username = f"{request.username}_{counter}"
+    while User.objects.filter(email=email).exists():
+        local, domain = request.email.rsplit('@', 1)
+        email = f"{local}_{counter}@{domain}"
         counter += 1
 
     return User.objects.create_user(
-        username=username,
-        email=request.email,
+        email=email,
         password=request.password,
         first_name=request.first_name,
         last_name=request.last_name,

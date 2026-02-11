@@ -57,7 +57,8 @@ urlpatterns = [
     # Orders & Product Catalog APIs
     path('orders/', include((order_urls, 'orders'))),
     
-    # Future API endpoints can be added here:
+    # GDPR compliance APIs (cookie consent, consent history, data export)
+    path('gdpr/', include('apps.api.gdpr.urls')),
 ]
 
 # ===============================================================================

@@ -278,9 +278,9 @@ def require_customer_authentication(view_func: Callable[..., Any]) -> Callable[.
 def require_user_authentication(view_func: Callable[..., Any]) -> Callable[..., Any]:
     """
     🔒 Decorator for API views requiring user authentication (session validation).
-    
+
     Usage:
-        @require_user_authentication  
+        @require_user_authentication
         def session_validate_view(request, user):
             # user is guaranteed to be authenticated User object
             return Response({"active": True})
@@ -290,4 +290,69 @@ def require_user_authentication(view_func: Callable[..., Any]) -> Callable[..., 
         if error_response:
             return error_response
         return view_func(request, user, *args, **kwargs)
+    return wrapper
+
+
+def validate_portal_service_request(request: HttpRequest) -> tuple[dict[str, Any] | None, Response | None]:
+    """
+    🔒 Lighter HMAC validation for Portal-to-Platform service calls.
+
+    KEY DIFFERENCE from validate_hmac_authenticated_request():
+    This does NOT require user_id in the signed body.  This is intentional —
+    GDPR cookie consent must be recordable by anonymous visitors who have
+    no user account yet.  The HMAC still proves the request came from Portal
+    (service-to-service auth), just without binding to a specific user.
+
+    Validates:
+    1. HMAC middleware has authenticated the request (_portal_authenticated)
+    2. Request body is valid JSON with a fresh timestamp (5-min window)
+
+    Returns:
+        (request_data_dict, error_response)
+    """
+    if not hasattr(request, '_portal_authenticated'):
+        logger.warning("🔥 [API Security] Request not HMAC authenticated (service-level)")
+        return None, _uniform_error_response("Authentication required", 401)
+
+    portal_id = request.headers.get('X-Portal-Id', 'unknown')
+
+    try:
+        request_data = request.data if hasattr(request, 'data') else json.loads(request.body)
+
+        request_timestamp = request_data.get('timestamp')
+        if not request_timestamp:
+            logger.warning(f"🚨 [API Security] Portal {portal_id} missing timestamp in service request")
+            return None, _uniform_error_response("Invalid request format", 400)
+
+        current_time = datetime.now(UTC).timestamp()
+        if abs(current_time - request_timestamp) > HMAC_TIMESTAMP_WINDOW_SECONDS:
+            logger.warning(f"🚨 [API Security] Portal {portal_id} stale timestamp in service request")
+            return None, _uniform_error_response("Invalid request format", 400)
+
+    except (json.JSONDecodeError, TypeError, AttributeError, ValueError):
+        logger.warning(f"🚨 [API Security] Portal {portal_id} invalid service request body format")
+        return None, _uniform_error_response("Invalid request format", 400)
+
+    logger.debug(f"✅ [API Security] Portal {portal_id} service request validated")
+    return request_data, None
+
+
+def require_portal_service_authentication(view_func: Callable[..., Any]) -> Callable[..., Any]:
+    """
+    🔒 Decorator for Portal-to-Platform service endpoints (user_id optional).
+
+    Validates HMAC service authentication but does NOT require user_id.
+    Passes request_data dict as second argument to the view.
+
+    Usage:
+        @require_portal_service_authentication
+        def my_api_view(request, request_data):
+            user_id = request_data.get('user_id')  # May be None
+            return Response({"success": True})
+    """
+    def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> Response:
+        request_data, error_response = validate_portal_service_request(request)
+        if error_response:
+            return error_response
+        return view_func(request, request_data, *args, **kwargs)
     return wrapper
