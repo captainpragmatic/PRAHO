@@ -77,17 +77,10 @@ def _get_user_role_for_customer(request: HttpRequest, customer_id: str) -> str |
             if str(membership.get('customer_id')) == str(customer_id):
                 return membership.get('role')
 
-    # Fallback: if user is authenticated and customer_id matches their session,
-    # the login already verified the user-customer relationship via Platform API.
-    # Grant 'owner' role for their primary customer — Platform API returned this
-    # customer_id during login, confirming the user is the verified owner.
-    session_customer_id = request.session.get('customer_id')
-    if session_customer_id and str(session_customer_id) == str(customer_id):
-        logger.warning(
-            f"⚠️ [Security] Fallback to owner role for user {request.session.get('user_id')} "
-            f"on primary customer {customer_id} — membership API unavailable"
-        )
-        return 'owner'
+    logger.warning(
+        f"🚨 [Security] No membership found for user {request.session.get('user_id')} "
+        f"on customer {customer_id} — access denied"
+    )
     return None
 
 

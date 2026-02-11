@@ -925,6 +925,7 @@ def customer_profile_api(request: HttpRequest, user: User) -> Response:
 @api_view(['POST'])
 @authentication_classes([])  # HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])
+@throttle_classes([])  # Internal HMAC-signed API — not subject to DRF throttling
 @require_user_authentication
 def user_customers_api(request: HttpRequest, user: User) -> Response:
     """
