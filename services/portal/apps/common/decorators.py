@@ -70,15 +70,16 @@ def _get_user_role_for_customer(request: HttpRequest, customer_id: str) -> str |
 
     # Fallback: if user is authenticated and customer_id matches their session,
     # the login already verified the user-customer relationship via Platform API.
-    # Grant 'owner' role for their primary customer to avoid blocking authenticated users
-    # when the membership API is unavailable.
+    # Grant minimal 'viewer' role (least privilege) to avoid blocking authenticated users
+    # when the membership API is unavailable. This prevents privilege escalation:
+    # billing/admin operations will correctly fail until memberships are fetched.
     session_customer_id = request.session.get('customer_id')
     if session_customer_id and str(session_customer_id) == str(customer_id):
-        logger.info(
-            f"🔍 [Security] Fallback role for user {request.session.get('user_id')} "
-            f"on primary customer {customer_id}"
+        logger.warning(
+            f"⚠️ [Security] Fallback to viewer role for user {request.session.get('user_id')} "
+            f"on primary customer {customer_id} — membership data unavailable"
         )
-        return 'owner'
+        return 'viewer'
     return None
 
 
