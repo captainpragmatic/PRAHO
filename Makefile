@@ -257,6 +257,11 @@ test-e2e:
 	@curl -sf http://localhost:8701/login/ > /dev/null 2>&1 || (echo "❌ Portal service not running on :8701. Run 'make dev' first." && exit 1)
 	@echo "✅ Both services are running"
 	@echo "🎭 Running Playwright E2E tests..."
+	@if [ "$$RATELIMIT_ENABLE" != "false" ]; then \
+		echo "⚠️  WARNING: Rate limiting is active on the running services."; \
+		echo "   Start services with: RATELIMIT_ENABLE=false make dev"; \
+		echo "   Or use: make dev-e2e (starts services with rate limiting disabled)"; \
+	fi
 	@PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/python -m pytest tests/e2e/ -v
 	@echo "✅ E2E tests completed!"
 
@@ -362,8 +367,10 @@ lint:
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "📋 Phase 1: Platform service"
 	@$(MAKE) lint-platform
-	@echo "📋 Phase 2: Portal service"  
+	@echo "📋 Phase 2: Portal service"
 	@$(MAKE) lint-portal
+	@echo "📋 Phase 3: Test suppression scan (ADR-0014)"
+	@.venv/bin/python scripts/lint_test_suppressions.py --fail-on critical
 	@echo "🎉 All services linting complete!"
 
 lint-security:

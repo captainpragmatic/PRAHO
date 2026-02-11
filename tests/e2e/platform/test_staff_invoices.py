@@ -161,8 +161,7 @@ def test_staff_invoices_functionality(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 check_performance=False,
-                                 ignore_patterns=["403", "404", "Forbidden", "favicon"]):
+                                 check_performance=False):
         # Ensure fresh session and login as staff
         ensure_fresh_platform_session(page)
         if not login_platform_user(page):
@@ -193,8 +192,7 @@ def test_invoices_role_based_access(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 check_performance=False,
-                                 ignore_patterns=["403", "404", "Forbidden", "favicon"]):
+                                 check_performance=False):
 
         # Test staff access on platform
         print(f"\n  👤 Testing invoice access for superuser")
@@ -245,8 +243,7 @@ def test_invoices_actions_and_interactions(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 check_performance=False,
-                                 ignore_patterns=["403", "404", "Forbidden", "favicon"]):
+                                 check_performance=False):
         # Login as staff for maximum invoice access
         ensure_fresh_platform_session(page)
         if not login_platform_user(page):
@@ -340,8 +337,7 @@ def test_invoices_mobile_responsiveness(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 check_performance=False,
-                                 ignore_patterns=["403", "404", "Forbidden", "favicon"]):
+                                 check_performance=False):
         # Login as staff for full invoice access
         ensure_fresh_platform_session(page)
         if not login_platform_user(page):
@@ -404,8 +400,7 @@ def test_invoices_mobile_specific_features(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 check_performance=False,
-                                 ignore_patterns=["403", "404", "Forbidden", "favicon"]):
+                                 check_performance=False):
         # Login as staff
         ensure_fresh_platform_session(page)
         if not login_platform_user(page):

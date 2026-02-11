@@ -53,8 +53,7 @@ def test_staff_billing_system_access_via_navigation(page: Page) -> None:
                                  check_network=True,
                                  check_html=False,  # Disabled due to duplicate ID issue in billing templates
                                  check_css=True,
-                                 check_accessibility=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_accessibility=False):
         # Login as superuser for staff access
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -100,8 +99,7 @@ def test_staff_billing_list_dashboard_display(page: Page) -> None:
                                  check_network=True,
                                  check_html=False,  # Disabled due to duplicate ID issue in billing template
                                  check_css=True,
-                                 check_accessibility=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_accessibility=False):
         # Login and navigate to billing
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -173,8 +171,7 @@ def test_staff_proforma_creation_workflow(page: Page) -> None:
                                  check_network=True,
                                  check_html=False,  # Disabled due to duplicate ID issue in billing templates
                                  check_css=True,
-                                 check_accessibility=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_accessibility=False):
         # Login and navigate to proforma creation
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -295,8 +292,7 @@ def test_staff_proforma_to_invoice_conversion(page: Page) -> None:
                                  check_network=True,
                                  check_html=False,  # Disabled due to duplicate ID issue in billing templates
                                  check_css=True,
-                                 check_accessibility=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_accessibility=False):
         # Login and navigate to billing
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -387,8 +383,7 @@ def test_staff_invoice_detail_and_management_features(page: Page) -> None:
                                  check_network=True,
                                  check_html=False,  # Disabled due to duplicate ID issue in billing templates
                                  check_css=True,
-                                 check_accessibility=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_accessibility=False):
         # Login and navigate to billing
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -484,8 +479,7 @@ def test_staff_billing_reports_and_analytics(page: Page) -> None:
                                  check_network=True,
                                  check_html=False,  # Disabled due to duplicate ID issue in billing templates
                                  check_css=True,
-                                 check_accessibility=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_accessibility=False):
         # Login and navigate to billing
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -560,8 +554,7 @@ def test_staff_billing_system_mobile_responsiveness(page: Page) -> None:
                                  check_html=False,  # Disabled due to duplicate ID issue in billing templates
                                  check_css=True,
                                  check_accessibility=False,
-                                 check_performance=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_performance=False):
         # Login and navigate to billing on desktop first
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -632,8 +625,7 @@ def test_staff_complete_billing_workflow(page: Page) -> None:
                                  check_network=True,
                                  check_html=False,  # Disabled due to duplicate ID issue in billing templates
                                  check_css=True,
-                                 check_accessibility=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_accessibility=False):
         # Login and start workflow
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -752,8 +744,7 @@ def test_staff_billing_system_responsive_breakpoints(page: Page) -> None:
                                  check_network=True,
                                  check_html=False,  # Disabled due to duplicate ID issue in billing templates
                                  check_css=True,
-                                 check_accessibility=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_accessibility=False):
         # Login first
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)

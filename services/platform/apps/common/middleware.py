@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import time
 import traceback
 import urllib.parse
@@ -513,10 +514,10 @@ class PortalServiceHMACMiddleware:
                 logger.debug(f"🔓 [HMAC Auth] Skipping HMAC validation for auth endpoint: {request.path}")
                 return self.get_response(request)
             
-            # Global rate limiting keyed by portal and IP
+            # Global rate limiting keyed by portal and IP (respects RATELIMIT_ENABLE env var)
             portal_id_for_rl = request.META.get('HTTP_X_PORTAL_ID', 'unknown')
             client_ip = get_safe_client_ip(request)
-            if self._rate_limited(portal_id_for_rl, client_ip):
+            if os.environ.get("RATELIMIT_ENABLE", "true").lower() != "false" and self._rate_limited(portal_id_for_rl, client_ip):
                 logger.warning(
                     f"🚨 [HMAC Auth] Rate limit exceeded for portal={portal_id_for_rl} ip={client_ip}"
                 )

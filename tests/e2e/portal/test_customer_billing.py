@@ -59,8 +59,7 @@ def test_customer_billing_system_access_via_navigation(page: Page) -> None:
                                  check_html=False,  # Disabled due to duplicate ID issue in billing templates
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Login as customer for customer access
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
@@ -104,8 +103,7 @@ def test_customer_billing_list_display_own_invoices_only(page: Page) -> None:
                                  check_html=False,  # Disabled due to duplicate ID issue in billing templates
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Login and navigate to billing
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
@@ -172,8 +170,7 @@ def test_customer_invoice_detail_and_pdf_access(page: Page) -> None:
                                  check_html=False,  # Disabled due to duplicate ID issue in billing templates
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Login and navigate to billing
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
@@ -266,8 +263,7 @@ def test_customer_payment_status_and_history(page: Page) -> None:
                                  check_html=False,  # Disabled due to duplicate ID issue in billing templates
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Login and navigate to billing
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
@@ -345,8 +341,7 @@ def test_customer_billing_access_control_security(page: Page) -> None:
                                  check_html=False,  # Disabled due to duplicate ID issue in billing templates
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Test customer user access
         print("    Testing customer user access...")
         ensure_fresh_session(page)
@@ -402,8 +397,7 @@ def test_customer_billing_isolation_comprehensive_security(page: Page) -> None:
                                  check_html=False,  # Disabled due to duplicate ID issue in billing templates
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
 
         # === PHASE 1: Customer 1 Billing Visibility Test ===
         print("    🔍 Phase 1: Testing Customer 1 billing visibility")
@@ -498,8 +492,7 @@ def test_customer_cannot_access_other_customers_billing(page: Page) -> None:
                                  check_html=False,  # Disabled due to duplicate ID issue in billing templates
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Login as customer
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
@@ -572,8 +565,7 @@ def test_customer_billing_system_mobile_responsiveness(page: Page) -> None:
                                  check_html=False,  # Disabled due to duplicate ID issue in billing templates
                                  check_css=True,
                                  check_accessibility=False,
-                                 check_performance=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_performance=False):
         # Login and navigate to billing on desktop first
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
@@ -664,8 +656,7 @@ def test_customer_complete_billing_workflow(page: Page) -> None:
                                  check_html=False,  # Disabled due to duplicate ID issue in billing templates
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Login and start workflow
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
@@ -755,8 +746,7 @@ def test_customer_billing_system_responsive_breakpoints(page: Page) -> None:
                                  check_html=False,  # Disabled due to duplicate ID issue in billing templates
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Login first
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)

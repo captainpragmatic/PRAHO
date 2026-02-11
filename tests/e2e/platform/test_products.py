@@ -59,8 +59,7 @@ def test_product_catalog_access_via_navigation(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Login as superuser for product management access
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -115,8 +114,7 @@ def test_product_catalog_dashboard_display(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Login and navigate to products
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -202,8 +200,7 @@ def test_product_creation_full_workflow(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Login and navigate to products
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -332,8 +329,7 @@ def test_product_pricing_management(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Login and navigate to products
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -450,8 +446,7 @@ def test_product_status_toggles(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Login and navigate to product detail
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -521,8 +516,7 @@ def test_product_search_and_filtering(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Login and navigate to products
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -635,8 +629,7 @@ def test_product_catalog_staff_access_control(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["403 (Forbidden)"]):
+                                 allow_accessibility_skip=True):
         # Test 1: Verify staff user has access
         print("    Testing staff user access...")
         ensure_fresh_platform_session(page)
@@ -713,8 +706,7 @@ def test_product_catalog_mobile_responsiveness(page: Page) -> None:
                                  check_css=True,
                                  check_accessibility=False,
                                  allow_accessibility_skip=True,
-                                 check_performance=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_performance=False):
         # Login and navigate to products on desktop first
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -828,8 +820,7 @@ def test_product_catalog_responsive_breakpoints(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Login first
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)

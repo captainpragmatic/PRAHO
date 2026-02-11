@@ -55,8 +55,7 @@ def test_staff_ticket_system_access_via_navigation(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Login as superuser for staff access
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -100,8 +99,7 @@ def test_staff_ticket_list_dashboard_display(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Login and navigate to tickets
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -291,8 +289,7 @@ def test_staff_ticket_detail_and_management_features(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Login and navigate to tickets
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -385,8 +382,7 @@ def test_staff_ticket_comments_and_internal_notes(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Login and navigate to tickets
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -478,8 +474,7 @@ def test_staff_ticket_status_management(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Login and navigate to tickets
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -562,8 +557,7 @@ def test_staff_ticket_access_control_permissions(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Test staff user access
         print("    Testing staff user access...")
         ensure_fresh_platform_session(page)
@@ -621,8 +615,7 @@ def test_staff_ticket_system_mobile_responsiveness(page: Page) -> None:
                                  check_css=True,
                                  check_accessibility=False,
                                  allow_accessibility_skip=True,
-                                 check_performance=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_performance=False):
         # Login and navigate to tickets on desktop first
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -693,8 +686,7 @@ def test_staff_complete_ticket_management_workflow(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Login and start workflow
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -813,8 +805,7 @@ def test_staff_ticket_system_responsive_breakpoints(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Login first
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)

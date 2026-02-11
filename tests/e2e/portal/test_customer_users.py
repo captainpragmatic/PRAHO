@@ -65,8 +65,7 @@ def test_customer_login_and_profile_access(page: Page) -> None:
                                  check_network=True,
                                  check_html=False,  # May have duplicate ID issues
                                  check_css=True,
-                                 check_accessibility=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_accessibility=False):
         # Login with dedicated E2E customer credentials
         ensure_fresh_session(page)
         assert login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
@@ -130,8 +129,7 @@ def test_customer_profile_using_convenience_helper(page: Page) -> None:
                                  check_network=True,
                                  check_html=False,
                                  check_css=True,
-                                 check_accessibility=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_accessibility=False):
         # Login with dedicated E2E customer credentials
         ensure_fresh_session(page)
         assert login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
@@ -186,8 +184,7 @@ def test_customer_profile_editing(page: Page) -> None:
                                  check_network=True,
                                  check_html=False,  # May have duplicate ID issues
                                  check_css=True,
-                                 check_accessibility=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_accessibility=False):
         # Login and navigate to profile
         ensure_fresh_session(page)
         assert login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
@@ -274,8 +271,7 @@ def test_customer_password_change_workflow(page: Page) -> None:
                                  check_network=True,
                                  check_html=False,  # May have duplicate ID issues
                                  check_css=True,
-                                 check_accessibility=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_accessibility=False):
         # Login as customer
         ensure_fresh_session(page)
         assert login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
@@ -370,8 +366,7 @@ def test_customer_2fa_setup_access_and_flow(page: Page) -> None:
                                  check_network=True,
                                  check_html=False,  # May have duplicate ID issues
                                  check_css=True,
-                                 check_accessibility=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_accessibility=False):
         # Login as customer (accounts have been reset)
         ensure_fresh_session(page)
         assert login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
@@ -483,8 +478,7 @@ def test_customer_staff_access_restrictions(page: Page) -> None:
                                  check_network=True,
                                  check_html=False,  # May have duplicate ID issues
                                  check_css=True,
-                                 check_accessibility=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_accessibility=False):
         # Login as customer
         ensure_fresh_session(page)
         assert login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
@@ -585,8 +579,7 @@ def test_customer_cannot_edit_other_users(page: Page) -> None:
                                  check_network=False,  # Expected failed requests from security tests
                                  check_html=False,  # May have duplicate ID issues
                                  check_css=True,
-                                 check_accessibility=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_accessibility=False):
         # Login as customer
         ensure_fresh_session(page)
         assert login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
@@ -676,8 +669,7 @@ def test_customer_profile_mobile_responsiveness(page: Page) -> None:
                                  check_html=False,  # May have duplicate ID issues
                                  check_css=True,
                                  check_accessibility=False,
-                                 check_performance=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_performance=False):
         # Login and navigate to profile on desktop first
         ensure_fresh_session(page)
         assert login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
@@ -766,8 +758,7 @@ def test_customer_complete_account_management_workflow(page: Page) -> None:
                                  check_network=True,
                                  check_html=False,  # May have duplicate ID issues
                                  check_css=True,
-                                 check_accessibility=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_accessibility=False):
         # Step 1: Customer authentication
         print("    Step 1: Customer authentication and dashboard access")
         ensure_fresh_session(page)
@@ -892,8 +883,7 @@ def test_customer_account_responsive_breakpoints(page: Page) -> None:
                                  check_network=True,
                                  check_html=False,  # May have duplicate ID issues
                                  check_css=True,
-                                 check_accessibility=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_accessibility=False):
         # Login first
         ensure_fresh_session(page)
         assert login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)

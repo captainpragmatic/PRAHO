@@ -53,8 +53,7 @@ def test_customer_can_view_own_services_but_not_manage(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Login as customer
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
@@ -103,8 +102,7 @@ def test_customer_cannot_create_services(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Login as customer
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
@@ -152,8 +150,7 @@ def test_customer_cannot_access_service_management_actions(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Login as customer
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
@@ -207,8 +204,7 @@ def test_customer_server_access_blocked_but_plans_allowed(page: Page) -> None:
                                  check_html=False,     # Plans form may be missing CSRF tokens
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Login as customer
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
@@ -256,8 +252,7 @@ def test_customer_provisioning_navigation_not_available(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Login as customer
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
@@ -293,8 +288,7 @@ def test_customer_provisioning_comprehensive_security_validation(page: Page) -> 
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Login as customer
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
@@ -321,14 +315,16 @@ def test_customer_provisioning_comprehensive_security_validation(page: Page) -> 
             page.wait_for_load_state("networkidle")
 
             current_url = page.url
-            page_content = page.content().lower()
-            is_404 = "not found" in page_content or "404" in page_content
+            # Detect 404 via the actual 404 template heading, not naive string search
+            # (page HTML contains "404" in SVG paths and "not found" in JS logs)
+            is_404 = page.locator('h1:has-text("404")').count() > 0
 
             if should_allow:
-                # For allowed URLs, check they load with actual content (not 404)
-                is_accessible = (test_url in current_url or "/services/" in current_url) and not is_404
+                # For allowed URLs: not on 404 page and still within /services/ area
+                # (service detail may redirect to list if service doesn't exist — still "allowed")
+                is_accessible = "/services/" in current_url and not is_404
             else:
-                # For blocked URLs, check they are redirected away, show 404, or have no management form
+                # For blocked URLs: redirected away, shows 404, or has no management form
                 has_mgmt_form = page.locator('form:has(button[type="submit"])').count() > 0
                 is_blocked = (test_url not in current_url) or is_404 or not has_mgmt_form
                 is_accessible = not is_blocked
@@ -398,8 +394,7 @@ def test_customer_provisioning_security_mobile_compatibility(page: Page) -> None
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 allow_accessibility_skip=True,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 allow_accessibility_skip=True):
         # Login as customer
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)

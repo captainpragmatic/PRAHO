@@ -160,8 +160,7 @@ def test_staff_tickets_functionality(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 check_performance=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_performance=False):
         # Ensure fresh session and login as staff
         ensure_fresh_platform_session(page)
         if not login_platform_user(page):
@@ -192,8 +191,7 @@ def test_tickets_role_based_access(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 check_performance=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_performance=False):
 
         # Test staff access on platform
         print(f"\n  👤 Testing ticket access for superuser")
@@ -244,8 +242,7 @@ def test_tickets_actions_and_interactions(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 check_performance=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_performance=False):
         # Login as staff for maximum ticket access
         ensure_fresh_platform_session(page)
         if not login_platform_user(page):
@@ -339,8 +336,7 @@ def test_tickets_mobile_responsiveness(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 check_performance=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_performance=False):
         # Login as staff for full ticket access
         ensure_fresh_platform_session(page)
         if not login_platform_user(page):
@@ -412,8 +408,7 @@ def test_tickets_mobile_specific_features(page: Page) -> None:
                                  check_html=True,
                                  check_css=True,
                                  check_accessibility=False,
-                                 check_performance=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_performance=False):
         # Login as staff
         ensure_fresh_platform_session(page)
         if not login_platform_user(page):

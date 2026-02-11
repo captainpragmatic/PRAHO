@@ -4,6 +4,7 @@ DoS protection and brute force prevention for authentication endpoints.
 """
 
 import logging
+import os
 import random
 import time
 from collections.abc import Callable
@@ -52,6 +53,10 @@ class AuthenticationRateLimitMiddleware:
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
         """Process request with rate limiting for authentication endpoints"""
+
+        # Respect RATELIMIT_ENABLE setting (disabled during E2E testing)
+        if os.environ.get("RATELIMIT_ENABLE", "true").lower() == "false":
+            return self.get_response(request)
 
         # Check if this is an authentication endpoint
         if not self._is_auth_endpoint(request):
@@ -262,6 +267,10 @@ class APIRateLimitMiddleware:
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
         """Process request with general API rate limiting"""
+
+        # Respect RATELIMIT_ENABLE setting (disabled during E2E testing)
+        if os.environ.get("RATELIMIT_ENABLE", "true").lower() == "false":
+            return self.get_response(request)
 
         # Check if this is an API endpoint
         if not self._is_api_endpoint(request):

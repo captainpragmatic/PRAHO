@@ -52,8 +52,7 @@ def test_navigation_cross_page_flow(page: Page) -> None:
                                  check_css=True,
                                  check_accessibility=False,  # Keep fast for navigation flow
                                  allow_accessibility_skip=True,
-                                 check_performance=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):   # Keep fast for navigation flow
+                                 check_performance=False):   # Keep fast for navigation flow
         # Login as superuser for maximum navigation access
         ensure_fresh_session(page)
         if not login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD):
@@ -137,8 +136,7 @@ def test_navigation_header_interactions(page: Page) -> None:
                                  check_css=True,
                                  check_accessibility=False,  # Keep fast for multi-user test
                                  allow_accessibility_skip=True,
-                                 check_performance=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):   # Keep fast for multi-user test
+                                 check_performance=False):   # Keep fast for multi-user test
 
         # Get test user credentials
         users = get_test_user_credentials()
@@ -324,8 +322,7 @@ def test_navigation_menu_visibility_by_role(page: Page) -> None:
                                  check_css=True,
                                  check_accessibility=False,  # Keep fast for role-based test
                                  allow_accessibility_skip=True,
-                                 check_performance=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):   # Keep fast for role-based test
+                                 check_performance=False):   # Keep fast for role-based test
 
         # Test superuser navigation access
         print("\n  👑 Testing superuser navigation access")
@@ -388,8 +385,7 @@ def test_navigation_dropdown_interactions(page: Page) -> None:
                                  check_css=True,
                                  check_accessibility=False,  # Keep fast for dropdown test
                                  allow_accessibility_skip=True,
-                                 check_performance=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):   # Keep fast for dropdown test
+                                 check_performance=False):   # Keep fast for dropdown test
         # Login as superuser for maximum navigation access
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
@@ -454,8 +450,7 @@ def test_mobile_navigation_responsiveness(page: Page) -> None:
                                  check_css=True,
                                  check_accessibility=False,   # Important for mobile navigation a11y
                                  allow_accessibility_skip=True,
-                                 check_performance=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):   # Keep fast for mobile test
+                                 check_performance=False):   # Keep fast for mobile test
         # Login as superuser for full navigation access
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
@@ -519,8 +514,7 @@ def test_navigation_responsive_breakpoints(page: Page) -> None:
                                  check_css=True,
                                  check_accessibility=False,  # Keep fast for comprehensive test
                                  allow_accessibility_skip=True,
-                                 check_performance=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):   # Keep fast for comprehensive test
+                                 check_performance=False):   # Keep fast for comprehensive test
         # Login as superuser for full navigation access
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)

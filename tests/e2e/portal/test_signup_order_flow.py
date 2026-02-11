@@ -103,7 +103,6 @@ def test_signup_page_loads_correctly(page: Page) -> None:
         check_network=True,
         check_html=True,
         check_css=True,
-        ignore_patterns=["404", "favicon", "429"],
                                  check_accessibility=False):
         # Navigate to signup page
         page.goto(f"{BASE_URL}{REGISTER_URL}")
@@ -117,7 +116,7 @@ def test_signup_page_loads_correctly(page: Page) -> None:
         assert "Create Account" in title or "PragmaticHost" in title, f"Page title should contain 'Create Account', got: {title}"
 
         # Verify main heading
-        heading = page.locator("h2")
+        heading = page.locator("h1")
         expect(heading).to_contain_text("Create Your PragmaticHost Account")
         print("  Signup page heading is correct")
 
@@ -189,7 +188,6 @@ def test_signup_page_has_romanian_business_context(page: Page) -> None:
         check_network=True,
         check_html=False,  # May have minor HTML issues
         check_css=True,
-        ignore_patterns=["404", "favicon", "429"],
                                  check_accessibility=False):
         # Navigate to signup page
         page.goto(f"{BASE_URL}{REGISTER_URL}")
@@ -254,7 +252,6 @@ def test_signup_form_validation_required_fields(page: Page) -> None:
         check_network=True,
         check_html=False,
         check_css=True,
-        ignore_patterns=["404", "favicon", "429"],
                                  check_accessibility=False):
         # Navigate to signup page
         page.goto(f"{BASE_URL}{REGISTER_URL}")
@@ -307,7 +304,6 @@ def test_signup_form_email_validation(page: Page) -> None:
         check_network=True,
         check_html=False,
         check_css=True,
-        ignore_patterns=["404", "favicon", "429"],
                                  check_accessibility=False):
         # Navigate to signup page
         page.goto(f"{BASE_URL}{REGISTER_URL}")
@@ -354,7 +350,6 @@ def test_signup_form_password_validation(page: Page) -> None:
         check_network=True,
         check_html=False,
         check_css=True,
-        ignore_patterns=["404", "favicon", "429"],
                                  check_accessibility=False):
         # Navigate to signup page
         page.goto(f"{BASE_URL}{REGISTER_URL}")
@@ -425,7 +420,6 @@ def test_signup_form_successful_submission(page: Page) -> None:
         check_network=True,
         check_html=False,
         check_css=True,
-        ignore_patterns=["404", "favicon", "429"],
                                  check_accessibility=False):
         # Navigate to signup page
         page.goto(f"{BASE_URL}{REGISTER_URL}")
@@ -526,7 +520,6 @@ def test_signup_then_login_flow(page: Page) -> None:
         check_network=True,
         check_html=False,
         check_css=True,
-        ignore_patterns=["404", "favicon", "429"],
                                  check_accessibility=False):
         # Generate unique test data
         test_email = generate_test_email()
@@ -615,7 +608,6 @@ def test_customer_can_view_orders_list(page: Page) -> None:
         check_network=True,
         check_html=False,
         check_css=True,
-        ignore_patterns=["404", "favicon", "429"],
                                  check_accessibility=False):
         # Login as customer
         ensure_fresh_session(page)
@@ -672,7 +664,6 @@ def test_customer_order_list_shows_correct_data(page: Page) -> None:
         check_network=True,
         check_html=False,
         check_css=True,
-        ignore_patterns=["404", "favicon", "429"],
                                  check_accessibility=False):
         # Login as customer
         ensure_fresh_session(page)
@@ -755,7 +746,6 @@ def test_complete_new_customer_journey(page: Page) -> None:
         check_network=True,
         check_html=False,
         check_css=True,
-        ignore_patterns=["404", "favicon", "429"],
                                  check_accessibility=False):
         # Generate unique test data
         test_email = generate_test_email()
@@ -876,7 +866,6 @@ def test_signup_page_mobile_responsiveness(page: Page) -> None:
         check_network=True,
         check_html=False,
         check_css=True,
-        ignore_patterns=["404", "favicon", "429"],
                                  check_accessibility=False):
         # Navigate to signup on desktop first
         page.goto(f"{BASE_URL}{REGISTER_URL}")
@@ -943,7 +932,6 @@ def test_signup_across_responsive_breakpoints(page: Page) -> None:
         check_network=True,
         check_html=False,
         check_css=True,
-        ignore_patterns=["404", "favicon", "429"],
                                  check_accessibility=False):
         def test_signup_form_visibility(test_page: Page, context: str = "") -> bool:
             """Test that signup form is visible and functional"""
@@ -1003,7 +991,6 @@ def test_signup_rate_limiting_indication(page: Page) -> None:
         check_network=True,
         check_html=False,
         check_css=True,
-        ignore_patterns=["404", "favicon", "429"],
                                  check_accessibility=False):
         # Navigate to signup
         page.goto(f"{BASE_URL}{REGISTER_URL}")
@@ -1040,7 +1027,6 @@ def test_signup_enumeration_protection(page: Page) -> None:
         check_network=True,
         check_html=False,
         check_css=True,
-        ignore_patterns=["404", "favicon", "429"],
                                  check_accessibility=False):
         # Complete signup with a new email
         new_email = generate_test_email()
@@ -1130,7 +1116,6 @@ def test_signup_with_special_characters_in_company_name(page: Page) -> None:
         check_network=True,
         check_html=False,
         check_css=True,
-        ignore_patterns=["404", "favicon", "429"],
                                  check_accessibility=False):
         page.goto(f"{BASE_URL}{REGISTER_URL}")
         page.wait_for_load_state("networkidle")

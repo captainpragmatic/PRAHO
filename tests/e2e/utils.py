@@ -969,7 +969,9 @@ def check_accessibility_basics(page: Page) -> list[str]:
                     }
                     
                     const id = input.id;
-                    if (!id || !document.querySelector('label[for="' + id + '"]')) {
+                    const hasLabelFor = id && document.querySelector('label[for="' + id + '"]');
+                    const hasLabelParent = input.closest('label') !== null;
+                    if (!hasLabelFor && !hasLabelParent) {
                         const ariaLabel = input.getAttribute('aria-label');
                         if (!ariaLabel) {
                             issues.push('Input missing label: ' + (input.name || input.type || 'unknown'));

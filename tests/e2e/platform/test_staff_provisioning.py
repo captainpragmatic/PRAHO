@@ -54,8 +54,7 @@ def test_staff_provisioning_system_access_via_navigation(page: Page) -> None:
                                  check_css=True,
                                  check_accessibility=False,
                                  allow_accessibility_skip=True,
-                                 check_performance=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_performance=False):
         # Login as staff user
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -89,8 +88,7 @@ def test_staff_provisioning_dashboard_display(page: Page) -> None:
                                  check_css=True,
                                  check_accessibility=False,
                                  allow_accessibility_skip=True,
-                                 check_performance=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_performance=False):
         # Login and navigate to provisioning
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -148,8 +146,7 @@ def test_staff_service_creation_workflow(page: Page) -> None:
                                  check_css=True,
                                  check_accessibility=False,
                                  allow_accessibility_skip=True,
-                                 check_performance=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_performance=False):
         # Login and navigate to provisioning
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -214,8 +211,7 @@ def test_staff_service_management_actions(page: Page) -> None:
                                  check_css=True,
                                  check_accessibility=False,
                                  allow_accessibility_skip=True,
-                                 check_performance=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_performance=False):
         # Login and navigate to provisioning
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -289,8 +285,7 @@ def test_staff_service_status_filtering(page: Page) -> None:
                                  check_css=True,
                                  check_accessibility=False,
                                  allow_accessibility_skip=True,
-                                 check_performance=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_performance=False):
         # Login and navigate to provisioning
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -347,8 +342,7 @@ def test_staff_servers_and_plans_access(page: Page) -> None:
                                  check_css=True,
                                  check_accessibility=False,
                                  allow_accessibility_skip=True,
-                                 check_performance=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_performance=False):
         # Login and navigate to provisioning
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -400,8 +394,7 @@ def test_staff_provisioning_system_mobile_responsiveness(page: Page) -> None:
                                  check_css=True,
                                  check_accessibility=False,
                                  allow_accessibility_skip=True,
-                                 check_performance=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_performance=False):
         # Login first
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -470,8 +463,7 @@ def test_staff_provisioning_system_responsive_breakpoints(page: Page) -> None:
                                  check_css=True,
                                  check_accessibility=False,
                                  allow_accessibility_skip=True,
-                                 check_performance=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_performance=False):
         # Login first
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -556,8 +548,7 @@ def test_staff_complete_provisioning_workflow(page: Page) -> None:
                                  check_css=True,
                                  check_accessibility=False,
                                  allow_accessibility_skip=True,
-                                 check_performance=False,
-                                 ignore_patterns=["401", "403", "404", "429", "Forbidden", "favicon"]):
+                                 check_performance=False):
         # Login and navigate to provisioning
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)

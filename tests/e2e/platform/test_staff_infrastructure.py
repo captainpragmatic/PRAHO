@@ -58,7 +58,6 @@ def test_staff_infrastructure_dashboard_access(page: Page) -> None:
                                  check_network=True,
                                  check_html=True,
                                  check_css=True,
-                                 ignore_patterns=["404", "favicon", "429"],
                                  check_accessibility=False,
                                  allow_accessibility_skip=True):
         # Login as staff user
@@ -90,7 +89,6 @@ def test_infrastructure_dashboard_stats_display(page: Page) -> None:
     with ComprehensivePageMonitor(page, "infrastructure dashboard stats",
                                  check_console=True,
                                  check_network=True,
-                                 ignore_patterns=["404", "favicon", "429"],
                                  check_accessibility=False,
                                  allow_accessibility_skip=True):
         # Login and navigate
@@ -126,7 +124,6 @@ def test_deployment_list_page_loads(page: Page) -> None:
     with ComprehensivePageMonitor(page, "deployment list page",
                                  check_console=True,
                                  check_network=True,
-                                 ignore_patterns=["404", "favicon", "429"],
                                  check_accessibility=False,
                                  allow_accessibility_skip=True):
         ensure_fresh_platform_session(page)
@@ -158,7 +155,6 @@ def test_deployment_create_page_loads(page: Page) -> None:
     with ComprehensivePageMonitor(page, "deployment create page",
                                  check_console=True,
                                  check_network=True,
-                                 ignore_patterns=["404", "favicon", "429"],
                                  check_accessibility=False,
                                  allow_accessibility_skip=True):
         ensure_fresh_platform_session(page)
@@ -199,7 +195,6 @@ def test_provider_list_page_loads(page: Page) -> None:
     with ComprehensivePageMonitor(page, "provider list page",
                                  check_console=True,
                                  check_network=True,
-                                 ignore_patterns=["404", "favicon", "429"],
                                  check_accessibility=False,
                                  allow_accessibility_skip=True):
         ensure_fresh_platform_session(page)
@@ -232,7 +227,6 @@ def test_size_list_page_loads(page: Page) -> None:
     with ComprehensivePageMonitor(page, "size list page",
                                  check_console=True,
                                  check_network=True,
-                                 ignore_patterns=["404", "favicon", "429"],
                                  check_accessibility=False,
                                  allow_accessibility_skip=True):
         ensure_fresh_platform_session(page)
@@ -261,7 +255,6 @@ def test_region_list_page_loads(page: Page) -> None:
     with ComprehensivePageMonitor(page, "region list page",
                                  check_console=True,
                                  check_network=True,
-                                 ignore_patterns=["404", "favicon", "429"],
                                  check_accessibility=False,
                                  allow_accessibility_skip=True):
         ensure_fresh_platform_session(page)
@@ -290,7 +283,6 @@ def test_cost_dashboard_page_loads(page: Page) -> None:
     with ComprehensivePageMonitor(page, "cost dashboard page",
                                  check_console=True,
                                  check_network=True,
-                                 ignore_patterns=["404", "favicon", "429"],
                                  check_accessibility=False,
                                  allow_accessibility_skip=True):
         ensure_fresh_platform_session(page)
@@ -319,7 +311,6 @@ def test_cost_history_page_loads(page: Page) -> None:
     with ComprehensivePageMonitor(page, "cost history page",
                                  check_console=True,
                                  check_network=True,
-                                 ignore_patterns=["404", "favicon", "429"],
                                  check_accessibility=False,
                                  allow_accessibility_skip=True):
         ensure_fresh_platform_session(page)
@@ -410,7 +401,6 @@ def test_infrastructure_navigation_links(page: Page) -> None:
     with ComprehensivePageMonitor(page, "infrastructure navigation",
                                  check_console=True,
                                  check_network=True,
-                                 ignore_patterns=["404", "favicon", "429"],
                                  check_accessibility=False,
                                  allow_accessibility_skip=True):
         ensure_fresh_platform_session(page)
