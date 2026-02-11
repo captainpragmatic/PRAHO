@@ -184,6 +184,8 @@ def navigation_dropdowns(request: HttpRequest) -> dict[str, Any]:
             {"divider": True},
             {"text": "Registrars", "url": "/domains/admin/registrars/", "icon": "🏢"},
             {"text": "TLD Management", "url": "/domains/admin/tlds/", "icon": "🌍"},
+            {"divider": True},
+            {"text": "Infrastructure", "url": "/infrastructure/", "icon": "🏗️"},
         ]
 
         support_items = [

@@ -12,7 +12,7 @@ from django.utils.translation import gettext as _
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 
-from .services import PlatformAPIError, TicketFilters, ticket_api
+from .services import PlatformAPIError, TicketCreateRequest, TicketFilters, ticket_api
 
 logger = logging.getLogger(__name__)
 
@@ -246,14 +246,13 @@ def ticket_create(request: HttpRequest) -> HttpResponse:
         try:
             # Create ticket via platform API
             # contact_email and contact_person are automatically populated from authenticated customer
-            ticket_data = {
-                'customer_id': customer_id,
-                'title': title,
-                'description': description,
-                'priority': priority,
-                'category': category
-            }
-            ticket = ticket_api.create_ticket(ticket_data, user_id)
+            ticket_request = TicketCreateRequest(
+                title=title,
+                description=description,
+                priority=priority,
+                category=category,
+            )
+            ticket = ticket_api.create_ticket(customer_id, user_id, ticket_request)
             
             # Extract ticket identifier for redirect and messages
             ticket_id = ticket.get('id') or ticket.get('pk') 

@@ -28,12 +28,59 @@ def _get_selected_customer_id(request: HttpRequest) -> str | None:
     return request.session.get('customer_id')
 
 
+def _fetch_user_memberships(request: HttpRequest) -> list[dict]:
+    """Lazy-fetch user memberships from Platform API and cache in session"""
+    user_id = request.session.get('user_id')
+    if not user_id:
+        logger.warning("🔍 [Decorator] No user_id in session for membership fetch")
+        return []
+    try:
+        response = api_client.post('users/customers/', data={
+            'customer_id': user_id,
+            'action': 'get_user_customers',
+        }, user_id=user_id)
+        logger.info(f"🔍 [Decorator] Membership API response: {response}")
+        if response and response.get('success') and 'results' in response:
+            memberships = []
+            for customer in response['results']:
+                memberships.append({
+                    'customer_id': customer.get('id'),
+                    'customer_name': customer.get('name', customer.get('company_name', '')),
+                    'role': customer.get('role', 'viewer'),
+                    'company_name': customer.get('company_name', ''),
+                    'is_primary': customer.get('is_primary', False),
+                })
+            if memberships:
+                request.session['user_memberships'] = memberships
+                logger.info(f"🔍 [Decorator] Stored {len(memberships)} memberships in session")
+            return memberships
+    except Exception as e:
+        logger.error(f"🔥 [Decorator] Failed to fetch memberships: {e}")
+    return []
+
+
 def _get_user_role_for_customer(request: HttpRequest, customer_id: str) -> str | None:
     """Get user's role for specific customer from cached memberships"""
     memberships = request.session.get('user_memberships', [])
+    if not memberships:
+        memberships = _fetch_user_memberships(request)
     for membership in memberships:
         if str(membership.get('customer_id')) == str(customer_id):
             return membership.get('role')
+
+    # Customer not found in cached memberships — force a fresh fetch from Platform API.
+    # This handles revoked memberships: stale session cache may still list the customer,
+    # but a fresh fetch will reflect the current state.
+    if memberships:
+        fresh_memberships = _fetch_user_memberships(request)
+        for membership in fresh_memberships:
+            if str(membership.get('customer_id')) == str(customer_id):
+                return membership.get('role')
+
+    logger.warning(
+        f"🚨 [Security] No membership found for user {request.session.get('user_id')} "
+        f"on customer {customer_id} — access denied"
+    )
     return None
 
 
@@ -154,18 +201,18 @@ def require_admin_role(realtime_verification: bool = False) -> Callable:
 
 
 def require_billing_access(realtime_verification: bool = False) -> Callable:
-    """🔒 Require billing access - admin or billing role"""
-    return require_customer_role(['admin', 'billing'], realtime_verification)
+    """🔒 Require billing access - owner, admin or billing role"""
+    return require_customer_role(['owner', 'admin', 'billing'], realtime_verification)
 
 
 def require_technical_access(realtime_verification: bool = False) -> Callable:
-    """🔒 Require technical access - admin or technical role"""
-    return require_customer_role(['admin', 'technical'], realtime_verification)
+    """🔒 Require technical access - owner, admin or technical role"""
+    return require_customer_role(['owner', 'admin', 'technical'], realtime_verification)
 
 
 def require_any_role(realtime_verification: bool = False) -> Callable:
     """🔒 Require any valid role - equivalent to authenticated user with customer access"""
-    return require_customer_role(['admin', 'billing', 'technical', 'viewer'], realtime_verification)
+    return require_customer_role(['owner', 'admin', 'billing', 'technical', 'viewer'], realtime_verification)
 
 
 def api_key_required(view_func: Callable) -> Callable:

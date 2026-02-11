@@ -299,10 +299,6 @@ class SecureUserRegistrationService:
             return Err(SecureErrorHandler.safe_error_response(e, "user_registration"))
 
     @classmethod
-    # @secure_user_registration(rate_limit=3)  # Disabled for testing
-    # @atomic_with_retry(max_retries=3)
-    # @audit_service_call("join_request")
-    # @monitor_performance(max_duration_seconds=5.0)
     def request_join_existing_customer(
         cls,
         user_data: dict[str, Any],
@@ -524,10 +520,6 @@ class SecureCustomerUserService:
     """
 
     @classmethod
-    # @secure_customer_operation(requires_owner=True)  # Disabled for testing
-    # @atomic_with_retry(max_retries=3)
-    # @audit_service_call("user_creation")
-    # @monitor_performance(max_duration_seconds=8.0)
     def create_user_for_customer(cls, request: UserCreationRequest, **kwargs: Any) -> Result[tuple[User, bool], str]:
         """
         🔒 Secure user creation for customer with comprehensive validation
@@ -607,9 +599,6 @@ class SecureCustomerUserService:
             return Err(SecureErrorHandler.safe_error_response(e, "user_creation"))
 
     @classmethod
-    # @secure_customer_operation(requires_owner=False)  # Disabled for testing
-    # @atomic_with_retry(max_retries=3)  # Remove temporarily
-    # @audit_service_call("user_linking")  # Remove temporarily
     def link_existing_user(cls, request: UserLinkingRequest, **kwargs: Any) -> Result[Any, str]:
         """
         🔒 Secure linking of existing user to customer
@@ -658,10 +647,6 @@ class SecureCustomerUserService:
             return Err(SecureErrorHandler.safe_error_response(e, "user_linking"))
 
     @classmethod
-    # @secure_invitation_system()  # Disabled for testing
-    # @atomic_with_retry(max_retries=3)
-    # @audit_service_call("invitation_sent")
-    # @monitor_performance(max_duration_seconds=10.0)
     def invite_user_to_customer(cls, request: UserInvitationRequest, **kwargs: Any) -> Result[CustomerMembership, str]:
         """
         🔒 Secure user invitation with comprehensive protection
@@ -739,10 +724,6 @@ class SecureCustomerUserService:
     # ===============================================================================
 
     @classmethod
-    # @secure_customer_operation(requires_owner=True)  # Disabled for testing
-    # @atomic_with_retry(max_retries=3)
-    # @audit_service_call("user_creation")
-    # @monitor_performance(max_duration_seconds=8.0)
     def create_user_for_customer_legacy(  # noqa: PLR0913
         cls,
         customer: Customer,
@@ -765,9 +746,6 @@ class SecureCustomerUserService:
         return cls.create_user_for_customer(request, **kwargs)
 
     @classmethod
-    # @secure_customer_operation(requires_owner=False)  # Disabled for testing
-    # @atomic_with_retry(max_retries=3)
-    # @audit_service_call("user_linking")
     def link_existing_user_legacy(  # noqa: PLR0913
         cls,
         user: User,
@@ -785,10 +763,6 @@ class SecureCustomerUserService:
         return cls.link_existing_user(request, **kwargs)
 
     @classmethod
-    # @secure_invitation_system()  # Disabled for testing
-    # @atomic_with_retry(max_retries=3)
-    # @audit_service_call("invitation_sent")
-    # @monitor_performance(max_duration_seconds=10.0)
     def invite_user_to_customer_legacy(  # noqa: PLR0913
         cls,
         inviter: User,

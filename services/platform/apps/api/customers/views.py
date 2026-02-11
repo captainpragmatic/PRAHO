@@ -220,7 +220,15 @@ def customer_create_api(request: HttpRequest) -> Response:
     - Automatic owner membership creation
     """
     try:
-        # HMAC authentication is handled by middleware
+        # Require HMAC-authenticated portal request — staff browser sessions
+        # must not be able to act on arbitrary user_id from request body.
+        if not getattr(request, '_portal_authenticated', False):
+            logger.warning(f"🔥 [API Security] customer_create_api called without HMAC auth from {request.META.get('REMOTE_ADDR')}")
+            return Response({
+                'success': False,
+                'error': 'HMAC authentication required'
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
         # Validate the request data structure
         user_id = request.data.get('user_id')
         action = request.data.get('action')

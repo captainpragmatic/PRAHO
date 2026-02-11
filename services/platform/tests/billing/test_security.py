@@ -467,9 +467,12 @@ class BillingInputSanitizationTests(TestCase):
 class BillingSecurityLoggingTests(TestCase):
     """🔒 Tests for security logging in billing operations"""
     
-    @patch('apps.billing.validators.logger')
-    def test_security_event_logging_format(self, mock_logger):
-        """🔒 Test that security events are logged in correct format"""
+    def test_security_event_logging_format(self):
+        """🔒 Test that security events create audit trail entries"""
+        from apps.audit.models import AuditEvent
+
+        initial_count = AuditEvent.objects.count()
+
         log_security_event(
             event_type='test_financial_operation',
             details={
@@ -480,13 +483,13 @@ class BillingSecurityLoggingTests(TestCase):
             request_ip='192.168.1.100',
             user_email='admin@test.com'
         )
-        
-        # Should log with correct format
-        mock_logger.info.assert_called()
-        call_args = str(mock_logger.info.call_args)
-        self.assertIn('Billing Security', call_args)
-        self.assertIn('test_financial_operation', call_args)
-        self.assertIn('financial_operation', call_args)
+
+        # Should create an audit event
+        self.assertEqual(AuditEvent.objects.count(), initial_count + 1)
+        event = AuditEvent.objects.order_by('-timestamp').first()
+        self.assertEqual(event.action, 'test_financial_operation')
+        self.assertIn('amount', event.metadata)
+        self.assertIn('user_email', event.metadata)
     
     @patch('apps.billing.proforma_models.log_security_event')
     def test_model_validation_triggers_logging(self, mock_log):

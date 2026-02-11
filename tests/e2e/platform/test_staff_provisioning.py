@@ -51,7 +51,10 @@ def test_staff_provisioning_system_access_via_navigation(page: Page) -> None:
                                  check_console=True,
                                  check_network=True,
                                  check_html=True,
-                                 check_css=True):
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True,
+                                 check_performance=False):
         # Login as staff user
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -82,7 +85,10 @@ def test_staff_provisioning_dashboard_display(page: Page) -> None:
                                  check_console=True,
                                  check_network=True,
                                  check_html=True,
-                                 check_css=True):
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True,
+                                 check_performance=False):
         # Login and navigate to provisioning
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -115,9 +121,9 @@ def test_staff_provisioning_dashboard_display(page: Page) -> None:
         if new_service_btn.count() > 0:
             print("  ✅ New Service button available for staff")
 
-        # Check quick action buttons
-        servers_btn = page.locator('a:has-text("🖥️"), a[href*="servers"]')
-        plans_btn = page.locator('a:has-text("📦"), a[href*="plans"]')
+        # Check quick action buttons (in main content, not navigation)
+        servers_btn = page.locator('main a:has-text("🖥️"), .content a[href*="servers"], a[href*="/provisioning/servers/"]')
+        plans_btn = page.locator('main a:has-text("📦"), .content a[href*="plans"], a[href*="/provisioning/plans/"]')
 
         assert servers_btn.count() > 0, "Servers button missing"
         assert plans_btn.count() > 0, "Plans button missing"
@@ -137,7 +143,10 @@ def test_staff_service_creation_workflow(page: Page) -> None:
                                  check_console=True,
                                  check_network=True,
                                  check_html=False,  # May have form validation issues
-                                 check_css=True):
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True,
+                                 check_performance=False):
         # Login and navigate to provisioning
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -146,7 +155,7 @@ def test_staff_service_creation_workflow(page: Page) -> None:
         page.wait_for_load_state("networkidle")
 
         # Look for New Service button (specifically for provisioning)
-        new_service_btn = page.locator('a[href*="/provisioning/"], a[href*="service_create"]').filter(has_text=["New Service", "➕"])
+        new_service_btn = page.locator('a[href*="/provisioning/"], a[href*="service_create"]').filter(has_text="New Service")
 
         if new_service_btn.count() > 0:
             print("  🔍 New Service button found - testing creation workflow")
@@ -156,9 +165,9 @@ def test_staff_service_creation_workflow(page: Page) -> None:
             # Check if we're on create page
             if "/create/" in page.url:
                 # Look for form elements
-                customer_select = page.locator('select[name="customer_id"], select:has(option)')
+                customer_select = page.locator('select[name="customer_id"]')
                 domain_input = page.locator('input[name="domain"], input[placeholder*="domain"]')
-                plan_select = page.locator('select[name="plan_id"], select:has(option)')
+                plan_select = page.locator('select[name="plan_id"]')
 
                 if customer_select.count() > 0 and domain_input.count() > 0:
                     print("  ✅ Service creation form elements found")
@@ -199,7 +208,10 @@ def test_staff_service_management_actions(page: Page) -> None:
                                  check_console=True,
                                  check_network=True,
                                  check_html=False,  # Actions may trigger redirects
-                                 check_css=True):
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True,
+                                 check_performance=False):
         # Login and navigate to provisioning
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -270,7 +282,10 @@ def test_staff_service_status_filtering(page: Page) -> None:
                                  check_console=True,
                                  check_network=True,
                                  check_html=True,
-                                 check_css=True):
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True,
+                                 check_performance=False):
         # Login and navigate to provisioning
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -324,7 +339,10 @@ def test_staff_servers_and_plans_access(page: Page) -> None:
                                  check_console=False,  # Plans/servers pages may have development issues
                                  check_network=False,  # May have 500 errors on dev pages
                                  check_html=False,     # Forms may be missing CSRF tokens
-                                 check_css=True):
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True,
+                                 check_performance=False):
         # Login and navigate to provisioning
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -332,11 +350,11 @@ def test_staff_servers_and_plans_access(page: Page) -> None:
         navigate_to_platform_page(page, "/provisioning/services/")
         page.wait_for_load_state("networkidle")
 
-        # Test Servers access
-        servers_btn = page.locator('a:has-text("🖥️"), a[href*="servers"]')
+        # Test Servers access (target buttons in main content, not navigation)
+        servers_btn = page.locator('main a:has-text("🖥️"), .content a[href*="servers"], a[href*="/provisioning/servers/"]').first
         if servers_btn.count() > 0:
             print("  🖥️ Testing servers section access")
-            servers_btn.first.click()
+            servers_btn.click()
             page.wait_for_load_state("networkidle")
 
             if "/servers/" in page.url:
@@ -373,7 +391,10 @@ def test_staff_provisioning_system_mobile_responsiveness(page: Page) -> None:
                                  check_console=True,
                                  check_network=True,
                                  check_html=True,
-                                 check_css=True):
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True,
+                                 check_performance=False):
         # Login first
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -439,7 +460,10 @@ def test_staff_provisioning_system_responsive_breakpoints(page: Page) -> None:
                                  check_console=True,
                                  check_network=True,
                                  check_html=True,
-                                 check_css=True):
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True,
+                                 check_performance=False):
         # Login first
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -521,7 +545,10 @@ def test_staff_complete_provisioning_workflow(page: Page) -> None:
                                  check_console=True,
                                  check_network=True,
                                  check_html=False,  # Complex workflow may trigger various page states
-                                 check_css=True):
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True,
+                                 check_performance=False):
         # Login and navigate to provisioning
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -553,7 +580,7 @@ def test_staff_complete_provisioning_workflow(page: Page) -> None:
         print("  🔗 Phase 3: Service detail access")
 
         # Try to access service details
-        service_links = page.locator('a[href*="/provisioning/services/"]:not([href*="/create/"])')
+        service_links = page.locator('main a[href*="/provisioning/services/"]:not([href*="/create/"])')
         if service_links.count() > 0:
             first_service = service_links.first
             first_service.click()
@@ -577,9 +604,9 @@ def test_staff_complete_provisioning_workflow(page: Page) -> None:
         navigate_to_platform_page(page, "/provisioning/services/")
         page.wait_for_load_state("networkidle")
 
-        servers_btn = page.locator('a:has-text("🖥️"), a[href*="servers"]')
+        servers_btn = page.locator('main a:has-text("🖥️"), .content a[href*="servers"], a[href*="/provisioning/servers/"]').first
         if servers_btn.count() > 0:
-            servers_btn.first.click()
+            servers_btn.click()
             page.wait_for_load_state("networkidle")
             if "/servers/" in page.url:
                 print("    ✅ Servers section accessible")

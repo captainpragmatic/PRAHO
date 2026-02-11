@@ -807,14 +807,35 @@ class SecureErrorHandler:
 # ===============================================================================
 
 
-def log_security_event(event_type: str, details: dict[str, Any], request_ip: str | None = None) -> None:
+def log_security_event(
+    event_type: str,
+    details: dict[str, Any] | None = None,
+    request_ip: str | None = None,
+    user_email: str | None = None,
+) -> None:
     """
-    Log security events for monitoring and forensics
-    """
-    try:
-        # For now, just log to standard logger to avoid transaction issues
-        logger.warning(f"🚨 [Security] {event_type}: {details} from IP: {request_ip}")
+    Log security events to the immutable audit trail.
 
-        # TODO: Integrate with audit service once transaction handling is fixed
-    except Exception as e:
-        logger.error(f"Failed to log security event: {e}")
+    Delegates to AuditService.log_simple_event() for proper audit record creation
+    with automatic categorization, severity detection, and SIEM integration.
+    Falls back to standard logging if the audit service is unavailable.
+    """
+    details = details or {}
+    try:
+        from apps.audit.services import AuditService  # noqa: PLC0415
+
+        metadata = {**details}
+        if user_email:
+            metadata["user_email"] = user_email
+
+        AuditService.log_simple_event(
+            event_type=event_type,
+            user=None,
+            content_object=None,
+            description=f"Security event: {event_type}",
+            metadata=metadata,
+            ip_address=request_ip,
+            actor_type="system",
+        )
+    except Exception:
+        logger.warning(f"🚨 [Security] {event_type}: {details} from IP: {request_ip}")

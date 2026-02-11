@@ -78,6 +78,14 @@ class BurstRateThrottle(SimpleRateThrottle):
     scope = "burst"
     rate = "30/10s"
 
+    def get_cache_key(self, request: Request, view: Any) -> str | None:
+        """Generate cache key based on user or IP for burst limiting."""
+        if request.user and request.user.is_authenticated:
+            ident = str(request.user.pk)
+        else:
+            ident = self.get_ident(request)
+        return self.cache_format % {"scope": self.scope, "ident": ident}
+
     def parse_rate(self, rate: str) -> tuple[int, int]:
         """Parse rate string with custom time units."""
         if rate is None:

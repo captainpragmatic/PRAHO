@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import time
 import traceback
 import urllib.parse
@@ -513,10 +514,10 @@ class PortalServiceHMACMiddleware:
                 logger.debug(f"🔓 [HMAC Auth] Skipping HMAC validation for auth endpoint: {request.path}")
                 return self.get_response(request)
             
-            # Global rate limiting keyed by portal and IP
+            # Global rate limiting keyed by portal and IP (respects RATELIMIT_ENABLE env var)
             portal_id_for_rl = request.META.get('HTTP_X_PORTAL_ID', 'unknown')
             client_ip = get_safe_client_ip(request)
-            if self._rate_limited(portal_id_for_rl, client_ip):
+            if os.environ.get("RATELIMIT_ENABLE", "true").lower() != "false" and self._rate_limited(portal_id_for_rl, client_ip):
                 logger.warning(
                     f"🚨 [HMAC Auth] Rate limit exceeded for portal={portal_id_for_rl} ip={client_ip}"
                 )
@@ -530,6 +531,21 @@ class PortalServiceHMACMiddleware:
             is_valid, error_msg = self._validate_hmac_signature(request)
             
             if not is_valid:
+                # Allow session-authenticated staff users to access specific API paths
+                # that platform templates call via browser fetch() (no HMAC headers).
+                # Restricted to an explicit allowlist to prevent broad bypass.
+                STAFF_SESSION_ALLOWED_PREFIXES = [
+                    '/api/customers/',  # Ticket form: fetch customer services
+                ]
+                if (
+                    getattr(request, 'user', None)
+                    and getattr(request.user, 'is_authenticated', False)
+                    and getattr(request.user, 'is_staff', False)
+                    and any(request.path.startswith(p) for p in STAFF_SESSION_ALLOWED_PREFIXES)
+                ):
+                    logger.debug(f"🔓 [HMAC Auth] Allowing session-authenticated staff user {request.user.email} for {request.path}")
+                    return self.get_response(request)
+
                 logger.warning(f"🔥 [HMAC Auth] Authentication failed from {get_safe_client_ip(request)}: {error_msg}")
                 return HttpResponse(
                     json.dumps({'error': 'HMAC authentication failed'}),

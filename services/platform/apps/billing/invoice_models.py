@@ -15,33 +15,17 @@ from django.db.models import F
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from apps.billing.validators import (
+    MAX_ADDRESS_FIELD_LENGTH,
+    validate_financial_amount,
+    validate_financial_json,
+    validate_financial_text_field,
+)
+from apps.common.validators import log_security_event
+
 from .currency_models import Currency
 
 logger = logging.getLogger(__name__)
-
-# Import validation functions - these will be available after models.py loads
-# Simplified approach to avoid circular imports
-
-MAX_ADDRESS_FIELD_LENGTH = 500  # Constant
-
-
-def validate_financial_amount(amount_cents: int, field_name: str = "Amount") -> None:
-    """Placeholder - actual validation will be done via main models"""
-
-
-def validate_financial_json(data: Any, field_name: str = "Financial JSON field") -> None:
-    """Placeholder - actual validation will be done via main models"""
-
-
-def validate_financial_text_field(text: str, field_name: str, max_length: int | None = None) -> None:
-    """Placeholder - actual validation will be done via main models"""
-
-
-def log_security_event(
-    event_type: str, details: dict[str, Any], request_ip: str | None = None, user_email: str | None = None
-) -> None:
-    """Placeholder - actual logging will be done via main models"""
-    logger.info(f"🔒 [Billing Security] {event_type}: {details}")
 
 
 # ===============================================================================

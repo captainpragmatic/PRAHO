@@ -12,6 +12,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
+from apps.common.validators import log_security_event
 from apps.orders.models import Order
 
 from .currency_models import Currency
@@ -121,6 +122,19 @@ class PaymentService:
                     )
 
                 logger.info(f"✅ Created payment {payment.id} for order {order.order_number}")
+
+                log_security_event(
+                    "payment_intent_created",
+                    {
+                        "payment_id": str(payment.id),
+                        "order_id": str(order.id),
+                        "order_number": order.order_number,
+                        "amount_cents": amount_cents,
+                        "currency": currency,
+                        "gateway": gateway,
+                        "critical_financial_operation": True,
+                    },
+                )
 
             return result
 
@@ -235,6 +249,19 @@ class PaymentService:
 
                 logger.info(f"✅ Created payment {payment.id} for Portal order {order_id}")
 
+                log_security_event(
+                    "payment_intent_created_direct",
+                    {
+                        "payment_id": str(payment.id),
+                        "order_id": str(order_id),
+                        "amount_cents": amount_cents,
+                        "currency": currency,
+                        "gateway": gateway,
+                        "source": "portal_api",
+                        "critical_financial_operation": True,
+                    },
+                )
+
             return result
 
         except Exception as e:
@@ -284,10 +311,22 @@ class PaymentService:
                     new_status = status_mapping.get(result_status, 'pending')
 
                     if payment.status != new_status:
+                        old_status = payment.status
                         payment.status = new_status
                         payment.save(update_fields=['status'])
 
                         logger.info(f"💰 Updated payment {payment.id} status to {new_status}")
+
+                        log_security_event(
+                            "payment_status_changed",
+                            {
+                                "payment_id": str(payment.id),
+                                "old_status": old_status,
+                                "new_status": new_status,
+                                "gateway_intent_id": payment_intent_id,
+                                "critical_financial_operation": True,
+                            },
+                        )
 
                 except Payment.DoesNotExist:
                     logger.warning(f"⚠️ Payment not found for intent {payment_intent_id}")
@@ -356,6 +395,17 @@ class PaymentService:
                 subscription_id = result.get('subscription_id', 'unknown')
                 logger.info(f"✅ Created subscription {subscription_id} "
                            f"for customer {customer.name}")
+
+                log_security_event(
+                    "gateway_subscription_created",
+                    {
+                        "subscription_id": subscription_id,
+                        "customer_id": str(customer.id),
+                        "price_id": price_id,
+                        "gateway": gateway,
+                        "critical_financial_operation": True,
+                    },
+                )
 
             return result
 
@@ -433,6 +483,16 @@ class PaymentService:
 
                 logger.info(f"💰 Payment {payment.id} marked as succeeded")
 
+                log_security_event(
+                    "payment_succeeded",
+                    {
+                        "payment_id": str(payment.id),
+                        "amount_received": payment_intent.get('amount_received'),
+                        "gateway": "stripe",
+                        "critical_financial_operation": True,
+                    },
+                )
+
                 # TODO: Trigger order completion workflow
                 return True, f"Payment {payment.id} succeeded"
 
@@ -448,6 +508,16 @@ class PaymentService:
                 payment.save(update_fields=['status', 'meta'])
 
                 logger.warning(f"❌ Payment {payment.id} marked as failed: {failure_reason}")
+
+                log_security_event(
+                    "payment_failed",
+                    {
+                        "payment_id": str(payment.id),
+                        "failure_reason": failure_reason,
+                        "gateway": "stripe",
+                        "critical_financial_operation": True,
+                    },
+                )
 
                 # TODO: Trigger payment retry/dunning process
                 return True, f"Payment {payment.id} failed: {failure_reason}"
