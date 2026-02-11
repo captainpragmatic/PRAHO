@@ -258,9 +258,8 @@ test-e2e:
 	@echo "✅ Both services are running"
 	@echo "🎭 Running Playwright E2E tests..."
 	@if [ "$$RATELIMIT_ENABLE" != "false" ]; then \
-		echo "⚠️  WARNING: Rate limiting is active on the running services."; \
+		echo "⚠️  WARNING: Rate limiting (django-ratelimit + DRF throttling) may be active."; \
 		echo "   Start services with: RATELIMIT_ENABLE=false make dev"; \
-		echo "   Or use: make dev-e2e (starts services with rate limiting disabled)"; \
 	fi
 	@PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/python -m pytest tests/e2e/ -v
 	@echo "✅ E2E tests completed!"

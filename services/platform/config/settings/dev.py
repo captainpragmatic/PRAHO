@@ -98,9 +98,16 @@ if is_testing:
 
     # Disable rate limiting during tests to prevent 403 errors from race conditions
     RATELIMIT_ENABLE = False
+    # Disable DRF throttling in tests to prevent 429s from rapid API calls
+    REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = []
 else:
     # Ensure rate limiting is enabled in development (but allow override)
     RATELIMIT_ENABLE = os.environ.get("RATELIMIT_ENABLE", "true").lower() == "true"
+
+# When rate limiting is explicitly disabled (e.g. RATELIMIT_ENABLE=false make dev),
+# also disable DRF throttling so E2E tests don't hit 429s.
+if not RATELIMIT_ENABLE:
+    REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = []
 
 # ===============================================================================
 # DJANGO SILK PROFILER CONFIGURATION 📊
