@@ -10,7 +10,8 @@ Endpoints:
 import logging
 from typing import Any
 
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
 
@@ -25,6 +26,8 @@ logger = logging.getLogger(__name__)
 
 
 @api_view(['POST'])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
+@permission_classes([AllowAny])  # No DRF permissions - auth handled by @require_portal_service_authentication
 @require_portal_service_authentication
 def cookie_consent_api(request: Request, request_data: dict[str, Any]) -> Response:
     """
@@ -51,7 +54,7 @@ def cookie_consent_api(request: Request, request_data: dict[str, Any]) -> Respon
     )
 
     if result.is_err():
-        logger.error(f"🔥 [GDPR API] Cookie consent failed: {result.err()}")
+        logger.error(f"🔥 [GDPR API] Cookie consent failed: {result.error}")
         return Response({'success': False, 'error': 'Failed to record consent'}, status=500)
 
     consent = result.unwrap()
@@ -59,6 +62,8 @@ def cookie_consent_api(request: Request, request_data: dict[str, Any]) -> Respon
 
 
 @api_view(['POST'])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
+@permission_classes([AllowAny])  # No DRF permissions - auth handled by @require_portal_service_authentication
 @require_portal_service_authentication
 def consent_history_api(request: Request, request_data: dict[str, Any]) -> Response:
     """
@@ -85,6 +90,8 @@ def consent_history_api(request: Request, request_data: dict[str, Any]) -> Respo
 
 
 @api_view(['POST'])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
+@permission_classes([AllowAny])  # No DRF permissions - auth handled by @require_portal_service_authentication
 @require_portal_service_authentication
 def data_export_api(request: Request, request_data: dict[str, Any]) -> Response:
     """
@@ -112,7 +119,7 @@ def data_export_api(request: Request, request_data: dict[str, Any]) -> Response:
     result = GDPRExportService.create_data_export_request(user, request_ip=ip_address)
 
     if result.is_err():
-        logger.error(f"🔥 [GDPR API] Data export request failed: {result.err()}")
+        logger.error(f"🔥 [GDPR API] Data export request failed: {result.error}")
         return Response({'success': False, 'error': 'Failed to create export request'}, status=500)
 
     export_request = result.unwrap()
