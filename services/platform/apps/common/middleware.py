@@ -531,10 +531,18 @@ class PortalServiceHMACMiddleware:
             is_valid, error_msg = self._validate_hmac_signature(request)
             
             if not is_valid:
-                # Allow session-authenticated staff users to access API endpoints.
-                # Platform templates (e.g., ticket form) make fetch() calls to /api/
-                # using the browser session — these don't carry HMAC headers.
-                if getattr(request, 'user', None) and getattr(request.user, 'is_authenticated', False) and getattr(request.user, 'is_staff', False):
+                # Allow session-authenticated staff users to access specific API paths
+                # that platform templates call via browser fetch() (no HMAC headers).
+                # Restricted to an explicit allowlist to prevent broad bypass.
+                STAFF_SESSION_ALLOWED_PREFIXES = [
+                    '/api/customers/',  # Ticket form: fetch customer services
+                ]
+                if (
+                    getattr(request, 'user', None)
+                    and getattr(request.user, 'is_authenticated', False)
+                    and getattr(request.user, 'is_staff', False)
+                    and any(request.path.startswith(p) for p in STAFF_SESSION_ALLOWED_PREFIXES)
+                ):
                     logger.debug(f"🔓 [HMAC Auth] Allowing session-authenticated staff user {request.user.email} for {request.path}")
                     return self.get_response(request)
 

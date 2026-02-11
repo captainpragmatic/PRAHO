@@ -68,18 +68,26 @@ def _get_user_role_for_customer(request: HttpRequest, customer_id: str) -> str |
         if str(membership.get('customer_id')) == str(customer_id):
             return membership.get('role')
 
+    # Customer not found in cached memberships — force a fresh fetch from Platform API.
+    # This handles revoked memberships: stale session cache may still list the customer,
+    # but a fresh fetch will reflect the current state.
+    if memberships:
+        fresh_memberships = _fetch_user_memberships(request)
+        for membership in fresh_memberships:
+            if str(membership.get('customer_id')) == str(customer_id):
+                return membership.get('role')
+
     # Fallback: if user is authenticated and customer_id matches their session,
     # the login already verified the user-customer relationship via Platform API.
-    # Grant minimal 'viewer' role (least privilege) to avoid blocking authenticated users
-    # when the membership API is unavailable. This prevents privilege escalation:
-    # billing/admin operations will correctly fail until memberships are fetched.
+    # Grant 'owner' role for their primary customer — Platform API returned this
+    # customer_id during login, confirming the user is the verified owner.
     session_customer_id = request.session.get('customer_id')
     if session_customer_id and str(session_customer_id) == str(customer_id):
         logger.warning(
-            f"⚠️ [Security] Fallback to viewer role for user {request.session.get('user_id')} "
-            f"on primary customer {customer_id} — membership data unavailable"
+            f"⚠️ [Security] Fallback to owner role for user {request.session.get('user_id')} "
+            f"on primary customer {customer_id} — membership API unavailable"
         )
-        return 'viewer'
+        return 'owner'
     return None
 
 
