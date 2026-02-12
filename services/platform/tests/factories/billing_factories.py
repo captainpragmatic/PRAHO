@@ -67,7 +67,7 @@ def create_invoice_line(
     quantity: int | Decimal = 1,
     unit_price_cents: int = 1000,
     kind: str = "service",
-    tax_rate: Decimal = Decimal("0.1900"),
+    tax_rate: Decimal = Decimal("0.2100"),
 ) -> InvoiceLine:
     """Create an InvoiceLine with sensible defaults."""
     return InvoiceLine.objects.create(
@@ -133,7 +133,7 @@ def InvoiceLineFactory(**kwargs: object) -> InvoiceLine:  # noqa: N802
     kwargs.setdefault("quantity", Decimal("1"))
     kwargs.setdefault("unit_price_cents", 1000)
     kwargs.setdefault("kind", "service")
-    kwargs.setdefault("tax_rate", Decimal("0.1900"))
+    kwargs.setdefault("tax_rate", Decimal("0.2100"))
     kwargs["quantity"] = Decimal(str(kwargs["quantity"]))
     return InvoiceLine.objects.create(invoice=invoice, **kwargs)
 

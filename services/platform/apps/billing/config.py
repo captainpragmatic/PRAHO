@@ -85,7 +85,6 @@ def get_invoice_payment_terms_days() -> int:
 
 # Backward-compatible module-level (for code that reads it at import time)
 DEFAULT_PAYMENT_TERMS_DAYS = 14
-INVOICE_DUE_DATE_DAYS = DEFAULT_PAYMENT_TERMS_DAYS
 
 
 # ===============================================================================

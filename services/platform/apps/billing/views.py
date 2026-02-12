@@ -42,6 +42,7 @@ from django.views.decorators.http import require_http_methods, require_POST
 from apps.billing.config import get_invoice_payment_terms_days
 from apps.common.tax_service import TaxService
 from apps.billing.pdf_generators import RomanianInvoicePDFGenerator, RomanianProformaPDFGenerator
+from apps.common.constants import DEFAULT_PAGE_SIZE
 from apps.common.decorators import billing_staff_required, can_edit_proforma, rate_limit, staff_required
 from apps.common.mixins import get_search_context
 from apps.common.utils import json_error, json_success
@@ -418,7 +419,7 @@ def proforma_list(request: HttpRequest) -> HttpResponse:
         proforma_documents.sort(key=lambda x: x["created_at"], reverse=True)  # type: ignore[arg-type,return-value]
 
         # ⚡ PERFORMANCE: Implement pagination for 25 items per page (Romanian business scale)
-        paginator = Paginator(proforma_documents, 25)
+        paginator = Paginator(proforma_documents, DEFAULT_PAGE_SIZE)
         page_number = request.GET.get("page")
         page_obj = paginator.get_page(page_number)
 
@@ -1342,7 +1343,7 @@ def payment_list(request: HttpRequest) -> HttpResponse:
         payments = payments.filter(invoice_id=invoice_id)
 
     # Pagination
-    paginator = Paginator(payments, 25)
+    paginator = Paginator(payments, DEFAULT_PAGE_SIZE)
     page_number = request.GET.get("page")
     payments_page = paginator.get_page(page_number)
 
