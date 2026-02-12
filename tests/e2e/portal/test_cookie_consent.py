@@ -11,8 +11,6 @@ Tests GDPR cookie consent compliance:
 - Accessible controls (aria-labels, keyboard)
 """
 
-import json
-
 import pytest
 from playwright.sync_api import Page, expect
 
@@ -215,25 +213,20 @@ def test_server_recording(page: Page) -> None:
     banner = page.locator('#cookie-consent-banner')
     expect(banner).to_be_visible(timeout=5000)
 
-    # Intercept the cookie-consent API response
-    api_responses: list[dict] = []
+    # Use expect_response context manager (deterministic, blocks until matched)
+    with page.expect_response(
+        lambda r: 'cookie-consent' in r.url and r.status == 200,
+        timeout=5000,
+    ) as response_info:
+        page.locator('#cookie-consent-banner button', has_text='Accept All').click()
 
-    def handle_response(response):
-        if 'cookie-consent' in response.url and response.status == 200:
-            try:
-                api_responses.append(response.json())
-            except Exception:
-                pass
-
-    page.on('response', handle_response)
-
-    page.locator('#cookie-consent-banner button', has_text='Accept All').click()
+    response = response_info.value
     expect(banner).to_be_hidden(timeout=3000)
 
     # Verify the Portal proxy endpoint returned success (which means Platform API succeeded)
-    assert len(api_responses) >= 1, "Expected at least one cookie-consent API response"
-    assert api_responses[0].get('success') is True, (
-        f"Expected success=true from cookie-consent API, got: {api_responses[0]}"
+    data = response.json()
+    assert data.get('success') is True, (
+        f"Expected success=true from cookie-consent API, got: {data}"
     )
 
 

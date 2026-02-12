@@ -57,7 +57,7 @@ def validate_hmac_authenticated_request(request: HttpRequest) -> tuple[dict[str,
     """
     
     # Check HMAC middleware authentication
-    if not hasattr(request, '_portal_authenticated'):
+    if not getattr(request, '_portal_authenticated', False):
         logger.warning("🔥 [API Security] Request not HMAC authenticated")
         return None, _uniform_error_response("Authentication required", 401)
     
@@ -310,7 +310,7 @@ def validate_portal_service_request(request: HttpRequest) -> tuple[dict[str, Any
     Returns:
         (request_data_dict, error_response)
     """
-    if not hasattr(request, '_portal_authenticated'):
+    if not getattr(request, '_portal_authenticated', False):
         logger.warning("🔥 [API Security] Request not HMAC authenticated (service-level)")
         return None, _uniform_error_response("Authentication required", 401)
 
