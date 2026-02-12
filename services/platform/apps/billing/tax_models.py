@@ -143,12 +143,26 @@ class TaxRule(models.Model):
             rule = (
                 cls.objects.filter(country_code=country_code.upper(), tax_type=tax_type, valid_from__lte=date)
                 .filter(models.Q(valid_to__isnull=True) | models.Q(valid_to__gte=date))
+                .order_by("-valid_from", "-created_at")
                 .first()
             )
 
             return rule.rate if rule else Decimal("0.00")
         except cls.DoesNotExist:
             return Decimal("0.00")
+
+
+def _invalidate_tax_cache(sender, instance, **kwargs):
+    """Invalidate TaxService cache when TaxRule is saved or deleted."""
+    try:
+        from apps.common.tax_service import TaxService
+        TaxService.invalidate_cache(instance.country_code)
+    except Exception:
+        pass  # Cache invalidation is best-effort
+
+
+models.signals.post_save.connect(_invalidate_tax_cache, sender=TaxRule)
+models.signals.post_delete.connect(_invalidate_tax_cache, sender=TaxRule)
 
 
 class VATValidation(models.Model):

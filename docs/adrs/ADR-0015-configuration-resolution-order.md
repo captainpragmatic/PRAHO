@@ -119,8 +119,51 @@ When introducing or changing a config value:
 
 ADR-0005 remains valid for immutable cross-app constants. ADR-0015 adds a complementary rule for dynamic/regulatory settings that require runtime and temporal behavior.
 
+## Design Decisions Log
+
+### 2026-02-12: is_vat_payer Semantics
+
+**Decision:** `CustomerTaxProfile.is_vat_payer=False` means "cannot use B2B reverse charge, treated as B2C consumer" — NOT full VAT exemption (0%).
+
+**Context:** A Romanian non-plătitor de TVA (entity below the VAT registration threshold) still gets charged VAT on purchases; they just cannot reclaim input VAT or participate in EU B2B reverse charge. Setting `is_vat_payer=False` sets `is_business=False` and falls through to standard country-based B2C logic.
+
+**Alternative rejected:** Full 0% VAT exemption on `is_vat_payer=False`. This would have been incorrect under Romanian tax law — only specific exports and certain legal exemptions qualify for 0%.
+
+### 2026-02-12: Per-Customer Rate Override (CUSTOM_RATE_OVERRIDE Scenario)
+
+**Decision:** Added a 6th VAT scenario `CUSTOM_RATE_OVERRIDE` for explicit per-customer rate overrides via `CustomerTaxProfile.vat_rate`.
+
+**Rationale:** When a customer has a negotiated special rate (e.g., 15% via a government incentive or contractual agreement), the system should not silently reclassify it as ROMANIA_B2B or ROMANIA_B2C. A dedicated scenario preserves audit clarity.
+
+### 2026-02-12: Non-EU Country VAT Treatment
+
+**Decision:** Valid 2-letter ISO country codes not in the EU country set get 0% VAT (export treatment). Only invalid/empty country codes default to Romanian VAT (conservative fallback).
+
+**Context:** Previously, `TaxService.get_vat_rate("US")` returned 21% (Romanian default) because the US wasn't in `DEFAULT_VAT_RATES`. This over-taxed legitimate non-EU exports. The fix distinguishes between "unknown/invalid country" (safety fallback to Romanian rate) and "known non-EU country" (0% export).
+
+### 2026-02-12: Cache Invalidation Strategy
+
+**Decision:** `TaxRule` model uses `post_save`/`post_delete` signals to automatically invalidate the `TaxService` cache for the affected country.
+
+**Rationale:** Manual cache invalidation is error-prone. When an admin updates a TaxRule via Django admin, the cache must be invalidated automatically. The signal handler calls `TaxService.invalidate_cache(country_code)`.
+
+**Note:** `invalidate_cache(None)` (clear all) iterates known country codes from `DEFAULT_VAT_RATES` rather than using `cache.keys()` with wildcards, because Django's `DatabaseCache` backend does not support `keys()`.
+
+### 2026-02-12: Data Migration for Custom Manager Models
+
+**Decision:** Data migrations for models using `SoftDeleteManager` (which lacks `use_in_migrations=True`) must use raw SQL instead of the ORM.
+
+**Context:** Django's historical model state does not include custom managers that don't declare `use_in_migrations = True`. Accessing `Model.objects` in a `RunPython` migration fails with `AttributeError`. Raw SQL is safe for simple UPDATE statements and avoids modifying the base model class.
+
+### 2026-02-12: TypedDict with .get() Safety
+
+**Decision:** Keep `CustomerVATInfo` as `TypedDict(total=False)` with `.get()` access patterns rather than converting to `@dataclass`.
+
+**Context:** `TypedDict(total=False)` means all fields are optional. Since callers construct these dicts inline (not via constructors), `.get()` with defaults is the idiomatic safety pattern. Converting to `@dataclass` would have required changing all call sites for minimal benefit.
+
 ## References
 
 1. [Django Constance](https://django-constance.readthedocs.io/)
 2. [The Twelve-Factor App - Config](https://12factor.net/config)
 3. [Git Config Documentation](https://git-scm.com/docs/git-config)
+4. Romania Emergency Ordinance 156/2024 — VAT rate change 19% → 21% (effective Aug 1, 2025)

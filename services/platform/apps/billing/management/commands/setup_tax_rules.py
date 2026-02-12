@@ -107,8 +107,42 @@ class Command(BaseCommand):
             self.stdout.write(f"  ✅ Created: {rule}")
             return 1, 0
 
+    def _remediate_legacy_ro_rules(self) -> int:
+        """Close open-ended legacy RO VAT rules that would conflict with the canonical pair.
+
+        Only targets rules that are:
+        - RO / vat
+        - Open-ended (valid_to IS NULL) — meaning they claim to be "current"
+        - NOT the canonical current rule (valid_from=2025-08-01)
+        - valid_from BEFORE 2025-08-01 — so planned future rules are never touched
+
+        These are closed by setting valid_to=2025-07-31 (the day before the new rate).
+        Manually-entered historical rules with explicit valid_to are left untouched.
+        Future rules (valid_from >= 2025-08-01) are left untouched.
+        """
+        canonical_current_start = date(2025, 8, 1)
+        cutoff = date(2025, 7, 31)
+
+        stale_open_rules = TaxRule.objects.filter(
+            country_code="RO",
+            tax_type="vat",
+            valid_to__isnull=True,
+            valid_from__lt=canonical_current_start,  # Only legacy rows, never future
+        ).exclude(valid_from=canonical_current_start)
+
+        count = stale_open_rules.update(valid_to=cutoff)
+        if count > 0:
+            self.stdout.write(
+                f"  🧹 Closed {count} legacy open-ended RO VAT rule(s) "
+                f"(set valid_to={cutoff})"
+            )
+        return count
+
     def _create_romanian_rules(self, today: date, force: bool) -> tuple[int, int]:
         """Create Romanian tax rules."""
+        # First, remediate any legacy rows from prior command runs
+        self._remediate_legacy_ro_rules()
+
         created_count = 0
         updated_count = 0
 

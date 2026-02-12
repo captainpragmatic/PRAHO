@@ -204,9 +204,32 @@ class TaxServiceCascadeTests(TestCase):
         TaxService.invalidate_cache("RO")
         self.assertIsNone(cache.get("tax_rate:RO"))
 
-    def test_unknown_country_defaults_to_romanian(self) -> None:
-        """Unknown country codes conservatively default to Romanian rate."""
+    def test_seeded_non_eu_country_gets_zero_vat(self) -> None:
+        """Non-EU country with TaxRule(rate=0) gets 0% VAT (export)."""
+        # Seed a non-EU rule (as setup_tax_rules would)
+        TaxRule.objects.create(
+            country_code="US",
+            tax_type="vat",
+            rate=Decimal("0.0000"),
+            valid_from=date(2020, 1, 1),
+            is_eu_member=False,
+        )
+        rate = TaxService.get_vat_rate("US")
+        self.assertEqual(rate, Decimal("0.00"))
+
+    def test_unknown_country_fails_safe_to_romanian(self) -> None:
+        """Unknown 2-letter code with no TaxRule fails safe to Romanian VAT.
+
+        This prevents tax leakage from typos (e.g. 'R0', 'ZZ') silently
+        getting 0%. Countries that should get 0% must be seeded via
+        setup_tax_rules.
+        """
         rate = TaxService.get_vat_rate("ZZ")
+        self.assertEqual(rate, Decimal("21.0"))
+
+    def test_empty_code_defaults_to_romanian(self) -> None:
+        """Empty/invalid country codes conservatively default to Romanian rate."""
+        rate = TaxService.get_vat_rate("")
         self.assertEqual(rate, Decimal("21.0"))
 
     def test_eu_country_rates_unchanged(self) -> None:
@@ -548,7 +571,15 @@ class OrderVATCalculatorTests(TestCase):
         self.assertEqual(result.vat_rate, Decimal("19.0"))
 
     def test_non_eu_zero_vat(self) -> None:
-        """Non-EU customer: 0% VAT (export)."""
+        """Non-EU customer with seeded TaxRule: 0% VAT (export)."""
+        # Seed US as non-EU 0% (as setup_tax_rules would)
+        TaxRule.objects.create(
+            country_code="US",
+            tax_type="vat",
+            rate=Decimal("0.0000"),
+            valid_from=date(2020, 1, 1),
+            is_eu_member=False,
+        )
         info: CustomerVATInfo = {"country": "US", "is_business": False}
         result = OrderVATCalculator.calculate_vat(10000, info)
 
@@ -556,8 +587,18 @@ class OrderVATCalculatorTests(TestCase):
         self.assertEqual(result.vat_rate, Decimal("0.0"))
         self.assertEqual(result.vat_cents, 0)
 
-    def test_unknown_country_defaults_to_romanian_vat(self) -> None:
-        """Unknown/invalid country codes default to Romanian rate (conservative)."""
+    def test_unknown_country_fails_safe_to_romanian_vat(self) -> None:
+        """Unknown 2-letter code with no TaxRule fails safe to Romanian VAT."""
+        info: CustomerVATInfo = {"country": "ZZ", "is_business": False}
+        result = OrderVATCalculator.calculate_vat(10000, info)
+
+        # Fail-safe: unknown country → Romanian VAT (not 0%)
+        self.assertEqual(result.scenario, VATScenario.ROMANIA_B2C)
+        self.assertEqual(result.vat_rate, Decimal("21.0"))
+        self.assertEqual(result.vat_cents, 2100)
+
+    def test_empty_country_defaults_to_romanian_vat(self) -> None:
+        """Empty/invalid country codes default to Romanian rate (conservative)."""
         info: CustomerVATInfo = {"country": "", "is_business": False}
         result = OrderVATCalculator.calculate_vat(10000, info)
 
@@ -644,14 +685,14 @@ class HardcodedVATGuardTests(TestCase):
     - setup_tax_rules.py (seed data command)
     """
 
-    # Patterns that indicate a hardcoded Romanian VAT rate
+    # Patterns that indicate a hardcoded Romanian VAT rate.
+    # These are intentionally narrow to minimize false positives:
+    # - Only match Decimal("0.19...") and Decimal("19.00") (the formats used in code)
+    # - Don't match bare floats/ints (too many false positives with version numbers, etc.)
     SUSPECT_PATTERNS = [
-        # Decimal format: "0.19", "0.1900", "19.00"
+        # Decimal format: Decimal("0.19"), Decimal("0.1900"), Decimal("19.00")
         r'Decimal\(\s*["\']0\.19(?:00)?["\']\s*\)',
         r'Decimal\(\s*["\']19\.00["\']\s*\)',
-        # Float/int format: 0.19, 19, 19.0
-        r'(?<!\d)0\.19(?:00)?(?!\d)',
-        r'(?<![.\d])19\.0(?:0)?(?![.\d])',
     ]
 
     # Directories/files that are allowed to have hardcoded rates
@@ -697,8 +738,13 @@ class HardcodedVATGuardTests(TestCase):
 
                 for pattern in self.SUSPECT_PATTERNS:
                     if re.search(pattern, line):
-                        # Exclude EU country rates (DE=19%, CY=19%)
-                        if "'DE'" in line or '"DE"' in line or "'CY'" in line or '"CY"' in line:
+                        # Exclude lines referencing EU country codes that have 19% VAT
+                        # (Germany DE, Cyprus CY — their 19% is correct, not a stale RO rate)
+                        eu_19_countries = {"DE", "CY"}
+                        if any(
+                            f"'{cc}'" in line or f'"{cc}"' in line
+                            for cc in eu_19_countries
+                        ):
                             continue
                         violations.append(f"{rel_path}:{line_num}: {stripped}")
 
@@ -828,8 +874,13 @@ class PerCustomerVATOverrideTests(TestCase):
     def setUp(self) -> None:
         cache.clear()
 
-    def test_non_vat_payer_gets_zero_vat(self) -> None:
-        """Customer with is_vat_payer=False gets 0% VAT."""
+    def test_non_vat_payer_treated_as_b2c(self) -> None:
+        """Customer with is_vat_payer=False is treated as B2C consumer.
+
+        A non-plătitor de TVA still gets charged VAT — they just can't
+        participate in EU B2B reverse charge. So a Romanian non-VAT-payer
+        gets standard 21% (not 0%).
+        """
         info: CustomerVATInfo = {
             "country": "RO",
             "is_business": True,
@@ -838,9 +889,26 @@ class PerCustomerVATOverrideTests(TestCase):
         }
         result = OrderVATCalculator.calculate_vat(10000, info)
 
-        self.assertEqual(result.vat_rate, Decimal("0.0"))
-        self.assertEqual(result.vat_cents, 0)
-        self.assertEqual(result.total_cents, 10000)
+        # Treated as B2C — standard Romanian rate, NOT 0%
+        self.assertEqual(result.scenario, VATScenario.ROMANIA_B2C)
+        self.assertEqual(result.vat_rate, Decimal("21.0"))
+        self.assertEqual(result.vat_cents, 2100)
+        self.assertEqual(result.total_cents, 12100)
+
+    def test_non_vat_payer_eu_no_reverse_charge(self) -> None:
+        """Non-VAT-payer EU business can't use reverse charge → destination B2C rate."""
+        info: CustomerVATInfo = {
+            "country": "DE",
+            "is_business": True,
+            "vat_number": "DE123456789",
+            "is_vat_payer": False,
+        }
+        result = OrderVATCalculator.calculate_vat(10000, info)
+
+        # Treated as B2C — gets German consumer rate, NOT reverse charge 0%
+        self.assertEqual(result.scenario, VATScenario.EU_B2C)
+        self.assertEqual(result.vat_rate, Decimal("19.0"))  # DE rate
+        self.assertEqual(result.vat_cents, 1900)
 
     def test_custom_vat_rate_override(self) -> None:
         """Customer with explicit vat_rate uses that rate."""
@@ -851,6 +919,7 @@ class PerCustomerVATOverrideTests(TestCase):
         }
         result = OrderVATCalculator.calculate_vat(10000, info)
 
+        self.assertEqual(result.scenario, VATScenario.CUSTOM_RATE_OVERRIDE)
         self.assertEqual(result.vat_rate, Decimal("15.0"))
         self.assertEqual(result.vat_cents, 1500)
         self.assertEqual(result.total_cents, 11500)
@@ -913,10 +982,374 @@ class PerCustomerVATOverrideTests(TestCase):
         self.assertEqual(result["vat_cents"], 2100)
 
     def test_calculate_vat_non_eu_business_zero(self) -> None:
-        """TaxService.calculate_vat: non-EU business gets standard rate (not reverse charge)."""
+        """TaxService.calculate_vat: non-EU business gets 0% VAT (export)."""
+        # Non-EU countries must be seeded in TaxRule to get 0% (fail-safe is Romanian VAT)
+        TaxRule.objects.create(
+            country_code="US", tax_type="vat", rate=Decimal("0.00"),
+            valid_from=date(2020, 1, 1), is_eu_member=False,
+        )
+        TaxService.invalidate_cache("US")
+
         result = TaxService.calculate_vat(
             10000, "US", is_business=True, vat_number="US12345"
         )
-        # US is not EU, so reverse charge doesn't apply.
-        # TaxService falls back to US rate (unknown country → Romanian default 21%)
-        self.assertEqual(result["vat_cents"], 2100)
+        # US is non-EU with seeded 0% rule → 0% VAT (export)
+        self.assertEqual(result["vat_cents"], 0)
+        self.assertEqual(result["total_cents"], 10000)
+
+
+# ===============================================================================
+# SECTION 11: CROSS-CALCULATOR CONSISTENCY
+# ===============================================================================
+
+
+class CrossCalculatorConsistencyTests(TestCase):
+    """Verify TaxService and OrderVATCalculator agree on VAT amounts.
+
+    Both paths should produce identical results for the same inputs.
+    This catches drift between the two calculation codepaths.
+    """
+
+    def setUp(self) -> None:
+        cache.clear()
+
+    def test_romanian_b2c_consistency(self) -> None:
+        """TaxService and OrderVATCalculator agree on Romanian B2C."""
+        amount = 10000
+        ts_result = TaxService.calculate_vat(amount, "RO")
+        ov_result = OrderVATCalculator.calculate_vat(
+            amount, {"country": "RO", "is_business": False}
+        )
+        self.assertEqual(ts_result["vat_cents"], ov_result.vat_cents)
+        self.assertEqual(ts_result["total_cents"], ov_result.total_cents)
+
+    def test_eu_b2b_reverse_charge_consistency(self) -> None:
+        """Both calculators return 0% for EU B2B reverse charge."""
+        amount = 10000
+        ts_result = TaxService.calculate_vat(
+            amount, "DE", is_business=True, vat_number="DE123456789"
+        )
+        ov_result = OrderVATCalculator.calculate_vat(
+            amount, {
+                "country": "DE",
+                "is_business": True,
+                "vat_number": "DE123456789",
+            }
+        )
+        self.assertEqual(ts_result["vat_cents"], 0)
+        self.assertEqual(ov_result.vat_cents, 0)
+
+
+# ===============================================================================
+# SECTION 12: CACHE INVALIDATION SIGNAL
+# ===============================================================================
+
+
+class TaxRuleCacheSignalTests(TestCase):
+    """Test that TaxRule save/delete signals invalidate TaxService cache."""
+
+    def setUp(self) -> None:
+        cache.clear()
+
+    def test_saving_tax_rule_invalidates_cache(self) -> None:
+        """Creating a TaxRule clears the cached rate for that country."""
+        # Populate cache
+        TaxService.get_vat_rate("RO")
+        self.assertIsNotNone(cache.get("tax_rate:RO"))
+
+        # Create a new TaxRule — should invalidate cache
+        TaxRule.objects.create(
+            country_code="RO",
+            tax_type="vat",
+            rate=Decimal("0.2500"),
+            valid_from=date(2020, 1, 1),
+            is_eu_member=True,
+        )
+
+        # Cache should be cleared
+        self.assertIsNone(cache.get("tax_rate:RO"))
+
+    def test_deleting_tax_rule_invalidates_cache(self) -> None:
+        """Deleting a TaxRule clears the cached rate."""
+        rule = TaxRule.objects.create(
+            country_code="DE",
+            tax_type="vat",
+            rate=Decimal("0.1900"),
+            valid_from=date(2020, 1, 1),
+            is_eu_member=True,
+        )
+        # Populate cache
+        TaxService.get_vat_rate("DE")
+        self.assertIsNotNone(cache.get("tax_rate:DE"))
+
+        # Delete — should invalidate
+        rule.delete()
+        self.assertIsNone(cache.get("tax_rate:DE"))
+
+
+# ===============================================================================
+# SECTION 13: REGRESSION TESTS FOR REVIEW FINDINGS
+# ===============================================================================
+
+
+class AuditMetadataConsistencyTests(TestCase):
+    """Verify audit/result metadata is consistent with the chosen VAT scenario.
+
+    Regression for: is_vat_payer=False downgrades to B2C, but audit data
+    could show is_business=True contradicting the ROMANIA_B2C scenario.
+    """
+
+    def setUp(self) -> None:
+        cache.clear()
+
+    def test_non_vat_payer_audit_shows_b2c(self) -> None:
+        """When is_vat_payer=False downgrades to B2C, audit must show is_business=False."""
+        info: CustomerVATInfo = {
+            "country": "RO",
+            "is_business": True,  # Input says business
+            "vat_number": "RO12345678",
+            "is_vat_payer": False,  # But not VAT-registered → downgrade to B2C
+            "customer_id": "CUST-001",
+        }
+        result = OrderVATCalculator.calculate_vat(10000, info)
+
+        # Scenario must be B2C
+        self.assertEqual(result.scenario, VATScenario.ROMANIA_B2C)
+        # Result object must reflect the effective (downgraded) state
+        self.assertFalse(result.is_business)
+        self.assertIsNone(result.vat_number)
+        # Audit data must also be consistent
+        self.assertFalse(result.audit_data["is_business"])
+        self.assertIsNone(result.audit_data["vat_number"])
+
+    def test_eu_non_vat_payer_no_reverse_charge_in_audit(self) -> None:
+        """EU business with is_vat_payer=False: audit must show B2C, not reverse charge."""
+        info: CustomerVATInfo = {
+            "country": "DE",
+            "is_business": True,
+            "vat_number": "DE123456789",
+            "is_vat_payer": False,
+        }
+        result = OrderVATCalculator.calculate_vat(10000, info)
+
+        self.assertEqual(result.scenario, VATScenario.EU_B2C)
+        self.assertFalse(result.is_business)
+        self.assertIsNone(result.vat_number)
+        # Must pay German B2C rate, not 0% reverse charge
+        self.assertEqual(result.vat_rate, Decimal("19.0"))
+
+    def test_custom_rate_override_preserves_business_in_audit(self) -> None:
+        """Custom rate override keeps original is_business in audit data."""
+        info: CustomerVATInfo = {
+            "country": "RO",
+            "is_business": True,
+            "vat_number": "RO12345678",
+            "custom_vat_rate": Decimal("15.0"),
+        }
+        result = OrderVATCalculator.calculate_vat(10000, info)
+
+        self.assertEqual(result.scenario, VATScenario.CUSTOM_RATE_OVERRIDE)
+        self.assertTrue(result.is_business)
+        self.assertEqual(result.audit_data["is_business"], True)
+
+
+class NullCountrySafetyTests(TestCase):
+    """Verify that None/missing country values don't crash the VAT calculation.
+
+    Regression for: country=None → .upper() raises AttributeError.
+    """
+
+    def setUp(self) -> None:
+        cache.clear()
+
+    def test_none_country_in_customer_info(self) -> None:
+        """Explicitly None country must not crash."""
+        info: CustomerVATInfo = {
+            "country": None,
+            "is_business": False,
+        }
+        result = OrderVATCalculator.calculate_vat(10000, info)
+
+        # Should fall back to Romanian rate
+        self.assertEqual(result.country_code, "RO")
+        self.assertEqual(result.vat_rate, Decimal("21.0"))
+
+    def test_missing_country_key(self) -> None:
+        """Missing country key must not crash."""
+        info: CustomerVATInfo = {
+            "is_business": False,
+        }
+        result = OrderVATCalculator.calculate_vat(10000, info)
+
+        self.assertEqual(result.country_code, "RO")
+        self.assertEqual(result.vat_rate, Decimal("21.0"))
+
+    def test_empty_string_country(self) -> None:
+        """Empty string country defaults to Romanian rate."""
+        info: CustomerVATInfo = {
+            "country": "",
+            "is_business": False,
+        }
+        result = OrderVATCalculator.calculate_vat(10000, info)
+
+        self.assertEqual(result.country_code, "RO")
+        self.assertEqual(result.vat_rate, Decimal("21.0"))
+
+
+class BusinessDetectionConsistencyTests(TestCase):
+    """Verify that is_business detection is consistent across calculation paths.
+
+    Regression for: calculate_order_totals used company_name only, while
+    create_order item path used company_name OR vat_number.
+    Both paths must agree.
+    """
+
+    def setUp(self) -> None:
+        cache.clear()
+
+    def test_vat_number_alone_implies_business(self) -> None:
+        """Customer with vat_number but no company_name is still a business."""
+        info: CustomerVATInfo = {
+            "country": "DE",
+            "is_business": True,  # Set by: bool(company_name) or bool(vat_number)
+            "vat_number": "DE123456789",
+        }
+        result = OrderVATCalculator.calculate_vat(10000, info)
+
+        # Must get reverse charge, not B2C rate
+        self.assertEqual(result.scenario, VATScenario.EU_B2B_REVERSE_CHARGE)
+        self.assertEqual(result.vat_cents, 0)
+
+
+# ===============================================================================
+# SECTION 16: SETUP_TAX_RULES LEGACY REMEDIATION
+# ===============================================================================
+
+
+class RemediateLegacyRoRulesTests(TestCase):
+    """Direct tests for _remediate_legacy_ro_rules() in setup_tax_rules command.
+
+    Regression guard: the method must close *only* open-ended legacy RO VAT
+    rules (valid_from < 2025-08-01, valid_to IS NULL) without touching:
+    - Rules with explicit valid_to (already bounded)
+    - Future rules (valid_from >= 2025-08-01)
+    - The canonical current rule (valid_from = 2025-08-01)
+    - Non-RO rules
+    """
+
+    def setUp(self) -> None:
+        from apps.billing.management.commands.setup_tax_rules import Command
+        self.command = Command()
+
+    def test_closes_open_ended_legacy_rule(self) -> None:
+        """Open-ended legacy RO rule gets valid_to=2025-07-31."""
+        legacy = TaxRule.objects.create(
+            country_code="RO", tax_type="vat", rate=Decimal("0.19"),
+            valid_from=date(2020, 1, 1), valid_to=None,
+        )
+
+        closed = self.command._remediate_legacy_ro_rules()
+
+        legacy.refresh_from_db()
+        self.assertEqual(closed, 1)
+        self.assertEqual(legacy.valid_to, date(2025, 7, 31))
+
+    def test_leaves_already_bounded_rule_untouched(self) -> None:
+        """Rule with explicit valid_to is never modified."""
+        bounded = TaxRule.objects.create(
+            country_code="RO", tax_type="vat", rate=Decimal("0.19"),
+            valid_from=date(2020, 1, 1), valid_to=date(2024, 12, 31),
+        )
+
+        closed = self.command._remediate_legacy_ro_rules()
+
+        bounded.refresh_from_db()
+        self.assertEqual(closed, 0)
+        self.assertEqual(bounded.valid_to, date(2024, 12, 31))
+
+    def test_leaves_future_rule_untouched(self) -> None:
+        """Future RO rule (valid_from >= 2025-08-01) is never touched."""
+        future = TaxRule.objects.create(
+            country_code="RO", tax_type="vat", rate=Decimal("0.25"),
+            valid_from=date(2027, 1, 1), valid_to=None,
+        )
+
+        closed = self.command._remediate_legacy_ro_rules()
+
+        future.refresh_from_db()
+        self.assertEqual(closed, 0)
+        self.assertIsNone(future.valid_to)
+
+    def test_leaves_canonical_current_rule_untouched(self) -> None:
+        """The canonical 2025-08-01 rule is never modified."""
+        canonical = TaxRule.objects.create(
+            country_code="RO", tax_type="vat", rate=Decimal("0.21"),
+            valid_from=date(2025, 8, 1), valid_to=None,
+        )
+
+        closed = self.command._remediate_legacy_ro_rules()
+
+        canonical.refresh_from_db()
+        self.assertEqual(closed, 0)
+        self.assertIsNone(canonical.valid_to)
+
+    def test_leaves_non_ro_rules_untouched(self) -> None:
+        """Open-ended rules for other countries are never touched."""
+        de_rule = TaxRule.objects.create(
+            country_code="DE", tax_type="vat", rate=Decimal("0.19"),
+            valid_from=date(2020, 1, 1), valid_to=None,
+        )
+
+        closed = self.command._remediate_legacy_ro_rules()
+
+        de_rule.refresh_from_db()
+        self.assertEqual(closed, 0)
+        self.assertIsNone(de_rule.valid_to)
+
+    def test_mixed_scenario_only_targets_correct_rows(self) -> None:
+        """With a mix of legacy, bounded, future, and non-RO rules,
+        only the open-ended legacy RO rule is closed."""
+        # Should be closed
+        legacy_open = TaxRule.objects.create(
+            country_code="RO", tax_type="vat", rate=Decimal("0.19"),
+            valid_from=date(2023, 6, 1), valid_to=None,
+        )
+        # Should NOT be closed (already bounded)
+        legacy_bounded = TaxRule.objects.create(
+            country_code="RO", tax_type="vat", rate=Decimal("0.19"),
+            valid_from=date(2020, 1, 1), valid_to=date(2023, 5, 31),
+        )
+        # Should NOT be closed (canonical current)
+        canonical = TaxRule.objects.create(
+            country_code="RO", tax_type="vat", rate=Decimal("0.21"),
+            valid_from=date(2025, 8, 1), valid_to=None,
+        )
+        # Should NOT be closed (future)
+        future = TaxRule.objects.create(
+            country_code="RO", tax_type="vat", rate=Decimal("0.25"),
+            valid_from=date(2028, 1, 1), valid_to=None,
+        )
+        # Should NOT be closed (non-RO)
+        de_rule = TaxRule.objects.create(
+            country_code="DE", tax_type="vat", rate=Decimal("0.19"),
+            valid_from=date(2020, 1, 1), valid_to=None,
+        )
+
+        closed = self.command._remediate_legacy_ro_rules()
+
+        self.assertEqual(closed, 1)
+
+        legacy_open.refresh_from_db()
+        self.assertEqual(legacy_open.valid_to, date(2025, 7, 31))
+
+        legacy_bounded.refresh_from_db()
+        self.assertEqual(legacy_bounded.valid_to, date(2023, 5, 31))
+
+        canonical.refresh_from_db()
+        self.assertIsNone(canonical.valid_to)
+
+        future.refresh_from_db()
+        self.assertIsNone(future.valid_to)
+
+        de_rule.refresh_from_db()
+        self.assertIsNone(de_rule.valid_to)
