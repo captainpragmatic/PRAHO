@@ -39,6 +39,7 @@ from django.utils.translation import gettext_lazy as _
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods, require_POST
 
+from apps.billing.config import get_invoice_payment_terms_days
 from apps.billing.pdf_generators import RomanianInvoicePDFGenerator, RomanianProformaPDFGenerator
 from apps.common.decorators import billing_staff_required, can_edit_proforma, rate_limit, staff_required
 from apps.common.mixins import get_search_context
@@ -782,7 +783,7 @@ def proforma_to_invoice(request: HttpRequest, pk: int) -> HttpResponse:
             tax_cents=proforma.tax_cents,
             total_cents=proforma.total_cents,
             issued_at=timezone.now(),
-            due_at=timezone.now() + timedelta(days=30),
+            due_at=timezone.now() + timedelta(days=get_invoice_payment_terms_days()),
             # Copy billing address from proforma
             bill_to_name=proforma.bill_to_name,
             bill_to_tax_id=proforma.bill_to_tax_id,
@@ -865,7 +866,7 @@ def process_proforma_payment(request: HttpRequest, pk: int) -> HttpResponse:
                 total_cents=proforma.total_cents,
                 tax_cents=proforma.tax_cents,
                 subtotal_cents=proforma.subtotal_cents,
-                due_at=proforma.valid_until if proforma.valid_until else timezone.now() + timezone.timedelta(days=30),
+                due_at=proforma.valid_until if proforma.valid_until else timezone.now() + timezone.timedelta(days=get_invoice_payment_terms_days()),
                 issued_at=timezone.now(),
                 converted_from_proforma=proforma,
             )
@@ -973,9 +974,13 @@ def _process_valid_until_date(request_data: dict[str, Any] | None) -> tuple[date
     """Process and validate the valid_until date from form data."""
     validation_errors: list[str] = []
 
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    validity_days = SettingsService.get_integer_setting("billing.proforma_validity_days", 30)
+
     # Handle None case properly
     if request_data is None:
-        valid_until = timezone.now() + timezone.timedelta(days=30)
+        valid_until = timezone.now() + timezone.timedelta(days=validity_days)
         return valid_until, validation_errors
 
     valid_until_str = (request_data.get("valid_until") or "").strip()
@@ -987,11 +992,11 @@ def _process_valid_until_date(request_data: dict[str, Any] | None) -> tuple[date
             valid_until = timezone.make_aware(datetime.combine(valid_until_date, datetime.min.time()))
         except ValueError:
             # Invalid date format, use default
-            valid_until = timezone.now() + timezone.timedelta(days=30)
-            validation_errors.append(f"Invalid date format '{valid_until_str}', using 30 days from now")
+            valid_until = timezone.now() + timezone.timedelta(days=validity_days)
+            validation_errors.append(f"Invalid date format '{valid_until_str}', using {validity_days} days from now")
     else:
         # No date provided, use default
-        valid_until = timezone.now() + timezone.timedelta(days=30)
+        valid_until = timezone.now() + timezone.timedelta(days=validity_days)
 
     return valid_until, validation_errors
 

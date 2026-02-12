@@ -212,8 +212,8 @@ CacheTTL = int  # Time to live in seconds
 # ROMANIAN BUSINESS CONSTANTS
 # ===============================================================================
 
-ROMANIAN_VAT_RATE = 0.21  # 21% standard VAT rate
-ROMANIAN_VAT_RATE_PERCENT = 21  # For display purposes
+# NOTE: VAT rates are NOT constants — they have temporal validity.
+# Use TaxService.get_vat_rate('RO') instead. See ADR-0005, ADR-0015.
 
 # ===============================================================================
 # ROMANIAN BUSINESS SPECIFIC TYPES
@@ -337,22 +337,25 @@ def validate_email(email: str) -> Result[EmailAddress, str]:
 
 
 def calculate_romanian_vat(amount_cents: int, include_vat: bool = True) -> dict[str, float]:
-    """Calculate Romanian VAT (21%) for the given amount"""
+    """Calculate Romanian VAT for the given amount using TaxService (ADR-0015)."""
+    from apps.common.tax_service import TaxService  # noqa: PLC0415
+
+    vat_rate = float(TaxService.get_vat_rate("RO", as_decimal=True))
 
     if include_vat:
         # Amount includes VAT, extract base amount
-        base_amount = int(amount_cents / (1 + ROMANIAN_VAT_RATE))
+        base_amount = int(amount_cents / (1 + vat_rate))
         vat_amount = amount_cents - base_amount
     else:
         # Amount excludes VAT, calculate VAT
         base_amount = amount_cents
-        vat_amount = int(amount_cents * ROMANIAN_VAT_RATE)
+        vat_amount = int(amount_cents * vat_rate)
 
     return {
         "base_amount": base_amount,
         "vat_amount": vat_amount,
         "total_amount": base_amount + vat_amount,
-        "vat_rate": ROMANIAN_VAT_RATE,
+        "vat_rate": vat_rate,
     }
 
 

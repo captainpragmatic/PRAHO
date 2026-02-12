@@ -364,8 +364,7 @@ REST_FRAMEWORK = {
 # ROMANIAN BUSINESS CONFIGURATION
 # ===============================================================================
 
-# Romanian VAT rate (21% standard)
-ROMANIA_VAT_RATE = "0.21"
+# NOTE: VAT rates removed — use TaxService.get_vat_rate('RO'). See ADR-0005, ADR-0015.
 
 # Romanian company information
 ROMANIAN_BUSINESS_CONTEXT = {
@@ -374,7 +373,6 @@ ROMANIAN_BUSINESS_CONTEXT = {
     "email": os.environ.get("COMPANY_EMAIL", "contact@pragmatichost.com"),
     "phone": os.environ.get("COMPANY_PHONE", "+40.21.123.4567"),
     "address": os.environ.get("COMPANY_ADDRESS", "Str. Exemplu Nr. 1, Bucuresti, Romania"),
-    "vat_rate": 0.21,
     "currency": "RON",
 }
 
@@ -448,7 +446,7 @@ COMPANY_PHONE = os.environ.get("COMPANY_PHONE", "+40 21 000 0000")
 COMPANY_WEBSITE = os.environ.get("COMPANY_WEBSITE", "https://praho.ro")
 
 # VAT settings for Romanian compliance
-VAT_RATE = 0.21  # 21% Romanian VAT rate
+# NOTE: VAT_RATE removed — use TaxService.get_vat_rate('RO'). See ADR-0005, ADR-0015.
 VAT_ENABLED = True
 
 # ===============================================================================

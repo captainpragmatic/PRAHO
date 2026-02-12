@@ -20,8 +20,7 @@ from django.http import HttpRequest
 
 # Generic type variable removed for Python 3.13 compatibility
 
-# 🎯 Romanian business pagination constants
-DEFAULT_PAGE_SIZE = 20
+from apps.common.constants import DEFAULT_PAGE_SIZE
 DEFAULT_ORPHANS = 3
 
 

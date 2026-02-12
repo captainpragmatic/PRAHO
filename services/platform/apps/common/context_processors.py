@@ -8,7 +8,7 @@ from typing import Any
 from django.conf import settings
 from django.http import HttpRequest
 
-from apps.common.types import ROMANIAN_VAT_RATE_PERCENT
+from apps.common.tax_service import TaxService
 
 
 def romanian_business_context(request: HttpRequest) -> dict[str, Any]:
@@ -19,7 +19,7 @@ def romanian_business_context(request: HttpRequest) -> dict[str, Any]:
         "company_address": "Str. Exemplu 123, București, România",
         "company_phone": "+40.21.123.4567",
         "company_email": "contact@pragmatichost.com",
-        "vat_rate": ROMANIAN_VAT_RATE_PERCENT,  # Romanian VAT rate from types module
+        "vat_rate": int(TaxService.get_vat_rate("RO", as_decimal=False)),
         "currency": "RON",
         "currency_symbol": "lei",
         "support_hours": "09:00 - 18:00 (Luni - Vineri)",

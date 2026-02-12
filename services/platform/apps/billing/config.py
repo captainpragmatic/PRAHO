@@ -69,10 +69,18 @@ EU_COUNTRY_CODES = frozenset({
 # PAYMENT & INVOICE TERMS
 # ===============================================================================
 
-# Default payment terms (days)
-DEFAULT_PAYMENT_TERMS_DAYS = _get_positive_int("BILLING_PAYMENT_TERMS_DAYS", 14)
 
-# Invoice due date offset from issue date (days)
+def get_invoice_payment_terms_days() -> int:
+    """Get invoice payment terms from SettingsService (ADR-0015 cascade)."""
+    try:
+        from apps.settings.services import SettingsService  # noqa: PLC0415
+        return SettingsService.get_integer_setting("billing.invoice_payment_terms_days", 14)
+    except Exception:
+        return _get_positive_int("BILLING_PAYMENT_TERMS_DAYS", 14)
+
+
+# Backward-compatible module-level (for code that reads it at import time)
+DEFAULT_PAYMENT_TERMS_DAYS = 14
 INVOICE_DUE_DATE_DAYS = DEFAULT_PAYMENT_TERMS_DAYS
 
 
@@ -187,4 +195,4 @@ def get_payment_due_date(issue_date=None):
     if issue_date is None:
         issue_date = timezone.now()
 
-    return issue_date + timedelta(days=DEFAULT_PAYMENT_TERMS_DAYS)
+    return issue_date + timedelta(days=get_invoice_payment_terms_days())

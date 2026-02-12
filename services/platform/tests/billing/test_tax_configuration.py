@@ -756,6 +756,60 @@ class HardcodedVATGuardTests(TestCase):
             )
             self.fail(msg)
 
+    def test_no_romanian_vat_rate_constant_outside_allowlist(self) -> None:
+        """No ROMANIAN_VAT_RATE = ... definitions outside test files and efactura/settings.py.
+
+        After the config-consolidation cleanup, the ROMANIAN_VAT_RATE module-level
+        constant should only exist in test fixtures and efactura settings.
+        """
+        apps_dir = Path(__file__).resolve().parent.parent.parent / "apps"
+        violations = []
+
+        # Pattern: module-level constant definition (not inside comments)
+        pattern = re.compile(r"^\s*ROMANIAN_VAT_RATE\s*[=:]")
+
+        for py_file in apps_dir.rglob("*.py"):
+            rel_path = str(py_file.relative_to(apps_dir))
+            # Allow in efactura settings and test files
+            if any(allowed in rel_path for allowed in self.ALLOWED_PATHS):
+                continue
+
+            try:
+                content = py_file.read_text()
+            except (OSError, UnicodeDecodeError):
+                continue
+
+            for line_num, line in enumerate(content.splitlines(), 1):
+                stripped = line.strip()
+                if stripped.startswith("#"):
+                    continue
+                if pattern.match(line):
+                    violations.append(f"{rel_path}:{line_num}: {stripped}")
+
+        if violations:
+            msg = (
+                f"Found {len(violations)} ROMANIAN_VAT_RATE definition(s) outside allowlist.\n"
+                "VAT rates should only come from TaxService (ADR-0005/0015).\n\n"
+                + "\n".join(violations)
+            )
+            self.fail(msg)
+
+    def test_constants_py_has_no_vat_rate(self) -> None:
+        """Verify constants.py does NOT contain any VAT rate definition."""
+        constants_file = Path(__file__).resolve().parent.parent.parent / "apps" / "common" / "constants.py"
+        content = constants_file.read_text()
+
+        # Should not have ROMANIAN_VAT_RATE as a variable definition
+        for line in content.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            self.assertNotRegex(
+                stripped,
+                r"^ROMANIAN_VAT_RATE\s*[:=]",
+                "constants.py should not define ROMANIAN_VAT_RATE — use TaxService",
+            )
+
     def test_no_hardcoded_vat_in_templates(self) -> None:
         """No stale 19% VAT rates in HTML templates."""
         templates_dir = (

@@ -16,8 +16,7 @@ from .models import Product, ProductPrice
 
 logger = logging.getLogger(__name__)
 
-# Romanian business constants for hosting products
-ROMANIAN_VAT_RATE = Decimal("0.21")  # 21% VAT rate for Romanian hosting services (updated Aug 2025)
+# NOTE: VAT rates are NOT constants — use TaxService.get_vat_rate('RO'). See ADR-0005, ADR-0015.
 PRICING_THRESHOLDS: dict[str, Any] = {
     "significant_change_percent": 15,  # Alert when price changes by more than 15%
     "high_value_product_ron": 500,  # Products over 500 RON need approval tracking
@@ -84,8 +83,10 @@ def log_product_lifecycle_events(sender: type[Product], instance: Product, creat
     try:
         if created:
             # New product created
+            from apps.common.tax_service import TaxService  # noqa: PLC0415
+
             romanian_context = {
-                "vat_rate_applied": float(ROMANIAN_VAT_RATE * 100),  # Convert to percentage
+                "vat_rate_applied": float(TaxService.get_vat_rate("RO", as_decimal=False)),
                 "includes_vat": instance.includes_vat,
                 "product_category": instance.product_type,
                 "requires_rotld_compliance": instance.product_type == "domain",
@@ -168,7 +169,7 @@ def log_price_changes(sender: type[ProductPrice], instance: ProductPrice, create
                 "currency": instance.currency.code,
                 "billing_model": "simplified_monthly",  # New simplified model
                 "includes_vat": instance.product.includes_vat,
-                "vat_rate_applied": float(ROMANIAN_VAT_RATE * 100),
+                "vat_rate_applied": float(TaxService.get_vat_rate("RO", as_decimal=False)),
                 "high_value_product": instance.monthly_price_cents > (PRICING_THRESHOLDS["high_value_product_ron"] * 100),
                 "semiannual_discount": float(instance.semiannual_discount_percent),
                 "annual_discount": float(instance.annual_discount_percent),
