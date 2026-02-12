@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No unreleased changes._
 
+---
+
+## [0.14.0] - 2026-02-12
+
+### Added
+- **ADR-0015: Configuration Resolution Order** — Documents the 4-tier configuration cascade pattern (Cache → DB → Settings → Code Defaults) as a platform-wide architectural standard, with decision criteria for when to use each tier
+- **Temporal VAT Rate Support**: `TaxRule` model now seeds historical (19%, pre-Aug 2025) and current (21%, post-Aug 2025) Romanian rates via `setup_tax_rules` management command
+- **Per-Customer VAT Overrides**: Wired orphaned `CustomerTaxProfile` fields (`is_vat_payer`, `vat_rate`, `reverse_charge_eligible`) into the VAT calculation flow via `TaxService` and `OrderVATCalculator`
+- **VAT Guard Test**: Grep-based test that scans `apps/` for hardcoded `Decimal("0.19")` or `Decimal("19.00")` outside allowlisted files, preventing future rate sprawl
+- **Temporal VAT Boundary Tests**: Tests verifying correct rate resolution at the July 31 / August 1, 2025 transition boundary
+- **E2E Test**: Playwright test verifying proforma form dropdown shows 21%/11%/0% with no stale 19%
+
+### Changed
+- **Single Source of Truth for VAT**: `TaxService` is now the sole VAT rate authority — `billing.config.get_vat_rate()` delegates to `TaxService` instead of independently querying `TaxRule`
+- **TaxService Database Tier Fixed**: `_get_rate_from_database()` now queries the real `TaxRule` model instead of non-existent `TaxSettings`
+- **Romanian VAT Rate Updated to 21%**: All hardcoded 19% references updated across billing views, model defaults, PDF generators, e-Factura settings/validator, sample data generators, proforma templates, and documentation (per Emergency Ordinance 156/2024, effective August 1, 2025)
+- **Romanian Reduced VAT Rates Consolidated**: 5% and 9% reduced rates merged to single 11% rate across e-Factura settings, validator, and proforma form templates
+- **ADR-0005 Amended**: Added scope clarification distinguishing value-immutable constants from regulatory/temporal values, with forward reference to ADR-0015
+
+### Fixed
+- **Proforma Form Value/Label Mismatch** (CRITICAL): `<option value="19">21% (Standard)</option>` — the submitted value was 19 while the label showed 21%. Both value and label now correctly show 21%
+- **e-Factura XML Tax Rate**: `xml_builder._get_tax_rate()` now reads from the invoice's stored line tax rate (frozen at creation) instead of live `TaxService`, preserving document immutability for regulatory compliance
+- **Custom VAT Rate Guard**: Fixed `Decimal("0.00")` being falsy — changed `if tax_profile.vat_rate and ...` to `if tax_profile.vat_rate is not None:` to correctly apply 0% VAT overrides
+- **TaxService `calculate_vat()` Business Flags**: `is_business` and `vat_number` parameters were accepted but completely ignored — now properly trigger reverse charge for EU B2B transactions
+- **Non-EU Default Rate**: Countries without explicit `TaxRule` records now fail-safe to Romanian VAT (21%) instead of silently returning 0%
+
+### Security
+- Per-customer reverse charge eligibility now enforced in VAT calculation (previously orphaned field)
+- Invoice tax rates frozen at document creation time, preventing retroactive rate changes on issued documents
+
 ### Planned for v1.0.0
 - Production deployment and hardening
 - Complete template system with polished UI
@@ -325,6 +355,7 @@ _No unreleased changes._
 
 | Version | Date | Milestone |
 |---------|------|-----------|
+| 0.14.0 | 2026-02-12 | VAT Architecture Consolidation & ADR-0015 |
 | 0.13.0 | 2026-02-11 | GDPR Cookie Consent, Audit Coverage & E2E Stabilization |
 | 0.12.0 | 2026-02-10 | Billing, e-Factura & CI Stabilization |
 | 0.11.0 | 2026-02-09 | Platform/Portal Service Separation |
