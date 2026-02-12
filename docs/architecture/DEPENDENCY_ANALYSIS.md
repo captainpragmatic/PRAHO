@@ -1,7 +1,7 @@
 # PRAHO Platform - Dependency Analysis Report
 
 **Generated:** December 27, 2025
-**Version:** 0.4.0
+**Version:** 0.13.0
 
 ---
 
