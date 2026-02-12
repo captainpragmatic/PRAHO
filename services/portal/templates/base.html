@@ -179,7 +179,7 @@
               <p class="mt-2 text-xs space-x-3">
                 <a href="{% url 'cookie_policy' %}" class="text-slate-500 hover:text-slate-300 transition-colors">{% trans 'Cookie Policy' %}</a>
                 <span class="text-slate-600">|</span>
-                <a href="#" onclick="if(window.showCookiePreferences){window.showCookiePreferences()}return false;" class="text-slate-500 hover:text-slate-300 transition-colors">{% trans 'Cookie Preferences' %}</a>
+                <a href="#" data-show-cookie-preferences class="text-slate-500 hover:text-slate-300 transition-colors">{% trans 'Cookie Preferences' %}</a>
               </p>
             </div>
           </div>
@@ -316,6 +316,16 @@
             const token = getCookie('csrftoken');
             if (token) {
                 event.detail.headers['X-CSRFToken'] = token;
+            }
+        });
+
+        // Cookie preferences link handler
+        document.addEventListener('click', function(e) {
+            if (e.target.closest('[data-show-cookie-preferences]')) {
+                e.preventDefault();
+                if (window.showCookiePreferences) {
+                    window.showCookiePreferences();
+                }
             }
         });
     </script>
