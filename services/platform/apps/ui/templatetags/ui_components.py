@@ -869,11 +869,11 @@ def romanian_percentage(value: float, decimals: int = 1) -> str:
     Format percentage in Romanian style
 
     Usage:
-        {% romanian_percentage 0.19 %} -> "19,0%"
-        {% romanian_percentage 0.195 2 %} -> "19,50%"
+        {% romanian_percentage 0.21 %} -> "21,0%"
+        {% romanian_percentage 0.215 2 %} -> "21,50%"
 
     Args:
-        value: Decimal value (0.19 for 19%)
+        value: Decimal value (0.21 for 21%)
         decimals: Number of decimal places
     """
     percentage = value * 100

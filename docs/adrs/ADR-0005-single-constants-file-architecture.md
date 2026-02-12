@@ -37,8 +37,9 @@ We decided to implement a **single centralized constants file** at `apps/common/
 # ===============================================================================
 # ROMANIAN COMPLIANCE 🇷🇴
 # ===============================================================================
-ROMANIAN_VAT_RATE = Decimal('0.19')         # Used in: billing, orders, customers
-CUI_MIN_LENGTH = 2                          # Used in: customers, billing  
+# NOTE: VAT rates are NOT constants — they have temporal validity and are
+# managed via TaxService (ADR-0015). Use TaxService.get_vat_rate() instead.
+CUI_MIN_LENGTH = 2                          # Used in: customers, billing
 CUI_MAX_LENGTH = 10                         # Used in: customers, billing
 PAYMENT_GRACE_PERIOD_DAYS = 5               # Used in: billing, tickets
 
@@ -82,6 +83,8 @@ STANDARD_TICKET_RESPONSE_HOURS = 24        # Used in: tickets, notifications
 - **Problem**: Adds query overhead for frequently accessed values
 - **Risk**: Database dependency for basic business logic
 - **Complexity**: Requires migration strategy for constant updates
+- **Scope note (2026-02-12)**: This rejection applies to immutable constants only.
+  Dynamic/regulatory values with runtime edits or temporal validity are governed by ADR-0015 (Configuration Resolution Order).
 
 **❌ Environment Variables:**
 - **Problem**: Poor discoverability and documentation
@@ -129,9 +132,10 @@ make lint
 
 **Romanian Government VAT Change Scenario:**
 ```python
-# Before (distributed): 5+ file changes, risk of missing updates
-# After (centralized): 1 line change in constants.py
-ROMANIAN_VAT_RATE = Decimal('0.21')  # Updated from 0.19
+# VAT rates are now managed via TaxService + TaxRule model (ADR-0015).
+# Rate changes are handled by creating a new TaxRule with valid_from date.
+# No code changes required — just a database record.
+# See: apps/billing/management/commands/setup_tax_rules.py
 ```
 
 **Developer Workflow:**

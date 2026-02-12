@@ -438,9 +438,12 @@ class SubscriptionService:
         except Currency.DoesNotExist:
             currency = Currency.objects.create(code="RON", name="Romanian Leu", symbol="lei")
 
-        # Calculate tax (19% Romanian VAT)
+        # Calculate tax using centralized TaxService (ADR-0015)
+        from apps.common.tax_service import TaxService
+
         subtotal_cents = change.proration_amount_cents
-        tax_cents = int(subtotal_cents * Decimal("0.19"))
+        vat_rate = TaxService.get_vat_rate("RO", as_decimal=True)
+        tax_cents = int(Decimal(subtotal_cents) * vat_rate)
         total_cents = subtotal_cents + tax_cents
 
         # Create invoice
@@ -472,7 +475,7 @@ class SubscriptionService:
             description=f"Proration: {change.change_type.replace('_', ' ').title()} - {subscription.product.name}",
             quantity=Decimal("1"),
             unit_price_cents=subtotal_cents,
-            tax_rate=Decimal("0.19"),
+            tax_rate=vat_rate,
             line_total_cents=total_cents,
         )
 
@@ -827,9 +830,11 @@ class RecurringBillingService:
 
             sequence, _ = InvoiceSequence.objects.get_or_create(scope="default")
 
-            # Calculate amounts
+            # Calculate amounts using centralized TaxService (ADR-0015)
+            from apps.common.tax_service import TaxService
+
             subtotal_cents = subscription.total_price_cents
-            tax_rate = Decimal("0.19")  # Romanian VAT
+            tax_rate = TaxService.get_vat_rate("RO", as_decimal=True)
             tax_cents = int(Decimal(subtotal_cents) * tax_rate)
             total_cents = subtotal_cents + tax_cents
 

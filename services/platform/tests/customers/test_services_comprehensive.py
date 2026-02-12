@@ -110,14 +110,14 @@ class TestCustomerTaxProfile:
         assert tax_profile.cui == 'RO12345678'
         assert tax_profile.vat_number == 'RO12345678'
         assert tax_profile.is_vat_payer is True
-        assert tax_profile.vat_rate == Decimal('19.00')
+        assert tax_profile.vat_rate == Decimal('21.00')
 
     def test_tax_profile_vat_rate(self):
-        """Default VAT rate should be 19% for Romania"""
+        """Default VAT rate should be 21% for Romania"""
         from tests.factories.core_factories import create_full_customer
 
         customer = create_full_customer()
-        assert customer.tax_profile.vat_rate == Decimal('19.00')
+        assert customer.tax_profile.vat_rate == Decimal('21.00')
 
     def test_non_vat_payer_profile(self):
         """Non-VAT payer should have appropriate settings"""

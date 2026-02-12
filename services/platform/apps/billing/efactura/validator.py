@@ -111,8 +111,8 @@ class CIUSROValidator:
     # Valid tax category codes
     VALID_TAX_CATEGORIES: ClassVar[set[str]] = {"S", "Z", "E", "AE", "K", "G", "O", "L", "M"}
 
-    # Romanian VAT rates
-    VALID_VAT_RATES: ClassVar[set[str]] = {"19.00", "9.00", "5.00", "0.00"}
+    # Romanian VAT rates (updated Aug 2025)
+    VALID_VAT_RATES: ClassVar[set[str]] = {"21.00", "11.00", "0.00"}
 
     def __init__(self) -> None:
         """Initialize validator."""

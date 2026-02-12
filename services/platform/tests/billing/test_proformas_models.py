@@ -127,13 +127,13 @@ class ProformaInvoiceTestCase(TestCase):
             currency=self.currency,
             number='PRO-PROPS',
             subtotal_cents=10000,  # 100.00
-            tax_cents=1900,        # 19.00
-            total_cents=11900      # 119.00
+            tax_cents=2100,        # 21.00
+            total_cents=12100      # 121.00
         )
 
         self.assertEqual(proforma.subtotal, Decimal('100.00'))
-        self.assertEqual(proforma.tax_amount, Decimal('19.00'))
-        self.assertEqual(proforma.total, Decimal('119.00'))
+        self.assertEqual(proforma.tax_amount, Decimal('21.00'))
+        self.assertEqual(proforma.total, Decimal('121.00'))
 
     def test_proforma_invoice_meta_json_field(self):
         """Test meta JSON field"""
@@ -277,11 +277,11 @@ class ProformaLineTestCase(TestCase):
             description='Taxable Service',
             quantity=Decimal('1.000'),
             unit_price_cents=10000,
-            tax_rate=Decimal('0.1900'),  # 19% VAT
-            line_total_cents=11900
+            tax_rate=Decimal('0.2100'),  # 21% VAT
+            line_total_cents=12100
         )
 
-        self.assertEqual(line.tax_rate, Decimal('0.1900'))
+        self.assertEqual(line.tax_rate, Decimal('0.2100'))
 
     def test_proforma_line_properties(self):
         """Test decimal properties"""
@@ -358,8 +358,8 @@ class ProformaIntegrationTestCase(TestCase):
             currency=self.currency,
             number='PRO-MULTI',
             subtotal_cents=6298,  # 49.99 + 12.99
-            tax_cents=1197,       # 19% VAT
-            total_cents=7495      # Total with VAT
+            tax_cents=1323,       # 21% VAT
+            total_cents=7621      # Total with VAT
         )
 
         # Hosting line
@@ -423,8 +423,8 @@ class ProformaIntegrationTestCase(TestCase):
             currency=self.currency,
             number='PRO-DISCOUNT',
             subtotal_cents=3999,  # After discount
-            tax_cents=760,        # VAT on discounted amount
-            total_cents=4759
+            tax_cents=840,        # VAT on discounted amount
+            total_cents=4839
         )
 
         # Regular line
@@ -478,8 +478,8 @@ class ProformaIntegrationTestCase(TestCase):
             currency=self.currency,
             number='PRO-COMPLEX',
             subtotal_cents=13297,  # Total before VAT
-            tax_cents=2526,        # 19% VAT
-            total_cents=15823,     # Total with VAT
+            tax_cents=2792,        # 21% VAT
+            total_cents=16089,     # Total with VAT
             bill_to_name='Integration Test SRL',
             bill_to_tax_id='RO98765432',
             meta={'project': 'new_customer_onboarding'}

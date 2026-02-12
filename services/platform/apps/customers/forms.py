@@ -717,7 +717,7 @@ class CustomerCreationForm(forms.Form):
             cui=data.get("cui", ""),
             is_vat_payer=data.get("is_vat_payer", False),
             vat_number=data.get("vat_number", ""),
-            vat_rate=19.0 if data.get("is_vat_payer", False) else 0.0,
+            vat_rate=21.0 if data.get("is_vat_payer", False) else 0.0,
         )
 
         # Create billing profile
@@ -881,7 +881,7 @@ class CustomerEditForm(forms.Form):
     vat_rate = forms.DecimalField(
         max_digits=5,
         decimal_places=2,
-        initial=19.0,
+        initial=21.0,
         required=False,
         label=_("VAT Rate (%)"),
         widget=forms.NumberInput(

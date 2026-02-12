@@ -13,6 +13,7 @@ from typing import ClassVar
 
 from django.conf import settings
 from django.core.cache import cache
+from django.db import models
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -102,9 +103,16 @@ class TaxConfiguration:
         if rate is None:
             rate = cls.DEFAULT_VAT_RATES.get(country_code)
 
-        # Default to Romanian rate if country unknown (conservative approach)
+        # Unknown country code → default to Romanian rate (conservative / fail-safe).
+        # Non-EU countries that should get 0% (US, GB, CH, etc.) are seeded in the DB
+        # via setup_tax_rules. If a country has no TaxRule, no settings entry, and no
+        # DEFAULT_VAT_RATES entry, it's safest to charge Romanian VAT. This avoids
+        # tax leakage from typos like "R0" or "ZZ" silently getting 0%.
         if rate is None:
-            logger.warning(f"⚠️ [TaxService] Unknown country {country_code}, defaulting to Romanian VAT")
+            logger.warning(
+                f"⚠️ [TaxService] No rate found for {country_code!r}, "
+                f"defaulting to Romanian VAT (fail-safe)"
+            )
             rate = cls.DEFAULT_VAT_RATES['RO']
 
         # Cache the rate
@@ -115,38 +123,54 @@ class TaxConfiguration:
 
     @classmethod
     def _get_rate_from_database(cls, country_code: str) -> Decimal | None:
-        """Get rate from database if TaxSettings model exists."""
+        """Get VAT rate from TaxRule model as percentage (e.g., 21.0)."""
         try:
-            from apps.common.models import TaxSettings
+            from apps.billing.tax_models import TaxRule
 
-            setting = TaxSettings.objects.filter(
-                country_code=country_code,
-                is_active=True,
-                effective_date__lte=timezone.now()
-            ).order_by('-effective_date').first()
+            today = timezone.now().date()
+            rule = (
+                TaxRule.objects.filter(country_code=country_code.upper(), tax_type="vat", valid_from__lte=today)
+                .filter(models.Q(valid_to__isnull=True) | models.Q(valid_to__gte=today))
+                .order_by("-valid_from", "-created_at")
+                .first()
+            )
 
-            if setting:
-                return setting.vat_rate_percent
+            if rule:
+                return (rule.rate * Decimal("100")).quantize(Decimal("0.01"))
 
         except Exception as e:
-            # Model might not exist yet or database not migrated
-            logger.debug(f"Database tax settings not available: {e}")
+            logger.debug(f"Database tax rules not available: {e}")
 
         return None
 
     @classmethod
     def _get_rate_from_settings(cls, country_code: str) -> Decimal | None:
-        """Get rate from Django settings."""
+        """Get rate from Django settings.
+
+        Always converts to Decimal via str() to avoid float precision issues.
+        """
         # Check for country-specific setting
         setting_name = f"VAT_RATE_{country_code}"
         if hasattr(settings, setting_name):
-            return Decimal(str(getattr(settings, setting_name)))
+            value = getattr(settings, setting_name)
+            if isinstance(value, float):
+                logger.warning(
+                    f"⚠️ [TaxService] Setting {setting_name} is a float ({value}); "
+                    f"use Decimal or str to avoid precision issues"
+                )
+            return Decimal(str(value))
 
         # Check for general VAT rates dictionary
         if hasattr(settings, 'VAT_RATES'):
             rates = getattr(settings, 'VAT_RATES', {})
             if country_code in rates:
-                return Decimal(str(rates[country_code]))
+                value = rates[country_code]
+                if isinstance(value, float):
+                    logger.warning(
+                        f"⚠️ [TaxService] VAT_RATES[{country_code}] is a float ({value}); "
+                        f"use Decimal or str to avoid precision issues"
+                    )
+                return Decimal(str(value))
 
         return None
 
@@ -159,12 +183,32 @@ class TaxConfiguration:
         Args:
             amount_cents: Amount in cents
             country_code: Country for VAT rate
-            is_business: Whether customer is a business
+            is_business: Whether customer is a business (for EU reverse charge)
             vat_number: VAT number for reverse charge checking
 
         Returns:
             Dict with vat_cents and total_cents
         """
+        country_code = country_code.upper().strip() if country_code else 'RO'
+
+        # EU B2B reverse charge: 0% VAT when business has valid VAT number
+        # and is in an EU country other than Romania (provider's home country)
+        if (
+            is_business
+            and vat_number
+            and cls.is_eu_country(country_code)
+            and country_code != 'RO'
+        ):
+            logger.info(
+                f"💰 [TaxService] EU B2B reverse charge: {country_code} "
+                f"VAT {vat_number} → 0% VAT"
+            )
+            return {
+                'vat_cents': 0,
+                'total_cents': amount_cents,
+                'vat_rate_percent': Decimal('0.0'),
+            }
+
         # Get VAT rate as decimal (e.g., 0.21 for 21%)
         vat_rate = cls.get_vat_rate(country_code, as_decimal=True)
 
@@ -186,8 +230,11 @@ class TaxConfiguration:
             cache.delete(cache_key)
             logger.info(f"🔄 [TaxService] Invalidated cache for {country_code}")
         else:
-            # Clear all tax rate caches
-            cache.delete_many(cache.keys(f"{cls.CACHE_KEY_PREFIX}:*"))
+            # Clear all known tax rate caches by iterating DEFAULT_VAT_RATES keys.
+            # NOTE: cache.keys() with wildcards is NOT supported by Django's
+            # DatabaseCache backend — only Redis/Memcached support it.
+            keys = [f"{cls.CACHE_KEY_PREFIX}:{cc}" for cc in cls.DEFAULT_VAT_RATES]
+            cache.delete_many(keys)
             logger.info("🔄 [TaxService] Invalidated all tax rate caches")
 
     @classmethod

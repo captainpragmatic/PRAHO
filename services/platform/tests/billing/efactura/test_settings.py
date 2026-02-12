@@ -61,20 +61,20 @@ class VATRateConfigTestCase(TestCase):
     def test_rate_percent(self):
         """Test rate_percent returns rate as-is."""
         config = VATRateConfig(
-            rate=Decimal("19.00"),
+            rate=Decimal("21.00"),
             category=VATCategory.STANDARD,
             name="Standard",
         )
-        self.assertEqual(config.rate_percent, Decimal("19.00"))
+        self.assertEqual(config.rate_percent, Decimal("21.00"))
 
     def test_rate_decimal_conversion(self):
         """Test rate_decimal converts to decimal fraction."""
         config = VATRateConfig(
-            rate=Decimal("19.00"),
+            rate=Decimal("21.00"),
             category=VATCategory.STANDARD,
             name="Standard",
         )
-        self.assertEqual(config.rate_decimal, Decimal("0.19"))
+        self.assertEqual(config.rate_decimal, Decimal("0.21"))
 
     def test_rate_decimal_for_reduced_rate(self):
         """Test rate_decimal for reduced rate."""
@@ -97,7 +97,7 @@ class VATRateConfigTestCase(TestCase):
     def test_applies_to_default(self):
         """Test applies_to defaults to empty list."""
         config = VATRateConfig(
-            rate=Decimal("19.00"),
+            rate=Decimal("21.00"),
             category=VATCategory.STANDARD,
             name="Standard",
         )
@@ -107,24 +107,17 @@ class VATRateConfigTestCase(TestCase):
 class RomanianVATRatesTestCase(TestCase):
     """Test Romanian VAT rates configuration."""
 
-    def test_standard_rate_is_19(self):
-        """Test standard rate is 19%."""
+    def test_standard_rate_is_21(self):
+        """Test standard rate is 21%."""
         rate = ROMANIAN_VAT_RATES["standard"]
-        self.assertEqual(rate.rate, Decimal("19.00"))
+        self.assertEqual(rate.rate, Decimal("21.00"))
         self.assertEqual(rate.category, VATCategory.STANDARD)
 
-    def test_reduced_9_rate(self):
-        """Test 9% reduced rate for hospitality."""
-        rate = ROMANIAN_VAT_RATES["reduced_9"]
-        self.assertEqual(rate.rate, Decimal("9.00"))
-        self.assertIn("hospitality", rate.applies_to)
+    def test_reduced_rate(self):
+        """Test 11% reduced rate."""
+        rate = ROMANIAN_VAT_RATES["reduced"]
+        self.assertEqual(rate.rate, Decimal("11.00"))
 
-    def test_reduced_5_rate(self):
-        """Test 5% reduced rate for food/books."""
-        rate = ROMANIAN_VAT_RATES["reduced_5"]
-        self.assertEqual(rate.rate, Decimal("5.00"))
-        self.assertIn("food", rate.applies_to)
-        self.assertIn("books", rate.applies_to)
 
     def test_zero_rate(self):
         """Test zero rate for exports."""
@@ -200,38 +193,36 @@ class EFacturaSettingsTestCase(TestCase):
     def test_get_vat_rate_standard(self):
         """Test getting standard VAT rate."""
         rate = self.settings.get_vat_rate("standard")
-        self.assertEqual(rate.rate, Decimal("19.00"))
+        self.assertEqual(rate.rate, Decimal("21.00"))
 
     def test_get_vat_rate_reduced(self):
-        """Test getting reduced VAT rates."""
-        rate_9 = self.settings.get_vat_rate("reduced_9")
-        rate_5 = self.settings.get_vat_rate("reduced_5")
-        self.assertEqual(rate_9.rate, Decimal("9.00"))
-        self.assertEqual(rate_5.rate, Decimal("5.00"))
+        """Test getting reduced VAT rate."""
+        rate = self.settings.get_vat_rate("reduced")
+        self.assertEqual(rate.rate, Decimal("11.00"))
 
     def test_get_vat_rate_unknown_returns_standard(self):
         """Test unknown rate type returns standard."""
         rate = self.settings.get_vat_rate("nonexistent")
-        self.assertEqual(rate.rate, Decimal("19.00"))
+        self.assertEqual(rate.rate, Decimal("21.00"))
 
     def test_get_vat_rate_for_category_food(self):
         """Test getting VAT rate by category."""
         rate = self.settings.get_vat_rate_for_category("food")
-        self.assertEqual(rate.rate, Decimal("5.00"))
+        self.assertEqual(rate.rate, Decimal("11.00"))
 
     def test_get_vat_rate_for_category_hospitality(self):
         """Test getting VAT rate for hospitality."""
         rate = self.settings.get_vat_rate_for_category("hospitality")
-        self.assertEqual(rate.rate, Decimal("9.00"))
+        self.assertEqual(rate.rate, Decimal("11.00"))
 
     def test_get_vat_rate_for_category_unknown(self):
         """Test unknown category returns standard rate."""
         rate = self.settings.get_vat_rate_for_category("unknown_category")
-        self.assertEqual(rate.rate, Decimal("19.00"))
+        self.assertEqual(rate.rate, Decimal("21.00"))
 
     def test_standard_vat_rate_property(self):
         """Test standard_vat_rate property."""
-        self.assertEqual(self.settings.standard_vat_rate, Decimal("19.00"))
+        self.assertEqual(self.settings.standard_vat_rate, Decimal("21.00"))
 
     def test_submission_deadline_days_default(self):
         """Test submission deadline is 5 days by default."""

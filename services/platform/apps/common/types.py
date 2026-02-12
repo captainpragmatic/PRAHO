@@ -469,7 +469,7 @@ APIResponseHeaders = dict[str, str]  # Response headers
 # BILLING AND FINANCIAL TYPES
 # ===============================================================================
 
-TaxRate = float  # Tax rate as decimal: 0.19 for 19%
+TaxRate = float  # Tax rate as decimal: 0.21 for 21%
 DiscountRate = float  # Discount rate as decimal: 0.10 for 10%
 Amount = int  # Amount in cents/smallest currency unit
 AmountDecimal = float  # Amount as decimal value

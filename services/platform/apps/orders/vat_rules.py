@@ -24,15 +24,35 @@ class VATScenario(Enum):
     EU_B2C = "eu_b2c"                     # EU consumer
     EU_B2B_REVERSE_CHARGE = "eu_b2b_reverse"  # EU business (reverse charge)
     NON_EU_ZERO_VAT = "non_eu_zero"       # Non-EU customer
+    CUSTOM_RATE_OVERRIDE = "custom_rate_override"  # Per-customer rate override
 
 
 class CustomerVATInfo(TypedDict, total=False):
-    """Customer VAT information for calculation"""
+    """Customer VAT information for calculation.
+
+    Core fields (always expected):
+        country: ISO 2-letter country code
+        is_business: Whether customer is a registered business
+        vat_number: Customer's VAT number (if business)
+
+    Per-customer overrides (from CustomerTaxProfile):
+        is_vat_payer: If False, customer is not VAT-registered → no reverse charge, treated as B2C
+        custom_vat_rate: Explicit per-customer rate override (as percentage, e.g. 15.0)
+        reverse_charge_eligible: If True + EU country + VAT number → force reverse charge
+
+    Audit context:
+        customer_id: For audit logging
+        order_id: For audit logging
+    """
     country: str
     is_business: bool
     vat_number: str | None
     customer_id: str | None
     order_id: str | None
+    # Per-customer overrides from CustomerTaxProfile
+    is_vat_payer: bool
+    custom_vat_rate: Decimal | None
+    reverse_charge_eligible: bool
 
 
 @dataclass
@@ -92,15 +112,18 @@ class OrderVATCalculator:
             VATCalculationResult with full audit trail
         """
         # Extract customer information
-        country_code = customer_info['country'].upper()
+        country_raw = customer_info.get('country') or 'RO'
+        country_code = country_raw.upper()
         is_business = customer_info.get('is_business', False)
         vat_number = customer_info.get('vat_number')
         customer_id = customer_info.get('customer_id')
         order_id = customer_info.get('order_id')
 
-        # Determine VAT scenario
-        scenario, vat_rate = cls._determine_vat_scenario(
-            country_code, is_business, vat_number
+        # Determine VAT scenario (passes full customer_info for per-customer overrides).
+        # Returns effective is_business/vat_number which may differ from inputs
+        # (e.g. is_vat_payer=False downgrades to B2C).
+        scenario, vat_rate, is_business, vat_number = cls._determine_vat_scenario(
+            country_code, is_business, vat_number, customer_info=customer_info
         )
         
         # Calculate VAT amounts
@@ -115,7 +138,7 @@ class OrderVATCalculator:
         total_cents = subtotal_cents + vat_cents
         
         # Generate reasoning for audit
-        reasoning = cls._generate_vat_reasoning(scenario, country_code, is_business, vat_number)
+        reasoning = cls._generate_vat_reasoning(scenario, country_code, is_business, vat_number, vat_rate)
         
         # Create audit data
         audit_data = {
@@ -156,44 +179,96 @@ class OrderVATCalculator:
         cls,
         country_code: str,
         is_business: bool,
-        vat_number: str | None
-    ) -> tuple[VATScenario, Decimal]:
+        vat_number: str | None,
+        customer_info: CustomerVATInfo | None = None,
+    ) -> tuple[VATScenario, Decimal, bool, str | None]:
         """
         Determine VAT scenario and rate - CONSERVATIVE APPROACH
-        Default to Romanian VAT when uncertain for compliance
+        Default to Romanian VAT when uncertain for compliance.
+
+        Returns:
+            (scenario, vat_rate, effective_is_business, effective_vat_number)
+            The effective values may differ from inputs when overrides apply
+            (e.g. is_vat_payer=False downgrades is_business to False).
+
+        Per-customer overrides (from CustomerTaxProfile) are checked FIRST:
+        1. is_vat_payer=False → disable reverse charge, treat as B2C consumer
+        2. custom_vat_rate set → use that rate (CUSTOM_RATE_OVERRIDE scenario)
+        3. reverse_charge_eligible + EU + VAT number → force reverse charge
         """
 
         # Normalize and validate country code
         country_code = country_code.upper().strip() if country_code else 'RO'
 
+        # ── Per-customer overrides (checked BEFORE country-based logic) ──
+
+        if customer_info:
+            # 1. Non-VAT-registered: disable reverse charge, treat as B2C consumer.
+            #    A non-plătitor de TVA still gets charged VAT — they just can't
+            #    participate in EU B2B reverse charge or reclaim input VAT.
+            if customer_info.get('is_vat_payer') is False:
+                logger.info(
+                    f"💰 [VAT] Customer is_vat_payer=False → B2C treatment, "
+                    f"no reverse charge (customer_id={customer_info.get('customer_id')})"
+                )
+                is_business = False
+                vat_number = None
+                # Fall through to standard country-based logic below
+            else:
+                # 2. Explicit per-customer rate override
+                custom_rate = customer_info.get('custom_vat_rate')
+                if custom_rate is not None:
+                    logger.info(
+                        f"💰 [VAT] Custom rate override: {custom_rate}% "
+                        f"(customer_id={customer_info.get('customer_id')})"
+                    )
+                    return VATScenario.CUSTOM_RATE_OVERRIDE, Decimal(str(custom_rate)), is_business, vat_number
+
+                # 3. Reverse charge via profile flag (EU B2B shortcut)
+                if (
+                    customer_info.get('reverse_charge_eligible')
+                    and vat_number
+                    and country_code in cls._get_eu_countries()
+                    and country_code != 'RO'
+                ):
+                    return VATScenario.EU_B2B_REVERSE_CHARGE, Decimal('0.0'), is_business, vat_number
+
+        # ── Standard country-based logic ──
+
         # Romania (home country) - always apply Romanian VAT
         if country_code == 'RO' or country_code in ['ROMANIA', 'ROMÂNIA']:
             vat_rate = cls._get_vat_rate('RO')
             if is_business:
-                return VATScenario.ROMANIA_B2B, vat_rate
+                return VATScenario.ROMANIA_B2B, vat_rate, is_business, vat_number
             else:
-                return VATScenario.ROMANIA_B2C, vat_rate
+                return VATScenario.ROMANIA_B2C, vat_rate, is_business, vat_number
 
         # EU member states with valid codes
         elif country_code in cls._get_eu_countries():
             if is_business and vat_number:
                 # B2B EU: Reverse charge (0% VAT, customer pays in their country)
-                return VATScenario.EU_B2B_REVERSE_CHARGE, Decimal('0.0')
+                return VATScenario.EU_B2B_REVERSE_CHARGE, Decimal('0.0'), is_business, vat_number
             else:
                 # B2C EU: Apply customer country VAT rate
                 vat_rate = cls._get_vat_rate(country_code)
-                return VATScenario.EU_B2C, vat_rate
+                return VATScenario.EU_B2C, vat_rate, is_business, vat_number
 
         # Unknown/Invalid country codes - DEFAULT TO ROMANIAN VAT for compliance
         elif not country_code or len(country_code) != 2:
             # Apply Romanian VAT when country is unclear
             vat_rate = cls._get_vat_rate('RO')
-            return VATScenario.ROMANIA_B2C, vat_rate  # Treat as consumer for safety
+            return VATScenario.ROMANIA_B2C, vat_rate, is_business, vat_number
 
-        # Non-EU countries with valid codes
+        # Non-EU countries — delegate to TaxService for the rate.
+        # Countries seeded in TaxRule with rate=0.00 (US, GB, CH, etc.) get 0%.
+        # Unknown countries with no TaxRule → TaxService fails safe to Romanian VAT.
         else:
-            # Non-EU: 0% VAT (export) - only for clearly identified non-EU countries
-            return VATScenario.NON_EU_ZERO_VAT, Decimal('0.0')
+            vat_rate = cls._get_vat_rate(country_code)
+            if vat_rate == Decimal('0.0'):
+                return VATScenario.NON_EU_ZERO_VAT, Decimal('0.0'), is_business, vat_number
+            else:
+                # Unknown country got Romanian default from TaxService → fail-safe
+                return VATScenario.ROMANIA_B2C, vat_rate, is_business, vat_number
     
     @classmethod
     def _generate_vat_reasoning(
@@ -201,10 +276,14 @@ class OrderVATCalculator:
         scenario: VATScenario,
         country_code: str,
         is_business: bool,
-        vat_number: str | None
+        vat_number: str | None,
+        vat_rate: Decimal = Decimal('0.0'),
     ) -> str:
         """Generate human-readable reasoning for VAT calculation"""
-        
+
+        if scenario == VATScenario.CUSTOM_RATE_OVERRIDE:
+            return f"Per-customer rate override: {vat_rate}% applied"
+
         if scenario == VATScenario.ROMANIA_B2C:
             if country_code in ['RO', 'ROMANIA', 'ROMÂNIA']:
                 return f"Romanian consumer - apply Romanian VAT {cls._get_vat_rate('RO')}%"
@@ -215,15 +294,15 @@ class OrderVATCalculator:
             return f"Romanian business - apply Romanian VAT {cls._get_vat_rate('RO')}%"
 
         elif scenario == VATScenario.EU_B2C:
-            vat_rate = cls._get_vat_rate(country_code)
-            return f"EU consumer ({country_code}) - apply destination country VAT {vat_rate}%"
-        
+            eu_rate = cls._get_vat_rate(country_code)
+            return f"EU consumer ({country_code}) - apply destination country VAT {eu_rate}%"
+
         elif scenario == VATScenario.EU_B2B_REVERSE_CHARGE:
             return f"EU business ({country_code}) with VAT number {vat_number} - reverse charge 0%"
-        
+
         elif scenario == VATScenario.NON_EU_ZERO_VAT:
             return f"Non-EU country ({country_code}) - export, 0% VAT"
-        
+
         else:
             return "Unknown VAT scenario"
     

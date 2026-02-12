@@ -12,6 +12,7 @@ from django.utils import timezone
 
 from apps.billing.models import Currency
 from apps.common.types import EmailAddress, Err, Ok, Result
+from django.core.exceptions import ObjectDoesNotExist
 from apps.common.validators import log_security_event
 from apps.products.models import Product
 from apps.provisioning.service_models import Service, ServicePlan
@@ -148,9 +149,9 @@ class OrderCalculationService:
 
         # Determine customer context for VAT calculation
         if billing_address:
-            country = billing_address.get('country', 'RO')
-            is_business = bool(billing_address.get('company_name'))
+            country = billing_address.get('country') or 'RO'
             vat_number = billing_address.get('vat_number') or billing_address.get('vat_id')
+            is_business = bool(billing_address.get('company_name')) or bool(vat_number)
         elif customer:
             country = getattr(customer, 'country', 'RO') or 'RO'
             is_business = bool(getattr(customer, 'company_name', ''))
@@ -167,8 +168,20 @@ class OrderCalculationService:
             'is_business': is_business,
             'vat_number': vat_number,
             'customer_id': str(customer.id) if customer else 'unknown',
-            'order_id': 'calculation'
+            'order_id': 'calculation',
         }
+
+        # Inject per-customer overrides from CustomerTaxProfile (if available)
+        if customer and hasattr(customer, 'tax_profile'):
+            try:
+                tax_profile = customer.tax_profile
+                customer_vat_info['is_vat_payer'] = tax_profile.is_vat_payer
+                customer_vat_info['reverse_charge_eligible'] = tax_profile.reverse_charge_eligible
+                # Pass custom rate if explicitly set (None means "use country default")
+                if tax_profile.vat_rate is not None:
+                    customer_vat_info['custom_vat_rate'] = tax_profile.vat_rate
+            except (ObjectDoesNotExist, AttributeError):
+                pass  # Profile doesn't exist yet — use defaults
         vat_result = OrderVATCalculator.calculate_vat(
             subtotal_cents=subtotal_cents,
             customer_info=customer_vat_info
@@ -347,6 +360,18 @@ class OrderService:
                         'customer_id': str(data.customer.id),
                         'order_id': None,
                     }
+
+                    # Inject per-customer overrides (must match calculate_order_totals)
+                    if hasattr(data.customer, 'tax_profile'):
+                        try:
+                            tax_profile = data.customer.tax_profile
+                            customer_vat_info['is_vat_payer'] = tax_profile.is_vat_payer
+                            customer_vat_info['reverse_charge_eligible'] = tax_profile.reverse_charge_eligible
+                            if tax_profile.vat_rate is not None:
+                                customer_vat_info['custom_vat_rate'] = tax_profile.vat_rate
+                        except (ObjectDoesNotExist, AttributeError):
+                            pass  # No tax profile yet — use defaults
+
                     vat_result = OrderVATCalculator.calculate_vat(
                         subtotal_cents=subtotal_cents,
                         customer_info=customer_vat_info

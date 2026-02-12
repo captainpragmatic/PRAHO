@@ -197,8 +197,8 @@ def customer_invoice_detail_api(request: HttpRequest, customer: Customer, invoic
                     "kind": "service",
                     "quantity": "1.000",
                     "unit_price_cents": 10000,
-                    "tax_rate": "0.1900",
-                    "line_total_cents": 11900
+                    "tax_rate": "0.2100",
+                    "line_total_cents": 12100
                 }
             ],
             "pdf_url": "/invoices/pdf/INV-000123.pdf",
@@ -518,8 +518,8 @@ def customer_proforma_detail_api(request: HttpRequest, customer: Customer, profo
                     "kind": "service",
                     "quantity": "1.000",
                     "unit_price_cents": 10000,
-                    "tax_rate": "0.1900",
-                    "line_total_cents": 11900
+                    "tax_rate": "0.2100",
+                    "line_total_cents": 12100
                 }
             ],
             "pdf_url": "/proformas/pdf/PRO-000123.pdf",

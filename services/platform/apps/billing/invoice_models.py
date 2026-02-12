@@ -328,7 +328,7 @@ class InvoiceLine(models.Model):
     quantity = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal("1.000"))
     unit_price_cents = models.BigIntegerField(default=0)
     tax_rate = models.DecimalField(
-        max_digits=5, decimal_places=4, default=Decimal("0.0000"), help_text=_("Tax rate as decimal (0.19 for 19%)")
+        max_digits=5, decimal_places=4, default=Decimal("0.0000"), help_text=_("Tax rate as decimal (0.21 for 21%)")
     )
     tax_cents = models.BigIntegerField(default=0, help_text=_("Tax amount in cents"))
     line_total_cents = models.BigIntegerField(default=0)

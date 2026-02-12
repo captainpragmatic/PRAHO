@@ -54,8 +54,8 @@ class RefundServiceTestCase(TestCase):
             customer=self.customer,
             currency=self.currency,
             subtotal_cents=10000,  # 100.00 RON
-            tax_cents=1900,        # 19.00 RON (19% VAT)
-            total_cents=11900,     # 119.00 RON
+            tax_cents=2100,        # 21.00 RON (21% VAT)
+            total_cents=12100,     # 121.00 RON
             status='completed',
             customer_email='test@company.com',
             customer_name=self.customer.company_name
@@ -69,8 +69,8 @@ class RefundServiceTestCase(TestCase):
             status='paid',
             currency=self.currency,
             subtotal_cents=10000,
-            tax_cents=1900,
-            total_cents=11900
+            tax_cents=2100,
+            total_cents=12100
         )
         
         # Link order to invoice
@@ -83,7 +83,7 @@ class RefundServiceTestCase(TestCase):
             customer=self.customer,
             invoice=self.invoice,
             status='succeeded',
-            amount_cents=11900,
+            amount_cents=12100,
             currency=self.currency,
             gateway_txn_id='test_txn_123'
         )
@@ -173,7 +173,7 @@ class RefundServiceTestCase(TestCase):
         # Attempt refund larger than order total
         refund_data: RefundData = {
             'refund_type': RefundType.PARTIAL,
-            'amount_cents': 20000,  # More than order total of 11900
+            'amount_cents': 20000,  # More than order total of 12100
             'reason': RefundReason.CUSTOMER_REQUEST,
             'notes': 'Invalid amount',
             'initiated_by': self.user,
@@ -243,7 +243,7 @@ class RefundServiceTestCase(TestCase):
         eligibility = result.unwrap()
         
         self.assertTrue(eligibility['is_eligible'])
-        self.assertEqual(eligibility['max_refund_amount_cents'], 11900)
+        self.assertEqual(eligibility['max_refund_amount_cents'], 12100)
         self.assertEqual(eligibility['already_refunded_cents'], 0)
         
         # Check partial refund eligibility with amount

@@ -177,8 +177,8 @@
   "VAT Calculation Function": {
     "prefix": "vat_calculation",
     "body": [
-      "def calculate_vat(amount: Amount, vat_rate: float = 0.19) -> dict[str, Amount]:",
-      "    \"\"\"Calculate Romanian VAT (19%) from base amount.\"\"\"",
+      "def calculate_vat(amount: Amount, vat_rate: float = 0.21) -> dict[str, Amount]:",
+      "    \"\"\"Calculate Romanian VAT (21%) from base amount.\"\"\"",
       "    vat_amount = round(amount * vat_rate, 2)",
       "    total_amount = amount + vat_amount",
       "    ",

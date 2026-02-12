@@ -14,7 +14,7 @@
 ### Key Features
 
 - **Customer Management** - Multi-user accounts with role-based access and soft deletes
-- **Romanian Billing** - 19% VAT, sequential invoice numbering, e-Factura XML generation
+- **EU VAT Billing** - All 27 EU country rates, Romanian 21% (Aug 2025), reverse charge for EU B2B, e-Factura XML
 - **Service Provisioning** - Virtualmin integration with two-phase provisioning and rollback
 - **Support System** - SLA-based ticket management with time tracking
 - **Domain Management** - Multi-registrar support (.ro via ROTLD, international)
@@ -165,13 +165,17 @@ See `.env.example` for the complete list with documentation.
 - **Testing**: Django test runner + pytest, Playwright (E2E)
 - **Deployment**: Docker, Ansible, Terraform (in `deploy/` and `services/platform/infrastructure/`)
 
-## Romanian Compliance
+## VAT & Romanian Compliance
 
-PRAHO is built specifically for Romanian hosting providers:
+PRAHO is built for Romanian hosting providers with **full EU VAT support**:
 
+- **All 27 EU VAT rates** - Centralized `TaxService` with temporal validity (rate changes tracked by date)
+- **EU B2B reverse charge** - 0% VAT for intra-EU business transactions with valid VAT number
+- **EU B2C destination rate** - Automatic country-specific rate for consumer sales (e.g., DE 19%, HU 27%)
+- **Non-EU export** - 0% VAT for customers outside the EU
+- **Romanian 21% VAT** - Updated for Emergency Ordinance 156/2024 (Aug 2025), reduced rate consolidated to 11%
 - **e-Factura** - Electronic invoicing via ANAF (Romanian tax authority)
 - **CUI/VAT validation** - Romanian company identifier validation
-- **19% VAT** - Automatic calculation with EU cross-border reverse charge
 - **Sequential invoice numbering** - Required by Romanian tax law
 - **GDPR compliance** - Romanian Law 190/2018, data export/erasure, consent tracking
 - **Bilingual templates** - Romanian and English for all customer communications

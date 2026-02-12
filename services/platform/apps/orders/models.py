@@ -301,7 +301,7 @@ class OrderItem(models.Model):
         max_digits=5,
         decimal_places=4,
         default=Decimal("0.0000"),
-        help_text=_("Tax rate applied (e.g., 0.1900 for 19%)"),
+        help_text=_("Tax rate applied (e.g., 0.2100 for 21%)"),
     )
     tax_cents = models.BigIntegerField(default=0, help_text=_("Tax amount in cents"))
 

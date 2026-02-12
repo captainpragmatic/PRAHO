@@ -142,10 +142,10 @@ class EFacturaSettingKeys:
     COMPANY_BANK_ACCOUNT = "efactura.company.bank_account"
     COMPANY_BANK_NAME = "efactura.company.bank_name"
 
-    # VAT rates (Romanian rates as of 2024)
+    # VAT rates (Romanian rates as of Aug 2025)
     VAT_RATE_STANDARD = "efactura.vat.rate_standard"
-    VAT_RATE_REDUCED_1 = "efactura.vat.rate_reduced_1"  # 9%
-    VAT_RATE_REDUCED_2 = "efactura.vat.rate_reduced_2"  # 5%
+    VAT_RATE_REDUCED_1 = "efactura.vat.rate_reduced_1"  # 11% (consolidated)
+    VAT_RATE_REDUCED_2 = "efactura.vat.rate_reduced_2"  # 11% (consolidated)
     VAT_RATE_ZERO = "efactura.vat.rate_zero"
 
     # B2B/B2C settings
@@ -221,10 +221,10 @@ EFACTURA_DEFAULTS: dict[str, Any] = {
     EFacturaSettingKeys.COMPANY_BANK_ACCOUNT: "",
     EFacturaSettingKeys.COMPANY_BANK_NAME: "",
 
-    # Romanian VAT rates (as of 2024)
-    EFacturaSettingKeys.VAT_RATE_STANDARD: "19.00",    # Standard rate
-    EFacturaSettingKeys.VAT_RATE_REDUCED_1: "9.00",    # Hotels, restaurants, cultural events
-    EFacturaSettingKeys.VAT_RATE_REDUCED_2: "5.00",    # Food, books, medicine, housing
+    # Romanian VAT rates (updated Aug 2025 — Emergency Ordinance 156/2024)
+    EFacturaSettingKeys.VAT_RATE_STANDARD: "21.00",    # Standard rate (was 19%)
+    EFacturaSettingKeys.VAT_RATE_REDUCED_1: "11.00",   # Consolidated reduced rate (was 9%)
+    EFacturaSettingKeys.VAT_RATE_REDUCED_2: "11.00",   # Consolidated reduced rate (was 5%)
     EFacturaSettingKeys.VAT_RATE_ZERO: "0.00",         # Exports, intra-EU supplies
 
     # B2B/B2C
@@ -302,25 +302,18 @@ class VATRateConfig:
 # Romanian VAT rates with categories
 ROMANIAN_VAT_RATES: dict[str, VATRateConfig] = {
     "standard": VATRateConfig(
-        rate=Decimal("19.00"),
+        rate=Decimal("21.00"),
         category=VATCategory.STANDARD,
         name="Standard Rate",
-        description="Standard Romanian VAT rate",
+        description="Standard Romanian VAT rate (updated Aug 2025)",
         applies_to=["general", "services", "goods"],
     ),
-    "reduced_9": VATRateConfig(
-        rate=Decimal("9.00"),
+    "reduced": VATRateConfig(
+        rate=Decimal("11.00"),
         category=VATCategory.STANDARD,
-        name="Reduced Rate (9%)",
-        description="Hotels, restaurants, cultural events, sports",
-        applies_to=["hospitality", "culture", "sports", "food_service"],
-    ),
-    "reduced_5": VATRateConfig(
-        rate=Decimal("5.00"),
-        category=VATCategory.STANDARD,
-        name="Reduced Rate (5%)",
-        description="Food, books, medicine, housing, prosthetics",
-        applies_to=["food", "books", "medicine", "housing", "prosthetics"],
+        name="Reduced Rate (11%)",
+        description="Consolidated reduced rate: hospitality, food, books, medicine, housing",
+        applies_to=["hospitality", "culture", "sports", "food_service", "food", "books", "medicine", "housing", "prosthetics"],
     ),
     "zero": VATRateConfig(
         rate=Decimal("0.00"),
@@ -544,8 +537,9 @@ class EFacturaSettings:
         # Check for custom rates in settings
         rate_key_map = {
             "standard": EFacturaSettingKeys.VAT_RATE_STANDARD,
-            "reduced_9": EFacturaSettingKeys.VAT_RATE_REDUCED_1,
-            "reduced_5": EFacturaSettingKeys.VAT_RATE_REDUCED_2,
+            "reduced": EFacturaSettingKeys.VAT_RATE_REDUCED_1,
+            "reduced_9": EFacturaSettingKeys.VAT_RATE_REDUCED_1,   # legacy alias
+            "reduced_5": EFacturaSettingKeys.VAT_RATE_REDUCED_2,   # legacy alias
             "zero": EFacturaSettingKeys.VAT_RATE_ZERO,
         }
 

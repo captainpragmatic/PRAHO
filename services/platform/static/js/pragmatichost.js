@@ -364,7 +364,7 @@ class PragmaticHostCRM {
   // ROMANIAN BUSINESS UTILITIES
   // ===============================================================================
 
-  calculateVAT(netAmount, vatRate = 19) {
+  calculateVAT(netAmount, vatRate = 21) {
     const net = parseFloat(netAmount);
     const vat = (net * vatRate) / 100;
     const total = net + vat;

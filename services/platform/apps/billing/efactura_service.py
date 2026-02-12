@@ -459,7 +459,7 @@ class EFacturaXMLGenerator:
         if invoice.subtotal_cents > 0:
             tax_rate = (invoice.tax_cents / invoice.subtotal_cents) * 100
         else:
-            tax_rate = 19.0  # Default Romanian VAT
+            tax_rate = 21.0  # Default Romanian VAT (Aug 2025)
         ET.SubElement(tax_category, f"{{{cbc}}}Percent").text = f"{tax_rate:.2f}"
 
         tax_scheme = ET.SubElement(tax_category, f"{{{cac}}}TaxScheme")
