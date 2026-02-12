@@ -111,7 +111,7 @@ class Command(BaseCommand):
             "billing.proforma_validity_days": "Number of days a proforma invoice remains valid",
             "billing.payment_grace_period_days": "Grace period in days after invoice due date",
             "billing.invoice_payment_terms_days": "Default number of days until invoice payment is due",
-            "billing.vat_rate": "Romanian VAT rate (19%)",
+            "billing.vat_rate": "Romanian VAT rate (21%)",
             "users.session_timeout_minutes": "User session timeout in minutes",
             "users.mfa_required_for_staff": "Require MFA for all staff accounts",
             # users.password_reset_timeout_hours removed — Django's PASSWORD_RESET_TIMEOUT is authoritative

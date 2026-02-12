@@ -28,9 +28,9 @@ CUI_MAX_LENGTH: Final[int] = 10  # Maximum CUI length
 # ── Billing Terms (defaults only — authoritative source is SettingsService) ──
 # Use SettingsService.get_integer_setting('billing.<key>') in new code.
 # These module-level values exist for backward compatibility only.
-PAYMENT_GRACE_PERIOD_DAYS: int = 5           # → billing.payment_grace_period_days
-INVOICE_DUE_DAYS_DEFAULT: int = 14           # → billing.invoice_payment_terms_days
-PROFORMA_VALIDITY_DAYS: int = 30             # → billing.proforma_validity_days
+PAYMENT_GRACE_PERIOD_DAYS: Final[int] = 5           # → billing.payment_grace_period_days
+INVOICE_DUE_DAYS_DEFAULT: Final[int] = 14           # → billing.invoice_payment_terms_days
+PROFORMA_VALIDITY_DAYS: Final[int] = 30             # → billing.proforma_validity_days
 
 # Romanian e-Factura compliance
 EFACTURA_BATCH_SIZE: Final[int] = 100  # Max invoices per e-Factura batch

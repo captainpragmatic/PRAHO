@@ -40,6 +40,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods, require_POST
 
 from apps.billing.config import get_invoice_payment_terms_days
+from apps.common.tax_service import TaxService
 from apps.billing.pdf_generators import RomanianInvoicePDFGenerator, RomanianProformaPDFGenerator
 from apps.common.decorators import billing_staff_required, can_edit_proforma, rate_limit, staff_required
 from apps.common.mixins import get_search_context
@@ -710,7 +711,7 @@ def proforma_create(request: HttpRequest) -> HttpResponse:
     customers = _get_customers_for_edit_form(request.user)
     context = {
         "customers": customers,
-        "vat_rate": Decimal("21.00"),  # Romanian standard VAT (Aug 2025)
+        "vat_rate": TaxService.get_vat_rate("RO", as_decimal=False),
         "document_type": "proforma",
     }
     return render(request, "billing/proforma_form.html", context)
@@ -1075,12 +1076,14 @@ def _parse_line_unit_price(request_data: dict[str, Any], line_counter: int) -> t
 def _parse_line_vat_rate(request_data: dict[str, Any], line_counter: int) -> tuple[Decimal, list[str]]:
     """Parse and validate line item VAT rate."""
     errors = []
+    default_rate = TaxService.get_vat_rate("RO", as_decimal=False)
+    default_rate_str = str(int(default_rate))
     try:
-        vat_rate_str = (request_data.get(f"line_{line_counter}_vat_rate") or "21").strip()
-        vat_rate = Decimal(vat_rate_str) if vat_rate_str else Decimal("21")
+        vat_rate_str = (request_data.get(f"line_{line_counter}_vat_rate") or default_rate_str).strip()
+        vat_rate = Decimal(vat_rate_str) if vat_rate_str else default_rate
     except (ValueError, TypeError, decimal.InvalidOperation):
-        vat_rate = Decimal("21")
-        errors.append(f"Line {line_counter + 1}: Invalid VAT rate '{vat_rate_str}', using 21%")
+        vat_rate = default_rate
+        errors.append(f"Line {line_counter + 1}: Invalid VAT rate '{vat_rate_str}', using {default_rate_str}%")
     return vat_rate, errors
 
 

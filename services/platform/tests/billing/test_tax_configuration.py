@@ -794,21 +794,8 @@ class HardcodedVATGuardTests(TestCase):
             )
             self.fail(msg)
 
-    def test_constants_py_has_no_vat_rate(self) -> None:
-        """Verify constants.py does NOT contain any VAT rate definition."""
-        constants_file = Path(__file__).resolve().parent.parent.parent / "apps" / "common" / "constants.py"
-        content = constants_file.read_text()
-
-        # Should not have ROMANIAN_VAT_RATE as a variable definition
-        for line in content.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("#"):
-                continue
-            self.assertNotRegex(
-                stripped,
-                r"^ROMANIAN_VAT_RATE\s*[:=]",
-                "constants.py should not define ROMANIAN_VAT_RATE — use TaxService",
-            )
+    # test_constants_py_has_no_vat_rate removed — covered by
+    # tests/common/test_constants_consistency.py::ConstantsVATGuardTest
 
     def test_no_hardcoded_vat_in_templates(self) -> None:
         """No stale 19% VAT rates in HTML templates."""

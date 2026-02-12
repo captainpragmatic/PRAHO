@@ -158,12 +158,14 @@ def log_price_changes(sender: type[ProductPrice], instance: ProductPrice, create
 
     Important for:
     - Grandfathered pricing for existing customers
-    - VAT compliance (19% Romanian rate)
+    - VAT compliance (Romanian rate via TaxService)
     - Promotional pricing audits
     - Billing accuracy
     """
     try:
         if created:
+            from apps.common.tax_service import TaxService  # noqa: PLC0415
+
             # New price created - log initial pricing setup
             romanian_context = {
                 "currency": instance.currency.code,
