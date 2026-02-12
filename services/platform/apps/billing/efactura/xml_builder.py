@@ -240,7 +240,22 @@ class BaseUBLBuilder:
         return TAX_CATEGORY_STANDARD
 
     def _get_tax_rate(self) -> Decimal:
-        """Get tax rate as percentage from centralized TaxService."""
+        """Get tax rate as percentage from the invoice's own stored data.
+
+        Uses the invoice's line-level tax rates (frozen at creation time) to
+        preserve document immutability. Falls back to TaxService only when
+        the invoice has no lines or no stored rate.
+        """
+        # Try to derive from invoice lines (frozen at invoice creation)
+        lines = getattr(self.invoice, 'lines', None)
+        if lines is not None:
+            first_line = lines.first() if hasattr(lines, 'first') else None
+            if first_line is not None:
+                tax_rate = getattr(first_line, 'tax_rate', None)
+                if tax_rate is not None:
+                    return (Decimal(str(tax_rate)) * 100).quantize(Decimal("0.01"))
+
+        # Fallback: current rate from TaxService (only for invoices with no lines)
         from apps.common.tax_service import TaxService
         return TaxService.get_vat_rate('RO', as_decimal=False)
 

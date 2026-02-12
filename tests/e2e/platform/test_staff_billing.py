@@ -789,3 +789,76 @@ def test_staff_billing_system_responsive_breakpoints(page: Page) -> None:
         assert mobile_pass, "Staff billing system should work on mobile viewport"
 
         print("  ✅ Staff billing system validated across all responsive breakpoints")
+
+
+# ===============================================================================
+# PROFORMA VAT RATE COMPLIANCE TESTS
+# ===============================================================================
+
+def test_proforma_form_vat_rate_dropdown_shows_21_percent(page: Page) -> None:
+    """
+    Test that the proforma creation form shows the correct Romanian VAT rates.
+
+    Regression guard for the 19% → 21% VAT transition (Aug 2025).
+    Verifies:
+    1. VAT dropdown default is 21% (Standard)
+    2. Reduced rate is 11% (not stale 9% or 5%)
+    3. No stale 19% option exists
+    """
+    print("🧪 Testing proforma form VAT rate dropdown (21% compliance)")
+
+    with ComprehensivePageMonitor(page, "proforma VAT rate compliance",
+                                 check_console=False,
+                                 check_network=False,
+                                 check_html=False,
+                                 check_css=False,
+                                 check_accessibility=False):
+        ensure_fresh_platform_session(page)
+        assert login_platform_user(page), "Must log in to platform"
+        require_authentication(page)
+
+        # Navigate to proforma create
+        page.goto(f"{PLATFORM_BASE_URL}/billing/proformas/create/")
+        page.wait_for_load_state("networkidle")
+
+        assert "/billing/proformas/create" in page.url, \
+            f"Should be on proforma create page, got: {page.url}"
+        print("  ✅ Proforma create page loaded")
+
+        # Find VAT rate dropdown(s) — line items have select with name like 'line_N_vat_rate'
+        vat_selects = page.locator("select").filter(
+            has=page.locator("option:has-text('21%')")
+        )
+        count = vat_selects.count()
+        assert count > 0, "Should find at least one VAT rate dropdown with 21% option"
+        print(f"  ✅ Found {count} VAT rate dropdown(s)")
+
+        # Check the first VAT dropdown
+        vat_select = vat_selects.first
+        selected_value = vat_select.input_value()
+        assert selected_value == "21", \
+            f"Default VAT rate should be 21, got: {selected_value}"
+        print("  ✅ Default value is 21 (Standard)")
+
+        # Verify all options are correct (21%, 11%, 0% — no stale 19%, 9%, 5%)
+        options = vat_select.locator("option").all_text_contents()
+        print(f"  Options: {options}")
+
+        assert any("21%" in opt for opt in options), "Must have 21% Standard option"
+        assert any("11%" in opt for opt in options), "Must have 11% Reduced option"
+        assert any("0%" in opt for opt in options), "Must have 0% Exempt option"
+
+        # Stale rate guard
+        for opt in options:
+            assert "19%" not in opt, f"Stale 19% rate found in dropdown: {opt}"
+            assert "9%" not in opt or "19%" in opt, f"Stale 9% reduced rate found: {opt}"
+            assert "5%" not in opt, f"Stale 5% super-reduced rate found: {opt}"
+
+        print("  ✅ No stale VAT rates in dropdown")
+
+        # Verify no 19% text anywhere on the page
+        body_text = page.inner_text("body")
+        assert "19%" not in body_text, "Page should not contain stale '19%' text"
+        print("  ✅ No stale '19%' text on the page")
+
+        print("  ✅ Proforma VAT rate compliance verified")

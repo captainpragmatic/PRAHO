@@ -177,8 +177,8 @@ class OrderCalculationService:
                 tax_profile = customer.tax_profile
                 customer_vat_info['is_vat_payer'] = tax_profile.is_vat_payer
                 customer_vat_info['reverse_charge_eligible'] = tax_profile.reverse_charge_eligible
-                # Only pass custom rate if it differs from the standard default
-                if tax_profile.vat_rate and tax_profile.vat_rate != Decimal("21.00"):
+                # Pass custom rate if explicitly set (None means "use country default")
+                if tax_profile.vat_rate is not None:
                     customer_vat_info['custom_vat_rate'] = tax_profile.vat_rate
             except (ObjectDoesNotExist, AttributeError):
                 pass  # Profile doesn't exist yet — use defaults
@@ -367,7 +367,7 @@ class OrderService:
                             tax_profile = data.customer.tax_profile
                             customer_vat_info['is_vat_payer'] = tax_profile.is_vat_payer
                             customer_vat_info['reverse_charge_eligible'] = tax_profile.reverse_charge_eligible
-                            if tax_profile.vat_rate and tax_profile.vat_rate != Decimal("21.00"):
+                            if tax_profile.vat_rate is not None:
                                 customer_vat_info['custom_vat_rate'] = tax_profile.vat_rate
                         except (ObjectDoesNotExist, AttributeError):
                             pass  # No tax profile yet — use defaults
