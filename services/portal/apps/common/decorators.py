@@ -4,6 +4,7 @@ Comprehensive role-based access control and authentication verification.
 """
 
 import logging
+import time
 from collections.abc import Callable
 from functools import wraps
 from typing import Any
@@ -16,6 +17,9 @@ from django.utils.translation import gettext as _
 from apps.api_client.services import PlatformAPIError, api_client
 
 logger = logging.getLogger(__name__)
+
+# TTL for cached memberships — force refresh after this many seconds
+_MEMBERSHIP_CACHE_TTL = 300  # 5 minutes
 
 
 def _get_selected_customer_id(request: HttpRequest) -> str | None:
@@ -39,10 +43,16 @@ def _fetch_user_memberships(request: HttpRequest) -> list[dict]:
             'customer_id': user_id,
             'action': 'get_user_customers',
         }, user_id=user_id)
-        logger.info(f"🔍 [Decorator] Membership API response: {response}")
-        if response and response.get('success') and 'results' in response:
+        success = response.get('success') if isinstance(response, dict) else None
+        results = response.get('results') if isinstance(response, dict) else None
+        logger.info(
+            "🔍 [Decorator] Membership API: success=%s, results_count=%s",
+            success, len(results) if isinstance(results, list) else 'n/a',
+        )
+        logger.debug("🔍 [Decorator] Membership API raw response: %s", response)
+        if response and success and results:
             memberships = []
-            for customer in response['results']:
+            for customer in results:
                 memberships.append({
                     'customer_id': customer.get('id'),
                     'customer_name': customer.get('name', customer.get('company_name', '')),
@@ -50,9 +60,11 @@ def _fetch_user_memberships(request: HttpRequest) -> list[dict]:
                     'company_name': customer.get('company_name', ''),
                     'is_primary': customer.get('is_primary', False),
                 })
-            if memberships:
-                request.session['user_memberships'] = memberships
-                logger.info(f"🔍 [Decorator] Stored {len(memberships)} memberships in session")
+            # Always overwrite — including empty list — so revoked memberships
+            # don't linger in the session cache.
+            request.session['user_memberships'] = memberships
+            request.session['user_memberships_fetched_at'] = time.time()
+            logger.info("🔍 [Decorator] Stored %d memberships in session", len(memberships))
             return memberships
     except Exception as e:
         logger.error(f"🔥 [Decorator] Failed to fetch memberships: {e}")
@@ -60,20 +72,29 @@ def _fetch_user_memberships(request: HttpRequest) -> list[dict]:
 
 
 def _get_user_role_for_customer(request: HttpRequest, customer_id: str) -> str | None:
-    """Get user's role for specific customer from cached memberships"""
+    """Get user's role for specific customer from cached memberships.
+
+    Uses a TTL-based cache: if memberships were fetched more than
+    _MEMBERSHIP_CACHE_TTL seconds ago, force a fresh fetch so that
+    revoked or changed roles are picked up promptly.
+    """
     memberships = request.session.get('user_memberships', [])
-    if not memberships:
+    fetched_at = request.session.get('user_memberships_fetched_at', 0)
+    cache_expired = (time.time() - fetched_at) > _MEMBERSHIP_CACHE_TTL
+
+    # Refresh if cache is empty or expired
+    if not memberships or cache_expired:
         memberships = _fetch_user_memberships(request)
+
     for membership in memberships:
         if str(membership.get('customer_id')) == str(customer_id):
             return membership.get('role')
 
-    # Customer not found in cached memberships — force a fresh fetch from Platform API.
-    # This handles revoked memberships: stale session cache may still list the customer,
-    # but a fresh fetch will reflect the current state.
-    if memberships:
-        fresh_memberships = _fetch_user_memberships(request)
-        for membership in fresh_memberships:
+    # Customer not found — force one more fresh fetch in case we had stale data.
+    # Skip if cache already expired (we just fetched above).
+    if not cache_expired and memberships:
+        memberships = _fetch_user_memberships(request)
+        for membership in memberships:
             if str(membership.get('customer_id')) == str(customer_id):
                 return membership.get('role')
 
