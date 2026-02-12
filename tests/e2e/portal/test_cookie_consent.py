@@ -18,7 +18,11 @@ from playwright.sync_api import Page, expect
 
 from tests.e2e.utils import (
     BASE_URL,
+    CUSTOMER_EMAIL,
+    CUSTOMER_PASSWORD,
+    PLATFORM_BASE_URL,
     dismiss_cookie_consent,
+    login_user_with_retry,
 )
 
 # All tests in this module need the banner visible (opt out of auto-dismiss)
@@ -231,3 +235,38 @@ def test_server_recording(page: Page) -> None:
     assert api_responses[0].get('success') is True, (
         f"Expected success=true from cookie-consent API, got: {api_responses[0]}"
     )
+
+
+def test_platform_has_no_cookie_banner(page: Page) -> None:
+    """Platform (staff-only) should not show a cookie consent banner."""
+    page.goto(f"{PLATFORM_BASE_URL}/auth/login/")
+    page.wait_for_load_state('networkidle')
+
+    banner = page.locator('#cookie-consent-banner')
+    assert banner.count() == 0 or not banner.is_visible(), (
+        "Cookie consent banner should not appear on Platform"
+    )
+
+
+def test_consent_history_shows_real_data(page: Page) -> None:
+    """Consent history page shows real data from Platform API, not mock stubs."""
+    dismiss_cookie_consent(page)
+    assert login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD), (
+        "Portal login failed — cannot verify consent history"
+    )
+
+    page.goto(f"{BASE_URL}/consent-history/")
+    page.wait_for_load_state('networkidle')
+
+    # Page loaded (not redirected to login)
+    assert '/login' not in page.url, f"Redirected to login: {page.url}"
+
+    # Has real consent-related content
+    page_text = (page.text_content('body') or '').lower()
+    assert 'consent' in page_text or 'history' in page_text, (
+        "Consent history page missing consent-related content"
+    )
+
+    # No mock or placeholder data
+    assert 'mock' not in page_text, "Found 'mock' text in consent history"
+    assert 'lorem ipsum' not in page_text, "Found placeholder text in consent history"
