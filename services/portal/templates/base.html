@@ -170,11 +170,16 @@
                 © {% now "Y" %} PRAHO Portal - {% trans 'PRAHO Really Automates Hosting Operations' %}
               </p>
               <p class="mt-2 text-xs">
-                <span class="text-blue-400">Django 5.2</span> | 
-                <span class="text-green-400">Python 3.13</span> | 
-                <span class="text-purple-400">PostgreSQL 16+</span> | 
-                <span class="text-yellow-400">HTMX</span> | 
+                <span class="text-blue-400">Django 5.2</span> |
+                <span class="text-green-400">Python 3.13</span> |
+                <span class="text-purple-400">PostgreSQL 16+</span> |
+                <span class="text-yellow-400">HTMX</span> |
                 <span class="text-cyan-400">{% trans 'Version' %} 1.0.0</span>
+              </p>
+              <p class="mt-2 text-xs space-x-3">
+                <a href="{% url 'cookie_policy' %}" class="text-slate-500 hover:text-slate-300 transition-colors">{% trans 'Cookie Policy' %}</a>
+                <span class="text-slate-600">|</span>
+                <a href="#" data-show-cookie-preferences class="text-slate-500 hover:text-slate-300 transition-colors">{% trans 'Cookie Preferences' %}</a>
               </p>
             </div>
           </div>
@@ -313,8 +318,20 @@
                 event.detail.headers['X-CSRFToken'] = token;
             }
         });
+
+        // Cookie preferences link handler
+        document.addEventListener('click', function(e) {
+            if (e.target.closest('[data-show-cookie-preferences]')) {
+                e.preventDefault();
+                if (window.showCookiePreferences) {
+                    window.showCookiePreferences();
+                }
+            }
+        });
     </script>
     
     {% block extra_js %}{% endblock %}
+
+    {% include "components/cookie_consent_banner.html" %}
 </body>
 </html>

@@ -4,11 +4,13 @@ DoS protection and brute force prevention for authentication endpoints.
 """
 
 import logging
+import os
 import random
 import time
 from collections.abc import Callable
 from typing import ClassVar
 
+from django.conf import settings
 from django.core.cache import cache
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils.translation import gettext as _
@@ -52,6 +54,15 @@ class AuthenticationRateLimitMiddleware:
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
         """Process request with rate limiting for authentication endpoints"""
+
+        # Respect RATELIMIT_ENABLE setting (disabled during E2E testing)
+        # Check Django settings first, fall back to env var for runtime override
+        ratelimit_setting = getattr(settings, "RATELIMIT_ENABLE", None)
+        if ratelimit_setting is not None:
+            if not ratelimit_setting:
+                return self.get_response(request)
+        elif os.environ.get("RATELIMIT_ENABLE", "true").lower() == "false":
+            return self.get_response(request)
 
         # Check if this is an authentication endpoint
         if not self._is_auth_endpoint(request):
@@ -262,6 +273,15 @@ class APIRateLimitMiddleware:
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
         """Process request with general API rate limiting"""
+
+        # Respect RATELIMIT_ENABLE setting (disabled during E2E testing)
+        # Check Django settings first, fall back to env var for runtime override
+        ratelimit_setting = getattr(settings, "RATELIMIT_ENABLE", None)
+        if ratelimit_setting is not None:
+            if not ratelimit_setting:
+                return self.get_response(request)
+        elif os.environ.get("RATELIMIT_ENABLE", "true").lower() == "false":
+            return self.get_response(request)
 
         # Check if this is an API endpoint
         if not self._is_api_endpoint(request):

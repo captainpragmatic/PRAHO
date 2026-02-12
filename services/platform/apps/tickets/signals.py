@@ -10,7 +10,7 @@ from django.db import models
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 
-from apps.audit.services import TicketsAuditService
+from apps.audit.services import AuditService, TicketsAuditService
 
 from .models import Ticket
 
@@ -131,12 +131,12 @@ def _log_ticket_closed(ticket: Ticket, old_status: str, new_status: str) -> None
 
 
 def _log_status_change(ticket: Ticket, old_status: str, new_status: str) -> None:
-    """Log significant status changes"""
+    """Log significant status changes to audit trail"""
     try:
         # Log meaningful status transitions
         significant_changes = {
             ("open", "in_progress"): "agent_started_work",
-            ("in_progress", "waiting_on_customer"): "awaiting_customer_response", 
+            ("in_progress", "waiting_on_customer"): "awaiting_customer_response",
             ("waiting_on_customer", "in_progress"): "customer_responded",
             ("waiting_on_customer", "open"): "customer_responded_unassigned",
         }
@@ -145,6 +145,21 @@ def _log_status_change(ticket: Ticket, old_status: str, new_status: str) -> None
         if change_key in significant_changes:
             event_type = significant_changes[change_key]
             logger.info(f"📝 [Tickets] Status change for {ticket.ticket_number}: {old_status} -> {new_status} ({event_type})")
+
+            AuditService.log_simple_event(
+                event_type=f"ticket_status_{event_type}",
+                user=ticket.assigned_to,
+                content_object=ticket,
+                description=f"Ticket {ticket.ticket_number} status: {old_status} -> {new_status}",
+                old_values={"status": old_status},
+                new_values={"status": new_status},
+                metadata={
+                    "ticket_number": ticket.ticket_number,
+                    "customer_id": str(ticket.customer_id),
+                    "transition_type": event_type,
+                },
+                actor_type="support_system",
+            )
 
     except Exception as e:
         logger.error(f"🔥 [Tickets] Failed to log status change: {e}")

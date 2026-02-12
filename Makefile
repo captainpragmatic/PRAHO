@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install dev dev-platform dev-portal dev-all test test-platform test-portal test-integration test-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security install-frontend build-css watch-css migrate fixtures fixtures-light clean lint lint-platform lint-portal lint-security lint-credentials type-check pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod
+.PHONY: help install dev dev-platform dev-portal dev-all test test-platform test-portal test-integration test-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security install-frontend build-css watch-css migrate fixtures fixtures-light clean lint lint-platform lint-portal lint-security lint-credentials lint-audit type-check pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -257,6 +257,11 @@ test-e2e:
 	@curl -sf http://localhost:8701/login/ > /dev/null 2>&1 || (echo "❌ Portal service not running on :8701. Run 'make dev' first." && exit 1)
 	@echo "✅ Both services are running"
 	@echo "🎭 Running Playwright E2E tests..."
+	@if [ "$$RATELIMIT_ENABLE" != "false" ]; then \
+		echo "⚠️  WARNING: Rate limiting is active on the running services."; \
+		echo "   Start services with: RATELIMIT_ENABLE=false make dev"; \
+		echo "   Or use: make dev-e2e (starts services with rate limiting disabled)"; \
+	fi
 	@PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/python -m pytest tests/e2e/ -v
 	@echo "✅ E2E tests completed!"
 
@@ -329,15 +334,23 @@ fixtures-light:
 lint-platform:
 	@echo "🏗️ [Platform] Comprehensive code quality check..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "🔍 1/3: Performance & Security Analysis (Ruff)..."
+	@echo "🔍 1/4: Performance & Security Analysis (Ruff)..."
 	@cd services/platform && $(PWD)/.venv/bin/ruff check . --statistics || echo "⚠️ Ruff check skipped"
 	@echo ""
-	@echo "🏷️  2/3: Type Safety Check (MyPy)..."
+	@echo "🏷️  2/4: Type Safety Check (MyPy)..."
 	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/mypy apps/ --config-file=../../pyproject.toml 2>/dev/null || echo "⚠️ MyPy check skipped"
 	@echo ""
-	@echo "📊 3/3: Django Check..."
+	@echo "📊 3/4: Django Check..."
 	@$(PYTHON_PLATFORM_MANAGE) check --deploy --settings=config.settings.dev
+	@echo ""
+	@echo "🔒 4/4: Audit Coverage Check..."
+	@$(MAKE) lint-audit
 	@echo "✅ Platform linting complete!"
+
+lint-audit:
+	@echo "🔒 [Audit] Coverage scanner..."
+	@$(PYTHON_SHARED) scripts/audit_coverage_scan.py --min-severity=medium --exclude-tests services/platform/apps
+	@echo "✅ Audit coverage check complete!"
 
 lint-portal:
 	@echo "🌐 [Portal] Code quality check (NO database access)..."
@@ -354,8 +367,10 @@ lint:
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "📋 Phase 1: Platform service"
 	@$(MAKE) lint-platform
-	@echo "📋 Phase 2: Portal service"  
+	@echo "📋 Phase 2: Portal service"
 	@$(MAKE) lint-portal
+	@echo "📋 Phase 3: Test suppression scan (ADR-0014)"
+	@.venv/bin/python scripts/lint_test_suppressions.py --fail-on critical
 	@echo "🎉 All services linting complete!"
 
 lint-security:

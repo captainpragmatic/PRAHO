@@ -13,15 +13,15 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from django.contrib.contenttypes.models import ContentType
 from django.utils import timezone
 
-from apps.audit.models import AuditEvent
+from apps.audit.services import AuditService
 from apps.common.request_ip import get_safe_client_ip
 
 if TYPE_CHECKING:
     from django.http import HttpRequest
 
+    from apps.audit.models import AuditEvent
     from apps.infrastructure.models import (
         CloudProvider,
         NodeDeployment,
@@ -468,27 +468,27 @@ class InfrastructureAuditService:
         metadata: dict[str, Any] | None = None,
         severity: str | None = None,
         is_sensitive: bool = False,
-    ) -> AuditEvent:
-        """Create and save an audit event"""
-        content_type = ContentType.objects.get_for_model(content_object)
-
+    ) -> Any:
+        """Create and save an audit event via the central audit service"""
         if severity is None:
             severity = cls.SEVERITY_MAP.get(action, "low")
 
-        event = AuditEvent.objects.create(
-            action=action,
-            category=cls.CATEGORY,
-            severity=severity,
-            content_type=content_type,
-            object_id=str(content_object.pk),
+        audit_metadata = dict(metadata or {})
+        audit_metadata["category"] = cls.CATEGORY
+        audit_metadata["severity"] = severity
+        audit_metadata["is_sensitive"] = is_sensitive
+        if user_agent:
+            audit_metadata["user_agent"] = user_agent
+
+        event = AuditService.log_simple_event(
+            action,
             user=user,
-            ip_address=ip_address,
-            user_agent=user_agent,
+            content_object=content_object,
             description=description,
-            old_values=old_values or {},
-            new_values=new_values or {},
-            metadata=metadata or {},
-            is_sensitive=is_sensitive,
+            old_values=old_values,
+            new_values=new_values,
+            metadata=audit_metadata,
+            ip_address=ip_address,
             actor_type="user" if user else "system",
         )
 

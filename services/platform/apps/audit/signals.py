@@ -665,6 +665,79 @@ def audit_api_key_revocation(
     )
 
 
+@receiver(cookie_consent_updated)
+def audit_cookie_consent_change(
+    sender: Any,
+    consent: Any,
+    user: Any | None = None,
+    ip_address: str | None = None,
+    user_agent: str = "",
+    **kwargs: Any,
+) -> None:
+    """
+    Audit cookie consent changes — dual audit trail for GDPR compliance.
+
+    Creates BOTH:
+    1. AuditEvent — for security monitoring dashboards (category=privacy, severity=high)
+    2. ComplianceLog — for GDPR Article 7 compliance reporting
+    """
+    from .services import AuditService, ComplianceEventRequest  # noqa: PLC0415  # circular import
+
+    try:
+        categories_enabled = []
+        if consent.functional_cookies:
+            categories_enabled.append("functional")
+        if consent.analytics_cookies:
+            categories_enabled.append("analytics")
+        if consent.marketing_cookies:
+            categories_enabled.append("marketing")
+
+        identifier = user.email if user else f"cookie:{consent.cookie_id[:8]}"
+
+        _create_audit_event(
+            AuditEventCreationData(
+                action="cookie_consent_updated",
+                user=user,
+                content_object=consent,
+                new_values={
+                    "status": consent.status,
+                    "functional": consent.functional_cookies,
+                    "analytics": consent.analytics_cookies,
+                    "marketing": consent.marketing_cookies,
+                },
+                description=f"Cookie consent {consent.status} by {identifier}",
+                metadata={
+                    "gdpr_compliance": True,
+                    "consent_version": consent.consent_version,
+                    "categories_enabled": categories_enabled,
+                    "source": "portal",
+                    "ip_address": ip_address,
+                    "is_anonymous": user is None,
+                },
+            )
+        )
+
+        # Also log as compliance event for GDPR reporting
+        compliance_request = ComplianceEventRequest(
+            compliance_type="gdpr_consent",
+            reference_id=f"cookie_consent_{consent.id}",
+            description=f"Cookie consent {consent.status} by {identifier}",
+            user=user,
+            status="success",
+            evidence={
+                "consent_status": consent.status,
+                "categories_enabled": categories_enabled,
+                "consent_version": consent.consent_version,
+                "cookie_id": consent.cookie_id,
+            },
+            metadata={"ip_address": ip_address, "user_agent": user_agent[:200] if user_agent else ""},
+        )
+        AuditService.log_compliance_event(compliance_request)
+
+    except Exception as e:
+        logger.error(f"🔥 [Audit Signal] Failed to audit cookie consent change: {e}")
+
+
 @receiver(customer_context_switched)
 def audit_customer_context_switch(
     sender: Any, user: User, old_customer: Any, new_customer: Any, request: HttpRequest | None = None, **kwargs: Any

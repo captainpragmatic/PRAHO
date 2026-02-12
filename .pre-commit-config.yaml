@@ -115,6 +115,16 @@ repos:
         files: ^services/portal/.*\.py$
         pass_filenames: false
         
+      # Audit coverage regression check
+      - id: audit-coverage-check
+        name: "Security: Audit Coverage Check"
+        entry: .venv/bin/python
+        args: [scripts/audit_coverage_scan.py, --min-severity=high, --exclude-tests, services/platform/apps]
+        language: system
+        files: ^services/platform/apps/.*\.py$
+        pass_filenames: false
+        stages: [pre-commit]
+
       # Check for hardcoded credentials (warning only)
       - id: security-credentials-check
         name: "Security: Check for Hardcoded Credentials"

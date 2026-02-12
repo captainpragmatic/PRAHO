@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from django.contrib import messages
 from django.core.paginator import Paginator
@@ -21,15 +20,11 @@ from apps.billing.models import Currency
 from apps.common.decorators import admin_required, staff_required_strict
 from apps.common.mixins import get_search_context
 from apps.common.utils import json_error, json_success
+from apps.common.validators import log_security_event
 
 from .models import Product, ProductPrice
 
 logger = logging.getLogger(__name__)
-
-
-# Lightweight security event logger for tests to patch
-def log_security_event(event_type: str, details: dict[str, Any] | None = None) -> None:
-    logger.info(f"🔒 [Products] {event_type}", extra={"event_type": event_type, "details": details or {}})
 
 
 # ===============================================================================

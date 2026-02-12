@@ -1,0 +1,251 @@
+{% extends 'base.html' %}
+{% load i18n %}
+
+{% block title %}{% trans 'Cookie Policy' %} - PragmaticHost{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 max-w-4xl mx-auto">
+  <!-- Header -->
+  <div class="mb-6">
+    <h1 class="text-2xl font-bold text-white">
+      &#127850; {% trans 'Cookie Policy' %}
+    </h1>
+    <p class="mt-2 text-sm text-slate-400">
+      {% trans 'Last updated: February 2026' %}
+    </p>
+  </div>
+
+  <!-- Introduction -->
+  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
+    <div class="p-6">
+      <h2 class="text-lg font-medium text-white mb-4">{% trans 'About Cookies' %}</h2>
+      <div class="text-sm text-slate-300 space-y-3">
+        <p>
+          {% blocktrans %}
+          This website uses cookies and similar technologies to ensure its proper functioning,
+          improve your browsing experience, and analyze how you interact with our services.
+          This policy explains what cookies we use, why we use them, and how you can control them.
+          {% endblocktrans %}
+        </p>
+        <p>
+          {% blocktrans %}
+          In accordance with EU Regulation 2016/679 (GDPR) and Romanian Law 506/2004,
+          we require your explicit consent before placing any non-essential cookies on your device.
+          {% endblocktrans %}
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cookie Categories -->
+  <div class="space-y-6 mb-6">
+
+    <!-- Essential Cookies -->
+    <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg">
+      <div class="p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-medium text-white">{% trans 'Essential Cookies' %}</h2>
+          <span class="bg-green-700 text-green-100 text-xs px-2.5 py-1 rounded-full font-medium">{% trans 'Always Active' %}</span>
+        </div>
+        <p class="text-sm text-slate-300 mb-4">
+          {% blocktrans %}
+          These cookies are strictly necessary for the website to function and cannot be disabled.
+          They are set in response to actions made by you, such as logging in or filling in forms.
+          {% endblocktrans %}
+        </p>
+        <p class="text-xs text-slate-400 mb-4">
+          <strong>{% trans 'Legal Basis:' %}</strong> {% trans 'Legitimate interest (GDPR Art. 6(1)(f)) — necessary for service delivery' %}
+        </p>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm text-left">
+            <thead class="text-xs text-slate-400 border-b border-slate-700">
+              <tr>
+                <th class="py-2 pr-4">{% trans 'Cookie Name' %}</th>
+                <th class="py-2 pr-4">{% trans 'Purpose' %}</th>
+                <th class="py-2 pr-4">{% trans 'Duration' %}</th>
+                <th class="py-2">{% trans 'Provider' %}</th>
+              </tr>
+            </thead>
+            <tbody class="text-slate-300">
+              <tr class="border-b border-slate-700/50">
+                <td class="py-2 pr-4 font-mono text-xs">csrftoken</td>
+                <td class="py-2 pr-4">{% trans 'Cross-site request forgery protection' %}</td>
+                <td class="py-2 pr-4">{% trans '1 year' %}</td>
+                <td class="py-2">PragmaticHost</td>
+              </tr>
+              <tr class="border-b border-slate-700/50">
+                <td class="py-2 pr-4 font-mono text-xs">sessionid</td>
+                <td class="py-2 pr-4">{% trans 'Maintains your login session' %}</td>
+                <td class="py-2 pr-4">{% trans '2 weeks' %}</td>
+                <td class="py-2">PragmaticHost</td>
+              </tr>
+              <tr class="border-b border-slate-700/50">
+                <td class="py-2 pr-4 font-mono text-xs">cookie_consent</td>
+                <td class="py-2 pr-4">{% trans 'Stores your cookie preference choices' %}</td>
+                <td class="py-2 pr-4">{% trans '1 year' %}</td>
+                <td class="py-2">PragmaticHost</td>
+              </tr>
+              <tr>
+                <td class="py-2 pr-4 font-mono text-xs">cookie_consent_id</td>
+                <td class="py-2 pr-4">{% trans 'Anonymous consent tracking identifier' %}</td>
+                <td class="py-2 pr-4">{% trans '1 year' %}</td>
+                <td class="py-2">PragmaticHost</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Functional Cookies -->
+    <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg">
+      <div class="p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-medium text-white">{% trans 'Functional Cookies' %}</h2>
+          <span class="bg-blue-700 text-blue-100 text-xs px-2.5 py-1 rounded-full font-medium">{% trans 'Optional' %}</span>
+        </div>
+        <p class="text-sm text-slate-300 mb-4">
+          {% blocktrans %}
+          These cookies enable enhanced functionality and personalization, such as remembering
+          your language preference, timezone, and display settings. If you do not allow these
+          cookies, some or all of these features may not function properly.
+          {% endblocktrans %}
+        </p>
+        <p class="text-xs text-slate-400 mb-4">
+          <strong>{% trans 'Legal Basis:' %}</strong> {% trans 'Consent (GDPR Art. 6(1)(a))' %}
+        </p>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm text-left">
+            <thead class="text-xs text-slate-400 border-b border-slate-700">
+              <tr>
+                <th class="py-2 pr-4">{% trans 'Cookie Name' %}</th>
+                <th class="py-2 pr-4">{% trans 'Purpose' %}</th>
+                <th class="py-2 pr-4">{% trans 'Duration' %}</th>
+                <th class="py-2">{% trans 'Provider' %}</th>
+              </tr>
+            </thead>
+            <tbody class="text-slate-300">
+              <tr class="border-b border-slate-700/50">
+                <td class="py-2 pr-4 font-mono text-xs">django_language</td>
+                <td class="py-2 pr-4">{% trans 'Remembers your preferred language (RO/EN)' %}</td>
+                <td class="py-2 pr-4">{% trans '1 year' %}</td>
+                <td class="py-2">PragmaticHost</td>
+              </tr>
+              <tr>
+                <td class="py-2 pr-4 font-mono text-xs">user_preferences</td>
+                <td class="py-2 pr-4">{% trans 'Display preferences (timezone, theme)' %}</td>
+                <td class="py-2 pr-4">{% trans '1 year' %}</td>
+                <td class="py-2">PragmaticHost</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Analytics Cookies -->
+    <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg">
+      <div class="p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-medium text-white">{% trans 'Analytics Cookies' %}</h2>
+          <span class="bg-yellow-700 text-yellow-100 text-xs px-2.5 py-1 rounded-full font-medium">{% trans 'Optional' %}</span>
+        </div>
+        <p class="text-sm text-slate-300 mb-4">
+          {% blocktrans %}
+          These cookies help us understand how visitors interact with our website by collecting
+          and reporting information anonymously. This helps us improve our services and user
+          experience.
+          {% endblocktrans %}
+        </p>
+        <p class="text-xs text-slate-400 mb-4">
+          <strong>{% trans 'Legal Basis:' %}</strong> {% trans 'Consent (GDPR Art. 6(1)(a))' %}
+        </p>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm text-left">
+            <thead class="text-xs text-slate-400 border-b border-slate-700">
+              <tr>
+                <th class="py-2 pr-4">{% trans 'Cookie Name' %}</th>
+                <th class="py-2 pr-4">{% trans 'Purpose' %}</th>
+                <th class="py-2 pr-4">{% trans 'Duration' %}</th>
+                <th class="py-2">{% trans 'Provider' %}</th>
+              </tr>
+            </thead>
+            <tbody class="text-slate-300">
+              <tr>
+                <td class="py-2 pr-4 font-mono text-xs">_pk_id, _pk_ses</td>
+                <td class="py-2 pr-4">{% trans 'Privacy-focused website analytics (self-hosted)' %}</td>
+                <td class="py-2 pr-4">{% trans '13 months / 30 min' %}</td>
+                <td class="py-2">PragmaticHost (Matomo)</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Marketing Cookies -->
+    <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg">
+      <div class="p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-medium text-white">{% trans 'Marketing Cookies' %}</h2>
+          <span class="bg-red-700 text-red-100 text-xs px-2.5 py-1 rounded-full font-medium">{% trans 'Optional' %}</span>
+        </div>
+        <p class="text-sm text-slate-300 mb-4">
+          {% blocktrans %}
+          These cookies may be set through our site by advertising partners. They may be used
+          by those companies to build a profile of your interests and show you relevant adverts
+          on other sites. We currently do not use third-party marketing cookies.
+          {% endblocktrans %}
+        </p>
+        <p class="text-xs text-slate-400">
+          <strong>{% trans 'Legal Basis:' %}</strong> {% trans 'Consent (GDPR Art. 6(1)(a))' %}
+        </p>
+        <p class="text-sm text-slate-400 mt-2 italic">
+          {% trans 'No marketing cookies are currently in use.' %}
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manage Preferences -->
+  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
+    <div class="p-6">
+      <h2 class="text-lg font-medium text-white mb-4">{% trans 'Manage Your Preferences' %}</h2>
+      <p class="text-sm text-slate-300 mb-4">
+        {% blocktrans %}
+        You can change your cookie preferences at any time. Withdrawing consent is as easy
+        as giving it, as required by GDPR Article 7(3).
+        {% endblocktrans %}
+      </p>
+      <button onclick="if(window.showCookiePreferences){window.showCookiePreferences()}" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md font-medium transition-colors text-sm">
+        {% trans 'Open Cookie Preferences' %}
+      </button>
+    </div>
+  </div>
+
+  <!-- Legal Information -->
+  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg">
+    <div class="p-6">
+      <h2 class="text-lg font-medium text-white mb-4">{% trans 'Legal Information' %}</h2>
+      <div class="text-sm text-slate-300 space-y-2">
+        <p>
+          {% blocktrans %}
+          This cookie policy complies with EU Regulation 2016/679 (General Data Protection Regulation),
+          Directive 2002/58/EC (ePrivacy Directive), and Romanian Law 506/2004 on the processing of
+          personal data and privacy protection in electronic communications.
+          {% endblocktrans %}
+        </p>
+        <p>
+          {% blocktrans %}
+          For any questions about our use of cookies, please contact our Data Protection Officer
+          at privacy@pragmatichost.com.
+          {% endblocktrans %}
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

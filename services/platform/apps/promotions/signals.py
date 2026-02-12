@@ -9,11 +9,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from django.contrib.contenttypes.models import ContentType
 from django.db.models.signals import post_save, pre_delete, pre_save
 from django.dispatch import receiver
 
 from apps.audit.models import AuditEvent
+from apps.audit.services import AuditService
 
 from .models import (
     Coupon,
@@ -50,21 +50,20 @@ def create_audit_event(
     is_sensitive: bool = False,
     metadata: dict | None = None,
 ) -> AuditEvent:
-    """Create an audit event for a promotion-related action."""
-    content_type = ContentType.objects.get_for_model(instance)
+    """Create an audit event for a promotion-related action via the audit service."""
+    audit_metadata = dict(metadata or {})
+    audit_metadata["category"] = category
+    audit_metadata["severity"] = severity
+    audit_metadata["is_sensitive"] = is_sensitive
 
-    return AuditEvent.objects.create(
-        action=action,
-        content_type=content_type,
-        object_id=str(instance.pk),
-        category=category,
-        severity=severity,
-        old_values=old_values or {},
-        new_values=new_values or {},
-        description=description,
+    return AuditService.log_simple_event(
+        event_type=action,
         user=user,
-        is_sensitive=is_sensitive,
-        metadata=metadata or {},
+        content_object=instance,
+        description=description,
+        old_values=old_values,
+        new_values=new_values,
+        metadata=audit_metadata,
     )
 
 

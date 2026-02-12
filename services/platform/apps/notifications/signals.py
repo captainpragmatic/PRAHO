@@ -194,3 +194,62 @@ def handle_email_log_status_change(sender: Any, instance: Any, created: bool, **
                 "provider": instance.provider,
             },
         )
+
+
+# ===============================================================================
+# EMAIL SUPPRESSION SIGNALS
+# ===============================================================================
+
+
+@receiver(post_save, sender="notifications.EmailSuppression")
+def handle_suppression_change(sender: Any, instance: Any, created: bool, **kwargs: Any) -> None:
+    """Audit email suppression additions and changes."""
+    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        return
+
+    action = "email_suppression_added" if created else "email_suppression_updated"
+    log_security_event(
+        action,
+        {
+            "suppression_id": str(instance.id),
+            "reason": instance.reason,
+            "email_hash": instance.email_hash[:8] if instance.email_hash else None,
+        },
+    )
+
+
+@receiver(post_delete, sender="notifications.EmailSuppression")
+def handle_suppression_removed(sender: Any, instance: Any, **kwargs: Any) -> None:
+    """Audit email suppression removal."""
+    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        return
+
+    log_security_event(
+        "email_suppression_removed",
+        {
+            "suppression_id": str(instance.id),
+            "reason": instance.reason,
+        },
+    )
+
+
+# ===============================================================================
+# EMAIL PREFERENCE SIGNALS
+# ===============================================================================
+
+
+@receiver(post_save, sender="notifications.EmailPreference")
+def handle_preference_change(sender: Any, instance: Any, created: bool, **kwargs: Any) -> None:
+    """Audit notification preference changes (GDPR-relevant consent tracking)."""
+    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        return
+
+    action = "notification_preference_created" if created else "notification_preference_updated"
+    log_security_event(
+        action,
+        {
+            "preference_id": str(instance.id),
+            "customer_id": str(instance.customer_id) if instance.customer_id else None,
+            "gdpr_consent_tracking": True,
+        },
+    )

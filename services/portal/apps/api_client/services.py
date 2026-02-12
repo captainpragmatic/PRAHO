@@ -954,6 +954,49 @@ class PlatformAPIClient:
         }
         return self._make_request('POST', f'/tickets/{ticket_id}/attachments/{attachment_id}/download/', data=request_data)
 
+    # ===============================================================================
+    # GDPR API ENDPOINTS
+    # ===============================================================================
+
+    def submit_cookie_consent(self, consent_data: dict[str, Any]) -> dict[str, Any]:
+        """
+        🔒 Submit cookie consent to Platform GDPR API.
+        user_id is optional — supports anonymous visitors.
+        """
+        return self._make_request(
+            'POST',
+            '/gdpr/cookie-consent/',
+            user_id=consent_data.get('user_id'),
+            data=consent_data,
+        )
+
+    def get_consent_history_secure(self, user_id: int) -> dict[str, Any]:
+        """🔒 Get GDPR consent history for a user — HMAC BODY"""
+        return self._make_request(
+            'POST',
+            '/gdpr/consent-history/',
+            user_id=user_id,
+            data={'user_id': user_id, 'action': 'get_consent_history'},
+        )
+
+    def request_data_export_secure(self, user_id: int) -> dict[str, Any]:
+        """🔒 Request GDPR data export (Article 20) — HMAC BODY"""
+        return self._make_request(
+            'POST',
+            '/gdpr/data-export/',
+            user_id=user_id,
+            data={'user_id': user_id, 'action': 'request'},
+        )
+
+    def get_data_export_status(self, user_id: int) -> dict[str, Any]:
+        """🔒 Get data export history/status for a user — HMAC BODY"""
+        return self._make_request(
+            'POST',
+            '/gdpr/data-export/',
+            user_id=user_id,
+            data={'user_id': user_id, 'action': 'status'},
+        )
+
 
 # Singleton instance
 api_client = PlatformAPIClient()

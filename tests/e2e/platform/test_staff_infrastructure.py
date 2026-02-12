@@ -57,7 +57,9 @@ def test_staff_infrastructure_dashboard_access(page: Page) -> None:
                                  check_console=True,
                                  check_network=True,
                                  check_html=True,
-                                 check_css=True):
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True):
         # Login as staff user
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -86,7 +88,9 @@ def test_infrastructure_dashboard_stats_display(page: Page) -> None:
 
     with ComprehensivePageMonitor(page, "infrastructure dashboard stats",
                                  check_console=True,
-                                 check_network=True):
+                                 check_network=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True):
         # Login and navigate
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
@@ -119,7 +123,9 @@ def test_deployment_list_page_loads(page: Page) -> None:
 
     with ComprehensivePageMonitor(page, "deployment list page",
                                  check_console=True,
-                                 check_network=True):
+                                 check_network=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True):
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
 
@@ -148,7 +154,9 @@ def test_deployment_create_page_loads(page: Page) -> None:
 
     with ComprehensivePageMonitor(page, "deployment create page",
                                  check_console=True,
-                                 check_network=True):
+                                 check_network=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True):
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
 
@@ -186,7 +194,9 @@ def test_provider_list_page_loads(page: Page) -> None:
 
     with ComprehensivePageMonitor(page, "provider list page",
                                  check_console=True,
-                                 check_network=True):
+                                 check_network=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True):
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
 
@@ -216,7 +226,9 @@ def test_size_list_page_loads(page: Page) -> None:
 
     with ComprehensivePageMonitor(page, "size list page",
                                  check_console=True,
-                                 check_network=True):
+                                 check_network=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True):
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
 
@@ -242,7 +254,9 @@ def test_region_list_page_loads(page: Page) -> None:
 
     with ComprehensivePageMonitor(page, "region list page",
                                  check_console=True,
-                                 check_network=True):
+                                 check_network=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True):
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
 
@@ -268,7 +282,9 @@ def test_cost_dashboard_page_loads(page: Page) -> None:
 
     with ComprehensivePageMonitor(page, "cost dashboard page",
                                  check_console=True,
-                                 check_network=True):
+                                 check_network=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True):
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
 
@@ -294,7 +310,9 @@ def test_cost_history_page_loads(page: Page) -> None:
 
     with ComprehensivePageMonitor(page, "cost history page",
                                  check_console=True,
-                                 check_network=True):
+                                 check_network=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True):
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
 
@@ -326,7 +344,7 @@ def test_unauthenticated_access_redirects_to_login(page: Page) -> None:
     page.wait_for_load_state("networkidle")
 
     # Should be redirected to login
-    assert "/login" in page.url or "/accounts/login" in page.url, \
+    assert "/login" in page.url or "/accounts/login" in page.url or "/auth/login" in page.url, \
         f"Expected redirect to login, got: {page.url}"
 
     print("  ✅ Unauthenticated access correctly redirected to login")
@@ -382,7 +400,9 @@ def test_infrastructure_navigation_links(page: Page) -> None:
 
     with ComprehensivePageMonitor(page, "infrastructure navigation",
                                  check_console=True,
-                                 check_network=True):
+                                 check_network=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True):
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
 

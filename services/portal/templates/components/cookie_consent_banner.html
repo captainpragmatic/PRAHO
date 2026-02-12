@@ -1,6 +1,6 @@
 {% load i18n %}
-{# Cookie Consent Banner - GDPR Compliant #}
-{# This component should be included in base.html before closing </body> tag #}
+{# Cookie Consent Banner - GDPR Compliant (Portal) #}
+{# Included in base.html before closing </body> tag #}
 
 <div id="cookie-consent-banner"
      x-data="cookieConsent()"
@@ -12,7 +12,10 @@
      x-transition:leave="transition ease-in duration-200"
      x-transition:leave-start="opacity-100 translate-y-0"
      x-transition:leave-end="opacity-0 translate-y-4"
-     class="fixed bottom-0 inset-x-0 z-50 p-4">
+     class="fixed bottom-0 inset-x-0 z-50 p-4"
+     role="dialog"
+     aria-label="{% trans 'Cookie consent' %}"
+     aria-modal="false">
 
     <div class="max-w-4xl mx-auto bg-slate-800 rounded-lg shadow-2xl border border-slate-700 overflow-hidden">
         <!-- Main Banner -->
@@ -27,22 +30,19 @@
                         We use cookies to enhance your browsing experience, analyze site traffic, and personalize content.
                         By clicking "Accept All", you consent to our use of cookies.
                         {% endblocktrans %}
-                        <a href="{% url 'cookie_policy' %}" class="text-blue-400 hover:text-blue-300 underline">
+                        <a href="{% url 'cookie_policy' %}" class="text-blue-400 hover:text-blue-300 underline" aria-label="{% trans 'Learn more about our cookie policy' %}">
                             {% trans "Learn more" %}
                         </a>
                     </p>
                 </div>
                 <div class="flex flex-col sm:flex-row gap-2">
-                    <button @click="acceptEssential()"
-                            class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded text-sm font-medium transition-colors">
+                    <button @click="acceptEssential()" aria-label="{% trans 'Accept essential cookies only' %}" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded text-sm font-medium transition-colors">
                         {% trans "Essential Only" %}
                     </button>
-                    <button @click="showPreferences = true"
-                            class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded text-sm font-medium transition-colors">
+                    <button @click="showPreferences = true" aria-label="{% trans 'Customize cookie preferences' %}" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded text-sm font-medium transition-colors">
                         {% trans "Customize" %}
                     </button>
-                    <button @click="acceptAll()"
-                            class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-medium transition-colors">
+                    <button @click="acceptAll()" aria-label="{% trans 'Accept all cookies' %}" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-medium transition-colors">
                         {% trans "Accept All" %}
                     </button>
                 </div>
@@ -57,7 +57,7 @@
              class="p-6">
             <div class="flex items-center justify-between mb-4">
                 <h3 class="text-lg font-semibold text-white">{% trans "Cookie Preferences" %}</h3>
-                <button @click="showPreferences = false" class="text-slate-400 hover:text-white">
+                <button @click="showPreferences = false" class="text-slate-400 hover:text-white" aria-label="{% trans 'Close preferences' %}">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                     </svg>
@@ -85,12 +85,8 @@
                         </p>
                     </div>
                     <label class="relative inline-flex items-center cursor-pointer ml-4">
-                        <input type="checkbox" x-model="preferences.functional" class="sr-only peer">
-                        <div class="w-11 h-6 bg-slate-600 peer-focus:outline-none rounded-full peer
-                                    peer-checked:after:translate-x-full peer-checked:after:border-white
-                                    after:content-[''] after:absolute after:top-[2px] after:left-[2px]
-                                    after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all
-                                    peer-checked:bg-blue-600"></div>
+                        <input type="checkbox" x-model="preferences.functional" class="sr-only peer" aria-label="{% trans 'Toggle functional cookies' %}">
+                        <div class="w-11 h-6 bg-slate-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                     </label>
                 </div>
 
@@ -103,12 +99,8 @@
                         </p>
                     </div>
                     <label class="relative inline-flex items-center cursor-pointer ml-4">
-                        <input type="checkbox" x-model="preferences.analytics" class="sr-only peer">
-                        <div class="w-11 h-6 bg-slate-600 peer-focus:outline-none rounded-full peer
-                                    peer-checked:after:translate-x-full peer-checked:after:border-white
-                                    after:content-[''] after:absolute after:top-[2px] after:left-[2px]
-                                    after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all
-                                    peer-checked:bg-blue-600"></div>
+                        <input type="checkbox" x-model="preferences.analytics" class="sr-only peer" aria-label="{% trans 'Toggle analytics cookies' %}">
+                        <div class="w-11 h-6 bg-slate-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                     </label>
                 </div>
 
@@ -121,23 +113,17 @@
                         </p>
                     </div>
                     <label class="relative inline-flex items-center cursor-pointer ml-4">
-                        <input type="checkbox" x-model="preferences.marketing" class="sr-only peer">
-                        <div class="w-11 h-6 bg-slate-600 peer-focus:outline-none rounded-full peer
-                                    peer-checked:after:translate-x-full peer-checked:after:border-white
-                                    after:content-[''] after:absolute after:top-[2px] after:left-[2px]
-                                    after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all
-                                    peer-checked:bg-blue-600"></div>
+                        <input type="checkbox" x-model="preferences.marketing" class="sr-only peer" aria-label="{% trans 'Toggle marketing cookies' %}">
+                        <div class="w-11 h-6 bg-slate-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                     </label>
                 </div>
             </div>
 
             <div class="flex flex-col sm:flex-row gap-2 mt-6">
-                <button @click="rejectAll()"
-                        class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded text-sm font-medium transition-colors">
+                <button @click="rejectAll()" aria-label="{% trans 'Reject all optional cookies' %}" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded text-sm font-medium transition-colors">
                     {% trans "Reject All" %}
                 </button>
-                <button @click="savePreferences()"
-                        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-medium transition-colors flex-1">
+                <button @click="savePreferences()" aria-label="{% trans 'Save cookie preferences' %}" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-medium transition-colors flex-1">
                     {% trans "Save Preferences" %}
                 </button>
             </div>
@@ -157,29 +143,28 @@
             showBanner: false,
             showPreferences: false,
             preferences: {
-                essential: true, // Always true
+                essential: true,
                 functional: false,
                 analytics: false,
                 marketing: false
             },
 
             init() {
-                // Check if consent was already given
                 const consent = this.getConsentCookie();
                 if (!consent) {
-                    // Show banner if no consent cookie exists
                     this.showBanner = true;
                 } else {
-                    // Load saved preferences
                     this.preferences = { ...this.preferences, ...consent };
                     this.applyConsent();
                 }
 
-                // Expose method to show preferences from cookie policy page
                 window.showCookiePreferences = () => {
                     this.showBanner = true;
                     this.showPreferences = true;
                 };
+
+                // Retry any pending consent that failed to persist server-side
+                this.retryPendingConsent();
             },
 
             getConsentCookie() {
@@ -244,37 +229,33 @@
                     timestamp: new Date().toISOString()
                 };
 
+                // Set cookie + hide banner immediately (optimistic UX)
                 this.setConsentCookie(data);
                 this.applyConsent();
-                this.sendConsentToServer(data);
-
                 this.showBanner = false;
                 this.showPreferences = false;
+
+                // Persist to server; queue for retry if it fails
+                this.sendConsentToServer(data);
             },
 
             applyConsent() {
-                // Apply consent settings
-                // This is where you would enable/disable analytics, etc.
                 if (this.preferences.analytics) {
-                    // Enable analytics (e.g., Matomo)
                     this.enableAnalytics();
                 }
 
-                // Dispatch event for other scripts to react to consent changes
                 window.dispatchEvent(new CustomEvent('cookieConsentUpdated', {
                     detail: this.preferences
                 }));
             },
 
             enableAnalytics() {
-                // Example: Enable Matomo analytics
-                // This would be replaced with actual analytics initialization
                 console.log('Analytics enabled');
             },
 
             async sendConsentToServer(data) {
                 try {
-                    const response = await fetch('{% url "cookie_consent_update" %}', {
+                    const response = await fetch('/api/cookie-consent/', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
@@ -284,10 +265,40 @@
                     });
 
                     if (!response.ok) {
-                        console.error('Failed to save consent to server');
+                        this.queueForRetry(data);
+                        return;
+                    }
+
+                    const result = await response.json();
+                    if (!result.success) {
+                        // Server returned 200 but Platform persistence failed
+                        this.queueForRetry(data);
+                    } else {
+                        // Server confirmed — clear any pending retry
+                        localStorage.removeItem('pendingCookieConsent');
                     }
                 } catch (error) {
                     console.error('Error saving consent:', error);
+                    this.queueForRetry(data);
+                }
+            },
+
+            queueForRetry(data) {
+                try {
+                    localStorage.setItem('pendingCookieConsent', JSON.stringify(data));
+                } catch (e) {
+                    // localStorage unavailable (private browsing) — best-effort only
+                }
+            },
+
+            async retryPendingConsent() {
+                try {
+                    const pending = localStorage.getItem('pendingCookieConsent');
+                    if (!pending) return;
+                    const data = JSON.parse(pending);
+                    await this.sendConsentToServer(data);
+                } catch (e) {
+                    // Silent — will retry on next page load
                 }
             },
 

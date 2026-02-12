@@ -106,6 +106,26 @@
     </div>
   </div>
 
+  <!-- Cookie Preferences -->
+  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
+    <div class="p-6">
+      <h3 class="text-lg font-medium text-white mb-4">
+        &#127850; {% trans 'Cookie Preferences' %}
+      </h3>
+      <p class="text-sm text-slate-300 mb-4">
+        {% trans 'Manage which cookies you allow on this website. You can change your preferences at any time.' %}
+      </p>
+      <div class="flex flex-wrap gap-3">
+        <button onclick="if(window.showCookiePreferences){window.showCookiePreferences()}" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors">
+          ⚙️ {% trans 'Manage Cookie Preferences' %}
+        </button>
+        <a href="/cookie-policy/" class="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors inline-block">
+          📄 {% trans 'Cookie Policy' %}
+        </a>
+      </div>
+    </div>
+  </div>
+
   <!-- GDPR Rights Information -->
   <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
     <div class="p-6">
