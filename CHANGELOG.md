@@ -23,6 +23,49 @@ _No unreleased changes._
 
 ---
 
+## [0.13.0] - 2026-02-11
+
+### Added
+- **GDPR Cookie Consent on Portal**: Moved cookie consent system from Platform (staff-only) to Portal (customer-facing) where GDPR compliance actually matters
+  - Cookie consent banner with granular per-category controls (essential, functional, analytics, marketing)
+  - Cookie policy page accessible without authentication, bilingual (RO/EN)
+  - Footer links for Cookie Policy and Cookie Preferences re-opening
+  - Server-side consent recording via HMAC-authenticated Platform API
+  - Anonymous visitor consent via `cookie_id`, linked to user account on login
+- **GDPR API Namespace** (`/api/gdpr/`): Three new Platform endpoints for Portal-to-Platform GDPR communication
+  - `POST /api/gdpr/cookie-consent/` — Record consent (anonymous or authenticated)
+  - `POST /api/gdpr/consent-history/` — Fetch consent history for authenticated users
+  - `POST /api/gdpr/data-export/` — Request GDPR data export (Article 20)
+- **Portal GDPR Views Wired to Real Data**: Consent history and data export views now call Platform API instead of using mock/TODO stubs
+- **Audit Coverage**: Security logging for payments, notifications, tickets, and promotions via centralized AuditService
+- **ADR-0014**: No-test-suppression policy with automated scanner (`scripts/lint_test_suppressions.py`) integrated into `make lint`
+- **Audit Coverage Scanner** (`scripts/audit_coverage_scan.py`): Automated detection of unaudited security-sensitive operations
+
+### Changed
+- **E2E Test Suite Stabilized**: 166/166 passing (was 76 failing), removed 11 duplicate test files (-11.4k lines)
+- Portal membership cache uses TTL-based invalidation (5-min expiry) to prevent stale session data
+- Portal role resolver performs fresh fetch from Platform API before fallback
+- Rate limiting middleware respects `RATELIMIT_ENABLE` Django setting and environment variable
+- DRF throttling disabled in test and dev-test environments
+
+### Fixed
+- Infrastructure URL wiring in Platform router and nav context processor
+- Portal login membership caching (populate `user_memberships` in session on login)
+- Portal ticket creation API call signature (`dict` to `TicketCreateRequest`)
+- `getattr` instead of `hasattr` for `_portal_authenticated` check (defensive coding)
+- Hardcoded `/cookie-policy/` URL replaced with `{% url 'cookie_policy' %}` in Portal footer
+- Unused `import json` removed from E2E test module
+- Flaky `page.on('response')` replaced with deterministic `page.expect_response()` in E2E tests
+
+### Security
+- HMAC staff session bypass restricted from all `/api/*` to explicit allowlist
+- Portal role fallback hardened: `owner` role for verified primary customer only
+- Customer create API now requires HMAC authentication
+- `@throttle_classes([])` on GDPR API views to bypass DRF global throttle on service-to-service endpoints
+- Cookie consent signal (`cookie_consent_updated`) now emits for audit trail creation
+
+---
+
 ## [0.12.0] - 2026-02-10
 
 ### Added
@@ -282,6 +325,7 @@ _No unreleased changes._
 
 | Version | Date | Milestone |
 |---------|------|-----------|
+| 0.13.0 | 2026-02-11 | GDPR Cookie Consent, Audit Coverage & E2E Stabilization |
 | 0.12.0 | 2026-02-10 | Billing, e-Factura & CI Stabilization |
 | 0.11.0 | 2026-02-09 | Platform/Portal Service Separation |
 | 0.10.0 | 2025-09-05 | Services Architecture Migration |
