@@ -23,6 +23,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.test import TestCase
 
+import apps.common.constants as constants_mod
 from apps.common.constants import (
     DEFAULT_PAGE_SIZE,
     INVOICE_DUE_DAYS_DEFAULT,
@@ -101,7 +102,6 @@ class DeadConstantsTest(TestCase):
 
     def test_no_password_reset_token_validity(self) -> None:
         """PASSWORD_RESET_TOKEN_VALIDITY_HOURS must not exist in constants."""
-        import apps.common.constants as constants_mod
         self.assertFalse(
             hasattr(constants_mod, "PASSWORD_RESET_TOKEN_VALIDITY_HOURS"),
             "PASSWORD_RESET_TOKEN_VALIDITY_HOURS should be removed — Django's PASSWORD_RESET_TIMEOUT is authoritative",
@@ -109,7 +109,6 @@ class DeadConstantsTest(TestCase):
 
     def test_no_email_send_rate_per_hour(self) -> None:
         """EMAIL_SEND_RATE_PER_HOUR must not exist in constants."""
-        import apps.common.constants as constants_mod
         self.assertFalse(
             hasattr(constants_mod, "EMAIL_SEND_RATE_PER_HOUR"),
             "EMAIL_SEND_RATE_PER_HOUR should be removed — EMAIL_RATE_LIMIT.MAX_PER_HOUR is authoritative",

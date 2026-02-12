@@ -418,7 +418,7 @@ def proforma_list(request: HttpRequest) -> HttpResponse:
         # Sort by creation date (newest first)
         proforma_documents.sort(key=lambda x: x["created_at"], reverse=True)  # type: ignore[arg-type,return-value]
 
-        # ⚡ PERFORMANCE: Implement pagination for 25 items per page (Romanian business scale)
+        # ⚡ PERFORMANCE: Paginate using DEFAULT_PAGE_SIZE
         paginator = Paginator(proforma_documents, DEFAULT_PAGE_SIZE)
         page_number = request.GET.get("page")
         page_obj = paginator.get_page(page_number)

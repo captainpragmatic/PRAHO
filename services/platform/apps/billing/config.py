@@ -77,7 +77,8 @@ def get_invoice_payment_terms_days() -> int:
     """Get invoice payment terms from SettingsService (ADR-0015 cascade)."""
     try:
         from apps.settings.services import SettingsService  # noqa: PLC0415
-        return SettingsService.get_integer_setting("billing.invoice_payment_terms_days", 14)
+        value = SettingsService.get_integer_setting("billing.invoice_payment_terms_days", 14)
+        return max(1, value)
     except Exception:
         logger.warning("Failed to read invoice_payment_terms_days from SettingsService, using fallback", exc_info=True)
         return _get_positive_int("BILLING_PAYMENT_TERMS_DAYS", 14)
