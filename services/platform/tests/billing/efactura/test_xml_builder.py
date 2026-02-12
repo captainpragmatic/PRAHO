@@ -3,6 +3,8 @@ Tests for UBL 2.1 XML Builder with CIUS-RO compliance.
 """
 
 
+from decimal import Decimal
+
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from lxml import etree
@@ -61,6 +63,7 @@ class UBLInvoiceBuilderTestCase(TestCase):
             description="Web Hosting Service",
             unit_price_cents=100000,
             quantity=1,
+            tax_rate=Decimal("0.1900"),  # Matches invoice's tax_total_cents=19000
         )
 
     def test_build_generates_valid_xml(self):
@@ -309,6 +312,7 @@ class UBLCreditNoteBuilderTestCase(TestCase):
             description="Partial Refund",
             unit_price_cents=50000,
             quantity=1,
+            tax_rate=Decimal("0.1900"),  # Matches credit note's tax_total_cents=9500
         )
 
     def test_build_credit_note_generates_valid_xml(self):

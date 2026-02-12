@@ -39,7 +39,10 @@ from django.utils.translation import gettext_lazy as _
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods, require_POST
 
+from apps.billing.config import get_invoice_payment_terms_days
+from apps.common.tax_service import TaxService
 from apps.billing.pdf_generators import RomanianInvoicePDFGenerator, RomanianProformaPDFGenerator
+from apps.common.constants import DEFAULT_PAGE_SIZE
 from apps.common.decorators import billing_staff_required, can_edit_proforma, rate_limit, staff_required
 from apps.common.mixins import get_search_context
 from apps.common.utils import json_error, json_success
@@ -415,8 +418,8 @@ def proforma_list(request: HttpRequest) -> HttpResponse:
         # Sort by creation date (newest first)
         proforma_documents.sort(key=lambda x: x["created_at"], reverse=True)  # type: ignore[arg-type,return-value]
 
-        # ⚡ PERFORMANCE: Implement pagination for 25 items per page (Romanian business scale)
-        paginator = Paginator(proforma_documents, 25)
+        # ⚡ PERFORMANCE: Paginate using DEFAULT_PAGE_SIZE
+        paginator = Paginator(proforma_documents, DEFAULT_PAGE_SIZE)
         page_number = request.GET.get("page")
         page_obj = paginator.get_page(page_number)
 
@@ -709,7 +712,7 @@ def proforma_create(request: HttpRequest) -> HttpResponse:
     customers = _get_customers_for_edit_form(request.user)
     context = {
         "customers": customers,
-        "vat_rate": Decimal("21.00"),  # Romanian standard VAT (Aug 2025)
+        "vat_rate": TaxService.get_vat_rate("RO", as_decimal=False),
         "document_type": "proforma",
     }
     return render(request, "billing/proforma_form.html", context)
@@ -782,7 +785,7 @@ def proforma_to_invoice(request: HttpRequest, pk: int) -> HttpResponse:
             tax_cents=proforma.tax_cents,
             total_cents=proforma.total_cents,
             issued_at=timezone.now(),
-            due_at=timezone.now() + timedelta(days=30),
+            due_at=timezone.now() + timedelta(days=get_invoice_payment_terms_days()),
             # Copy billing address from proforma
             bill_to_name=proforma.bill_to_name,
             bill_to_tax_id=proforma.bill_to_tax_id,
@@ -865,7 +868,7 @@ def process_proforma_payment(request: HttpRequest, pk: int) -> HttpResponse:
                 total_cents=proforma.total_cents,
                 tax_cents=proforma.tax_cents,
                 subtotal_cents=proforma.subtotal_cents,
-                due_at=proforma.valid_until if proforma.valid_until else timezone.now() + timezone.timedelta(days=30),
+                due_at=proforma.valid_until if proforma.valid_until else timezone.now() + timezone.timedelta(days=get_invoice_payment_terms_days()),
                 issued_at=timezone.now(),
                 converted_from_proforma=proforma,
             )
@@ -973,9 +976,13 @@ def _process_valid_until_date(request_data: dict[str, Any] | None) -> tuple[date
     """Process and validate the valid_until date from form data."""
     validation_errors: list[str] = []
 
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    validity_days = SettingsService.get_integer_setting("billing.proforma_validity_days", 30)
+
     # Handle None case properly
     if request_data is None:
-        valid_until = timezone.now() + timezone.timedelta(days=30)
+        valid_until = timezone.now() + timezone.timedelta(days=validity_days)
         return valid_until, validation_errors
 
     valid_until_str = (request_data.get("valid_until") or "").strip()
@@ -987,11 +994,11 @@ def _process_valid_until_date(request_data: dict[str, Any] | None) -> tuple[date
             valid_until = timezone.make_aware(datetime.combine(valid_until_date, datetime.min.time()))
         except ValueError:
             # Invalid date format, use default
-            valid_until = timezone.now() + timezone.timedelta(days=30)
-            validation_errors.append(f"Invalid date format '{valid_until_str}', using 30 days from now")
+            valid_until = timezone.now() + timezone.timedelta(days=validity_days)
+            validation_errors.append(f"Invalid date format '{valid_until_str}', using {validity_days} days from now")
     else:
         # No date provided, use default
-        valid_until = timezone.now() + timezone.timedelta(days=30)
+        valid_until = timezone.now() + timezone.timedelta(days=validity_days)
 
     return valid_until, validation_errors
 
@@ -1070,12 +1077,14 @@ def _parse_line_unit_price(request_data: dict[str, Any], line_counter: int) -> t
 def _parse_line_vat_rate(request_data: dict[str, Any], line_counter: int) -> tuple[Decimal, list[str]]:
     """Parse and validate line item VAT rate."""
     errors = []
+    default_rate = TaxService.get_vat_rate("RO", as_decimal=False)
+    default_rate_str = str(int(default_rate))
     try:
-        vat_rate_str = (request_data.get(f"line_{line_counter}_vat_rate") or "21").strip()
-        vat_rate = Decimal(vat_rate_str) if vat_rate_str else Decimal("21")
+        vat_rate_str = (request_data.get(f"line_{line_counter}_vat_rate") or default_rate_str).strip()
+        vat_rate = Decimal(vat_rate_str) if vat_rate_str else default_rate
     except (ValueError, TypeError, decimal.InvalidOperation):
-        vat_rate = Decimal("21")
-        errors.append(f"Line {line_counter + 1}: Invalid VAT rate '{vat_rate_str}', using 21%")
+        vat_rate = default_rate
+        errors.append(f"Line {line_counter + 1}: Invalid VAT rate '{vat_rate_str}', using {default_rate_str}%")
     return vat_rate, errors
 
 
@@ -1334,7 +1343,7 @@ def payment_list(request: HttpRequest) -> HttpResponse:
         payments = payments.filter(invoice_id=invoice_id)
 
     # Pagination
-    paginator = Paginator(payments, 25)
+    paginator = Paginator(payments, DEFAULT_PAGE_SIZE)
     page_number = request.GET.get("page")
     payments_page = paginator.get_page(page_number)
 

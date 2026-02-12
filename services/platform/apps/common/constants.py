@@ -18,17 +18,19 @@ from typing import Final
 # ROMANIAN COMPLIANCE 🇷🇴
 # ===============================================================================
 
-# Romanian VAT (TVA) regulations - used in billing, orders, customers
-ROMANIAN_VAT_RATE: Final[Decimal] = Decimal("0.21")  # 21% standard VAT rate
+# NOTE: VAT rates are NOT constants — they have temporal validity.
+# Use TaxService.get_vat_rate('RO') instead. See ADR-0005, ADR-0015.
 
 # Romanian CUI (Unique Registration Code) validation rules
 CUI_MIN_LENGTH: Final[int] = 2  # Minimum CUI length
 CUI_MAX_LENGTH: Final[int] = 10  # Maximum CUI length
 
-# Business payment terms
-PAYMENT_GRACE_PERIOD_DAYS: Final[int] = 5  # Payment grace period
-INVOICE_DUE_DAYS_DEFAULT: Final[int] = 30  # Default invoice due period
-PROFORMA_VALIDITY_DAYS: Final[int] = 30  # Proforma invoice validity
+# ── Billing Terms (defaults only — authoritative source is SettingsService) ──
+# Use SettingsService.get_integer_setting('billing.<key>') in new code.
+# These module-level values exist for backward compatibility only.
+PAYMENT_GRACE_PERIOD_DAYS: Final[int] = 5           # → billing.payment_grace_period_days
+INVOICE_DUE_DAYS_DEFAULT: Final[int] = 14           # → billing.invoice_payment_terms_days
+PROFORMA_VALIDITY_DAYS: Final[int] = 30             # → billing.proforma_validity_days
 
 # Romanian e-Factura compliance
 EFACTURA_BATCH_SIZE: Final[int] = 100  # Max invoices per e-Factura batch
@@ -42,7 +44,7 @@ MAX_DOMAINS_PER_PACKAGE: Final[int] = 100  # Maximum domains per hosting package
 MAX_SUBDOMAINS_PER_DOMAIN: Final[int] = 50  # Maximum subdomains per domain
 
 # Pagination and list views (Query Budget compliance)
-DEFAULT_PAGE_SIZE: Final[int] = 25  # Standard pagination size
+DEFAULT_PAGE_SIZE: Final[int] = 20  # Standard pagination size
 MAX_PAGE_SIZE: Final[int] = 100  # Maximum allowed page size
 MIN_PAGE_SIZE: Final[int] = 5  # Minimum allowed page size
 
@@ -75,7 +77,7 @@ MAX_TICKET_REASSIGNMENTS: Final[int] = 3  # Maximum reassignment count
 # Account lockout policies
 MAX_LOGIN_ATTEMPTS: Final[int] = 5  # Max failed login attempts
 ACCOUNT_LOCKOUT_DURATION_MINUTES: Final[int] = 15  # Account lockout duration
-PASSWORD_RESET_TOKEN_VALIDITY_HOURS: Final[int] = 24  # Password reset token validity
+# PASSWORD_RESET_TOKEN_VALIDITY_HOURS removed — Django's PASSWORD_RESET_TIMEOUT (base.py:155) is authoritative
 
 # 2FA settings
 BACKUP_CODE_COUNT: Final[int] = 10  # Number of backup codes generated
@@ -159,7 +161,7 @@ API_CONNECTION_TIMEOUT_SECONDS: Final[int] = 10  # API connection timeout
 # ===============================================================================
 
 # Email sending limits
-EMAIL_SEND_RATE_PER_HOUR: Final[int] = 100  # Emails per hour limit
+# EMAIL_SEND_RATE_PER_HOUR removed — EMAIL_RATE_LIMIT.MAX_PER_HOUR (base.py) is authoritative
 EMAIL_BATCH_SIZE: Final[int] = 50  # Emails processed per batch
 
 # Notification preferences

@@ -5,9 +5,12 @@ All billing-related constants and configuration should be defined here
 to ensure DRY compliance and easy maintenance.
 """
 
+import logging
 from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 # ===============================================================================
 # HELPER: SAFE VALUE PARSING
@@ -69,11 +72,20 @@ EU_COUNTRY_CODES = frozenset({
 # PAYMENT & INVOICE TERMS
 # ===============================================================================
 
-# Default payment terms (days)
-DEFAULT_PAYMENT_TERMS_DAYS = _get_positive_int("BILLING_PAYMENT_TERMS_DAYS", 14)
 
-# Invoice due date offset from issue date (days)
-INVOICE_DUE_DATE_DAYS = DEFAULT_PAYMENT_TERMS_DAYS
+def get_invoice_payment_terms_days() -> int:
+    """Get invoice payment terms from SettingsService (ADR-0015 cascade)."""
+    try:
+        from apps.settings.services import SettingsService  # noqa: PLC0415
+        value = SettingsService.get_integer_setting("billing.invoice_payment_terms_days", 14)
+        return max(1, value)
+    except Exception:
+        logger.warning("Failed to read invoice_payment_terms_days from SettingsService, using fallback", exc_info=True)
+        return _get_positive_int("BILLING_PAYMENT_TERMS_DAYS", 14)
+
+
+# Backward-compatible module-level (for code that reads it at import time)
+DEFAULT_PAYMENT_TERMS_DAYS = 14
 
 
 # ===============================================================================
@@ -187,4 +199,4 @@ def get_payment_due_date(issue_date=None):
     if issue_date is None:
         issue_date = timezone.now()
 
-    return issue_date + timedelta(days=DEFAULT_PAYMENT_TERMS_DAYS)
+    return issue_date + timedelta(days=get_invoice_payment_terms_days())

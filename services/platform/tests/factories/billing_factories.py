@@ -57,7 +57,7 @@ def create_invoice(customer: Customer, currency: Currency | None = None, number:
         total_cents=total_cents,
         subtotal_cents=total_cents,
         status='issued',
-        due_at=timezone.now() + timedelta(days=30)  # Default 30 day payment terms
+        due_at=timezone.now() + timedelta(days=14)  # Default 14 day payment terms
     )
 
 
@@ -67,7 +67,7 @@ def create_invoice_line(
     quantity: int | Decimal = 1,
     unit_price_cents: int = 1000,
     kind: str = "service",
-    tax_rate: Decimal = Decimal("0.1900"),
+    tax_rate: Decimal = Decimal("0.2100"),
 ) -> InvoiceLine:
     """Create an InvoiceLine with sensible defaults."""
     return InvoiceLine.objects.create(
@@ -119,7 +119,7 @@ def InvoiceFactory(**kwargs: object) -> Invoice:  # noqa: N802
     kwargs.setdefault("status", "issued")
     kwargs.setdefault("subtotal_cents", kwargs.get("total_cents", 10000))
     kwargs.setdefault("total_cents", kwargs.get("subtotal_cents", 10000))
-    kwargs.setdefault("due_at", timezone.now() + timedelta(days=30))
+    kwargs.setdefault("due_at", timezone.now() + timedelta(days=14))
     kwargs.setdefault("bill_to_name", "Test Company SRL")
 
     return Invoice.objects.create(customer=customer, currency=currency, **kwargs)
@@ -133,7 +133,7 @@ def InvoiceLineFactory(**kwargs: object) -> InvoiceLine:  # noqa: N802
     kwargs.setdefault("quantity", Decimal("1"))
     kwargs.setdefault("unit_price_cents", 1000)
     kwargs.setdefault("kind", "service")
-    kwargs.setdefault("tax_rate", Decimal("0.1900"))
+    kwargs.setdefault("tax_rate", Decimal("0.2100"))
     kwargs["quantity"] = Decimal(str(kwargs["quantity"]))
     return InvoiceLine.objects.create(invoice=invoice, **kwargs)
 

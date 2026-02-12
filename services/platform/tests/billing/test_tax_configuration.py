@@ -756,6 +756,47 @@ class HardcodedVATGuardTests(TestCase):
             )
             self.fail(msg)
 
+    def test_no_romanian_vat_rate_constant_outside_allowlist(self) -> None:
+        """No ROMANIAN_VAT_RATE = ... definitions outside test files and efactura/settings.py.
+
+        After the config-consolidation cleanup, the ROMANIAN_VAT_RATE module-level
+        constant should only exist in test fixtures and efactura settings.
+        """
+        apps_dir = Path(__file__).resolve().parent.parent.parent / "apps"
+        violations = []
+
+        # Pattern: module-level constant definition (not inside comments)
+        pattern = re.compile(r"^\s*ROMANIAN_VAT_RATE\s*[=:]")
+
+        for py_file in apps_dir.rglob("*.py"):
+            rel_path = str(py_file.relative_to(apps_dir))
+            # Allow in efactura settings and test files
+            if any(allowed in rel_path for allowed in self.ALLOWED_PATHS):
+                continue
+
+            try:
+                content = py_file.read_text()
+            except (OSError, UnicodeDecodeError):
+                continue
+
+            for line_num, line in enumerate(content.splitlines(), 1):
+                stripped = line.strip()
+                if stripped.startswith("#"):
+                    continue
+                if pattern.match(line):
+                    violations.append(f"{rel_path}:{line_num}: {stripped}")
+
+        if violations:
+            msg = (
+                f"Found {len(violations)} ROMANIAN_VAT_RATE definition(s) outside allowlist.\n"
+                "VAT rates should only come from TaxService (ADR-0005/0015).\n\n"
+                + "\n".join(violations)
+            )
+            self.fail(msg)
+
+    # test_constants_py_has_no_vat_rate removed — covered by
+    # tests/common/test_constants_consistency.py::ConstantsVATGuardTest
+
     def test_no_hardcoded_vat_in_templates(self) -> None:
         """No stale 19% VAT rates in HTML templates."""
         templates_dir = (

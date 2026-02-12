@@ -68,11 +68,11 @@ class SettingsService:
     DEFAULT_SETTINGS: ClassVar[dict[str, Any]] = {
         "billing.proforma_validity_days": 30,
         "billing.payment_grace_period_days": 5,
-        "billing.invoice_due_days": 30,
+        "billing.invoice_payment_terms_days": 14,
         "billing.vat_rate": "0.21",
         "users.session_timeout_minutes": 120,
         "users.mfa_required_for_staff": True,
-        "users.password_reset_timeout_hours": 24,
+        # users.password_reset_timeout_hours removed — Django's PASSWORD_RESET_TIMEOUT (base.py) is authoritative
         "users.max_login_attempts": 5,
         "domains.registration_enabled": True,
         "domains.auto_renewal_enabled": True,
