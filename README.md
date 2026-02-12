@@ -1,8 +1,8 @@
 # PRAHO Platform - PRAHO Really Automates Hosting Operations
 
-> **Pre-release software (v0.14.0-alpha)** - Under active development. Not yet recommended for production use.
+> **Pre-release software (v0.15.0-alpha)** - Under active development. Not yet recommended for production use.
 
-[![Version](https://img.shields.io/badge/version-0.14.0--alpha-orange.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.15.0--alpha-orange.svg)](CHANGELOG.md)
 [![Django 5.2](https://img.shields.io/badge/Django-5.2-green.svg)](https://www.djangoproject.com/)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
 [![License: GPL v3+](https://img.shields.io/badge/License-GPLv3%2B-blue.svg)](LICENSE.md)
@@ -207,7 +207,7 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ## Versioning
 
-This project follows [Semantic Versioning](https://semver.org/). Current version: **v0.14.0** (alpha).
+This project follows [Semantic Versioning](https://semver.org/). Current version: **v0.15.0** (alpha).
 
 - Pre-1.0: API and features may change between minor versions
 - Each minor bump (0.Y.0) represents a new feature milestone

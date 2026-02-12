@@ -1966,7 +1966,7 @@ wheels = [
 
 [[package]]
 name = "praho-platform"
-version = "0.14.0"
+version = "0.15.0"
 source = { virtual = "." }
 dependencies = [
     { name = "django" },
@@ -2150,12 +2150,12 @@ prod = [
 
 [[package]]
 name = "praho-platform-service"
-version = "0.14.0"
+version = "0.15.0"
 source = { editable = "services/platform" }
 
 [[package]]
 name = "praho-portal-service"
-version = "0.14.0"
+version = "0.15.0"
 source = { editable = "services/portal" }
 
 [[package]]

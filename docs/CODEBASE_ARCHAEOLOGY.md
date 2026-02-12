@@ -2,7 +2,7 @@
 
 **Analysis Date:** 2025-12-27
 **Author:** PRAHO Development Team
-**Project Version:** 0.14.0 (Alpha)
+**Project Version:** 0.15.0 (Alpha)
 
 ---
 

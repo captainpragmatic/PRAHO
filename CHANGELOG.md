@@ -11,6 +11,31 @@ _No unreleased changes._
 
 ---
 
+## [0.15.0] - 2026-02-12
+
+### Changed
+- **Configuration Sprawl Cleanup**: Eliminated hardcoded `ROMANIAN_VAT_RATE` from 5 locations (`constants.py`, `types.py`, `context_processors.py`, `products/signals.py`, `base.py`). All callsites now use `TaxService.get_vat_rate('RO')` per ADR-0005/ADR-0015
+- **Billing Terms Consolidated**: Wired invoice payment terms, proforma validity, and payment grace period through `SettingsService` with proper fallback cascade. Renamed setting key `billing.invoice_due_days` → `billing.invoice_payment_terms_days` with data migration preserving admin overrides
+- **Invoice Payment Terms Corrected**: Default payment terms aligned to 14 days across `constants.py`, `SettingsService`, and `billing/config.py` (previously 30 in constants, 14 in config — now consistent)
+- **Page Size Unified**: `DEFAULT_PAGE_SIZE` corrected from 25 → 20 across `constants.py`, `mixins.py`, and billing views (previously inconsistent between modules)
+- **Proforma/Invoice Views Dynamic**: 7 hardcoded `timedelta(days=30)` and `Decimal("21.00")` VAT values in `billing/views.py` replaced with SettingsService and TaxService calls
+
+### Removed
+- `ROMANIAN_VAT_RATE` and `ROMANIAN_VAT_RATE_PERCENT` from `constants.py` and `types.py` (use `TaxService` instead)
+- `VAT_RATE` and `ROMANIA_VAT_RATE` from `config/settings/base.py` (redundant with TaxService)
+- Dead constants: `PASSWORD_RESET_TOKEN_VALIDITY_HOURS`, `EMAIL_SEND_RATE_PER_HOUR` (never imported, conflicted with authoritative sources)
+- Dead SettingsService key: `users.password_reset_timeout_hours` (Django's `PASSWORD_RESET_TIMEOUT` is authoritative)
+- Dead alias: `INVOICE_DUE_DATE_DAYS` from `billing/config.py` (zero consumers)
+
+### Added
+- `get_invoice_payment_terms_days()` in `billing/config.py` — reads from SettingsService with env-var fallback, positive-value clamping, and logged exception handling
+- Data migration `0002_rename_invoice_due_days_key` — idempotent rename with key-collision handling
+- **12 guardrail tests** preventing configuration drift:
+  - `test_constants_consistency.py`: VAT sprawl guard, billing term sync, page size consistency, dead constant detection, `calculate_romanian_vat` TaxService integration, context processor regression
+  - `test_billing_terms.py`: SettingsService billing term defaults and DB override integration tests
+
+---
+
 ## [0.14.0] - 2026-02-12
 
 ### Added
