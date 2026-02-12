@@ -241,8 +241,8 @@ class BaseUBLBuilder:
 
     def _get_tax_rate(self) -> Decimal:
         """Get tax rate as percentage."""
-        # Romanian standard VAT rate
-        return Decimal("19.00")
+        # Romanian standard VAT rate (updated Aug 2025, Emergency Ordinance 156/2024)
+        return Decimal("21.00")
 
     def _add_postal_address(self, parent: etree._Element, company: CompanyInfo) -> etree._Element:
         """Add PostalAddress element."""

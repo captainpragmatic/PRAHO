@@ -167,8 +167,20 @@ class OrderCalculationService:
             'is_business': is_business,
             'vat_number': vat_number,
             'customer_id': str(customer.id) if customer else 'unknown',
-            'order_id': 'calculation'
+            'order_id': 'calculation',
         }
+
+        # Inject per-customer overrides from CustomerTaxProfile (if available)
+        if customer and hasattr(customer, 'tax_profile'):
+            try:
+                tax_profile = customer.tax_profile
+                customer_vat_info['is_vat_payer'] = tax_profile.is_vat_payer
+                customer_vat_info['reverse_charge_eligible'] = tax_profile.reverse_charge_eligible
+                # Only pass custom rate if it differs from the standard default
+                if tax_profile.vat_rate and tax_profile.vat_rate != Decimal("21.00"):
+                    customer_vat_info['custom_vat_rate'] = tax_profile.vat_rate
+            except Exception:
+                pass  # Profile doesn't exist yet — use defaults
         vat_result = OrderVATCalculator.calculate_vat(
             subtotal_cents=subtotal_cents,
             customer_info=customer_vat_info

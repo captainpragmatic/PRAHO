@@ -49,7 +49,7 @@ class CustomerTaxProfile(SoftDeleteModel):
     vat_rate = models.DecimalField(
         max_digits=5,
         decimal_places=2,
-        default=Decimal("19.00"),  # Romanian VAT rate
+        default=Decimal("21.00"),  # Romanian VAT rate (updated Aug 2025)
         verbose_name="Cota TVA (%)",
     )
 

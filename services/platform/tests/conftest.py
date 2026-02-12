@@ -90,7 +90,7 @@ def romanian_customer(admin_user):
         vat_number='RO12345678',
         registration_number='J40/1234/2023',
         is_vat_payer=True,
-        vat_rate=Decimal('19.00')
+        vat_rate=Decimal('21.00')
     )
 
     # Create billing profile

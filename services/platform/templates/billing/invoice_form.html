@@ -170,8 +170,7 @@
                 <div class="col-span-2">
                   <select name="line_0_vat_rate" class="line-vat w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
                     <option value="21">21% ({% trans 'Standard' %})</option>
-                    <option value="9">9% ({% trans 'Reduced' %})</option>
-                    <option value="5">5% ({% trans 'Super Reduced' %})</option>
+                    <option value="11">11% ({% trans 'Reduced' %})</option>
                     <option value="0">0% ({% trans 'Exempt' %})</option>
                   </select>
                 </div>
@@ -237,7 +236,7 @@
             </div>
             
             <div class="flex justify-between text-slate-300">
-              <span>{% trans 'VAT (21%):' %}</span>
+              <span id="invoice-summary-vat-label">{% trans 'VAT:' %}</span>
               <span id="invoice-summary-vat" class="font-medium">0.00 RON</span>
             </div>
             
@@ -335,6 +334,20 @@ function calculateTotals() {
     document.getElementById('invoice-summary-subtotal').textContent = subtotal.toFixed(2) + ' RON';
     document.getElementById('invoice-summary-vat').textContent = totalVat.toFixed(2) + ' RON';
     document.getElementById('invoice-summary-total').textContent = grandTotal.toFixed(2) + ' RON';
+
+    // Dynamic VAT label: show rate when uniform, "mixed" when lines differ
+    const vatRates = new Set();
+    document.querySelectorAll('.invoice-line .line-vat').forEach(function (sel) { vatRates.add(sel.value); });
+    const vatLabel = document.getElementById('invoice-summary-vat-label');
+    if (vatLabel) {
+      if (vatRates.size === 1) {
+        vatLabel.textContent = 'TVA (' + [...vatRates][0] + '%):';
+      } else if (vatRates.size > 1) {
+        vatLabel.textContent = 'TVA ({% trans "mixed" %}):';
+      } else {
+        vatLabel.textContent = 'TVA:';
+      }
+    }
     
     // Update line count
     document.getElementById('line-count').textContent = document.querySelectorAll('.invoice-line').length;
@@ -360,8 +373,7 @@ function addLineItem() {
             <div class="col-span-2">
                 <select name="line_${lineCounter}_vat_rate" class="line-vat w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
                     <option value="21">21% ({% trans 'Standard' %})</option>
-                    <option value="9">9% ({% trans 'Reduced' %})</option>
-                    <option value="5">5% ({% trans 'Super Reduced' %})</option>
+                    <option value="11">11% ({% trans 'Reduced' %})</option>
                     <option value="0">0% ({% trans 'Exempt' %})</option>
                 </select>
             </div>

@@ -82,6 +82,8 @@ STANDARD_TICKET_RESPONSE_HOURS = 24        # Used in: tickets, notifications
 - **Problem**: Adds query overhead for frequently accessed values
 - **Risk**: Database dependency for basic business logic
 - **Complexity**: Requires migration strategy for constant updates
+- **Scope note (2026-02-12)**: This rejection applies to immutable constants only.
+  Dynamic/regulatory values with runtime edits or temporal validity are governed by ADR-0015 (Configuration Resolution Order).
 
 **❌ Environment Variables:**
 - **Problem**: Poor discoverability and documentation

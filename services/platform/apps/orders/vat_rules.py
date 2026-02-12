@@ -27,12 +27,31 @@ class VATScenario(Enum):
 
 
 class CustomerVATInfo(TypedDict, total=False):
-    """Customer VAT information for calculation"""
+    """Customer VAT information for calculation.
+
+    Core fields (always expected):
+        country: ISO 2-letter country code
+        is_business: Whether customer is a registered business
+        vat_number: Customer's VAT number (if business)
+
+    Per-customer overrides (from CustomerTaxProfile):
+        is_vat_payer: If False, customer is below VAT threshold → 0% VAT
+        custom_vat_rate: Explicit per-customer rate override (as percentage, e.g. 15.0)
+        reverse_charge_eligible: If True + EU country + VAT number → force reverse charge
+
+    Audit context:
+        customer_id: For audit logging
+        order_id: For audit logging
+    """
     country: str
     is_business: bool
     vat_number: str | None
     customer_id: str | None
     order_id: str | None
+    # Per-customer overrides from CustomerTaxProfile
+    is_vat_payer: bool
+    custom_vat_rate: Decimal | None
+    reverse_charge_eligible: bool
 
 
 @dataclass
@@ -98,9 +117,9 @@ class OrderVATCalculator:
         customer_id = customer_info.get('customer_id')
         order_id = customer_info.get('order_id')
 
-        # Determine VAT scenario
+        # Determine VAT scenario (passes full customer_info for per-customer overrides)
         scenario, vat_rate = cls._determine_vat_scenario(
-            country_code, is_business, vat_number
+            country_code, is_business, vat_number, customer_info=customer_info
         )
         
         # Calculate VAT amounts
@@ -156,15 +175,54 @@ class OrderVATCalculator:
         cls,
         country_code: str,
         is_business: bool,
-        vat_number: str | None
+        vat_number: str | None,
+        customer_info: CustomerVATInfo | None = None,
     ) -> tuple[VATScenario, Decimal]:
         """
         Determine VAT scenario and rate - CONSERVATIVE APPROACH
-        Default to Romanian VAT when uncertain for compliance
+        Default to Romanian VAT when uncertain for compliance.
+
+        Per-customer overrides (from CustomerTaxProfile) are checked FIRST:
+        1. is_vat_payer=False → 0% VAT (customer below threshold)
+        2. custom_vat_rate set → use that rate
+        3. reverse_charge_eligible + EU + VAT number → force reverse charge
         """
 
         # Normalize and validate country code
         country_code = country_code.upper().strip() if country_code else 'RO'
+
+        # ── Per-customer overrides (checked BEFORE country-based logic) ──
+
+        if customer_info:
+            # 1. Non-VAT payer: below Romanian VAT registration threshold
+            if customer_info.get('is_vat_payer') is False:
+                logger.info(
+                    f"💰 [VAT] Customer is_vat_payer=False → 0% VAT "
+                    f"(customer_id={customer_info.get('customer_id')})"
+                )
+                return VATScenario.NON_EU_ZERO_VAT, Decimal('0.0')
+
+            # 2. Explicit per-customer rate override
+            custom_rate = customer_info.get('custom_vat_rate')
+            if custom_rate is not None:
+                logger.info(
+                    f"💰 [VAT] Custom rate override: {custom_rate}% "
+                    f"(customer_id={customer_info.get('customer_id')})"
+                )
+                if is_business:
+                    return VATScenario.ROMANIA_B2B, Decimal(str(custom_rate))
+                return VATScenario.ROMANIA_B2C, Decimal(str(custom_rate))
+
+            # 3. Reverse charge via profile flag (EU B2B shortcut)
+            if (
+                customer_info.get('reverse_charge_eligible')
+                and vat_number
+                and country_code in cls._get_eu_countries()
+                and country_code != 'RO'
+            ):
+                return VATScenario.EU_B2B_REVERSE_CHARGE, Decimal('0.0')
+
+        # ── Standard country-based logic ──
 
         # Romania (home country) - always apply Romanian VAT
         if country_code == 'RO' or country_code in ['ROMANIA', 'ROMÂNIA']:

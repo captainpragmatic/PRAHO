@@ -163,7 +163,7 @@ def create_full_customer(request: CustomerCreationRequest | None = None) -> Cust
             vat_number=request.vat_number,
             registration_number='J40/1234/2023',
             is_vat_payer=request.is_vat_payer,
-            vat_rate=Decimal('19.00'),
+            vat_rate=Decimal('21.00'),
         )
 
     if request.with_billing_profile:
@@ -514,7 +514,7 @@ def create_complete_order_to_invoice_flow(
 
     # Calculate totals
     subtotal = sum(item.line_total_cents for item in order.items.all())
-    vat = int(subtotal * Decimal('0.19'))
+    vat = int(subtotal * Decimal('0.21'))
     total = subtotal + vat
 
     # Create invoice from order

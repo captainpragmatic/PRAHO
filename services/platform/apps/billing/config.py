@@ -55,7 +55,7 @@ DEFAULT_CURRENCY_CODE = getattr(settings, "BILLING_DEFAULT_CURRENCY", "RON") or 
 # ===============================================================================
 
 # Romanian VAT standard rate (fallback if TaxRule not configured)
-DEFAULT_VAT_RATE = _get_decimal_rate("BILLING_DEFAULT_VAT_RATE", "0.19")
+DEFAULT_VAT_RATE = _get_decimal_rate("BILLING_DEFAULT_VAT_RATE", "0.21")
 
 # EU countries for VAT purposes
 EU_COUNTRY_CODES = frozenset({
@@ -130,26 +130,27 @@ E_FACTURA_MINIMUM_AMOUNT_CENTS = _get_positive_int("BILLING_EFACTURA_MINIMUM_CEN
 
 def get_vat_rate(country_code: str | None = None, fallback: bool = True) -> Decimal:
     """
-    Get VAT rate for a country, using TaxRule if available.
+    Get VAT rate for a country via centralized TaxService.
 
     Args:
         country_code: ISO 3166-1 alpha-2 country code. Defaults to DEFAULT_COUNTRY_CODE.
-        fallback: If True, return DEFAULT_VAT_RATE when no TaxRule found for
-                  the default country. If False, return Decimal("0") when no
-                  TaxRule found.
+        fallback: If True, use TaxService full fallback chain.
+                  If False, return Decimal("0.00") when no active TaxRule exists.
 
     Returns:
-        VAT rate as Decimal (e.g., Decimal("0.19") for 19%)
+        VAT rate as Decimal (e.g., Decimal("0.21") for 21%)
     """
+    from apps.common.tax_service import TaxService
     from .tax_models import TaxRule
 
     country = (country_code or DEFAULT_COUNTRY_CODE).upper()
-    rate = TaxRule.get_active_rate(country, "vat")
+    rate = TaxService.get_vat_rate(country, as_decimal=True)
 
-    # TaxRule.get_active_rate returns Decimal("0.00") if not found
-    # Fallback to default rate only for default country (regardless of how it was passed)
-    if rate == Decimal("0.00") and fallback and country == DEFAULT_COUNTRY_CODE.upper():
-        return DEFAULT_VAT_RATE
+    if fallback:
+        return rate
+
+    if TaxRule.get_active_rate(country, "vat") == Decimal("0.00"):
+        return Decimal("0.00")
 
     return rate
 

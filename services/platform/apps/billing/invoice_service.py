@@ -460,7 +460,7 @@ def generate_vat_summary(period_start: str, period_end: str) -> dict[str, Any]:
         # Group by VAT rate
         vat_breakdown = {}
         for invoice in invoices:
-            vat_rate = getattr(invoice, "vat_rate", 19)  # Default 19% for Romania
+            vat_rate = getattr(invoice, "vat_rate", 21)  # Default 21% for Romania (Aug 2025)
             if vat_rate not in vat_breakdown:
                 vat_breakdown[vat_rate] = {"sales": 0, "vat": 0, "count": 0}
             vat_breakdown[vat_rate]["sales"] += invoice.subtotal_cents or 0

@@ -40,8 +40,8 @@ class BaseRomanianDocumentPDFGeneratorTestCase(TestCase):
             currency=self.currency,
             number='INV-PDF-001',
             subtotal_cents=10000,
-            tax_cents=1900,
-            total_cents=11900,
+            tax_cents=2100,
+            total_cents=12100,
             status='issued',
             bill_to_name='PDF Test Company SRL',
             bill_to_email='billing@test.ro',
@@ -59,7 +59,7 @@ class BaseRomanianDocumentPDFGeneratorTestCase(TestCase):
             description='Web Hosting Premium',
             quantity=1,
             unit_price_cents=10000,
-            tax_rate=Decimal('0.19'),
+            tax_rate=Decimal('0.21'),
             line_total_cents=10000
         )
 
@@ -180,7 +180,7 @@ class BaseRomanianDocumentPDFGeneratorTestCase(TestCase):
             description=long_description,
             quantity=1,
             unit_price_cents=5000,
-            tax_rate=Decimal('0.19'),
+            tax_rate=Decimal('0.21'),
             line_total_cents=5000
         )
         
@@ -248,8 +248,8 @@ class RomanianInvoicePDFGeneratorTestCase(TestCase):
             currency=self.currency,
             number='INV-PDF-TEST-001',
             subtotal_cents=10000,
-            tax_cents=1900,
-            total_cents=11900,
+            tax_cents=2100,
+            total_cents=12100,
             status='issued',
             issued_at=timezone.now(),
             due_at=timezone.now() + timezone.timedelta(days=30),
@@ -263,7 +263,7 @@ class RomanianInvoicePDFGeneratorTestCase(TestCase):
             description='Premium Hosting Service',
             quantity=1,
             unit_price_cents=10000,
-            tax_rate=Decimal('0.19'),
+            tax_rate=Decimal('0.21'),
             line_total_cents=10000
         )
 
@@ -401,8 +401,8 @@ class RomanianProformaPDFGeneratorTestCase(TestCase):
             currency=self.currency,
             number='PRO-PDF-TEST-001',
             subtotal_cents=5000,
-            tax_cents=950,
-            total_cents=5950,
+            tax_cents=1050,
+            total_cents=6050,
             valid_until=timezone.now() + timezone.timedelta(days=30),
             bill_to_name='Proforma Test Company SRL',
             bill_to_email='proforma@test.ro'
@@ -414,7 +414,7 @@ class RomanianProformaPDFGeneratorTestCase(TestCase):
             description='Basic Hosting Service',
             quantity=1,
             unit_price_cents=5000,
-            tax_rate=Decimal('0.19'),
+            tax_rate=Decimal('0.21'),
             line_total_cents=5000
         )
 
@@ -597,8 +597,8 @@ class PDFContentValidationTestCase(TestCase):
             currency=self.currency,
             number='INV-CONTENT-001',
             subtotal_cents=10000,
-            tax_cents=1900,
-            total_cents=11900,
+            tax_cents=2100,
+            total_cents=12100,
             status='issued',
             issued_at=timezone.now(),
             due_at=timezone.now() + timezone.timedelta(days=30),
@@ -650,7 +650,7 @@ class PDFContentValidationTestCase(TestCase):
                 description=f'Service {i+1}',
                 quantity=i+1,
                 unit_price_cents=(i+1) * 1000,
-                tax_rate=Decimal('0.19'),
+                tax_rate=Decimal('0.21'),
                 line_total_cents=(i+1) * 1000
             )
         
@@ -668,8 +668,8 @@ class PDFContentValidationTestCase(TestCase):
             currency=self.currency,
             number='INV-ROMÂNĂ-001',
             subtotal_cents=4200,  # 42.00 RON
-            tax_cents=798,        # 7.98 RON VAT (4200 * 0.19)
-            total_cents=4998,     # 49.98 RON (close to 5000, rounded for validation)
+            tax_cents=882,        # 8.82 RON VAT (4200 * 0.21)
+            total_cents=5082,     # 50.82 RON
             issued_at=timezone.now(),
             due_at=timezone.now() + timezone.timedelta(days=30),
             status='issued',
@@ -684,7 +684,7 @@ class PDFContentValidationTestCase(TestCase):
             description='Serviciu de găzduire web în România',
             quantity=1,
             unit_price_cents=5000,
-            tax_rate=Decimal('0.19'),
+            tax_rate=Decimal('0.21'),
             line_total_cents=5000
         )
         
@@ -726,7 +726,7 @@ class PDFGenerationPerformanceTestCase(TestCase):
                 description=f'Service Line {i+1:03d} - Detailed Description',
                 quantity=1,
                 unit_price_cents=2500,
-                tax_rate=Decimal('0.19'),
+                tax_rate=Decimal('0.21'),
                 line_total_cents=2500
             )
         
@@ -792,8 +792,8 @@ class PDFGeneratorEdgeCasesTestCase(TestCase):
             currency=self.currency,
             number='INV-EDGE-001',
             subtotal_cents=5000,
-            tax_cents=950,
-            total_cents=5950,
+            tax_cents=1050,
+            total_cents=6050,
             status='issued',
             issued_at=timezone.now(),
             due_at=timezone.now() + timezone.timedelta(days=15)
@@ -873,8 +873,8 @@ class PDFGeneratorEdgeCasesTestCase(TestCase):
             currency=self.currency,
             number='CN-001',  # Credit Note
             subtotal_cents=-5000,
-            tax_cents=-950,
-            total_cents=-5950,
+            tax_cents=-1050,
+            total_cents=-6050,
             status='issued'
         )
         
@@ -892,7 +892,7 @@ class PDFGeneratorEdgeCasesTestCase(TestCase):
             description='Zero Quantity Service',
             quantity=0,
             unit_price_cents=1000,
-            tax_rate=Decimal('0.19'),
+            tax_rate=Decimal('0.21'),
             line_total_cents=0
         )
         
@@ -909,7 +909,7 @@ class PDFGeneratorEdgeCasesTestCase(TestCase):
             description='High Precision Service',
             quantity=Decimal('1.999'),
             unit_price_cents=3333,  # €33.33
-            tax_rate=Decimal('0.19'),
+            tax_rate=Decimal('0.21'),
             line_total_cents=6666
         )
         
@@ -1089,8 +1089,8 @@ class PDFGeneratorIntegrationTestCase(TestCase):
             currency=self.currency,
             number='FA-2025-001',
             subtotal_cents=84000,  # €840.00
-            tax_cents=15960,       # €159.60 (19% VAT)
-            total_cents=99960,     # €999.60
+            tax_cents=17640,       # €176.40 (21% VAT)
+            total_cents=101640,    # €1016.40
             status='issued',
             issued_at=timezone.now(),
             due_at=timezone.now() + timezone.timedelta(days=30),
@@ -1110,27 +1110,27 @@ class PDFGeneratorIntegrationTestCase(TestCase):
             description='Premium Web Hosting Package',
             quantity=1,
             unit_price_cents=50000,  # €500.00
-            tax_rate=Decimal('0.19'),
+            tax_rate=Decimal('0.21'),
             line_total_cents=50000
         )
-        
+
         InvoiceLine.objects.create(
             invoice=self.invoice,
             kind='service',
             description='SSL Certificate Premium',
             quantity=2,
             unit_price_cents=15000,  # €150.00 each
-            tax_rate=Decimal('0.19'),
+            tax_rate=Decimal('0.21'),
             line_total_cents=30000   # €300.00 total
         )
-        
+
         InvoiceLine.objects.create(
             invoice=self.invoice,
             kind='setup',
             description='Initial Setup and Configuration',
             quantity=1,
             unit_price_cents=4000,   # €40.00
-            tax_rate=Decimal('0.19'),
+            tax_rate=Decimal('0.21'),
             line_total_cents=4000
         )
 
@@ -1154,8 +1154,8 @@ class PDFGeneratorIntegrationTestCase(TestCase):
             currency=self.currency,
             number='PRO-2025-001',
             subtotal_cents=25000,
-            tax_cents=4750,
-            total_cents=29750,
+            tax_cents=5250,
+            total_cents=30250,
             valid_until=timezone.now() + timezone.timedelta(days=15),
             bill_to_name='Prospect Company SRL',
             bill_to_email='prospect@company.ro'
@@ -1167,7 +1167,7 @@ class PDFGeneratorIntegrationTestCase(TestCase):
             description='Standard Hosting Package - Annual',
             quantity=1,
             unit_price_cents=25000,
-            tax_rate=Decimal('0.19'),
+            tax_rate=Decimal('0.21'),
             line_total_cents=25000
         )
         
@@ -1235,7 +1235,7 @@ class PDFGeneratorIntegrationTestCase(TestCase):
                 description=f'Service Line {i+1:03d} - Detailed Description with Romanian Characters: ăîâșț',
                 quantity=Decimal('1.5'),
                 unit_price_cents=100 * (i + 1),
-                tax_rate=Decimal('0.19'),
+                tax_rate=Decimal('0.21'),
                 line_total_cents=100 * (i + 1)
             )
         

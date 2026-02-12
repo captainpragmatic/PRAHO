@@ -381,8 +381,8 @@ class Command(BaseCommand):
                 customer=domain.customer,
                 currency=currency,
                 subtotal_cents=domain.last_paid_amount_cents,
-                tax_cents=int(domain.last_paid_amount_cents * 0.19),  # 19% VAT
-                total_cents=int(domain.last_paid_amount_cents * 1.19),
+                tax_cents=int(domain.last_paid_amount_cents * 0.21),  # 21% VAT
+                total_cents=int(domain.last_paid_amount_cents * 1.21),
                 status="completed",
                 created_at=domain.registered_at or timezone.now(),
                 notes=f"Domain registration: {domain.name}",

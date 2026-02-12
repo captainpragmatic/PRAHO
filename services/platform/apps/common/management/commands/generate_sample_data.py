@@ -460,7 +460,7 @@ class Command(BaseCommand):
             tax_type="vat",
             valid_from=timezone.now().date(),
             defaults={
-                "rate": Decimal("0.19"),  # 19% VAT for Romania
+                "rate": Decimal("0.21"),  # 21% VAT for Romania (Aug 2025)
                 "applies_to_b2b": True,
                 "applies_to_b2c": True,
                 "reverse_charge_eligible": True,
@@ -811,7 +811,7 @@ class Command(BaseCommand):
             # Generate amounts in cents for precision
             base_amount = Decimal(str(random.uniform(50.0, 500.0))).quantize(Decimal("0.01"))
             subtotal_cents = int(base_amount * 100)  # Convert to cents
-            tax_cents = int(subtotal_cents * Decimal("0.19"))  # 19% VAT
+            tax_cents = int(subtotal_cents * Decimal("0.21"))  # 21% VAT
             total_cents = subtotal_cents + tax_cents
 
             # Use specific statuses for comprehensive testing
@@ -840,7 +840,7 @@ class Command(BaseCommand):
                 
                 for service in order_services:
                     unit_price_cents = int(service.price * 100)
-                    tax_cents = int(unit_price_cents * Decimal('0.19'))  # 19% VAT
+                    tax_cents = int(unit_price_cents * Decimal('0.21'))  # 21% VAT
                     line_total_cents = unit_price_cents + tax_cents
                     
                     # Get the Product that corresponds to this service's plan
@@ -863,7 +863,7 @@ class Command(BaseCommand):
                         product_type=service.service_plan.plan_type,
                         quantity=1,
                         unit_price_cents=unit_price_cents,
-                        tax_rate=Decimal('0.1900'),
+                        tax_rate=Decimal('0.2100'),
                         tax_cents=tax_cents,
                         line_total_cents=line_total_cents,
                         service=service  # Link to provisioned service
@@ -882,7 +882,7 @@ class Command(BaseCommand):
             tax_type="vat",
             valid_from=timezone.now().date(),
             defaults={
-                "rate": Decimal("0.19"),  # 19% VAT for Romania
+                "rate": Decimal("0.21"),  # 21% VAT for Romania (Aug 2025)
                 "applies_to_b2b": True,
                 "applies_to_b2c": True,
                 "reverse_charge_eligible": True,
@@ -948,7 +948,7 @@ class Command(BaseCommand):
                 description=f"Hosting services - {fake.month_name()} {fake.year()}",
                 quantity=Decimal("1.000"),
                 unit_price_cents=base_amount_cents,
-                tax_rate=Decimal("0.1900"),
+                tax_rate=Decimal("0.2100"),
                 line_total_cents=base_amount_cents
             )
             
@@ -965,7 +965,7 @@ class Command(BaseCommand):
             tax_type="vat",
             valid_from=timezone.now().date(),
             defaults={
-                "rate": Decimal("0.19"),  # 19% VAT for Romania
+                "rate": Decimal("0.21"),  # 21% VAT for Romania (Aug 2025)
                 "applies_to_b2b": True,
                 "applies_to_b2c": True,
                 "reverse_charge_eligible": True,
@@ -1031,7 +1031,7 @@ class Command(BaseCommand):
                 description=f"Hosting services - {fake.month_name()} {fake.year()}",
                 quantity=Decimal("1.000"),
                 unit_price_cents=base_amount_cents,
-                tax_rate=Decimal("0.1900"),
+                tax_rate=Decimal("0.2100"),
                 line_total_cents=base_amount_cents
             )
             

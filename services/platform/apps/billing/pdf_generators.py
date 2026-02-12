@@ -171,10 +171,16 @@ class RomanianDocumentPDFGenerator:
         self.canvas.drawString(
             12 * cm, totals_y, str(_t("Subtotal: {amount} RON")).format(amount=f"{self.document.subtotal:.2f}")
         )
+        # Use document's effective tax rate for label; fall back to 21%
+        vat_pct = 21
+        if hasattr(self.document, "lines"):
+            first_line = self.document.lines.first()
+            if first_line and first_line.tax_rate:
+                vat_pct = int(first_line.tax_rate * 100)
         self.canvas.drawString(
             12 * cm,
             totals_y - 0.5 * cm,
-            str(_t("VAT (19%): {amount} RON")).format(amount=f"{self.document.tax_amount:.2f}"),
+            str(_t("VAT ({pct}%): {amount} RON")).format(pct=vat_pct, amount=f"{self.document.tax_amount:.2f}"),
         )
 
         # Document-specific total label

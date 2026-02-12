@@ -89,12 +89,15 @@ class ConfigValidationRedTeamTestCase(TestCase):
         self.assertTrue(billing_config.is_eu_country("Ro"))
 
     def test_get_vat_rate_explicit_ro_fallback(self):
-        """Test get_vat_rate falls back for explicit 'RO' not just None."""
-        with patch("apps.billing.tax_models.TaxRule") as mock_tax:
-            mock_tax.get_active_rate.return_value = Decimal("0.00")
-            # Explicit "RO" should still get fallback
-            rate = billing_config.get_vat_rate("RO", fallback=True)
-            self.assertEqual(rate, billing_config.DEFAULT_VAT_RATE)
+        """Test get_vat_rate falls back for explicit 'RO' not just None.
+
+        After TaxService consolidation, get_vat_rate() delegates to TaxService
+        which has its own 4-tier fallback: cache → DB → settings → defaults.
+        When no TaxRule exists in DB, it uses DEFAULT_VAT_RATES['RO'] = 21.0.
+        """
+        # No TaxRules in test DB — TaxService falls back to defaults
+        rate = billing_config.get_vat_rate("RO", fallback=True)
+        self.assertEqual(rate, billing_config.DEFAULT_VAT_RATE)
 
 
 class IdempotencyRedTeamTestCase(TransactionTestCase):
