@@ -80,34 +80,33 @@
   <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
     <div class="p-6">
       <h3 class="text-lg font-medium text-white mb-4">
-        📅 {% trans 'Consent Timeline' %}
+        📅 {% trans 'Data Processing Consent Timeline' %}
       </h3>
-      
+
       <div class="space-y-4">
         {% for consent in consent_history %}
         <div class="flex items-start p-4 bg-slate-700 rounded-lg">
           <div class="flex-shrink-0 w-12 h-12 bg-slate-600 rounded-lg flex items-center justify-center mr-4">
-            {% if consent.status == 'Granted' %}
+            {% if consent.status == 'success' %}
               <span class="text-green-400">✅</span>
-            {% elif consent.status == 'Declined' %}
-              <span class="text-red-400">❌</span>
+            {% elif consent.status == 'initiated' %}
+              <span class="text-blue-400">🔄</span>
             {% else %}
               <span class="text-yellow-400">⏸️</span>
             {% endif %}
           </div>
-          
+
           <div class="flex-1">
             <div class="flex items-center justify-between mb-1">
-              <h4 class="text-sm font-medium text-white">{{ consent.type }}</h4>
-              <span class="text-xs text-slate-400">{{ consent.date }}</span>
+              <h4 class="text-sm font-medium text-white">{{ consent.description }}</h4>
+              <span class="text-xs text-slate-400">{{ consent.timestamp }}</span>
             </div>
             <p class="text-sm text-slate-300 mb-1">
               <span class="font-medium">{% trans 'Status:' %}</span>
-              <span class="{% if consent.status == 'Granted' %}text-green-400{% elif consent.status == 'Declined' %}text-red-400{% else %}text-yellow-400{% endif %}">
+              <span class="{% if consent.status == 'success' %}text-green-400{% elif consent.status == 'completed' %}text-green-400{% else %}text-yellow-400{% endif %}">
                 {{ consent.status }}
               </span>
             </p>
-            <p class="text-xs text-slate-400">{{ consent.description }}</p>
           </div>
         </div>
         {% empty %}
@@ -119,6 +118,60 @@
       </div>
     </div>
   </div>
+
+  <!-- Cookie Consent History -->
+  {% if cookie_consent_history %}
+  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
+    <div class="p-6">
+      <h3 class="text-lg font-medium text-white mb-4">
+        &#127850; {% trans 'Cookie Consent History' %}
+      </h3>
+
+      <div class="space-y-4">
+        {% for cookie in cookie_consent_history %}
+        <div class="flex items-start p-4 bg-slate-700 rounded-lg">
+          <div class="flex-shrink-0 w-12 h-12 bg-slate-600 rounded-lg flex items-center justify-center mr-4">
+            {% if cookie.status == 'accepted_all' %}
+              <span class="text-green-400">✅</span>
+            {% elif cookie.status == 'accepted_essential' %}
+              <span class="text-yellow-400">🔒</span>
+            {% elif cookie.status == 'customized' %}
+              <span class="text-blue-400">⚙️</span>
+            {% else %}
+              <span class="text-red-400">❌</span>
+            {% endif %}
+          </div>
+
+          <div class="flex-1">
+            <div class="flex items-center justify-between mb-1">
+              <h4 class="text-sm font-medium text-white">
+                {% if cookie.status == 'accepted_all' %}{% trans 'All Cookies Accepted' %}
+                {% elif cookie.status == 'accepted_essential' %}{% trans 'Essential Only' %}
+                {% elif cookie.status == 'customized' %}{% trans 'Custom Preferences' %}
+                {% elif cookie.status == 'withdrawn' %}{% trans 'Consent Withdrawn' %}
+                {% else %}{{ cookie.status }}{% endif %}
+              </h4>
+              <span class="text-xs text-slate-400">{{ cookie.updated_at }}</span>
+            </div>
+            <div class="flex flex-wrap gap-2 mt-2">
+              <span class="text-xs px-2 py-0.5 rounded bg-green-800 text-green-200">{% trans 'Essential' %}</span>
+              {% if cookie.functional %}
+                <span class="text-xs px-2 py-0.5 rounded bg-blue-800 text-blue-200">{% trans 'Functional' %}</span>
+              {% endif %}
+              {% if cookie.analytics %}
+                <span class="text-xs px-2 py-0.5 rounded bg-yellow-800 text-yellow-200">{% trans 'Analytics' %}</span>
+              {% endif %}
+              {% if cookie.marketing %}
+                <span class="text-xs px-2 py-0.5 rounded bg-red-800 text-red-200">{% trans 'Marketing' %}</span>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
 
   <!-- Manage Preferences -->
   <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">

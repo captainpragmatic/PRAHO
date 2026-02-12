@@ -646,24 +646,48 @@ def data_export_view(request: HttpRequest) -> HttpResponse:
     customer_email = request.session.get('email')
     
     if request.method == 'POST':
-        # Handle data export request
         try:
-            # TODO: Implement actual data export request via Platform API
-            logger.info(f"✅ [Portal Data Export] Request submitted for customer {customer_id}")
-            messages.success(request, _("Data export request submitted successfully. You will receive an email with download instructions within 48 hours."))
-            return redirect('users:data_export')
-            
+            user_id = request.session.get('user_id')
+            if not user_id:
+                messages.error(request, _("Authentication required."))
+                return redirect('users:data_export')
+
+            result = api_client.request_data_export_secure(user_id)
+            if result.get('success'):
+                logger.info(f"✅ [Portal Data Export] Request created: export_id={result.get('export_id')}")
+                messages.success(request, _("Data export request submitted successfully. You will receive an email with download instructions within 48 hours."))
+            else:
+                messages.error(request, _("Failed to create export request. Please try again."))
+
+        except PlatformAPIError:
+            logger.warning("⚠️ [Portal Data Export] Platform API unavailable")
+            messages.error(request, _("Service temporarily unavailable. Please try again later."))
         except Exception as e:
             logger.error(f"🔥 [Portal Data Export] Error processing request: {e}")
             messages.error(request, _("Error processing your data export request. Please try again."))
-    
+
+        # PRG: redirect after POST to prevent re-submission on refresh
+        return redirect('users:data_export')
+
+    # Fetch recent export requests for status display
+    exports = []
+    try:
+        user_id = request.session.get('user_id')
+        if user_id:
+            result = api_client.get_data_export_status(user_id)
+            if result.get('success'):
+                exports = result.get('exports', [])
+    except PlatformAPIError:
+        logger.warning("⚠️ [Portal Data Export] Could not fetch export status")
+
     context = {
         'customer_email': customer_email,
         'customer_id': customer_id,
+        'exports': exports,
         'page_title': _('Export My Data'),
         'brand_name': 'PRAHO Portal',
     }
-    
+
     return render(request, 'users/data_export.html', context)
 
 
@@ -689,27 +713,25 @@ def consent_history_view(request: HttpRequest) -> HttpResponse:
     except Exception as e:
         logger.debug(f"Could not load profile data from Platform API: {e}")
     
-    # Mock consent history data - in real implementation this would come from Platform API
-    consent_history = [
-        {
-            'date': '2024-01-15',
-            'type': 'GDPR Data Processing',
-            'status': 'Granted',
-            'description': 'Initial account registration consent'
-        },
-        {
-            'date': '2024-01-15', 
-            'type': 'Marketing Communications',
-            'status': 'Declined',
-            'description': 'Newsletter and promotional emails'
-        }
-    ]
+    # Fetch real consent history from Platform GDPR API
+    consent_history = []
+    cookie_consent_history = []
+    try:
+        user_id = request.session.get('user_id')
+        if user_id:
+            result = api_client.get_consent_history_secure(user_id)
+            if result.get('success'):
+                consent_history = result.get('consent_history', [])
+                cookie_consent_history = result.get('cookie_consent_history', [])
+    except PlatformAPIError:
+        logger.warning("⚠️ [Portal Consent] Failed to fetch consent history from Platform")
     
     context = {
         'profile': profile_data,
         'customer_email': customer_email,
         'customer_id': customer_id,
         'consent_history': consent_history,
+        'cookie_consent_history': cookie_consent_history,
         'page_title': _('Consent History'),
         'brand_name': 'PRAHO Portal',
     }

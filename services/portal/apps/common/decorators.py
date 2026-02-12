@@ -90,7 +90,8 @@ def _get_user_role_for_customer(request: HttpRequest, customer_id: str) -> str |
         if str(membership.get('customer_id')) == str(customer_id):
             return membership.get('role')
 
-    # Customer not found — force one more fresh fetch in case we had stale data
+    # Customer not found — force one more fresh fetch in case we had stale data.
+    # Skip if cache already expired (we just fetched above).
     if not cache_expired and memberships:
         memberships = _fetch_user_memberships(request)
         for membership in memberships:

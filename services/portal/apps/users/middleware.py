@@ -39,13 +39,15 @@ class PortalAuthenticationMiddleware:
     # Public URLs that don't require authentication
     PUBLIC_URLS: ClassVar[list[str]] = [
         '/login/',
-        '/logout/', 
+        '/logout/',
         '/register/',
         '/password-reset/',
         '/static/',
         '/media/',
         '/status/',
         '/favicon.ico',
+        '/cookie-policy/',
+        '/api/cookie-consent/',
     ]
     
     # Validation timing configuration

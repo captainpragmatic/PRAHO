@@ -535,6 +535,28 @@ def ensure_fresh_session(page: Page) -> None:
     print("  ✅ Navigated to login page")
 
 
+def dismiss_cookie_consent(page: Page) -> None:
+    """
+    Dismiss the cookie consent banner by clicking "Accept All".
+
+    Use in Portal E2E tests that need to bypass the banner to interact
+    with page content underneath. Sets the cookie_consent client cookie
+    so the banner stays hidden on subsequent page loads.
+
+    If the banner is not visible (already dismissed), this is a no-op.
+    """
+    banner = page.locator('#cookie-consent-banner')
+    try:
+        if banner.is_visible(timeout=2000):
+            accept_btn = banner.locator('button', has_text='Accept All')
+            accept_btn.click()
+            banner.wait_for(state='hidden', timeout=3000)
+            print("✅ Cookie consent banner dismissed")
+    except Exception:
+        # Banner not present or already dismissed — that's fine
+        pass
+
+
 # ===============================================================================
 # NAVIGATION UTILITIES
 # ===============================================================================

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -29,6 +30,7 @@ from .models import (
     AuditRetentionPolicy,
     AuditSearchQuery,
     ComplianceLog,
+    CookieConsent,
     DataExport,
 )
 
@@ -1235,6 +1237,25 @@ class GDPRExportService:
             return Err(f"Export processing failed: {e!s}")
 
     @classmethod
+    def get_user_exports(cls, user: User) -> list[dict[str, Any]]:
+        """Get recent data export requests for a user (last 10)."""
+        exports = DataExport.objects.filter(
+            requested_by=user,
+        ).order_by("-requested_at")[:10]
+        return [
+            {
+                "id": str(e.id),
+                "status": e.status,
+                "requested_at": e.requested_at.isoformat(),
+                "completed_at": e.completed_at.isoformat() if e.completed_at else None,
+                "expires_at": e.expires_at.isoformat(),
+                "file_size": e.file_size,
+                "record_count": e.record_count,
+            }
+            for e in exports
+        ]
+
+    @classmethod
     def _collect_user_data(cls, user: User, scope: dict[str, Any]) -> dict[str, Any]:
         """Collect comprehensive user data based on export scope"""
         data: dict[str, Any] = {
@@ -1636,6 +1657,112 @@ class GDPRConsentService:
 
         except Exception as e:
             logger.error(f"🔥 [GDPR Consent] Failed to get consent history for {user.email}: {e}")
+            return []
+
+    @classmethod
+    @transaction.atomic
+    def record_cookie_consent(  # noqa: PLR0913
+        cls,
+        *,
+        cookie_id: str,
+        status: str,
+        functional: bool = False,
+        analytics: bool = False,
+        marketing: bool = False,
+        ip_address: str | None = None,
+        user_agent: str = "",
+        user_id: int | None = None,
+    ) -> Result[CookieConsent, str]:
+        """
+        Record cookie consent from Portal (via GDPR API).
+
+        Handles both anonymous (cookie_id only) and authenticated (user_id) consent.
+        When user_id is provided with a cookie_id, also links any prior anonymous
+        CookieConsent records with the same cookie_id to this user.
+        """
+        from .signals import cookie_consent_updated  # noqa: PLC0415  # circular import
+
+        try:
+            status_map = {
+                "accepted_all": "accepted_all",
+                "accepted_essential": "accepted_essential",
+                "customized": "customized",
+                "withdrawn": "withdrawn",
+            }
+            consent_status = status_map.get(status, "customized")
+
+            user = None
+            if user_id is not None:
+                with contextlib.suppress(User.DoesNotExist):
+                    user = User.objects.get(id=user_id, is_active=True)
+
+            defaults = {
+                "status": consent_status,
+                "essential_cookies": True,
+                "functional_cookies": functional,
+                "analytics_cookies": analytics,
+                "marketing_cookies": marketing,
+                "ip_address": ip_address,
+                "user_agent": (user_agent or "")[:500],
+                "consent_version": "1.0",
+            }
+
+            # Always use cookie_id as the SOLE lookup key — one cookie_id = one row.
+            # Using user__isnull=True in the anonymous branch would create a second
+            # row after the authenticated branch sets user, leading to
+            # MultipleObjectsReturned on the next authenticated call.
+            # When anonymous, user is omitted from defaults so existing user
+            # associations are preserved (e.g., user logs out, updates preferences).
+            if user:
+                defaults["user"] = user
+
+            consent, _created = CookieConsent.objects.update_or_create(
+                cookie_id=cookie_id, defaults=defaults,
+            )
+
+            # Emit signal → triggers dual audit trail:
+            # 1. AuditEvent (security monitoring)
+            # 2. ComplianceLog (GDPR reporting)
+            # See audit_cookie_consent_change() in signals.py
+            cookie_consent_updated.send(
+                sender=cls,
+                consent=consent,
+                user=user,
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+
+            logger.info(
+                f"✅ [GDPR Cookie] Consent recorded: "
+                f"user={'anonymous' if not user else user.email}, status={consent_status}"
+            )
+            return Ok(consent)
+
+        except Exception as e:
+            logger.error(f"🔥 [GDPR Cookie] Failed to record consent: {e}")
+            return Err(f"Failed to record cookie consent: {e!s}")
+
+    @classmethod
+    def get_cookie_consent_history(cls, user: User) -> list[dict[str, Any]]:
+        """Get cookie consent records for a user."""
+        try:
+            consents = CookieConsent.objects.filter(user=user).order_by("-updated_at")
+            return [
+                {
+                    "id": str(c.id),
+                    "status": c.status,
+                    "essential": c.essential_cookies,
+                    "functional": c.functional_cookies,
+                    "analytics": c.analytics_cookies,
+                    "marketing": c.marketing_cookies,
+                    "consent_version": c.consent_version,
+                    "created_at": c.created_at.isoformat(),
+                    "updated_at": c.updated_at.isoformat(),
+                }
+                for c in consents
+            ]
+        except Exception as e:
+            logger.error(f"🔥 [GDPR Cookie] Failed to get cookie history for {user.email}: {e}")
             return []
 
 

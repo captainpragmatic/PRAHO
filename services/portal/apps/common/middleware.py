@@ -250,7 +250,7 @@ class SecurityHeadersMiddleware:
         # 🔒 SECURITY: Content Security Policy for HTMX/Tailwind compatibility
         csp_parts = [
             "default-src 'self'",
-            "script-src 'self' 'unsafe-inline' https://js.stripe.com",  # HTMX, Alpine.js, and Stripe require external scripts
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com",  # HTMX + Stripe need unsafe-inline; Alpine.js v3 needs unsafe-eval for x-data expressions
             "style-src 'self' 'unsafe-inline'",   # Tailwind requires unsafe-inline
             "img-src 'self' data: https:",
             "font-src 'self'",
