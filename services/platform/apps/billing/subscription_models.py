@@ -331,11 +331,11 @@ class Subscription(models.Model):
         )
         constraints = [
             models.CheckConstraint(
-                check=Q(unit_price_cents__gte=0),
+                condition=Q(unit_price_cents__gte=0),
                 name="subscription_price_non_negative",
             ),
             models.CheckConstraint(
-                check=Q(quantity__gte=1),
+                condition=Q(quantity__gte=1),
                 name="subscription_quantity_positive",
             ),
         ]

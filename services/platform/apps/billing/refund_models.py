@@ -124,14 +124,14 @@ class Refund(models.Model):
         constraints: ClassVar[list[models.CheckConstraint]] = [
             # Ensure either order OR invoice is specified, not both
             models.CheckConstraint(
-                check=(
+                condition=(
                     (models.Q(order__isnull=False) & models.Q(invoice__isnull=True))
                     | (models.Q(order__isnull=True) & models.Q(invoice__isnull=False))
                 ),
                 name="refund_order_or_invoice_not_both",
             ),
             # Ensure refund amount is positive
-            models.CheckConstraint(check=models.Q(amount_cents__gt=0), name="refund_amount_positive"),
+            models.CheckConstraint(condition=models.Q(amount_cents__gt=0), name="refund_amount_positive"),
         ]
 
     def __str__(self) -> str:

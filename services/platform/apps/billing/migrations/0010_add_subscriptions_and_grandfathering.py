@@ -322,14 +322,14 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="subscription",
             constraint=models.CheckConstraint(
-                check=models.Q(unit_price_cents__gte=0),
+                condition=models.Q(unit_price_cents__gte=0),
                 name="subscription_price_non_negative",
             ),
         ),
         migrations.AddConstraint(
             model_name="subscription",
             constraint=models.CheckConstraint(
-                check=models.Q(quantity__gte=1),
+                condition=models.Q(quantity__gte=1),
                 name="subscription_quantity_positive",
             ),
         ),
