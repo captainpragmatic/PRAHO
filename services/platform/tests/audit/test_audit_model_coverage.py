@@ -15,18 +15,15 @@ from django.apps import apps
 from django.db.models.signals import post_delete, post_save, pre_delete, pre_save
 from django.test import SimpleTestCase
 
-
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 ALLOWLIST_PATH = Path(__file__).resolve().parents[4] / "scripts" / "audit_model_allowlist.txt"
 
 AUDIT_SIGNALS = (post_save, pre_save, post_delete, pre_delete)
 
-# Matches: "app_label.ModelName  # some comment"
 _ALLOWLIST_RE = re.compile(
     r"^(?P<entry>[a-z_]+\.[A-Za-z]+)\s+#\s*(?P<comment>.+)$"
 )
-# Matches entries without comments: "app_label.ModelName" (no # …)
 _UNCOMMENTED_RE = re.compile(
     r"^(?P<entry>[a-z_]+\.[A-Za-z]+)\s*$"
 )
@@ -64,7 +61,12 @@ def _model_label(model: type) -> str:
 def _has_audit_signal(model: type) -> bool:
     """Check if *any* audit signal type has a live receiver for this model."""
     for sig in AUDIT_SIGNALS:
-        if sig._live_receivers(model):
+        raw_receivers = sig._live_receivers(model)
+        if isinstance(raw_receivers, tuple):
+            sync_receivers, async_receivers = raw_receivers
+            if sync_receivers or async_receivers:
+                return True
+        elif raw_receivers:
             return True
     return False
 
@@ -133,7 +135,7 @@ class TestAuditModelCoverage(SimpleTestCase):
 
     def test_allowlist_entries_have_comments(self):
         """Every allowlist entry must have a justification comment."""
-        commented, uncommented = _parse_allowlist()
+        _commented, uncommented = _parse_allowlist()
 
         uncommented_sorted = sorted(uncommented)
         self.assertEqual(

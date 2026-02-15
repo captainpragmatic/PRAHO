@@ -13,12 +13,15 @@ from django.contrib.contenttypes.models import ContentType
 from django.test import TestCase, override_settings
 
 from apps.audit.models import AuditEvent
-from apps.billing.models import Currency
+from apps.billing.models import Currency, Invoice, Payment
+from apps.common.validators import log_security_event
+from apps.notifications.models import EmailPreference, EmailSuppression, EmailTemplate
+from apps.settings.models import SystemSetting
 from tests.factories.core_factories import CustomerCreationRequest, create_full_customer
 
 
 def _get_ron() -> Currency:
-    """Create RON currency without the broken is_active default."""
+    """Create or get the RON currency for tests."""
     currency, _ = Currency.objects.get_or_create(
         code="RON", defaults={"name": "Romanian Leu", "symbol": "L", "decimals": 2}
     )
@@ -30,8 +33,6 @@ class TestSystemSettingAuditEvent(TestCase):
     """SystemSetting save/delete → AuditEvent creation."""
 
     def test_create_system_setting_produces_audit_event(self) -> None:
-        from apps.settings.models import SystemSetting
-
         setting = SystemSetting.objects.create(
             key="test.audit_integration",
             name="Test Audit Integration",
@@ -49,8 +50,6 @@ class TestSystemSettingAuditEvent(TestCase):
         self.assertTrue(events.exists(), "No AuditEvent created for SystemSetting.create")
 
     def test_update_system_setting_produces_audit_event(self) -> None:
-        from apps.settings.models import SystemSetting
-
         setting = SystemSetting.objects.create(
             key="test.update_audit",
             name="Test Update Audit",
@@ -75,8 +74,6 @@ class TestSystemSettingAuditEvent(TestCase):
         self.assertTrue(events.exists(), "No AuditEvent created for SystemSetting.update")
 
     def test_delete_system_setting_produces_audit_event(self) -> None:
-        from apps.settings.models import SystemSetting
-
         setting = SystemSetting.objects.create(
             key="test.delete_audit",
             name="Test Delete Audit",
@@ -102,8 +99,6 @@ class TestEmailSuppressionAuditEvent(TestCase):
     """EmailSuppression save → AuditEvent creation (data protection)."""
 
     def test_create_email_suppression_produces_audit_event(self) -> None:
-        from apps.notifications.models import EmailSuppression
-
         suppression = EmailSuppression.objects.create(
             email_hash=hashlib.sha256(b"test@example.com").hexdigest(),
             reason="hard_bounce",
@@ -121,8 +116,6 @@ class TestEmailPreferenceAuditEvent(TestCase):
     """EmailPreference create → AuditEvent creation (GDPR consent tracking)."""
 
     def test_create_email_preference_produces_audit_event(self) -> None:
-        from apps.notifications.models import EmailPreference
-
         customer = create_full_customer(
             CustomerCreationRequest(
                 with_tax_profile=False,
@@ -149,8 +142,6 @@ class TestEmailTemplateAuditEvent(TestCase):
     """EmailTemplate update/delete → AuditEvent creation."""
 
     def test_update_email_template_produces_audit_event(self) -> None:
-        from apps.notifications.models import EmailTemplate
-
         template = EmailTemplate.objects.create(
             key="test_audit_template",
             locale="en",
@@ -177,8 +168,6 @@ class TestInvoiceAuditEvent(TestCase):
     """Invoice save → AuditEvent creation."""
 
     def test_create_invoice_produces_audit_event(self) -> None:
-        from apps.billing.models import Invoice
-
         customer = create_full_customer(
             CustomerCreationRequest(
                 with_tax_profile=False,
@@ -209,8 +198,6 @@ class TestPaymentAuditEvent(TestCase):
     """Payment save → AuditEvent creation."""
 
     def test_create_payment_produces_audit_event(self) -> None:
-        from apps.billing.models import Invoice, Payment
-
         customer = create_full_customer(
             CustomerCreationRequest(
                 with_tax_profile=False,
@@ -247,8 +234,6 @@ class TestLogSecurityEvent(TestCase):
     """log_security_event() → AuditEvent creation via AuditService delegation."""
 
     def test_log_security_event_creates_audit_event(self) -> None:
-        from apps.common.validators import log_security_event
-
         initial_count = AuditEvent.objects.count()
 
         log_security_event(

@@ -18,7 +18,7 @@ from typing import Any
 from django.conf import settings
 from django.core.cache import cache
 from django.core.files.storage import default_storage
-from django.db.models.signals import post_delete, post_save, pre_save
+from django.db.models.signals import post_delete, post_save, pre_delete, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
 
@@ -32,10 +32,15 @@ from apps.audit.services import (
 from apps.common.validators import log_security_event
 
 from .models import (
+    CreditLedger,
     Invoice,
+    OAuthToken,
     Payment,
     PaymentRetryAttempt,
+    PriceGrandfathering,
     ProformaInvoice,
+    Refund,
+    Subscription,
     TaxRule,
     VATValidation,
 )
@@ -70,6 +75,240 @@ def _serialize_values_for_audit(values: dict[str, Any]) -> dict[str, Any]:
 # Financial thresholds in cents (Romanian business context)
 LARGE_REFUND_THRESHOLD_CENTS = 50000  # 500 EUR - requires finance team notification
 E_FACTURA_MINIMUM_AMOUNT = 100  # 100 RON - minimum for mandatory e-Factura
+
+# ===============================================================================
+# MODEL LIFECYCLE COVERAGE SIGNALS
+# ===============================================================================
+
+
+def _log_billing_model_event(  # noqa: PLR0913
+    *,
+    event_type: str,
+    instance: Any,
+    description: str,
+    new_values: dict[str, Any] | None = None,
+    old_values: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """Log a lightweight lifecycle audit event for billing models."""
+    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        return
+
+    try:
+        event_metadata = {
+            "source_app": "billing",
+            "model_lifecycle": True,
+        }
+        if metadata:
+            event_metadata.update(metadata)
+
+        AuditService.log_event(
+            AuditEventData(
+                event_type=event_type,
+                content_object=instance,
+                old_values=_serialize_values_for_audit(old_values or {}),
+                new_values=_serialize_values_for_audit(new_values or {}),
+                description=description,
+            ),
+            context=AuditContext(actor_type="system", metadata=event_metadata),
+        )
+    except Exception as e:
+        logger.exception(f"🔥 [Billing Lifecycle] Failed to log {event_type}: {e}")
+
+
+@receiver(post_save, sender=Subscription)
+def audit_subscription_lifecycle(
+    sender: type[Subscription], instance: Subscription, created: bool, **kwargs: Any
+) -> None:
+    """Audit lifecycle events for Subscription model."""
+    event_type = "subscription_model_created" if created else "subscription_model_updated"
+    _log_billing_model_event(
+        event_type=event_type,
+        instance=instance,
+        description=f"Subscription {instance.subscription_number} {'created' if created else 'updated'}",
+        new_values={
+            "subscription_id": str(instance.id),
+            "subscription_number": instance.subscription_number,
+            "customer_id": str(instance.customer_id),
+            "product_id": str(instance.product_id),
+            "status": instance.status,
+            "billing_cycle": instance.billing_cycle,
+        },
+        metadata={"model": "Subscription"},
+    )
+
+
+@receiver(pre_delete, sender=Subscription)
+def audit_subscription_deleted(sender: type[Subscription], instance: Subscription, **kwargs: Any) -> None:
+    """Audit deletion events for Subscription model."""
+    _log_billing_model_event(
+        event_type="subscription_model_deleted",
+        instance=instance,
+        description=f"Subscription {instance.subscription_number} deleted",
+        old_values={
+            "subscription_id": str(instance.id),
+            "subscription_number": instance.subscription_number,
+            "customer_id": str(instance.customer_id),
+            "status": instance.status,
+        },
+        metadata={"model": "Subscription"},
+    )
+
+
+@receiver(post_save, sender=PriceGrandfathering)
+def audit_price_grandfathering_lifecycle(
+    sender: type[PriceGrandfathering], instance: PriceGrandfathering, created: bool, **kwargs: Any
+) -> None:
+    """Audit lifecycle events for PriceGrandfathering model."""
+    event_type = "price_grandfathering_created" if created else "price_grandfathering_updated"
+    _log_billing_model_event(
+        event_type=event_type,
+        instance=instance,
+        description=f"Price grandfathering {'created' if created else 'updated'} for customer {instance.customer_id}",
+        new_values={
+            "grandfathering_id": str(instance.id),
+            "customer_id": str(instance.customer_id),
+            "product_id": str(instance.product_id),
+            "locked_price_cents": instance.locked_price_cents,
+            "is_active": instance.is_active,
+        },
+        metadata={"model": "PriceGrandfathering"},
+    )
+
+
+@receiver(pre_delete, sender=PriceGrandfathering)
+def audit_price_grandfathering_deleted(
+    sender: type[PriceGrandfathering], instance: PriceGrandfathering, **kwargs: Any
+) -> None:
+    """Audit deletion events for PriceGrandfathering model."""
+    _log_billing_model_event(
+        event_type="price_grandfathering_deleted",
+        instance=instance,
+        description=f"Price grandfathering deleted for customer {instance.customer_id}",
+        old_values={
+            "grandfathering_id": str(instance.id),
+            "customer_id": str(instance.customer_id),
+            "product_id": str(instance.product_id),
+            "locked_price_cents": instance.locked_price_cents,
+            "is_active": instance.is_active,
+        },
+        metadata={"model": "PriceGrandfathering"},
+    )
+
+
+@receiver(post_save, sender=Refund)
+def audit_refund_lifecycle(sender: type[Refund], instance: Refund, created: bool, **kwargs: Any) -> None:
+    """Audit lifecycle events for Refund model."""
+    event_type = "refund_model_created" if created else "refund_model_updated"
+    _log_billing_model_event(
+        event_type=event_type,
+        instance=instance,
+        description=f"Refund {instance.reference_number} {'created' if created else 'updated'}",
+        new_values={
+            "refund_id": str(instance.id),
+            "reference_number": instance.reference_number,
+            "customer_id": str(instance.customer_id),
+            "status": instance.status,
+            "refund_type": instance.refund_type,
+            "amount_cents": instance.amount_cents,
+        },
+        metadata={"model": "Refund"},
+    )
+
+
+@receiver(pre_delete, sender=Refund)
+def audit_refund_deleted(sender: type[Refund], instance: Refund, **kwargs: Any) -> None:
+    """Audit deletion events for Refund model."""
+    _log_billing_model_event(
+        event_type="refund_model_deleted",
+        instance=instance,
+        description=f"Refund {instance.reference_number} deleted",
+        old_values={
+            "refund_id": str(instance.id),
+            "reference_number": instance.reference_number,
+            "customer_id": str(instance.customer_id),
+            "status": instance.status,
+            "amount_cents": instance.amount_cents,
+        },
+        metadata={"model": "Refund"},
+    )
+
+
+@receiver(post_save, sender=CreditLedger)
+def audit_credit_ledger_lifecycle(
+    sender: type[CreditLedger], instance: CreditLedger, created: bool, **kwargs: Any
+) -> None:
+    """Audit lifecycle events for CreditLedger model."""
+    event_type = "credit_ledger_created" if created else "credit_ledger_updated"
+    _log_billing_model_event(
+        event_type=event_type,
+        instance=instance,
+        description=f"Credit ledger entry {'created' if created else 'updated'} for customer {instance.customer_id}",
+        new_values={
+            "credit_entry_id": str(instance.id),
+            "customer_id": str(instance.customer_id),
+            "invoice_id": str(instance.invoice_id) if instance.invoice_id else None,
+            "payment_id": str(instance.payment_id) if instance.payment_id else None,
+            "delta_cents": instance.delta_cents,
+            "reason": instance.reason,
+        },
+        metadata={"model": "CreditLedger"},
+    )
+
+
+@receiver(pre_delete, sender=CreditLedger)
+def audit_credit_ledger_deleted(sender: type[CreditLedger], instance: CreditLedger, **kwargs: Any) -> None:
+    """Audit deletion events for CreditLedger model."""
+    _log_billing_model_event(
+        event_type="credit_ledger_deleted",
+        instance=instance,
+        description=f"Credit ledger entry deleted for customer {instance.customer_id}",
+        old_values={
+            "credit_entry_id": str(instance.id),
+            "customer_id": str(instance.customer_id),
+            "delta_cents": instance.delta_cents,
+            "reason": instance.reason,
+        },
+        metadata={"model": "CreditLedger"},
+    )
+
+
+@receiver(post_save, sender=OAuthToken)
+def audit_oauth_token_lifecycle(sender: type[OAuthToken], instance: OAuthToken, created: bool, **kwargs: Any) -> None:
+    """Audit lifecycle events for OAuthToken model (without token material)."""
+    event_type = "efactura_oauth_token_created" if created else "efactura_oauth_token_updated"
+    _log_billing_model_event(
+        event_type=event_type,
+        instance=instance,
+        description=f"e-Factura OAuth token {'created' if created else 'updated'} for CUI {instance.cui}",
+        new_values={
+            "token_id": str(instance.id),
+            "cui": instance.cui,
+            "environment": instance.environment,
+            "is_active": instance.is_active,
+            "expires_at": instance.expires_at.isoformat(),
+        },
+        metadata={"model": "OAuthToken"},
+    )
+
+
+@receiver(pre_delete, sender=OAuthToken)
+def audit_oauth_token_deleted(sender: type[OAuthToken], instance: OAuthToken, **kwargs: Any) -> None:
+    """Audit deletion events for OAuthToken model (without token material)."""
+    _log_billing_model_event(
+        event_type="efactura_oauth_token_deleted",
+        instance=instance,
+        description=f"e-Factura OAuth token deleted for CUI {instance.cui}",
+        old_values={
+            "token_id": str(instance.id),
+            "cui": instance.cui,
+            "environment": instance.environment,
+            "is_active": instance.is_active,
+            "expires_at": instance.expires_at.isoformat(),
+        },
+        metadata={"model": "OAuthToken"},
+    )
+
 
 # ===============================================================================
 # CORE INVOICE LIFECYCLE SIGNALS
