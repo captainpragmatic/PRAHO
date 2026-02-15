@@ -8,7 +8,7 @@ repos:
   # ===============================================================================
   # CORE PYTHON QUALITY - FAST CHECKS ⚡
   # ===============================================================================
-  
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0
     hooks:
@@ -30,19 +30,19 @@ repos:
   # ===============================================================================
   # Uses the strategic configuration from pyproject.toml
   # Focus: Performance, Security, Type Hints
-  
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.1.8
     hooks:
       # Fast linting check - strategic rules only
       - id: ruff
         name: "Strategic Linting (Performance & Security)"
-        args: 
+        args:
           - --config=pyproject.toml
           - --statistics
           - --show-source
         exclude: ^(migrations/.*\.py|scripts/backup\.py|scripts/deploy\.py)$
-      
+
       # Auto-formatting (safe fixes only)
       - id: ruff-format
         name: "Auto-format Python Code"
@@ -52,7 +52,7 @@ repos:
   # ===============================================================================
   # TYPE SAFETY - GRADUAL IMPLEMENTATION 🏷️
   # ===============================================================================
-  
+
   - repo: local
     hooks:
       # Only check modified Python files for performance
@@ -65,7 +65,7 @@ repos:
         exclude: ^(migrations/.*\.py|services/platform/scripts/backup\.py|services/platform/scripts/deploy\.py)$
         pass_filenames: true
         require_serial: false
-        
+
       # Prevent new # type: ignore comments to avoid regression
       - id: prevent-type-ignore
         name: "Block New Type Ignore Comments"
@@ -81,7 +81,7 @@ repos:
   # DJANGO TEMPLATE SAFETY 🎨
   # ===============================================================================
   # Prevent the template comparison operator spacing issue
-  
+
   - repo: local
     hooks:
       - id: django-template-check
@@ -95,7 +95,7 @@ repos:
   # ===============================================================================
   # SECURITY CHECKS 🔒
   # ===============================================================================
-  
+
   - repo: local
     hooks:
       # Check portal doesn't import platform code
@@ -114,7 +114,7 @@ repos:
         language: system
         files: ^services/portal/.*\.py$
         pass_filenames: false
-        
+
       # Audit coverage regression check
       - id: audit-coverage-check
         name: "Security: Audit Coverage Check"
@@ -145,7 +145,7 @@ repos:
   # ===============================================================================
   # PERFORMANCE ANALYSIS ⚡
   # ===============================================================================
-  
+
   - repo: local
     hooks:
       # Check for performance anti-patterns in modified files
@@ -157,7 +157,7 @@ repos:
           - |
             # Check for performance issues in modified files
             .venv/bin/ruff check --select=PERF,C90,PIE,SIM --output-format=concise --quiet $@ || true
-            # Always pass - this is informational only  
+            # Always pass - this is informational only
             exit 0
         language: system
         files: \.py$
@@ -177,12 +177,6 @@ default_language_version:
 default_stages: [pre-commit]
 fail_fast: false  # Run all hooks even if one fails
 minimum_pre_commit_version: "3.0.0"
-
-# Repository settings
-repos:
-  # Additional local repository settings if needed
-  - repo: local
-    hooks: []
 
 # CI/CD integration settings
 ci:
