@@ -15,6 +15,14 @@ import sys
 from pathlib import Path
 
 
+def normalize_repo_path(file_path: str) -> str:
+    """Normalize path so checks work from repository root and service root."""
+    normalized = file_path.replace("\\", "/").lstrip("./")
+    if normalized.startswith("services/platform/"):
+        return normalized[len("services/platform/") :]
+    return normalized
+
+
 def get_modified_python_files(staged_only: bool = False, since: str | None = None) -> list[str]:
     """Get Python files that have been modified."""
     try:
@@ -42,7 +50,8 @@ def get_modified_python_files(staged_only: bool = False, since: str | None = Non
 
 def should_check_file(file_path: str) -> bool:
     """Determine if a file should be type-checked based on path."""
-    path = Path(file_path)
+    normalized = normalize_repo_path(file_path)
+    path = Path(normalized)
 
     # Skip non-app files
     if not str(path).startswith("apps/"):
@@ -108,6 +117,7 @@ def run_mypy_on_files(files: list[str], verbose: bool = False) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Type check modified Python files")
+    parser.add_argument("files", nargs="*", help="Optional explicit file list (e.g., pre-commit)")
     parser.add_argument("--staged", action="store_true", help="Check only staged files")
     parser.add_argument("--since", help="Check files modified since this commit")
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
@@ -116,8 +126,8 @@ def main() -> int:
 
     print("🎯 PRAHO Platform - Type Safety Check")
 
-    # Get modified files
-    files = get_modified_python_files(staged_only=args.staged, since=args.since)
+    # Use explicit file list when provided (e.g., direct hook invocation), otherwise detect from git.
+    files = args.files or get_modified_python_files(staged_only=args.staged, since=args.since)
 
     if not files:
         print("i  No Python files modified")

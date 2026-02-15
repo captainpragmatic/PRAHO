@@ -40,7 +40,6 @@ repos:
         args:
           - --config=pyproject.toml
           - --statistics
-          - --show-source
         exclude: ^(migrations/.*\.py|scripts/backup\.py|scripts/deploy\.py)$
 
       # Auto-formatting (safe fixes only)
@@ -59,18 +58,18 @@ repos:
       - id: type-check-modified
         name: "Type Check Modified Files"
         entry: .venv/bin/python
-        args: [services/platform/scripts/check_types_modified.py]
+        args: [services/platform/scripts/check_types_modified.py, --staged]
         language: system
         files: \.py$
         exclude: ^(migrations/.*\.py|services/platform/scripts/backup\.py|services/platform/scripts/deploy\.py)$
-        pass_filenames: true
+        pass_filenames: false
         require_serial: false
 
       # Prevent new # type: ignore comments to avoid regression
       - id: prevent-type-ignore
         name: "Block New Type Ignore Comments"
         entry: .venv/bin/python
-        args: [services/platform/scripts/prevent_type_ignore.py]
+        args: [services/platform/scripts/prevent_type_ignore.py, --staged-only]
         language: system
         files: \.py$
         exclude: ^(migrations/.*\.py|tests/.*\.py)$
