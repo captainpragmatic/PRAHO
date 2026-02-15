@@ -146,10 +146,13 @@ def poll_all_pending_status_task() -> dict[str, Any]:
     """
     logger.info("[e-Factura Task] Polling status for all pending documents")
 
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+    batch_size = SettingsService.get_integer_setting("billing.efactura_batch_size", 100)
+
     if EFacturaService is None:
         raise RuntimeError("EFacturaService unavailable")
     service = EFacturaService()
-    results = service.poll_awaiting_documents(limit=100)
+    results = service.poll_awaiting_documents(limit=batch_size)
 
     logger.info(f"[e-Factura Task] Status poll complete: {results}")
     return {
@@ -194,10 +197,13 @@ def process_pending_submissions_task() -> dict[str, Any]:
     """
     logger.info("[e-Factura Task] Processing pending submissions")
 
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+    batch_size = SettingsService.get_integer_setting("billing.efactura_batch_size", 100)
+
     if EFacturaService is None:
         raise RuntimeError("EFacturaService unavailable")
     service = EFacturaService()
-    results = service.process_pending_submissions(limit=50)
+    results = service.process_pending_submissions(limit=batch_size)
 
     logger.info(f"[e-Factura Task] Submissions complete: {results}")
     return {
@@ -209,7 +215,7 @@ def process_pending_submissions_task() -> dict[str, Any]:
 
 def check_efactura_deadlines_task() -> dict[str, Any]:
     """
-    Check for invoices approaching the 5-day submission deadline.
+    Check for invoices approaching the submission deadline.
 
     This task should be scheduled to run daily.
 
@@ -218,10 +224,13 @@ def check_efactura_deadlines_task() -> dict[str, Any]:
     """
     logger.info("[e-Factura Task] Checking e-Factura deadlines")
 
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+    warning_hours = SettingsService.get_integer_setting("billing.efactura_deadline_warning_hours", 24)
+
     if EFacturaService is None:
         raise RuntimeError("EFacturaService unavailable")
     service = EFacturaService()
-    approaching = service.check_approaching_deadlines(hours=24)
+    approaching = service.check_approaching_deadlines(hours=warning_hours)
 
     if approaching:
         logger.warning(f"[e-Factura Task] {len(approaching)} invoices approaching deadline!")

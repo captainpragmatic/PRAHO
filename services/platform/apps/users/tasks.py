@@ -21,6 +21,7 @@ from django_q.tasks import async_task, schedule
 
 from apps.audit.models import AuditEvent
 from apps.audit.services import AuditService
+from apps.settings.services import SettingsService
 from apps.users.mfa import WebAuthnCredential
 from apps.users.models import User, UserLoginLog
 
@@ -180,8 +181,9 @@ def rotate_failed_login_tracking() -> dict[str, Any]:
 
             results["unlocked_accounts"] = unlocked_count
 
-            # Clean up old login logs (keep last 30 days)
-            log_cutoff = timezone.now() - timedelta(days=30)
+            # Clean up old login logs based on GDPR retention policy
+            retention_months = SettingsService.get_integer_setting("gdpr.failed_login_retention_months", 6)
+            log_cutoff = timezone.now() - timedelta(days=retention_months * 30)
             old_logs = UserLoginLog.objects.filter(timestamp__lt=log_cutoff)
             cleaned_logs_count = old_logs.count()
 
@@ -235,8 +237,8 @@ def audit_suspicious_login_patterns() -> dict[str, Any]:
             .values("user_id")
             .annotate(ip_count=Count("ip_address", distinct=True), total_failures=Count("id"))
             .filter(
-                ip_count__gte=3,  # At least 3 different IPs
-                total_failures__gte=5,  # At least 5 failed attempts
+                ip_count__gte=SettingsService.get_integer_setting("security.suspicious_ip_threshold", 3),
+                total_failures__gte=SettingsService.get_integer_setting("users.security_lockout_failure_threshold", 5),
             )
         )
 

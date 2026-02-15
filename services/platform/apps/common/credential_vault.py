@@ -34,10 +34,10 @@ from apps.common.types import Err, Ok, Result
 
 logger = logging.getLogger(__name__)
 
-# Vault configuration constants
+# Vault configuration constants — defaults; authoritative source is SettingsService
 CREDENTIAL_EXPIRY_DAYS = 30  # Default credential expiration
-MAX_CREDENTIAL_AGE_DAYS = 90  # Maximum age before forced rotation
-ROTATION_RETRY_LIMIT = 3
+_DEFAULT_MAX_CREDENTIAL_AGE_DAYS = 90  # Maximum age before forced rotation
+_DEFAULT_ROTATION_RETRY_LIMIT = 3
 ACCESS_LOG_RETENTION_DAYS = 365  # Keep access logs for 1 year
 VAULT_CACHE_TIMEOUT = 300  # 5 minutes for credential caching
 

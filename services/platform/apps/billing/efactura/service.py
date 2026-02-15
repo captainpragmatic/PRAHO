@@ -347,7 +347,7 @@ class EFacturaService:
 
     def check_approaching_deadlines(self, hours: int = 24) -> list[EFacturaDocument]:
         """
-        Find invoices approaching the 5-day submission deadline.
+        Find invoices approaching the submission deadline.
 
         Args:
             hours: Hours before deadline to alert
@@ -356,14 +356,17 @@ class EFacturaService:
             List of documents approaching deadline
         """
         from apps.billing.invoice_models import Invoice
+        from apps.settings.services import SettingsService  # noqa: PLC0415
+
+        deadline_days = SettingsService.get_integer_setting("billing.efactura_submission_deadline_days", 5)
 
         cutoff = timezone.now() + timedelta(hours=hours)
-        deadline_start = cutoff - timedelta(days=5)
+        deadline_start = cutoff - timedelta(days=deadline_days)
 
         # Find invoices issued within deadline window that don't have accepted e-Factura
         invoices = Invoice.objects.filter(
             issued_at__gte=deadline_start,
-            issued_at__lte=cutoff - timedelta(days=5) + timedelta(hours=hours),
+            issued_at__lte=cutoff - timedelta(days=deadline_days) + timedelta(hours=hours),
             bill_to_country="RO",
             bill_to_tax_id__isnull=False,
             status="issued",
@@ -395,7 +398,8 @@ class EFacturaService:
             return getattr(settings, "EFACTURA_B2C_ENABLED", False)
 
         # Minimum amount check (e.g., simplified invoices under 100 RON might be exempt)
-        min_amount = getattr(settings, "EFACTURA_MINIMUM_AMOUNT_CENTS", 0)
+        from apps.settings.services import SettingsService  # noqa: PLC0415
+        min_amount = SettingsService.get_integer_setting("billing.efactura_minimum_amount_cents", 10000)
         return not invoice.total_cents < min_amount
 
     def _get_existing_document(self, invoice: Invoice) -> EFacturaDocument | None:

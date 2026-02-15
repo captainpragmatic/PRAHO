@@ -11,16 +11,17 @@ from typing import Any
 from django.utils import timezone
 
 from apps.common.types import Err, Ok, Result
+from apps.settings.services import SettingsService
 
 from .virtualmin_models import VirtualminAccount, VirtualminServer
 from .virtualmin_service import VirtualminAccountCreationData, VirtualminProvisioningService
 
 logger = logging.getLogger(__name__)
 
-# Recovery integrity thresholds
-EXCELLENT_RECOVERY_THRESHOLD = 95  # >= 95% for excellent status
-GOOD_RECOVERY_THRESHOLD = 90  # >= 90% for good status
-WARNING_RECOVERY_THRESHOLD = 80  # >= 80% for warning status
+# Module-level defaults for recovery integrity thresholds (used as fallbacks)
+_DEFAULT_EXCELLENT_RECOVERY_THRESHOLD = 95
+_DEFAULT_GOOD_RECOVERY_THRESHOLD = 90
+_DEFAULT_WARNING_RECOVERY_THRESHOLD = 80
 
 
 class VirtualminDisasterRecoveryService:
@@ -229,13 +230,23 @@ class VirtualminDisasterRecoveryService:
 
             recovery_percentage = (recoverable_accounts / total_accounts * 100) if total_accounts > 0 else 100
 
+            excellent_threshold = SettingsService.get_integer_setting(
+                "provisioning.recovery_excellent_threshold", _DEFAULT_EXCELLENT_RECOVERY_THRESHOLD
+            )
+            good_threshold = SettingsService.get_integer_setting(
+                "provisioning.recovery_good_threshold", _DEFAULT_GOOD_RECOVERY_THRESHOLD
+            )
+            warning_threshold = SettingsService.get_integer_setting(
+                "provisioning.recovery_warning_threshold", _DEFAULT_WARNING_RECOVERY_THRESHOLD
+            )
+
             integrity_status = (
                 "excellent"
-                if recovery_percentage >= EXCELLENT_RECOVERY_THRESHOLD
+                if recovery_percentage >= excellent_threshold
                 else "good"
-                if recovery_percentage >= GOOD_RECOVERY_THRESHOLD
+                if recovery_percentage >= good_threshold
                 else "warning"
-                if recovery_percentage >= WARNING_RECOVERY_THRESHOLD
+                if recovery_percentage >= warning_threshold
                 else "critical"
             )
 

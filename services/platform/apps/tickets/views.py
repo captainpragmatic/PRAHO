@@ -21,12 +21,16 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
 from django_ratelimit.decorators import ratelimit  # type: ignore[import-untyped]
 
+from apps.settings.services import SettingsService
 from apps.users.models import User
 
 from .models import Ticket, TicketAttachment, TicketComment
 from .services import TicketStatusService
 
 logger = logging.getLogger(__name__)
+
+# Module-level default for file size limit (must match tickets.security)
+_DEFAULT_MAX_FILE_SIZE_BYTES = 10485760  # 10MB
 
 
 @dataclass
@@ -253,7 +257,10 @@ def _is_file_size_valid(uploaded_file: UploadedFile) -> bool:
     """Check if uploaded file size is within limits."""
     if uploaded_file.size is None:
         return False
-    return uploaded_file.size <= 10 * 1024 * 1024  # 10MB limit
+    max_file_size = SettingsService.get_integer_setting(
+        "tickets.max_file_size_bytes", _DEFAULT_MAX_FILE_SIZE_BYTES
+    )
+    return uploaded_file.size <= max_file_size
 
 
 def _is_file_type_allowed(content_type: str) -> bool:
@@ -287,7 +294,10 @@ def _process_ticket_attachments(request: HttpRequest, ticket: Ticket, comment: T
 
         # File size check
         if not _is_file_size_valid(uploaded_file):
-            messages.warning(request, f"❌ File {uploaded_file.name} is too large (max 10MB).")
+            max_size_mb = SettingsService.get_integer_setting(
+                "tickets.max_file_size_bytes", _DEFAULT_MAX_FILE_SIZE_BYTES
+            ) // (1024 * 1024)
+            messages.warning(request, f"❌ File {uploaded_file.name} is too large (max {max_size_mb}MB).")
             continue
 
         # Content type detection

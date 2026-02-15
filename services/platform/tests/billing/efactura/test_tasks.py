@@ -191,7 +191,7 @@ class ProcessPendingSubmissionsTaskTestCase(TestCase):
 
         self.assertTrue(result["success"])
         self.assertEqual(result["submitted"], 5)
-        mock_service.process_pending_submissions.assert_called_once_with(limit=50)
+        mock_service.process_pending_submissions.assert_called_once_with(limit=100)
 
 
 class CheckEfacturaDeadlinesTaskTestCase(TestCase):

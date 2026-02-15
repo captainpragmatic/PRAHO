@@ -13,20 +13,22 @@ from typing import TYPE_CHECKING, Any
 from django.db.models import Avg, Count, Sum
 from django.utils import timezone
 
+from apps.settings.services import SettingsService
+
 if TYPE_CHECKING:
     from apps.customers.models import Customer
 
 logger = logging.getLogger(__name__)
 
-# Credit score constants
-BASE_CREDIT_SCORE = 750  # Starting score for new customers
+# Credit score constants — defaults used as fallbacks for SettingsService
+_DEFAULT_BASE_CREDIT_SCORE = 750  # Starting score for new customers
 MIN_CREDIT_SCORE = 0
 MAX_CREDIT_SCORE = 1000
 POOR_CREDIT_THRESHOLD = 400
 EXCELLENT_CREDIT_THRESHOLD = 800
 
-# Score adjustments for events
-CREDIT_ADJUSTMENTS = {
+# Default score adjustments for events — authoritative source is SettingsService
+_DEFAULT_CREDIT_ADJUSTMENTS = {
     "positive_payment": 15,  # On-time payment
     "early_payment": 25,  # Payment before due date
     "failed_payment": -50,  # Payment failure
@@ -36,6 +38,10 @@ CREDIT_ADJUSTMENTS = {
     "account_age_bonus": 5,  # Per year of account age
     "order_completed": 5,  # Successfully completed order
 }
+
+# Module-level alias kept for backward compatibility
+BASE_CREDIT_SCORE = _DEFAULT_BASE_CREDIT_SCORE
+CREDIT_ADJUSTMENTS = _DEFAULT_CREDIT_ADJUSTMENTS
 
 
 class CustomerCreditService:
@@ -70,12 +76,14 @@ class CustomerCreditService:
 
             # Apply additional modifiers based on customer history
             if event_type == "positive_payment":
-                # Bonus for consistent payers
+                # Bonus for consistent payers — thresholds from SettingsService
                 consecutive_on_time = CustomerCreditService._get_consecutive_on_time_payments(customer)
-                if consecutive_on_time >= 6:
-                    adjustment += 10  # Bonus for 6+ consecutive on-time payments
-                elif consecutive_on_time >= 12:
-                    adjustment += 20  # Larger bonus for 12+ consecutive
+                consecutive_bonus_6 = SettingsService.get_integer_setting("billing.credit_consecutive_bonus_6", 10)
+                consecutive_bonus_12 = SettingsService.get_integer_setting("billing.credit_consecutive_bonus_12", 20)
+                if consecutive_on_time >= 12:
+                    adjustment += consecutive_bonus_12  # Larger bonus for 12+ consecutive
+                elif consecutive_on_time >= 6:
+                    adjustment += consecutive_bonus_6  # Bonus for 6+ consecutive on-time payments
 
             # Calculate new score (clamped to valid range)
             new_score = max(MIN_CREDIT_SCORE, min(MAX_CREDIT_SCORE, current_score + adjustment))

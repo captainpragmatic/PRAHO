@@ -26,10 +26,7 @@ from django.utils.translation import gettext_lazy as _
 
 from apps.common.constants import (
     IDENTIFIER_MAX_LENGTH,
-    MAX_CUSTOMER_LOOKUPS_PER_HOUR,
-    MAX_JOIN_NOTIFICATIONS_PER_HOUR,
     MIN_RESPONSE_TIME_SECONDS,
-    SUSPICIOUS_IP_THRESHOLD,
 )
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.types import (
@@ -52,6 +49,7 @@ from apps.customers.models import (
     CustomerBillingProfile,
     CustomerTaxProfile,
 )
+from apps.settings.services import SettingsService
 
 from .models import CustomerMembership
 
@@ -437,7 +435,7 @@ class SecureUserRegistrationService:
             # Rate limit lookups
             cache_key = f"customer_lookup:{request_ip or 'unknown'}"
             lookups = cache.get(cache_key, 0)
-            if lookups >= MAX_CUSTOMER_LOOKUPS_PER_HOUR:  # lookups per hour per IP
+            if lookups >= SettingsService.get_integer_setting("security.max_customer_lookups_per_hour", 20):  # lookups per hour per IP
                 return None
             cache.set(cache_key, lookups + 1, timeout=3600)
 
@@ -481,7 +479,7 @@ class SecureUserRegistrationService:
             # Rate limit notifications
             cache_key = f"join_notifications:{customer.id}"
             notifications = cache.get(cache_key, 0)
-            if notifications >= MAX_JOIN_NOTIFICATIONS_PER_HOUR:  # Max notifications per hour per customer
+            if notifications >= SettingsService.get_integer_setting("security.invitation_rate_limit_per_user", 10):  # Max notifications per hour per customer
                 return
             cache.set(cache_key, notifications + 1, timeout=3600)
 
@@ -811,7 +809,7 @@ class SecureCustomerUserService:
             # Rate limit lookups
             cache_key = f"customer_lookup:{request_ip or 'unknown'}"
             lookups = cache.get(cache_key, 0)
-            if lookups >= MAX_CUSTOMER_LOOKUPS_PER_HOUR:  # lookups per hour per IP
+            if lookups >= SettingsService.get_integer_setting("security.max_customer_lookups_per_hour", 20):  # lookups per hour per IP
                 return None
             cache.set(cache_key, lookups + 1, timeout=3600)
 
@@ -905,7 +903,7 @@ class SecureCustomerUserService:
             # Rate limit notifications
             cache_key = f"join_notifications:{customer.id}"
             notifications = cache.get(cache_key, 0)
-            if notifications >= MAX_JOIN_NOTIFICATIONS_PER_HOUR:  # Max notifications per hour per customer
+            if notifications >= SettingsService.get_integer_setting("security.invitation_rate_limit_per_user", 10):  # Max notifications per hour per customer
                 return
             cache.set(cache_key, notifications + 1, timeout=3600)
 
@@ -989,13 +987,25 @@ class SessionSecurityService:
     - Shared device mode with enhanced timeouts
     """
 
-    # Session timeout policies (seconds)
-    TIMEOUT_POLICIES: ClassVar[dict[str, int]] = {
+    # Default session timeout policies (seconds) — used as fallbacks when SettingsService unavailable
+    _DEFAULT_TIMEOUT_POLICIES: ClassVar[dict[str, int]] = {
         "standard": 3600,  # 1 hour for regular users
         "sensitive": 1800,  # 30 min for admin/billing staff
         "shared_device": 900,  # 15 min for shared device mode
         "remember_me": 86400 * 7,  # 7 days for remember me
     }
+
+    @classmethod
+    def _get_timeout_policies(cls) -> dict[str, int]:
+        """Get timeout policies from SettingsService with defaults."""
+        admin_timeout_min = SettingsService.get_integer_setting("users.admin_session_timeout_minutes", 30)
+        lockout_duration_min = SettingsService.get_integer_setting("users.account_lockout_duration_minutes", 15)
+        return {
+            "standard": 3600,  # 1 hour for regular users
+            "sensitive": admin_timeout_min * 60,  # admin/billing staff
+            "shared_device": lockout_duration_min * 60,  # shared device mode
+            "remember_me": 86400 * 7,  # 7 days for remember me
+        }
 
     @classmethod
     def rotate_session_on_password_change(cls, request: HttpRequest, user: User | None = None) -> None:
@@ -1107,24 +1117,26 @@ class SessionSecurityService:
     @classmethod
     def get_appropriate_timeout(cls, request: HttpRequest) -> int:
         """Get appropriate timeout based on user role and device context"""
+        policies = cls._get_timeout_policies()
+
         if not request.user.is_authenticated:
-            return cls.TIMEOUT_POLICIES["standard"]
+            return policies["standard"]
 
         user = request.user
 
         # Shared device mode (shorter timeout)
         if request.session.get("shared_device_mode", False):
-            return cls.TIMEOUT_POLICIES["shared_device"]
+            return policies["shared_device"]
 
         # Sensitive staff roles get shorter timeouts
         if hasattr(user, "staff_role") and user.staff_role in ["admin", "billing"]:
-            return cls.TIMEOUT_POLICIES["sensitive"]
+            return policies["sensitive"]
 
         # Remember me functionality
         if request.session.get("remember_me", False):
-            return cls.TIMEOUT_POLICIES["remember_me"]
+            return policies["remember_me"]
 
-        return cls.TIMEOUT_POLICIES["standard"]
+        return policies["standard"]
 
     @classmethod
     def enable_shared_device_mode(cls, request: HttpRequest) -> None:
@@ -1136,7 +1148,7 @@ class SessionSecurityService:
         request.session["shared_device_enabled_at"] = timezone.now().isoformat()
 
         # Set shorter timeout immediately
-        timeout = cls.TIMEOUT_POLICIES["shared_device"]
+        timeout = cls._get_timeout_policies()["shared_device"]
         request.session.set_expiry(timeout)
 
         # Clear any remember me settings
@@ -1170,9 +1182,10 @@ class SessionSecurityService:
         one_hour_ago = time.time() - 3600
         recent_ips = [ip_data for ip_data in recent_ips if ip_data["timestamp"] > one_hour_ago]
 
-        # Check for suspicious pattern (3+ different IPs in 1 hour)
+        # Check for suspicious pattern (configurable threshold of different IPs in 1 hour)
         unique_ips = {ip_data["ip"] for ip_data in recent_ips}
-        is_suspicious = len(unique_ips) >= SUSPICIOUS_IP_THRESHOLD
+        suspicious_threshold = SettingsService.get_integer_setting("security.suspicious_ip_threshold", 3)
+        is_suspicious = len(unique_ips) >= suspicious_threshold
 
         if is_suspicious:
             log_security_event(
@@ -1277,7 +1290,7 @@ class SessionSecurityService:
     @classmethod
     def _get_timeout_policy_name(cls, timeout_seconds: int) -> str:
         """Get policy name for timeout value"""
-        for policy, seconds in cls.TIMEOUT_POLICIES.items():
+        for policy, seconds in cls._get_timeout_policies().items():
             if seconds == timeout_seconds:
                 return policy
         return "custom"

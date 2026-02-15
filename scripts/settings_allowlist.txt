@@ -1,0 +1,122 @@
+# ===============================================================================
+# Settings Coverage Lint — Allowlist
+# ===============================================================================
+# Two sections:
+#   1. CONSTANT_NAME     — structural constants (not settings candidates)
+#   2. category.key_name — known-orphan settings (defined but not yet wired)
+#
+# Format: one entry per line, # comments allowed
+# ===============================================================================
+
+# ── Cryptographic protocol constants (NIST/OWASP specs) ──────────────────────
+AES_KEY_SIZE
+NONCE_SIZE
+AUTH_TAG_SIZE
+SALT_SIZE
+PBKDF2_ITERATIONS
+VERSION_AES256_GCM
+VERSION_FERNET_LEGACY
+MIN_SECRET_LENGTH
+
+# ── Romanian legal / RFC format constants ─────────────────────────────────────
+CUI_MIN_LENGTH
+CUI_MAX_LENGTH
+EMAIL_PARTS_COUNT
+DOMAIN_NAME_MAX_LENGTH
+
+# ── Calendar system constants ─────────────────────────────────────────────────
+JANUARY
+DECEMBER
+FIRST_DAY_OF_MONTH
+LAST_DAY_OF_DECEMBER
+
+# ── JSON / DoS protection limits (security boundaries) ───────────────────────
+MAX_JSON_SIZE
+MAX_JSON_SIZE_BYTES
+MAX_JSON_DEPTH
+MAX_FINANCIAL_AMOUNT_CENTS
+MIN_FINANCIAL_AMOUNT_CENTS
+MAX_DESCRIPTION_LENGTH
+MAX_ADDRESS_FIELD_LENGTH
+MAX_USAGE_LIMIT
+
+# ── HMAC / anti-replay security ──────────────────────────────────────────────
+HMAC_TIMESTAMP_WINDOW_SECONDS
+HMAC_ALGORITHM
+PRICE_SEAL_TTL_SECONDS
+
+# ── HTTP status code boundaries ──────────────────────────────────────────────
+HTTP_CLIENT_ERROR_THRESHOLD
+
+# ── Protocol parsing ─────────────────────────────────────────────────────────
+EXPECTED_KEY_VALUE_PARTS
+SETTING_KEY_PARTS_COUNT
+
+# ── Logging infrastructure ───────────────────────────────────────────────────
+REDACTION_TEXT
+
+# ── Django/framework internals ───────────────────────────────────────────────
+DEFAULT_AUTO_FIELD
+
+# ── Rate limiting tier structures (complex dicts, not simple values) ─────────
+ENDPOINT_THROTTLE_RATES
+TIER_RATES
+DEFAULT_QUOTAS
+
+# ===============================================================================
+# Known-orphan setting keys (defined in DEFAULT_SETTINGS, not yet wired)
+# ===============================================================================
+# These settings are defined for future use or template integration.
+# Wire them up to runtime code, then remove from this list.
+
+# ── Company / branding (pending template context processor) ──────────────────
+company.legal_name
+company.registration_number
+company.address
+company.email_contact
+company.email_support
+company.email_privacy
+company.email_dpo
+company.email_noreply
+company.phone
+
+# ── Billing (pending feature wiring) ─────────────────────────────────────────
+billing.negative_balance_threshold
+
+# ── Domains (pending feature wiring) ─────────────────────────────────────────
+domains.auto_renewal_enabled
+domains.renewal_notice_days
+
+# ── Node deployment (pending feature build-out) ──────────────────────────────
+node_deployment.auto_registration
+node_deployment.cost_tracking_enabled
+node_deployment.default_environment
+node_deployment.default_provider
+node_deployment.default_region
+node_deployment.timeout_ansible_playbook
+node_deployment.timeout_terraform_apply
+node_deployment.timeout_validation
+
+# ── Notifications (pending feature wiring) ───────────────────────────────────
+notifications.max_recipients_per_batch
+notifications.sms_enabled
+
+# ── Provisioning (pending feature wiring) ────────────────────────────────────
+provisioning.long_provisioning_threshold_minutes
+provisioning.resource_usage_alert_threshold
+provisioning.server_overload_threshold
+
+# ── Security (pending feature wiring) ────────────────────────────────────────
+security.registration_rate_limit_per_ip
+security.invitation_rate_limit_per_user
+
+# ── System (pending feature wiring) ──────────────────────────────────────────
+system.backup_retention_days
+
+# ── Users (pending runtime wiring) ───────────────────────────────────────────
+users.backup_code_count
+users.credential_max_age_days
+users.credential_rotation_retry_limit
+users.login_rate_limit_per_hour
+users.mfa_required_for_staff
+users.security_lockout_failure_threshold

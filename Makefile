@@ -334,17 +334,20 @@ fixtures-light:
 lint-platform:
 	@echo "🏗️ [Platform] Comprehensive code quality check..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "🔍 1/4: Performance & Security Analysis (Ruff)..."
+	@echo "🔍 1/5: Performance & Security Analysis (Ruff)..."
 	@cd services/platform && $(PWD)/.venv/bin/ruff check . --statistics || echo "⚠️ Ruff check skipped"
 	@echo ""
-	@echo "🏷️  2/4: Type Safety Check (MyPy)..."
+	@echo "🏷️  2/5: Type Safety Check (MyPy)..."
 	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/mypy apps/ --config-file=../../pyproject.toml 2>/dev/null || echo "⚠️ MyPy check skipped"
 	@echo ""
-	@echo "📊 3/4: Django Check..."
+	@echo "📊 3/5: Django Check..."
 	@$(PYTHON_PLATFORM_MANAGE) check --deploy --settings=config.settings.dev
 	@echo ""
-	@echo "🔒 4/4: Audit Coverage Check..."
-	@$(MAKE) lint-audit
+	@echo "🔒 4/5: Audit Coverage Check..."
+	@$(PYTHON_SHARED) scripts/audit_coverage_scan.py --min-severity=medium --exclude-tests services/platform/apps
+	@echo ""
+	@echo "⚙️ 5/5: Settings Coverage Check..."
+	@$(PYTHON_SHARED) scripts/lint_settings_coverage.py --fail-on medium
 	@echo "✅ Platform linting complete!"
 
 lint-audit:

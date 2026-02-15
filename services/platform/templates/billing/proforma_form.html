@@ -91,7 +91,7 @@
                   data-company="{{ customer.company_name|default:customer.name }}"
                   data-vat="{{ customer.tax_profile.vat_number|default:'N/A' }}"
                   data-email="{{ customer.billing_profile.email|default:customer.primary_email|default:'N/A' }}"
-                  data-terms="{{ customer.billing_profile.payment_terms|default:'30' }} days">
+                  data-terms="{{ customer.billing_profile.payment_terms|default:'14' }} days">
                   {{ customer.company_name|default:customer.name }}{% if customer.tax_profile.vat_number %} ({{
                   customer.tax_profile.vat_number }}){% endif %}
                 </option>

@@ -30,6 +30,7 @@ from apps.audit.services import (
     AuditService,
 )
 from apps.common.validators import log_security_event
+from apps.settings.services import SettingsService
 
 from .models import (
     Server,
@@ -56,19 +57,15 @@ DEFAULT_TEMPLATE_NAME = "Default"
 # BUSINESS CONSTANTS
 # ===============================================================================
 
-# Service plan thresholds for Romanian hosting
-HIGH_VALUE_PLAN_THRESHOLD = 500  # 500 RON threshold for high-value plans
+# Module-level defaults for SettingsService fallbacks
+_DEFAULT_HIGH_VALUE_PLAN_THRESHOLD_CENTS = 50000  # 500 RON in cents
+_DEFAULT_RESOURCE_USAGE_ALERT_THRESHOLD = 85  # 85% resource usage alert threshold
+_DEFAULT_SERVER_OVERLOAD_THRESHOLD = 90  # 90% resource usage threshold
+_DEFAULT_LONG_PROVISIONING_THRESHOLD_MINUTES = 30  # 30 minutes for provisioning timeout
+
+# Structural constants (not configurable via SettingsService)
 ENTERPRISE_DISK_THRESHOLD = 100  # 100 GB threshold for enterprise plans
-RESOURCE_USAGE_ALERT_THRESHOLD = 85  # 85% resource usage alert threshold
-
-# Server capacity thresholds
-SERVER_OVERLOAD_THRESHOLD = 90  # 90% resource usage threshold
 MAX_SERVICES_WARNING_THRESHOLD = 0.8  # 80% of max services capacity
-
-# Service lifecycle thresholds
-LONG_PROVISIONING_THRESHOLD = 30  # 30 minutes for provisioning timeout
-
-# Pricing and billing thresholds
 PRICE_CHANGE_DETECTION_THRESHOLD = 0.01  # Minimum price change detection (1 cent)
 SIGNIFICANT_PRICE_CHANGE_PERCENTAGE = 25  # 25% price change threshold for security alerts
 CRITICAL_SERVICE_DOWNTIME_THRESHOLD = 5  # 5 minutes critical service downtime
@@ -344,7 +341,9 @@ def _handle_new_service_plan_creation(instance: ServicePlan) -> None:
                 "source_app": "provisioning",
                 "compliance_event": True,
                 "pricing_event": True,
-                "high_value_plan": float(instance.price_monthly) >= HIGH_VALUE_PLAN_THRESHOLD,
+                "high_value_plan": float(instance.price_monthly) >= SettingsService.get_integer_setting(
+                    "provisioning.high_value_plan_threshold_cents", _DEFAULT_HIGH_VALUE_PLAN_THRESHOLD_CENTS
+                ) / 100,
                 "enterprise_plan": (instance.disk_space_gb and instance.disk_space_gb >= ENTERPRISE_DISK_THRESHOLD),
             },
         ),
@@ -417,7 +416,9 @@ def _handle_new_service_creation(instance: Service) -> None:
                 "service_lifecycle": True,
                 "customer_id": str(instance.customer.id),
                 "billing_cycle": instance.billing_cycle,
-                "high_value_service": float(instance.price) >= HIGH_VALUE_PLAN_THRESHOLD,
+                "high_value_service": float(instance.price) >= SettingsService.get_integer_setting(
+                    "provisioning.high_value_plan_threshold_cents", _DEFAULT_HIGH_VALUE_PLAN_THRESHOLD_CENTS
+                ) / 100,
             },
         ),
     )

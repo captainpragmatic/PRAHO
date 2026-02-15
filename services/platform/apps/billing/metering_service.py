@@ -201,7 +201,7 @@ class MeteringService:
             grace_period = timedelta(hours=meter.event_grace_period_hours)
             min_timestamp = timezone.now() - grace_period
             max_timestamp = timezone.now() + timedelta(
-                minutes=billing_config.MAX_FUTURE_EVENT_DRIFT_MINUTES
+                minutes=billing_config.get_future_event_drift_minutes()
             )
 
             if timestamp < min_timestamp:

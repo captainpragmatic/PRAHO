@@ -796,9 +796,17 @@ class CouponBatchCreateView(StaffRequiredMixin, TemplateView):
     """Create a batch of coupons."""
 
     template_name = "promotions/admin/coupon_batch_form.html"
-    MAX_BATCH_SIZE = 1000  # Maximum coupons per batch for security
+    _DEFAULT_MAX_BATCH_SIZE = 1000  # Fallback; runtime value from SettingsService
+
+    def _get_max_batch_size(self) -> int:
+        """Get max batch size from SettingsService at runtime."""
+        from apps.settings.services import SettingsService
+
+        return SettingsService.get_integer_setting("promotions.max_coupon_batch_size", self._DEFAULT_MAX_BATCH_SIZE)
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        max_batch_size = self._get_max_batch_size()
+
         # Validate and sanitize count input
         try:
             count = int(request.POST.get("count", 10))
@@ -810,10 +818,10 @@ class CouponBatchCreateView(StaffRequiredMixin, TemplateView):
         if count < 1:
             messages.error(request, "Count must be at least 1.")
             return redirect("promotions:coupon_batch_create")
-        if count > self.MAX_BATCH_SIZE:
+        if count > max_batch_size:
             messages.error(
                 request,
-                f"Count exceeds maximum batch size of {self.MAX_BATCH_SIZE}. "
+                f"Count exceeds maximum batch size of {max_batch_size}. "
                 "Please create multiple batches for larger quantities."
             )
             return redirect("promotions:coupon_batch_create")

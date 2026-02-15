@@ -27,12 +27,14 @@ from typing import TypedDict
 from django.core.files.uploadedfile import UploadedFile
 from django.utils import timezone
 
+from apps.settings.services import SettingsService
+
 logger = logging.getLogger(__name__)
 
-# Security constants
-MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024  # 2MB limit (reduced from 10MB)
-MAX_FILENAME_LENGTH = 255
-ALLOWED_EXTENSIONS = {".pdf", ".txt", ".png", ".jpg", ".jpeg", ".doc", ".docx"}
+# Security constants - configurable via SettingsService
+_DEFAULT_MAX_FILE_SIZE_BYTES = 10485760  # 10MB limit
+MAX_FILENAME_LENGTH = 255  # Structural - filesystem limit
+_DEFAULT_ALLOWED_EXTENSIONS = [".pdf", ".txt", ".png", ".jpg", ".jpeg", ".doc", ".docx"]
 
 # Magic number signatures for file type validation
 MAGIC_NUMBER_SIGNATURES = {
@@ -118,8 +120,11 @@ class FileSecurityScanner:
 
             # Step 3: File size validation
             if not self._validate_file_size(uploaded_file):
+                max_file_size = SettingsService.get_integer_setting(
+                    "tickets.max_file_size_bytes", _DEFAULT_MAX_FILE_SIZE_BYTES
+                )
                 return self._reject_file(
-                    f"File too large ({uploaded_file.size} bytes > {MAX_FILE_SIZE_BYTES})", filename
+                    f"File too large ({uploaded_file.size} bytes > {max_file_size})", filename
                 )
 
             # Step 4: MIME type validation
@@ -166,8 +171,13 @@ class FileSecurityScanner:
     def _validate_file_extension(self, filename: str) -> bool:
         """Validate file extension against allowlist"""
         file_ext = Path(filename).suffix.lower()
+        allowed_extensions = set(
+            SettingsService.get_list_setting(
+                "tickets.allowed_file_extensions", _DEFAULT_ALLOWED_EXTENSIONS
+            )
+        )
 
-        if file_ext not in ALLOWED_EXTENSIONS:
+        if file_ext not in allowed_extensions:
             logger.warning(f"🚨 [Ticket Security] Blocked file extension: {file_ext}")
             return False
 
@@ -184,8 +194,11 @@ class FileSecurityScanner:
 
     def _validate_file_size(self, uploaded_file: UploadedFile) -> bool:
         """Validate file size against security limits"""
+        max_file_size = SettingsService.get_integer_setting(
+            "tickets.max_file_size_bytes", _DEFAULT_MAX_FILE_SIZE_BYTES
+        )
         size = uploaded_file.size or 0
-        if size > MAX_FILE_SIZE_BYTES:
+        if size > max_file_size:
             logger.warning(f"🚨 [Ticket Security] File too large: {size} bytes")
             return False
 
@@ -332,7 +345,12 @@ def generate_secure_filename(original_filename: str) -> str:
     """
     # Extract safe extension
     file_ext = Path(original_filename).suffix.lower()
-    if file_ext not in ALLOWED_EXTENSIONS:
+    allowed_extensions = set(
+        SettingsService.get_list_setting(
+            "tickets.allowed_file_extensions", _DEFAULT_ALLOWED_EXTENSIONS
+        )
+    )
+    if file_ext not in allowed_extensions:
         file_ext = ".txt"  # Default to safe extension
 
     # Generate secure filename: timestamp + random + extension

@@ -25,6 +25,8 @@ from django.db.models import Q, QuerySet
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from apps.settings.services import SettingsService
+
 from .models import TLD, Domain, DomainOrderItem, Registrar
 
 if TYPE_CHECKING:
@@ -32,6 +34,9 @@ if TYPE_CHECKING:
     from apps.orders.models import Order
 
 logger = logging.getLogger(__name__)
+
+# Module-level default for WHOIS privacy price
+_DEFAULT_WHOIS_PRIVACY_PRICE_CENTS = 500
 
 # Domain name validation constants
 MIN_DOMAIN_NAME_LENGTH = 3  # Minimum length for domain names
@@ -223,8 +228,10 @@ class TLDService:
 
         # Add WHOIS privacy cost if requested and available
         if include_whois_privacy and tld.whois_privacy_available:
-            # WHOIS privacy typically costs 500 cents (5 RON) per year
-            whois_cost_cents = 500 * years
+            whois_privacy_price = SettingsService.get_integer_setting(
+                "domains.whois_privacy_price_cents", _DEFAULT_WHOIS_PRIVACY_PRICE_CENTS
+            )
+            whois_cost_cents = whois_privacy_price * years
 
         total_cost_cents = base_cost_cents + whois_cost_cents
 
@@ -544,7 +551,9 @@ class DomainOrderService:
 
         # Add WHOIS privacy cost
         if whois_privacy and tld.whois_privacy_available:
-            unit_price_cents += 500  # 5 RON per year
+            unit_price_cents += SettingsService.get_integer_setting(
+                "domains.whois_privacy_price_cents", _DEFAULT_WHOIS_PRIVACY_PRICE_CENTS
+            )
 
         try:
             order_item = DomainOrderItem.objects.create(

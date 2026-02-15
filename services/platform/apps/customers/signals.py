@@ -28,6 +28,7 @@ from apps.audit.services import (
     ComplianceEventRequest,
 )
 from apps.common.validators import log_security_event
+from apps.settings.services import SettingsService
 
 from .models import (
     Customer,
@@ -44,9 +45,9 @@ logger = logging.getLogger(__name__)
 # BUSINESS CONSTANTS
 # ===============================================================================
 
-# Business thresholds for Romanian compliance
-LARGE_CREDIT_LIMIT_THRESHOLD = 10000  # 10,000 RON threshold for credit limit alerts
-EXTENDED_PAYMENT_TERMS_THRESHOLD = 60  # 60 days - Romanian law threshold
+# Default business thresholds for Romanian compliance — authoritative source is SettingsService
+_DEFAULT_LARGE_CREDIT_LIMIT_THRESHOLD = 10000  # 10,000 RON threshold for credit limit alerts
+_DEFAULT_EXTENDED_PAYMENT_TERMS_THRESHOLD = 60  # 60 days - Romanian law threshold
 
 # ===============================================================================
 # CUSTOMER CORE MODEL SIGNALS
@@ -807,7 +808,10 @@ def _handle_credit_limit_change(billing_profile: CustomerBillingProfile, old_lim
         )
 
         # Alert for significant credit limit increases
-        if change_type == "increased" and change_amount > LARGE_CREDIT_LIMIT_THRESHOLD:
+        large_credit_threshold = SettingsService.get_integer_setting(
+            "billing.large_credit_limit_threshold", _DEFAULT_LARGE_CREDIT_LIMIT_THRESHOLD
+        )
+        if change_type == "increased" and change_amount > large_credit_threshold:
             log_security_event(
                 "large_credit_limit_increase",
                 {
@@ -830,7 +834,10 @@ def _handle_payment_terms_change(billing_profile: CustomerBillingProfile, old_te
         )
 
         # Romanian law: payment terms > 60 days for companies require justification
-        if new_terms > EXTENDED_PAYMENT_TERMS_THRESHOLD and billing_profile.customer.customer_type == "company":
+        extended_terms_threshold = SettingsService.get_integer_setting(
+            "billing.extended_payment_terms_threshold", _DEFAULT_EXTENDED_PAYMENT_TERMS_THRESHOLD
+        )
+        if new_terms > extended_terms_threshold and billing_profile.customer.customer_type == "company":
             compliance_request = ComplianceEventRequest(
                 compliance_type="extended_payment_terms",
                 reference_id=f"customer_{billing_profile.customer.id}",

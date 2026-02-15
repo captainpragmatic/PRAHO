@@ -19,12 +19,13 @@ from django.core.mail import EmailMessage, EmailMultiAlternatives
 from django.utils import timezone
 
 from apps.notifications.models import EmailLog
+from apps.settings.services import SettingsService
 
 logger = logging.getLogger(__name__)
 
 # Task configuration
 TASK_TIMEOUT = 300  # 5 minutes
-MAX_RETRIES = 3
+_DEFAULT_MAX_RETRIES = 3  # Fallback — authoritative source is SettingsService
 RETRY_DELAY_MINUTES = 5
 
 
@@ -150,7 +151,7 @@ def send_email_task(
             email_log = EmailLog.objects.get(id=email_log_id)
 
             # Check if we should retry
-            max_retries = getattr(settings, "EMAIL_RETRY", {}).get("MAX_RETRIES", MAX_RETRIES)
+            max_retries = SettingsService.get_integer_setting("notifications.email_max_retries", _DEFAULT_MAX_RETRIES)
             if retry_count < max_retries:
                 # Schedule retry
                 email_log.status = "queued"
@@ -349,7 +350,7 @@ def process_email_queue() -> dict[str, Any]:
     stuck_emails = EmailLog.objects.filter(
         status="queued",
         sent_at__lt=cutoff,  # sent_at = creation time for queued emails
-    ).order_by("sent_at")[:50]  # Process in batches
+    ).order_by("sent_at")[:SettingsService.get_integer_setting("notifications.email_batch_size", 50)]
 
     processed = 0
     failed = 0
@@ -400,7 +401,7 @@ def retry_failed_emails(max_age_hours: int = 24) -> dict[str, Any]:
     failed_emails = EmailLog.objects.filter(
         status="failed",
         sent_at__gte=cutoff,
-    ).order_by("sent_at")[:50]
+    ).order_by("sent_at")[:SettingsService.get_integer_setting("notifications.email_batch_size", 50)]
 
     retried = 0
     skipped = 0
@@ -410,7 +411,7 @@ def retry_failed_emails(max_age_hours: int = 24) -> dict[str, Any]:
         provider_response = email_log.provider_response or {}
         retry_count = provider_response.get("retry_count", 0)
 
-        max_retries = getattr(settings, "EMAIL_RETRY", {}).get("MAX_RETRIES", MAX_RETRIES)
+        max_retries = SettingsService.get_integer_setting("notifications.email_max_retries", _DEFAULT_MAX_RETRIES)
         if retry_count >= max_retries:
             skipped += 1
             continue

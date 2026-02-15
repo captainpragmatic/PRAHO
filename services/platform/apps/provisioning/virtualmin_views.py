@@ -488,7 +488,7 @@ def virtualmin_account_restore(request: HttpRequest, account_id: str) -> HttpRes
 
     # Get available backups
     backup_service = VirtualminBackupService(account.server)
-    backups_result = backup_service.list_backups(account=account, max_age_days=90)
+    backups_result = backup_service.list_backups(account=account)
     available_backups = backups_result.unwrap() if backups_result.is_ok() else []
 
     if not available_backups:

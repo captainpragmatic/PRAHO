@@ -42,10 +42,22 @@ class Command(BaseCommand):
             "display_order": 40,
         },
         {
+            "key": "company",
+            "name": "🏢 Company & Branding",
+            "description": "Legal entity details, contact information, and branding configuration",
+            "display_order": 5,
+        },
+        {
             "key": "virtualmin",
             "name": "🖥️ Virtualmin Integration",
             "description": "Virtualmin server configuration, API settings, and hosting account management",
             "display_order": 50,
+        },
+        {
+            "key": "tickets",
+            "name": "🎫 Support & Tickets",
+            "description": "SLA response times, file upload limits, escalation rules, and support policies",
+            "display_order": 55,
         },
         {
             "key": "security",
@@ -54,16 +66,40 @@ class Command(BaseCommand):
             "display_order": 60,
         },
         {
+            "key": "monitoring",
+            "name": "📊 Monitoring & Alerts",
+            "description": "Resource thresholds, health checks, alert cooldowns, and monitoring intervals",
+            "display_order": 65,
+        },
+        {
             "key": "notifications",
             "name": "📧 Notifications",
             "description": "Email templates, SMS settings, notification delivery, and alert configurations",
             "display_order": 70,
         },
         {
+            "key": "gdpr",
+            "name": "🗄️ GDPR & Data Retention",
+            "description": "Data retention policies, audit log lifetimes, and GDPR compliance settings",
+            "display_order": 75,
+        },
+        {
             "key": "integrations",
             "name": "🔗 External Integrations",
             "description": "Payment gateways, webhooks, API keys, and third-party service configurations",
             "display_order": 80,
+        },
+        {
+            "key": "ui",
+            "name": "🖥️ UI & Display",
+            "description": "Pagination defaults, page size limits, and display preferences",
+            "display_order": 85,
+        },
+        {
+            "key": "promotions",
+            "name": "🎁 Promotions & Discounts",
+            "description": "Discount limits, coupon batch sizes, and promotion constraints",
+            "display_order": 88,
         },
         {
             "key": "system",

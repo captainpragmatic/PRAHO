@@ -33,59 +33,59 @@ INVOICE_DUE_DAYS_DEFAULT: Final[int] = 14           # → billing.invoice_paymen
 PROFORMA_VALIDITY_DAYS: Final[int] = 30             # → billing.proforma_validity_days
 
 # Romanian e-Factura compliance
-EFACTURA_BATCH_SIZE: Final[int] = 100  # Max invoices per e-Factura batch
+EFACTURA_BATCH_SIZE: Final[int] = 100  # DEPRECATED: use SettingsService.get_integer_setting("billing.efactura_batch_size")
 
 # ===============================================================================
 # SERVICE LIMITS ⚡
 # ===============================================================================
 
 # Domain management limits
-MAX_DOMAINS_PER_PACKAGE: Final[int] = 100  # Maximum domains per hosting package
-MAX_SUBDOMAINS_PER_DOMAIN: Final[int] = 50  # Maximum subdomains per domain
+MAX_DOMAINS_PER_PACKAGE: Final[int] = 100  # DEPRECATED: use SettingsService.get_integer_setting("domains.max_per_package")
+MAX_SUBDOMAINS_PER_DOMAIN: Final[int] = 50  # DEPRECATED: use SettingsService.get_integer_setting("domains.max_subdomains_per_domain")
 
 # Pagination and list views (Query Budget compliance)
-DEFAULT_PAGE_SIZE: Final[int] = 20  # Standard pagination size
-MAX_PAGE_SIZE: Final[int] = 100  # Maximum allowed page size
-MIN_PAGE_SIZE: Final[int] = 5  # Minimum allowed page size
+DEFAULT_PAGE_SIZE: Final[int] = 20  # DEPRECATED: use SettingsService.get_integer_setting("ui.default_page_size")
+MAX_PAGE_SIZE: Final[int] = 100  # DEPRECATED: use SettingsService.get_integer_setting("ui.max_page_size")
+MIN_PAGE_SIZE: Final[int] = 5  # DEPRECATED: use SettingsService.get_integer_setting("ui.min_page_size")
 
 # API rate limiting
-API_RATE_LIMIT_PER_HOUR: Final[int] = 1000  # API calls per hour per user
-API_BURST_LIMIT: Final[int] = 50  # Burst limit for API calls
+API_RATE_LIMIT_PER_HOUR: Final[int] = 1000  # DEPRECATED: use SettingsService.get_integer_setting("security.rate_limit_per_hour")
+API_BURST_LIMIT: Final[int] = 50  # DEPRECATED: use SettingsService.get_integer_setting("security.api_burst_limit")
 
 # File upload limits
-MAX_ATTACHMENT_SIZE_MB: Final[int] = 25  # Maximum file attachment size
-MAX_ATTACHMENTS_PER_TICKET: Final[int] = 5  # Maximum attachments per ticket
+MAX_ATTACHMENT_SIZE_MB: Final[int] = 25  # DEPRECATED: use SettingsService.get_integer_setting("ui.max_attachment_size_mb")
+MAX_ATTACHMENTS_PER_TICKET: Final[int] = 5  # DEPRECATED: use SettingsService.get_integer_setting("tickets.max_attachments_per_ticket")
 
 # ===============================================================================
 # SUPPORT SLA 🎯
 # ===============================================================================
 
 # Ticket response time SLAs (in hours)
-CRITICAL_TICKET_RESPONSE_HOURS: Final[int] = 1  # Critical priority response time
-HIGH_TICKET_RESPONSE_HOURS: Final[int] = 4  # High priority response time
-STANDARD_TICKET_RESPONSE_HOURS: Final[int] = 24  # Standard priority response time
-LOW_TICKET_RESPONSE_HOURS: Final[int] = 72  # Low priority response time
+CRITICAL_TICKET_RESPONSE_HOURS: Final[int] = 1  # DEPRECATED: use SettingsService.get_integer_setting("tickets.sla_critical_response_hours")
+HIGH_TICKET_RESPONSE_HOURS: Final[int] = 4  # DEPRECATED: use SettingsService.get_integer_setting("tickets.sla_high_response_hours")
+STANDARD_TICKET_RESPONSE_HOURS: Final[int] = 24  # DEPRECATED: use SettingsService.get_integer_setting("tickets.sla_standard_response_hours")
+LOW_TICKET_RESPONSE_HOURS: Final[int] = 72  # DEPRECATED: use SettingsService.get_integer_setting("tickets.sla_low_response_hours")
 
 # Ticket escalation rules
-TICKET_AUTO_ESCALATION_HOURS: Final[int] = 48  # Auto-escalate after hours
-MAX_TICKET_REASSIGNMENTS: Final[int] = 3  # Maximum reassignment count
+TICKET_AUTO_ESCALATION_HOURS: Final[int] = 48  # DEPRECATED: use SettingsService.get_integer_setting("tickets.auto_escalation_hours")
+MAX_TICKET_REASSIGNMENTS: Final[int] = 3  # DEPRECATED: use SettingsService.get_integer_setting("tickets.max_reassignments")
 
 # ===============================================================================
 # SECURITY & AUTHENTICATION 🔐
 # ===============================================================================
 
 # Account lockout policies
-MAX_LOGIN_ATTEMPTS: Final[int] = 5  # Max failed login attempts
-ACCOUNT_LOCKOUT_DURATION_MINUTES: Final[int] = 15  # Account lockout duration
+MAX_LOGIN_ATTEMPTS: Final[int] = 5  # DEPRECATED: use SettingsService.get_integer_setting("users.max_login_attempts")
+ACCOUNT_LOCKOUT_DURATION_MINUTES: Final[int] = 15  # DEPRECATED: use SettingsService.get_integer_setting("users.account_lockout_duration_minutes")
 # PASSWORD_RESET_TOKEN_VALIDITY_HOURS removed — Django's PASSWORD_RESET_TIMEOUT (base.py:155) is authoritative
 
 # 2FA settings
-BACKUP_CODE_COUNT: Final[int] = 10  # Number of backup codes generated
+BACKUP_CODE_COUNT: Final[int] = 10  # DEPRECATED: use SettingsService.get_integer_setting("users.backup_code_count")
 TOTP_VALIDITY_WINDOW: Final[int] = 1  # TOTP time window (30s * window)
 
 # Session management
-SESSION_TIMEOUT_MINUTES: Final[int] = 120  # Session timeout for regular users
-ADMIN_SESSION_TIMEOUT_MINUTES: Final[int] = 60  # Session timeout for admin users
+SESSION_TIMEOUT_MINUTES: Final[int] = 120  # DEPRECATED: use SettingsService.get_integer_setting("users.session_timeout_minutes")
+ADMIN_SESSION_TIMEOUT_MINUTES: Final[int] = 60  # DEPRECATED: use SettingsService.get_integer_setting("users.admin_session_timeout_minutes")
 
 # ===============================================================================
 # BILLING & FINANCIAL 💰
@@ -96,8 +96,8 @@ CURRENCY_DECIMAL_PLACES: Final[int] = 2  # Decimal places for currency
 CURRENCY_MAX_DIGITS: Final[int] = 10  # Maximum digits for currency fields
 
 # Payment processing
-PAYMENT_RETRY_ATTEMPTS: Final[int] = 3  # Payment retry attempts
-PAYMENT_RETRY_DELAY_HOURS: Final[int] = 24  # Delay between payment retries
+PAYMENT_RETRY_ATTEMPTS: Final[int] = 3  # DEPRECATED: use SettingsService.get_integer_setting("billing.payment_retry_attempts")
+PAYMENT_RETRY_DELAY_HOURS: Final[int] = 24  # DEPRECATED: use SettingsService.get_integer_setting("billing.payment_retry_delay_hours")
 
 # Credit and billing
 MINIMUM_CREDIT_BALANCE: Final[Decimal] = Decimal("0.01")  # Minimum credit balance
@@ -108,53 +108,53 @@ NEGATIVE_BALANCE_THRESHOLD: Final[Decimal] = Decimal("-100.00")  # Service suspe
 # ===============================================================================
 
 # Service provisioning timeouts (in minutes)
-SERVICE_PROVISION_TIMEOUT_MINUTES: Final[int] = 30  # Max provisioning time
-SERVICE_SUSPEND_TIMEOUT_MINUTES: Final[int] = 15  # Max suspension time
-SERVICE_TERMINATE_TIMEOUT_MINUTES: Final[int] = 60  # Max termination time
+SERVICE_PROVISION_TIMEOUT_MINUTES: Final[int] = 30  # DEPRECATED: use SettingsService.get_integer_setting("provisioning.setup_timeout_minutes")
+SERVICE_SUSPEND_TIMEOUT_MINUTES: Final[int] = 15  # DEPRECATED: use SettingsService.get_integer_setting("provisioning.suspend_timeout_minutes")
+SERVICE_TERMINATE_TIMEOUT_MINUTES: Final[int] = 60  # DEPRECATED: use SettingsService.get_integer_setting("provisioning.terminate_timeout_minutes")
 
 # Resource limits
-DEFAULT_DISK_QUOTA_GB: Final[int] = 10  # Default disk quota in GB
-DEFAULT_BANDWIDTH_QUOTA_GB: Final[int] = 100  # Default bandwidth quota in GB
-MAX_EMAIL_ACCOUNTS_PER_PACKAGE: Final[int] = 50  # Max email accounts per package
+DEFAULT_DISK_QUOTA_GB: Final[int] = 10  # DEPRECATED: use SettingsService.get_integer_setting("provisioning.default_disk_quota_gb")
+DEFAULT_BANDWIDTH_QUOTA_GB: Final[int] = 100  # DEPRECATED: use SettingsService.get_integer_setting("provisioning.default_bandwidth_quota_gb")
+MAX_EMAIL_ACCOUNTS_PER_PACKAGE: Final[int] = 50  # DEPRECATED: use SettingsService.get_integer_setting("provisioning.max_email_accounts_per_package")
 
 # ===============================================================================
 # MONITORING & ALERTS 📊
 # ===============================================================================
 
 # System monitoring thresholds
-CPU_USAGE_WARNING_THRESHOLD: Final[int] = 80  # CPU usage warning threshold (%)
-MEMORY_USAGE_WARNING_THRESHOLD: Final[int] = 85  # Memory usage warning threshold (%)
-DISK_USAGE_WARNING_THRESHOLD: Final[int] = 90  # Disk usage warning threshold (%)
+CPU_USAGE_WARNING_THRESHOLD: Final[int] = 80  # DEPRECATED: use SettingsService.get_integer_setting("monitoring.cpu_warning_threshold")
+MEMORY_USAGE_WARNING_THRESHOLD: Final[int] = 85  # DEPRECATED: use SettingsService.get_integer_setting("monitoring.memory_warning_threshold")
+DISK_USAGE_WARNING_THRESHOLD: Final[int] = 90  # DEPRECATED: use SettingsService.get_integer_setting("monitoring.disk_warning_threshold")
 
 # Alert frequencies
-ALERT_COOLDOWN_MINUTES: Final[int] = 60  # Minimum time between same alerts
-HEALTH_CHECK_INTERVAL_MINUTES: Final[int] = 5  # Health check frequency
+ALERT_COOLDOWN_MINUTES: Final[int] = 60  # DEPRECATED: use SettingsService.get_integer_setting("monitoring.alert_cooldown_minutes")
+HEALTH_CHECK_INTERVAL_MINUTES: Final[int] = 5  # DEPRECATED: use SettingsService.get_integer_setting("monitoring.health_check_interval_minutes")
 
 # ===============================================================================
 # DATA RETENTION & GDPR 🗄️
 # ===============================================================================
 
 # GDPR compliance periods
-GDPR_DATA_RETENTION_YEARS: Final[int] = 7  # General data retention period
-GDPR_LOG_RETENTION_MONTHS: Final[int] = 12  # Log retention period
-GDPR_EXPORT_RETENTION_DAYS: Final[int] = 30  # GDPR export file retention
+GDPR_DATA_RETENTION_YEARS: Final[int] = 7  # DEPRECATED: use SettingsService.get_integer_setting("gdpr.data_retention_years")
+GDPR_LOG_RETENTION_MONTHS: Final[int] = 12  # DEPRECATED: use SettingsService.get_integer_setting("gdpr.log_retention_months")
+GDPR_EXPORT_RETENTION_DAYS: Final[int] = 30  # DEPRECATED: use SettingsService.get_integer_setting("gdpr.export_retention_days")
 
 # Audit trail
-AUDIT_LOG_RETENTION_YEARS: Final[int] = 10  # Audit log retention for compliance
-FAILED_LOGIN_LOG_RETENTION_MONTHS: Final[int] = 6  # Failed login attempt retention
+AUDIT_LOG_RETENTION_YEARS: Final[int] = 10  # DEPRECATED: use SettingsService.get_integer_setting("gdpr.audit_log_retention_years")
+FAILED_LOGIN_LOG_RETENTION_MONTHS: Final[int] = 6  # DEPRECATED: use SettingsService.get_integer_setting("gdpr.failed_login_retention_months")
 
 # ===============================================================================
 # INTEGRATION LIMITS 🔗
 # ===============================================================================
 
 # Webhook settings
-WEBHOOK_RETRY_ATTEMPTS: Final[int] = 5  # Webhook delivery retry attempts
-WEBHOOK_TIMEOUT_SECONDS: Final[int] = 30  # Webhook request timeout
-WEBHOOK_BATCH_SIZE: Final[int] = 50  # Webhooks processed per batch
+WEBHOOK_RETRY_ATTEMPTS: Final[int] = 5  # DEPRECATED: use SettingsService.get_integer_setting("integrations.webhook_retry_attempts")
+WEBHOOK_TIMEOUT_SECONDS: Final[int] = 30  # DEPRECATED: use SettingsService.get_integer_setting("integrations.webhook_timeout_seconds")
+WEBHOOK_BATCH_SIZE: Final[int] = 50  # DEPRECATED: use SettingsService.get_integer_setting("integrations.webhook_batch_size")
 
 # External API timeouts
-API_REQUEST_TIMEOUT_SECONDS: Final[int] = 30  # External API request timeout
-API_CONNECTION_TIMEOUT_SECONDS: Final[int] = 10  # API connection timeout
+API_REQUEST_TIMEOUT_SECONDS: Final[int] = 30  # DEPRECATED: use SettingsService.get_integer_setting("integrations.api_request_timeout_seconds")
+API_CONNECTION_TIMEOUT_SECONDS: Final[int] = 10  # DEPRECATED: use SettingsService.get_integer_setting("integrations.api_connection_timeout_seconds")
 
 # ===============================================================================
 # EMAIL & NOTIFICATIONS 📧
@@ -162,11 +162,11 @@ API_CONNECTION_TIMEOUT_SECONDS: Final[int] = 10  # API connection timeout
 
 # Email sending limits
 # EMAIL_SEND_RATE_PER_HOUR removed — EMAIL_RATE_LIMIT.MAX_PER_HOUR (base.py) is authoritative
-EMAIL_BATCH_SIZE: Final[int] = 50  # Emails processed per batch
+EMAIL_BATCH_SIZE: Final[int] = 50  # DEPRECATED: use SettingsService.get_integer_setting("notifications.email_batch_size")
 
 # Notification preferences
-NOTIFICATION_DIGEST_HOURS: Final[int] = 24  # Digest notification frequency
-MAX_NOTIFICATION_HISTORY: Final[int] = 1000  # Max notifications kept in history
+NOTIFICATION_DIGEST_HOURS: Final[int] = 24  # DEPRECATED: use SettingsService.get_integer_setting("notifications.digest_frequency_hours")
+MAX_NOTIFICATION_HISTORY: Final[int] = 1000  # DEPRECATED: use SettingsService.get_integer_setting("notifications.max_history")
 
 # ===============================================================================
 # FILE PROCESSING & DISPLAY 📁
@@ -201,11 +201,11 @@ HTTP_CLIENT_ERROR_THRESHOLD: Final[int] = 400  # Start of 4xx client errors
 # ===============================================================================
 
 # Customer service rate limits
-MAX_CUSTOMER_LOOKUPS_PER_HOUR: Final[int] = 20  # Customer lookups per IP per hour
+MAX_CUSTOMER_LOOKUPS_PER_HOUR: Final[int] = 20  # DEPRECATED: use SettingsService.get_integer_setting("security.max_customer_lookups_per_hour")
 MAX_JOIN_NOTIFICATIONS_PER_HOUR: Final[int] = 10  # Join notifications per customer per hour
 
 # Suspicious activity detection
-SUSPICIOUS_IP_THRESHOLD: Final[int] = 3  # Different IPs to trigger suspicious activity
+SUSPICIOUS_IP_THRESHOLD: Final[int] = 3  # DEPRECATED: use SettingsService.get_integer_setting("security.suspicious_ip_threshold")
 
 # Timing attack prevention
 MIN_RESPONSE_TIME_SECONDS: Final[float] = 0.1  # Minimum response time to prevent timing attacks

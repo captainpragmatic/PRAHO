@@ -28,11 +28,11 @@ from apps.customers.models import Customer
 from apps.tickets.models import Ticket, TicketAttachment, TicketComment, SupportCategory
 from apps.tickets.monitoring import SecurityEventTracker, security_tracker
 from apps.tickets.security import (
-    FileSecurityScanner, 
+    FileSecurityScanner,
     FileSecurityError,
     generate_secure_filename,
     get_secure_upload_path,
-    MAX_FILE_SIZE_BYTES,
+    _DEFAULT_MAX_FILE_SIZE_BYTES,
     SUSPICIOUS_PATTERNS
 )
 from apps.users.models import User, CustomerMembership
@@ -75,7 +75,7 @@ class FileSecurityScannerTest(TestCase):
 
     def test_oversized_file_blocked(self):
         """🚨 Files exceeding size limit should be blocked"""
-        oversized_content = b'A' * (MAX_FILE_SIZE_BYTES + 1)
+        oversized_content = b'A' * (_DEFAULT_MAX_FILE_SIZE_BYTES + 1)
         oversized_file = SimpleUploadedFile(
             "huge_file.txt",
             oversized_content,

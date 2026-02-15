@@ -58,7 +58,7 @@ class SessionSecurityServiceTestCase(TestCase):
 
     def test_timeout_policies_defined(self):
         """Test that timeout policies are properly defined"""
-        policies = SessionSecurityService.TIMEOUT_POLICIES
+        policies = SessionSecurityService._DEFAULT_TIMEOUT_POLICIES
 
         self.assertIn('standard', policies)
         self.assertIn('sensitive', policies)

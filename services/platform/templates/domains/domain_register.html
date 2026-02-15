@@ -163,6 +163,7 @@
                                     type="checkbox"
                                     class="h-4 w-4 text-primary-600 focus:ring-primary-500 border-slate-300 dark:border-slate-600 rounded"
                                 >
+                                {# TODO: Replace hardcoded WHOIS privacy price (500 cents / 5 RON) with settings context variable #}
                                 <label for="whois_privacy" class="ml-2 block text-sm text-slate-900 dark:text-white">
                                     🔒 {% trans "WHOIS Privacy Protection" %}
                                     <span class="text-slate-500 dark:text-slate-400">(+5 RON/{% trans "year" %})</span>
@@ -337,7 +338,8 @@ document.addEventListener('DOMContentLoaded', function() {
         let totalCost = baseCost * years;
         
         if (whoisPrivacy) {
-            totalCost += 500 * years; // 5 RON per year for WHOIS privacy
+            // TODO: Replace hardcoded WHOIS privacy price with value from settings context
+            totalCost += 500 * years; // 5 RON (500 cents) per year for WHOIS privacy
         }
 
         const costInRon = (totalCost / 100).toFixed(2);
