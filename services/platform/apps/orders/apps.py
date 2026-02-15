@@ -11,4 +11,5 @@ class OrdersConfig(AppConfig):
     verbose_name = "Orders"
 
     def ready(self) -> None:
-        """Import signals when Django starts"""
+        """Import signals when Django starts."""
+        from . import signals  # noqa: F401

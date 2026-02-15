@@ -6,12 +6,16 @@ Auto-creation of user profiles and comprehensive audit logging.
 import logging
 from typing import Any
 
+from django.conf import settings
 from django.contrib.auth.signals import user_logged_in, user_logged_out, user_login_failed
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, pre_delete
 from django.dispatch import receiver
 from django.http import HttpRequest
 
 from apps.audit.services import (
+    AuditContext,
+    AuditEventData,
+    AuditService,
     AuthenticationAuditService,
     AuthenticationEventData,
     LoginFailureEventData,
@@ -35,6 +39,86 @@ def save_user_profile(sender: type[User], instance: User, **kwargs: Any) -> None
     """Save user profile when user is saved"""
     if hasattr(instance, "profile"):
         instance.profile.save()
+
+
+def _log_user_model_event(  # noqa: PLR0913
+    *,
+    event_type: str,
+    instance: Any,
+    description: str,
+    new_values: dict[str, Any] | None = None,
+    old_values: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """Log lightweight user model lifecycle events."""
+    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        return
+
+    try:
+        event_metadata = {
+            "source_app": "users",
+            "model_lifecycle": True,
+        }
+        if metadata:
+            event_metadata.update(metadata)
+
+        AuditService.log_event(
+            AuditEventData(
+                event_type=event_type,
+                content_object=instance,
+                old_values=old_values or {},
+                new_values=new_values or {},
+                description=description,
+            ),
+            context=AuditContext(actor_type="system", metadata=event_metadata),
+        )
+    except Exception as e:
+        logger.exception(f"🔥 [Users Lifecycle] Failed to log {event_type}: {e}")
+
+
+@receiver(post_save, sender="users.WebAuthnCredential")
+def audit_webauthn_credential_lifecycle(sender: Any, instance: Any, created: bool, **kwargs: Any) -> None:
+    """Audit lifecycle events for WebAuthnCredential model."""
+    credential_id = str(getattr(instance, "credential_id", "") or "")
+    credential_preview = credential_id[:16] if credential_id else ""
+    event_type = "webauthn_credential_created" if created else "webauthn_credential_updated"
+
+    _log_user_model_event(
+        event_type=event_type,
+        instance=instance,
+        description=f"WebAuthn credential {'created' if created else 'updated'} for user {instance.user_id}",
+        new_values={
+            "credential_pk": str(instance.pk),
+            "user_id": str(instance.user_id),
+            "credential_preview": credential_preview,
+            "credential_type": instance.credential_type,
+            "is_active": instance.is_active,
+            "sign_count": instance.sign_count,
+        },
+        metadata={"model": "WebAuthnCredential"},
+    )
+
+
+@receiver(pre_delete, sender="users.WebAuthnCredential")
+def audit_webauthn_credential_deleted(sender: Any, instance: Any, **kwargs: Any) -> None:
+    """Audit deletion events for WebAuthnCredential model."""
+    credential_id = str(getattr(instance, "credential_id", "") or "")
+    credential_preview = credential_id[:16] if credential_id else ""
+
+    _log_user_model_event(
+        event_type="webauthn_credential_deleted",
+        instance=instance,
+        description=f"WebAuthn credential deleted for user {instance.user_id}",
+        old_values={
+            "credential_pk": str(instance.pk),
+            "user_id": str(instance.user_id),
+            "credential_preview": credential_preview,
+            "credential_type": instance.credential_type,
+            "is_active": instance.is_active,
+            "sign_count": instance.sign_count,
+        },
+        metadata={"model": "WebAuthnCredential"},
+    )
 
 
 @receiver(user_logged_in)

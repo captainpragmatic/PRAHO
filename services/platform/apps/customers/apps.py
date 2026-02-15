@@ -11,4 +11,5 @@ class CustomersConfig(AppConfig):
     verbose_name = "Customers"
 
     def ready(self) -> None:
-        """Import signals when the app is ready"""
+        """Import signals when the app is ready."""
+        from . import signals  # noqa: F401

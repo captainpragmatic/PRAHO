@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Added
+- **Audit Enforcement**: Added ADR-0016 and a model allowlist with justification requirements to formalize audit-trail coverage policy
+- **Audit Coverage Tests**: Added runtime model-classification checks and signal-registration regression tests for critical apps
+- **Audit Pipeline Tests**: Added integration/E2E tests for settings, billing, notifications, and customer audit event creation paths
+
+### Fixed
+- **Signal Registration**: Restored `ready()` signal imports for `billing`, `orders`, `customers`, and `domains` apps to ensure receivers are connected at startup
+- **Tax Rate Migration Drift**: Added migrations to align `InvoiceLine.tax_rate` and `OrderItem.tax_rate` schema metadata with current model definitions
 
 ---
 

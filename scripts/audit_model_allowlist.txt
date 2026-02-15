@@ -1,0 +1,95 @@
+# ===============================================================================
+# Audit Model Coverage — Allowlist
+# ===============================================================================
+# Models listed here are exempt from the audit signal coverage requirement.
+# Every exemption MUST include a justification comment.
+#
+# Format: app_label.ModelName  # reason
+#
+# Models NOT in this file must either:
+#   1. Have a post_save/post_delete signal wired to AuditService, OR
+#   2. Be flagged as a finding by audit_coverage_scan.py and test_audit_model_coverage.py
+#
+# Review this file periodically — remove entries when audit coverage is added.
+# ===============================================================================
+
+# ── 1. Audit infrastructure (self-referential — auditing these is circular) ───
+audit.AuditEvent                # the audit trail itself
+audit.AuditAlert                # audit subsystem alert record
+audit.AuditIntegrityCheck       # audit chain integrity verification
+audit.AuditRetentionPolicy      # audit data retention configuration
+audit.AuditSearchQuery          # audit search log
+audit.ComplianceLog             # compliance audit trail
+audit.ComplianceReportRecord    # compliance report output
+audit.CookieConsent             # consent record (IS the compliance trail)
+audit.DataExport                # GDPR export record
+audit.SIEMExportLog             # SIEM export tracking
+audit.SIEMHashChainState        # SIEM hash chain state
+
+# ── 2. Append-only history/log models (these ARE the audit trail) ─────────────
+billing.RefundNote              # append-only notes on refunds
+billing.RefundStatusHistory     # refund status change log
+integrations.WebhookDelivery    # append-only delivery attempt records
+integrations.WebhookEvent       # append-only inbound webhook records
+notifications.EmailLog          # append-only email delivery records
+orders.OrderStatusHistory       # order status change log
+users.UserLoginLog              # security audit trail for login attempts
+
+# ── 3. Reference/configuration data (read-mostly, no business state changes) ──
+billing.Currency                # ISO 4217 currency definitions
+billing.FXRate                  # exchange rate reference data
+billing.PaymentRetryPolicy      # dunning schedule configuration
+billing.PricingTier             # tiered pricing configuration
+billing.PricingTierBracket      # pricing tier bracket definition
+billing.TaxRule                 # EU VAT rate reference data
+domains.TLD                     # top-level domain reference data
+domains.TLDRegistrarAssignment  # TLD-to-registrar mapping
+products.ProductBundle          # product bundle definition
+products.ProductBundleItem      # bundle membership (child of ProductBundle)
+products.ProductRelationship    # product relationship metadata
+settings.SettingCategory        # setting category taxonomy
+tickets.SupportCategory         # support category taxonomy
+
+# ── 4. Detail/child models (audited via parent signal) ────────────────────────
+billing.BillingCycle            # child of Subscription
+billing.InvoiceLine             # child of Invoice
+billing.InvoiceSequence         # internal counter (no business significance)
+billing.PaymentCollectionRun    # batch processing record
+billing.PaymentRetryAttempt     # child of PaymentCollectionRun
+billing.ProformaLine            # child of ProformaInvoice
+billing.ProformaSequence        # internal counter (no business significance)
+billing.SubscriptionChange      # child of Subscription
+billing.SubscriptionItem        # child of Subscription
+domains.DomainOrderItem         # child of Order (audited via Order signal)
+orders.OrderItem                # child of Order
+provisioning.ServiceDomain      # child of Service
+provisioning.ServiceGroupMember # child of ServiceGroup
+provisioning.ServiceRelationship # child of Service
+tickets.TicketAttachment        # child of Ticket
+tickets.TicketComment           # child of Ticket
+tickets.TicketWorklog           # child of Ticket
+
+# ── 5. Virtualmin integration internals (audited via Service parent) ──────────
+provisioning.VirtualminAccount          # internal Virtualmin state
+provisioning.VirtualminDriftRecord      # internal drift detection
+provisioning.VirtualminProvisioningJob  # internal provisioning job
+provisioning.VirtualminServer           # mirrors Server model
+
+# ── 6. Usage metering (high-volume operational data) ──────────────────────────
+billing.UsageAggregation        # aggregated usage data
+billing.UsageAlert              # high-volume usage alert records
+billing.UsageEvent              # high-volume individual usage events
+billing.UsageMeter              # usage metric definition
+billing.UsageThreshold          # usage alert threshold configuration
+
+# ── 7. Common & base models ──────────────────────────────────────────────────
+common.CredentialAccessLog      # IS the audit trail for credential access
+common.EncryptedCredential      # audited via CredentialVault service layer
+
+# ── 8. Derived artifacts & operational data ──────────────────────────────────
+billing.EFacturaDocument        # e-Factura XML documents (audited via Invoice lifecycle, document generation is a derived artifact)
+infrastructure.NodeDeploymentCostRecord  # append-only cost records (operational data)
+infrastructure.NodeDeploymentLog         # IS the deployment audit trail (append-only log)
+infrastructure.PanelType        # static panel type definitions (reference data, rarely changes)
+notifications.EmailCampaign     # campaign management (future: will get signals when campaign service is built)
+promotions.LoyaltyTier          # tier definitions (changes audited via LoyaltyProgram parent)

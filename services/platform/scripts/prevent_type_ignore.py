@@ -13,7 +13,9 @@ Usage:
 
 import argparse
 import re
+import subprocess
 import sys
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +23,7 @@ from typing import Any
 class TypeIgnoreChecker:
     """Checks for and prevents new # type: ignore comments."""
 
-    def __init__(self, allow_legacy: bool = False, strict_mode: bool = True):
+    def __init__(self: "TypeIgnoreChecker", allow_legacy: bool = False, strict_mode: bool = True):
         self.allow_legacy = allow_legacy
         self.strict_mode = strict_mode
 
@@ -46,7 +48,7 @@ class TypeIgnoreChecker:
             "apps/users/services.py",
         }
 
-    def is_legacy_file(self, file_path: str) -> bool:
+    def is_legacy_file(self: "TypeIgnoreChecker", file_path: str) -> bool:
         """Check if file is in legacy allowlist."""
         if not self.allow_legacy:
             return False
@@ -54,12 +56,12 @@ class TypeIgnoreChecker:
         path_str = str(file_path)
         return any(legacy in path_str for legacy in self.legacy_allowlist)
 
-    def is_strict_file(self, file_path: str) -> bool:
+    def is_strict_file(self: "TypeIgnoreChecker", file_path: str) -> bool:
         """Check if file requires strict type safety."""
         path_str = str(file_path)
         return any(strict in path_str for strict in self.strict_modules)
 
-    def should_skip_file(self, file_path: str) -> bool:
+    def should_skip_file(self: "TypeIgnoreChecker", file_path: str) -> bool:
         """Determine if file should be skipped from checking."""
         path_str = str(file_path)
 
@@ -74,7 +76,7 @@ class TypeIgnoreChecker:
         # Skip if file doesn't exist
         return not Path(file_path).exists()
 
-    def check_file_for_type_ignore(self, file_path: str) -> tuple[bool, list[dict[str, Any]]]:
+    def check_file_for_type_ignore(self: "TypeIgnoreChecker", file_path: str) -> tuple[bool, list[dict[str, Any]]]:
         """
         Check a single file for type ignore comments.
 
@@ -108,7 +110,7 @@ class TypeIgnoreChecker:
 
         return len(violations) > 0, violations
 
-    def format_violation_message(self, violations: list[dict[str, Any]]) -> str:
+    def format_violation_message(self: "TypeIgnoreChecker", violations: list[dict[str, Any]]) -> str:
         """Format violation messages for output."""
         if not violations:
             return ""
@@ -137,7 +139,7 @@ class TypeIgnoreChecker:
 
         return "\n".join(message_parts)
 
-    def check_files(self, file_paths: list[str]) -> tuple[bool, str]:
+    def check_files(self: "TypeIgnoreChecker", file_paths: list[str]) -> tuple[bool, str]:
         """
         Check multiple files for type ignore violations.
 
@@ -182,6 +184,85 @@ class TypeIgnoreChecker:
 
         return should_fail, message
 
+    def _parse_staged_added_lines(self: "TypeIgnoreChecker", file_paths: list[str]) -> dict[str, list[tuple[int, str]]]:
+        """Return added lines from staged diff keyed by file path."""
+        cmd = ["git", "diff", "--cached", "--unified=0", "--", *file_paths]
+        result = subprocess.run(cmd, check=False, capture_output=True, text=True)  # noqa: S603
+        if result.returncode != 0:
+            return {}
+
+        added_by_file: dict[str, list[tuple[int, str]]] = defaultdict(list)
+        current_file: str | None = None
+        new_line_number: int | None = None
+
+        hunk_pattern = re.compile(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+
+        for raw_line in result.stdout.splitlines():
+            if raw_line.startswith("+++ b/"):
+                current_file = raw_line.removeprefix("+++ b/")
+                new_line_number = None
+                continue
+
+            if raw_line.startswith("@@"):
+                match = hunk_pattern.search(raw_line)
+                if match:
+                    new_line_number = int(match.group(1))
+                continue
+
+            if raw_line.startswith("+") and not raw_line.startswith("+++"):
+                if current_file and new_line_number is not None:
+                    added_by_file[current_file].append((new_line_number, raw_line[1:]))
+                    new_line_number += 1
+                continue
+
+            # Deleted lines do not advance the "new file" line counter.
+            if raw_line.startswith("-") and not raw_line.startswith("---"):
+                continue
+
+            if new_line_number is not None:
+                new_line_number += 1
+
+        return added_by_file
+
+    def check_staged_new_type_ignores(self: "TypeIgnoreChecker", file_paths: list[str]) -> tuple[bool, str]:
+        """Check only newly added staged lines for type-ignore comments."""
+        violations: list[dict[str, Any]] = []
+        added_by_file = self._parse_staged_added_lines(file_paths)
+
+        for file_path, added_lines in added_by_file.items():
+            if self.should_skip_file(file_path):
+                continue
+
+            for line_no, line in added_lines:
+                match = self.type_ignore_pattern.search(line)
+                if not match:
+                    continue
+
+                violations.append(
+                    {
+                        "file": file_path,
+                        "line": line_no,
+                        "content": line.strip(),
+                        "position": match.start(),
+                        "is_legacy": self.is_legacy_file(file_path),
+                        "is_strict": self.is_strict_file(file_path),
+                    }
+                )
+
+        if not violations:
+            return False, "✅ No new type ignore comments in staged changes"
+
+        # Reuse existing decision logic.
+        should_fail = False
+        for violation in violations:
+            if violation["is_strict"] or (self.strict_mode and not violation["is_legacy"]):
+                should_fail = True
+                break
+
+        message = "🚫 New type ignore comments detected in staged changes:"
+        message += self.format_violation_message(violations)
+        return should_fail, message
+
 
 def main() -> int:
     """Main CLI interface."""
@@ -192,10 +273,10 @@ def main() -> int:
 Examples:
     # Check specific files (pre-commit usage)
     python scripts/prevent_type_ignore.py file1.py file2.py
-    
+
     # Check all Python files in apps/
     python scripts/prevent_type_ignore.py --check-all
-    
+
     # Allow legacy files during transition
     python scripts/prevent_type_ignore.py --allow-legacy file.py
         """,
@@ -207,6 +288,11 @@ Examples:
     )
     parser.add_argument(
         "--no-strict", action="store_true", help="Disable strict mode (allow type ignore in non-legacy files)"
+    )
+    parser.add_argument(
+        "--staged-only",
+        action="store_true",
+        help="Check only newly added staged lines (for pre-commit)",
     )
 
     args = parser.parse_args()
@@ -235,7 +321,10 @@ Examples:
     print(f"⚙️  Mode: {'Legacy allowed' if args.allow_legacy else 'Strict'}")
 
     # Check files
-    has_violations, message = checker.check_files(files_to_check)
+    if args.staged_only:
+        has_violations, message = checker.check_staged_new_type_ignores(files_to_check)
+    else:
+        has_violations, message = checker.check_files(files_to_check)
 
     print(message)
 
