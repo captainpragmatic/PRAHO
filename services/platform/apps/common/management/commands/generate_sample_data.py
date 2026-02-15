@@ -95,6 +95,7 @@ class Command(BaseCommand):
         test_customer = self.create_test_company_customer(fake, users, config)
         customers = [test_customer]
         self.stdout.write(f"  ✓ Created guaranteed test customer #1: {test_customer.get_display_name()}")
+        self.ensure_e2e_users(test_customer)
 
         # Create remaining customers with comprehensive data
         remaining_customers = max(0, num_customers - 1)  # -1 because we already created the test customer
@@ -151,6 +152,60 @@ class Command(BaseCommand):
                     is_active=True,
                 )
                 self.stdout.write(f"  ✓ Support: {user.email}")
+
+    def ensure_e2e_users(self, test_customer: Customer) -> None:
+        """Ensure deterministic E2E users required by Playwright flows."""
+        self.stdout.write("Ensuring deterministic E2E users...")
+
+        # E2E admin for platform login helpers
+        e2e_admin, _ = User.objects.get_or_create(
+            email="e2e-admin@test.local",
+            defaults={
+                "first_name": "E2E",
+                "last_name": "Admin",
+                "is_staff": True,
+                "is_superuser": True,
+                "is_active": True,
+                "staff_role": "admin",
+            },
+        )
+        e2e_admin.is_active = True
+        e2e_admin.is_staff = True
+        e2e_admin.is_superuser = True
+        e2e_admin.staff_role = "admin"
+        e2e_admin.set_password("test123")
+        e2e_admin.save()
+        self.stdout.write("  ✓ E2E admin: e2e-admin@test.local")
+
+        # E2E customer for portal login helpers
+        e2e_customer, _ = User.objects.get_or_create(
+            email="e2e-customer@test.local",
+            defaults={
+                "first_name": "E2E",
+                "last_name": "Customer",
+                "is_staff": False,
+                "is_superuser": False,
+                "is_active": True,
+            },
+        )
+        e2e_customer.is_active = True
+        e2e_customer.is_staff = False
+        e2e_customer.is_superuser = False
+        e2e_customer.set_password("test123")
+        e2e_customer.save()
+        self.stdout.write("  ✓ E2E customer: e2e-customer@test.local")
+
+        CustomerMembership.objects.update_or_create(
+            user=e2e_customer,
+            customer=test_customer,
+            defaults={
+                "role": "owner",
+                "is_primary": True,
+                "is_active": True,
+                "created_by": e2e_admin,
+            },
+        )
+        self.stdout.write(f"  ✓ Linked E2E customer to: {test_customer.get_display_name()}")
 
     def create_service_plans(self) -> list[ServicePlan]:
         self.stdout.write("Creating service plans...")

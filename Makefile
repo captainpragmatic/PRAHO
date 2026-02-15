@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install dev dev-platform dev-portal dev-all test test-platform test-portal test-integration test-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security install-frontend build-css watch-css migrate fixtures fixtures-light clean lint lint-platform lint-portal lint-security lint-credentials lint-audit type-check pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod
+.PHONY: help install dev dev-e2e dev-platform dev-portal dev-all test test-platform test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security install-frontend build-css watch-css check-css-tooling migrate fixtures fixtures-light clean lint lint-platform lint-portal lint-security lint-credentials lint-audit type-check pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -29,6 +29,7 @@ help:
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "🏗️  DEVELOPMENT SERVICES:"
 	@echo "  make dev             - Run all services (platform + portal)"
+	@echo "  make dev-e2e         - Run all services with rate limiting disabled"
 	@echo "  make dev-platform    - Run platform service only (:8700)"
 	@echo "  make dev-portal      - Run portal service only (:8701)"
 	@echo ""
@@ -39,6 +40,7 @@ help:
 	@echo "  make test-portal     - Test portal service (NO DB access)"
 	@echo "  make test-integration - Test platform→portal API communication"
 	@echo "  make test-e2e        - All E2E tests (requires both services)"
+	@echo "  make test-with-e2e   - Alias for make test-e2e"
 	@echo "  make test-e2e-platform - Platform staff E2E tests (:8700)"
 	@echo "  make test-e2e-portal   - Portal customer E2E tests (:8701)"
 	@echo "  make test-e2e-orm      - ORM E2E tests (no server needed)"
@@ -176,6 +178,11 @@ dev-all: build-css
 dev: build-css
 	@$(MAKE) dev-all
 
+dev-e2e: build-css
+	@echo "🎭 [E2E Dev] Starting services with rate limiting disabled..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@RATELIMIT_ENABLE=false $(MAKE) dev-all
+
 # Start both services and write logs to files via tee
 .PHONY: dev-with-logs
 dev-with-logs: build-css
@@ -264,6 +271,8 @@ test-e2e:
 	fi
 	@PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/python -m pytest tests/e2e/ -v
 	@echo "✅ E2E tests completed!"
+
+test-with-e2e: test-e2e
 
 test-e2e-platform:
 	@echo "🎭 [E2E Platform] Running platform staff E2E tests..."
@@ -446,19 +455,28 @@ install-css:
 	@echo "📦 Installing frontend dependencies..."
 	npm install
 
-build-css:
+install-frontend: install-css
+
+check-css-tooling:
+	@npm ls --depth=0 @tailwindcss/cli >/dev/null 2>&1 || ( \
+		echo "❌ Missing Tailwind CLI package: @tailwindcss/cli"; \
+		echo "   Run: npm install --save-dev @tailwindcss/cli"; \
+		exit 1; \
+	)
+
+build-css: check-css-tooling
 	@echo "🎨 Building Tailwind CSS assets for all services..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "🏗️  Building Portal CSS..."
-	npx @tailwindcss/cli -c services/portal/tailwind.config.js -i assets/css/input.css -o services/portal/static/css/tailwind.min.css --minify
+	npx --no-install @tailwindcss/cli -c services/portal/tailwind.config.js -i assets/css/input.css -o services/portal/static/css/tailwind.min.css --minify
 	@echo "🏗️  Building Platform CSS..."
-	npx @tailwindcss/cli -c services/platform/tailwind.config.js -i assets/css/input.css -o services/platform/static/css/tailwind.min.css --minify
+	npx --no-install @tailwindcss/cli -c services/platform/tailwind.config.js -i assets/css/input.css -o services/platform/static/css/tailwind.min.css --minify
 	@echo "✅ CSS build complete!"
 
-watch-css:
+watch-css: check-css-tooling
 	@echo "👀 Watching CSS changes for development..."
-	npx @tailwindcss/cli -c services/portal/tailwind.config.js -i assets/css/input.css -o services/portal/static/css/tailwind.min.css --watch &
-	npx @tailwindcss/cli -c services/platform/tailwind.config.js -i assets/css/input.css -o services/platform/static/css/tailwind.min.css --watch
+	npx --no-install @tailwindcss/cli -c services/portal/tailwind.config.js -i assets/css/input.css -o services/portal/static/css/tailwind.min.css --watch &
+	npx --no-install @tailwindcss/cli -c services/platform/tailwind.config.js -i assets/css/input.css -o services/platform/static/css/tailwind.min.css --watch
 
 # ===============================================================================
 # DOCKER SERVICES DEPLOYMENT 🐳
