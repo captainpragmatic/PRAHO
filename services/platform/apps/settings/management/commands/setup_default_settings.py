@@ -338,7 +338,7 @@ class Command(BaseCommand):
             # Tickets
             "tickets.sla_critical_response_hours": "Response SLA for P1/critical tickets.",
             "tickets.sla_high_response_hours": "Response SLA for P2/high-priority tickets.",
-            "tickets.max_file_size_bytes": "Maximum upload size in bytes. Default: 10MB (10485760).",
+            "tickets.max_file_size_bytes": "Maximum upload size in bytes. Default: 2MB (2097152).",
             "tickets.allowed_file_extensions": "JSON list of permitted file extensions.",
             "tickets.security_alert_threshold": "Number of suspicious events before alerting security team.",
             # Security
