@@ -11,6 +11,14 @@ _No unreleased changes._
 
 ---
 
+## [0.15.1] - 2026-02-15
+
+### Fixed
+- **Settings**: Corrected default values, removed stale caches, and added missing configuration keys identified during code review (#9)
+- **Billing**: Replaced deprecated `CheckConstraint.check` with `.condition` to align with Django 5.2 API changes
+
+---
+
 ## [0.15.0] - 2026-02-12
 
 ### Changed
