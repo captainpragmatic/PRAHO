@@ -275,7 +275,7 @@ class SettingsDashboardView(TemplateView):
                         "proforma_validity": SettingsService.get_setting("billing.proforma_validity_days", 30),
                         "session_timeout": SettingsService.get_setting("users.session_timeout_minutes", 120),
                         "domain_registration": SettingsService.get_setting("domains.registration_enabled", True),
-                        "mfa_required": SettingsService.get_setting("users.mfa_required_for_staff", False),
+                        "mfa_required": SettingsService.get_setting("users.mfa_required_for_staff", True),
                     },
                 }
             )

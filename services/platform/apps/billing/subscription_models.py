@@ -46,11 +46,31 @@ BILLING_CYCLE_DAYS = {
     "yearly": 365,
 }
 
-# Grace period before suspension (days)
-DEFAULT_GRACE_PERIOD_DAYS = 7
+# Grace period before suspension (days) — module-level fallback for model field default
+_DEFAULT_GRACE_PERIOD_DAYS = 7
+DEFAULT_GRACE_PERIOD_DAYS = _DEFAULT_GRACE_PERIOD_DAYS
 
-# Maximum retry attempts before cancellation
-MAX_PAYMENT_RETRY_ATTEMPTS = 5
+# Maximum retry attempts before cancellation — module-level fallback
+_DEFAULT_MAX_PAYMENT_RETRY_ATTEMPTS = 5
+MAX_PAYMENT_RETRY_ATTEMPTS = _DEFAULT_MAX_PAYMENT_RETRY_ATTEMPTS
+
+
+def get_subscription_grace_period_days() -> int:
+    """Get grace period days from SettingsService (runtime)."""
+    try:
+        from apps.settings.services import SettingsService  # noqa: PLC0415
+        return max(1, SettingsService.get_integer_setting("billing.subscription_grace_period_days", 7))
+    except Exception:
+        return _DEFAULT_GRACE_PERIOD_DAYS
+
+
+def get_max_payment_retry_attempts() -> int:
+    """Get max payment retry attempts from SettingsService (runtime)."""
+    try:
+        from apps.settings.services import SettingsService  # noqa: PLC0415
+        return max(1, SettingsService.get_integer_setting("billing.max_payment_retry_attempts", 5))
+    except Exception:
+        return _DEFAULT_MAX_PAYMENT_RETRY_ATTEMPTS
 
 
 # ===============================================================================

@@ -63,14 +63,20 @@
         <section id="data-controller" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">2. {% trans "Data Controller Information" %}</h2>
             <div class="bg-slate-900/50 rounded p-4 mb-4">
+                {# TODO: Replace with settings context variable from company.legal_name #}
                 <p class="text-slate-300"><strong class="text-white">{% trans "Company Name" %}:</strong> PragmaticHost SRL</p>
+                {# TODO: Replace with settings context variable from company.registration_number #}
                 <p class="text-slate-300"><strong class="text-white">{% trans "Registration Number (CUI)" %}:</strong> RO12345678</p>
+                {# TODO: Replace with settings context variable from company.address #}
                 <p class="text-slate-300"><strong class="text-white">{% trans "Registered Address" %}:</strong> Str. Exemplu 123, București, România</p>
+                {# TODO: Replace with settings context variable from company.email_contact #}
                 <p class="text-slate-300"><strong class="text-white">{% trans "Email" %}:</strong> contact@pragmatichost.com</p>
+                {# TODO: Replace with settings context variable from company.phone #}
                 <p class="text-slate-300"><strong class="text-white">{% trans "Phone" %}:</strong> +40.21.123.4567</p>
             </div>
             <div class="bg-blue-900/30 rounded p-4 border border-blue-700">
                 <h3 class="text-lg font-medium text-blue-300 mb-2">{% trans "Data Protection Officer (DPO)" %}</h3>
+                {# TODO: Replace with settings context variable from company.email_dpo #}
                 <p class="text-slate-300"><strong class="text-white">{% trans "Email" %}:</strong> dpo@praho.com</p>
                 <p class="text-slate-300 text-sm mt-2">
                     {% blocktrans %}
@@ -408,11 +414,14 @@
             <div class="grid md:grid-cols-2 gap-6">
                 <div class="bg-slate-900/50 rounded p-4">
                     <h4 class="text-white font-medium mb-2">{% trans "Data Protection Officer" %}</h4>
+                    {# TODO: Replace with settings context variable from company.email_dpo #}
                     <p class="text-slate-400 text-sm">dpo@praho.com</p>
                 </div>
                 <div class="bg-slate-900/50 rounded p-4">
                     <h4 class="text-white font-medium mb-2">{% trans "General Inquiries" %}</h4>
+                    {# TODO: Replace with settings context variable from company.email_contact #}
                     <p class="text-slate-400 text-sm">contact@pragmatichost.com</p>
+                    {# TODO: Replace with settings context variable from company.phone #}
                     <p class="text-slate-400 text-sm">+40.21.123.4567</p>
                 </div>
             </div>

@@ -20,15 +20,17 @@ from django.core.cache import cache
 from django.db.models import Count
 from django.utils import timezone
 
+from apps.settings.services import SettingsService
+
 from .models import Ticket, TicketAttachment, TicketComment
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
 
 # Security monitoring constants
-SECURITY_ALERT_THRESHOLD = 5  # Failed attempts before alert
-MONITORING_WINDOW_MINUTES = 15  # Time window for pattern detection
-SUSPICIOUS_UPLOAD_COUNT = 10  # File uploads per window that trigger alert
+_DEFAULT_SECURITY_ALERT_THRESHOLD = 5  # Failed attempts before alert (configurable via SettingsService)
+MONITORING_WINDOW_MINUTES = 15  # Time window for pattern detection (structural)
+SUSPICIOUS_UPLOAD_COUNT = 10  # File uploads per window that trigger alert (structural)
 
 
 class SecurityEventTracker:
@@ -44,8 +46,14 @@ class SecurityEventTracker:
 
     def __init__(self) -> None:
         self.cache_prefix = "ticket_security"
-        self.alert_threshold = SECURITY_ALERT_THRESHOLD
         self.monitoring_window = MONITORING_WINDOW_MINUTES
+
+    @property
+    def alert_threshold(self) -> int:
+        """Alert threshold from SettingsService (cached by SettingsService layer)."""
+        return SettingsService.get_integer_setting(
+            "tickets.security_alert_threshold", _DEFAULT_SECURITY_ALERT_THRESHOLD
+        )
 
     def track_failed_access(self, user_id: int, resource_type: str, resource_id: str, reason: str) -> None:
         """Track failed access attempts for pattern detection"""

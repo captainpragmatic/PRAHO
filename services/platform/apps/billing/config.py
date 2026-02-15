@@ -92,11 +92,34 @@ DEFAULT_PAYMENT_TERMS_DAYS = 14
 # USAGE METERING CONFIGURATION
 # ===============================================================================
 
-# Default grace period for accepting late usage events (hours)
-DEFAULT_EVENT_GRACE_PERIOD_HOURS = _get_positive_int("BILLING_EVENT_GRACE_PERIOD_HOURS", 24)
+# Module-level fallbacks for code that reads at import time
+_DEFAULT_EVENT_GRACE_PERIOD_HOURS = 24
+_DEFAULT_FUTURE_EVENT_DRIFT_MINUTES = 5
 
-# Maximum time drift allowed for future events (minutes)
-MAX_FUTURE_EVENT_DRIFT_MINUTES = _get_positive_int("BILLING_MAX_FUTURE_EVENT_MINUTES", 5)
+
+def get_event_grace_period_hours() -> int:
+    """Get grace period for accepting late usage events (hours) from SettingsService."""
+    try:
+        from apps.settings.services import SettingsService  # noqa: PLC0415
+        return max(1, SettingsService.get_integer_setting("billing.event_grace_period_hours", 24))
+    except Exception:
+        logger.warning("Failed to read event_grace_period_hours from SettingsService, using fallback", exc_info=True)
+        return _get_positive_int("BILLING_EVENT_GRACE_PERIOD_HOURS", _DEFAULT_EVENT_GRACE_PERIOD_HOURS)
+
+
+def get_future_event_drift_minutes() -> int:
+    """Get max time drift allowed for future events (minutes) from SettingsService."""
+    try:
+        from apps.settings.services import SettingsService  # noqa: PLC0415
+        return max(1, SettingsService.get_integer_setting("billing.future_event_drift_minutes", 5))
+    except Exception:
+        logger.warning("Failed to read future_event_drift_minutes from SettingsService, using fallback", exc_info=True)
+        return _get_positive_int("BILLING_MAX_FUTURE_EVENT_MINUTES", _DEFAULT_FUTURE_EVENT_DRIFT_MINUTES)
+
+
+# Backward-compatible module-level aliases (prefer the functions at runtime)
+DEFAULT_EVENT_GRACE_PERIOD_HOURS = _DEFAULT_EVENT_GRACE_PERIOD_HOURS
+MAX_FUTURE_EVENT_DRIFT_MINUTES = _DEFAULT_FUTURE_EVENT_DRIFT_MINUTES
 
 
 # ===============================================================================
@@ -124,16 +147,44 @@ DEFAULT_USAGE_THRESHOLDS = (
     Decimal("1.00"),  # 100%
 )
 
-# Hours between repeat notifications for same threshold
-DEFAULT_ALERT_COOLDOWN_HOURS = _get_positive_int("BILLING_ALERT_COOLDOWN_HOURS", 24)
+# Module-level fallback for alert cooldown
+_DEFAULT_ALERT_COOLDOWN_HOURS = 24
+
+
+def get_alert_cooldown_hours() -> int:
+    """Get hours between repeat notifications for same threshold from SettingsService."""
+    try:
+        from apps.settings.services import SettingsService  # noqa: PLC0415
+        return max(1, SettingsService.get_integer_setting("billing.alert_cooldown_hours", 24))
+    except Exception:
+        logger.warning("Failed to read alert_cooldown_hours from SettingsService, using fallback", exc_info=True)
+        return _get_positive_int("BILLING_ALERT_COOLDOWN_HOURS", _DEFAULT_ALERT_COOLDOWN_HOURS)
+
+
+# Backward-compatible module-level alias
+DEFAULT_ALERT_COOLDOWN_HOURS = _DEFAULT_ALERT_COOLDOWN_HOURS
 
 
 # ===============================================================================
 # E-FACTURA (ROMANIAN ELECTRONIC INVOICING)
 # ===============================================================================
 
-# Minimum amount for mandatory e-Factura submission (RON)
-E_FACTURA_MINIMUM_AMOUNT_CENTS = _get_positive_int("BILLING_EFACTURA_MINIMUM_CENTS", 10000)  # 100 RON
+# Module-level fallback for e-Factura minimum amount
+_DEFAULT_EFACTURA_MINIMUM_AMOUNT_CENTS = 10000  # 100 RON
+
+
+def get_efactura_minimum_amount_cents() -> int:
+    """Get minimum amount for mandatory e-Factura submission from SettingsService."""
+    try:
+        from apps.settings.services import SettingsService  # noqa: PLC0415
+        return max(1, SettingsService.get_integer_setting("billing.efactura_minimum_amount_cents", 10000))
+    except Exception:
+        logger.warning("Failed to read efactura_minimum_amount_cents from SettingsService, using fallback", exc_info=True)
+        return _get_positive_int("BILLING_EFACTURA_MINIMUM_CENTS", _DEFAULT_EFACTURA_MINIMUM_AMOUNT_CENTS)
+
+
+# Backward-compatible module-level alias
+E_FACTURA_MINIMUM_AMOUNT_CENTS = _DEFAULT_EFACTURA_MINIMUM_AMOUNT_CENTS
 
 
 # ===============================================================================

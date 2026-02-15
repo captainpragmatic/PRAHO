@@ -39,6 +39,7 @@ from apps.notifications.models import (
     EmailTemplate,
     validate_template_content,
 )
+from apps.settings.services import SettingsService
 
 if TYPE_CHECKING:
     from apps.billing.models import Invoice
@@ -49,7 +50,7 @@ logger = logging.getLogger(__name__)
 
 # Security constants
 MAX_CONTEXT_VALUE_LENGTH = 1000  # Maximum length for template context values
-MAX_RECIPIENTS_PER_BATCH = 50  # Maximum recipients per batch send
+_DEFAULT_MAX_RECIPIENTS_PER_BATCH = 50  # Maximum recipients per batch send
 TEMPLATE_CACHE_PREFIX = "email_template:"
 TEMPLATE_CACHE_TIMEOUT = 3600  # 1 hour
 SUPPRESSION_CACHE_PREFIX = "email_suppressed:"
@@ -329,7 +330,9 @@ class EmailService:
         from django.core.mail import EmailMultiAlternatives  # noqa: PLC0415
 
         try:
-            from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "noreply@praho.io")
+            from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None) or SettingsService.get_setting(
+                "company.email_noreply", "noreply@pragmatichost.com"
+            )
 
             email = EmailMultiAlternatives(
                 subject=subject,

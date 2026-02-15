@@ -40,10 +40,10 @@ logger = logging.getLogger(__name__)
 # SECURITY CONSTANTS
 # ===============================================================================
 
-# Rate limiting thresholds
-RATE_LIMIT_REGISTRATION_PER_IP = 5  # per hour
-RATE_LIMIT_INVITATION_PER_USER = 10  # per hour
-RATE_LIMIT_COMPANY_CHECK_PER_IP = 30  # per hour
+# Rate limiting thresholds — defaults; authoritative source is SettingsService
+_DEFAULT_RATE_LIMIT_REGISTRATION_PER_IP = 5  # per hour
+_DEFAULT_RATE_LIMIT_INVITATION_PER_USER = 10  # per hour
+_DEFAULT_RATE_LIMIT_COMPANY_CHECK_PER_IP = 30  # per hour
 
 # Input size limits (DoS prevention)
 MAX_EMAIL_LENGTH = 254
@@ -685,7 +685,11 @@ class BusinessLogicValidator:
         # Rate limiting for enumeration prevention
         cache_key = f"company_check:{request_ip or 'unknown'}"
         current_checks = cache.get(cache_key, 0)
-        if current_checks >= RATE_LIMIT_COMPANY_CHECK_PER_IP:
+        from apps.settings.services import SettingsService
+
+        if current_checks >= SettingsService.get_integer_setting(
+            "security.company_check_rate_limit_per_ip", _DEFAULT_RATE_LIMIT_COMPANY_CHECK_PER_IP
+        ):
             raise ValidationError(_("Service temporarily unavailable"))
         cache.set(cache_key, current_checks + 1, timeout=3600)
 
@@ -750,7 +754,7 @@ class BusinessLogicValidator:
                 raise ValidationError(_("Account not active"))
 
     @staticmethod
-    @rate_limited("invitation", RATE_LIMIT_INVITATION_PER_USER, 60)
+    @rate_limited("invitation", _DEFAULT_RATE_LIMIT_INVITATION_PER_USER, 60)
     def validate_invitation_request(inviter: Any, invitee_email: str, customer: Any, role: str, **kwargs: Any) -> None:
         """
         Comprehensive invitation validation with rate limiting

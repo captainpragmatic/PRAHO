@@ -1486,7 +1486,7 @@ class GDPRDeletionService:
 
         restrictions = []
 
-        # Romanian business law - must keep tax records for 7 years
+        # Romanian business law — must keep tax records per gdpr.data_retention_years (default 7)
         try:
             if hasattr(user, "customer_memberships") and user.customer_memberships.exists():
                 restrictions.append("Customer relationship exists - Romanian business law compliance")
@@ -3381,7 +3381,7 @@ class AuditRetentionService:
     Features:
     - Configurable retention periods by event category/severity
     - Automatic archiving of old audit logs
-    - Romanian legal compliance (7-year financial records)
+    - Romanian legal compliance (gdpr.data_retention_years, default 7 years)
     - GDPR right-to-erasure implementation
     - Bulk deletion with approval workflows
     - Archive storage and retrieval system
@@ -3491,7 +3491,7 @@ class AuditRetentionService:
             logger.warning(f"⚠️ [Retention] Attempted deletion with mandatory policy: {policy.name}")
             return 0
 
-        # Check Romanian compliance (7-year financial records)
+        # Check Romanian compliance (gdpr.data_retention_years, default 7 years)
         financial_events = [e for e in events if cls._is_financial_record(e)]
         if financial_events:
             logger.warning(
@@ -3539,7 +3539,7 @@ class AuditRetentionService:
 
     @classmethod
     def _is_financial_record(cls, event: AuditEvent) -> bool:
-        """Check if event is a financial record requiring 7-year retention."""
+        """Check if event is a financial record requiring extended retention (see gdpr.data_retention_years)."""
 
         financial_actions = [
             "invoice_created",

@@ -17,11 +17,28 @@ from apps.billing.models import Invoice
 
 logger = logging.getLogger(__name__)
 
-# Task configuration
-TASK_RETRY_DELAY = 300  # 5 minutes
-TASK_MAX_RETRIES = 3
+# Task configuration — module-level fallbacks (structural, used for async_task timeout args)
+_DEFAULT_TASK_RETRY_DELAY = 300  # 5 minutes
+_DEFAULT_TASK_MAX_RETRIES = 3
 TASK_SOFT_TIME_LIMIT = 300  # 5 minutes
 TASK_TIME_LIMIT = 600  # 10 minutes
+
+
+def _get_task_retry_delay() -> int:
+    """Get task retry delay seconds from SettingsService."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+    return SettingsService.get_integer_setting("billing.task_retry_delay_seconds", 300)
+
+
+def _get_task_max_retries() -> int:
+    """Get task max retries from SettingsService."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+    return SettingsService.get_integer_setting("billing.task_max_retries", 3)
+
+
+# Backward-compatible module-level aliases (for code that imports them)
+TASK_RETRY_DELAY = _DEFAULT_TASK_RETRY_DELAY
+TASK_MAX_RETRIES = _DEFAULT_TASK_MAX_RETRIES
 
 
 def submit_efactura(invoice_id: str) -> dict[str, Any]:

@@ -63,7 +63,9 @@ class EFacturaConfig:
 
     @classmethod
     def from_settings(cls) -> EFacturaConfig:
-        """Create config from Django settings."""
+        """Create config from Django settings and SettingsService."""
+        from apps.settings.services import SettingsService  # noqa: PLC0415
+
         env_str = getattr(settings, "EFACTURA_ENVIRONMENT", "test")
         environment = EFacturaEnvironment.PRODUCTION if env_str == "production" else EFacturaEnvironment.TEST
 
@@ -72,7 +74,8 @@ class EFacturaConfig:
             client_secret=getattr(settings, "EFACTURA_CLIENT_SECRET", ""),
             company_cui=getattr(settings, "EFACTURA_COMPANY_CUI", ""),
             environment=environment,
-            timeout=getattr(settings, "EFACTURA_TIMEOUT", 30),
+            timeout=SettingsService.get_integer_setting("billing.efactura_api_timeout_seconds", 30),
+            max_retries=SettingsService.get_integer_setting("billing.efactura_api_max_retries", 3),
         )
 
     @property

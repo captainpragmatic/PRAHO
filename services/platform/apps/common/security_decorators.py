@@ -27,7 +27,7 @@ from apps.common.constants import (
 from apps.common.types import Err, Ok, Result
 
 from .validators import (
-    RATE_LIMIT_REGISTRATION_PER_IP,
+    _DEFAULT_RATE_LIMIT_REGISTRATION_PER_IP,
     BusinessLogicValidator,
     SecureErrorHandler,
     SecureInputValidator,
@@ -144,7 +144,7 @@ def secure_service_method_legacy(  # noqa: PLR0913
 
 
 def secure_user_registration(
-    rate_limit: int = RATE_LIMIT_REGISTRATION_PER_IP,
+    rate_limit: int = _DEFAULT_RATE_LIMIT_REGISTRATION_PER_IP,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Security decorator specifically for user registration methods"""
     return secure_service_method(

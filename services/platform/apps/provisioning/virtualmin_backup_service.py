@@ -79,12 +79,12 @@ class RestoreOperationParams(TypedDict):
 logger = logging.getLogger(__name__)
 
 # Backup configuration constants
-BACKUP_RETENTION_DAYS = 90  # Keep backups for 90 days
-BACKUP_VERIFICATION_TIMEOUT = 300  # 5 minutes for verification
-BACKUP_COMPRESSION_LEVEL = 6  # Balance between speed and compression
-MAX_BACKUP_SIZE_GB = 50  # Maximum backup size in GB
-BACKUP_CHUNK_SIZE = 8 * 1024 * 1024  # 8MB chunks for S3 upload
-S3_MULTIPART_THRESHOLD = 100 * 1024 * 1024  # 100MB threshold for multipart
+_DEFAULT_BACKUP_RETENTION_DAYS = 90  # Keep backups for 90 days (configurable via SettingsService)
+BACKUP_VERIFICATION_TIMEOUT = 300  # 5 minutes for verification (structural)
+BACKUP_COMPRESSION_LEVEL = 6  # Balance between speed and compression (structural)
+_DEFAULT_MAX_BACKUP_SIZE_GB = 50  # Maximum backup size in GB (configurable via SettingsService)
+BACKUP_CHUNK_SIZE = 8 * 1024 * 1024  # 8MB chunks for S3 upload (structural)
+S3_MULTIPART_THRESHOLD = 100 * 1024 * 1024  # 100MB threshold for multipart (structural)
 
 # Cache keys for backup status
 BACKUP_STATUS_CACHE_PREFIX = "virtualmin_backup_status_"
@@ -360,9 +360,13 @@ class VirtualminBackupService:
             return Err(f"Restore operation failed: {e!s}")
 
     def list_backups(
-        self, account: VirtualminAccount | None = None, backup_type: str | None = None, max_age_days: int = 90
+        self, account: VirtualminAccount | None = None, backup_type: str | None = None, max_age_days: int | None = None
     ) -> Result[list[dict[str, Any]], str]:
         """List available backups with filtering options."""
+        if max_age_days is None:
+            max_age_days = SettingsService.get_integer_setting(
+                "provisioning.backup_retention_days", _DEFAULT_BACKUP_RETENTION_DAYS
+            )
         try:
             s3_client = self._get_s3_client()
             bucket_name = self._get_backup_bucket()
@@ -563,9 +567,12 @@ class VirtualminBackupService:
         estimated_backup_size_mb = int(disk_info * 1.5)
 
         # Check if backup would exceed size limits
-        if estimated_backup_size_mb > (MAX_BACKUP_SIZE_GB * 1024):
+        max_backup_size_gb = SettingsService.get_integer_setting(
+            "provisioning.max_backup_size_gb", _DEFAULT_MAX_BACKUP_SIZE_GB
+        )
+        if estimated_backup_size_mb > (max_backup_size_gb * 1024):
             return Err(
-                f"Estimated backup size ({estimated_backup_size_mb}MB) exceeds limit ({MAX_BACKUP_SIZE_GB}GB)"
+                f"Estimated backup size ({estimated_backup_size_mb}MB) exceeds limit ({max_backup_size_gb}GB)"
             )
 
         logger.debug(
@@ -724,7 +731,10 @@ class VirtualminBackupService:
             if file_size == 0:
                 return Err("Backup file is empty")
 
-            max_size_bytes = MAX_BACKUP_SIZE_GB * 1024 * 1024 * 1024
+            max_backup_size_gb = SettingsService.get_integer_setting(
+                "provisioning.max_backup_size_gb", _DEFAULT_MAX_BACKUP_SIZE_GB
+            )
+            max_size_bytes = max_backup_size_gb * 1024 * 1024 * 1024
             if file_size > max_size_bytes:
                 return Err(f"Backup file exceeds size limit: {file_size} bytes > {max_size_bytes} bytes")
 
@@ -991,7 +1001,10 @@ class VirtualminBackupService:
 
     def _find_last_full_backup(self, account: VirtualminAccount) -> Result[dict[str, Any], str]:
         """Find the most recent full backup for incremental operations."""
-        backups_result = self.list_backups(account, backup_type="full", max_age_days=30)
+        retention_days = SettingsService.get_integer_setting(
+            "provisioning.backup_retention_days", _DEFAULT_BACKUP_RETENTION_DAYS
+        )
+        backups_result = self.list_backups(account, backup_type="full", max_age_days=retention_days)
         if backups_result.is_err():
             return Err(backups_result.unwrap_err())
 

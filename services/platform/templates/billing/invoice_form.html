@@ -64,7 +64,7 @@
                           data-company="{{ customer.company_name|default:customer.name }}"
                           data-vat="{{ customer.tax_profile.vat_number|default:'N/A' }}"
                           data-email="{{ customer.billing_profile.email|default:customer.primary_email|default:'N/A' }}"
-                          data-terms="{{ customer.billing_profile.payment_terms|default:'30' }} days">
+                          data-terms="{{ customer.billing_profile.payment_terms|default:'14' }} days">
                     {{ customer.company_name|default:customer.name }}{% if customer.tax_profile.vat_number %} ({{ customer.tax_profile.vat_number }}){% endif %}
                   </option>
                 {% empty %}
@@ -205,7 +205,7 @@
               </label>
               <textarea name="public_notes" rows="3" 
                         class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
-                        placeholder="{% trans 'Thank you for your business! Payment due within 30 days.' %}"></textarea>
+                        placeholder="{% trans 'Thank you for your business! Payment due within 14 days.' %}"></textarea>
             </div>
 
             <div>
@@ -448,11 +448,11 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
     
-    // Auto-calculate due date (30 days from issue date)
+    // Auto-calculate due date (14 days from issue date — matches billing.invoice_payment_terms_days)
     document.querySelector('input[name="issued_at"]').addEventListener('change', function() {
         const issueDate = new Date(this.value);
         const dueDate = new Date(issueDate);
-        dueDate.setDate(dueDate.getDate() + 30);
+        dueDate.setDate(dueDate.getDate() + 14);
         
         document.querySelector('input[name="due_at"]').value = dueDate.toISOString().split('T')[0];
     });

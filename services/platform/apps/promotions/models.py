@@ -30,6 +30,8 @@ from django.db.models import F, Sum
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from apps.settings.services import SettingsService
+
 if TYPE_CHECKING:
     from apps.customers.models import Customer
     from apps.orders.models import Order
@@ -44,11 +46,24 @@ logger = logging.getLogger(__name__)
 COUPON_CODE_LENGTH = 12
 COUPON_CODE_CHARS = string.ascii_uppercase + string.digits
 
-# Security limits
-MAX_DISCOUNT_PERCENT = Decimal("100.00")
-MAX_DISCOUNT_AMOUNT_CENTS = 100_000_000  # 1M in major currency units
+# Security limits — runtime values come from SettingsService;
+# module-level defaults kept for model field validators / class definitions.
+_DEFAULT_MAX_DISCOUNT_PERCENT = Decimal("100.00")
+_DEFAULT_MAX_DISCOUNT_AMOUNT_CENTS = 100_000_000  # 1M in major currency units
+MAX_DISCOUNT_PERCENT = _DEFAULT_MAX_DISCOUNT_PERCENT
+MAX_DISCOUNT_AMOUNT_CENTS = _DEFAULT_MAX_DISCOUNT_AMOUNT_CENTS
 MAX_USAGE_LIMIT = 1_000_000
 MAX_JSON_SIZE = 10_000
+
+
+def get_max_discount_percent() -> Decimal:
+    """Get max discount percent from SettingsService at runtime."""
+    return Decimal(str(SettingsService.get_integer_setting("promotions.max_discount_percent", 100)))
+
+
+def get_max_discount_amount_cents() -> int:
+    """Get max discount amount in cents from SettingsService at runtime."""
+    return SettingsService.get_integer_setting("promotions.max_discount_amount_cents", 100_000_000)
 
 
 class CouponMetadata(TypedDict, total=False):
@@ -458,13 +473,17 @@ class Coupon(models.Model):
         if self.discount_type == "percent":
             if self.discount_percent is None:
                 raise ValidationError("Percentage discount requires discount_percent value")
-            if self.discount_percent < 0 or self.discount_percent > 100:
-                raise ValidationError("Percentage must be between 0 and 100")
+            max_pct = get_max_discount_percent()
+            if self.discount_percent < 0 or self.discount_percent > max_pct:
+                raise ValidationError(f"Percentage must be between 0 and {max_pct}")
         elif self.discount_type == "fixed":
             if self.discount_amount_cents is None:
                 raise ValidationError("Fixed discount requires discount_amount_cents value")
             if self.discount_amount_cents < 0:
                 raise ValidationError("Fixed discount amount cannot be negative")
+            max_amount = get_max_discount_amount_cents()
+            if self.discount_amount_cents > max_amount:
+                raise ValidationError(f"Fixed discount amount cannot exceed {max_amount} cents")
         elif self.discount_type == "free_months":
             if self.free_months is None:
                 raise ValidationError("Free months discount requires free_months value")

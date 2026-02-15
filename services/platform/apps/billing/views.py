@@ -71,7 +71,13 @@ from .services import (
 )
 
 # Customer access function removed - platform is staff-only
-MAX_PAYMENT_AMOUNT_CENTS = 100_000_000
+_DEFAULT_MAX_PAYMENT_AMOUNT_CENTS = 100_000_000
+
+
+def _get_max_payment_amount_cents() -> int:
+    """Get max payment amount from SettingsService."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+    return SettingsService.get_integer_setting("billing.max_payment_amount_cents", 100000000)
 
 
 def _validate_financial_document_access(
@@ -1662,7 +1668,7 @@ def api_create_payment_intent(request: HttpRequest) -> JsonResponse:  # noqa: PL
                 'error': 'amount_cents is required and must be an integer'
             }, status=400)
 
-        if amount_cents <= 0 or amount_cents > MAX_PAYMENT_AMOUNT_CENTS:  # Max 1M RON
+        if amount_cents <= 0 or amount_cents > _get_max_payment_amount_cents():  # Max 1M RON
             return JsonResponse({
                 'success': False,
                 'error': 'amount_cents must be between 1 and 100,000,000 (1M RON)'

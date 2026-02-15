@@ -19,6 +19,7 @@ from django.views.decorators.http import require_http_methods
 
 from apps.common.decorators import admin_required, staff_required
 from apps.customers.models import Customer
+from apps.settings.services import SettingsService
 from apps.users.models import User
 
 from .forms import RegistrarForm, TLDForm
@@ -33,9 +34,9 @@ from .services import (
 
 logger = logging.getLogger(__name__)
 
-# Domain expiry warning thresholds (in days)
-DOMAIN_EXPIRY_CRITICAL_DAYS = 7  # Show danger alert when expiring within 7 days
-DOMAIN_EXPIRY_WARNING_DAYS = 30  # Show warning alert when expiring within 30 days
+# Module-level defaults for domain expiry thresholds (configurable via SettingsService)
+_DEFAULT_DOMAIN_EXPIRY_CRITICAL_DAYS = 7
+_DEFAULT_DOMAIN_EXPIRY_WARNING_DAYS = 30
 
 
 # ===============================================================================
@@ -67,6 +68,13 @@ def _build_domain_table_data(domains: QuerySet[Domain] | list[Domain], user: Use
 
     can_manage = user.is_staff or getattr(user, "staff_role", None)
 
+    expiry_critical_days = SettingsService.get_integer_setting(
+        "domains.expiry_critical_days", _DEFAULT_DOMAIN_EXPIRY_CRITICAL_DAYS
+    )
+    expiry_warning_days = SettingsService.get_integer_setting(
+        "domains.expiry_warning_days", _DEFAULT_DOMAIN_EXPIRY_WARNING_DAYS
+    )
+
     rows = []
     for domain in domains:
         # Determine status badge variant
@@ -89,10 +97,10 @@ def _build_domain_table_data(domains: QuerySet[Domain] | list[Domain], user: Use
                 if days_left < 0:
                     expiry_variant = "danger"
                     expiry_title = "Domain has expired"
-                elif days_left <= DOMAIN_EXPIRY_CRITICAL_DAYS:
+                elif days_left <= expiry_critical_days:
                     expiry_variant = "danger"
                     expiry_title = f"Expires in {days_left} days"
-                elif days_left <= DOMAIN_EXPIRY_WARNING_DAYS:
+                elif days_left <= expiry_warning_days:
                     expiry_variant = "warning"
                     expiry_title = f"Expires in {days_left} days"
                 else:
@@ -277,14 +285,21 @@ def domain_detail(request: HttpRequest, domain_id: str) -> HttpResponse:
     expiry_status = "ok"
     expiry_message = ""
 
+    expiry_critical_days = SettingsService.get_integer_setting(
+        "domains.expiry_critical_days", _DEFAULT_DOMAIN_EXPIRY_CRITICAL_DAYS
+    )
+    expiry_warning_days = SettingsService.get_integer_setting(
+        "domains.expiry_warning_days", _DEFAULT_DOMAIN_EXPIRY_WARNING_DAYS
+    )
+
     if domain.expires_at and days_until_expiry is not None:
         if days_until_expiry < 0:
             expiry_status = "expired"
             expiry_message = f"Domain expired {abs(days_until_expiry)} days ago"
-        elif days_until_expiry <= DOMAIN_EXPIRY_CRITICAL_DAYS:
+        elif days_until_expiry <= expiry_critical_days:
             expiry_status = "critical"
             expiry_message = f"Domain expires in {days_until_expiry} days"
-        elif days_until_expiry <= DOMAIN_EXPIRY_WARNING_DAYS:
+        elif days_until_expiry <= expiry_warning_days:
             expiry_status = "warning"
             expiry_message = f"Domain expires in {days_until_expiry} days"
         else:

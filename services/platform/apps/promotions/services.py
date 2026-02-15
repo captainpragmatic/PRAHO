@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 # Constants
 # ===============================================================================
 
-MAX_CODE_GENERATION_ATTEMPTS = 100  # Prevent infinite loops in code generation
+MAX_CODE_GENERATION_ATTEMPTS = 100  # Prevent infinite loops in code generation (structural safety limit)
 
 
 # ===============================================================================

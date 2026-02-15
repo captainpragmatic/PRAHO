@@ -66,31 +66,88 @@ class SettingsService:
 
     # Default settings values
     DEFAULT_SETTINGS: ClassVar[dict[str, Any]] = {
+        # ── Company & Branding ──────────────────────────────────────────
+        "company.legal_name": "PragmaticHost SRL",
+        "company.registration_number": "",
+        "company.address": "",
+        "company.email_contact": "contact@pragmatichost.com",
+        "company.email_support": "support@pragmatichost.com",
+        "company.email_privacy": "privacy@pragmatichost.com",
+        "company.email_dpo": "dpo@pragmatichost.com",
+        "company.email_noreply": "noreply@pragmatichost.com",
+        "company.phone": "",
+        # ── Billing & Invoicing ─────────────────────────────────────────
         "billing.proforma_validity_days": 30,
         "billing.payment_grace_period_days": 5,
         "billing.invoice_payment_terms_days": 14,
         "billing.vat_rate": "0.21",
+        "billing.max_payment_amount_cents": 100000000,
+        "billing.payment_retry_attempts": 3,
+        "billing.payment_retry_delay_hours": 24,
+        "billing.negative_balance_threshold": "-100.00",
+        "billing.subscription_grace_period_days": 7,
+        "billing.max_payment_retry_attempts": 5,
+        "billing.efactura_minimum_amount_cents": 10000,
+        "billing.efactura_submission_deadline_days": 5,
+        "billing.efactura_deadline_warning_hours": 24,
+        "billing.efactura_batch_size": 100,
+        "billing.efactura_api_max_retries": 3,
+        "billing.efactura_api_timeout_seconds": 30,
+        "billing.event_grace_period_hours": 24,
+        "billing.future_event_drift_minutes": 5,
+        "billing.alert_cooldown_hours": 24,
+        "billing.task_retry_delay_seconds": 300,
+        "billing.task_max_retries": 3,
+        "billing.credit_consecutive_bonus_6": 10,
+        "billing.credit_consecutive_bonus_12": 20,
+        "billing.large_credit_limit_threshold": 10000,
+        "billing.extended_payment_terms_threshold": 60,
+        # ── Users & Authentication ──────────────────────────────────────
         "users.session_timeout_minutes": 120,
         "users.mfa_required_for_staff": True,
         # users.password_reset_timeout_hours removed — Django's PASSWORD_RESET_TIMEOUT (base.py) is authoritative
         "users.max_login_attempts": 5,
+        "users.account_lockout_duration_minutes": 15,
+        "users.admin_session_timeout_minutes": 30,
+        "users.shared_device_timeout_minutes": 15,
+        "users.backup_code_count": 10,
+        "users.credential_max_age_days": 90,
+        "users.credential_rotation_retry_limit": 3,
+        "users.login_rate_limit_per_hour": 5,
+        "users.security_lockout_failure_threshold": 5,
+        # ── Domain Management ───────────────────────────────────────────
         "domains.registration_enabled": True,
         "domains.auto_renewal_enabled": True,
         "domains.renewal_notice_days": 30,
+        "domains.expiry_critical_days": 7,
+        "domains.expiry_warning_days": 30,
+        "domains.max_per_package": 100,
+        "domains.max_subdomains_per_domain": 50,
+        "domains.whois_privacy_price_cents": 500,
+        # ── Service Provisioning ────────────────────────────────────────
         "provisioning.auto_setup_enabled": True,
         "provisioning.setup_timeout_minutes": 30,
-        # Virtualmin operational settings
+        "provisioning.suspend_timeout_minutes": 15,
+        "provisioning.terminate_timeout_minutes": 60,
+        "provisioning.default_disk_quota_gb": 10,
+        "provisioning.default_bandwidth_quota_gb": 100,
+        "provisioning.max_email_accounts_per_package": 50,
+        "provisioning.recovery_excellent_threshold": 95,
+        "provisioning.recovery_good_threshold": 90,
+        "provisioning.recovery_warning_threshold": 80,
+        "provisioning.max_backup_size_gb": 50,
+        "provisioning.backup_retention_days": 90,
+        "provisioning.high_value_plan_threshold_cents": 50000,
+        "provisioning.resource_usage_alert_threshold": 85,
+        "provisioning.server_overload_threshold": 90,
+        "provisioning.long_provisioning_threshold_minutes": 30,
+        # ── Virtualmin Integration ──────────────────────────────────────
         "virtualmin.hostname": "localhost",
         "virtualmin.port": 10000,
         "virtualmin.ssl_verify": True,
         "virtualmin.request_timeout_seconds": 30,
         "virtualmin.max_retries": 3,
         "virtualmin.rate_limit_qps": 10,
-        # Stripe payment integration settings
-        "integrations.stripe_secret_key": "",
-        "integrations.stripe_publishable_key": "",
-        "integrations.stripe_webhook_secret": "",
-        "integrations.stripe_enabled": False,
         "virtualmin.connection_pool_size": 10,
         "virtualmin.rate_limit_max_calls_per_hour": 100,
         "virtualmin.auth_health_check_interval_seconds": 3600,
@@ -105,44 +162,93 @@ class SettingsService:
         "virtualmin.ssl_auto_renewal_enabled": True,
         "virtualmin.monitoring_enabled": True,
         "virtualmin.log_retention_days": 30,
-        # Advanced authentication settings
         "virtualmin.ssh_username": "virtualmin-praho",
         "virtualmin.api_endpoint_path": "/virtual-server/remote.cgi",
         "virtualmin.use_ssl": True,
+        # ── Support & Tickets ───────────────────────────────────────────
+        "tickets.sla_critical_response_hours": 1,
+        "tickets.sla_high_response_hours": 4,
+        "tickets.sla_standard_response_hours": 24,
+        "tickets.sla_low_response_hours": 72,
+        "tickets.auto_escalation_hours": 48,
+        "tickets.max_reassignments": 3,
+        "tickets.max_file_size_bytes": 2097152,
+        "tickets.allowed_file_extensions": [".pdf", ".txt", ".png", ".jpg", ".jpeg", ".doc", ".docx"],
+        "tickets.max_attachments_per_ticket": 5,
+        "tickets.security_alert_threshold": 5,
+        # ── Security & Access ───────────────────────────────────────────
         "security.rate_limit_per_hour": 1000,
         "security.require_2fa_for_admin": True,
+        "security.api_burst_limit": 50,
+        "security.max_customer_lookups_per_hour": 20,
+        "security.suspicious_ip_threshold": 3,
+        "security.registration_rate_limit_per_ip": 5,
+        "security.invitation_rate_limit_per_user": 10,
+        "security.company_check_rate_limit_per_ip": 30,
+        # ── Monitoring & Alerts ─────────────────────────────────────────
+        "monitoring.cpu_warning_threshold": 80,
+        "monitoring.memory_warning_threshold": 85,
+        "monitoring.disk_warning_threshold": 90,
+        "monitoring.alert_cooldown_minutes": 60,
+        "monitoring.health_check_interval_minutes": 5,
+        # ── Notifications ───────────────────────────────────────────────
         "notifications.email_enabled": True,
         "notifications.sms_enabled": False,
+        "notifications.max_recipients_per_batch": 50,
+        "notifications.email_batch_size": 50,
+        "notifications.digest_frequency_hours": 24,
+        "notifications.max_history": 1000,
+        "notifications.email_max_retries": 3,
+        # ── GDPR & Data Retention ───────────────────────────────────────
+        "gdpr.data_retention_years": 7,
+        "gdpr.log_retention_months": 12,
+        "gdpr.export_retention_days": 30,
+        "gdpr.audit_log_retention_years": 10,
+        "gdpr.failed_login_retention_months": 6,
+        # ── External Integrations ───────────────────────────────────────
+        "integrations.stripe_secret_key": "",
+        "integrations.stripe_publishable_key": "",
+        "integrations.stripe_webhook_secret": "",
+        "integrations.stripe_enabled": False,
+        "integrations.webhook_retry_attempts": 5,
+        "integrations.webhook_timeout_seconds": 30,
+        "integrations.webhook_batch_size": 50,
+        "integrations.api_request_timeout_seconds": 30,
+        "integrations.api_connection_timeout_seconds": 10,
+        # ── UI & Display ────────────────────────────────────────────────
+        "ui.default_page_size": 20,
+        "ui.max_page_size": 100,
+        "ui.min_page_size": 5,
+        "ui.max_attachment_size_mb": 25,
+        # ── Promotions & Discounts ──────────────────────────────────────
+        "promotions.max_discount_percent": 100,
+        "promotions.max_discount_amount_cents": 100000000,
+        "promotions.max_coupon_batch_size": 1000,
+        # ── System Configuration ────────────────────────────────────────
         "system.maintenance_mode": False,
         "system.backup_retention_days": 30,
-        # Node Deployment settings - Infrastructure provisioning configuration
-        # Terraform Configuration
-        "node_deployment.terraform_state_backend": "local",  # 'local' or 's3'
-        "node_deployment.terraform_s3_bucket": "",  # S3 bucket name (when backend=s3)
-        "node_deployment.terraform_s3_region": "",  # S3 region (when backend=s3)
-        "node_deployment.terraform_s3_key_prefix": "praho/nodes/",  # S3 key prefix
-        # DNS Configuration
-        "node_deployment.dns_default_zone": "",  # Default Cloudflare zone for node hostnames
-        "node_deployment.dns_cloudflare_zone_id": "",  # Cloudflare zone ID
-        "node_deployment.dns_cloudflare_api_token": "",  # Cloudflare API token (sensitive)
-        # Default Deployment Options
-        "node_deployment.default_provider": "hetzner",  # Default cloud provider
-        "node_deployment.default_region": "fsn1",  # Default region code
-        "node_deployment.default_environment": "prd",  # Default environment (prd/stg/dev)
-        # Backup Configuration
-        "node_deployment.backup_enabled": True,  # Enable backups on new nodes
-        "node_deployment.backup_storage": "local",  # 'local' or 's3' (TODO: s3)
-        "node_deployment.backup_s3_bucket": "",  # S3 bucket for backups (TODO)
-        "node_deployment.backup_retention_days": 7,  # Local backup retention
-        "node_deployment.backup_schedule": "0 2 * * *",  # Cron schedule (2 AM daily)
-        # Timeouts (seconds)
-        "node_deployment.timeout_terraform_apply": 600,  # 10 minutes
-        "node_deployment.timeout_ansible_playbook": 1800,  # 30 minutes
-        "node_deployment.timeout_validation": 300,  # 5 minutes
-        # Feature flags
-        "node_deployment.enabled": True,  # Master enable/disable for node deployment
-        "node_deployment.auto_registration": True,  # Auto-register as VirtualminServer
-        "node_deployment.cost_tracking_enabled": True,  # Track deployment costs
+        # ── Node Deployment ─────────────────────────────────────────────
+        "node_deployment.terraform_state_backend": "local",
+        "node_deployment.terraform_s3_bucket": "",
+        "node_deployment.terraform_s3_region": "eu-west-1",
+        "node_deployment.terraform_s3_key_prefix": "praho/nodes/",
+        "node_deployment.dns_default_zone": "",
+        "node_deployment.dns_cloudflare_zone_id": "",
+        "node_deployment.dns_cloudflare_api_token": "",
+        "node_deployment.default_provider": "hetzner",
+        "node_deployment.default_region": "fsn1",
+        "node_deployment.default_environment": "prd",
+        "node_deployment.backup_enabled": True,
+        "node_deployment.backup_storage": "local",
+        "node_deployment.backup_s3_bucket": "",
+        "node_deployment.backup_retention_days": 7,
+        "node_deployment.backup_schedule": "0 2 * * *",
+        "node_deployment.timeout_terraform_apply": 600,
+        "node_deployment.timeout_ansible_playbook": 1800,
+        "node_deployment.timeout_validation": 300,
+        "node_deployment.enabled": True,
+        "node_deployment.auto_registration": True,
+        "node_deployment.cost_tracking_enabled": True,
     }
 
     @classmethod
