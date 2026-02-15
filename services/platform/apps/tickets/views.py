@@ -30,7 +30,7 @@ from .services import TicketStatusService
 logger = logging.getLogger(__name__)
 
 # Module-level default for file size limit (must match tickets.security)
-_DEFAULT_MAX_FILE_SIZE_BYTES = 10485760  # 10MB
+_DEFAULT_MAX_FILE_SIZE_BYTES = 2097152  # 2MB
 
 
 @dataclass

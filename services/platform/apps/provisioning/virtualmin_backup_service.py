@@ -79,7 +79,7 @@ class RestoreOperationParams(TypedDict):
 logger = logging.getLogger(__name__)
 
 # Backup configuration constants
-_DEFAULT_BACKUP_RETENTION_DAYS = 30  # Keep backups for 30 days (configurable via SettingsService)
+_DEFAULT_BACKUP_RETENTION_DAYS = 90  # Keep backups for 90 days (configurable via SettingsService)
 BACKUP_VERIFICATION_TIMEOUT = 300  # 5 minutes for verification (structural)
 BACKUP_COMPRESSION_LEVEL = 6  # Balance between speed and compression (structural)
 _DEFAULT_MAX_BACKUP_SIZE_GB = 50  # Maximum backup size in GB (configurable via SettingsService)

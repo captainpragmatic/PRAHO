@@ -113,7 +113,7 @@ class TicketAttachmentTest(TestCase):
 
     def test_file_size_limit(self):
         """Test file size limit enforcement"""
-        # Create file larger than 10MB
+        # Create file larger than default max (2MB)
         large_content = b'x' * (11 * 1024 * 1024)  # 11MB
         large_file = SimpleUploadedFile(
             'large_file.txt',

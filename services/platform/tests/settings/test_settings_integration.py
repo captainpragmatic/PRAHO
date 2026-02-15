@@ -32,12 +32,12 @@ class TicketsSettingsIntegration(TestCase):
     """Verify ticket-related settings flow from DB to runtime consumers."""
 
     def test_file_size_default(self) -> None:
-        """No DB record -> _validate_file_size() uses 10MB default."""
+        """No DB record -> _validate_file_size() uses 2MB default."""
         from apps.tickets.security import FileSecurityScanner
 
         scanner = FileSecurityScanner()
         uploaded = SimpleUploadedFile("test.txt", b"x" * 100)
-        # Under 10 MB → should pass
+        # Under 2 MB → should pass
         self.assertTrue(scanner._validate_file_size(uploaded))
 
     def test_file_size_override(self) -> None:
@@ -245,19 +245,19 @@ class ProvisioningSettingsIntegration(TestCase):
         self.assertEqual(warning, 85)
 
     def test_backup_retention_default(self) -> None:
-        """No DB record -> backup_retention_days defaults to 30."""
-        result = SettingsService.get_integer_setting("provisioning.backup_retention_days", 30)
-        self.assertEqual(result, 30)
+        """No DB record -> backup_retention_days defaults to 90."""
+        result = SettingsService.get_integer_setting("provisioning.backup_retention_days", 90)
+        self.assertEqual(result, 90)
 
     def test_backup_retention_override(self) -> None:
         """DB set to 60 -> SettingsService returns 60."""
         SettingsService.update_setting(
             key="provisioning.backup_retention_days",
             value=60,
-            reason="integration test: longer retention",
+            reason="integration test: shorter retention",
         )
 
-        result = SettingsService.get_integer_setting("provisioning.backup_retention_days", 30)
+        result = SettingsService.get_integer_setting("provisioning.backup_retention_days", 90)
         self.assertEqual(result, 60)
 
 

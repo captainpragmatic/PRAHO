@@ -85,7 +85,7 @@ TOTP_VALIDITY_WINDOW: Final[int] = 1  # TOTP time window (30s * window)
 
 # Session management
 SESSION_TIMEOUT_MINUTES: Final[int] = 120  # DEPRECATED: use SettingsService.get_integer_setting("users.session_timeout_minutes")
-ADMIN_SESSION_TIMEOUT_MINUTES: Final[int] = 60  # DEPRECATED: use SettingsService.get_integer_setting("users.admin_session_timeout_minutes")
+ADMIN_SESSION_TIMEOUT_MINUTES: Final[int] = 30  # DEPRECATED: use SettingsService.get_integer_setting("users.admin_session_timeout_minutes")
 
 # ===============================================================================
 # BILLING & FINANCIAL 💰

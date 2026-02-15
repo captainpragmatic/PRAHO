@@ -999,11 +999,11 @@ class SessionSecurityService:
     def _get_timeout_policies(cls) -> dict[str, int]:
         """Get timeout policies from SettingsService with defaults."""
         admin_timeout_min = SettingsService.get_integer_setting("users.admin_session_timeout_minutes", 30)
-        lockout_duration_min = SettingsService.get_integer_setting("users.account_lockout_duration_minutes", 15)
+        shared_device_min = SettingsService.get_integer_setting("users.shared_device_timeout_minutes", 15)
         return {
             "standard": 3600,  # 1 hour for regular users
             "sensitive": admin_timeout_min * 60,  # admin/billing staff
-            "shared_device": lockout_duration_min * 60,  # shared device mode
+            "shared_device": shared_device_min * 60,  # shared device mode
             "remember_me": 86400 * 7,  # 7 days for remember me
         }
 

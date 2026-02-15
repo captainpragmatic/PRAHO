@@ -350,7 +350,7 @@ def process_email_queue() -> dict[str, Any]:
     stuck_emails = EmailLog.objects.filter(
         status="queued",
         sent_at__lt=cutoff,  # sent_at = creation time for queued emails
-    ).order_by("sent_at")[:SettingsService.get_integer_setting("notifications.email_batch_size", 50)]
+    ).order_by("sent_at")[:max(1, SettingsService.get_integer_setting("notifications.email_batch_size", 50))]
 
     processed = 0
     failed = 0
@@ -401,7 +401,7 @@ def retry_failed_emails(max_age_hours: int = 24) -> dict[str, Any]:
     failed_emails = EmailLog.objects.filter(
         status="failed",
         sent_at__gte=cutoff,
-    ).order_by("sent_at")[:SettingsService.get_integer_setting("notifications.email_batch_size", 50)]
+    ).order_by("sent_at")[:max(1, SettingsService.get_integer_setting("notifications.email_batch_size", 50))]
 
     retried = 0
     skipped = 0

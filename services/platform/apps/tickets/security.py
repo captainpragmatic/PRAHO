@@ -32,7 +32,7 @@ from apps.settings.services import SettingsService
 logger = logging.getLogger(__name__)
 
 # Security constants - configurable via SettingsService
-_DEFAULT_MAX_FILE_SIZE_BYTES = 10485760  # 10MB limit
+_DEFAULT_MAX_FILE_SIZE_BYTES = 2097152  # 2MB limit
 MAX_FILENAME_LENGTH = 255  # Structural - filesystem limit
 _DEFAULT_ALLOWED_EXTENSIONS = [".pdf", ".txt", ".png", ".jpg", ".jpeg", ".doc", ".docx"]
 
