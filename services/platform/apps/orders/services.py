@@ -123,8 +123,9 @@ class OrderCalculationService:
     """
 
     @staticmethod
-    def calculate_order_totals(items: list[OrderItemData], customer: Customer = None,
-                              billing_address: dict | None = None) -> dict[str, int]:
+    def calculate_order_totals(
+        items: list[OrderItemData], customer: Customer = None, billing_address: dict | None = None
+    ) -> dict[str, int]:
         """
         Calculate order subtotal, VAT, and total in cents using authoritative VAT calculator.
 
@@ -149,48 +150,45 @@ class OrderCalculationService:
 
         # Determine customer context for VAT calculation
         if billing_address:
-            country = billing_address.get('country') or 'RO'
-            vat_number = billing_address.get('vat_number') or billing_address.get('vat_id')
-            is_business = bool(billing_address.get('company_name')) or bool(vat_number)
+            country = billing_address.get("country") or "RO"
+            vat_number = billing_address.get("vat_number") or billing_address.get("vat_id")
+            is_business = bool(billing_address.get("company_name")) or bool(vat_number)
         elif customer:
-            country = getattr(customer, 'country', 'RO') or 'RO'
-            is_business = bool(getattr(customer, 'company_name', ''))
-            vat_number = getattr(customer.tax_profile, 'vat_number', '') if hasattr(customer, 'tax_profile') else ''
+            country = getattr(customer, "country", "RO") or "RO"
+            is_business = bool(getattr(customer, "company_name", ""))
+            vat_number = getattr(customer.tax_profile, "vat_number", "") if hasattr(customer, "tax_profile") else ""
         else:
             # Default to Romanian business for consistency
-            country = 'RO'
+            country = "RO"
             is_business = True
-            vat_number = ''
+            vat_number = ""
 
         # Calculate VAT using authoritative calculator
         customer_vat_info: CustomerVATInfo = {
-            'country': country,
-            'is_business': is_business,
-            'vat_number': vat_number,
-            'customer_id': str(customer.id) if customer else 'unknown',
-            'order_id': 'calculation',
+            "country": country,
+            "is_business": is_business,
+            "vat_number": vat_number,
+            "customer_id": str(customer.id) if customer else "unknown",
+            "order_id": "calculation",
         }
 
         # Inject per-customer overrides from CustomerTaxProfile (if available)
-        if customer and hasattr(customer, 'tax_profile'):
+        if customer and hasattr(customer, "tax_profile"):
             try:
                 tax_profile = customer.tax_profile
-                customer_vat_info['is_vat_payer'] = tax_profile.is_vat_payer
-                customer_vat_info['reverse_charge_eligible'] = tax_profile.reverse_charge_eligible
+                customer_vat_info["is_vat_payer"] = tax_profile.is_vat_payer
+                customer_vat_info["reverse_charge_eligible"] = tax_profile.reverse_charge_eligible
                 # Pass custom rate if explicitly set (None means "use country default")
                 if tax_profile.vat_rate is not None:
-                    customer_vat_info['custom_vat_rate'] = tax_profile.vat_rate
+                    customer_vat_info["custom_vat_rate"] = tax_profile.vat_rate
             except (ObjectDoesNotExist, AttributeError):
                 pass  # Profile doesn't exist yet — use defaults
-        vat_result = OrderVATCalculator.calculate_vat(
-            subtotal_cents=subtotal_cents,
-            customer_info=customer_vat_info
-        )
+        vat_result = OrderVATCalculator.calculate_vat(subtotal_cents=subtotal_cents, customer_info=customer_vat_info)
 
         return {
             "subtotal_cents": subtotal_cents,
             "tax_cents": int(vat_result.vat_cents),
-            "total_cents": int(vat_result.total_cents)
+            "total_cents": int(vat_result.total_cents),
         }
 
 
@@ -248,52 +246,41 @@ class OrderService:
         This ensures we always use the most current customer data.
         """
         from apps.customers.models import CustomerAddress  # noqa: PLC0415
-        
+
         # Get current address from CustomerAddress model - try multiple strategies
         address = None
-        
+
         # First, try to get billing address marked as current
-        address = CustomerAddress.objects.filter(
-            customer=customer, 
-            address_type='billing', 
-            is_current=True
-        ).first()
-        
-        # If no billing address, try primary address marked as current  
+        address = CustomerAddress.objects.filter(customer=customer, address_type="billing", is_current=True).first()
+
+        # If no billing address, try primary address marked as current
         if not address:
-            address = CustomerAddress.objects.filter(
-                customer=customer, 
-                address_type='primary', 
-                is_current=True
-            ).first()
-        
+            address = CustomerAddress.objects.filter(customer=customer, address_type="primary", is_current=True).first()
+
         # If still no address, get any current address
         if not address:
-            address = CustomerAddress.objects.filter(
-                customer=customer, 
-                is_current=True
-            ).first()
-            
+            address = CustomerAddress.objects.filter(customer=customer, is_current=True).first()
+
         # Last resort: get the most recent address for this customer
         if not address:
-            address = CustomerAddress.objects.filter(
-                customer=customer
-            ).order_by('-created_at').first()
-        
+            address = CustomerAddress.objects.filter(customer=customer).order_by("-created_at").first()
+
         return BillingAddressData(
-            company_name=customer.company_name or '',
+            company_name=customer.company_name or "",
             contact_name=customer.name,
             email=customer.primary_email,
-            phone=customer.primary_phone if customer.primary_phone != '+40712345678' else '',  # Skip default phone
-            address_line1=address.address_line1 if address else '',
-            address_line2=address.address_line2 if address else '',
-            city=address.city if address else '',
-            county=address.county if address else '',
-            postal_code=address.postal_code if address else '',
-            country='RO' if (address and address.country in ['România', 'Romania']) or not address else (address.country if address else 'RO'),
-            fiscal_code=getattr(customer.tax_profile, 'cui', '') if hasattr(customer, 'tax_profile') else '',
-            registration_number=getattr(customer, 'registration_number', ''),
-            vat_number=getattr(customer.tax_profile, 'vat_number', '') if hasattr(customer, 'tax_profile') else ''
+            phone=customer.primary_phone if customer.primary_phone != "+40712345678" else "",  # Skip default phone
+            address_line1=address.address_line1 if address else "",
+            address_line2=address.address_line2 if address else "",
+            city=address.city if address else "",
+            county=address.county if address else "",
+            postal_code=address.postal_code if address else "",
+            country="RO"
+            if (address and address.country in ["România", "Romania"]) or not address
+            else (address.country if address else "RO"),
+            fiscal_code=getattr(customer.tax_profile, "cui", "") if hasattr(customer, "tax_profile") else "",
+            registration_number=getattr(customer, "registration_number", ""),
+            vat_number=getattr(customer.tax_profile, "vat_number", "") if hasattr(customer, "tax_profile") else "",
         )
 
     @staticmethod
@@ -309,12 +296,12 @@ class OrderService:
 
             # Calculate financial totals using consistent VAT calculator
             totals = OrderCalculationService.calculate_order_totals(
-                items=data.items,
-                customer=data.customer,
-                billing_address=dict(data.billing_address)
+                items=data.items, customer=data.customer, billing_address=dict(data.billing_address)
             )
 
-            logger.warning(f"🧮 [OrderService] Calculated totals for order creation: subtotal={totals['subtotal_cents']}¢, tax={totals['tax_cents']}¢, total={totals['total_cents']}¢")
+            logger.warning(
+                f"🧮 [OrderService] Calculated totals for order creation: subtotal={totals['subtotal_cents']}¢, tax={totals['tax_cents']}¢, total={totals['total_cents']}¢"
+            )
 
             # Get currency instance (Currency already imported at top)
             currency_instance = Currency.objects.get(code=data.currency)
@@ -342,7 +329,9 @@ class OrderService:
             # Create order items
             for item_data in data.items:
                 # Calculate line totals (include setup fee if provided) with VAT rules
-                subtotal_cents = item_data["quantity"] * item_data["unit_price_cents"] + int(item_data.get("setup_cents", 0))
+                subtotal_cents = item_data["quantity"] * item_data["unit_price_cents"] + int(
+                    item_data.get("setup_cents", 0)
+                )
 
                 # Determine VAT using comprehensive VAT rules (per customer country/business)
                 try:
@@ -354,27 +343,26 @@ class OrderService:
                     is_business = bool(data.billing_address.get("company_name")) or bool(vat_number)
 
                     customer_vat_info: CustomerVATInfo = {
-                        'country': customer_country,
-                        'is_business': is_business,
-                        'vat_number': vat_number,
-                        'customer_id': str(data.customer.id),
-                        'order_id': None,
+                        "country": customer_country,
+                        "is_business": is_business,
+                        "vat_number": vat_number,
+                        "customer_id": str(data.customer.id),
+                        "order_id": None,
                     }
 
                     # Inject per-customer overrides (must match calculate_order_totals)
-                    if hasattr(data.customer, 'tax_profile'):
+                    if hasattr(data.customer, "tax_profile"):
                         try:
                             tax_profile = data.customer.tax_profile
-                            customer_vat_info['is_vat_payer'] = tax_profile.is_vat_payer
-                            customer_vat_info['reverse_charge_eligible'] = tax_profile.reverse_charge_eligible
+                            customer_vat_info["is_vat_payer"] = tax_profile.is_vat_payer
+                            customer_vat_info["reverse_charge_eligible"] = tax_profile.reverse_charge_eligible
                             if tax_profile.vat_rate is not None:
-                                customer_vat_info['custom_vat_rate'] = tax_profile.vat_rate
+                                customer_vat_info["custom_vat_rate"] = tax_profile.vat_rate
                         except (ObjectDoesNotExist, AttributeError):
                             pass  # No tax profile yet — use defaults
 
                     vat_result = OrderVATCalculator.calculate_vat(
-                        subtotal_cents=subtotal_cents,
-                        customer_info=customer_vat_info
+                        subtotal_cents=subtotal_cents, customer_info=customer_vat_info
                     )
                     # Convert percent to decimal rate with 4 places for storage
                     tax_rate_decimal = (vat_result.vat_rate / Decimal("100")).quantize(Decimal("0.0001"))
@@ -386,10 +374,12 @@ class OrderService:
 
                     fallback_vat_result = TaxService.calculate_vat(
                         amount_cents=subtotal_cents,
-                        country_code='RO'  # Conservative Romanian default
+                        country_code="RO",  # Conservative Romanian default
                     )
-                    tax_rate_decimal = (fallback_vat_result['vat_rate_percent'] / Decimal("100")).quantize(Decimal("0.0001"))
-                    tax_cents = fallback_vat_result['vat_cents']
+                    tax_rate_decimal = (fallback_vat_result["vat_rate_percent"] / Decimal("100")).quantize(
+                        Decimal("0.0001")
+                    )
+                    tax_cents = fallback_vat_result["vat_cents"]
 
                 line_total_cents = subtotal_cents + tax_cents
 
@@ -577,7 +567,9 @@ class OrderServiceCreationService:
                 # Map product to service plan
                 service_plan_result = OrderServiceCreationService._get_service_plan_for_product(item.product)
                 if service_plan_result.is_err():
-                    logger.warning(f"⚠️ [ServiceCreation] Could not map product to service plan: {service_plan_result.error}")
+                    logger.warning(
+                        f"⚠️ [ServiceCreation] Could not map product to service plan: {service_plan_result.error}"
+                    )
                     continue
 
                 service_plan = service_plan_result.unwrap()
@@ -588,12 +580,13 @@ class OrderServiceCreationService:
                     service_name = f"{item.product_name} - {item.domain_name}"
 
                 # Extract billing cycle from item config or use monthly as default
-                billing_cycle = item.config.get('billing_cycle', 'monthly')
-                if billing_cycle not in ['monthly', 'quarterly', 'annual']:
-                    billing_cycle = 'monthly'
+                billing_cycle = item.config.get("billing_cycle", "monthly")
+                if billing_cycle not in ["monthly", "quarterly", "annual"]:
+                    billing_cycle = "monthly"
 
                 # Generate unique username (will be updated during provisioning)
                 import time
+
                 username = f"tmp_{int(time.time())}_{order.id.hex[:8]}"
 
                 # Create service with pending status
@@ -601,18 +594,18 @@ class OrderServiceCreationService:
                     customer=order.customer,
                     service_plan=service_plan,
                     service_name=service_name,
-                    domain=item.domain_name or '',
+                    domain=item.domain_name or "",
                     username=username,  # Temporary unique username
                     billing_cycle=billing_cycle,
                     price=item.unit_price / 100,  # Convert from cents to decimal
-                    status='pending',  # Key status - visible to customer
+                    status="pending",  # Key status - visible to customer
                     # Link to order for tracking
                     admin_notes=f"Created from order {order.order_number}",
                 )
 
                 # Link the service to the order item
                 item.service = service
-                item.save(update_fields=['service'])
+                item.save(update_fields=["service"])
 
                 services_created.append(service)
 
@@ -620,26 +613,32 @@ class OrderServiceCreationService:
 
                 # Log audit event
                 log_security_event(
-                    'service_created_from_order',
+                    "service_created_from_order",
                     {
-                        'service_id': str(service.id),
-                        'order_id': str(order.id),
-                        'order_number': order.order_number,
-                        'customer_id': str(order.customer.id),
-                        'service_name': service.service_name,
-                        'status': 'pending',
-                    }
+                        "service_id": str(service.id),
+                        "order_id": str(order.id),
+                        "order_number": order.order_number,
+                        "customer_id": str(order.customer.id),
+                        "service_name": service.service_name,
+                        "status": "pending",
+                    },
                 )
 
             if services_created:
-                logger.info(f"🎉 [ServiceCreation] Successfully created {len(services_created)} pending services for order {order.order_number}")
+                logger.info(
+                    f"🎉 [ServiceCreation] Successfully created {len(services_created)} pending services for order {order.order_number}"
+                )
             else:
-                logger.info(f"💡 [ServiceCreation] No new services created for order {order.order_number} (services may already exist)")
+                logger.info(
+                    f"💡 [ServiceCreation] No new services created for order {order.order_number} (services may already exist)"
+                )
 
             return Ok(services_created)
 
         except Exception as e:
-            logger.exception(f"🔥 [ServiceCreation] Failed to create pending services for order {order.order_number}: {e}")
+            logger.exception(
+                f"🔥 [ServiceCreation] Failed to create pending services for order {order.order_number}: {e}"
+            )
             return Err(f"Failed to create pending services: {e}")
 
     @staticmethod
@@ -659,38 +658,39 @@ class OrderServiceCreationService:
             from apps.provisioning.models import ServicePlan  # noqa: PLC0415
 
             # Strategy 1: Check if product has a direct service plan reference
-            if hasattr(product, 'default_service_plan') and product.default_service_plan:
+            if hasattr(product, "default_service_plan") and product.default_service_plan:
                 return Ok(product.default_service_plan)
 
             # Strategy 2: Map based on product type
             product_type = product.product_type
             service_plan_mapping = {
-                'shared_hosting': 'shared_hosting',
-                'vps': 'vps',
-                'dedicated': 'dedicated',
-                'cloud': 'cloud',
-                'domain': 'domain',
-                'ssl': 'ssl',
-                'email': 'email',
-                'backup': 'backup',
+                "shared_hosting": "shared_hosting",
+                "vps": "vps",
+                "dedicated": "dedicated",
+                "cloud": "cloud",
+                "domain": "domain",
+                "ssl": "ssl",
+                "email": "email",
+                "backup": "backup",
             }
 
-            plan_type = service_plan_mapping.get(product_type, 'shared_hosting')
+            plan_type = service_plan_mapping.get(product_type, "shared_hosting")
 
             # Find a service plan of the matching type
-            service_plan = ServicePlan.objects.filter(
-                plan_type=plan_type,
-                is_active=True
-            ).first()
+            service_plan = ServicePlan.objects.filter(plan_type=plan_type, is_active=True).first()
 
             if service_plan:
-                logger.info(f"🔧 [ServiceCreation] Mapped product {product.name} ({product_type}) to service plan {service_plan.name}")
+                logger.info(
+                    f"🔧 [ServiceCreation] Mapped product {product.name} ({product_type}) to service plan {service_plan.name}"
+                )
                 return Ok(service_plan)
 
             # Strategy 3: Fallback to any active service plan
             fallback_plan = ServicePlan.objects.filter(is_active=True).first()
             if fallback_plan:
-                logger.warning(f"⚠️ [ServiceCreation] Using fallback service plan {fallback_plan.name} for product {product.name}")
+                logger.warning(
+                    f"⚠️ [ServiceCreation] Using fallback service plan {fallback_plan.name} for product {product.name}"
+                )
                 return Ok(fallback_plan)
 
             return Err(f"No suitable service plan found for product {product.name} (type: {product_type})")
@@ -716,23 +716,23 @@ class OrderServiceCreationService:
             updated_services = []
 
             for item in order.items.all():
-                if item.service and item.service.status == 'pending':
-                    item.service.status = 'provisioning'
-                    item.service.save(update_fields=['status'])
+                if item.service and item.service.status == "pending":
+                    item.service.status = "provisioning"
+                    item.service.save(update_fields=["status"])
                     updated_services.append(item.service)
 
                     logger.info(f"🔄 [ServiceCreation] Updated service {item.service.id} status to provisioning")
 
                     # Log audit event
                     log_security_event(
-                        'service_status_updated',
+                        "service_status_updated",
                         {
-                            'service_id': str(item.service.id),
-                            'order_id': str(order.id),
-                            'old_status': 'pending',
-                            'new_status': 'provisioning',
-                            'reason': 'payment_confirmed',
-                        }
+                            "service_id": str(item.service.id),
+                            "order_id": str(order.id),
+                            "old_status": "pending",
+                            "new_status": "provisioning",
+                            "reason": "payment_confirmed",
+                        },
                     )
 
             return Ok(updated_services)

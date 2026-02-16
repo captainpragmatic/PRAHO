@@ -6,17 +6,17 @@
 {% block content %}
 <div class="container mx-auto px-4 py-8">
     <h1 class="text-3xl font-bold text-gray-900 mb-6">{% trans "Security & Compliance Alerts" %}</h1>
-    
+
     <div class="bg-white shadow rounded-lg p-6 mb-6">
         <h2 class="text-xl font-semibold mb-4">{% trans "Alert Filters" %}</h2>
-        
+
         <div class="flex flex-wrap gap-4 mb-4">
             <select name="status" class="border border-gray-300 rounded px-3 py-2">
                 <option value="active" {% if status_filter == 'active' %}selected{% endif %}>{% trans "Active" %}</option>
                 <option value="resolved" {% if status_filter == 'resolved' %}selected{% endif %}>{% trans "Resolved" %}</option>
                 <option value="dismissed" {% if status_filter == 'dismissed' %}selected{% endif %}>{% trans "Dismissed" %}</option>
             </select>
-            
+
             {% if alert_types %}
                 <select name="alert_type" class="border border-gray-300 rounded px-3 py-2">
                     <option value="">{% trans "All Types" %}</option>
@@ -27,36 +27,36 @@
             {% endif %}
         </div>
     </div>
-    
+
     <div class="bg-white shadow rounded-lg p-6 mb-6">
         <h2 class="text-xl font-semibold mb-4">{% trans "Alert Summary" %}</h2>
-        
+
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div class="bg-red-50 p-4 rounded">
                 <h3 class="font-medium text-red-900">{% trans "Critical" %}</h3>
                 <p class="text-2xl font-bold text-red-600">{{ alert_counts.critical|default:0 }}</p>
             </div>
-            
+
             <div class="bg-yellow-50 p-4 rounded">
                 <h3 class="font-medium text-yellow-900">{% trans "High Priority" %}</h3>
                 <p class="text-2xl font-bold text-yellow-600">{{ alert_counts.high|default:0 }}</p>
             </div>
-            
+
             <div class="bg-blue-50 p-4 rounded">
                 <h3 class="font-medium text-blue-900">{% trans "Medium Priority" %}</h3>
                 <p class="text-2xl font-bold text-blue-600">{{ alert_counts.medium|default:0 }}</p>
             </div>
-            
+
             <div class="bg-gray-50 p-4 rounded">
                 <h3 class="font-medium text-gray-900">{% trans "Low Priority" %}</h3>
                 <p class="text-2xl font-bold text-gray-600">{{ alert_counts.low|default:0 }}</p>
             </div>
         </div>
     </div>
-    
+
     <div class="bg-white shadow rounded-lg p-6">
         <h2 class="text-xl font-semibold mb-4">{% trans "Recent Alerts" %}</h2>
-        
+
         {% if alerts %}
             <div class="space-y-3">
                 {% for alert in alerts %}

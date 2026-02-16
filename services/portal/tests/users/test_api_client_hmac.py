@@ -22,13 +22,13 @@ from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 
 class HMACAuthenticationTestCase(unittest.TestCase):
     """Test HMAC authentication implementation in Portal API Client"""
-    
+
     def setUp(self):
         """Set up test client with known configuration"""
         self.client = PlatformAPIClient()
         self.test_secret = "test-hmac-secret-for-unit-tests"
         self.test_portal_id = "test-portal-001"
-        
+
         # Override settings for testing
         with patch.object(settings, 'PORTAL_ID', self.test_portal_id), \
              patch.object(settings, 'PLATFORM_API_SECRET', self.test_secret), \
@@ -41,34 +41,34 @@ class HMACAuthenticationTestCase(unittest.TestCase):
         method = "POST"
         path = "/api/users/login/"
         body = b'{"email": "test@example.com", "password": "test123"}'
-        
+
         headers = self.client._generate_hmac_headers(method, path, body)
-        
+
         # Verify all required headers are present
         required_headers = [
-            'X-Portal-Id', 'X-Nonce', 'X-Timestamp', 
+            'X-Portal-Id', 'X-Nonce', 'X-Timestamp',
             'X-Body-Hash', 'X-Signature', 'Content-Type', 'Accept'
         ]
         for header in required_headers:
             self.assertIn(header, headers, f"Missing required header: {header}")
-            
+
         # Verify header formats
         self.assertEqual(headers['X-Portal-Id'], self.test_portal_id)
         self.assertEqual(headers['Content-Type'], 'application/json')
         self.assertEqual(headers['Accept'], 'application/json')
-        
+
         # Verify nonce is base64-encoded and reasonable length
         nonce = headers['X-Nonce']
         self.assertTrue(len(nonce) > 10, "Nonce should be substantial length")
-        
+
         # Verify timestamp is numeric
         timestamp = float(headers['X-Timestamp'])
         self.assertAlmostEqual(timestamp, time.time(), delta=5.0)
-        
+
         # Verify body hash is base64-encoded SHA-256
         expected_body_hash = base64.b64encode(hashlib.sha256(body).digest()).decode('ascii')
         self.assertEqual(headers['X-Body-Hash'], expected_body_hash)
-        
+
         # Verify signature is hex-encoded and correct length for SHA-256
         signature = headers['X-Signature']
         self.assertEqual(len(signature), 64, "HMAC-SHA256 signature should be 64 hex chars")
@@ -79,10 +79,10 @@ class HMACAuthenticationTestCase(unittest.TestCase):
         method = "POST"
         path = "/api/users/login/"
         body = b'{"test": "data"}'
-        
+
         # Generate headers to get the components
         headers = self.client._generate_hmac_headers(method, path, body)
-        
+
         # Manually build expected canonical string
         body_hash = base64.b64encode(hashlib.sha256(body).digest()).decode('ascii')
         # Normalize path+query like client does
@@ -102,31 +102,31 @@ class HMACAuthenticationTestCase(unittest.TestCase):
             headers['X-Nonce'],
             headers['X-Timestamp']
         ])
-        
+
         # Generate expected signature
         expected_signature = hmac.new(
             self.test_secret.encode(),
             expected_canonical.encode(),
             hashlib.sha256
         ).hexdigest()
-        
+
         self.assertEqual(headers['X-Signature'], expected_signature)
 
     def test_hmac_signature_different_bodies_different_signatures(self):
         """Test that different request bodies produce different signatures"""
         method = "POST"
         path = "/api/test/"
-        
+
         body1 = b'{"email": "user1@example.com"}'
         body2 = b'{"email": "user2@example.com"}'
-        
+
         # Mock time to ensure timestamps are the same
         with patch('time.time', return_value=1234567890.0), \
              patch('secrets.token_urlsafe', return_value='fixed-nonce-for-test'):
-            
+
             headers1 = self.client._generate_hmac_headers(method, path, body1)
             headers2 = self.client._generate_hmac_headers(method, path, body2)
-        
+
         # Same timestamp and nonce, but different bodies should produce different signatures
         self.assertEqual(headers1['X-Timestamp'], headers2['X-Timestamp'])
         self.assertEqual(headers1['X-Nonce'], headers2['X-Nonce'])
@@ -149,20 +149,20 @@ class HMACAuthenticationTestCase(unittest.TestCase):
             'message': 'Authentication successful'
         }
         mock_request.return_value = mock_response
-        
+
         # Make authenticated request
         result = self.client.authenticate_customer('test@example.com', 'password123')
-        
+
         # Verify request was made with HMAC headers
         mock_request.assert_called_once()
         call_args = mock_request.call_args
-        
+
         # Check HMAC headers were included
         headers = call_args.kwargs['headers']
         hmac_headers = ['X-Portal-Id', 'X-Nonce', 'X-Timestamp', 'X-Body-Hash', 'X-Signature']
         for header in hmac_headers:
             self.assertIn(header, headers)
-        
+
         # Verify result format
         self.assertIsNotNone(result)
         self.assertTrue(result['valid'])
@@ -178,10 +178,10 @@ class HMACAuthenticationTestCase(unittest.TestCase):
             'error': 'HMAC authentication failed: HMAC signature verification failed'
         }
         mock_request.return_value = mock_response
-        
+
         # This should return None for authentication failure
         result = self.client.authenticate_customer('test@example.com', 'wrongpassword')
-        
+
         self.assertIsNone(result)
 
     @patch('apps.api_client.services.requests.request')
@@ -189,20 +189,20 @@ class HMACAuthenticationTestCase(unittest.TestCase):
         """Test handling of connection errors to platform service"""
         # Mock connection error
         mock_request.side_effect = requests.exceptions.ConnectionError("Connection refused")
-        
+
         result = self.client.authenticate_customer('test@example.com', 'password')
-        
+
         # Should return None for connection errors
         self.assertIsNone(result)
 
     @patch('apps.api_client.services.requests.request')
     def test_request_timeout_handling(self, mock_request):
         """Test handling of request timeouts"""
-        # Mock timeout error  
+        # Mock timeout error
         mock_request.side_effect = requests.exceptions.Timeout("Request timed out")
-        
+
         result = self.client.authenticate_customer('test@example.com', 'password')
-        
+
         self.assertIsNone(result)
 
     def test_empty_body_hmac_generation(self):
@@ -210,13 +210,13 @@ class HMACAuthenticationTestCase(unittest.TestCase):
         method = "GET"
         path = "/api/users/validate/"
         body = b''
-        
+
         headers = self.client._generate_hmac_headers(method, path, body)
-        
+
         # Empty body should still have a valid hash
         expected_empty_hash = base64.b64encode(hashlib.sha256(b'').digest()).decode('ascii')
         self.assertEqual(headers['X-Body-Hash'], expected_empty_hash)
-        
+
         # Should still have valid signature
         self.assertEqual(len(headers['X-Signature']), 64)
 
@@ -226,10 +226,10 @@ class HMACAuthenticationTestCase(unittest.TestCase):
         # Intentionally unsorted query params to ensure client normalizes order
         path = "/api/users/search/?status=active&email=test%40example.com"
         body = b''
-        
+
         # Should not raise any exceptions
         headers = self.client._generate_hmac_headers(method, path, body)
-        
+
         # Should produce valid signature
         self.assertIn('X-Signature', headers)
         self.assertEqual(len(headers['X-Signature']), 64)
@@ -264,22 +264,22 @@ class HMACAuthenticationTestCase(unittest.TestCase):
     def test_timestamp_precision(self, mock_time):
         """Test that timestamps have sufficient precision"""
         mock_time.return_value = 1234567890.123456
-        
+
         headers = self.client._generate_hmac_headers("GET", "/test/", b'')
         timestamp = headers['X-Timestamp']
-        
+
         # Should preserve microsecond precision
         self.assertEqual(timestamp, "1234567890.123456")
 
     def test_nonce_uniqueness(self):
         """Test that nonces are unique across multiple requests"""
         nonces = set()
-        
+
         # Generate multiple requests
         for _ in range(100):
             headers = self.client._generate_hmac_headers("GET", "/test/", b'test')
             nonce = headers['X-Nonce']
-            
+
             # Each nonce should be unique
             self.assertNotIn(nonce, nonces, "Nonce collision detected")
             nonces.add(nonce)
@@ -290,7 +290,7 @@ class HMACAuthenticationTestCase(unittest.TestCase):
              patch.object(settings, 'PLATFORM_API_SECRET', 'test-secret-override'), \
              patch.object(settings, 'PORTAL_ID', 'test-portal-override'):
             client = PlatformAPIClient()
-        
+
         # Verify settings are loaded correctly
         self.assertEqual(client.base_url, 'http://testserver')
         self.assertEqual(client.portal_secret, 'test-secret-override')
@@ -318,11 +318,11 @@ class HMACAuthenticationTestCase(unittest.TestCase):
 
 class PlatformAPIClientIntegrationTestCase(unittest.TestCase):
     """Integration tests for complete Portal → Platform API workflows"""
-    
+
     def setUp(self):
         self.client = PlatformAPIClient()
 
-    @patch('apps.api_client.services.requests.request')  
+    @patch('apps.api_client.services.requests.request')
     def test_full_authentication_workflow(self, mock_request):
         """Test complete authentication workflow with proper HMAC"""
         # Mock platform response
@@ -341,29 +341,29 @@ class PlatformAPIClientIntegrationTestCase(unittest.TestCase):
             'message': 'Authentication successful'
         }
         mock_request.return_value = mock_response
-        
+
         # Perform authentication
         result = self.client.authenticate_customer(
             email='integration@example.com',
             password='secure-password-123'
         )
-        
+
         # Verify the request was made correctly
         mock_request.assert_called_once()
         call_args = mock_request.call_args
-        
+
         # Verify HTTP method and URL (requests.request() uses keyword args)
         self.assertEqual(call_args.kwargs['method'], 'POST')
         expected_url = f"{self.client.base_url}/users/login/"
         self.assertEqual(call_args.kwargs['url'], expected_url)
-        
+
         # Verify HMAC authentication headers
         headers = call_args.kwargs['headers']
         required_headers = ['X-Portal-Id', 'X-Signature', 'X-Nonce', 'X-Timestamp', 'X-Body-Hash']
         for header in required_headers:
             self.assertIn(header, headers)
             self.assertIsNotNone(headers[header])
-        
+
         # Verify request body
         request_data = call_args.kwargs['data']
         body = json.loads(request_data if isinstance(request_data, str) else request_data.decode())

@@ -38,12 +38,12 @@ document.addEventListener('DOMContentLoaded', function() {
     const submitBtn = document.querySelector('#reply-form button[type="submit"]');
     const submitText = document.getElementById('submit-text');
     const submitSpinner = document.getElementById('submit-spinner');
-    
+
     // Character counter
     if (textarea && charCounter) {
         textarea.addEventListener('input', function() {
             charCounter.textContent = this.value.length;
-            
+
             // Visual feedback for long messages
             if (this.value.length > 1000) {
                 charCounter.className = 'text-xs text-yellow-400';
@@ -54,14 +54,14 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
-    
+
     // Auto-scroll to bottom after new comment
     window.updateReplyCount = function() {
         const container = document.getElementById('comments-container');
         if (container) {
             container.scrollTop = container.scrollHeight;
         }
-        
+
         // Update reply count in header
         const comments = container.querySelectorAll('.mb-6:not(.text-center)');
         const countSpan = document.querySelector('.ml-2.text-sm.font-normal.text-slate-400');
@@ -69,7 +69,7 @@ document.addEventListener('DOMContentLoaded', function() {
             countSpan.textContent = `(${comments.length} replies)`;
         }
     };
-    
+
     // Auto-resize textarea
     if (textarea) {
         textarea.addEventListener('input', function() {
@@ -77,7 +77,7 @@ document.addEventListener('DOMContentLoaded', function() {
             this.style.height = Math.min(this.scrollHeight, 200) + 'px';
         });
     }
-    
+
     // Keyboard shortcuts
     if (textarea) {
         textarea.addEventListener('keydown', function(e) {
@@ -89,32 +89,32 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
-    
+
     // File upload handling
     const fileInput = document.getElementById('file-input');
     const attachBtn = document.getElementById('attach-btn');
     const fileList = document.getElementById('file-list');
-    
+
     if (attachBtn && fileInput) {
         attachBtn.addEventListener('click', function() {
             fileInput.click();
         });
-        
+
         fileInput.addEventListener('change', function(e) {
             updateFileList();
         });
     }
-    
+
     function updateFileList() {
         const files = fileInput.files;
         if (files.length === 0) {
             fileList.classList.add('hidden');
             return;
         }
-        
+
         fileList.classList.remove('hidden');
         fileList.innerHTML = '';
-        
+
         Array.from(files).forEach((file, index) => {
             // File size validation
             if (file.size > 10 * 1024 * 1024) { // 10MB
@@ -122,7 +122,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 removeFile(index);
                 return;
             }
-            
+
             const fileItem = document.createElement('div');
             fileItem.className = 'flex items-center justify-between bg-slate-700 rounded p-2 text-sm mt-2';
             fileItem.innerHTML = `
@@ -142,7 +142,7 @@ document.addEventListener('DOMContentLoaded', function() {
             fileList.appendChild(fileItem);
         });
     }
-    
+
     window.removeFile = function(index) {
         const dt = new DataTransfer();
         const files = Array.from(fileInput.files);
@@ -151,7 +151,7 @@ document.addEventListener('DOMContentLoaded', function() {
         fileInput.files = dt.files;
         updateFileList();
     };
-    
+
     function formatFileSize(bytes) {
         if (bytes === 0) return '0 Bytes';
         const k = 1024;
@@ -167,7 +167,7 @@ document.addEventListener('htmx:beforeRequest', function(e) {
         const submitBtn = document.querySelector('#reply-form button[type="submit"]');
         const submitText = document.getElementById('submit-text');
         const submitSpinner = document.getElementById('submit-spinner');
-        
+
         if (submitBtn) submitBtn.disabled = true;
         if (submitText) submitText.textContent = 'Sending...';
         if (submitSpinner) submitSpinner.classList.remove('hidden');
@@ -179,11 +179,11 @@ window.handleReplyActionChange = function() {
     const replyAction = document.getElementById('reply_action');
     const resolutionContainer = document.getElementById('resolution_code_container');
     const submitText = document.getElementById('submit-text');
-    
+
     if (!replyAction || !submitText) return;
-    
+
     const actionValue = replyAction.value;
-    
+
     // Show/hide resolution code field
     if (resolutionContainer) {
         if (actionValue === 'close_with_resolution') {
@@ -192,7 +192,7 @@ window.handleReplyActionChange = function() {
             resolutionContainer.classList.add('hidden');
         }
     }
-    
+
     // Update submit button text
     const buttonTexts = {
         'reply': '{% trans "Send Reply" %}',
@@ -200,7 +200,7 @@ window.handleReplyActionChange = function() {
         'internal_note': '{% trans "Add Internal Note" %}',
         'close_with_resolution': '{% trans "Reply & Close Ticket" %}'
     };
-    
+
     submitText.textContent = buttonTexts[actionValue] || '{% trans "Send Reply" %}';
 };
 
@@ -215,7 +215,7 @@ document.addEventListener('htmx:afterRequest', function(e) {
         const submitText = document.getElementById('submit-text');
         const submitSpinner = document.getElementById('submit-spinner');
         const charCounter = document.getElementById('char-counter');
-        
+
         if (submitBtn) submitBtn.disabled = false;
         if (submitText) submitText.textContent = 'Send Reply';
         if (submitSpinner) submitSpinner.classList.add('hidden');

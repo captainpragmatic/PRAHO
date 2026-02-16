@@ -22,7 +22,7 @@
                     <span class="text-slate-400 text-lg">○</span>
                 </div>
             {% endif %}
-            
+
             <div>
                 <h2 class="text-xl font-semibold text-slate-100">
                     {% if live_status.status == "completed" %}
@@ -40,7 +40,7 @@
                 </p>
             </div>
         </div>
-        
+
         <div class="text-right">
             {% if live_status.status == "completed" %}
                 {% badge "Complete" variant="success" %}
@@ -53,7 +53,7 @@
             {% endif %}
         </div>
     </div>
-    
+
     <!-- Progress Bar -->
     {% if live_status.progress is not None %}
     <div class="mt-4">
@@ -62,12 +62,12 @@
             <span>{{ live_status.progress }}%</span>
         </div>
         <div class="w-full bg-slate-700 rounded-full h-2">
-            <div class="{% if live_status.status == 'failed' %}bg-red-600{% elif live_status.status == 'completed' %}bg-green-600{% else %}bg-blue-600{% endif %} h-2 rounded-full transition-all duration-300" 
+            <div class="{% if live_status.status == 'failed' %}bg-red-600{% elif live_status.status == 'completed' %}bg-green-600{% else %}bg-blue-600{% endif %} h-2 rounded-full transition-all duration-300"
                  style="width: {{ live_status.progress }}%"></div>
         </div>
     </div>
     {% endif %}
-    
+
     <!-- Error Message -->
     {% if live_status.status == "failed" and live_status.error_message %}
     <div class="mt-4 bg-red-900/20 border border-red-700 rounded-lg p-4">

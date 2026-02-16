@@ -8,28 +8,28 @@
         <!-- Request Information -->
         <div class="space-y-3">
             <h4 class="font-semibold text-white">📋 {% trans "Request Information" %}</h4>
-            
+
             <div class="space-y-2 text-sm">
                 <div class="flex justify-between">
                     <span class="text-slate-400">{% trans "Request ID:" %}</span>
                     <span class="text-white font-mono">{{ export_request.id }}</span>
                 </div>
-                
+
                 <div class="flex justify-between">
                     <span class="text-slate-400">{% trans "User:" %}</span>
                     <span class="text-blue-400">{{ export_request.requested_by.email }}</span>
                 </div>
-                
+
                 <div class="flex justify-between">
                     <span class="text-slate-400">{% trans "Requested:" %}</span>
                     <span class="text-white">{{ export_request.requested_at|date:"M d, Y H:i" }}</span>
                 </div>
-                
+
                 <div class="flex justify-between">
                     <span class="text-slate-400">{% trans "Export Type:" %}</span>
                     {% badge export_request.export_type|upper variant="secondary" size="xs" %}
                 </div>
-                
+
                 <div class="flex justify-between">
                     <span class="text-slate-400">{% trans "Status:" %}</span>
                     {% if export_request.status == 'pending' %}
@@ -52,7 +52,7 @@
         <!-- Processing Information -->
         <div class="space-y-3">
             <h4 class="font-semibold text-white">⚙️ {% trans "Processing Information" %}</h4>
-            
+
             <div class="space-y-2 text-sm">
                 {% if export_request.started_at %}
                     <div class="flex justify-between">
@@ -60,28 +60,28 @@
                         <span class="text-white">{{ export_request.started_at|date:"M d, Y H:i" }}</span>
                     </div>
                 {% endif %}
-                
+
                 {% if export_request.completed_at %}
                     <div class="flex justify-between">
                         <span class="text-slate-400">{% trans "Completed:" %}</span>
                         <span class="text-white">{{ export_request.completed_at|date:"M d, Y H:i" }}</span>
                     </div>
                 {% endif %}
-                
+
                 {% if export_request.file_size %}
                     <div class="flex justify-between">
                         <span class="text-slate-400">{% trans "File Size:" %}</span>
                         <span class="text-white">{{ export_request.file_size|filesizeformat }}</span>
                     </div>
                 {% endif %}
-                
+
                 {% if export_request.record_count %}
                     <div class="flex justify-between">
                         <span class="text-slate-400">{% trans "Records:" %}</span>
                         <span class="text-white">{{ export_request.record_count|floatformat:0 }}</span>
                     </div>
                 {% endif %}
-                
+
                 <div class="flex justify-between">
                     <span class="text-slate-400">{% trans "Downloads:" %}</span>
                     <span class="text-white">{{ export_request.download_count }}</span>
@@ -126,7 +126,7 @@
                         <span class="text-red-400">❌ {% trans "File missing" %}</span>
                     {% endif %}
                 </div>
-                
+
                 <div class="flex justify-between items-center">
                     <span class="text-slate-400">{% trans "Expires:" %}</span>
                     <span class="{% if is_expired %}text-red-400{% else %}text-white{% endif %}">
@@ -163,15 +163,15 @@
                     <input type="hidden" name="action" value="process_now">
                     {% button "⚡ Process Now" variant="success" size="sm" type="submit" %}
                 </form>
-                
-                <button onclick="showFailForm('{{ export_request.id }}')" 
+
+                <button onclick="showFailForm('{{ export_request.id }}')"
                         class="inline-flex items-center px-3 py-1 border border-red-600 text-xs font-medium rounded-md text-red-400 bg-red-900/20 hover:bg-red-900/40 focus:outline-none focus:ring-2 focus:ring-red-500">
                     ❌ {% trans "Mark as Failed" %}
                 </button>
-                
+
             {% elif export_request.status == 'completed' and not is_expired and file_exists %}
                 {% button "📥 Download Export" variant="primary" size="sm" href="/app/audit/gdpr_management/download/"|add:export_request.id|add:"/" %}
-                
+
             {% elif export_request.status == 'completed' and is_expired %}
                 <form method="post" action="{% url 'audit:process_export_request' export_request.id %}" class="inline">
                     {% csrf_token %}
@@ -187,24 +187,24 @@
 <div id="fail-modal-{{ export_request.id }}" class="fixed inset-0 z-50 hidden bg-black bg-opacity-50 flex items-center justify-center">
     <div class="bg-slate-800 border border-slate-700 rounded-lg p-6 max-w-md w-full mx-4">
         <h3 class="text-lg font-semibold text-white mb-4">❌ {% trans "Mark Export as Failed" %}</h3>
-        
+
         <form method="post" action="{% url 'audit:process_export_request' export_request.id %}">
             {% csrf_token %}
             <input type="hidden" name="action" value="mark_failed">
-            
+
             <div class="mb-4">
                 <label class="block text-sm font-medium text-slate-300 mb-2">
                     {% trans "Error Message" %}
                 </label>
-                <textarea name="error_message" 
-                          rows="3" 
+                <textarea name="error_message"
+                          rows="3"
                           required
                           placeholder="{% trans 'Describe why this export failed...' %}"
                           class="w-full bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm focus:ring-2 focus:ring-red-500 focus:border-transparent"></textarea>
             </div>
-            
+
             <div class="flex justify-end space-x-3">
-                <button type="button" 
+                <button type="button"
                         onclick="hideFailForm('{{ export_request.id }}')"
                         class="px-4 py-2 text-sm font-medium text-slate-300 bg-slate-700 border border-slate-600 rounded-md hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-500">
                     {% trans "Cancel" %}

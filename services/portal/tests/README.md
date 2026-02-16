@@ -5,7 +5,7 @@ This directory contains unit tests for the Portal service.
 ## Structure
 
 - `users/` - User authentication and API client tests
-- `api_client/` - Platform API integration tests  
+- `api_client/` - Platform API integration tests
 - `integration/` - Cross-app integration tests
 
 ## Running Tests

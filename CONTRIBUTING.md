@@ -56,4 +56,3 @@ Security
 --------
 Please report vulnerabilities privately to the maintainers. Do not open a
 public issue for security-sensitive matters.
-

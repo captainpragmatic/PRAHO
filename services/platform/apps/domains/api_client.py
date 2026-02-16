@@ -19,10 +19,14 @@ logger = logging.getLogger(__name__)
 
 def get_api_timeouts() -> dict[str, int]:
     """Get API timeout configuration from settings with fallbacks."""
-    return getattr(settings, 'API_TIMEOUTS', {
-        'REQUEST_TIMEOUT': 30,
-        'MAX_RETRIES': 3,
-    })
+    return getattr(
+        settings,
+        "API_TIMEOUTS",
+        {
+            "REQUEST_TIMEOUT": 30,
+            "MAX_RETRIES": 3,
+        },
+    )
 
 
 # HTTP status codes below this are considered successful
@@ -42,7 +46,7 @@ class SecureAPIClient:
 
         headers = SecureAPIClient._build_headers(api_key, api_secret)
         timeouts = get_api_timeouts()
-        max_retries = timeouts.get('MAX_RETRIES', 3)
+        max_retries = timeouts.get("MAX_RETRIES", 3)
 
         for attempt in range(max_retries):
             try:
@@ -95,7 +99,7 @@ class SecureAPIClient:
     def _make_http_request(method: str, url: str, data: dict[str, Any], headers: dict[str, str]) -> Response:
         """🌐 Make HTTP request with security settings"""
         timeouts = get_api_timeouts()
-        request_timeout = timeouts.get('REQUEST_TIMEOUT', 30)
+        request_timeout = timeouts.get("REQUEST_TIMEOUT", 30)
         return requests.request(
             method=method,
             url=url,

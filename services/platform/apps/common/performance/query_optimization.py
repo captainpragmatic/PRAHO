@@ -124,6 +124,7 @@ def prefetch_related_for_list(*relations: str | Prefetch) -> list[str | Prefetch
 
 # Common optimization patterns for PRAHO models
 
+
 class CustomerQueryOptimization:
     """Optimization patterns for Customer queries."""
 
@@ -223,6 +224,7 @@ class ServiceQueryOptimization:
 
 # Query profiling utilities
 
+
 class QueryProfiler:
     """
     Context manager for profiling database queries.
@@ -241,7 +243,7 @@ class QueryProfiler:
         self._start_queries = 0
         self._start_time = 0.0
 
-    def __enter__(self) -> "QueryProfiler":
+    def __enter__(self) -> QueryProfiler:
         if settings.DEBUG:
             reset_queries()
             self._start_queries = len(connection.queries)
@@ -256,11 +258,10 @@ class QueryProfiler:
 
             if self.log_queries or self.query_count > 10:
                 logger.warning(
-                    f"⚠️ Query profiler [{self.name}]: "
-                    f"{self.query_count} queries in {self.total_time:.2f}ms"
+                    f"⚠️ Query profiler [{self.name}]: " f"{self.query_count} queries in {self.total_time:.2f}ms"
                 )
                 if self.log_queries:
-                    for query in connection.queries[-self.query_count:]:
+                    for query in connection.queries[-self.query_count :]:
                         logger.debug(f"  SQL: {query['sql'][:200]}...")
 
 
@@ -273,6 +274,7 @@ def profile_queries(name: str = "", warn_threshold: int = 5) -> Any:
         def get_customer_orders(customer_id):
             ...
     """
+
     def decorator(func: Any) -> Any:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -293,10 +295,12 @@ def profile_queries(name: str = "", warn_threshold: int = 5) -> Any:
             return result
 
         return wrapper
+
     return decorator
 
 
 # Bulk operation utilities
+
 
 def bulk_select_related(
     queryset: QuerySet[T],
@@ -329,10 +333,7 @@ def annotate_counts(
             {"invoice_count": "invoices", "service_count": "services"}
         )
     """
-    annotations = {
-        name: Count(relation)
-        for name, relation in count_relations.items()
-    }
+    annotations = {name: Count(relation) for name, relation in count_relations.items()}
     return queryset.annotate(**annotations)
 
 
@@ -372,9 +373,11 @@ def get_missing_indexes() -> list[dict[str, Any]]:
     recommendations = []
     for model_path, indexes in INDEX_RECOMMENDATIONS.items():
         for index_fields in indexes:
-            recommendations.append({
-                "model": model_path,
-                "fields": index_fields,
-                "recommendation": "Consider adding composite index",
-            })
+            recommendations.append(
+                {
+                    "model": model_path,
+                    "fields": index_fields,
+                    "recommendation": "Consider adding composite index",
+                }
+            )
     return recommendations

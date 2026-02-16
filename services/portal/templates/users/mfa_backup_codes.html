@@ -46,8 +46,8 @@
           {% for code in backup_codes %}
           <div class="bg-slate-700 p-4 rounded-lg border border-slate-600 flex items-center justify-between">
             <code class="text-green-400 font-mono text-lg">{{ code }}</code>
-            <button type="button" onclick="copyCode('{{ code }}')" 
-                    class="ml-2 text-slate-400 hover:text-white transition-colors" 
+            <button type="button" onclick="copyCode('{{ code }}')"
+                    class="ml-2 text-slate-400 hover:text-white transition-colors"
                     title="{% trans 'Copy code' %}">
               📋
             </button>
@@ -57,12 +57,12 @@
 
         <!-- Actions -->
         <div class="flex gap-4 mt-6">
-          <button type="button" onclick="copyAllCodes()" 
+          <button type="button" onclick="copyAllCodes()"
                   class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors">
             📋 {% trans 'Copy All Codes' %}
           </button>
-          
-          <button type="button" onclick="printCodes()" 
+
+          <button type="button" onclick="printCodes()"
                   class="bg-gray-600 hover:bg-gray-700 text-white font-medium py-2 px-4 rounded-lg transition-colors">
             🖨️ {% trans 'Print Codes' %}
           </button>
@@ -90,12 +90,12 @@
       <h3 class="text-lg font-medium text-white mb-4">
         🔄 {% trans 'Regenerate Codes' %}
       </h3>
-      
+
       <div class="space-y-4">
         <p class="text-sm text-slate-300">
           {% trans 'If you\'ve used most of your codes or suspect they\'ve been compromised, you can generate new ones. This will invalidate all existing backup codes.' %}
         </p>
-        
+
         <div class="bg-orange-900/20 border border-orange-700/50 rounded-lg p-4">
           <div class="flex items-start">
             <span class="text-orange-400 text-lg mr-3">⚠️</span>
@@ -108,7 +108,7 @@
           </div>
         </div>
 
-        <button type="button" onclick="regenerateCodes()" 
+        <button type="button" onclick="regenerateCodes()"
                 class="bg-orange-600 hover:bg-orange-700 text-white font-medium py-2 px-4 rounded-lg transition-colors">
           🔄 {% trans 'Generate New Backup Codes' %}
         </button>
@@ -122,7 +122,7 @@
       <h3 class="text-lg font-medium text-white mb-4">
         📖 {% trans 'How to Use Backup Codes' %}
       </h3>
-      
+
       <div class="space-y-3 text-sm text-slate-300">
         <div class="flex items-start">
           <span class="text-blue-400 mr-2">1.</span>
@@ -146,7 +146,7 @@
 
   <!-- Back Navigation -->
   <div class="mt-6 text-center">
-    <a href="{% url 'users:mfa_management' %}" 
+    <a href="{% url 'users:mfa_management' %}"
        class="text-blue-400 hover:text-blue-300 text-sm">
       ← {% trans 'Back to MFA Management' %}
     </a>
@@ -167,7 +167,7 @@ function copyCode(code) {
 function copyAllCodes() {
   const codes = [{% for code in backup_codes %}'{{ code }}'{% if not forloop.last %}, {% endif %}{% endfor %}];
   const allCodes = codes.join('\n');
-  
+
   navigator.clipboard.writeText(allCodes).then(function() {
     alert('{% trans "All backup codes copied to clipboard!" %}');
   }).catch(function(err) {
@@ -178,7 +178,7 @@ function copyAllCodes() {
 function printCodes() {
   const printWindow = window.open('', '_blank');
   const codes = [{% for code in backup_codes %}'{{ code }}'{% if not forloop.last %}, {% endif %}{% endfor %}];
-  
+
   printWindow.document.write(`
     <html>
       <head>
@@ -186,10 +186,10 @@ function printCodes() {
         <style>
           body { font-family: monospace; margin: 20px; }
           h1 { color: #333; }
-          .code { 
-            background: #f5f5f5; 
-            padding: 10px; 
-            margin: 5px 0; 
+          .code {
+            background: #f5f5f5;
+            padding: 10px;
+            margin: 5px 0;
             border: 1px solid #ddd;
             font-size: 14px;
           }
@@ -205,7 +205,7 @@ function printCodes() {
         <h1>{% trans "PragmaticHost - MFA Backup Codes" %}</h1>
         <p><strong>{% trans "Account:" %}</strong> {{ customer_email }}</p>
         <div class="warning">
-          <strong>⚠️ {% trans "Important:" %}</strong> 
+          <strong>⚠️ {% trans "Important:" %}</strong>
           {% trans "Store these codes safely. Each can only be used once." %}
         </div>
         ${codes.map(code => '<div class="code">' + code + '</div>').join('')}
@@ -213,7 +213,7 @@ function printCodes() {
       </body>
     </html>
   `);
-  
+
   printWindow.document.close();
   printWindow.print();
 }

@@ -23,7 +23,7 @@ PRAHO/                          # Beautiful monorepo root
 │   └── portal/                 # Customer-facing Django service (client area)
 │       ├── apps/               # Customer-facing apps only
 │       ├── config/             # Django settings
-│       ├── manage.py           # Django management  
+│       ├── manage.py           # Django management
 │       ├── requirements/       # Portal-specific deps (no business DB drivers)
 │       └── Public internet exposure, in-memory DB for sessions only
 │
@@ -55,7 +55,7 @@ PRAHO/                          # Beautiful monorepo root
 **No separate repositories or shared library needed.** Build and maintain a single beautiful monorepo with two complete Django services under `services/` folder. This approach:
 
 - ✅ **Maximizes development velocity** - Single repo, unified tooling, shared CI/CD
-- ✅ **Minimizes complexity** - One repo with clear service boundaries  
+- ✅ **Minimizes complexity** - One repo with clear service boundaries
 - ✅ **Enables atomic changes** - Cross-service changes in single commit/PR
 - ✅ **Aligns with modern practices** - Google, Facebook, Uber use monorepos
 - ✅ **Accepts deliberate duplication** of ~500 lines of shared code (validators, constants)
@@ -80,7 +80,7 @@ PRAHO/                          # Beautiful monorepo root
 
 1. **🔄 Atomic Changes** - Update API contract and consumer in single PR/commit
 2. **🛠️ Unified Tooling** - One Makefile, shared linting, common Docker setup
-3. **📊 Shared CI/CD** - Single pipeline can test both services together  
+3. **📊 Shared CI/CD** - Single pipeline can test both services together
 4. **📚 Centralized Documentation** - All docs in one place, cross-references work
 5. **🔍 Global Search** - Find all usage of a function across both services instantly
 6. **🧪 Integration Testing** - Easy to write tests that span both services
@@ -92,7 +92,7 @@ PRAHO/                          # Beautiful monorepo root
 This approach gives us:
 - ✅ **Service Isolation** - Services can't directly import each other (different Python paths)
 - ✅ **Development Velocity** - No separate repo coordination needed
-- ✅ **Deployment Flexibility** - Can deploy services independently 
+- ✅ **Deployment Flexibility** - Can deploy services independently
 - ✅ **Clear Boundaries** - Physical separation under `services/` folder
 - ✅ **Operational Simplicity** - One repo to clone, one place for issues/PRs
 
@@ -217,7 +217,7 @@ INTER_SERVICE_SECRET = env('INTER_SERVICE_SECRET')
 class PlatformAPIClient:
     """Single point of integration with platform service"""
     BASE_URL = "http://10.0.1.5:8700/api"
-    
+
     def get_customer_invoices(self, customer_id):
         # All platform communication through this service
 ```
@@ -239,7 +239,7 @@ class PlatformAPIClient:
 - **Separate Services**: Could isolate to portal service, platform remains secure
 - **Single Service**: Compromised package affects both platform and portal instantly
 
-#### Zero-Day in Django/Framework  
+#### Zero-Day in Django/Framework
 - **Separate Services**: Different Django versions possible, staggered exposure
 - **Single Service**: Both systems vulnerable simultaneously
 
@@ -256,7 +256,7 @@ Internet
     ↓
 services/portal/     (public-facing service)
     ↓ (HTTPS API calls)
-services/platform/   (VPN-protected service)  
+services/platform/   (VPN-protected service)
     ↓ (direct database access)
 PostgreSQL Database
 ```
@@ -337,7 +337,7 @@ The Portal service is designed as a **pure UI service** that consumes Platform A
 #### ❌ What Portal Should NOT Have
 
 - ❌ **No Real Database**: Portal uses dummy in-memory SQLite (lost on restart)
-- ❌ **No Models**: Portal apps should not define any Django models  
+- ❌ **No Models**: Portal apps should not define any Django models
 - ❌ **No Migrations**: Database router prevents all migrations
 - ❌ **No Sessions**: No session middleware or session storage
 - ❌ **No User Authentication**: No `django.contrib.auth` or user models
@@ -530,7 +530,7 @@ headers = {"X-Service-Auth": INTER_SERVICE_SECRET}
 **Phase 2**: JWT Migration (after portal service is stable)
 ```python
 # Easy 1-day migration later
-JWT_SECRET = env('JWT_SECRET') 
+JWT_SECRET = env('JWT_SECRET')
 token = jwt.encode({'customer_id': customer_id, 'exp': datetime.now() + timedelta(minutes=5)}, JWT_SECRET)
 ```
 
@@ -583,7 +583,7 @@ Your current architecture with the service layer pattern (ADR-0012) and modular 
 ```
 platform.pragmatichost.com
 ├── Django Admin
-├── Staff Dashboard  
+├── Staff Dashboard
 ├── System Settings
 ├── Server Management (Virtualmin)
 ├── Audit Logs
@@ -597,7 +597,7 @@ portal.pragmatichost.com
 ├── Customer Login/Dashboard
 ├── Invoice Viewing
 ├── Service Status
-├── Domain Management  
+├── Domain Management
 ├── Ticket Creation
 └── Account Settings
 ```
@@ -608,7 +608,7 @@ Add this section:
 ```markdown
 ## Architecture Decision: Beautiful Monorepo with Two Services
 - services/platform/: Full Django service with database access and DRF API endpoints
-- services/portal/: Lightweight Django service with API client only  
+- services/portal/: Lightweight Django service with API client only
 - API Framework: Django REST Framework with clean /api/ URLs (no versioning initially)
 - Shared code: Deliberately duplicated (~500 lines) until proven need
 - Models: Always live in platform service, never shared
@@ -619,7 +619,7 @@ Add this section:
 
 ## Conclusion
 
-For PRAHO Platform, a Romanian hosting provider handling CUI data, VAT information, and server infrastructure, the security benefits of complete application separation significantly outweigh the maintenance overhead. 
+For PRAHO Platform, a Romanian hosting provider handling CUI data, VAT information, and server infrastructure, the security benefits of complete application separation significantly outweigh the maintenance overhead.
 
 The platform system managing Virtualmin servers and customer financial data should never share code paths with the public-facing customer portal. This architecture provides true security isolation while maintaining shared business logic through deliberate duplication of small shared code (validators, constants) between the two apps. Models and business logic always live in `platform` and are never shared.
 
@@ -637,7 +637,7 @@ The platform system managing Virtualmin servers and customer financial data shou
 3. **Configure CSRF protection** for all forms
 4. **Test basic Django session functionality**
 
-### **Phase 2: Implement Proper LoginView (Day 1 - Afternoon)** 
+### **Phase 2: Implement Proper LoginView (Day 1 - Afternoon)**
 1. **Replace custom cookie logic** with Django sessions (`request.session`)
 2. **Add CSRF protection** to login form with `{% csrf_token %}`
 3. **Implement "Remember Me"** using `request.session.set_expiry()`
@@ -645,7 +645,7 @@ The platform system managing Virtualmin servers and customer financial data shou
 
 ### **Phase 3: Secure Platform API Integration (Day 2 - Morning)**
 1. **Implement HMAC request signing** in portal API client
-2. **Add HMAC verification** to platform authenticate_customer endpoint  
+2. **Add HMAC verification** to platform authenticate_customer endpoint
 3. **Add nonce tracking** to prevent replay attacks
 4. **Return generic 401s** to prevent credential enumeration
 
@@ -659,13 +659,13 @@ The platform system managing Virtualmin servers and customer financial data shou
 
 #### **✅ Fixed Configuration Issues:**
 1. **Correct SESSION_ENGINE** - Using `django.contrib.sessions.backends.db`
-2. **Added missing apps** - `sessions`, `messages` 
+2. **Added missing apps** - `sessions`, `messages`
 3. **Added missing middleware** - Session, CSRF, Auth, Messages
 4. **Proper CSRF protection** - All forms include `{% csrf_token %}`
 
 #### **✅ Security Improvements:**
 1. **HMAC inter-service auth** - Platform verifies portal requests
-2. **No custom cookie handling** - Using Django sessions exclusively  
+2. **No custom cookie handling** - Using Django sessions exclusively
 3. **Session key rotation** - `request.session.flush()` on logout
 4. **Generic 401 responses** - No credential enumeration
 5. **Nonce tracking** - Prevents replay attacks

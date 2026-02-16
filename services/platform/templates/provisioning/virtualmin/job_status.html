@@ -164,7 +164,7 @@
                                     </div>
                                 </div>
                             </li>
-                            
+
                             {% if job.started_at %}
                             <li>
                                 <div class="relative pb-8">
@@ -215,7 +215,7 @@
                 <div class="px-6 py-4 border-b border-slate-700">
                     <h3 class="text-lg font-medium text-slate-100 flex items-center">
                         📋 {% trans "Live Logs" %}
-                        <button class="ml-2 text-xs bg-blue-600 px-2 py-1 rounded" 
+                        <button class="ml-2 text-xs bg-blue-600 px-2 py-1 rounded"
                                 hx-get="{% url 'provisioning:virtualmin_job_logs' job.id %}"
                                 hx-target="#job-logs"
                                 hx-trigger="every 2s">

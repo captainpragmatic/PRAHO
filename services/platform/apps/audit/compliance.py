@@ -12,26 +12,22 @@ This module provides automated compliance reporting with:
 from __future__ import annotations
 
 import csv
-import io
 import json
 import logging
 import os
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.core.files.base import ContentFile
-from django.core.files.storage import default_storage
-from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Q
 from django.utils import timezone
 
 if TYPE_CHECKING:
-    from apps.audit.models import AuditEvent, AuditRetentionPolicy
+    pass
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -42,7 +38,7 @@ User = get_user_model()
 # =============================================================================
 
 
-class ComplianceFramework(str, Enum):
+class ComplianceFramework(StrEnum):
     """Supported compliance frameworks"""
 
     ISO27001 = "iso27001"
@@ -54,7 +50,7 @@ class ComplianceFramework(str, Enum):
     PCI_DSS = "pci_dss"
 
 
-class ReportType(str, Enum):
+class ReportType(StrEnum):
     """Types of compliance reports"""
 
     SECURITY_SUMMARY = "security_summary"
@@ -68,7 +64,7 @@ class ReportType(str, Enum):
     RETENTION_COMPLIANCE = "retention_compliance"
 
 
-class ReportFormat(str, Enum):
+class ReportFormat(StrEnum):
     """Report output formats"""
 
     JSON = "json"
@@ -151,10 +147,7 @@ class ComplianceRule:
     severity: str = "medium"
 
     def check(
-        self,
-        events: list[Any],
-        period_start: datetime,
-        period_end: datetime
+        self, events: list[Any], period_start: datetime, period_end: datetime
     ) -> tuple[bool, list[ComplianceViolation]]:
         """
         Check compliance for this rule.
@@ -174,33 +167,33 @@ class PasswordPolicyRule(ComplianceRule):
     severity = "high"
 
     def check(
-        self,
-        events: list[Any],
-        period_start: datetime,
-        period_end: datetime
+        self, events: list[Any], period_start: datetime, period_end: datetime
     ) -> tuple[bool, list[ComplianceViolation]]:
         violations = []
 
         # Check for weak password events
         weak_password_events = [
-            e for e in events
+            e
+            for e in events
             if e.action in ("password_strength_weak", "password_compromised", "password_policy_violation")
         ]
 
         for event in weak_password_events:
-            violations.append(ComplianceViolation(
-                framework=self.framework.value,
-                control_id=self.control_id,
-                description=f"Password policy violation: {event.action}",
-                severity=self.severity,
-                detected_at=event.timestamp,
-                evidence={
-                    "event_id": str(event.id),
-                    "user_id": str(event.user_id) if event.user_id else None,
-                    "action": event.action,
-                },
-                remediation="Enforce stronger password requirements",
-            ))
+            violations.append(
+                ComplianceViolation(
+                    framework=self.framework.value,
+                    control_id=self.control_id,
+                    description=f"Password policy violation: {event.action}",
+                    severity=self.severity,
+                    detected_at=event.timestamp,
+                    evidence={
+                        "event_id": str(event.id),
+                        "user_id": str(event.user_id) if event.user_id else None,
+                        "action": event.action,
+                    },
+                    remediation="Enforce stronger password requirements",
+                )
+            )
 
         return len(violations) == 0, violations
 
@@ -214,32 +207,28 @@ class MFAEnforcementRule(ComplianceRule):
     severity = "high"
 
     def check(
-        self,
-        events: list[Any],
-        period_start: datetime,
-        period_end: datetime
+        self, events: list[Any], period_start: datetime, period_end: datetime
     ) -> tuple[bool, list[ComplianceViolation]]:
         violations = []
 
         # Check for 2FA disabled events (especially for privileged users)
-        mfa_disabled_events = [
-            e for e in events
-            if e.action == "2fa_disabled"
-        ]
+        mfa_disabled_events = [e for e in events if e.action == "2fa_disabled"]
 
         for event in mfa_disabled_events:
-            violations.append(ComplianceViolation(
-                framework=self.framework.value,
-                control_id=self.control_id,
-                description="Multi-factor authentication disabled",
-                severity=self.severity,
-                detected_at=event.timestamp,
-                evidence={
-                    "event_id": str(event.id),
-                    "user_id": str(event.user_id) if event.user_id else None,
-                },
-                remediation="Re-enable MFA for affected accounts",
-            ))
+            violations.append(
+                ComplianceViolation(
+                    framework=self.framework.value,
+                    control_id=self.control_id,
+                    description="Multi-factor authentication disabled",
+                    severity=self.severity,
+                    detected_at=event.timestamp,
+                    evidence={
+                        "event_id": str(event.id),
+                        "user_id": str(event.user_id) if event.user_id else None,
+                    },
+                    remediation="Re-enable MFA for affected accounts",
+                )
+            )
 
         return len(violations) == 0, violations
 
@@ -253,33 +242,29 @@ class AccessControlRule(ComplianceRule):
     severity = "high"
 
     def check(
-        self,
-        events: list[Any],
-        period_start: datetime,
-        period_end: datetime
+        self, events: list[Any], period_start: datetime, period_end: datetime
     ) -> tuple[bool, list[ComplianceViolation]]:
         violations = []
 
         # Check for privilege escalation attempts
-        escalation_events = [
-            e for e in events
-            if e.action == "privilege_escalation_attempt"
-        ]
+        escalation_events = [e for e in events if e.action == "privilege_escalation_attempt"]
 
         for event in escalation_events:
-            violations.append(ComplianceViolation(
-                framework=self.framework.value,
-                control_id=self.control_id,
-                description="Privilege escalation attempt detected",
-                severity="critical",
-                detected_at=event.timestamp,
-                evidence={
-                    "event_id": str(event.id),
-                    "user_id": str(event.user_id) if event.user_id else None,
-                    "ip_address": event.ip_address,
-                },
-                remediation="Investigate and block unauthorized access attempts",
-            ))
+            violations.append(
+                ComplianceViolation(
+                    framework=self.framework.value,
+                    control_id=self.control_id,
+                    description="Privilege escalation attempt detected",
+                    severity="critical",
+                    detected_at=event.timestamp,
+                    evidence={
+                        "event_id": str(event.id),
+                        "user_id": str(event.user_id) if event.user_id else None,
+                        "ip_address": event.ip_address,
+                    },
+                    remediation="Investigate and block unauthorized access attempts",
+                )
+            )
 
         return len(violations) == 0, violations
 
@@ -293,32 +278,28 @@ class DataProtectionRule(ComplianceRule):
     severity = "critical"
 
     def check(
-        self,
-        events: list[Any],
-        period_start: datetime,
-        period_end: datetime
+        self, events: list[Any], period_start: datetime, period_end: datetime
     ) -> tuple[bool, list[ComplianceViolation]]:
         violations = []
 
         # Check for data breach events
-        breach_events = [
-            e for e in events
-            if e.action in ("data_breach_detected", "data_breach_reported")
-        ]
+        breach_events = [e for e in events if e.action in ("data_breach_detected", "data_breach_reported")]
 
         for event in breach_events:
-            violations.append(ComplianceViolation(
-                framework=self.framework.value,
-                control_id=self.control_id,
-                description="Data breach detected",
-                severity="critical",
-                detected_at=event.timestamp,
-                evidence={
-                    "event_id": str(event.id),
-                    "description": event.description,
-                },
-                remediation="Follow data breach notification procedures (72 hours)",
-            ))
+            violations.append(
+                ComplianceViolation(
+                    framework=self.framework.value,
+                    control_id=self.control_id,
+                    description="Data breach detected",
+                    severity="critical",
+                    detected_at=event.timestamp,
+                    evidence={
+                        "event_id": str(event.id),
+                        "description": event.description,
+                    },
+                    remediation="Follow data breach notification procedures (72 hours)",
+                )
+            )
 
         return len(violations) == 0, violations
 
@@ -332,18 +313,12 @@ class GDPRConsentRule(ComplianceRule):
     severity = "high"
 
     def check(
-        self,
-        events: list[Any],
-        period_start: datetime,
-        period_end: datetime
+        self, events: list[Any], period_start: datetime, period_end: datetime
     ) -> tuple[bool, list[ComplianceViolation]]:
         violations = []
 
         # Check for consent withdrawal without proper handling
-        consent_events = [
-            e for e in events
-            if e.action == "gdpr_consent_withdrawn"
-        ]
+        [e for e in events if e.action == "gdpr_consent_withdrawn"]
 
         # Note: This is a simplified check. In practice, you'd verify
         # that data processing stopped after consent withdrawal.
@@ -360,43 +335,36 @@ class SecurityEventRule(ComplianceRule):
     severity = "high"
 
     def check(
-        self,
-        events: list[Any],
-        period_start: datetime,
-        period_end: datetime
+        self, events: list[Any], period_start: datetime, period_end: datetime
     ) -> tuple[bool, list[ComplianceViolation]]:
         violations = []
 
         # Check for unaddressed security incidents
         security_events = [
-            e for e in events
-            if e.action in (
-                "security_incident_detected",
-                "brute_force_attempt",
-                "malicious_request",
-                "suspicious_activity"
-            )
+            e
+            for e in events
+            if e.action
+            in ("security_incident_detected", "brute_force_attempt", "malicious_request", "suspicious_activity")
         ]
 
         # Group by severity
-        critical_unaddressed = [
-            e for e in security_events
-            if e.severity == "critical" and e.requires_review
-        ]
+        critical_unaddressed = [e for e in security_events if e.severity == "critical" and e.requires_review]
 
         if critical_unaddressed:
-            violations.append(ComplianceViolation(
-                framework=self.framework.value,
-                control_id=self.control_id,
-                description=f"{len(critical_unaddressed)} critical security events require review",
-                severity="critical",
-                detected_at=timezone.now(),
-                evidence={
-                    "event_ids": [str(e.id) for e in critical_unaddressed[:10]],
-                    "count": len(critical_unaddressed),
-                },
-                remediation="Review and address critical security events",
-            ))
+            violations.append(
+                ComplianceViolation(
+                    framework=self.framework.value,
+                    control_id=self.control_id,
+                    description=f"{len(critical_unaddressed)} critical security events require review",
+                    severity="critical",
+                    detected_at=timezone.now(),
+                    evidence={
+                        "event_ids": [str(e.id) for e in critical_unaddressed[:10]],
+                        "count": len(critical_unaddressed),
+                    },
+                    remediation="Review and address critical security events",
+                )
+            )
 
         return len(violations) == 0, violations
 
@@ -427,11 +395,7 @@ class ComplianceReportService:
     ]
 
     def __init__(self) -> None:
-        self.report_dir = getattr(
-            settings,
-            "COMPLIANCE_REPORTING",
-            {}
-        ).get("REPORT_DIR", "/var/log/praho/compliance")
+        self.report_dir = getattr(settings, "COMPLIANCE_REPORTING", {}).get("REPORT_DIR", "/var/log/praho/compliance")
 
     def generate_report(
         self,
@@ -462,10 +426,12 @@ class ComplianceReportService:
         )
 
         # Fetch relevant events
-        events = list(AuditEvent.objects.filter(
-            timestamp__gte=period_start,
-            timestamp__lte=period_end,
-        ).select_related("user", "content_type"))
+        events = list(
+            AuditEvent.objects.filter(
+                timestamp__gte=period_start,
+                timestamp__lte=period_end,
+            ).select_related("user", "content_type")
+        )
 
         # Initialize report
         report = ComplianceReport(
@@ -505,18 +471,11 @@ class ComplianceReportService:
         # Calculate overall compliance score
         self._calculate_compliance_score(report)
 
-        logger.info(
-            f"✅ [Compliance] Report generated: {report.report_id} "
-            f"(score: {report.compliance_score}%)"
-        )
+        logger.info(f"✅ [Compliance] Report generated: {report.report_id} " f"(score: {report.compliance_score}%)")
 
         return report
 
-    def _generate_security_summary(
-        self,
-        report: ComplianceReport,
-        events: list[Any]
-    ) -> None:
+    def _generate_security_summary(self, report: ComplianceReport, events: list[Any]) -> None:
         """Generate security summary section"""
         # Authentication events
         auth_events = [e for e in events if e.category == "authentication"]
@@ -527,43 +486,47 @@ class ComplianceReportService:
         security_events = [e for e in events if e.category == "security_event"]
         critical_events = len([e for e in security_events if e.severity == "critical"])
 
-        report.sections.append(ComplianceReportSection(
-            title="Authentication Summary",
-            description="Overview of authentication activity",
-            status="compliant" if failed_logins < successful_logins * 0.1 else "partial",
-            metrics={
-                "total_login_attempts": len(auth_events),
-                "successful_logins": successful_logins,
-                "failed_logins": failed_logins,
-                "failure_rate": f"{(failed_logins / max(len(auth_events), 1)) * 100:.2f}%",
-            },
-            recommendations=[
-                "Review accounts with high failed login rates",
-                "Ensure MFA is enabled for all privileged accounts",
-            ] if failed_logins > 0 else [],
-        ))
+        report.sections.append(
+            ComplianceReportSection(
+                title="Authentication Summary",
+                description="Overview of authentication activity",
+                status="compliant" if failed_logins < successful_logins * 0.1 else "partial",
+                metrics={
+                    "total_login_attempts": len(auth_events),
+                    "successful_logins": successful_logins,
+                    "failed_logins": failed_logins,
+                    "failure_rate": f"{(failed_logins / max(len(auth_events), 1)) * 100:.2f}%",
+                },
+                recommendations=[
+                    "Review accounts with high failed login rates",
+                    "Ensure MFA is enabled for all privileged accounts",
+                ]
+                if failed_logins > 0
+                else [],
+            )
+        )
 
-        report.sections.append(ComplianceReportSection(
-            title="Security Events",
-            description="Overview of security-related events",
-            status="non_compliant" if critical_events > 0 else "compliant",
-            metrics={
-                "total_security_events": len(security_events),
-                "critical_events": critical_events,
-                "events_requiring_review": len([e for e in security_events if e.requires_review]),
-            },
-            recommendations=[
-                "Investigate all critical security events immediately",
-            ] if critical_events > 0 else [],
-        ))
+        report.sections.append(
+            ComplianceReportSection(
+                title="Security Events",
+                description="Overview of security-related events",
+                status="non_compliant" if critical_events > 0 else "compliant",
+                metrics={
+                    "total_security_events": len(security_events),
+                    "critical_events": critical_events,
+                    "events_requiring_review": len([e for e in security_events if e.requires_review]),
+                },
+                recommendations=[
+                    "Investigate all critical security events immediately",
+                ]
+                if critical_events > 0
+                else [],
+            )
+        )
 
         report.critical_findings = critical_events
 
-    def _generate_access_review(
-        self,
-        report: ComplianceReport,
-        events: list[Any]
-    ) -> None:
+    def _generate_access_review(self, report: ComplianceReport, events: list[Any]) -> None:
         """Generate access review section"""
         auth_events = [e for e in events if e.category == "authorization"]
 
@@ -571,33 +534,31 @@ class ComplianceReportService:
         role_changes = [e for e in auth_events if "role" in e.action]
         permission_changes = [e for e in auth_events if "permission" in e.action]
 
-        report.sections.append(ComplianceReportSection(
-            title="Access Control Review",
-            description="Review of access control changes",
-            status="compliant",
-            metrics={
-                "role_assignments": len([e for e in role_changes if "assigned" in e.action]),
-                "role_removals": len([e for e in role_changes if "removed" in e.action]),
-                "permission_grants": len([e for e in permission_changes if "granted" in e.action]),
-                "permission_revocations": len([e for e in permission_changes if "revoked" in e.action]),
-            },
-            findings=[
-                {
-                    "type": "role_change",
-                    "event_id": str(e.id),
-                    "action": e.action,
-                    "user": e.user.email if e.user else "system",
-                    "timestamp": e.timestamp.isoformat(),
-                }
-                for e in role_changes[:20]  # Limit findings
-            ],
-        ))
+        report.sections.append(
+            ComplianceReportSection(
+                title="Access Control Review",
+                description="Review of access control changes",
+                status="compliant",
+                metrics={
+                    "role_assignments": len([e for e in role_changes if "assigned" in e.action]),
+                    "role_removals": len([e for e in role_changes if "removed" in e.action]),
+                    "permission_grants": len([e for e in permission_changes if "granted" in e.action]),
+                    "permission_revocations": len([e for e in permission_changes if "revoked" in e.action]),
+                },
+                findings=[
+                    {
+                        "type": "role_change",
+                        "event_id": str(e.id),
+                        "action": e.action,
+                        "user": e.user.email if e.user else "system",
+                        "timestamp": e.timestamp.isoformat(),
+                    }
+                    for e in role_changes[:20]  # Limit findings
+                ],
+            )
+        )
 
-    def _generate_authentication_audit(
-        self,
-        report: ComplianceReport,
-        events: list[Any]
-    ) -> None:
+    def _generate_authentication_audit(self, report: ComplianceReport, events: list[Any]) -> None:
         """Generate authentication audit section"""
         auth_events = [e for e in events if e.category == "authentication"]
 
@@ -612,46 +573,42 @@ class ComplianceReportService:
         # 2FA events
         mfa_events = [e for e in auth_events if "2fa" in e.action]
 
-        report.sections.append(ComplianceReportSection(
-            title="Authentication Audit",
-            description="Detailed authentication activity audit",
-            status="compliant",
-            metrics={
-                "action_breakdown": action_counts,
-                "account_lockouts": len(lockouts),
-                "mfa_events": len(mfa_events),
-            },
-            findings=[
-                {
-                    "type": "account_lockout",
-                    "event_id": str(e.id),
-                    "user": e.user.email if e.user else "unknown",
-                    "ip_address": e.ip_address,
-                    "timestamp": e.timestamp.isoformat(),
-                }
-                for e in lockouts
-            ],
-        ))
+        report.sections.append(
+            ComplianceReportSection(
+                title="Authentication Audit",
+                description="Detailed authentication activity audit",
+                status="compliant",
+                metrics={
+                    "action_breakdown": action_counts,
+                    "account_lockouts": len(lockouts),
+                    "mfa_events": len(mfa_events),
+                },
+                findings=[
+                    {
+                        "type": "account_lockout",
+                        "event_id": str(e.id),
+                        "user": e.user.email if e.user else "unknown",
+                        "ip_address": e.ip_address,
+                        "timestamp": e.timestamp.isoformat(),
+                    }
+                    for e in lockouts
+                ],
+            )
+        )
 
-    def _generate_compliance_violations(
-        self,
-        report: ComplianceReport,
-        events: list[Any]
-    ) -> None:
+    def _generate_compliance_violations(self, report: ComplianceReport, events: list[Any]) -> None:
         """Generate compliance violations section"""
         # This is populated by _run_compliance_checks
-        report.sections.append(ComplianceReportSection(
-            title="Compliance Violations",
-            description="Detected compliance violations",
-            status="pending",  # Updated after checks
-            metrics={},
-        ))
+        report.sections.append(
+            ComplianceReportSection(
+                title="Compliance Violations",
+                description="Detected compliance violations",
+                status="pending",  # Updated after checks
+                metrics={},
+            )
+        )
 
-    def _generate_gdpr_compliance(
-        self,
-        report: ComplianceReport,
-        events: list[Any]
-    ) -> None:
+    def _generate_gdpr_compliance(self, report: ComplianceReport, events: list[Any]) -> None:
         """Generate GDPR compliance section"""
         privacy_events = [e for e in events if e.category == "privacy"]
         data_events = [e for e in events if e.category == "data_protection"]
@@ -664,71 +621,68 @@ class ComplianceReportService:
         export_requests = len([e for e in data_events if e.action == "data_export_requested"])
         deletion_requests = len([e for e in data_events if e.action == "data_deletion_requested"])
 
-        report.sections.append(ComplianceReportSection(
-            title="GDPR Compliance",
-            description="GDPR compliance status and data subject request handling",
-            status="compliant",
-            metrics={
-                "consent_granted": consent_granted,
-                "consent_withdrawn": consent_withdrawn,
-                "data_export_requests": export_requests,
-                "data_deletion_requests": deletion_requests,
-            },
-            recommendations=[
-                "Ensure all data subject requests are processed within 30 days",
-                "Maintain records of consent for all data processing activities",
-            ],
-        ))
+        report.sections.append(
+            ComplianceReportSection(
+                title="GDPR Compliance",
+                description="GDPR compliance status and data subject request handling",
+                status="compliant",
+                metrics={
+                    "consent_granted": consent_granted,
+                    "consent_withdrawn": consent_withdrawn,
+                    "data_export_requests": export_requests,
+                    "data_deletion_requests": deletion_requests,
+                },
+                recommendations=[
+                    "Ensure all data subject requests are processed within 30 days",
+                    "Maintain records of consent for all data processing activities",
+                ],
+            )
+        )
 
-    def _generate_log_integrity(
-        self,
-        report: ComplianceReport,
-        events: list[Any]
-    ) -> None:
+    def _generate_log_integrity(self, report: ComplianceReport, events: list[Any]) -> None:
         """Generate log integrity verification section"""
         from apps.audit.siem import get_siem_service
 
         siem = get_siem_service()
 
         # Verify hash chain integrity
-        is_valid, errors = siem.verify_log_integrity(
-            report.period_start,
-            report.period_end
+        is_valid, errors = siem.verify_log_integrity(report.period_start, report.period_end)
+
+        report.sections.append(
+            ComplianceReportSection(
+                title="Log Integrity Verification",
+                description="Verification of audit log integrity using hash chain",
+                status="compliant" if is_valid else "non_compliant",
+                metrics={
+                    "logs_verified": len(events),
+                    "integrity_errors": len(errors),
+                },
+                findings=[{"error": error} for error in errors],
+                recommendations=[
+                    "Investigate any hash chain integrity failures",
+                    "Ensure log storage is protected from modification",
+                ]
+                if errors
+                else [],
+            )
         )
 
-        report.sections.append(ComplianceReportSection(
-            title="Log Integrity Verification",
-            description="Verification of audit log integrity using hash chain",
-            status="compliant" if is_valid else "non_compliant",
-            metrics={
-                "logs_verified": len(events),
-                "integrity_errors": len(errors),
-            },
-            findings=[{"error": error} for error in errors],
-            recommendations=[
-                "Investigate any hash chain integrity failures",
-                "Ensure log storage is protected from modification",
-            ] if errors else [],
-        ))
-
         if errors:
-            report.violations.append(ComplianceViolation(
-                framework="ISO27001",
-                control_id="A.12.4.2",
-                description="Log integrity verification failed",
-                severity="critical",
-                detected_at=timezone.now(),
-                evidence={"errors": errors},
-                remediation="Investigate potential log tampering",
-            ))
+            report.violations.append(
+                ComplianceViolation(
+                    framework="ISO27001",
+                    control_id="A.12.4.2",
+                    description="Log integrity verification failed",
+                    severity="critical",
+                    detected_at=timezone.now(),
+                    evidence={"errors": errors},
+                    remediation="Investigate potential log tampering",
+                )
+            )
 
-    def _generate_retention_compliance(
-        self,
-        report: ComplianceReport,
-        events: list[Any]
-    ) -> None:
+    def _generate_retention_compliance(self, report: ComplianceReport, events: list[Any]) -> None:
         """Generate retention compliance section"""
-        from apps.audit.models import AuditEvent, AuditRetentionPolicy
+        from apps.audit.models import AuditEvent
 
         retention_config = getattr(settings, "AUDIT_LOG_RETENTION", {})
 
@@ -738,60 +692,54 @@ class ComplianceReportService:
             cutoff_date = timezone.now() - timedelta(days=retention_days)
 
             # Check for events past retention period
-            old_events = AuditEvent.objects.filter(
-                category=category,
-                timestamp__lt=cutoff_date
-            ).count()
+            old_events = AuditEvent.objects.filter(category=category, timestamp__lt=cutoff_date).count()
 
             if old_events > 0:
-                findings.append({
-                    "category": category,
-                    "retention_days": retention_days,
-                    "events_past_retention": old_events,
-                    "action_required": config.get("action", "archive"),
-                })
+                findings.append(
+                    {
+                        "category": category,
+                        "retention_days": retention_days,
+                        "events_past_retention": old_events,
+                        "action_required": config.get("action", "archive"),
+                    }
+                )
 
-        report.sections.append(ComplianceReportSection(
-            title="Log Retention Compliance",
-            description="Verification of log retention policy compliance",
-            status="partial" if findings else "compliant",
-            metrics={
-                "categories_checked": len(retention_config),
-                "categories_with_issues": len(findings),
-            },
-            findings=findings,
-            recommendations=[
-                f"Process {f['events_past_retention']} events in category '{f['category']}'"
-                for f in findings
-            ],
-        ))
+        report.sections.append(
+            ComplianceReportSection(
+                title="Log Retention Compliance",
+                description="Verification of log retention policy compliance",
+                status="partial" if findings else "compliant",
+                metrics={
+                    "categories_checked": len(retention_config),
+                    "categories_with_issues": len(findings),
+                },
+                findings=findings,
+                recommendations=[
+                    f"Process {f['events_past_retention']} events in category '{f['category']}'" for f in findings
+                ],
+            )
+        )
 
-    def _generate_generic_report(
-        self,
-        report: ComplianceReport,
-        events: list[Any]
-    ) -> None:
+    def _generate_generic_report(self, report: ComplianceReport, events: list[Any]) -> None:
         """Generate a generic report for unhandled report types"""
         # Group by category
         category_counts = {}
         for event in events:
             category_counts[event.category] = category_counts.get(event.category, 0) + 1
 
-        report.sections.append(ComplianceReportSection(
-            title="Event Summary",
-            description="Overview of all audit events",
-            status="compliant",
-            metrics={
-                "total_events": len(events),
-                "by_category": category_counts,
-            },
-        ))
+        report.sections.append(
+            ComplianceReportSection(
+                title="Event Summary",
+                description="Overview of all audit events",
+                status="compliant",
+                metrics={
+                    "total_events": len(events),
+                    "by_category": category_counts,
+                },
+            )
+        )
 
-    def _run_compliance_checks(
-        self,
-        report: ComplianceReport,
-        events: list[Any]
-    ) -> None:
+    def _run_compliance_checks(self, report: ComplianceReport, events: list[Any]) -> None:
         """Run compliance rules against events"""
         for rule_class in self.COMPLIANCE_RULES:
             rule = rule_class()
@@ -800,11 +748,7 @@ class ComplianceReportService:
             if report.framework and rule.framework != report.framework:
                 continue
 
-            is_compliant, violations = rule.check(
-                events,
-                report.period_start,
-                report.period_end
-            )
+            _is_compliant, violations = rule.check(events, report.period_start, report.period_end)
 
             report.violations.extend(violations)
 
@@ -825,10 +769,7 @@ class ComplianceReportService:
             "low": 1,
         }
 
-        total_penalty = sum(
-            severity_weights.get(v.severity, 5)
-            for v in report.violations
-        )
+        total_penalty = sum(severity_weights.get(v.severity, 5) for v in report.violations)
 
         # Calculate score (100 - penalties, minimum 0)
         report.compliance_score = max(0, 100 - total_penalty)
@@ -926,21 +867,20 @@ class ComplianceReportService:
             writer = csv.writer(f)
 
             # Header
-            writer.writerow([
-                "Framework", "Control ID", "Description", "Severity",
-                "Detected At", "Remediation"
-            ])
+            writer.writerow(["Framework", "Control ID", "Description", "Severity", "Detected At", "Remediation"])
 
             # Violations
             for v in report.violations:
-                writer.writerow([
-                    v.framework,
-                    v.control_id,
-                    v.description,
-                    v.severity,
-                    v.detected_at.isoformat(),
-                    v.remediation,
-                ])
+                writer.writerow(
+                    [
+                        v.framework,
+                        v.control_id,
+                        v.description,
+                        v.severity,
+                        v.detected_at.isoformat(),
+                        v.remediation,
+                    ]
+                )
 
         logger.info(f"📄 [Compliance] Exported violations to {filepath}")
         return filepath
@@ -1030,7 +970,6 @@ class LogRetentionService:
         Returns:
             Summary of actions taken
         """
-        from apps.audit.models import AuditEvent, AuditRetentionPolicy
 
         logger.info("🗄️ [Retention] Applying retention policies...")
 
@@ -1062,11 +1001,7 @@ class LogRetentionService:
 
         return summary
 
-    def _process_category(
-        self,
-        category: str,
-        config: dict[str, Any]
-    ) -> dict[str, int]:
+    def _process_category(self, category: str, config: dict[str, Any]) -> dict[str, int]:
         """Process retention for a specific category"""
         from apps.audit.models import AuditEvent
 
@@ -1075,10 +1010,7 @@ class LogRetentionService:
         cutoff_date = timezone.now() - timedelta(days=retention_days)
 
         # Find events past retention period
-        old_events = AuditEvent.objects.filter(
-            category=category,
-            timestamp__lt=cutoff_date
-        )
+        old_events = AuditEvent.objects.filter(category=category, timestamp__lt=cutoff_date)
 
         count = old_events.count()
         if count == 0:
@@ -1115,8 +1047,7 @@ class LogRetentionService:
         """Delete events (with safety checks)"""
         # Never delete security events or compliance-critical events
         safe_to_delete = events.exclude(
-            Q(severity="critical") |
-            Q(category__in=["security_event", "compliance", "data_protection"])
+            Q(severity="critical") | Q(category__in=["security_event", "compliance", "data_protection"])
         )
 
         count = safe_to_delete.count()
@@ -1158,10 +1089,7 @@ class LogRetentionService:
             cutoff_date = timezone.now() - timedelta(days=retention_days)
 
             total = AuditEvent.objects.filter(category=category).count()
-            past_retention = AuditEvent.objects.filter(
-                category=category,
-                timestamp__lt=cutoff_date
-            ).count()
+            past_retention = AuditEvent.objects.filter(category=category, timestamp__lt=cutoff_date).count()
 
             status[category] = {
                 "retention_days": retention_days,

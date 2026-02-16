@@ -399,6 +399,7 @@ class EFacturaService:
 
         # Minimum amount check (e.g., simplified invoices under 100 RON might be exempt)
         from apps.settings.services import SettingsService  # noqa: PLC0415
+
         min_amount = SettingsService.get_integer_setting("billing.efactura_minimum_amount_cents", 10000)
         return not invoice.total_cents < min_amount
 

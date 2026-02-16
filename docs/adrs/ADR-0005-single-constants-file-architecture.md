@@ -1,9 +1,9 @@
 # ADR-0005: Single Constants File Architecture for PRAHO Platform
 
-**Status:** Accepted  
-**Date:** 2025-08-26  
-**Authors:** Development Team  
-**Supersedes:** N/A  
+**Status:** Accepted
+**Date:** 2025-08-26
+**Authors:** Development Team
+**Supersedes:** N/A
 
 ## Context
 
@@ -171,7 +171,7 @@ grep -r "ROMANIAN_VAT_RATE" apps/
 - All Romanian compliance constants centralized
 - Documentation updated with constants usage patterns
 
-### Medium-term (6 months)  
+### Medium-term (6 months)
 - Developer onboarding improved (single source for business rules)
 - Zero incidents from inconsistent VAT calculations
 - Positive feedback from Romanian compliance audits
@@ -198,7 +198,7 @@ grep -r "ROMANIAN_VAT_RATE" apps/
 
 **Review Schedule:** Quarterly review recommended to ensure business rules remain current with Romanian legal requirements.
 
-**Next Steps:** 
+**Next Steps:**
 1. Implement automated migration of magic values
 2. Update development guidelines for constant usage
 3. Establish change management process for Romanian compliance updates

@@ -156,6 +156,7 @@ def _invalidate_tax_cache(sender, instance, **kwargs):
     """Invalidate TaxService cache when TaxRule is saved or deleted."""
     try:
         from apps.common.tax_service import TaxService
+
         TaxService.invalidate_cache(instance.country_code)
     except Exception:
         pass  # Cache invalidation is best-effort

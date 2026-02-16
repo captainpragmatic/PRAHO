@@ -79,7 +79,7 @@ class TicketStatusServiceTest(TestCase):
             created_by=self.customer_user,
             contact_email='customer@example.com'
         )
-        
+
         self.assertEqual(ticket.status, 'open')
         self.assertIsNone(ticket.closed_at)
         self.assertFalse(ticket.has_customer_replied)
@@ -96,14 +96,14 @@ class TicketStatusServiceTest(TestCase):
             created_by=self.customer_user,
             contact_email='customer@example.com'
         )
-        
+
         # Agent replies
         updated_ticket = TicketStatusService.handle_first_agent_reply(
             ticket=ticket,
             agent=self.agent_user,
             reply_action='reply'
         )
-        
+
         self.assertEqual(updated_ticket.status, 'in_progress')
         self.assertIsNotNone(updated_ticket.assigned_at)
 
@@ -119,14 +119,14 @@ class TicketStatusServiceTest(TestCase):
             created_by=self.customer_user,
             contact_email='customer@example.com'
         )
-        
+
         # Agent replies and waits on customer
         updated_ticket = TicketStatusService.handle_agent_reply(
             ticket=ticket,
             agent=self.agent_user,
             reply_action='reply_and_wait'
         )
-        
+
         self.assertEqual(updated_ticket.status, 'waiting_on_customer')
         self.assertFalse(updated_ticket.has_customer_replied)
 
@@ -142,7 +142,7 @@ class TicketStatusServiceTest(TestCase):
             created_by=self.customer_user,
             contact_email='customer@example.com'
         )
-        
+
         # Agent closes with resolution
         updated_ticket = TicketStatusService.handle_agent_reply(
             ticket=ticket,
@@ -150,7 +150,7 @@ class TicketStatusServiceTest(TestCase):
             reply_action='close_with_resolution',
             resolution_code='fixed'
         )
-        
+
         self.assertEqual(updated_ticket.status, 'closed')
         self.assertEqual(updated_ticket.resolution_code, 'fixed')
         self.assertIsNotNone(updated_ticket.closed_at)
@@ -167,19 +167,19 @@ class TicketStatusServiceTest(TestCase):
             created_by=self.customer_user,
             contact_email='customer@example.com'
         )
-        
+
         # Set to waiting on customer
         ticket = TicketStatusService.handle_agent_reply(
             ticket=ticket,
             agent=self.agent_user,
             reply_action='reply_and_wait'
         )
-        
+
         # Customer replies
         updated_ticket = TicketStatusService.handle_customer_reply(
             ticket=ticket
         )
-        
+
         self.assertEqual(updated_ticket.status, 'in_progress')
         self.assertTrue(updated_ticket.has_customer_replied)
         self.assertIsNotNone(updated_ticket.customer_replied_at)
@@ -196,12 +196,12 @@ class TicketStatusServiceTest(TestCase):
             created_by=self.customer_user,
             contact_email='customer@example.com'
         )
-        
+
         # Customer replies before any agent response
         updated_ticket = TicketStatusService.handle_customer_reply(
             ticket=ticket
         )
-        
+
         self.assertEqual(updated_ticket.status, 'open')
         self.assertTrue(updated_ticket.has_customer_replied)
 
@@ -217,16 +217,16 @@ class TicketStatusServiceTest(TestCase):
             created_by=self.customer_user,
             contact_email='customer@example.com'
         )
-        
+
         original_status = ticket.status
-        
+
         # Agent adds internal note
         updated_ticket = TicketStatusService.handle_agent_reply(
             ticket=ticket,
             agent=self.agent_user,
             reply_action='internal_note'
         )
-        
+
         # Status should remain unchanged
         self.assertEqual(updated_ticket.status, original_status)
 
@@ -241,7 +241,7 @@ class TicketStatusServiceTest(TestCase):
             created_by=self.customer_user,
             contact_email='customer@example.com'
         )
-        
+
         with self.assertRaises(ValueError):
             TicketStatusService.handle_agent_reply(
                 ticket=ticket,
@@ -260,7 +260,7 @@ class TicketStatusServiceTest(TestCase):
             created_by=self.customer_user,
             contact_email='customer@example.com'
         )
-        
+
         with self.assertRaises(ValueError):
             TicketStatusService.handle_agent_reply(
                 ticket=ticket,
@@ -280,25 +280,25 @@ class TicketStatusServiceTest(TestCase):
             created_by=self.customer_user,
             contact_email='customer@example.com'
         )
-        
+
         # Initially no customer reply
         self.assertFalse(ticket.customer_replied_recently)
-        
+
         # Customer replies
         ticket = TicketStatusService.handle_customer_reply(
             ticket=ticket
         )
-        
+
         # Should show recently replied
         self.assertTrue(ticket.customer_replied_recently)
-        
+
         # Agent replies (resets customer replied flag)
         ticket = TicketStatusService.handle_agent_reply(
             ticket=ticket,
             agent=self.agent_user,
             reply_action='reply'
         )
-        
+
         # Should no longer show recently replied
         self.assertFalse(ticket.customer_replied_recently)
 
@@ -313,16 +313,16 @@ class TicketStatusServiceTest(TestCase):
             created_by=self.customer_user,
             contact_email='customer@example.com'
         )
-        
+
         original_status = ticket.status
-        
+
         # Agent replies and changes status
         updated_ticket = TicketStatusService.handle_agent_reply(
             ticket=ticket,
             agent=self.agent_user,
             reply_action='reply_and_wait'
         )
-        
+
         # Status should have changed
         self.assertNotEqual(updated_ticket.status, original_status)
         self.assertEqual(updated_ticket.status, 'waiting_on_customer')
@@ -338,7 +338,7 @@ class TicketStatusServiceTest(TestCase):
             created_by=self.customer_user,
             contact_email='customer@example.com'
         )
-        
+
         # Test all status display values
         status_displays = {
             'open': 'Open',
@@ -346,7 +346,7 @@ class TicketStatusServiceTest(TestCase):
             'waiting_on_customer': 'Waiting on Customer',
             'closed': 'Closed'
         }
-        
+
         for status, expected_display in status_displays.items():
             ticket.status = status
             ticket.save()
@@ -358,16 +358,16 @@ class TicketStatusServiceTest(TestCase):
         expected_codes = {
             'fixed': 'Fixed',
             'invalid': 'Invalid',
-            'duplicate': 'Duplicate',  
+            'duplicate': 'Duplicate',
             'by_design': 'By Design',
             'refunded': 'Refunded',
             'cancelled': 'Cancelled',
             'other': 'Other'
         }
-        
+
         # Get choices from model
         choices = dict(Ticket.RESOLUTION_CHOICES)
-        
+
         for code, expected_display in expected_codes.items():
             self.assertIn(code, choices)
             # Note: The actual display might be translated, so we just check the key exists
@@ -383,13 +383,13 @@ class TicketStatusServiceTest(TestCase):
             created_by=self.customer_user,
             contact_email='customer@example.com'
         )
-        
+
         # Valid statuses should work
         valid_statuses = ['open', 'in_progress', 'waiting_on_customer', 'closed']
         for status in valid_statuses:
             ticket.status = status
             ticket.save()  # Should not raise
-            
+
         # Invalid status should raise error when validated
         ticket.status = 'invalid_status'
         with self.assertRaises(Exception):  # Django validation error

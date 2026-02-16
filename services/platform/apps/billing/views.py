@@ -77,6 +77,7 @@ _DEFAULT_MAX_PAYMENT_AMOUNT_CENTS = 100_000_000
 def _get_max_payment_amount_cents() -> int:
     """Get max payment amount from SettingsService."""
     from apps.settings.services import SettingsService  # noqa: PLC0415
+
     return SettingsService.get_integer_setting("billing.max_payment_amount_cents", 100000000)
 
 
@@ -233,7 +234,7 @@ def billing_list(request: HttpRequest) -> HttpResponse:
 
     try:
         # Staff can access all customers
-        customer_ids = list(Customer.objects.values_list('id', flat=True))
+        customer_ids = list(Customer.objects.values_list("id", flat=True))
 
         # Filter by type
         doc_type = request.GET.get("type", "all")  # all, proforma, invoice
@@ -384,7 +385,7 @@ def proforma_list(request: HttpRequest) -> HttpResponse:
 
     try:
         # Staff can access all customers
-        customer_ids = list(Customer.objects.values_list('id', flat=True))
+        customer_ids = list(Customer.objects.values_list("id", flat=True))
 
         # ✅ Get search context for template
         search_context = get_search_context(request, "search")
@@ -495,7 +496,7 @@ def billing_list_htmx(request: HttpRequest) -> HttpResponse:
 
     try:
         # Staff can access all customers
-        customer_ids = list(Customer.objects.values_list('id', flat=True))
+        customer_ids = list(Customer.objects.values_list("id", flat=True))
 
         # Filter by type
         doc_type = request.GET.get("type", "all")  # all, proforma, invoice
@@ -874,7 +875,9 @@ def process_proforma_payment(request: HttpRequest, pk: int) -> HttpResponse:
                 total_cents=proforma.total_cents,
                 tax_cents=proforma.tax_cents,
                 subtotal_cents=proforma.subtotal_cents,
-                due_at=proforma.valid_until if proforma.valid_until else timezone.now() + timezone.timedelta(days=get_invoice_payment_terms_days()),
+                due_at=proforma.valid_until
+                if proforma.valid_until
+                else timezone.now() + timezone.timedelta(days=get_invoice_payment_terms_days()),
                 issued_at=timezone.now(),
                 converted_from_proforma=proforma,
             )
@@ -1647,50 +1650,36 @@ def api_create_payment_intent(request: HttpRequest) -> JsonResponse:  # noqa: PL
     try:
         # Parse request data
         data = json.loads(request.body)
-        order_id = data.get('order_id')
-        amount_cents = data.get('amount_cents')
-        currency = data.get('currency', 'RON')
-        customer_id = data.get('customer_id')
-        order_number = data.get('order_number')
-        gateway = data.get('gateway', 'stripe')
-        metadata = data.get('metadata', {})
+        order_id = data.get("order_id")
+        amount_cents = data.get("amount_cents")
+        currency = data.get("currency", "RON")
+        customer_id = data.get("customer_id")
+        order_number = data.get("order_number")
+        gateway = data.get("gateway", "stripe")
+        metadata = data.get("metadata", {})
 
         # Enhanced input validation
         if not order_id or not isinstance(order_id, str):
-            return JsonResponse({
-                'success': False,
-                'error': 'order_id is required and must be a string'
-            }, status=400)
+            return JsonResponse({"success": False, "error": "order_id is required and must be a string"}, status=400)
 
         if not amount_cents or not isinstance(amount_cents, int):
-            return JsonResponse({
-                'success': False,
-                'error': 'amount_cents is required and must be an integer'
-            }, status=400)
+            return JsonResponse(
+                {"success": False, "error": "amount_cents is required and must be an integer"}, status=400
+            )
 
         if amount_cents <= 0 or amount_cents > _get_max_payment_amount_cents():  # Max 1M RON
-            return JsonResponse({
-                'success': False,
-                'error': 'amount_cents must be between 1 and 100,000,000 (1M RON)'
-            }, status=400)
+            return JsonResponse(
+                {"success": False, "error": "amount_cents must be between 1 and 100,000,000 (1M RON)"}, status=400
+            )
 
         if not customer_id:
-            return JsonResponse({
-                'success': False,
-                'error': 'customer_id is required'
-            }, status=400)
+            return JsonResponse({"success": False, "error": "customer_id is required"}, status=400)
 
-        if currency and currency not in ['RON', 'EUR', 'USD']:
-            return JsonResponse({
-                'success': False,
-                'error': 'currency must be one of: RON, EUR, USD'
-            }, status=400)
+        if currency and currency not in ["RON", "EUR", "USD"]:
+            return JsonResponse({"success": False, "error": "currency must be one of: RON, EUR, USD"}, status=400)
 
-        if gateway not in ['stripe', 'bank']:
-            return JsonResponse({
-                'success': False,
-                'error': 'gateway must be one of: stripe, bank'
-            }, status=400)
+        if gateway not in ["stripe", "bank"]:
+            return JsonResponse({"success": False, "error": "gateway must be one of: stripe, bank"}, status=400)
 
         # Create payment intent using PaymentService
         result = PaymentService.create_payment_intent_direct(
@@ -1700,34 +1689,27 @@ def api_create_payment_intent(request: HttpRequest) -> JsonResponse:  # noqa: PL
             customer_id=customer_id,
             order_number=order_number,
             gateway=gateway,
-            metadata=metadata
+            metadata=metadata,
         )
 
-        if result['success']:
+        if result["success"]:
             logger.info(f"✅ API: Created payment intent for order {order_id}")
-            return JsonResponse({
-                'success': True,
-                'payment_intent_id': result['payment_intent_id'],
-                'client_secret': result['client_secret']
-            })
+            return JsonResponse(
+                {
+                    "success": True,
+                    "payment_intent_id": result["payment_intent_id"],
+                    "client_secret": result["client_secret"],
+                }
+            )
         else:
             logger.error(f"❌ API: Failed to create payment intent: {result['error']}")
-            return JsonResponse({
-                'success': False,
-                'error': result['error']
-            }, status=400)
+            return JsonResponse({"success": False, "error": result["error"]}, status=400)
 
     except json.JSONDecodeError:
-        return JsonResponse({
-            'success': False,
-            'error': 'Invalid JSON payload'
-        }, status=400)
+        return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
     except Exception as e:
         logger.error(f"🔥 API: Unexpected error creating payment intent: {e}")
-        return JsonResponse({
-            'success': False,
-            'error': 'Internal server error'
-        }, status=500)
+        return JsonResponse({"success": False, "error": "Internal server error"}, status=500)
 
 
 @csrf_exempt
@@ -1746,61 +1728,39 @@ def api_confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911
     try:
         # Parse request data
         data = json.loads(request.body)
-        payment_intent_id = data.get('payment_intent_id')
-        gateway = data.get('gateway', 'stripe')
+        payment_intent_id = data.get("payment_intent_id")
+        gateway = data.get("gateway", "stripe")
 
         # Enhanced input validation
         if not payment_intent_id or not isinstance(payment_intent_id, str):
-            return JsonResponse({
-                'success': False,
-                'error': 'payment_intent_id is required and must be a string'
-            }, status=400)
+            return JsonResponse(
+                {"success": False, "error": "payment_intent_id is required and must be a string"}, status=400
+            )
 
         # Basic format validation for Stripe payment intent IDs
-        if gateway == 'stripe' and not payment_intent_id.startswith('pi_'):
-            return JsonResponse({
-                'success': False,
-                'error': 'Invalid Stripe payment_intent_id format'
-            }, status=400)
+        if gateway == "stripe" and not payment_intent_id.startswith("pi_"):
+            return JsonResponse({"success": False, "error": "Invalid Stripe payment_intent_id format"}, status=400)
 
-        if gateway not in ['stripe', 'bank']:
-            return JsonResponse({
-                'success': False,
-                'error': 'gateway must be one of: stripe, bank'
-            }, status=400)
+        if gateway not in ["stripe", "bank"]:
+            return JsonResponse({"success": False, "error": "gateway must be one of: stripe, bank"}, status=400)
 
         # Confirm payment using PaymentService
-        result = PaymentService.confirm_payment(
-            payment_intent_id=payment_intent_id,
-            gateway=gateway
-        )
+        result = PaymentService.confirm_payment(payment_intent_id=payment_intent_id, gateway=gateway)
 
-        if result.get('success', False):
-            result_status = result.get('status', 'unknown')
+        if result.get("success", False):
+            result_status = result.get("status", "unknown")
             logger.info(f"✅ API: Confirmed payment {payment_intent_id} - status: {result_status}")
-            return JsonResponse({
-                'success': True,
-                'status': result_status
-            })
+            return JsonResponse({"success": True, "status": result_status})
         else:
-            result_error = result.get('error', 'Unknown error')
+            result_error = result.get("error", "Unknown error")
             logger.error(f"❌ API: Failed to confirm payment: {result_error}")
-            return JsonResponse({
-                'success': False,
-                'error': result_error
-            }, status=400)
+            return JsonResponse({"success": False, "error": result_error}, status=400)
 
     except json.JSONDecodeError:
-        return JsonResponse({
-            'success': False,
-            'error': 'Invalid JSON payload'
-        }, status=400)
+        return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
     except Exception as e:
         logger.error(f"🔥 API: Unexpected error confirming payment: {e}")
-        return JsonResponse({
-            'success': False,
-            'error': 'Internal server error'
-        }, status=500)
+        return JsonResponse({"success": False, "error": "Internal server error"}, status=500)
 
 
 @csrf_exempt
@@ -1821,51 +1781,34 @@ def api_create_subscription(request: HttpRequest) -> JsonResponse:
     try:
         # Parse request data
         data = json.loads(request.body)
-        customer_id = data.get('customer_id')
-        price_id = data.get('price_id')
-        gateway = data.get('gateway', 'stripe')
-        metadata = data.get('metadata', {})
+        customer_id = data.get("customer_id")
+        price_id = data.get("price_id")
+        gateway = data.get("gateway", "stripe")
+        metadata = data.get("metadata", {})
 
         # Validate required fields
         if not customer_id or not price_id:
-            return JsonResponse({
-                'success': False,
-                'error': 'customer_id and price_id are required'
-            }, status=400)
+            return JsonResponse({"success": False, "error": "customer_id and price_id are required"}, status=400)
 
         # Create subscription using PaymentService
         result = PaymentService.create_subscription(
-            customer_id=customer_id,
-            price_id=price_id,
-            gateway=gateway,
-            metadata=metadata
+            customer_id=customer_id, price_id=price_id, gateway=gateway, metadata=metadata
         )
 
-        if result['success']:
+        if result["success"]:
             logger.info(f"✅ API: Created subscription {result['subscription_id']} for customer {customer_id}")
-            return JsonResponse({
-                'success': True,
-                'subscription_id': result['subscription_id'],
-                'status': result['status']
-            })
+            return JsonResponse(
+                {"success": True, "subscription_id": result["subscription_id"], "status": result["status"]}
+            )
         else:
             logger.error(f"❌ API: Failed to create subscription: {result['error']}")
-            return JsonResponse({
-                'success': False,
-                'error': result['error']
-            }, status=400)
+            return JsonResponse({"success": False, "error": result["error"]}, status=400)
 
     except json.JSONDecodeError:
-        return JsonResponse({
-            'success': False,
-            'error': 'Invalid JSON payload'
-        }, status=400)
+        return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
     except Exception as e:
         logger.error(f"🔥 API: Unexpected error creating subscription: {e}")
-        return JsonResponse({
-            'success': False,
-            'error': 'Internal server error'
-        }, status=500)
+        return JsonResponse({"success": False, "error": "Internal server error"}, status=500)
 
 
 @require_http_methods(["GET"])
@@ -1881,17 +1824,11 @@ def api_payment_methods(request: HttpRequest, customer_id: str) -> JsonResponse:
         methods = PaymentService.get_available_payment_methods(customer_id)
 
         logger.info(f"✅ API: Retrieved {len(methods)} payment methods for customer {customer_id}")
-        return JsonResponse({
-            'success': True,
-            'payment_methods': methods
-        })
+        return JsonResponse({"success": True, "payment_methods": methods})
 
     except Exception as e:
         logger.error(f"🔥 API: Unexpected error getting payment methods: {e}")
-        return JsonResponse({
-            'success': False,
-            'error': 'Internal server error'
-        }, status=500)
+        return JsonResponse({"success": False, "error": "Internal server error"}, status=500)
 
 
 @csrf_exempt
@@ -1911,36 +1848,24 @@ def api_process_refund(request: HttpRequest) -> JsonResponse:
     try:
         # Parse request data
         data = json.loads(request.body)
-        payment_id = data.get('payment_id')
-        data.get('amount_cents')
-        data.get('reason', 'API refund request')
+        payment_id = data.get("payment_id")
+        data.get("amount_cents")
+        data.get("reason", "API refund request")
 
         # Validate required fields
         if not payment_id:
-            return JsonResponse({
-                'success': False,
-                'error': 'payment_id is required'
-            }, status=400)
+            return JsonResponse({"success": False, "error": "payment_id is required"}, status=400)
 
         # TODO: Implement refund processing via PaymentService
 
         logger.info(f"📝 API: Refund request for payment {payment_id} - not yet implemented")
-        return JsonResponse({
-            'success': False,
-            'error': 'Refund processing not yet implemented'
-        }, status=501)
+        return JsonResponse({"success": False, "error": "Refund processing not yet implemented"}, status=501)
 
     except json.JSONDecodeError:
-        return JsonResponse({
-            'success': False,
-            'error': 'Invalid JSON payload'
-        }, status=400)
+        return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
     except Exception as e:
         logger.error(f"🔥 API: Unexpected error processing refund: {e}")
-        return JsonResponse({
-            'success': False,
-            'error': 'Internal server error'
-        }, status=500)
+        return JsonResponse({"success": False, "error": "Internal server error"}, status=500)
 
 
 @require_http_methods(["GET"])
@@ -1958,46 +1883,34 @@ def api_stripe_config(request: HttpRequest) -> JsonResponse:
         stripe_enabled = SettingsService.get_setting("integrations.stripe_enabled", default=False)
         if not stripe_enabled:
             logger.warning("⚠️ API: Stripe integration is disabled")
-            return JsonResponse({
-                'success': False,
-                'error': 'Stripe integration disabled'
-            }, status=503)
+            return JsonResponse({"success": False, "error": "Stripe integration disabled"}, status=503)
 
         # Get public configuration from settings system
         publishable_key = SettingsService.get_setting("integrations.stripe_publishable_key")
 
         config = {
-            'publishable_key': publishable_key,
-            'currency': 'RON',
-            'country': 'RO',
-            'supported_payment_methods': ['card'],
-            'appearance': {
-                'theme': 'stripe',
-                'variables': {
-                    'colorPrimary': '#0570de',
-                }
-            }
+            "publishable_key": publishable_key,
+            "currency": "RON",
+            "country": "RO",
+            "supported_payment_methods": ["card"],
+            "appearance": {
+                "theme": "stripe",
+                "variables": {
+                    "colorPrimary": "#0570de",
+                },
+            },
         }
 
-        if not config['publishable_key']:
+        if not config["publishable_key"]:
             logger.error("❌ API: Stripe publishable key not configured in settings system")
-            return JsonResponse({
-                'success': False,
-                'error': 'Stripe not configured'
-            }, status=500)
+            return JsonResponse({"success": False, "error": "Stripe not configured"}, status=500)
 
         logger.info("✅ API: Retrieved Stripe configuration from settings system")
-        return JsonResponse({
-            'success': True,
-            'config': config
-        })
+        return JsonResponse({"success": True, "config": config})
 
     except Exception as e:
         logger.error(f"🔥 API: Unexpected error getting Stripe config: {e}")
-        return JsonResponse({
-            'success': False,
-            'error': 'Internal server error'
-        }, status=500)
+        return JsonResponse({"success": False, "error": "Internal server error"}, status=500)
 
 
 # ===============================================================================
@@ -2025,9 +1938,7 @@ def efactura_dashboard(request: HttpRequest) -> HttpResponse:
 
     # 1. Status summary - count by status
     status_counts: dict[str, int] = {}
-    for status_row in (
-        EFacturaDocument.objects.values("status").annotate(count=Count("id")).order_by()
-    ):
+    for status_row in EFacturaDocument.objects.values("status").annotate(count=Count("id")).order_by():
         status_counts[status_row["status"]] = status_row["count"]
 
     total_documents = sum(status_counts.values())
@@ -2036,10 +1947,34 @@ def efactura_dashboard(request: HttpRequest) -> HttpResponse:
     status_cards = [
         {"key": "draft", "label": _("Draft"), "count": status_counts.get("draft", 0), "color": "slate", "icon": "📝"},
         {"key": "queued", "label": _("Queued"), "count": status_counts.get("queued", 0), "color": "blue", "icon": "📋"},
-        {"key": "submitted", "label": _("Submitted"), "count": status_counts.get("submitted", 0), "color": "indigo", "icon": "📤"},
-        {"key": "processing", "label": _("Processing"), "count": status_counts.get("processing", 0), "color": "yellow", "icon": "⏳"},
-        {"key": "accepted", "label": _("Accepted"), "count": status_counts.get("accepted", 0), "color": "green", "icon": "✅"},
-        {"key": "rejected", "label": _("Rejected"), "count": status_counts.get("rejected", 0), "color": "red", "icon": "❌"},
+        {
+            "key": "submitted",
+            "label": _("Submitted"),
+            "count": status_counts.get("submitted", 0),
+            "color": "indigo",
+            "icon": "📤",
+        },
+        {
+            "key": "processing",
+            "label": _("Processing"),
+            "count": status_counts.get("processing", 0),
+            "color": "yellow",
+            "icon": "⏳",
+        },
+        {
+            "key": "accepted",
+            "label": _("Accepted"),
+            "count": status_counts.get("accepted", 0),
+            "color": "green",
+            "icon": "✅",
+        },
+        {
+            "key": "rejected",
+            "label": _("Rejected"),
+            "count": status_counts.get("rejected", 0),
+            "color": "red",
+            "icon": "❌",
+        },
         {"key": "error", "label": _("Error"), "count": status_counts.get("error", 0), "color": "orange", "icon": "⚠️"},
     ]
 
@@ -2186,8 +2121,7 @@ def efactura_documents_htmx(request: HttpRequest) -> HttpResponse:
     search = request.GET.get("q", "").strip()
     if search:
         documents_qs = documents_qs.filter(
-            Q(invoice__number__icontains=search)
-            | Q(anaf_upload_index__icontains=search)
+            Q(invoice__number__icontains=search) | Q(anaf_upload_index__icontains=search)
         )
 
     paginator = Paginator(documents_qs, 20)

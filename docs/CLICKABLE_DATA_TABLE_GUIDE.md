@@ -5,7 +5,7 @@
 The `table_enhanced` component is a **standardized, reusable table component** for PRAHO Platform that provides:
 
 - ✅ **Clickable rows** with navigation
-- ✅ **Fixed column widths** for consistency  
+- ✅ **Fixed column widths** for consistency
 - ✅ **Badge and button integration**
 - ✅ **HTMX pagination support**
 - ✅ **Romanian business theming**
@@ -17,9 +17,9 @@ The `table_enhanced` component is a **standardized, reusable table component** f
 ```html
 {% load ui_components %}
 
-{% table_enhanced 
-   columns=table_columns 
-   rows=table_rows 
+{% table_enhanced
+   columns=table_columns
+   rows=table_rows
    page_obj=page_obj
    pagination_enabled=True
    show_actions=True %}
@@ -37,7 +37,7 @@ columns = [
     {
         'label': _('Number'),
         'width': 'w-32',
-        'align': 'left', 
+        'align': 'left',
         'sortable': True
     }
 ]
@@ -125,7 +125,7 @@ rows = [
 }
 ```
 
-### JavaScript Navigation  
+### JavaScript Navigation
 ```python
 {
     'clickable': True,
@@ -179,7 +179,7 @@ table_data = prepare_billing_table_data(documents_page, request.user)
 ```
 
 ### Orders
-```python  
+```python
 # apps/orders/views.py
 table_data = prepare_orders_table_data(orders_page, request.user)
 ```
@@ -192,12 +192,12 @@ table_data = prepare_orders_table_data(orders_page, request.user)
 
 ## Benefits
 
-✅ **Consistency**: Same look and behavior across all lists  
-✅ **Maintainability**: Single component to update  
-✅ **Performance**: Optimized rendering and interactions  
-✅ **Accessibility**: Proper ARIA labels and keyboard navigation  
-✅ **Mobile-friendly**: Responsive design patterns  
-✅ **HTMX Ready**: Built-in pagination and dynamic loading  
+✅ **Consistency**: Same look and behavior across all lists
+✅ **Maintainability**: Single component to update
+✅ **Performance**: Optimized rendering and interactions
+✅ **Accessibility**: Proper ARIA labels and keyboard navigation
+✅ **Mobile-friendly**: Responsive design patterns
+✅ **HTMX Ready**: Built-in pagination and dynamic loading
 
 ## Migration Guide
 

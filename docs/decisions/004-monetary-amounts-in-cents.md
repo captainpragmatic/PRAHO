@@ -35,7 +35,7 @@ PRAHO Platform handles financial transactions for Romanian hosting providers, in
 -- Invoice amounts stored in cents
 CREATE TABLE invoice (
     subtotal_cents BIGINT NOT NULL,  -- 11900 = 119.00 EUR
-    tax_cents BIGINT NOT NULL,       -- 2261 = 22.61 EUR  
+    tax_cents BIGINT NOT NULL,       -- 2261 = 22.61 EUR
     total_cents BIGINT NOT NULL,     -- 14161 = 141.61 EUR
     currency_id VARCHAR(3) NOT NULL  -- 'EUR', 'RON', 'USD'
 );
@@ -51,11 +51,11 @@ CREATE TABLE payment (
 ```python
 class Invoice(models.Model):
     subtotal_cents = models.BigIntegerField()
-    tax_cents = models.BigIntegerField() 
+    tax_cents = models.BigIntegerField()
     total_cents = models.BigIntegerField()
     currency = models.ForeignKey(Currency, on_delete=models.RESTRICT)
-    
-    @property 
+
+    @property
     def subtotal(self):
         """Convert cents to currency units"""
         return Decimal(self.subtotal_cents) / 100
@@ -97,18 +97,18 @@ class Invoice(models.Model):
 
 ### Positive
 
-✅ **Financial accuracy**: No rounding errors in calculations  
-✅ **API integration**: Direct compatibility with payment providers  
-✅ **Performance**: Faster arithmetic operations  
-✅ **Romanian compliance**: Meets e-Factura precision requirements  
-✅ **Audit friendly**: Clear monetary trail for tax authorities  
+✅ **Financial accuracy**: No rounding errors in calculations
+✅ **API integration**: Direct compatibility with payment providers
+✅ **Performance**: Faster arithmetic operations
+✅ **Romanian compliance**: Meets e-Factura precision requirements
+✅ **Audit friendly**: Clear monetary trail for tax authorities
 
 ### Negative
 
-❌ **Developer complexity**: Must remember to convert cents ↔ currency units  
-❌ **Template complexity**: Need formatting filters for display  
-❌ **Migration effort**: Existing decimal amounts need conversion  
-❌ **Query complexity**: Aggregations require careful handling  
+❌ **Developer complexity**: Must remember to convert cents ↔ currency units
+❌ **Template complexity**: Need formatting filters for display
+❌ **Migration effort**: Existing decimal amounts need conversion
+❌ **Query complexity**: Aggregations require careful handling
 
 ### Mitigation Strategies
 
@@ -152,7 +152,7 @@ invoice = Invoice.objects.create(
   "currency": "EUR",
   "display": {
     "subtotal": "119,00 EUR",
-    "tax": "22,61 EUR", 
+    "tax": "22,61 EUR",
     "total": "141,61 EUR"
   }
 }
@@ -178,7 +178,7 @@ invoice = Invoice.objects.create(
 ## Monitoring and Success Metrics
 
 - **Financial accuracy**: Zero monetary discrepancies in reports
-- **Performance**: Query response times under 100ms for financial aggregations  
+- **Performance**: Query response times under 100ms for financial aggregations
 - **API compatibility**: 100% success rate with Stripe/PayPal integration
 - **e-Factura compliance**: No rejection due to amount precision issues
 - **Developer satisfaction**: Reduced monetary calculation bugs
@@ -191,7 +191,7 @@ invoice = Invoice.objects.create(
 - Martin Fowler's ["Money"](https://martinfowler.com/eaaCatalog/money.html) pattern
 
 ---
-**Decision made by**: Development Team  
-**Approved by**: Technical Lead  
-**Implementation date**: August 2025  
+**Decision made by**: Development Team
+**Approved by**: Technical Lead
+**Implementation date**: August 2025
 **Review date**: February 2026

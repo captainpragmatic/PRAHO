@@ -209,8 +209,7 @@ class BranchCoverageAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
         """Get remediation advice for incomplete branch point."""
         if point.point_type == "if-chain":
             return (
-                "Add an 'else' branch to handle all cases explicitly, "
-                "or document why the else case is impossible."
+                "Add an 'else' branch to handle all cases explicitly, " "or document why the else case is impossible."
             )
         elif point.point_type == "try-except":
             return (
@@ -391,9 +390,7 @@ class BranchCoverageAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
                 )
             elif isinstance(handler.type, ast.Tuple):
                 # Multiple exception types
-                exc_names = [
-                    e.id for e in handler.type.elts if isinstance(e, ast.Name)
-                ]
+                exc_names = [e.id for e in handler.type.elts if isinstance(e, ast.Name)]
                 if "Exception" in exc_names or "BaseException" in exc_names:
                     has_base_exception = True
                 branch = self._create_branch(

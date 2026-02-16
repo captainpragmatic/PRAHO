@@ -1,6 +1,6 @@
 {% comment %}
 ===============================================================================
-📄 BILLING DOCUMENTS LIST PARTIAL - PRAHO Platform  
+📄 BILLING DOCUMENTS LIST PARTIAL - PRAHO Platform
 ===============================================================================
 HTMX-loaded partial for billing documents table with pagination.
 This template includes both the table content and header count update.
@@ -59,23 +59,23 @@ This template includes both the table content and header count update.
                 {% badge "🧾 Invoice" variant="success" %}
               {% endif %}
             </td>
-            
+
             <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">
               <div class="truncate font-mono">
                 {{ document.number }}
               </div>
             </td>
-            
+
             <td class="px-6 py-4 text-sm text-slate-300">
               <div class="truncate" title="{{ document.customer.company_name|default:document.customer.name }}">
                 {{ document.customer.company_name|default:document.customer.name }}
               </div>
             </td>
-            
+
             <td class="px-6 py-4 whitespace-nowrap text-sm text-white text-right font-mono">
               {{ document.total|floatformat:2 }} {{ document.currency }}
             </td>
-            
+
             <td class="px-6 py-4 whitespace-nowrap text-center">
               {% if document.type == 'proforma' %}
                 {% if document.status == 'draft' %}
@@ -105,7 +105,7 @@ This template includes both the table content and header count update.
                 {% endif %}
               {% endif %}
             </td>
-            
+
             <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-300 text-center font-mono">
               {{ document.created_at|date:"d.m.Y" }}
             </td>

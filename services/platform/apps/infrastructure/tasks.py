@@ -312,11 +312,13 @@ def bulk_validate_nodes_task() -> dict:
             # Quick health check instead of full validation
             is_healthy = service.quick_health_check(deployment)
 
-            results.append({
-                "deployment_id": deployment.id,
-                "hostname": deployment.hostname,
-                "healthy": is_healthy,
-            })
+            results.append(
+                {
+                    "deployment_id": deployment.id,
+                    "hostname": deployment.hostname,
+                    "healthy": is_healthy,
+                }
+            )
 
             if is_healthy:
                 passed_count += 1
@@ -327,12 +329,14 @@ def bulk_validate_nodes_task() -> dict:
         except Exception as e:
             logger.error(f"[Task:bulk_validate] Error validating {deployment.hostname}: {e}")
             failed_count += 1
-            results.append({
-                "deployment_id": deployment.id,
-                "hostname": deployment.hostname,
-                "healthy": False,
-                "error": str(e),
-            })
+            results.append(
+                {
+                    "deployment_id": deployment.id,
+                    "hostname": deployment.hostname,
+                    "healthy": False,
+                    "error": str(e),
+                }
+            )
 
     logger.info(
         f"[Task:bulk_validate] Complete: {passed_count} healthy, {failed_count} unhealthy "
@@ -1149,9 +1153,7 @@ def calculate_daily_costs_task() -> dict:
     logger.info("[Task:calculate_daily_costs] Starting daily cost calculation")
 
     now = timezone.now()
-    yesterday_start = timezone.make_aware(
-        now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
-    )
+    yesterday_start = timezone.make_aware(now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1))
     yesterday_end = timezone.make_aware(
         now.replace(hour=23, minute=59, second=59, microsecond=999999) - timedelta(days=1)
     )
@@ -1283,16 +1285,10 @@ def generate_cost_report_task(year: int, month: int) -> dict:
             }
             for d in deployment_breakdown[:10]  # Top 10
         ],
-        "by_provider": {
-            name: str(cost)
-            for name, cost in provider_breakdown.items()
-        },
+        "by_provider": {name: str(cost) for name, cost in provider_breakdown.items()},
     }
 
-    logger.info(
-        f"[Task:generate_cost_report] Report generated for {year}-{month:02d}: "
-        f"{summary.total_eur:.2f} EUR"
-    )
+    logger.info(f"[Task:generate_cost_report] Report generated for {year}-{month:02d}: " f"{summary.total_eur:.2f} EUR")
 
     return report
 

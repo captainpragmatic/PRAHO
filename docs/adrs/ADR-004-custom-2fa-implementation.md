@@ -8,7 +8,7 @@ PRAHO Platform requires Two-Factor Authentication (2FA) for enhanced security, p
 
 ## Decision Drivers
 1. **Romanian Compliance** - GDPR and local audit requirements
-2. **UI/UX Standards** - Modern card-based interface requirements  
+2. **UI/UX Standards** - Modern card-based interface requirements
 3. **Architecture Consistency** - Services pattern across platform
 4. **Future Extensibility** - WebAuthn/Passkeys support planned
 5. **Performance Requirements** - O(1) lookups, Redis caching
@@ -57,11 +57,11 @@ Our modern card-based designs with progress indicators provide superior user exp
 - Hover effects and transitions
 - Mobile-first responsive design
 
-### 2. Romanian Compliance  
+### 2. Romanian Compliance
 Custom audit events required for local regulations:
 ```python
-'2FA_ENABLED', '2FA_DISABLED', '2FA_LOGIN_SUCCESS', 
-'2FA_LOGIN_FAILED', 'BACKUP_CODES_GENERATED', 
+'2FA_ENABLED', '2FA_DISABLED', '2FA_LOGIN_SUCCESS',
+'2FA_LOGIN_FAILED', 'BACKUP_CODES_GENERATED',
 'BACKUP_CODE_USED', 'WEBAUTHN_CREDENTIAL_ADDED',
 'WEBAUTHN_CREDENTIAL_REMOVED', 'WEBAUTHN_LOGIN_SUCCESS',
 'WEBAUTHN_LOGIN_FAILED', '2FA_ADMIN_RESET'
@@ -87,7 +87,7 @@ apps/users/mfa.py
 
 ### Security Measures
 - **Encryption**: Fernet (AES-256) for TOTP secrets
-- **Hashing**: Argon2 for backup codes  
+- **Hashing**: Argon2 for backup codes
 - **Rate Limiting**: Redis-based with configurable windows
 - **Time Windows**: ±30 seconds tolerance for clock drift
 - **Audit Trail**: Complete GDPR-compliant logging
@@ -107,7 +107,7 @@ apps/users/mfa.py
 - ✅ WebAuthn ready for future enhancement
 - ✅ No external dependency security risks
 
-### Negative  
+### Negative
 - ⚠️ Security review responsibility on our team
 - ⚠️ Need to track CVEs and implement patches
 - ⚠️ Higher maintenance burden long-term

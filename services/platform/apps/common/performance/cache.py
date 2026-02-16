@@ -221,6 +221,7 @@ def cached_model_property(
             def calculate_total_spend(self) -> Decimal:
                 return self.invoices.aggregate(total=Sum("total_cents"))["total"] or 0
     """
+
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @functools.wraps(func)
         def wrapper(self: models.Model, *args: Any, **kwargs: Any) -> T:
@@ -236,6 +237,7 @@ def cached_model_property(
             return value
 
         return wrapper
+
     return decorator
 
 
@@ -254,6 +256,7 @@ def cached_queryset(
         def get_active_products() -> QuerySet[Product]:
             return Product.objects.filter(is_active=True)
     """
+
     def decorator(func: Callable[..., models.QuerySet[T]]) -> Callable[..., list[T]]:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> list[T]:
@@ -293,6 +296,7 @@ def cached_queryset(
             return result
 
         return wrapper
+
     return decorator
 
 
@@ -332,6 +336,7 @@ class CacheInvalidationMixin:
 
 
 # Customer-specific caching utilities
+
 
 def get_customer_cache_key(customer_id: int, data_type: str) -> str:
     """Generate a cache key for customer-specific data."""

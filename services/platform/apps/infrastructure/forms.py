@@ -32,12 +32,8 @@ class NodeDeploymentForm(forms.ModelForm):
             "backup_enabled",
         ]
         widgets = {
-            "environment": forms.RadioSelect(
-                attrs={"class": "sr-only peer", "x-model": "environment"}
-            ),
-            "node_type": forms.RadioSelect(
-                attrs={"class": "sr-only peer", "x-model": "nodeType"}
-            ),
+            "environment": forms.RadioSelect(attrs={"class": "sr-only peer", "x-model": "environment"}),
+            "node_type": forms.RadioSelect(attrs={"class": "sr-only peer", "x-model": "nodeType"}),
             "provider": forms.Select(
                 attrs={
                     "class": "w-full bg-slate-700 border-slate-600 rounded-lg text-white",
@@ -51,9 +47,7 @@ class NodeDeploymentForm(forms.ModelForm):
                     "x-model": "region",
                 }
             ),
-            "node_size": forms.RadioSelect(
-                attrs={"class": "sr-only peer", "x-model": "nodeSize"}
-            ),
+            "node_size": forms.RadioSelect(attrs={"class": "sr-only peer", "x-model": "nodeSize"}),
             "panel_type": forms.Select(
                 attrs={
                     "class": "w-full bg-slate-700 border-slate-600 rounded-lg text-white",

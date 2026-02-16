@@ -6,7 +6,7 @@
 {% block content %}
 <div class="min-h-screen bg-slate-900 py-8">
     <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-        
+
         <!-- Header -->
         <div class="mb-8">
             <h1 class="text-3xl font-bold text-white mb-2">{% trans "Edit Company Profile" %}</h1>
@@ -16,7 +16,7 @@
         <!-- Action Bar -->
         <div class="mb-6">
             {% if request.GET.next %}
-            <a href="{{ request.GET.next }}" 
+            <a href="{{ request.GET.next }}"
                class="inline-flex items-center px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors">
                 <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
@@ -24,7 +24,7 @@
                 {% trans "Back to Checkout" %}
             </a>
             {% else %}
-            <a href="{% url 'users:company_profile' %}" 
+            <a href="{% url 'users:company_profile' %}"
                class="inline-flex items-center px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors">
                 <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
@@ -40,7 +40,7 @@
             {% if request.GET.next %}
             <input type="hidden" name="next" value="{{ request.GET.next }}">
             {% endif %}
-            
+
             <!-- Company Information Section -->
             <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
                 <div class="px-6 py-4 border-b border-slate-700">
@@ -53,7 +53,7 @@
                 </div>
                 <div class="p-6">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        
+
                         <!-- Company Name -->
                         <div class="md:col-span-2">
                             <label for="{{ form.company_name.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
@@ -147,7 +147,7 @@
                 </div>
                 <div class="p-6">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        
+
                         <!-- Street Address -->
                         <div class="md:col-span-2">
                             <label for="{{ form.street_address.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
@@ -259,7 +259,7 @@
                 </div>
                 <div class="p-6">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        
+
                         <!-- Primary Email -->
                         <div>
                             <label for="{{ form.primary_email.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
@@ -326,14 +326,14 @@
                 <div class="text-sm text-slate-400">
                     <span class="text-red-400">*</span> {% trans "Required fields" %}
                 </div>
-                
+
                 <div class="flex items-center space-x-4">
-                    <a href="{% url 'users:company_profile' %}" 
+                    <a href="{% url 'users:company_profile' %}"
                        class="px-6 py-3 border border-slate-600 text-slate-300 font-medium rounded-lg hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 focus:ring-offset-slate-900 transition-colors">
                         {% trans "Cancel" %}
                     </a>
-                    
-                    <button type="submit" 
+
+                    <button type="submit"
                             class="px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900 transition-colors">
                         {% trans "Save Changes" %}
                     </button>

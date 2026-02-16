@@ -44,33 +44,35 @@ logger = logging.getLogger(__name__)
 # TASK CONFIGURATION - Externalized Timeouts
 # ===============================================================================
 
+
 def get_task_timeouts() -> dict[str, int]:
     """
     Get task timeout configurations from Django settings.
-    
+
     Supports runtime configuration updates and environment variable overrides.
     Uses the centralized VIRTUALMIN_TIMEOUTS configuration system.
-    
+
     Returns:
         Dictionary of task timeout values in seconds
     """
-    
+
     # Get Virtualmin timeout configuration
-    virtualmin_timeouts = getattr(settings, 'VIRTUALMIN_TIMEOUTS', {})
-    
+    virtualmin_timeouts = getattr(settings, "VIRTUALMIN_TIMEOUTS", {})
+
     return {
-        'TASK_RETRY_DELAY': virtualmin_timeouts.get('RETRY_DELAY', 5) * 60,  # Convert to minutes
-        'TASK_MAX_RETRIES': virtualmin_timeouts.get('MAX_RETRIES', 3),
-        'TASK_SOFT_TIME_LIMIT': virtualmin_timeouts.get('PROVISIONING_TIMEOUT', 180) * 2,  # 2x provisioning timeout
-        'TASK_TIME_LIMIT': virtualmin_timeouts.get('PROVISIONING_TIMEOUT', 180) * 3,  # 3x provisioning timeout
-        'BACKUP_TIME_LIMIT': virtualmin_timeouts.get('API_BACKUP_TIMEOUT', 300),
-        'BULK_OPERATION_TIME_LIMIT': virtualmin_timeouts.get('API_BULK_TIMEOUT', 600),
-        'HEALTH_CHECK_TIME_LIMIT': virtualmin_timeouts.get('API_HEALTH_CHECK_TIMEOUT', 10) * 6,  # 1 minute total
+        "TASK_RETRY_DELAY": virtualmin_timeouts.get("RETRY_DELAY", 5) * 60,  # Convert to minutes
+        "TASK_MAX_RETRIES": virtualmin_timeouts.get("MAX_RETRIES", 3),
+        "TASK_SOFT_TIME_LIMIT": virtualmin_timeouts.get("PROVISIONING_TIMEOUT", 180) * 2,  # 2x provisioning timeout
+        "TASK_TIME_LIMIT": virtualmin_timeouts.get("PROVISIONING_TIMEOUT", 180) * 3,  # 3x provisioning timeout
+        "BACKUP_TIME_LIMIT": virtualmin_timeouts.get("API_BACKUP_TIMEOUT", 300),
+        "BULK_OPERATION_TIME_LIMIT": virtualmin_timeouts.get("API_BULK_TIMEOUT", 600),
+        "HEALTH_CHECK_TIME_LIMIT": virtualmin_timeouts.get("API_HEALTH_CHECK_TIMEOUT", 10) * 6,  # 1 minute total
     }
+
 
 # Legacy constants for backward compatibility
 TASK_RETRY_DELAY = 300  # 5 minutes - DEPRECATED: Use get_task_timeouts()['TASK_RETRY_DELAY']
-TASK_MAX_RETRIES = 3    # DEPRECATED: Use get_task_timeouts()['TASK_MAX_RETRIES']
+TASK_MAX_RETRIES = 3  # DEPRECATED: Use get_task_timeouts()['TASK_MAX_RETRIES']
 TASK_SOFT_TIME_LIMIT = 600  # 10 minutes - DEPRECATED: Use get_task_timeouts()['TASK_SOFT_TIME_LIMIT']
 TASK_TIME_LIMIT = 900  # 15 minutes - DEPRECATED: Use get_task_timeouts()['TASK_TIME_LIMIT']
 
@@ -90,7 +92,7 @@ class VirtualminProvisioningConfig:
 @dataclass
 class ProvisioningContext:
     """Context for provisioning operations with validated parameters."""
-    
+
     service_id: str
     domain: str
     username: str | None
@@ -100,10 +102,10 @@ class ProvisioningContext:
     idempotency_key: str
 
 
-@dataclass 
+@dataclass
 class ProvisioningExecutionParams:
     """Parameters for executing Virtualmin provisioning."""
-    
+
     service: Service
     domain: str
     username: str | None
@@ -124,10 +126,12 @@ class VirtualminProvisioningParams(TypedDict, total=False):
     server_id: str | None
 
 
-def _decrypt_and_extract_parameters(params: VirtualminProvisioningParams | SecureTaskParameters) -> tuple[dict[str, Any], str, str] | tuple[None, None, None]:
+def _decrypt_and_extract_parameters(
+    params: VirtualminProvisioningParams | SecureTaskParameters,
+) -> tuple[dict[str, Any], str, str] | tuple[None, None, None]:
     """
     Decrypt and extract core parameters from provisioning params.
-    
+
     Returns:
         Tuple of (decrypted_params, service_id, domain) or (None, None, None) on error
     """
@@ -138,27 +142,25 @@ def _decrypt_and_extract_parameters(params: VirtualminProvisioningParams | Secur
         else:
             # Legacy parameter format - still validate
             decrypted_params = dict(params)  # Convert TypedDict to regular dict
-            
+
         # Extract and validate core parameters
         service_id = decrypted_params["service_id"]
         domain = decrypted_params["domain"]
-        
+
         return decrypted_params, service_id, domain
-        
+
     except Exception as decrypt_error:
         logger.error(f"🔥 [VirtualminTask] Parameter decryption/extraction failed: {decrypt_error}")
-        log_security_event_safe(
-            "virtualmin_task_parameter_decryption_failed",
-            {"error": str(decrypt_error)},
-            None
-        )
+        log_security_event_safe("virtualmin_task_parameter_decryption_failed", {"error": str(decrypt_error)}, None)
         return None, None, None
 
 
-def _validate_provisioning_parameters(decrypted_params: dict[str, Any], service_id: str, domain: str) -> ProvisioningContext | None:
+def _validate_provisioning_parameters(
+    decrypted_params: dict[str, Any], service_id: str, domain: str
+) -> ProvisioningContext | None:
     """
     Validate provisioning parameters and create context.
-    
+
     Returns:
         ProvisioningContext with validated parameters or None on error
     """
@@ -166,8 +168,10 @@ def _validate_provisioning_parameters(decrypted_params: dict[str, Any], service_
         validated_service_id = ProvisioningParametersValidator.validate_service_id(service_id)
         validated_domain = ProvisioningParametersValidator.validate_domain(domain)
         validated_username = ProvisioningParametersValidator.validate_username(decrypted_params.get("username"))
-        validated_template = ProvisioningParametersValidator.validate_template(decrypted_params.get("template", "Default"))
-        
+        validated_template = ProvisioningParametersValidator.validate_template(
+            decrypted_params.get("template", "Default")
+        )
+
         # Initialize correlation and logging context
         correlation_id = f"provision_{validated_service_id}_{validated_domain}"
         safe_log_ctx = {
@@ -176,18 +180,14 @@ def _validate_provisioning_parameters(decrypted_params: dict[str, Any], service_
             "template": validated_template,
             "correlation_id": correlation_id,
         }
-        
+
         # Step 3: Idempotency check
         idempotency_key = IdempotencyManager.generate_key(
             validated_service_id,
             "provision_account",
-            {
-                "domain": validated_domain,
-                "template": validated_template,
-                "correlation_id": correlation_id
-            }
+            {"domain": validated_domain, "template": validated_template, "correlation_id": correlation_id},
         )
-        
+
         return ProvisioningContext(
             service_id=validated_service_id,
             domain=validated_domain,
@@ -195,16 +195,16 @@ def _validate_provisioning_parameters(decrypted_params: dict[str, Any], service_
             template=validated_template,
             correlation_id=correlation_id,
             safe_log_ctx=safe_log_ctx,
-            idempotency_key=idempotency_key
+            idempotency_key=idempotency_key,
         )
-        
+
     except Exception as validation_error:
         logger.error(f"❌ [VirtualminTask] Parameter validation failed: {validation_error}")
         log_security_event_safe(
             "virtualmin_task_validation_failed",
             {"error": str(validation_error), "original_params": sanitize_log_parameters(decrypted_params)},
             service_id,
-            domain
+            domain,
         )
         return None
 
@@ -212,7 +212,7 @@ def _validate_provisioning_parameters(decrypted_params: dict[str, Any], service_
 def _check_idempotency(context: ProvisioningContext) -> tuple[bool, dict[str, Any] | None]:
     """
     Check idempotency for provisioning operation.
-    
+
     Returns:
         Tuple of (should_continue, existing_result)
     """
@@ -224,18 +224,18 @@ def _check_idempotency(context: ProvisioningContext) -> tuple[bool, dict[str, An
         else:
             logger.info(f"⏭️ [VirtualminTask] Operation already in progress (key: {context.idempotency_key[:16]}...)")
             return False, {"success": False, "error": "Operation already in progress", "retry": True}
-    
+
     return True, None
 
 
 def _execute_provisioning_transaction(context: ProvisioningContext, server_id: str | None) -> dict[str, Any]:
     """
     Execute provisioning within atomic transaction.
-    
+
     Args:
         context: Provisioning context with validated parameters
         server_id: Optional server ID from decrypted params
-        
+
     Returns:
         Provisioning result dictionary
     """
@@ -247,16 +247,16 @@ def _execute_provisioning_transaction(context: ProvisioningContext, server_id: s
                 IdempotencyManager.clear(context.idempotency_key)
                 return validation_result
             service = validation_result["service"]
-            
+
             # Check for existing account within transaction
             existing_check = _check_existing_virtualmin_account_secure(service)
             if existing_check:
                 IdempotencyManager.complete(context.idempotency_key, existing_check)
                 return existing_check
-                
+
             # Get server for provisioning
             server = _get_provisioning_server_secure(server_id)
-            
+
             # Create execution params
             exec_params = ProvisioningExecutionParams(
                 service=service,
@@ -265,27 +265,27 @@ def _execute_provisioning_transaction(context: ProvisioningContext, server_id: s
                 template=context.template,
                 server=server,
                 correlation_id=context.correlation_id,
-                safe_log_ctx=context.safe_log_ctx
+                safe_log_ctx=context.safe_log_ctx,
             )
-            
+
             # Execute provisioning with rollback capability
             result = _execute_virtualmin_provisioning_with_params(exec_params)
-            
+
             # Update idempotency with result
             if result["success"]:
                 IdempotencyManager.complete(context.idempotency_key, result)
             else:
                 IdempotencyManager.clear(context.idempotency_key)
-            
+
             return result
 
     except Exception as db_error:
         logger.error(f"🔥 [VirtualminTask] Database operation failed: {db_error}")
         IdempotencyManager.clear(context.idempotency_key)
-        
+
         # Classify error for proper handling
         error_type = ProvisioningErrorClassifier.classify_error(str(db_error))
-        
+
         if ProvisioningErrorClassifier.is_retryable(error_type):
             logger.warning(f"🔄 [VirtualminTask] Retryable error, will retry: {db_error}")
             raise db_error  # Trigger retry
@@ -318,7 +318,7 @@ def provision_virtualmin_account(params: VirtualminProvisioningParams | SecureTa
     decrypted_params, service_id, domain = _decrypt_and_extract_parameters(params)
     if decrypted_params is None or service_id is None or domain is None:
         return {"success": False, "error": "Parameter processing failed"}
-    
+
     logger.info(f"🔄 [VirtualminTask] Starting secure provisioning for {domain}")
 
     try:
@@ -326,7 +326,7 @@ def provision_virtualmin_account(params: VirtualminProvisioningParams | SecureTa
         context = _validate_provisioning_parameters(decrypted_params, service_id, domain)
         if context is None:
             return {"success": False, "error": "Validation failed"}
-        
+
         # Step 3: Check idempotency
         should_continue, existing_result = _check_idempotency(context)
         if not should_continue:
@@ -338,14 +338,24 @@ def provision_virtualmin_account(params: VirtualminProvisioningParams | SecureTa
     except Exception as e:
         # Use context values if available, otherwise use original parameters
         try:
-            validated_domain = context.domain if 'context' in locals() and context else (domain or "unknown")
-            validated_service_id = context.service_id if 'context' in locals() and context else (service_id or "unknown")
-            correlation_id = context.correlation_id if 'context' in locals() and context else f"provision_{validated_service_id}_{validated_domain}"
-            safe_log_ctx = context.safe_log_ctx if 'context' in locals() and context else {
-                "service_id": validated_service_id, "domain": validated_domain, "correlation_id": correlation_id
-            }
-            
-            return _handle_critical_provisioning_error_secure(e, validated_domain, validated_service_id, correlation_id, safe_log_ctx)
+            validated_domain = context.domain if "context" in locals() and context else (domain or "unknown")
+            validated_service_id = (
+                context.service_id if "context" in locals() and context else (service_id or "unknown")
+            )
+            correlation_id = (
+                context.correlation_id
+                if "context" in locals() and context
+                else f"provision_{validated_service_id}_{validated_domain}"
+            )
+            safe_log_ctx = (
+                context.safe_log_ctx
+                if "context" in locals() and context
+                else {"service_id": validated_service_id, "domain": validated_domain, "correlation_id": correlation_id}
+            )
+
+            return _handle_critical_provisioning_error_secure(
+                e, validated_domain, validated_service_id, correlation_id, safe_log_ctx
+            )
         except Exception:
             # Fallback for any issues with context access
             return {"success": False, "error": f"Critical error: {e}"}
@@ -359,11 +369,7 @@ def _validate_service_for_provisioning_secure(service_id: str) -> dict[str, Any]
     except Service.DoesNotExist:
         error_msg = f"Service {service_id} not found"
         logger.error(f"❌ [VirtualminTask] {error_msg}")
-        log_security_event_safe(
-            "virtualmin_task_service_not_found",
-            {"service_id": service_id},
-            service_id
-        )
+        log_security_event_safe("virtualmin_task_service_not_found", {"service_id": service_id}, service_id)
         return {"success": False, "error": error_msg}
 
     # Validate service status for provisioning
@@ -371,7 +377,7 @@ def _validate_service_for_provisioning_secure(service_id: str) -> dict[str, Any]
         error_msg = f"Service {service.service_name} is not active (status: {service.status})"
         logger.warning(f"⚠️ [VirtualminTask] {error_msg}")
         return {"success": False, "error": error_msg}
-    
+
     return {"success": True, "service": service}
 
 
@@ -382,10 +388,10 @@ def _validate_service_for_provisioning(service_id: str) -> dict[str, Any]:
 
 def _check_existing_virtualmin_account_secure(service: Service) -> dict[str, Any] | None:
     """Check if VirtualMin account already exists for service with enhanced logging."""
-    if hasattr(service, 'virtualmin_account') and service.virtualmin_account:
+    if hasattr(service, "virtualmin_account") and service.virtualmin_account:
         account = service.virtualmin_account
         logger.info(f"⏭️ [VirtualminTask] VirtualMin account already exists for {service.service_name}")
-        
+
         # Log idempotency event
         log_security_event_safe(
             "virtualmin_task_account_already_exists",
@@ -396,9 +402,9 @@ def _check_existing_virtualmin_account_secure(service: Service) -> dict[str, Any
                 "status": account.status,
             },
             str(service.id),
-            account.domain
+            account.domain,
         )
-        
+
         return {
             "success": True,
             "account_id": str(account.id),
@@ -419,13 +425,13 @@ def _get_provisioning_server_secure(server_id: str | None) -> VirtualminServer |
     if not server_id:
         logger.info("🔄 [VirtualminTask] No specific server requested, will use load balancer")
         return None
-        
+
     try:
         # Validate server ID format first
         validated_server_id = ProvisioningParametersValidator.validate_service_id(server_id)
-        
+
         server = VirtualminServer.objects.get(id=validated_server_id)
-        
+
         # Enhanced server validation
         if not server.can_host_domain():
             logger.warning(f"⚠️ [VirtualminTask] Server {server.hostname} cannot host new domains")
@@ -437,16 +443,16 @@ def _get_provisioning_server_secure(server_id: str | None) -> VirtualminServer |
                     "current_domains": server.current_domains,
                     "max_domains": server.max_domains,
                 },
-                None
+                None,
             )
             return None
-            
+
         if server.status != "active":
             logger.warning(f"⚠️ [VirtualminTask] Server {server.hostname} is not active (status: {server.status})")
             return None
-            
+
         return server
-        
+
     except Exception as e:
         logger.warning(f"⚠️ [VirtualminTask] Server validation failed for {server_id}: {e}")
         return None
@@ -483,16 +489,19 @@ def _execute_virtualmin_provisioning_with_params(exec_params: ProvisioningExecut
             )
         else:
             return _handle_failed_provisioning_secure(
-                result.unwrap_err(), exec_params.service, exec_params.domain, 
-                exec_params.correlation_id, exec_params.safe_log_ctx
+                result.unwrap_err(),
+                exec_params.service,
+                exec_params.domain,
+                exec_params.correlation_id,
+                exec_params.safe_log_ctx,
             )
 
     except Exception as exec_error:
         logger.error(f"🔥 [VirtualminTask] Provisioning execution failed: {exec_error}")
-        
+
         # Classify and handle error
         error_type = ProvisioningErrorClassifier.classify_error(str(exec_error))
-        
+
         log_security_event_safe(
             "virtualmin_provisioning_execution_failed",
             {
@@ -501,9 +510,9 @@ def _execute_virtualmin_provisioning_with_params(exec_params: ProvisioningExecut
                 "context": exec_params.safe_log_ctx,
             },
             str(exec_params.service.id),
-            exec_params.domain
+            exec_params.domain,
         )
-        
+
         if ProvisioningErrorClassifier.is_retryable(error_type):
             raise exec_error  # Trigger retry
         else:
@@ -511,8 +520,8 @@ def _execute_virtualmin_provisioning_with_params(exec_params: ProvisioningExecut
 
 
 def _execute_virtualmin_provisioning(
-    service: Service, 
-    domain: str, 
+    service: Service,
+    domain: str,
     params: VirtualminProvisioningParams,
     server: VirtualminServer | None,
     correlation_id: str,
@@ -523,7 +532,7 @@ def _execute_virtualmin_provisioning(
         "domain": domain,
         "correlation_id": correlation_id,
     }
-    
+
     # Create execution params and use new function
     exec_params = ProvisioningExecutionParams(
         service=service,
@@ -534,7 +543,7 @@ def _execute_virtualmin_provisioning(
         correlation_id=correlation_id,
         safe_log_ctx=safe_log_ctx,
     )
-    
+
     return _execute_virtualmin_provisioning_with_params(exec_params)
 
 
@@ -573,7 +582,7 @@ def _handle_successful_provisioning_secure(
                 },
             ),
         )
-        
+
         # Log security event for successful provisioning
         log_security_event_safe(
             "virtualmin_account_provisioned_successfully",
@@ -585,15 +594,17 @@ def _handle_successful_provisioning_secure(
                 "context": safe_log_ctx,
             },
             str(service.id),
-            account.domain
+            account.domain,
         )
 
         success_ctx = safe_log_ctx.copy()
-        success_ctx.update({
-            "account_id": str(account.id),
-            "server": account.server.hostname,
-            "status": account.status,
-        })
+        success_ctx.update(
+            {
+                "account_id": str(account.id),
+                "server": account.server.hostname,
+                "status": account.status,
+            }
+        )
 
         logger.info(f"✅ [VirtualminTask] Secure provisioning successful: {sanitize_log_parameters(success_ctx)}")
 
@@ -606,11 +617,11 @@ def _handle_successful_provisioning_secure(
             "correlation_id": correlation_id,
             "security_enhanced": True,
         }
-        
+
     except Exception as audit_error:
         # Don't fail the whole operation if audit logging fails
         logger.warning(f"⚠️ [VirtualminTask] Audit logging failed (non-critical): {audit_error}")
-        
+
         return {
             "success": True,
             "account_id": str(account.id),
@@ -623,9 +634,7 @@ def _handle_successful_provisioning_secure(
         }
 
 
-def _handle_successful_provisioning(
-    account: Any, service: Service, correlation_id: str
-) -> dict[str, Any]:
+def _handle_successful_provisioning(account: Any, service: Service, correlation_id: str) -> dict[str, Any]:
     """Legacy function - kept for backward compatibility."""
     safe_log_ctx = {
         "service_id": str(service.id),
@@ -639,16 +648,18 @@ def _handle_failed_provisioning_secure(
     error_msg: str, service: Service, domain: str, correlation_id: str, safe_log_ctx: dict[str, Any]
 ) -> dict[str, Any]:
     """Handle failed provisioning with enhanced security and error classification."""
-    
+
     # Classify error type for proper handling
     error_type = ProvisioningErrorClassifier.classify_error(error_msg)
-    
+
     error_ctx = safe_log_ctx.copy()
-    error_ctx.update({
-        "error": error_msg,
-        "error_type": error_type.value,
-    })
-    
+    error_ctx.update(
+        {
+            "error": error_msg,
+            "error_type": error_type.value,
+        }
+    )
+
     logger.error(f"❌ [VirtualminTask] Secure provisioning failed: {sanitize_log_parameters(error_ctx)}")
 
     try:
@@ -683,7 +694,7 @@ def _handle_failed_provisioning_secure(
                 },
             ),
         )
-        
+
         # Log security event for provisioning failures
         log_security_event_safe(
             "virtualmin_provisioning_failed",
@@ -694,9 +705,9 @@ def _handle_failed_provisioning_secure(
                 "context": error_ctx,
             },
             str(service.id),
-            domain
+            domain,
         )
-        
+
     except Exception as audit_error:
         logger.warning(f"⚠️ [VirtualminTask] Audit logging failed for error case: {audit_error}")
 
@@ -714,9 +725,7 @@ def _handle_failed_provisioning_secure(
     }
 
 
-def _handle_failed_provisioning(
-    error_msg: str, service: Service, domain: str, correlation_id: str
-) -> dict[str, Any]:
+def _handle_failed_provisioning(error_msg: str, service: Service, domain: str, correlation_id: str) -> dict[str, Any]:
     """Legacy function - kept for backward compatibility."""
     safe_log_ctx = {
         "service_id": str(service.id),
@@ -732,14 +741,16 @@ def _handle_critical_provisioning_error_secure(
     """Handle critical provisioning errors with enhanced security and classification."""
     error_msg = str(error)
     error_type = ProvisioningErrorClassifier.classify_error(error_msg)
-    
+
     critical_ctx = safe_log_ctx.copy()
-    critical_ctx.update({
-        "error": error_msg,
-        "error_type": error_type.value,
-        "is_critical": True,
-    })
-    
+    critical_ctx.update(
+        {
+            "error": error_msg,
+            "error_type": error_type.value,
+            "is_critical": True,
+        }
+    )
+
     logger.exception(f"💥 [VirtualminTask] Critical secure provisioning error: {sanitize_log_parameters(critical_ctx)}")
 
     # Log critical error with enhanced security context
@@ -774,7 +785,7 @@ def _handle_critical_provisioning_error_secure(
                 },
             ),
         )
-        
+
         # Log security event for critical errors
         log_security_event_safe(
             "virtualmin_provisioning_critical_error",
@@ -785,9 +796,9 @@ def _handle_critical_provisioning_error_secure(
                 "context": critical_ctx,
             },
             service_id,
-            domain
+            domain,
         )
-        
+
     except Exception as audit_error:
         logger.error(f"🔥 [VirtualminTask] Failed to log critical error audit event: {audit_error}")
 
@@ -1206,35 +1217,37 @@ def provision_virtualmin_account_async(params: VirtualminProvisioningParams | Se
     try:
         # Log task scheduling with sanitized parameters
         if isinstance(params, SecureTaskParameters):
-            logger.info(f"🚀 [VirtualminTask] Scheduling secure provisioning task (hash: {params.parameter_hash[:16]}...)")
+            logger.info(
+                f"🚀 [VirtualminTask] Scheduling secure provisioning task (hash: {params.parameter_hash[:16]}...)"
+            )
         else:
             safe_params = sanitize_log_parameters(dict(params))
             logger.info(f"🚀 [VirtualminTask] Scheduling provisioning task: {safe_params}")
-        
+
         return async_task(
-            "apps.provisioning.virtualmin_tasks.provision_virtualmin_account", 
-            params, 
+            "apps.provisioning.virtualmin_tasks.provision_virtualmin_account",
+            params,
             timeout=TASK_TIME_LIMIT,
-            retry=TASK_MAX_RETRIES
+            retry=TASK_MAX_RETRIES,
         )
-        
+
     except Exception as e:
         logger.error(f"🔥 [VirtualminTask] Failed to schedule provisioning task: {e}")
-        
+
         # Log security event for task scheduling failures
         if isinstance(params, SecureTaskParameters):
             log_security_event_safe(
                 "virtualmin_task_scheduling_failed",
                 {"error": str(e), "parameter_hash": params.parameter_hash[:16] + "..."},
-                None
+                None,
             )
         else:
             log_security_event_safe(
                 "virtualmin_task_scheduling_failed",
                 {"error": str(e), "params": sanitize_log_parameters(dict(params))},
-                params.get("service_id") if isinstance(params, dict) else None
+                params.get("service_id") if isinstance(params, dict) else None,
             )
-        
+
         raise
 
 

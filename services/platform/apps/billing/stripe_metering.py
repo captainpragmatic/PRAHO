@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Result:
     """Result pattern for operations"""
+
     _value: Any
     _error: str | None
 
@@ -61,6 +62,7 @@ def get_stripe():
     """Get configured Stripe module"""
     try:
         import stripe
+
         stripe.api_key = getattr(settings, "STRIPE_SECRET_KEY", None)
         return stripe
     except ImportError:
@@ -80,11 +82,7 @@ class StripeMeterService:
         self.stripe = get_stripe()
 
     def create_meter(
-        self,
-        display_name: str,
-        event_name: str,
-        aggregation_formula: str = "sum",
-        event_time_window: str = "day"
+        self, display_name: str, event_name: str, aggregation_formula: str = "sum", event_time_window: str = "day"
     ) -> Result:
         """
         Create a new Stripe Meter.
@@ -103,22 +101,19 @@ class StripeMeterService:
                 display_name=display_name,
                 event_name=event_name,
                 default_aggregation={"formula": aggregation_formula},
-                customer_mapping={
-                    "event_payload_key": "stripe_customer_id",
-                    "type": "by_id"
-                },
-                value_settings={
-                    "event_payload_key": "value"
-                },
+                customer_mapping={"event_payload_key": "stripe_customer_id", "type": "by_id"},
+                value_settings={"event_payload_key": "value"},
             )
 
             logger.info(f"Created Stripe Meter: {meter.id} ({event_name})")
 
-            return Result.ok({
-                "meter_id": meter.id,
-                "event_name": event_name,
-                "display_name": display_name,
-            })
+            return Result.ok(
+                {
+                    "meter_id": meter.id,
+                    "event_name": event_name,
+                    "display_name": display_name,
+                }
+            )
 
         except self.stripe.error.StripeError as e:
             logger.error(f"Stripe error creating meter: {e}")
@@ -155,10 +150,7 @@ class StripeMeterService:
             return Result.err("Stripe not configured")
 
         try:
-            meter = self.stripe.billing.Meter.modify(
-                meter_id,
-                status="inactive"
-            )
+            meter = self.stripe.billing.Meter.modify(meter_id, status="inactive")
             logger.info(f"Deactivated Stripe Meter: {meter_id}")
             return Result.ok(meter)
         except self.stripe.error.StripeError as e:
@@ -182,7 +174,7 @@ class StripeMeterEventService:
         stripe_customer_id: str,
         value: Decimal | int | float,
         timestamp: datetime | None = None,
-        identifier: str | None = None
+        identifier: str | None = None,
     ) -> Result:
         """
         Report a usage event to Stripe.
@@ -223,17 +215,16 @@ class StripeMeterEventService:
             # Send meter event
             event = self.stripe.billing.MeterEvent.create(**event_params)
 
-            logger.info(
-                f"Reported usage to Stripe: {event_name} = {value} "
-                f"for customer {stripe_customer_id}"
-            )
+            logger.info(f"Reported usage to Stripe: {event_name} = {value} " f"for customer {stripe_customer_id}")
 
-            return Result.ok({
-                "event_id": event.identifier,
-                "event_name": event_name,
-                "value": str(value),
-                "timestamp": timestamp.isoformat() if timestamp else None,
-            })
+            return Result.ok(
+                {
+                    "event_id": event.identifier,
+                    "event_name": event_name,
+                    "value": str(value),
+                    "timestamp": timestamp.isoformat() if timestamp else None,
+                }
+            )
 
         except self.stripe.error.StripeError as e:
             logger.error(f"Stripe error reporting usage: {e}")
@@ -242,10 +233,7 @@ class StripeMeterEventService:
             logger.exception(f"Error reporting usage to Stripe: {e}")
             return Result.err(str(e))
 
-    def report_bulk_usage(
-        self,
-        events: list[dict[str, Any]]
-    ) -> tuple[int, int, list[str]]:
+    def report_bulk_usage(self, events: list[dict[str, Any]]) -> tuple[int, int, list[str]]:
         """
         Report multiple usage events to Stripe.
 
@@ -296,7 +284,7 @@ class StripeSubscriptionMeterService:
         price_id: str,
         meter_id: str | None = None,
         payment_behavior: str = "default_incomplete",
-        trial_days: int | None = None
+        trial_days: int | None = None,
     ) -> Result:
         """
         Create a subscription with metered billing.
@@ -315,32 +303,28 @@ class StripeSubscriptionMeterService:
 
             if trial_days:
                 from datetime import timedelta
+
                 trial_end = timezone.now() + timedelta(days=trial_days)
                 sub_params["trial_end"] = int(trial_end.timestamp())
 
             subscription = self.stripe.Subscription.create(**sub_params)
 
-            logger.info(
-                f"Created metered subscription: {subscription.id} "
-                f"for customer {customer_id}"
-            )
+            logger.info(f"Created metered subscription: {subscription.id} " f"for customer {customer_id}")
 
-            return Result.ok({
-                "subscription_id": subscription.id,
-                "status": subscription.status,
-                "current_period_start": subscription.current_period_start,
-                "current_period_end": subscription.current_period_end,
-            })
+            return Result.ok(
+                {
+                    "subscription_id": subscription.id,
+                    "status": subscription.status,
+                    "current_period_start": subscription.current_period_start,
+                    "current_period_end": subscription.current_period_end,
+                }
+            )
 
         except self.stripe.error.StripeError as e:
             logger.error(f"Stripe error creating subscription: {e}")
             return Result.err(str(e))
 
-    def add_metered_item(
-        self,
-        subscription_id: str,
-        price_id: str
-    ) -> Result:
+    def add_metered_item(self, subscription_id: str, price_id: str) -> Result:
         """Add a metered item to an existing subscription"""
         if not self.stripe:
             return Result.err("Stripe not configured")
@@ -351,23 +335,20 @@ class StripeSubscriptionMeterService:
                 price=price_id,
             )
 
-            logger.info(
-                f"Added metered item {item.id} to subscription {subscription_id}"
-            )
+            logger.info(f"Added metered item {item.id} to subscription {subscription_id}")
 
-            return Result.ok({
-                "subscription_item_id": item.id,
-                "price_id": price_id,
-            })
+            return Result.ok(
+                {
+                    "subscription_item_id": item.id,
+                    "price_id": price_id,
+                }
+            )
 
         except self.stripe.error.StripeError as e:
             return Result.err(str(e))
 
     def get_usage_summary(
-        self,
-        subscription_item_id: str,
-        start_time: datetime | None = None,
-        end_time: datetime | None = None
+        self, subscription_item_id: str, start_time: datetime | None = None, end_time: datetime | None = None
     ) -> Result:
         """
         Get usage summary for a metered subscription item.
@@ -385,22 +366,22 @@ class StripeSubscriptionMeterService:
                 params["ending_before"] = int(end_time.timestamp())
 
             # Get usage record summaries
-            summaries = self.stripe.SubscriptionItem.list_usage_record_summaries(
-                **params
-            )
+            summaries = self.stripe.SubscriptionItem.list_usage_record_summaries(**params)
 
-            return Result.ok({
-                "subscription_item_id": subscription_item_id,
-                "summaries": [
-                    {
-                        "id": s.id,
-                        "total_usage": s.total_usage,
-                        "period_start": s.period.start,
-                        "period_end": s.period.end,
-                    }
-                    for s in summaries.data
-                ],
-            })
+            return Result.ok(
+                {
+                    "subscription_item_id": subscription_item_id,
+                    "summaries": [
+                        {
+                            "id": s.id,
+                            "total_usage": s.total_usage,
+                            "period_start": s.period.start,
+                            "period_end": s.period.end,
+                        }
+                        for s in summaries.data
+                    ],
+                }
+            )
 
         except self.stripe.error.StripeError as e:
             return Result.err(str(e))
@@ -429,9 +410,9 @@ class StripeUsageSyncService:
         from .metering_models import UsageAggregation
 
         try:
-            aggregation = UsageAggregation.objects.select_related(
-                "meter", "customer", "subscription"
-            ).get(id=aggregation_id)
+            aggregation = UsageAggregation.objects.select_related("meter", "customer", "subscription").get(
+                id=aggregation_id
+            )
         except UsageAggregation.DoesNotExist:
             return Result.err(f"Aggregation not found: {aggregation_id}")
 
@@ -471,9 +452,7 @@ class StripeUsageSyncService:
             with transaction.atomic():
                 aggregation.stripe_synced_at = timezone.now()
                 aggregation.stripe_usage_record_id = result.unwrap().get("event_id", "")
-                aggregation.save(update_fields=[
-                    "stripe_synced_at", "stripe_usage_record_id"
-                ])
+                aggregation.save(update_fields=["stripe_synced_at", "stripe_usage_record_id"])
 
             logger.info(f"Synced aggregation {aggregation_id} to Stripe")
 
@@ -491,9 +470,7 @@ class StripeUsageSyncService:
             return Result.err(f"Billing cycle not found: {billing_cycle_id}")
 
         aggregations = UsageAggregation.objects.filter(
-            billing_cycle=billing_cycle,
-            status="rated",
-            stripe_synced_at__isnull=True
+            billing_cycle=billing_cycle, status="rated", stripe_synced_at__isnull=True
         ).select_related("meter")
 
         success_count = 0
@@ -512,17 +489,16 @@ class StripeUsageSyncService:
                 error_count += 1
                 errors.append(f"{agg.meter.name}: {result.error}")
 
-        logger.info(
-            f"Synced billing cycle {billing_cycle_id}: "
-            f"{success_count} succeeded, {error_count} failed"
-        )
+        logger.info(f"Synced billing cycle {billing_cycle_id}: " f"{success_count} succeeded, {error_count} failed")
 
-        return Result.ok({
-            "billing_cycle_id": billing_cycle_id,
-            "success_count": success_count,
-            "error_count": error_count,
-            "errors": errors,
-        })
+        return Result.ok(
+            {
+                "billing_cycle_id": billing_cycle_id,
+                "success_count": success_count,
+                "error_count": error_count,
+                "errors": errors,
+            }
+        )
 
 
 class StripeMeterWebhookHandler:
@@ -580,6 +556,7 @@ class StripeMeterWebhookHandler:
 
         # Update local meter if it exists
         from .metering_models import UsageMeter
+
         try:
             local_meter = UsageMeter.objects.get(stripe_meter_id=meter_data.id)
             local_meter.stripe_meter_event_name = meter_data.event_name
@@ -616,11 +593,13 @@ class StripeMeterWebhookHandler:
             logger.info(f"Invoice {invoice_data.id} has metered usage")
             # Could link to local billing cycle here
 
-        return Result.ok({
-            "handled": True,
-            "invoice_id": invoice_data.id,
-            "has_metered_usage": has_metered,
-        })
+        return Result.ok(
+            {
+                "handled": True,
+                "invoice_id": invoice_data.id,
+                "has_metered_usage": has_metered,
+            }
+        )
 
     def _handle_invoice_finalized(self, event: Any) -> Result:
         """Handle finalized metered invoice"""
@@ -634,12 +613,9 @@ class StripeMeterWebhookHandler:
         if subscription_id:
             try:
                 from .subscription_models import Subscription
-                subscription = Subscription.objects.get(
-                    stripe_subscription_id=subscription_id
-                )
-                billing_cycle = subscription.billing_cycles.filter(
-                    status="invoiced"
-                ).order_by("-period_start").first()
+
+                subscription = Subscription.objects.get(stripe_subscription_id=subscription_id)
+                billing_cycle = subscription.billing_cycles.filter(status="invoiced").order_by("-period_start").first()
 
                 if billing_cycle:
                     billing_cycle.meta["stripe_invoice_id"] = invoice_data.id
@@ -651,7 +627,9 @@ class StripeMeterWebhookHandler:
             except Subscription.DoesNotExist:
                 pass
 
-        return Result.ok({
-            "handled": True,
-            "invoice_id": invoice_data.id,
-        })
+        return Result.ok(
+            {
+                "handled": True,
+                "invoice_id": invoice_data.id,
+            }
+        )

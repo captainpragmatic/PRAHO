@@ -19,7 +19,7 @@ service = models.OneToOneField(
 **Implementation**: ✅ **PRAHO Service is the authoritative parent** - Virtualmin accounts cannot exist without PRAHO services.
 
 ### 2. **Account Creation Flows Through PRAHO**
-**Location**: `virtualmin_service.py` - Lines 65-118  
+**Location**: `virtualmin_service.py` - Lines 65-118
 ```python
 def create_virtualmin_account(
     self,
@@ -70,9 +70,9 @@ def enforce_praho_state(self, account: VirtualminAccount, force: bool = False):
 def rebuild_server_from_praho(self, target_server: VirtualminServer, dry_run: bool = True):
     """
     🚨 NUCLEAR OPTION: Rebuild entire Virtualmin server from PRAHO data.
-    
+
     This is the ultimate expression of PRAHO-as-Source-of-Truth:
-    - Completely ignore current Virtualmin state  
+    - Completely ignore current Virtualmin state
     - Recreate all accounts based on PRAHO database
     - Servers are truly replaceable infrastructure
     """
@@ -85,7 +85,7 @@ def rebuild_server_from_praho(self, target_server: VirtualminServer, dry_run: bo
 def verify_praho_data_integrity(self) -> Result[dict[str, Any], str]:
     """
     Verify PRAHO data integrity for disaster recovery readiness.
-    
+
     Since PRAHO is the source of truth, we must ensure PRAHO data
     is sufficient to rebuild any Virtualmin server from scratch.
     """
@@ -127,7 +127,7 @@ if account.status == "active":
     result = gateway.call("enable-domain", {"domain": account.domain})
 elif account.status == "suspended":
     result = gateway.call("disable-domain", {"domain": account.domain})
-    
+
 # Log enforcement action
 VirtualminDriftRecord.objects.create(
     drift_type="praho_state_enforced",
@@ -141,8 +141,8 @@ VirtualminDriftRecord.objects.create(
 **Location**: `virtualmin_service.py` - VirtualminServerManagementService
 ```python
 def migrate_accounts_to_new_server(
-    self, 
-    from_server: VirtualminServer, 
+    self,
+    from_server: VirtualminServer,
     to_server: VirtualminServer
 ):
     # Recreate account on new server using PRAHO data
@@ -163,7 +163,7 @@ def rebuild_server_from_praho(self, target_server: VirtualminServer):
         server=target_server,
         status__in=["active", "suspended"]
     ).select_related('service', 'service__customer')
-    
+
     # Recreate each account using PRAHO as authority
     for account in praho_accounts:
         result = provisioning_service.create_virtualmin_account(
@@ -190,11 +190,11 @@ def rebuild_server_from_praho(self, target_server: VirtualminServer):
 
 ## 🎉 **Conclusion**
 
-**YES** - The PRAHO-as-Source-of-Truth design principle has been **comprehensively factored in** to the Virtualmin integration implementation. 
+**YES** - The PRAHO-as-Source-of-Truth design principle has been **comprehensively factored in** to the Virtualmin integration implementation.
 
 ### Key Strengths:
 1. **Complete data authority** - PRAHO controls all account lifecycle
-2. **Server independence** - No clustering dependencies 
+2. **Server independence** - No clustering dependencies
 3. **Drift detection & resolution** - Automated conflict resolution
 4. **Disaster recovery** - Complete server rebuild from PRAHO data
 5. **"Cattle, not pets"** - Servers are truly replaceable infrastructure

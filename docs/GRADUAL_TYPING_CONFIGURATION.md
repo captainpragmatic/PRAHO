@@ -6,7 +6,7 @@ This document outlines the gradual typing strategy implemented for the PRAHO Pla
 
 Our gradual typing configuration is designed to:
 - **Enable type adoption without blocking development** - Relaxed global settings
-- **Prevent type debt accumulation** - Progressive strictness per app/module  
+- **Prevent type debt accumulation** - Progressive strictness per app/module
 - **Support Django patterns** - Proper django-stubs integration
 - **Provide clear adoption roadmap** - Week-by-week rollout plan
 
@@ -35,7 +35,7 @@ The configuration uses targeted `[[tool.mypy.overrides]]` sections to enforce in
 
 **Target Modules:**
 - `apps.common.types` - Type definitions
-- `apps.common.validators` - Validation functions  
+- `apps.common.validators` - Validation functions
 - `apps.common.utils` - Utility functions
 
 **Strictness Level:** Maximum
@@ -109,7 +109,7 @@ ignore_missing_imports = true  # Many third-party integrations
 
 **Target Modules:**
 - `apps.*.services` - Business logic layer
-- `apps.*.repos` - Data access layer  
+- `apps.*.repos` - Data access layer
 - `apps.*.gateways` - External integration layer
 
 **Strictness Level:** High
@@ -118,7 +118,7 @@ disallow_untyped_defs = true
 check_untyped_defs = true
 ```
 
-**Rationale:** 
+**Rationale:**
 - Service layer benefits most from type safety
 - Clean architecture boundaries need clear contracts
 - Future microservices extraction points
@@ -142,7 +142,7 @@ ignore_missing_model_attributes = true  # Allow missing Django model attributes
 def get_customer_name(customer_id):
     return Customer.objects.get(id=customer_id).name
 
-# After  
+# After
 def get_customer_name(customer_id: int) -> str:
     return Customer.objects.get(id=customer_id).name
 ```
@@ -186,7 +186,7 @@ mypy apps/common/types.py
    ```python
    # Before
    def calculate_total(items, tax_rate):
-   
+
    # After
    def calculate_total(items: list[dict], tax_rate: float) -> Decimal:
    ```
@@ -201,9 +201,9 @@ mypy apps/common/types.py
    ```python
    from typing import Optional
    from django.contrib.auth import get_user_model
-   
+
    User = get_user_model()
-   
+
    def find_user_by_email(email: str) -> Optional[User]:
        try:
            return User.objects.get(email=email)
@@ -241,7 +241,7 @@ result = some_external_lib.complex_function()  # type: ignore[no-untyped-call]
 
 ### Week 3-4: Business Logic Apps
 - [ ] Enable type checking for `apps.customers.*`
-- [ ] Enable type checking for `apps.tickets.*` 
+- [ ] Enable type checking for `apps.tickets.*`
 - [ ] Enable type checking for `apps.orders.*`
 - [ ] Enable type checking for `apps.products.*`
 

@@ -1,7 +1,7 @@
 # ADR-0007: Function-Level Cross-App Imports for Circular Import Prevention
 
-**Date**: 2025-08-26  
-**Status**: Accepted  
+**Date**: 2025-08-26
+**Status**: Accepted
 **Context**: PRAHO Platform Django app architecture and import management
 
 ## Context and Problem Statement
@@ -35,7 +35,7 @@ def export_user_data(user):
     tickets = Ticket.objects.filter(created_by=user)
 ```
 
-**Pros**: Follows Python import conventions, clean linting  
+**Pros**: Follows Python import conventions, clean linting
 **Cons**: High risk of circular imports in Django apps, fragile import ordering, prevents modular architecture
 
 ### Option 2: String references only (Django lazy loading)
@@ -48,7 +48,7 @@ from django.apps import apps
 Ticket = apps.get_model('tickets', 'Ticket')
 ```
 
-**Pros**: No circular imports, very safe  
+**Pros**: No circular imports, very safe
 **Cons**: No type safety, no IDE support, runtime overhead, less readable
 
 ### Option 3: Function-level imports with TYPE_CHECKING pattern
@@ -63,7 +63,7 @@ def export_user_data(user) -> dict:
     tickets: list['Ticket'] = list(Ticket.objects.filter(created_by=user))
 ```
 
-**Pros**: Type safety + runtime safety, follows Django patterns, supports strategic seams  
+**Pros**: Type safety + runtime safety, follows Django patterns, supports strategic seams
 **Cons**: Requires linting configuration, slightly more verbose
 
 ### Option 4: Hybrid approach with apps.get_model fallback
@@ -76,7 +76,7 @@ def get_model_safe(app_label: str, model_name: str):
         return None
 ```
 
-**Pros**: Very defensive, handles optional apps  
+**Pros**: Very defensive, handles optional apps
 **Cons**: Complex, runtime overhead, limited type safety
 
 ## Decision
@@ -100,17 +100,17 @@ class DataExportService:
     def export_user_data(self, user, scope: dict) -> dict:
         """Export user data with proper typing support"""
         data = {'user_id': user.id}
-        
+
         # Runtime import prevents circular dependency
         if scope.get('include_tickets', True):
             from apps.tickets.models import Ticket  # noqa: PLC0415
             tickets: list['Ticket'] = list(Ticket.objects.filter(created_by=user))
-            
+
             data['tickets'] = [
                 {'id': t.id, 'subject': t.subject, 'status': t.status}
                 for t in tickets
             ]
-        
+
         return data
 ```
 
@@ -124,7 +124,7 @@ def export_user_data(user) -> dict:
     from apps.tickets.models import Ticket  # noqa: PLC0415 - Circular import prevention
     tickets: list['Ticket'] = list(Ticket.objects.filter(created_by=user))
 
-# ✅ Safe imports moved to top-level (no longer flagged)  
+# ✅ Safe imports moved to top-level (no longer flagged)
 from django.db import transaction
 from io import BytesIO
 from django.contrib.auth import logout
@@ -238,7 +238,7 @@ from reportlab.pdfgen import canvas
 
 ### Quality Gates:
 - ❌ **Function-level imports without noqa comments** fail CI
-- ✅ **Strategic noqa comments with clear explanations** pass review  
+- ✅ **Strategic noqa comments with clear explanations** pass review
 - 🔧 **Safe imports moved to module-level** improve performance
 
 ## Related Decisions
@@ -250,11 +250,11 @@ from reportlab.pdfgen import canvas
 ## Expert References
 
 - Django Forum: "Best Practices for Avoiding Circular Imports" (2024)
-- Stack Overflow: "Django inter-app imports accepted practices" 
+- Stack Overflow: "Django inter-app imports accepted practices"
 - Django Documentation: "Lazy relationship references" and `apps.get_model()`
 - Python typing PEP 563: Forward references and TYPE_CHECKING
 
 ---
 
-**Tags**: architecture, django, imports, type-safety, circular-dependencies  
+**Tags**: architecture, django, imports, type-safety, circular-dependencies
 **Updated**: Initial version

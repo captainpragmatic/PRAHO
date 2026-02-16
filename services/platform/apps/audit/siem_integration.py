@@ -133,10 +133,7 @@ class SIEMEvent:
             if v
         )
 
-        return (
-            f"CEF:0|PRAHO|Platform|1.0|{self.event_type}|"
-            f"{self.description[:100]}|{self.severity}|{extension}"
-        )
+        return f"CEF:0|PRAHO|Platform|1.0|{self.event_type}|" f"{self.description[:100]}|{self.severity}|{extension}"
 
     def to_syslog(self) -> str:
         """Convert to syslog RFC 5424 format."""
@@ -255,18 +252,13 @@ class SIEMIntegrationService:
             praho_requires_review=audit_event.requires_review,
         )
 
-    def _format_for_provider(
-        self, events: list[SIEMEvent]
-    ) -> tuple[str, dict[str, str]]:
+    def _format_for_provider(self, events: list[SIEMEvent]) -> tuple[str, dict[str, str]]:
         """Format events for specific SIEM provider."""
         headers: dict[str, str] = {}
 
         if self.config.provider == SIEMProvider.SPLUNK:
             # Splunk HEC format
-            payload = "\n".join(
-                json.dumps({"event": event.to_dict(), "time": event.event_time})
-                for event in events
-            )
+            payload = "\n".join(json.dumps({"event": event.to_dict(), "time": event.event_time}) for event in events)
             return payload, headers
 
         elif self.config.provider == SIEMProvider.ELASTICSEARCH:
@@ -342,15 +334,12 @@ class SIEMIntegrationService:
         filtered_events = [
             event
             for event in audit_events
-            if SIEMSeverity.from_audit_severity(event.severity).value
-            >= min_severity_value
+            if SIEMSeverity.from_audit_severity(event.severity).value >= min_severity_value
         ]
 
         # Filter sensitive events if not included
         if not self.config.include_sensitive:
-            filtered_events = [
-                event for event in filtered_events if not event.is_sensitive
-            ]
+            filtered_events = [event for event in filtered_events if not event.is_sensitive]
 
         if not filtered_events:
             logger.debug("No events to send after filtering")

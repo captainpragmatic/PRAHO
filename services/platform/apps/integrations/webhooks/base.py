@@ -229,7 +229,9 @@ class BaseWebhookProcessor(ABC):
                     event_id=event_id,
                     event_type=event_type,
                     payload=context.payload,
-                    signature_hash=(hashlib.sha256(context.signature.encode()).hexdigest() if context.signature else ""),
+                    signature_hash=(
+                        hashlib.sha256(context.signature.encode()).hexdigest() if context.signature else ""
+                    ),
                     ip_address=context.ip_address,
                     user_agent=context.user_agent or "",  # Convert None to empty string for TextField
                     headers=self._sanitize_headers(context.headers),
@@ -260,9 +262,7 @@ class BaseWebhookProcessor(ABC):
             # This is expected behavior - treat as duplicate
             logger.info(f"🔄 Duplicate webhook {self.source_name}:{event_id} detected via constraint - skipping")
             existing = WebhookEvent.objects.get(source=self.source_name, event_id=event_id)
-            return Ok(WebhookProcessingResult.success_result(
-                f"⏭️ Duplicate webhook skipped: {event_id}", existing
-            ))
+            return Ok(WebhookProcessingResult.success_result(f"⏭️ Duplicate webhook skipped: {event_id}", existing))
 
     def extract_event_id(self, payload: dict[str, Any]) -> str | None:
         """🔍 Extract unique event ID from payload - override in subclasses"""

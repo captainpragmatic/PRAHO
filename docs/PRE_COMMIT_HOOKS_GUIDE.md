@@ -186,7 +186,7 @@ make type-coverage
 # Generate JSON report
 make type-coverage
 
-# View markdown report  
+# View markdown report
 .venv/bin/python scripts/type_coverage_report.py --markdown
 ```
 

@@ -286,4 +286,3 @@ class TicketInternalCommentsSecurityTest(TestCase):
         # Check role badges
         self.assertContains(response, 'Customer')  # Customer badge
         self.assertContains(response, 'Support')   # Support badge
-

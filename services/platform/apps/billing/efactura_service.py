@@ -65,6 +65,7 @@ ANAF_SPV_ENDPOINTS = {
     "test": "https://api.anaf.ro/test/FCTEL/rest",
 }
 
+
 # e-Factura submission states
 class EFacturaStatus(StrEnum):
     PENDING = "pending"
@@ -239,10 +240,7 @@ class EFacturaXMLGenerator:
         """Create the root Invoice element with namespaces."""
         root = ET.Element(
             "{urn:oasis:names:specification:ubl:schema:xsd:Invoice-2}Invoice",
-            attrib={
-                f"xmlns:{prefix}": uri
-                for prefix, uri in UBL_NAMESPACES.items()
-            },
+            attrib={f"xmlns:{prefix}": uri for prefix, uri in UBL_NAMESPACES.items()},
         )
         root.set("xmlns", UBL_NAMESPACES["ubl"])
         return root
@@ -255,9 +253,9 @@ class EFacturaXMLGenerator:
         ET.SubElement(root, f"{{{cbc}}}UBLVersionID").text = "2.1"
 
         # Customization ID (Romanian CIUS-RO)
-        ET.SubElement(root, f"{{{cbc}}}CustomizationID").text = (
-            "urn:cen.eu:en16931:2017#compliant#urn:efactura.mfinante.ro:CIUS-RO:1.0.1"
-        )
+        ET.SubElement(
+            root, f"{{{cbc}}}CustomizationID"
+        ).text = "urn:cen.eu:en16931:2017#compliant#urn:efactura.mfinante.ro:CIUS-RO:1.0.1"
 
         # Invoice ID
         ET.SubElement(root, f"{{{cbc}}}ID").text = invoice.number

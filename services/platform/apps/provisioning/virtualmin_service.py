@@ -274,11 +274,11 @@ class VirtualminProvisioningService:
                     except Exception as db_error:
                         # Database update failed - rollback Virtualmin domain creation
                         logger.error(f"🔥 [VirtualminService] Database update failed for {account.domain}: {db_error}")
-                        rollback_status, rollback_details = self._execute_rollback(rollback_operations, gateway, account)
+                        rollback_status, rollback_details = self._execute_rollback(
+                            rollback_operations, gateway, account
+                        )
                         if rollback_status == "failed":
-                            logger.error(
-                                f"🚨 [VirtualminService] CRITICAL: Rollback failed for {account.domain}"
-                            )
+                            logger.error(f"🚨 [VirtualminService] CRITICAL: Rollback failed for {account.domain}")
 
                         job.mark_failed(
                             f"Database update failed: {db_error}",
@@ -463,7 +463,9 @@ class VirtualminProvisioningService:
                         op_result["status"] = "skipped"
                         op_result["reason"] = f"Unknown operation type: {operation['operation']}"
 
-                    logger.info(f"✅ [VirtualminService] Rolled back: {operation.get('description', operation['operation'])}")
+                    logger.info(
+                        f"✅ [VirtualminService] Rolled back: {operation.get('description', operation['operation'])}"
+                    )
 
                 except Exception as op_error:
                     logger.error(
@@ -583,8 +585,12 @@ class VirtualminProvisioningService:
 
                         except Exception as db_error:
                             # Database update failed - rollback the API operation
-                            logger.error(f"🔥 [VirtualminService] DB update failed for suspend {account.domain}: {db_error}")
-                            rollback_status, rollback_details = self._execute_rollback(rollback_operations, gateway, account)
+                            logger.error(
+                                f"🔥 [VirtualminService] DB update failed for suspend {account.domain}: {db_error}"
+                            )
+                            rollback_status, rollback_details = self._execute_rollback(
+                                rollback_operations, gateway, account
+                            )
 
                             job.mark_failed(
                                 f"Database update failed: {db_error}",
@@ -650,7 +656,9 @@ class VirtualminProvisioningService:
                     logger.info(f"✅ [VirtualminService] Returning cached unsuspend result for {account.domain}")
                     return Ok(True)
                 else:
-                    logger.warning(f"⚠️ [VirtualminService] Unsuspend operation already in progress for {account.domain}")
+                    logger.warning(
+                        f"⚠️ [VirtualminService] Unsuspend operation already in progress for {account.domain}"
+                    )
                     return Err("Operation already in progress")
 
             gateway = self._get_gateway(account.server)
@@ -698,8 +706,12 @@ class VirtualminProvisioningService:
 
                         except Exception as db_error:
                             # Database update failed - rollback the API operation
-                            logger.error(f"🔥 [VirtualminService] DB update failed for unsuspend {account.domain}: {db_error}")
-                            rollback_status, rollback_details = self._execute_rollback(rollback_operations, gateway, account)
+                            logger.error(
+                                f"🔥 [VirtualminService] DB update failed for unsuspend {account.domain}: {db_error}"
+                            )
+                            rollback_status, rollback_details = self._execute_rollback(
+                                rollback_operations, gateway, account
+                            )
 
                             job.mark_failed(
                                 f"Database update failed: {db_error}",
@@ -861,7 +873,9 @@ class VirtualminProvisioningService:
                             except Exception as revert_error:
                                 logger.error(f"🔥 [VirtualminService] Failed to revert server stats: {revert_error}")
 
-                            return Err(f"Deletion failed during database update (CRITICAL: domain already deleted): {db_error}")
+                            return Err(
+                                f"Deletion failed during database update (CRITICAL: domain already deleted): {db_error}"
+                            )
 
                     else:
                         error_msg = response.data.get("error", "Deletion failed")

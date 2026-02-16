@@ -32,7 +32,7 @@
             <div class="ml-4">
                 <h2 class="text-lg font-bold text-slate-100">{{ account.domain }}</h2>
                 <p class="text-sm text-slate-400">
-                    {% trans "Server:" %} {{ account.server.name }} | 
+                    {% trans "Server:" %} {{ account.server.name }} |
                     {% trans "Status:" %} {% badge account.get_status_display variant="success" %}
                 </p>
             </div>
@@ -47,11 +47,11 @@
         <div class="lg:col-span-2">
             <form method="post" action="{{ form_action }}" class="bg-slate-800 rounded-lg border border-slate-700">
                 {% csrf_token %}
-                
+
                 <div class="px-6 py-4 border-b border-slate-700">
                     <h2 class="text-lg font-semibold text-slate-100">{% trans "Backup Configuration" %}</h2>
                 </div>
-                
+
                 <div class="px-6 py-6 space-y-6">
                     <!-- Backup Type Selection -->
                     <div>

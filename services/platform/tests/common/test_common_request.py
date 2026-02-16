@@ -25,7 +25,7 @@ class TestSecureIPDetection(TestCase):
         self.request.META = {
             'REMOTE_ADDR': '203.0.113.10'
         }
-        
+
         result = get_safe_client_ip(self.request)
         self.assertEqual(result, '203.0.113.10')
 
@@ -33,7 +33,7 @@ class TestSecureIPDetection(TestCase):
         """Test fallback to 127.0.0.1 when no IP detection possible."""
         # Empty META
         self.request.META = {}
-        
+
         result = get_safe_client_ip(self.request)
         self.assertEqual(result, '127.0.0.1')
 
@@ -42,7 +42,7 @@ class TestSecureIPDetection(TestCase):
         self.request.META = {
             'REMOTE_ADDR': ''
         }
-        
+
         result = get_safe_client_ip(self.request)
         self.assertEqual(result, '127.0.0.1')
 
@@ -54,7 +54,7 @@ class TestSecureIPDetection(TestCase):
             'HTTP_X_FORWARDED_FOR': '203.0.113.50',  # Should be ignored
             'HTTP_X_REAL_IP': '203.0.113.60'         # Should be ignored
         }
-        
+
         result = get_safe_client_ip(self.request)
         # Should use REMOTE_ADDR only, ignoring proxy headers
         self.assertEqual(result, '127.0.0.1')
@@ -66,19 +66,19 @@ class TestSecureIPDetection(TestCase):
             'REMOTE_ADDR': '10.0.1.5',  # Trusted proxy IP
             'HTTP_X_FORWARDED_FOR': '203.0.113.100',  # Client IP from trusted proxy
         }
-        
+
         result = get_safe_client_ip(self.request)
         # Should extract client IP from proxy header
         self.assertEqual(result, '203.0.113.100')
 
-    @override_settings(IPWARE_TRUSTED_PROXY_LIST=['10.0.0.0/8'])  
+    @override_settings(IPWARE_TRUSTED_PROXY_LIST=['10.0.0.0/8'])
     def test_production_untrusted_proxy_blocked(self):
         """Test production environment blocks untrusted proxy headers."""
         self.request.META = {
             'REMOTE_ADDR': '203.0.113.200',  # Untrusted proxy IP
             'HTTP_X_FORWARDED_FOR': '203.0.113.300',  # Potentially spoofed
         }
-        
+
         result = get_safe_client_ip(self.request)
         # Should use REMOTE_ADDR only, blocking untrusted proxy
         self.assertEqual(result, '203.0.113.200')
@@ -91,16 +91,16 @@ class TestSecureIPDetection(TestCase):
             'REMOTE_ADDR': '172.16.5.10',
             'HTTP_X_FORWARDED_FOR': '203.0.113.150',
         }
-        
+
         result = get_safe_client_ip(self.request)
         self.assertEqual(result, '203.0.113.150')
-        
+
         # Test second range (10.x.x.x)
         self.request.META = {
             'REMOTE_ADDR': '10.20.30.40',
             'HTTP_X_FORWARDED_FOR': '203.0.113.160',
         }
-        
+
         result = get_safe_client_ip(self.request)
         self.assertEqual(result, '203.0.113.160')
 
@@ -111,7 +111,7 @@ class TestSecureIPDetection(TestCase):
             'REMOTE_ADDR': '10.0.1.5',  # Trusted proxy
             'HTTP_X_FORWARDED_FOR': '203.0.113.180, 192.168.1.100, 10.0.1.5',
         }
-        
+
         result = get_safe_client_ip(self.request)
         # Should return first IP in chain (original client)
         self.assertEqual(result, '203.0.113.180')
@@ -123,7 +123,7 @@ class TestSecureIPDetection(TestCase):
             'REMOTE_ADDR': '10.0.1.5',  # Trusted proxy
             'HTTP_X_REAL_IP': '203.0.113.190',  # Client IP
         }
-        
+
         result = get_safe_client_ip(self.request)
         self.assertEqual(result, '203.0.113.190')
 
@@ -132,7 +132,7 @@ class TestSecureIPDetection(TestCase):
         self.request.META = {
             'REMOTE_ADDR': '2001:db8::1'
         }
-        
+
         result = get_safe_client_ip(self.request)
         self.assertEqual(result, '2001:db8::1')
 
@@ -143,7 +143,7 @@ class TestSecureIPDetection(TestCase):
             'REMOTE_ADDR': '2001:db8::5',  # Trusted IPv6 proxy
             'HTTP_X_FORWARDED_FOR': '2001:db8:85a3::8a2e:370:7334',
         }
-        
+
         result = get_safe_client_ip(self.request)
         self.assertEqual(result, '2001:db8:85a3::8a2e:370:7334')
 
@@ -154,7 +154,7 @@ class TestSecureIPDetection(TestCase):
             'REMOTE_ADDR': '10.0.1.5',  # Trusted proxy
             'HTTP_X_FORWARDED_FOR': '\x00\x01\x02invalid',  # Malformed header
         }
-        
+
         # Should fall back to REMOTE_ADDR gracefully
         with override_settings(IPWARE_TRUSTED_PROXY_LIST=['10.0.0.0/8']):
             result = get_safe_client_ip(self.request)
@@ -167,7 +167,7 @@ class TestSecureIPDetection(TestCase):
             'HTTP_X_FORWARDED_FOR': '',  # Empty header
             'HTTP_X_REAL_IP': '   ',     # Whitespace only
         }
-        
+
         # Should fall back to REMOTE_ADDR when headers are empty
         with override_settings(IPWARE_TRUSTED_PROXY_LIST=['10.0.0.0/8']):
             result = get_safe_client_ip(self.request)
@@ -180,7 +180,7 @@ class TestSecureIPDetection(TestCase):
             'HTTP_X_FORWARDED_FOR': '"><script>alert("xss")</script>',
             'HTTP_X_REAL_IP': '127.0.0.1; DROP TABLE users;',
         }
-        
+
         # With empty trust list, should ignore malicious headers
         with override_settings(IPWARE_TRUSTED_PROXY_LIST=[]):
             result = get_safe_client_ip(self.request)
@@ -193,7 +193,7 @@ class TestSecureIPDetection(TestCase):
             'REMOTE_ADDR': '127.0.0.1',
             'HTTP_X_FORWARDED_FOR': '203.0.113.220',
         }
-        
+
         result = get_safe_client_ip(self.request)
         self.assertEqual(result, '203.0.113.220')
 
@@ -210,19 +210,19 @@ class TestIPDetectionWithoutIPware(TestCase):
         """Test fallback implementation when ipware is not installed."""
         # This would test the ImportError fallback, but since ipware is already
         # imported, we'll test the behavior through our fallback function
-        
+
         # Create a mock request
         request = Mock()
         request.META = {'REMOTE_ADDR': '203.0.113.99'}
-        
-        # Test our fallback function directly  
+
+        # Test our fallback function directly
         from apps.common.request_ip import get_safe_client_ip
-        
+
         # Mock the ipware function to simulate ImportError scenario
         with patch('apps.common.request_ip.get_client_ip') as mock_func:
             # Simulate the fallback function behavior
             mock_func.return_value = ('203.0.113.99', False)
-            
+
             result = get_safe_client_ip(request)
             self.assertEqual(result, '203.0.113.99')
 
@@ -241,19 +241,19 @@ class TestRateLimitingIntegration(TestCase):
             'REMOTE_ADDR': '203.0.113.30',
             'HTTP_X_FORWARDED_FOR': '203.0.113.99',  # Should be ignored
         }
-        
+
         ip = get_safe_client_ip(self.request)
         # Rate limiting should use REMOTE_ADDR to prevent bypass
         self.assertEqual(ip, '203.0.113.30')
 
-    @override_settings(IPWARE_TRUSTED_PROXY_LIST=['10.0.0.0/8'])  
+    @override_settings(IPWARE_TRUSTED_PROXY_LIST=['10.0.0.0/8'])
     def test_rate_limiting_uses_real_ip_production(self):
         """Test rate limiting uses real client IP in production."""
         self.request.META = {
             'REMOTE_ADDR': '10.0.1.10',  # Load balancer IP
             'HTTP_X_FORWARDED_FOR': '203.0.113.40',  # Real client IP
         }
-        
+
         ip = get_safe_client_ip(self.request)
         # Should extract real client IP for accurate rate limiting
         self.assertEqual(ip, '203.0.113.40')
@@ -263,7 +263,7 @@ class TestAuditLoggingIntegration(TestCase):
     """Test IP detection integration with audit logging."""
 
     def setUp(self):
-        """Set up test fixtures.""" 
+        """Set up test fixtures."""
         self.request = HttpRequest()
 
     @override_settings(IPWARE_TRUSTED_PROXY_LIST=[])
@@ -273,7 +273,7 @@ class TestAuditLoggingIntegration(TestCase):
             'REMOTE_ADDR': '203.0.113.50',
             'HTTP_X_FORWARDED_FOR': '203.0.113.51',  # Potentially spoofed
         }
-        
+
         ip = get_safe_client_ip(self.request)
         # Audit logs should use REMOTE_ADDR to prevent IP spoofing in logs
         self.assertEqual(ip, '203.0.113.50')
@@ -285,8 +285,8 @@ class TestAuditLoggingIntegration(TestCase):
             'REMOTE_ADDR': '192.168.1.100',  # Internal load balancer
             'HTTP_X_FORWARDED_FOR': '203.0.113.60',  # External client
         }
-        
-        ip = get_safe_client_ip(self.request)  
+
+        ip = get_safe_client_ip(self.request)
         # Should log the real external client IP
         self.assertEqual(ip, '203.0.113.60')
 
@@ -306,7 +306,7 @@ class TestSecurityScenarios(TestCase):
             'HTTP_X_FORWARDED_FOR': '127.0.0.1',  # Attacker trying to spoof localhost
             'HTTP_X_REAL_IP': '10.0.0.1',         # Attacker trying to spoof internal IP
         }
-        
+
         ip = get_safe_client_ip(self.request)
         # Should ignore spoofed headers and use REMOTE_ADDR
         self.assertEqual(ip, '203.0.113.70')
@@ -317,9 +317,9 @@ class TestSecurityScenarios(TestCase):
         # Attacker from untrusted IP trying to spoof different IP
         self.request.META = {
             'REMOTE_ADDR': '203.0.113.80',  # Untrusted IP
-            'HTTP_X_FORWARDED_FOR': '203.0.113.81',  # Trying to appear as different IP  
+            'HTTP_X_FORWARDED_FOR': '203.0.113.81',  # Trying to appear as different IP
         }
-        
+
         ip = get_safe_client_ip(self.request)
         # Should use actual connection IP, preventing rate limit bypass
         self.assertEqual(ip, '203.0.113.80')
@@ -331,7 +331,7 @@ class TestSecurityScenarios(TestCase):
             'REMOTE_ADDR': '10.0.1.100',  # Legitimate load balancer
             'HTTP_X_FORWARDED_FOR': '203.0.113.90',  # Real client
         }
-        
+
         ip = get_safe_client_ip(self.request)
         # Should extract real client IP from trusted proxy
         self.assertEqual(ip, '203.0.113.90')
@@ -343,7 +343,7 @@ class TestSecurityScenarios(TestCase):
             'REMOTE_ADDR': '10.0.1.200',  # Final proxy (trusted)
             'HTTP_X_FORWARDED_FOR': '203.0.113.100, 192.168.1.50, 10.0.1.200',
         }
-        
+
         ip = get_safe_client_ip(self.request)
         # Should return the original client IP (first in chain)
         self.assertEqual(ip, '203.0.113.100')

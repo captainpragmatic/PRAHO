@@ -145,10 +145,7 @@ class CostTrackingService:
             existing.bandwidth_cost = bandwidth_cost
             existing.storage_cost = storage_cost
             existing.save()
-            logger.info(
-                f"[Cost] Updated cost record for {deployment.hostname}: "
-                f"{total_cost:.4f} EUR"
-            )
+            logger.info(f"[Cost] Updated cost record for {deployment.hostname}: " f"{total_cost:.4f} EUR")
             return Ok(existing)
 
         # Create new record
@@ -187,15 +184,20 @@ class CostTrackingService:
         from apps.infrastructure.models import NodeDeployment
 
         # Get all deployments that were active during this period
-        active_deployments = NodeDeployment.objects.filter(
-            status__in=["completed", "stopped", "destroyed"],
-        ).filter(
-            # Started before period end
-            models.Q(started_at__lte=period_end) | models.Q(started_at__isnull=True),
-        ).filter(
-            # Not destroyed before period start
-            models.Q(destroyed_at__gte=period_start) | models.Q(destroyed_at__isnull=True),
-        ).select_related("node_size")
+        active_deployments = (
+            NodeDeployment.objects.filter(
+                status__in=["completed", "stopped", "destroyed"],
+            )
+            .filter(
+                # Started before period end
+                models.Q(started_at__lte=period_end) | models.Q(started_at__isnull=True),
+            )
+            .filter(
+                # Not destroyed before period start
+                models.Q(destroyed_at__gte=period_start) | models.Q(destroyed_at__isnull=True),
+            )
+            .select_related("node_size")
+        )
 
         results = []
         for deployment in active_deployments:

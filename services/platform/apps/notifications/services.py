@@ -1015,7 +1015,9 @@ class EmailService:
             "invoice_number": invoice.number,
             "total_amount": str(invoice.total),
             "currency": invoice.currency.code if invoice.currency else "RON",
-            "paid_date": invoice.paid_at.strftime("%Y-%m-%d") if invoice.paid_at else timezone.now().strftime("%Y-%m-%d"),
+            "paid_date": invoice.paid_at.strftime("%Y-%m-%d")
+            if invoice.paid_at
+            else timezone.now().strftime("%Y-%m-%d"),
             "invoice_url": f"{settings.COMPANY_WEBSITE}/billing/invoices/{invoice.id}/",
         }
 
@@ -1425,9 +1427,7 @@ class EmailPreferenceService:
         # Check against known template keys to validate
         token_valid = False
         for template_key in ["marketing", "newsletter", "all"]:
-            expected_token = hashlib.sha256(
-                f"{email}:{template_key}:{settings.SECRET_KEY}".encode()
-            ).hexdigest()[:32]
+            expected_token = hashlib.sha256(f"{email}:{template_key}:{settings.SECRET_KEY}".encode()).hexdigest()[:32]
             # Use timing-safe comparison to prevent timing attacks
             if hmac.compare_digest(token, expected_token):
                 token_valid = True

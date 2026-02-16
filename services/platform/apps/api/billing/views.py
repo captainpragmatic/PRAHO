@@ -32,13 +32,14 @@ logger = logging.getLogger(__name__)
 class MiddlewareUserAuthentication(BaseAuthentication):
     """
     🔒 Pass-through authentication that preserves middleware-set user.
-    
+
     This allows DRF to work with users set by our HMAC middleware
     without overriding them with AnonymousUser.
     """
+
     def authenticate(self, request: HttpRequest) -> tuple | None:
         # If middleware has set a user (not AnonymousUser), preserve it
-        if hasattr(request, 'user') and request.user and not request.user.is_anonymous:
+        if hasattr(request, "user") and request.user and not request.user.is_anonymous:
             return (request.user, None)
         # Otherwise, no authentication (will be AnonymousUser)
         return None
@@ -48,16 +49,17 @@ class MiddlewareUserAuthentication(BaseAuthentication):
 # CUSTOMER INVOICE LIST API 📋
 # ===============================================================================
 
-@api_view(['POST'])
+
+@api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
-@require_customer_authentication  
+@require_customer_authentication
 def customer_invoices_api(request: HttpRequest, customer: Customer) -> Response:
     """
     📋 Customer Invoice List API
-    
+
     POST /api/billing/invoices/
-    
+
     Request Body (HMAC-signed):
     {
         "customer_id": 123,
@@ -67,7 +69,7 @@ def customer_invoices_api(request: HttpRequest, customer: Customer) -> Response:
         "page": 1,         // optional pagination
         "limit": 20        // optional limit
     }
-    
+
     Response:
     {
         "success": true,
@@ -94,7 +96,7 @@ def customer_invoices_api(request: HttpRequest, customer: Customer) -> Response:
             "has_previous": false
         }
     }
-    
+
     Security Features:
     - HMAC authentication required (customer passed by decorator)
     - Customer ID from signed request body (no URL enumeration)
@@ -102,72 +104,75 @@ def customer_invoices_api(request: HttpRequest, customer: Customer) -> Response:
     """
     try:
         # Get optional filters from HMAC-signed request body
-        request_data = request.data if hasattr(request, 'data') else {}
-        
+        request_data = request.data if hasattr(request, "data") else {}
+
         # Build query for customer's invoices
-        invoices_qs = Invoice.objects.filter(customer=customer).select_related('currency')
-        
+        invoices_qs = Invoice.objects.filter(customer=customer).select_related("currency")
+
         # Apply status filter if provided in request body
-        status_filter = request_data.get('status')
-        if status_filter and status_filter in ['draft', 'issued', 'paid', 'overdue', 'void', 'refunded']:
+        status_filter = request_data.get("status")
+        if status_filter and status_filter in ["draft", "issued", "paid", "overdue", "void", "refunded"]:
             invoices_qs = invoices_qs.filter(status=status_filter)
-        
+
         # Apply pagination from request body
-        page = max(1, int(request_data.get('page', 1)))
-        limit = min(100, max(1, int(request_data.get('limit', 20))))
-        
+        page = max(1, int(request_data.get("page", 1)))
+        limit = min(100, max(1, int(request_data.get("limit", 20))))
+
         total_items = invoices_qs.count()
         total_pages = (total_items + limit - 1) // limit
         offset = (page - 1) * limit
-        
-        invoices = invoices_qs.order_by('-created_at')[offset:offset + limit]
-        
+
+        invoices = invoices_qs.order_by("-created_at")[offset : offset + limit]
+
         # Serialize data
         serializer = InvoiceListSerializer(invoices, many=True)
-        
+
         logger.info(f"✅ [Billing API] Returned {len(invoices)} invoices for customer {customer.company_name}")
-        
-        return Response({
-            'success': True,
-            'invoices': serializer.data,
-            'pagination': {
-                'current_page': page,
-                'total_pages': total_pages,
-                'total_items': total_items,
-                'has_next': page < total_pages,
-                'has_previous': page > 1,
-                'limit': limit
+
+        return Response(
+            {
+                "success": True,
+                "invoices": serializer.data,
+                "pagination": {
+                    "current_page": page,
+                    "total_pages": total_pages,
+                    "total_items": total_items,
+                    "has_next": page < total_pages,
+                    "has_previous": page > 1,
+                    "limit": limit,
+                },
             }
-        })
-        
+        )
+
     except Exception as e:
         logger.error(f"🔥 [Billing API] Invoice list error: {e}")
-        return Response({
-            'success': False,
-            'error': 'Invoice service temporarily unavailable'
-        }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return Response(
+            {"success": False, "error": "Invoice service temporarily unavailable"},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
 
 
 # ===============================================================================
 # CUSTOMER INVOICE DETAIL API 📄
 # ===============================================================================
 
-@api_view(['POST'])
+
+@api_view(["POST"])
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
 def customer_invoice_detail_api(request: HttpRequest, customer: Customer, invoice_number: str) -> Response:
     """
     📄 Customer Invoice Detail API
-    
+
     POST /api/billing/invoices/{invoice_number}/
-    
+
     Request Body (HMAC-signed):
     {
         "customer_id": 123,
         "action": "get_invoice_detail",
         "timestamp": 1699999999
     }
-    
+
     Response:
     {
         "success": true,
@@ -206,7 +211,7 @@ def customer_invoice_detail_api(request: HttpRequest, customer: Customer, invoic
             "amount_due": 15000
         }
     }
-    
+
     Security Features:
     - HMAC authentication required (customer passed by decorator)
     - Invoice access restricted to customer only
@@ -215,56 +220,54 @@ def customer_invoice_detail_api(request: HttpRequest, customer: Customer, invoic
     try:
         # Find invoice for the authenticated customer
         try:
-            invoice = Invoice.objects.select_related('currency', 'customer').prefetch_related('lines').get(
-                number=invoice_number,
-                customer=customer
+            invoice = (
+                Invoice.objects.select_related("currency", "customer")
+                .prefetch_related("lines")
+                .get(number=invoice_number, customer=customer)
             )
         except Invoice.DoesNotExist:
-            logger.warning(f"🚨 [Billing API] Invoice access denied - {invoice_number} for customer {customer.company_name}")
-            return Response({
-                'success': False,
-                'error': 'Invoice not found'
-            }, status=status.HTTP_404_NOT_FOUND)
-        
+            logger.warning(
+                f"🚨 [Billing API] Invoice access denied - {invoice_number} for customer {customer.company_name}"
+            )
+            return Response({"success": False, "error": "Invoice not found"}, status=status.HTTP_404_NOT_FOUND)
+
         # Serialize data
         serializer = InvoiceDetailSerializer(invoice)
-        
+
         logger.info(f"✅ [Billing API] Invoice detail returned: {invoice_number} for customer {customer.company_name}")
-        
-        return Response({
-            'success': True,
-            'invoice': serializer.data
-        })
-        
+
+        return Response({"success": True, "invoice": serializer.data})
+
     except Exception as e:
         logger.error(f"🔥 [Billing API] Invoice detail error for {invoice_number}: {e}")
-        return Response({
-            'success': False,
-            'error': 'Invoice service temporarily unavailable'
-        }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return Response(
+            {"success": False, "error": "Invoice service temporarily unavailable"},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
 
 
 # ===============================================================================
 # CUSTOMER INVOICE SUMMARY API 📊
 # ===============================================================================
 
-@api_view(['POST'])
+
+@api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
 def customer_invoice_summary_api(request: HttpRequest, customer: Customer) -> Response:
     """
     📊 Customer Invoice Summary API
-    
+
     POST /api/billing/summary/
-    
+
     Request Body (HMAC-signed):
     {
         "customer_id": 123,
         "action": "get_billing_summary",
         "timestamp": 1699999999
     }
-    
+
     Response:
     {
         "success": true,
@@ -287,53 +290,48 @@ def customer_invoice_summary_api(request: HttpRequest, customer: Customer) -> Re
             ]
         }
     }
-    
+
     Security Features:
     - HMAC authentication required (customer passed by decorator)
     - No enumeration attacks possible
-    
+
     Used for customer dashboard billing widget.
     """
     try:
         # Build summary data for the authenticated customer
         invoices_qs = Invoice.objects.filter(customer=customer)
-        
-        summary_data = {
-            'customer_id': customer.id,
-            'invoices_queryset': invoices_qs
-        }
-        
+
+        summary_data = {"customer_id": customer.id, "invoices_queryset": invoices_qs}
+
         serializer = InvoiceSummarySerializer(summary_data)
-        
+
         logger.info(f"✅ [Billing API] Invoice summary returned for customer {customer.company_name}")
-        
-        return Response({
-            'success': True,
-            'summary': serializer.data
-        })
-        
+
+        return Response({"success": True, "summary": serializer.data})
+
     except Exception as e:
         logger.error(f"🔥 [Billing API] Invoice summary error: {e}")
-        return Response({
-            'success': False,
-            'error': 'Invoice service temporarily unavailable'
-        }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return Response(
+            {"success": False, "error": "Invoice service temporarily unavailable"},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
 
 
 # ===============================================================================
 # CURRENCY LIST API 💱
 # ===============================================================================
 
-@api_view(['GET'])
+
+@api_view(["GET"])
 @permission_classes([AllowAny])
 def currencies_api(request: HttpRequest) -> Response:
     """
     💱 Currency List API
-    
+
     GET /api/billing/currencies/
-    
+
     Returns active currencies for invoice display formatting.
-    
+
     Response:
     {
         "success": true,
@@ -349,36 +347,34 @@ def currencies_api(request: HttpRequest) -> Response:
     }
     """
     try:
-        currencies = Currency.objects.filter(is_active=True).order_by('code')
+        currencies = Currency.objects.filter(is_active=True).order_by("code")
         serializer = CurrencySerializer(currencies, many=True)
-        
-        return Response({
-            'success': True,
-            'currencies': serializer.data
-        })
-        
+
+        return Response({"success": True, "currencies": serializer.data})
+
     except Exception as e:
         logger.error(f"🔥 [Billing API] Currency list error: {e}")
-        return Response({
-            'success': False,
-            'error': 'Currency service temporarily unavailable'
-        }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return Response(
+            {"success": False, "error": "Currency service temporarily unavailable"},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
 
 
 # ===============================================================================
 # CUSTOMER PROFORMA LIST API 📄
 # ===============================================================================
 
-@api_view(['POST'])
+
+@api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
 def customer_proformas_api(request: HttpRequest, customer: Customer) -> Response:
     """
     📄 Customer Proforma List API
-    
+
     POST /api/billing/proformas/
-    
+
     Request Body (HMAC-signed):
     {
         "customer_id": 123,
@@ -388,7 +384,7 @@ def customer_proformas_api(request: HttpRequest, customer: Customer) -> Response
         "page": 1,         // optional pagination
         "limit": 20        // optional limit
     }
-    
+
     Response:
     {
         "success": true,
@@ -415,7 +411,7 @@ def customer_proformas_api(request: HttpRequest, customer: Customer) -> Response
             "has_previous": false
         }
     }
-    
+
     Security Features:
     - HMAC authentication required (customer passed by decorator)
     - Customer ID from signed request body (no URL enumeration)
@@ -423,72 +419,75 @@ def customer_proformas_api(request: HttpRequest, customer: Customer) -> Response
     """
     try:
         # Get optional filters from HMAC-signed request body
-        request_data = request.data if hasattr(request, 'data') else {}
-        
+        request_data = request.data if hasattr(request, "data") else {}
+
         # Build query for customer's proformas
-        proformas_qs = ProformaInvoice.objects.filter(customer=customer).select_related('currency')
-        
+        proformas_qs = ProformaInvoice.objects.filter(customer=customer).select_related("currency")
+
         # Apply status filter if provided in request body
-        status_filter = request_data.get('status')
-        if status_filter and status_filter in ['draft', 'sent', 'accepted', 'expired']:
+        status_filter = request_data.get("status")
+        if status_filter and status_filter in ["draft", "sent", "accepted", "expired"]:
             proformas_qs = proformas_qs.filter(status=status_filter)
-        
+
         # Apply pagination from request body
-        page = max(1, int(request_data.get('page', 1)))
-        limit = min(100, max(1, int(request_data.get('limit', 20))))
-        
+        page = max(1, int(request_data.get("page", 1)))
+        limit = min(100, max(1, int(request_data.get("limit", 20))))
+
         total_items = proformas_qs.count()
         total_pages = (total_items + limit - 1) // limit
         offset = (page - 1) * limit
-        
-        proformas = proformas_qs.order_by('-created_at')[offset:offset + limit]
-        
+
+        proformas = proformas_qs.order_by("-created_at")[offset : offset + limit]
+
         # Serialize data
         serializer = ProformaListSerializer(proformas, many=True)
-        
+
         logger.info(f"✅ [Billing API] Returned {len(proformas)} proformas for customer {customer.company_name}")
-        
-        return Response({
-            'success': True,
-            'proformas': serializer.data,
-            'pagination': {
-                'current_page': page,
-                'total_pages': total_pages,
-                'total_items': total_items,
-                'has_next': page < total_pages,
-                'has_previous': page > 1,
-                'limit': limit
+
+        return Response(
+            {
+                "success": True,
+                "proformas": serializer.data,
+                "pagination": {
+                    "current_page": page,
+                    "total_pages": total_pages,
+                    "total_items": total_items,
+                    "has_next": page < total_pages,
+                    "has_previous": page > 1,
+                    "limit": limit,
+                },
             }
-        })
-        
+        )
+
     except Exception as e:
         logger.error(f"🔥 [Billing API] Proforma list error: {e}")
-        return Response({
-            'success': False,
-            'error': 'Proforma service temporarily unavailable'
-        }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return Response(
+            {"success": False, "error": "Proforma service temporarily unavailable"},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
 
 
 # ===============================================================================
 # CUSTOMER PROFORMA DETAIL API 📄
 # ===============================================================================
 
-@api_view(['POST'])
+
+@api_view(["POST"])
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
 def customer_proforma_detail_api(request: HttpRequest, customer: Customer, proforma_number: str) -> Response:
     """
     📄 Customer Proforma Detail API
-    
+
     POST /api/billing/proformas/{proforma_number}/
-    
+
     Request Body (HMAC-signed):
     {
         "customer_id": 123,
         "action": "get_proforma_detail",
         "timestamp": 1699999999
     }
-    
+
     Response:
     {
         "success": true,
@@ -527,7 +526,7 @@ def customer_proforma_detail_api(request: HttpRequest, customer: Customer, profo
             "notes": "Additional details..."
         }
     }
-    
+
     Security Features:
     - HMAC authentication required (customer passed by decorator)
     - Proforma access restricted to customer only
@@ -536,58 +535,58 @@ def customer_proforma_detail_api(request: HttpRequest, customer: Customer, profo
     try:
         # Find proforma for the authenticated customer
         try:
-            proforma = ProformaInvoice.objects.select_related('currency', 'customer').prefetch_related('lines').get(
-                number=proforma_number,
-                customer=customer
+            proforma = (
+                ProformaInvoice.objects.select_related("currency", "customer")
+                .prefetch_related("lines")
+                .get(number=proforma_number, customer=customer)
             )
         except ProformaInvoice.DoesNotExist:
-            logger.warning(f"🚨 [Billing API] Proforma access denied - {proforma_number} for customer {customer.company_name}")
-            return Response({
-                'success': False,
-                'error': 'Proforma not found'
-            }, status=status.HTTP_404_NOT_FOUND)
-        
+            logger.warning(
+                f"🚨 [Billing API] Proforma access denied - {proforma_number} for customer {customer.company_name}"
+            )
+            return Response({"success": False, "error": "Proforma not found"}, status=status.HTTP_404_NOT_FOUND)
+
         # Serialize data
         serializer = ProformaDetailSerializer(proforma)
-        
-        logger.info(f"✅ [Billing API] Proforma detail returned: {proforma_number} for customer {customer.company_name}")
-        
-        return Response({
-            'success': True,
-            'proforma': serializer.data
-        })
-        
+
+        logger.info(
+            f"✅ [Billing API] Proforma detail returned: {proforma_number} for customer {customer.company_name}"
+        )
+
+        return Response({"success": True, "proforma": serializer.data})
+
     except Exception as e:
         logger.error(f"🔥 [Billing API] Proforma detail error for {proforma_number}: {e}")
-        return Response({
-            'success': False,
-            'error': 'Proforma service temporarily unavailable'
-        }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return Response(
+            {"success": False, "error": "Proforma service temporarily unavailable"},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
 
 
 # ===============================================================================
 # PDF EXPORT ENDPOINTS 📄
 # ===============================================================================
 
-@api_view(['POST'])
+
+@api_view(["POST"])
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
 def invoice_pdf_export(request: HttpRequest, invoice_number: str, customer: Customer) -> Response:
     """
     📄 Export Invoice as PDF
-    
+
     POST /api/billing/invoices/{invoice_number}/pdf/
-    
+
     Request Body (HMAC-signed):
     {
         "customer_id": 123,
         "action": "export_invoice_pdf",
         "timestamp": 1699999999
     }
-    
+
     Response:
         PDF file with proper Content-Disposition headers for download
-    
+
     Security Features:
     - HMAC authentication required (customer passed by decorator)
     - Invoice access restricted to customer only
@@ -596,80 +595,84 @@ def invoice_pdf_export(request: HttpRequest, invoice_number: str, customer: Cust
     try:
         # Find invoice for the authenticated customer
         try:
-            invoice = Invoice.objects.select_related('currency', 'customer').prefetch_related('lines').get(
-                number=invoice_number,
-                customer=customer
+            invoice = (
+                Invoice.objects.select_related("currency", "customer")
+                .prefetch_related("lines")
+                .get(number=invoice_number, customer=customer)
             )
         except Invoice.DoesNotExist:
-            logger.warning(f"🚨 [Invoice PDF API] Invoice access denied - {invoice_number} for customer {customer.company_name}")
-            return Response({
-                'success': False,
-                'error': 'Invoice not found'
-            }, status=status.HTTP_404_NOT_FOUND)
-        
+            logger.warning(
+                f"🚨 [Invoice PDF API] Invoice access denied - {invoice_number} for customer {customer.company_name}"
+            )
+            return Response({"success": False, "error": "Invoice not found"}, status=status.HTTP_404_NOT_FOUND)
+
         # Generate PDF using the same generator as platform
         pdf_generator = RomanianInvoicePDFGenerator(invoice)
         pdf_response = pdf_generator.generate_response()
-        
-        logger.info(f"✅ [Invoice PDF API] PDF generated for invoice {invoice_number} by customer {customer.company_name}")
+
+        logger.info(
+            f"✅ [Invoice PDF API] PDF generated for invoice {invoice_number} by customer {customer.company_name}"
+        )
         return pdf_response
-        
+
     except Exception as e:
         logger.error(f"🔥 [Invoice PDF API] PDF generation error for {invoice_number}: {e}")
-        return Response({
-            'success': False,
-            'error': 'PDF generation service temporarily unavailable'
-        }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return Response(
+            {"success": False, "error": "PDF generation service temporarily unavailable"},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
 
 
-@api_view(['POST'])
+@api_view(["POST"])
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
 def proforma_pdf_export(request: HttpRequest, proforma_number: str, customer: Customer) -> Response:
     """
     📄 Export Proforma as PDF
-    
+
     POST /api/billing/proformas/{proforma_number}/pdf/
-    
+
     Request Body (HMAC-signed):
     {
         "customer_id": 123,
         "action": "export_proforma_pdf",
         "timestamp": 1699999999
     }
-    
+
     Response:
         PDF file with proper Content-Disposition headers for download
-    
+
     Security Features:
     - HMAC authentication required (customer passed by decorator)
-    - Proforma access restricted to customer only  
+    - Proforma access restricted to customer only
     - Generated using Romanian compliance PDF format
     """
     try:
         # Find proforma for the authenticated customer
         try:
-            proforma = ProformaInvoice.objects.select_related('currency', 'customer').prefetch_related('lines').get(
-                number=proforma_number,
-                customer=customer
+            proforma = (
+                ProformaInvoice.objects.select_related("currency", "customer")
+                .prefetch_related("lines")
+                .get(number=proforma_number, customer=customer)
             )
         except ProformaInvoice.DoesNotExist:
-            logger.warning(f"🚨 [Proforma PDF API] Proforma access denied - {proforma_number} for customer {customer.company_name}")
-            return Response({
-                'success': False,
-                'error': 'Proforma not found'
-            }, status=status.HTTP_404_NOT_FOUND)
-        
+            logger.warning(
+                f"🚨 [Proforma PDF API] Proforma access denied - {proforma_number} for customer {customer.company_name}"
+            )
+            return Response({"success": False, "error": "Proforma not found"}, status=status.HTTP_404_NOT_FOUND)
+
         # Generate PDF using the same generator as platform
         pdf_generator = RomanianProformaPDFGenerator(proforma)
         pdf_response = pdf_generator.generate_response()
-        
-        logger.info(f"✅ [Proforma PDF API] PDF generated for proforma {proforma_number} by customer {customer.company_name}")
+
+        logger.info(
+            f"✅ [Proforma PDF API] PDF generated for proforma {proforma_number} by customer {customer.company_name}"
+        )
         return pdf_response
-        
+
     except Exception as e:
         logger.error(f"🔥 [Proforma PDF API] PDF generation error for {proforma_number}: {e}")
-        return Response({
-            'success': False,
-            'error': 'PDF generation service temporarily unavailable'
-        }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return Response(
+            {"success": False, "error": "PDF generation service temporarily unavailable"},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )

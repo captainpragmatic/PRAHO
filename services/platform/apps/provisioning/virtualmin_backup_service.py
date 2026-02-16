@@ -554,7 +554,7 @@ class VirtualminBackupService:
         account_info_result = gateway.get_domain_info(account.domain)
         if account_info_result.is_err():
             return Err(f"Failed to get domain info: {account_info_result.unwrap_err()}")
-        
+
         account_info = account_info_result.unwrap()
         if not account_info.get("disk_usage_mb"):
             return Err(f"Domain {account.domain} not found on server")
@@ -571,9 +571,7 @@ class VirtualminBackupService:
             "provisioning.max_backup_size_gb", _DEFAULT_MAX_BACKUP_SIZE_GB
         )
         if estimated_backup_size_mb > (max_backup_size_gb * 1024):
-            return Err(
-                f"Estimated backup size ({estimated_backup_size_mb}MB) exceeds limit ({max_backup_size_gb}GB)"
-            )
+            return Err(f"Estimated backup size ({estimated_backup_size_mb}MB) exceeds limit ({max_backup_size_gb}GB)")
 
         logger.debug(
             f"Backup preconditions validated for {account.domain}: "

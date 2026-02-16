@@ -1,5 +1,5 @@
 # TODO: WEEK 3 - RECOVERY IMPLEMENTATION
-# 
+#
 # Following virtualmin_review.md recommendations for recovery phase.
 # DO NOT IMPLEMENT YET - Planning phase only.
 #
@@ -15,7 +15,7 @@
 # 2. **Recovery Procedures Documentation**
 #    - Step-by-step server rebuild procedures
 #    - Data restoration workflows
-#    - Network reconfiguration playbooks  
+#    - Network reconfiguration playbooks
 #    - DNS failover procedures
 #
 # 3. **Automated Recovery Testing**
@@ -39,7 +39,7 @@
 # - Set up cross-region backup replication
 # - Build backup metadata tracking in PRAHO database
 #
-# Phase 3B: Recovery Automation  
+# Phase 3B: Recovery Automation
 # - Create VirtualminRecoveryService for account rebuilding
 # - Implement server rebuilding from PRAHO-as-source-of-truth
 # - Build automated DNS failover mechanisms
@@ -53,7 +53,7 @@
 #
 # FILES TO CREATE:
 # - apps/provisioning/backup_service.py
-# - apps/provisioning/recovery_service.py  
+# - apps/provisioning/recovery_service.py
 # - apps/provisioning/management/commands/test_disaster_recovery.py
 # - scripts/backup_verification.py
 # - scripts/recovery_automation.py

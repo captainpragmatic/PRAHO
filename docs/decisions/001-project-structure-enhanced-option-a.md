@@ -1,9 +1,9 @@
 # ADR-001: Project Structure - Enhanced Option A with Strategic Seams
 
-**Status:** ✅ Accepted  
-**Date:** 2025-08-15  
-**Authors:** Development Team  
-**Reviewers:** Technical Lead  
+**Status:** ✅ Accepted
+**Date:** 2025-08-15
+**Authors:** Development Team
+**Reviewers:** Technical Lead
 
 ## Context
 

@@ -26,6 +26,4 @@ class BillingConfig(AppConfig):
 
                 schedule_efactura_tasks()
             except Exception:
-                logger.warning(
-                    "⚠️ [Billing] Failed to schedule e-Factura tasks during startup"
-                )
+                logger.warning("⚠️ [Billing] Failed to schedule e-Factura tasks during startup")

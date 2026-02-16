@@ -172,7 +172,8 @@ def log_price_changes(sender: type[ProductPrice], instance: ProductPrice, create
                 "billing_model": "simplified_monthly",  # New simplified model
                 "includes_vat": instance.product.includes_vat,
                 "vat_rate_applied": float(TaxService.get_vat_rate("RO", as_decimal=False)),
-                "high_value_product": instance.monthly_price_cents > (PRICING_THRESHOLDS["high_value_product_ron"] * 100),
+                "high_value_product": instance.monthly_price_cents
+                > (PRICING_THRESHOLDS["high_value_product_ron"] * 100),
                 "semiannual_discount": float(instance.semiannual_discount_percent),
                 "annual_discount": float(instance.annual_discount_percent),
             }
@@ -319,7 +320,8 @@ def _check_pricing_changes(instance: ProductPrice) -> dict[str, Any] | None:
         changes["semiannual_discount_changed"] = {
             "from_percent": float(instance._old_semiannual_discount_percent or 0),
             "to_percent": float(instance.semiannual_discount_percent),
-            "discount_increased": instance.semiannual_discount_percent > (instance._old_semiannual_discount_percent or 0),
+            "discount_increased": instance.semiannual_discount_percent
+            > (instance._old_semiannual_discount_percent or 0),
         }
 
     # Check annual discount changes

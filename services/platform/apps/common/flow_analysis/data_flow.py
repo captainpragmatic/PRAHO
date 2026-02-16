@@ -272,10 +272,7 @@ class DataFlowAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
         severity = self._get_sink_severity(category)
         cwe_id = self._get_cwe_for_category(category)
 
-        message = (
-            f"Tainted data from '{path.source_var}' reaches sink '{path.sink_func}' "
-            f"without sanitization"
-        )
+        message = f"Tainted data from '{path.source_var}' reaches sink '{path.sink_func}' " f"without sanitization"
         if path.intermediate_vars:
             message += f" (via: {' -> '.join(path.intermediate_vars)})"
 
@@ -358,8 +355,7 @@ class DataFlowAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
                 "Use yaml.safe_load() instead of yaml.load(). Prefer JSON for data exchange."
             ),
             IssueCategory.TAINTED_DATA: (
-                "Validate and sanitize all user input before use. "
-                "Apply appropriate encoding for the context."
+                "Validate and sanitize all user input before use. " "Apply appropriate encoding for the context."
             ),
         }
         return remediations.get(category, "Validate and sanitize user input.")
@@ -522,9 +518,7 @@ class DataFlowAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
                                 severity=AnalysisSeverity.MEDIUM,
                                 message=f"Tainted variable '{source_var}' used in f-string",
                                 location=location,
-                                code_snippet=self.get_source_line(
-                                    self.context, location.line_number
-                                ),
+                                code_snippet=self.get_source_line(self.context, location.line_number),
                                 remediation=(
                                     "Sanitize the variable before use in f-string, "
                                     "or use proper escaping for the context."
@@ -577,17 +571,13 @@ class DataFlowAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
             return node.id in self.tainted_vars
         elif isinstance(node, ast.Attribute):
             attr_name = self._get_attribute_chain(node)
-            return attr_name in self.tainted_vars or any(
-                attr_name.startswith(t) for t in self.tainted_vars
-            )
+            return attr_name in self.tainted_vars or any(attr_name.startswith(t) for t in self.tainted_vars)
         elif isinstance(node, ast.Subscript):
             subscript_str = self._get_subscript_string(node)
             return any(source in subscript_str for source in TAINT_SOURCES)
         elif isinstance(node, ast.BinOp):
             # String concatenation propagates taint
-            return self._is_tainted_expression(node.left) or self._is_tainted_expression(
-                node.right
-            )
+            return self._is_tainted_expression(node.left) or self._is_tainted_expression(node.right)
         elif isinstance(node, ast.Call):
             # Check if function returns tainted data
             for arg in node.args:
@@ -599,9 +589,7 @@ class DataFlowAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
         """Check if expression is a taint source."""
         if isinstance(node, ast.Call):
             func_name = self._get_call_name(node)
-            return func_name in TAINT_SOURCE_FUNCS or any(
-                source in func_name for source in TAINT_SOURCES
-            )
+            return func_name in TAINT_SOURCE_FUNCS or any(source in func_name for source in TAINT_SOURCES)
         elif isinstance(node, ast.Subscript):
             subscript_str = self._get_subscript_string(node)
             return any(source in subscript_str for source in TAINT_SOURCES)

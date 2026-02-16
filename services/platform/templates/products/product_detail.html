@@ -22,7 +22,7 @@
       </h1>
       <p class="mt-2 text-slate-400">{{ product.slug }}</p>
     </div>
-    
+
     <div class="flex space-x-3">
       {% url 'products:product_edit' slug=product.slug as edit_url %}
       {% button "✏️ Edit" variant="secondary" href=edit_url %}
@@ -37,7 +37,7 @@
       <!-- Basic Information Card -->
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
         <h2 class="text-xl font-semibold text-white mb-4">📋 {% trans 'Basic Information' %}</h2>
-        
+
         <dl class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <dt class="text-sm font-medium text-slate-400">{% trans 'Product Type' %}</dt>
@@ -45,19 +45,19 @@
               {% badge product.get_product_type_display variant="secondary" %}
             </dd>
           </div>
-          
+
           {% if product.module %}
           <div>
             <dt class="text-sm font-medium text-slate-400">{% trans 'Provisioning Module' %}</dt>
             <dd class="mt-1 text-sm text-white">{{ product.module }}</dd>
           </div>
           {% endif %}
-          
+
           <div>
             <dt class="text-sm font-medium text-slate-400">{% trans 'Sort Order' %}</dt>
             <dd class="mt-1 text-sm text-white">{{ product.sort_order }}</dd>
           </div>
-          
+
           {% if product.requires_domain %}
           <div>
             <dt class="text-sm font-medium text-slate-400">{% trans 'Domain Requirements' %}</dt>
@@ -70,7 +70,7 @@
             </dd>
           </div>
           {% endif %}
-          
+
           <div>
             <dt class="text-sm font-medium text-slate-400">{% trans 'VAT Inclusion' %}</dt>
             <dd class="mt-1">
@@ -81,7 +81,7 @@
               {% endif %}
             </dd>
           </div>
-          
+
           <div>
             <dt class="text-sm font-medium text-slate-400">{% trans 'Created' %}</dt>
             <dd class="mt-1 text-sm text-white">{{ product.created_at|date:"j F Y, H:i" }}</dd>
@@ -127,7 +127,7 @@
               <span class="ml-2 text-xs text-green-400">(Romanian Lei)</span>
             {% endif %}
           </h3>
-          
+
           <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {% for price in prices %}
             <div class="bg-slate-700 rounded-lg p-4 border border-slate-600">
@@ -139,7 +139,7 @@
                   {% badge "Inactive" variant="danger" size="sm" %}
                 {% endif %}
               </div>
-              
+
               <div class="text-lg font-semibold text-white">
                 {{ price.effective_price|floatformat:0 }} {{ currency_code }}
                 {% if price.promo_price_cents and price.promo_valid_until %}
@@ -148,13 +148,13 @@
                   </div>
                 {% endif %}
               </div>
-              
+
               {% if price.setup_cents > 0 %}
               <div class="text-sm text-slate-400 mt-1">
                 + {{ price.setup_fee|floatformat:0 }} {{ currency_code }} {% trans 'setup' %}
               </div>
               {% endif %}
-              
+
               {% if price.minimum_quantity > 1 %}
               <div class="text-xs text-slate-500 mt-2">
                 {% trans 'Min qty:' %} {{ price.minimum_quantity }}
@@ -172,7 +172,7 @@
       {% if relationships_from or relationships_to %}
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
         <h2 class="text-xl font-semibold text-white mb-4">🔗 {% trans 'Product Relationships' %}</h2>
-        
+
         {% if relationships_from %}
         <div class="mb-6">
           <h3 class="text-lg font-medium text-white mb-3">{% trans 'This product relates to:' %}</h3>
@@ -181,7 +181,7 @@
             <div class="flex items-center justify-between bg-slate-700 rounded-lg p-3 border border-slate-600">
               <div class="flex items-center">
                 <span class="text-slate-400 mr-2">{{ rel.get_relationship_type_display }}:</span>
-                <a href="{% url 'products:product_detail' slug=rel.target_product.slug %}" 
+                <a href="{% url 'products:product_detail' slug=rel.target_product.slug %}"
                    class="text-blue-400 hover:text-blue-300">
                   {{ rel.target_product.name }}
                 </a>
@@ -200,7 +200,7 @@
             {% for rel in relationships_to %}
             <div class="flex items-center justify-between bg-slate-700 rounded-lg p-3 border border-slate-600">
               <div class="flex items-center">
-                <a href="{% url 'products:product_detail' slug=rel.source_product.slug %}" 
+                <a href="{% url 'products:product_detail' slug=rel.source_product.slug %}"
                    class="text-blue-400 hover:text-blue-300 mr-2">
                   {{ rel.source_product.name }}
                 </a>
@@ -251,12 +251,12 @@
       <!-- Status Card -->
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
         <h2 class="text-xl font-semibold text-white mb-4">⚙️ {% trans 'Status & Settings' %}</h2>
-        
+
         <div class="space-y-4">
           <!-- Active Status -->
           <div class="flex items-center justify-between">
             <span class="text-slate-400">{% trans 'Active' %}</span>
-            <button class="toggle-switch" 
+            <button class="toggle-switch"
                     hx-post="{% url 'products:product_toggle_active' slug=product.slug %}"
                     hx-target="this"
                     hx-swap="outerHTML">
@@ -271,7 +271,7 @@
           <!-- Public Status -->
           <div class="flex items-center justify-between">
             <span class="text-slate-400">{% trans 'Public' %}</span>
-            <button class="toggle-switch" 
+            <button class="toggle-switch"
                     hx-post="{% url 'products:product_toggle_public' slug=product.slug %}"
                     hx-target="this"
                     hx-swap="outerHTML">
@@ -286,7 +286,7 @@
           <!-- Featured Status -->
           <div class="flex items-center justify-between">
             <span class="text-slate-400">{% trans 'Featured' %}</span>
-            <button class="toggle-switch" 
+            <button class="toggle-switch"
                     hx-post="{% url 'products:product_toggle_featured' slug=product.slug %}"
                     hx-target="this"
                     hx-swap="outerHTML">
@@ -303,14 +303,14 @@
       <!-- Quick Actions Card -->
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
         <h2 class="text-xl font-semibold text-white mb-4">🚀 {% trans 'Quick Actions' %}</h2>
-        
+
         <div class="space-y-3">
           {% url 'products:product_edit' slug=product.slug as edit_url %}
           {% button "✏️ Edit Product" variant="primary" href=edit_url class="w-full" %}
-          
+
           {% url 'products:product_prices' slug=product.slug as prices_url %}
           {% button "💰 Manage Pricing" variant="secondary" href=prices_url class="w-full" %}
-          
+
           {% url 'products:product_list' as list_url %}
           {% button "← Back to Products" variant="outline" href=list_url class="w-full" %}
         </div>
@@ -320,14 +320,14 @@
       {% if product.meta_title or product.meta_description %}
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
         <h2 class="text-xl font-semibold text-white mb-4">🔍 {% trans 'SEO Information' %}</h2>
-        
+
         {% if product.meta_title %}
         <div class="mb-4">
           <dt class="text-sm font-medium text-slate-400 mb-1">{% trans 'Meta Title' %}</dt>
           <dd class="text-sm text-slate-300">{{ product.meta_title }}</dd>
         </div>
         {% endif %}
-        
+
         {% if product.meta_description %}
         <div>
           <dt class="text-sm font-medium text-slate-400 mb-1">{% trans 'Meta Description' %}</dt>

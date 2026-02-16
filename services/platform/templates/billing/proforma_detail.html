@@ -29,20 +29,20 @@
   <div class="mb-6">
     <div class="flex space-x-3">
         {% if can_edit %}
-          <a href="{% url 'billing:proforma_edit' proforma.pk %}" 
+          <a href="{% url 'billing:proforma_edit' proforma.pk %}"
              class="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition-colors">
             ✏️ {% trans 'Edit' %}
           </a>
         {% endif %}
-        
+
         {% if can_convert %}
-          <a href="{% url 'billing:proforma_to_invoice' proforma.pk %}" 
+          <a href="{% url 'billing:proforma_to_invoice' proforma.pk %}"
              class="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md font-medium transition-colors">
             🔄 {% trans 'Convert to Invoice' %}
           </a>
         {% endif %}
-        
-        <a href="{% url 'billing:proforma_pdf' proforma.pk %}" 
+
+        <a href="{% url 'billing:proforma_pdf' proforma.pk %}"
            class="inline-flex items-center px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-md font-medium transition-colors">
           📄 {% trans 'Download PDF' %}
         </a>
@@ -84,13 +84,13 @@
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
     <!-- Left Column: Details -->
     <div class="lg:col-span-2 space-y-8">
-      
+
       <!-- Customer Information -->
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
         <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
           👤 {% trans 'Customer Information' %}
         </h3>
-        
+
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <div class="space-y-2">
@@ -98,21 +98,21 @@
                 <span class="text-sm text-slate-400">{% trans 'Company:' %}</span>
                 <p class="text-white font-medium">{{ proforma.bill_to_name }}</p>
               </div>
-              
+
               {% if proforma.bill_to_tax_id %}
               <div>
                 <span class="text-sm text-slate-400">{% trans 'VAT Number:' %}</span>
                 <p class="text-white">{{ proforma.bill_to_tax_id }}</p>
               </div>
               {% endif %}
-              
+
               <div>
                 <span class="text-sm text-slate-400">{% trans 'Email:' %}</span>
                 <p class="text-white">{{ proforma.bill_to_email }}</p>
               </div>
             </div>
           </div>
-          
+
           <div>
             {% if proforma.bill_to_address1 %}
             <div>
@@ -138,7 +138,7 @@
         <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
           📋 {% trans 'Proforma Lines' %}
         </h3>
-        
+
         <div class="overflow-hidden">
           <table class="min-w-full">
             <thead>
@@ -194,7 +194,7 @@
         <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
           📝 {% trans 'Additional Information' %}
         </h3>
-        
+
         {% if proforma.public_notes %}
         <div class="mb-4">
           <h4 class="text-sm font-medium text-slate-300 mb-2">{% trans 'Public Notes' %}</h4>
@@ -203,7 +203,7 @@
           </div>
         </div>
         {% endif %}
-        
+
         {% if proforma.internal_notes and user.is_staff %}
         <div>
           <h4 class="text-sm font-medium text-slate-300 mb-2">{% trans 'Internal Notes' %} <span class="text-xs text-slate-500">({% trans 'staff only' %})</span></h4>
@@ -218,7 +218,7 @@
 
     <!-- Right Column: Summary & Actions -->
     <div class="space-y-6">
-      
+
       <!-- Proforma Summary -->
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6 sticky top-4">
         <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
@@ -230,12 +230,12 @@
             <span>{% trans 'Subtotal:' %}</span>
             <span class="font-medium">{{ proforma.subtotal|floatformat:2 }} {{ proforma.currency }}</span>
           </div>
-          
+
           <div class="flex justify-between text-slate-300">
             <span>{% trans 'VAT:' %}</span>
             <span class="font-medium">{{ proforma.tax|floatformat:2 }} {{ proforma.currency }}</span>
           </div>
-          
+
           <div class="border-t border-slate-600 pt-3">
             <div class="flex justify-between text-lg font-bold text-white">
               <span>{% trans 'Total:' %}</span>
@@ -291,17 +291,17 @@
 
         <div class="space-y-3">
           {% if can_convert %}
-            <a href="{% url 'billing:proforma_to_invoice' proforma.pk %}" 
+            <a href="{% url 'billing:proforma_to_invoice' proforma.pk %}"
                class="block w-full text-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md font-medium transition-colors">
               🔄 {% trans 'Convert to Invoice' %}
             </a>
           {% endif %}
-          
-          <a href="{% url 'billing:proforma_pdf' proforma.pk %}" 
+
+          <a href="{% url 'billing:proforma_pdf' proforma.pk %}"
              class="block w-full text-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition-colors">
             📄 {% trans 'Download PDF' %}
           </a>
-          
+
           <button onclick="sendProforma({{ proforma.pk }})"
                   class="block w-full text-center px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md font-medium transition-colors">
             {% if is_staff_user %}
@@ -310,9 +310,9 @@
               📧 {% trans 'Send to Email' %}
             {% endif %}
           </button>
-          
+
           {% if can_edit %}
-            <a href="{% url 'billing:proforma_edit' proforma.pk %}" 
+            <a href="{% url 'billing:proforma_edit' proforma.pk %}"
                class="block w-full text-center px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-md font-medium transition-colors">
               ✏️ {% trans 'Edit Proforma' %}
             </a>

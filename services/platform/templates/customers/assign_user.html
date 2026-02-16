@@ -15,7 +15,7 @@
             <span>/</span>
             <span class="text-white">{% trans 'Assign User' %}</span>
         </nav>
-        
+
         <h1 class="text-2xl font-bold text-white romanian-flag">
             👥 {% trans 'Assign User to' %} {{ customer.name }}
         </h1>
@@ -29,28 +29,28 @@
         <h2 class="text-lg font-semibold text-white mb-4">
             🏢 {% trans 'Customer Information' %}
         </h2>
-        
+
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
                 <span class="text-sm text-slate-400">{% trans 'Company' %}:</span>
                 <p class="text-white font-medium">{{ customer.company_name|default:customer.name }}</p>
             </div>
-            
+
             <div>
                 <span class="text-sm text-slate-400">{% trans 'Email' %}:</span>
                 <p class="text-white">{{ customer.primary_email }}</p>
             </div>
-            
+
             <div>
                 <span class="text-sm text-slate-400">{% trans 'Type' %}:</span>
                 <p class="text-white">{{ customer.get_customer_type_display }}</p>
             </div>
-            
+
             <div>
                 <span class="text-sm text-slate-400">{% trans 'Status' %}:</span>
                 <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
                     {% if customer.status == 'active' %}bg-green-900 text-green-200
-                    {% elif customer.status == 'inactive' %}bg-red-900 text-red-200  
+                    {% elif customer.status == 'inactive' %}bg-red-900 text-red-200
                     {% elif customer.status == 'suspended' %}bg-yellow-900 text-yellow-200
                     {% else %}bg-blue-900 text-blue-200{% endif %}">
                     {{ customer.get_status_display }}
@@ -63,12 +63,12 @@
     <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
         <form method="post" x-data="{ userAction: '{{ form.user_action.value|default:'create' }}' }">
             {% csrf_token %}
-            
+
             <div class="mb-6">
                 <h2 class="text-lg font-semibold text-white mb-4">
                     🔗 {% trans 'User Assignment Options' %}
                 </h2>
-                
+
                 <!-- User Action Radio Buttons -->
                 <div class="space-y-3">
                     <!-- Create new user option -->
@@ -93,7 +93,7 @@
                             </div>
                         </div>
                     </label>
-                    
+
                     <!-- Link existing user option -->
                     <label class="flex items-start p-4 rounded-lg border border-slate-600 hover:border-blue-500 transition-colors cursor-pointer"
                            :class="{ 'border-blue-500 bg-blue-900/10': userAction === 'link' }">
@@ -111,7 +111,7 @@
                             </div>
                         </div>
                     </label>
-                    
+
                     <!-- Skip user assignment option -->
                     <label class="flex items-start p-4 rounded-lg border border-slate-600 hover:border-yellow-500 transition-colors cursor-pointer"
                            :class="{ 'border-yellow-500 bg-yellow-900/10': userAction === 'skip' }">
@@ -131,13 +131,13 @@
                     </label>
                 </div>
             </div>
-            
+
             <!-- Conditional Fields -->
             <div x-show="userAction === 'create'" x-cloak class="mb-6 pl-4 border-l-2 border-green-500">
                 <h3 class="text-md font-semibold text-white mb-4">
                     👤 {% trans "New User Details" %}
                 </h3>
-                
+
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                         <label for="{{ form.first_name.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
@@ -148,7 +148,7 @@
                         <p class="text-red-500 text-sm mt-1">{{ form.first_name.errors.0 }}</p>
                         {% endif %}
                     </div>
-                    
+
                     <div>
                         <label for="{{ form.last_name.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
                             {{ form.last_name.label }} <span class="text-red-400">*</span>
@@ -159,7 +159,7 @@
                         {% endif %}
                     </div>
                 </div>
-                
+
                 <div class="mt-4">
                     <label for="{{ form.role.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
                         {{ form.role.label }}
@@ -169,7 +169,7 @@
                     <p class="text-xs text-slate-400 mt-1">{{ form.role.help_text }}</p>
                     {% endif %}
                 </div>
-                
+
                 <div class="flex items-start space-x-3 mt-4">
                     {{ form.send_welcome_email }}
                     <div class="flex-1">
@@ -181,20 +181,20 @@
                         {% endif %}
                     </div>
                 </div>
-                
+
                 <div class="p-3 bg-green-900/20 rounded-lg border border-green-800 mt-4">
                     <p class="text-sm text-green-300">
-                        ℹ️ {% trans "A user account will be created using" %} <strong>{{ customer.primary_email }}</strong>. 
+                        ℹ️ {% trans "A user account will be created using" %} <strong>{{ customer.primary_email }}</strong>.
                         {% trans "They will receive a password reset link to set their password." %}
                     </p>
                 </div>
             </div>
-            
+
             <div x-show="userAction === 'link'" x-cloak class="mb-6 pl-4 border-l-2 border-blue-500">
                 <h3 class="text-md font-semibold text-white mb-4">
                     🔗 {% trans "Existing User Selection" %}
                 </h3>
-                
+
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                         <label for="{{ form.existing_user.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
@@ -208,7 +208,7 @@
                         <p class="text-red-500 text-sm mt-1">{{ form.existing_user.errors.0 }}</p>
                         {% endif %}
                     </div>
-                    
+
                     <div>
                         <label for="{{ form.role.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
                             {{ form.role.label }}
@@ -219,14 +219,14 @@
                         {% endif %}
                     </div>
                 </div>
-                
+
                 <div class="p-3 bg-blue-900/20 rounded-lg border border-blue-800 mt-4">
                     <p class="text-sm text-blue-300">
                         ℹ️ {% trans "The selected user will gain access to this customer organization with the specified role." %}
                     </p>
                 </div>
             </div>
-            
+
             <div x-show="userAction === 'skip'" x-cloak class="mb-6 pl-4 border-l-2 border-yellow-500">
                 <div class="p-3 bg-yellow-900/20 rounded-lg border border-yellow-800">
                     <p class="text-sm text-yellow-300">
@@ -234,12 +234,12 @@
                     </p>
                 </div>
             </div>
-            
+
             <!-- Form Actions -->
             <div class="flex justify-between pt-6 border-t border-slate-600">
                 {% url 'customers:detail' customer.pk as cancel_url %}
                 {% include 'components/button.html' with text='Cancel' variant='secondary' href=cancel_url %}
-                
+
                 {% include 'components/button.html' with text='Assign User' variant='primary' type='submit' %}
             </div>
         </form>

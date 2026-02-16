@@ -89,7 +89,7 @@
                 <label for="status" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                     {% trans "Status" %}
                 </label>
-                <select name="status" id="status" 
+                <select name="status" id="status"
                         class="block w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-3 py-2 text-sm">
                     <option value="">{% trans "All Statuses" %}</option>
                     <option value="active" {% if request.GET.status == 'active' %}selected{% endif %}>🟢 {% trans "Active" %}</option>
@@ -137,23 +137,23 @@
                                 </h3>
                                 {% badge registrar.get_status_display %}
                             </div>
-                            
+
                             <div class="space-y-1">
                                 <p class="text-sm text-slate-600 dark:text-slate-400">
                                     <span class="font-medium">{% trans "Website:" %}</span>
-                                    <a href="{{ registrar.website_url }}" target="_blank" 
+                                    <a href="{{ registrar.website_url }}" target="_blank"
                                        class="text-blue-600 dark:text-blue-400 hover:underline ml-1">
                                         {{ registrar.website_url }}
                                     </a>
                                 </p>
-                                
+
                                 <p class="text-sm text-slate-600 dark:text-slate-400">
                                     <span class="font-medium">{% trans "API Endpoint:" %}</span>
                                     <code class="ml-1 text-xs bg-slate-100 dark:bg-slate-600 px-1 py-0.5 rounded">
                                         {{ registrar.api_endpoint }}
                                     </code>
                                 </p>
-                                
+
                                 {% if registrar.tld_assignments.all %}
                                 <div class="flex items-center space-x-1 mt-2">
                                     <span class="text-xs font-medium text-slate-500 dark:text-slate-400">{% trans "TLDs:" %}</span>
@@ -186,13 +186,13 @@
             <nav class="flex items-center justify-between">
                 <div class="flex-1 flex justify-between sm:hidden">
                     {% if registrars_page.has_previous %}
-                        <a href="?page={{ registrars_page.previous_page_number }}" 
+                        <a href="?page={{ registrars_page.previous_page_number }}"
                            class="relative inline-flex items-center px-4 py-2 border border-slate-300 text-sm font-medium rounded-md text-slate-700 bg-white hover:bg-slate-50">
                             {% trans "Previous" %}
                         </a>
                     {% endif %}
                     {% if registrars_page.has_next %}
-                        <a href="?page={{ registrars_page.next_page_number }}" 
+                        <a href="?page={{ registrars_page.next_page_number }}"
                            class="ml-3 relative inline-flex items-center px-4 py-2 border border-slate-300 text-sm font-medium rounded-md text-slate-700 bg-white hover:bg-slate-50">
                             {% trans "Next" %}
                         </a>
@@ -220,11 +220,11 @@
                                     ‹
                                 </a>
                             {% endif %}
-                            
+
                             <span class="relative inline-flex items-center px-4 py-2 border border-slate-300 bg-white text-sm font-medium text-slate-700">
                                 {{ registrars_page.number }}
                             </span>
-                            
+
                             {% if registrars_page.has_next %}
                                 <a href="?page={{ registrars_page.next_page_number }}" class="relative inline-flex items-center px-2 py-2 border border-slate-300 bg-white text-sm font-medium text-slate-500 hover:bg-slate-50">
                                     ›
@@ -239,7 +239,7 @@
             </nav>
         </div>
         {% endif %}
-        
+
         {% else %}
         <div class="px-6 py-12 text-center">
             <div class="text-slate-400 text-6xl mb-4">🏢</div>
@@ -257,14 +257,14 @@
 function toggleDropdown(id) {
     const dropdown = document.getElementById(id);
     const allDropdowns = document.querySelectorAll('[id^="dropdown-"]');
-    
+
     // Close all other dropdowns
     allDropdowns.forEach(d => {
         if (d.id !== id) {
             d.classList.add('hidden');
         }
     });
-    
+
     // Toggle current dropdown
     dropdown.classList.toggle('hidden');
 }

@@ -109,7 +109,7 @@ class TestRomanianVATValidation(TestCase):
 
         expected_results = [
             'RO12345678',
-            'RO123456789', 
+            'RO123456789',
             'RO1234567890',
             'RO12345678',
         ]

@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 # Expose imports at module scope for patching in tests
 try:
     from apps.billing.invoice_models import Invoice  # type: ignore
+
     InvoiceDoesNotExist = Invoice.DoesNotExist  # type: ignore[attr-defined]
 except Exception:  # pragma: no cover - import guard for test/runtime isolation
     Invoice = None  # type: ignore
@@ -41,6 +42,7 @@ except Exception:  # pragma: no cover - optional dependency
 
 try:
     from .models import EFacturaDocument  # type: ignore
+
     EFacturaDocumentDoesNotExist = EFacturaDocument.DoesNotExist  # type: ignore[attr-defined]
 except Exception:  # pragma: no cover - import guard for test/runtime isolation
     EFacturaDocument = None  # type: ignore
@@ -147,6 +149,7 @@ def poll_all_pending_status_task() -> dict[str, Any]:
     logger.info("[e-Factura Task] Polling status for all pending documents")
 
     from apps.settings.services import SettingsService  # noqa: PLC0415
+
     batch_size = SettingsService.get_integer_setting("billing.efactura_batch_size", 100)
 
     if EFacturaService is None:
@@ -198,6 +201,7 @@ def process_pending_submissions_task() -> dict[str, Any]:
     logger.info("[e-Factura Task] Processing pending submissions")
 
     from apps.settings.services import SettingsService  # noqa: PLC0415
+
     batch_size = SettingsService.get_integer_setting("billing.efactura_batch_size", 100)
 
     if EFacturaService is None:
@@ -225,6 +229,7 @@ def check_efactura_deadlines_task() -> dict[str, Any]:
     logger.info("[e-Factura Task] Checking e-Factura deadlines")
 
     from apps.settings.services import SettingsService  # noqa: PLC0415
+
     warning_hours = SettingsService.get_integer_setting("billing.efactura_deadline_warning_hours", 24)
 
     if EFacturaService is None:

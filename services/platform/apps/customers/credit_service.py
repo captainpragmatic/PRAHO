@@ -318,9 +318,11 @@ class CustomerCreditService:
             failed = payments.filter(status="failed").count()
 
             # Calculate on-time payments (payments made before or on due date)
-            on_time = payments.filter(
-                status="succeeded", created_at__lte=models.F("invoice__due_date")
-            ).count() if hasattr(Payment, "invoice") else successful
+            on_time = (
+                payments.filter(status="succeeded", created_at__lte=models.F("invoice__due_date")).count()
+                if hasattr(Payment, "invoice")
+                else successful
+            )
 
             return {
                 "total_payments": total,
@@ -354,9 +356,7 @@ class CustomerCreditService:
             from apps.billing.models import Payment  # noqa: PLC0415
 
             # Get recent payments ordered by date
-            recent_payments = Payment.objects.filter(
-                invoice__customer=customer
-            ).order_by("-created_at")[:20]
+            recent_payments = Payment.objects.filter(invoice__customer=customer).order_by("-created_at")[:20]
 
             consecutive = 0
             for payment in recent_payments:

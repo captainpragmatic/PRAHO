@@ -155,15 +155,9 @@ class SESWebhookView(View):
                 "sns.ap-northeast-1.amazonaws.com",
             ]
             # Also allow regional pattern: sns.<region>.amazonaws.com
-            is_valid_sns_domain = (
-                parsed.scheme == "https"
-                and (
-                    parsed.netloc in allowed_domains
-                    or (
-                        parsed.netloc.startswith("sns.")
-                        and parsed.netloc.endswith(".amazonaws.com")
-                    )
-                )
+            is_valid_sns_domain = parsed.scheme == "https" and (
+                parsed.netloc in allowed_domains
+                or (parsed.netloc.startswith("sns.") and parsed.netloc.endswith(".amazonaws.com"))
             )
 
             if not is_valid_sns_domain:

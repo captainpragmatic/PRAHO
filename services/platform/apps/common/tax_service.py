@@ -34,35 +34,34 @@ class TaxConfiguration:
     # Default VAT rates (can be overridden via settings or database)
     DEFAULT_VAT_RATES: ClassVar[dict[str, Decimal]] = {
         # Romania - Primary market (updated Aug 2025)
-        'RO': Decimal('21.0'),
-
+        "RO": Decimal("21.0"),
         # EU Countries
-        'AT': Decimal('20.0'),  # Austria
-        'BE': Decimal('21.0'),  # Belgium
-        'BG': Decimal('20.0'),  # Bulgaria
-        'HR': Decimal('25.0'),  # Croatia
-        'CY': Decimal('19.0'),  # Cyprus
-        'CZ': Decimal('21.0'),  # Czech Republic
-        'DK': Decimal('25.0'),  # Denmark
-        'EE': Decimal('22.0'),  # Estonia
-        'FI': Decimal('24.0'),  # Finland
-        'FR': Decimal('20.0'),  # France
-        'DE': Decimal('19.0'),  # Germany
-        'GR': Decimal('24.0'),  # Greece
-        'HU': Decimal('27.0'),  # Hungary (highest in EU)
-        'IE': Decimal('23.0'),  # Ireland
-        'IT': Decimal('22.0'),  # Italy
-        'LV': Decimal('21.0'),  # Latvia
-        'LT': Decimal('21.0'),  # Lithuania
-        'LU': Decimal('17.0'),  # Luxembourg
-        'MT': Decimal('18.0'),  # Malta
-        'NL': Decimal('21.0'),  # Netherlands
-        'PL': Decimal('23.0'),  # Poland
-        'PT': Decimal('23.0'),  # Portugal
-        'SK': Decimal('20.0'),  # Slovakia
-        'SI': Decimal('22.0'),  # Slovenia
-        'ES': Decimal('21.0'),  # Spain
-        'SE': Decimal('25.0'),  # Sweden
+        "AT": Decimal("20.0"),  # Austria
+        "BE": Decimal("21.0"),  # Belgium
+        "BG": Decimal("20.0"),  # Bulgaria
+        "HR": Decimal("25.0"),  # Croatia
+        "CY": Decimal("19.0"),  # Cyprus
+        "CZ": Decimal("21.0"),  # Czech Republic
+        "DK": Decimal("25.0"),  # Denmark
+        "EE": Decimal("22.0"),  # Estonia
+        "FI": Decimal("24.0"),  # Finland
+        "FR": Decimal("20.0"),  # France
+        "DE": Decimal("19.0"),  # Germany
+        "GR": Decimal("24.0"),  # Greece
+        "HU": Decimal("27.0"),  # Hungary (highest in EU)
+        "IE": Decimal("23.0"),  # Ireland
+        "IT": Decimal("22.0"),  # Italy
+        "LV": Decimal("21.0"),  # Latvia
+        "LT": Decimal("21.0"),  # Lithuania
+        "LU": Decimal("17.0"),  # Luxembourg
+        "MT": Decimal("18.0"),  # Malta
+        "NL": Decimal("21.0"),  # Netherlands
+        "PL": Decimal("23.0"),  # Poland
+        "PT": Decimal("23.0"),  # Portugal
+        "SK": Decimal("20.0"),  # Slovakia
+        "SI": Decimal("22.0"),  # Slovenia
+        "ES": Decimal("21.0"),  # Spain
+        "SE": Decimal("25.0"),  # Sweden
     }
 
     @classmethod
@@ -78,11 +77,11 @@ class TaxConfiguration:
             VAT rate as Decimal
         """
         # Normalize country code
-        country_code = country_code.upper().strip() if country_code else 'RO'
+        country_code = country_code.upper().strip() if country_code else "RO"
 
         # Special handling for Romanian variations
-        if country_code in ['ROMANIA', 'ROMÂNIA']:
-            country_code = 'RO'
+        if country_code in ["ROMANIA", "ROMÂNIA"]:
+            country_code = "RO"
 
         # Check cache first
         cache_key = f"{cls.CACHE_KEY_PREFIX}:{country_code}"
@@ -110,10 +109,9 @@ class TaxConfiguration:
         # tax leakage from typos like "R0" or "ZZ" silently getting 0%.
         if rate is None:
             logger.warning(
-                f"⚠️ [TaxService] No rate found for {country_code!r}, "
-                f"defaulting to Romanian VAT (fail-safe)"
+                f"⚠️ [TaxService] No rate found for {country_code!r}, " f"defaulting to Romanian VAT (fail-safe)"
             )
-            rate = cls.DEFAULT_VAT_RATES['RO']
+            rate = cls.DEFAULT_VAT_RATES["RO"]
 
         # Cache the rate
         cache.set(cache_key, str(rate), cls.CACHE_TIMEOUT)
@@ -161,8 +159,8 @@ class TaxConfiguration:
             return Decimal(str(value))
 
         # Check for general VAT rates dictionary
-        if hasattr(settings, 'VAT_RATES'):
-            rates = getattr(settings, 'VAT_RATES', {})
+        if hasattr(settings, "VAT_RATES"):
+            rates = getattr(settings, "VAT_RATES", {})
             if country_code in rates:
                 value = rates[country_code]
                 if isinstance(value, float):
@@ -175,8 +173,9 @@ class TaxConfiguration:
         return None
 
     @classmethod
-    def calculate_vat(cls, amount_cents: int, country_code: str = 'RO',
-                     is_business: bool = False, vat_number: str | None = None) -> dict[str, int]:
+    def calculate_vat(
+        cls, amount_cents: int, country_code: str = "RO", is_business: bool = False, vat_number: str | None = None
+    ) -> dict[str, int]:
         """
         Calculate VAT for an amount using proper rounding.
 
@@ -189,24 +188,16 @@ class TaxConfiguration:
         Returns:
             Dict with vat_cents and total_cents
         """
-        country_code = country_code.upper().strip() if country_code else 'RO'
+        country_code = country_code.upper().strip() if country_code else "RO"
 
         # EU B2B reverse charge: 0% VAT when business has valid VAT number
         # and is in an EU country other than Romania (provider's home country)
-        if (
-            is_business
-            and vat_number
-            and cls.is_eu_country(country_code)
-            and country_code != 'RO'
-        ):
-            logger.info(
-                f"💰 [TaxService] EU B2B reverse charge: {country_code} "
-                f"VAT {vat_number} → 0% VAT"
-            )
+        if is_business and vat_number and cls.is_eu_country(country_code) and country_code != "RO":
+            logger.info(f"💰 [TaxService] EU B2B reverse charge: {country_code} " f"VAT {vat_number} → 0% VAT")
             return {
-                'vat_cents': 0,
-                'total_cents': amount_cents,
-                'vat_rate_percent': Decimal('0.0'),
+                "vat_cents": 0,
+                "total_cents": amount_cents,
+                "vat_rate_percent": Decimal("0.0"),
             }
 
         # Get VAT rate as decimal (e.g., 0.21 for 21%)
@@ -214,13 +205,9 @@ class TaxConfiguration:
 
         # Calculate VAT with banker's rounding
         vat_amount = Decimal(amount_cents) * vat_rate
-        vat_cents = int(vat_amount.quantize(Decimal('1'), rounding=ROUND_HALF_EVEN))
+        vat_cents = int(vat_amount.quantize(Decimal("1"), rounding=ROUND_HALF_EVEN))
 
-        return {
-            'vat_cents': vat_cents,
-            'total_cents': amount_cents + vat_cents,
-            'vat_rate_percent': vat_rate * 100
-        }
+        return {"vat_cents": vat_cents, "total_cents": amount_cents + vat_cents, "vat_rate_percent": vat_rate * 100}
 
     @classmethod
     def invalidate_cache(cls, country_code: str | None = None) -> None:

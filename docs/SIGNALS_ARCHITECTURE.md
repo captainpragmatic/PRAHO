@@ -13,7 +13,7 @@ The PRAHO platform uses Django signals for event-driven architecture, enabling d
 
 **Key Signals**:
 - Order creation/updates → Audit logging, email notifications
-- Invoice status changes → Payment tracking, e-Factura submission  
+- Invoice status changes → Payment tracking, e-Factura submission
 - Payment processing → Invoice status updates, service activation
 - Status transitions → Cross-app notifications, compliance logging
 
@@ -45,7 +45,7 @@ def handle_order_created_or_updated()
 # Order status transitions
 def _handle_order_status_change()
     # processing → Invoice generation
-    # completed → Service provisioning  
+    # completed → Service provisioning
     # cancelled → Cleanup operations
     # refunded → Service management
 ```
@@ -58,7 +58,7 @@ def handle_order_domain_provisioning()
     # → Domain registration for domain products
     # → Bridges orders → domains app
 
-@receiver(post_save, sender=Order)  
+@receiver(post_save, sender=Order)
 def handle_customer_credit_limit_update()
     # → Customer credit score updates
     # → Bridges orders → customers app
@@ -94,7 +94,7 @@ def handle_invoice_created_or_updated()
     # → Payment reminder scheduling
     # → Status change notifications
 
-# Payment processing  
+# Payment processing
 @receiver(post_save, sender=Payment)
 def handle_payment_created_or_updated()
     # → Invoice status updates
@@ -118,7 +118,7 @@ def handle_invoice_order_synchronization()
     # → Order status updates when invoice changes
     # → Cross-app state management
 
-@receiver(m2m_changed, sender=Invoice.orders.through)  
+@receiver(m2m_changed, sender=Invoice.orders.through)
 def handle_invoice_order_linking()
     # → Many-to-many relationship management
     # → Bidirectional synchronization
@@ -147,10 +147,10 @@ def handle_billing_analytics_update()
 
 ### 1. Orders ↔ Billing
 - **Order completion** → Invoice generation
-- **Invoice payment** → Order status progression  
+- **Invoice payment** → Order status progression
 - **Refund processing** → Bidirectional status sync
 
-### 2. Orders ↔ Provisioning  
+### 2. Orders ↔ Provisioning
 - **Order completion** → Service provisioning queue
 - **Service bundles** → Service group creation
 - **Order cancellation** → Service suspension
@@ -185,7 +185,7 @@ def handle_invoice_issued():
 ### Sequential Invoice Numbering
 ```python
 # Romanian law compliance
-@receiver(post_save, sender=Invoice) 
+@receiver(post_save, sender=Invoice)
 def handle_invoice_number_generation():
     if instance.status == 'issued' and instance.number.startswith('TMP-'):
         # Generate sequential number only for issued invoices
@@ -218,7 +218,7 @@ def handle_vat_validation_result():
 - GDPR compliance considerations
 
 ### 4. Idempotency
-- Signals can be safely re-executed  
+- Signals can be safely re-executed
 - State checking before actions
 - Duplicate prevention logic
 

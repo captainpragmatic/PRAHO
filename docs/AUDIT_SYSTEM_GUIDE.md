@@ -41,20 +41,20 @@ class AuditEvent:
     timestamp: DateTime         # When the event occurred (indexed)
     user: User                 # Who performed the action
     actor_type: str            # user|system|api
-    
+
     # Event categorization (NEW)
     action: str                # Specific action performed (200+ types)
     category: str              # Security category (10 categories)
     severity: str              # low|medium|high|critical
     is_sensitive: bool         # Contains PII or security data
     requires_review: bool      # Flagged for manual review
-    
+
     # Context and location
     ip_address: IPAddress      # Client IP address
     user_agent: str           # Client user agent
     session_key: str          # Session identifier
     request_id: str           # Request correlation ID
-    
+
     # What changed
     content_type: ContentType  # Model that was affected
     object_id: str            # ID of the affected object
@@ -72,7 +72,7 @@ class AuditEvent:
 - **Examples**: `login_success`, `login_failed_password`, `session_expired`
 - **Compliance**: NIST SP 800-63B, ISO 27001
 
-#### 2. Authorization Events  
+#### 2. Authorization Events
 - **Purpose**: Track role/permission changes, access control
 - **Severity**: High
 - **Examples**: `role_assigned`, `permission_revoked`, `staff_role_changed`
@@ -155,7 +155,7 @@ class AuditEvent:
 ### Profile & Account Management (GDPR Article 12-22)
 ```python
 'profile_updated', 'email_changed', 'phone_updated', 'name_changed',
-'language_preference_changed', 'timezone_changed', 
+'language_preference_changed', 'timezone_changed',
 'emergency_contact_updated'
 ```
 
@@ -200,12 +200,12 @@ def audit_user_profile_changes(sender, instance, created, **kwargs):
     """Automatically audit critical user profile changes"""
     if created:
         return
-    
+
     update_fields = kwargs.get('update_fields', None)
     if update_fields:
         sensitive_fields = {'email', 'phone', 'staff_role', 'two_factor_enabled'}
         changed_fields = set(update_fields) & sensitive_fields
-        
+
         for field in changed_fields:
             _create_audit_event(
                 action=f'{field}_changed',
@@ -273,7 +273,7 @@ def audit_dashboard_view(request):
     """
     Query Budget: 4 queries
     1. High severity events (1 query)
-    2. Recent user activity (1 query) 
+    2. Recent user activity (1 query)
     3. Compliance events (1 query)
     4. Security incidents (1 query)
     """
@@ -393,7 +393,7 @@ def test_user_profile_change_audit():
     user = User.objects.create_user(email='test@example.com')
     user.email = 'new@example.com'
     user.save(update_fields=['email'])
-    
+
     # Verify audit event
     audit_event = AuditEvent.objects.get(action='email_changed')
     assert audit_event.category == 'account_management'
@@ -407,7 +407,7 @@ def test_security_incident_flagging():
         user=user,
         metadata={'threat_level': 'high'}
     )
-    
+
     audit_event = AuditEvent.objects.get(action='password_compromised')
     assert audit_event.severity == 'high'
     assert audit_event.requires_review is True
@@ -420,7 +420,7 @@ def test_security_incident_flagging():
 # Events that trigger immediate alerts
 CRITICAL_EVENTS = [
     'data_breach_detected',
-    'security_incident_detected', 
+    'security_incident_detected',
     'password_compromised',
     '2fa_admin_reset',
     'privilege_escalation_attempt'
@@ -441,10 +441,10 @@ REVIEW_REQUIRED_EVENTS = [
 def process_audit_event(audit_event):
     if audit_event.severity == 'critical':
         send_security_alert(audit_event)
-    
+
     if audit_event.requires_review:
         flag_for_manual_review(audit_event)
-    
+
     if detect_anomalous_pattern(audit_event):
         trigger_investigation_workflow(audit_event)
 ```
@@ -462,14 +462,14 @@ def process_audit_event(audit_event):
 # Automated archival process
 def archive_old_events():
     cutoff_date = timezone.now() - timedelta(days=365)
-    
+
     # Archive non-critical events older than 1 year
     old_events = AuditEvent.objects.filter(
         timestamp__lt=cutoff_date,
         severity__in=['low', 'medium'],
         category__in=['business_operation']
     )
-    
+
     # Export to long-term storage
     archive_to_s3(old_events)
     old_events.delete()

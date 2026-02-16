@@ -33,16 +33,16 @@ class PaymentProcessingViewsTestCase(TestCase):
         """Setup test data"""
         self.factory = RequestFactory()
         self.currency, _ = Currency.objects.get_or_create(
-            code='RON', 
+            code='RON',
             defaults={'symbol': 'lei', 'decimals': 2}
         )
-        
+
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Payment Test Company SRL',
             status='active'
         )
-        
+
         self.user = User.objects.create_user(
             email='payment@test.ro',
             password='testpass'
@@ -54,7 +54,7 @@ class PaymentProcessingViewsTestCase(TestCase):
             customer=self.customer,
             role='admin'
         )
-        
+
         self.invoice = Invoice.objects.create(
             customer=self.customer,
             currency=self.currency,
@@ -62,7 +62,7 @@ class PaymentProcessingViewsTestCase(TestCase):
             total_cents=15000,
             status='issued'
         )
-        
+
         # Add invoice line
         InvoiceLine.objects.create(
             invoice=self.invoice,
@@ -78,7 +78,7 @@ class PaymentProcessingViewsTestCase(TestCase):
         middleware = SessionMiddleware(lambda req: HttpResponse())
         middleware.process_request(request)
         request.session.save()
-        
+
         middleware = MessageMiddleware(lambda req: HttpResponse())
         middleware.process_request(request)
         return request
@@ -89,13 +89,13 @@ class PaymentProcessingViewsTestCase(TestCase):
             'amount': '150.00',
             'payment_method': 'stripe'
         }
-        
+
         request = self.factory.post('/billing/invoices/1/pay/', post_data)
         request.user = self.user
         request = self.add_middleware_to_request(request)
-        
+
         response = process_payment(request, pk=self.invoice.pk)
-        
+
         # Should return JSON response with success
         self.assertEqual(response.status_code, 200)
         self.assertIsInstance(response, JsonResponse)
@@ -106,19 +106,19 @@ class PaymentProcessingViewsTestCase(TestCase):
             email='unauth_payment@test.ro',
             password='testpass'
         )
-        
+
         post_data = {
             'invoice_id': str(self.invoice.pk),
             'amount': '150.00',
             'payment_method': 'stripe'
         }
-        
+
         request = self.factory.post('/billing/invoices/1/pay/', post_data)
         request.user = unauthorized_user
         request = self.add_middleware_to_request(request)
-        
+
         response = process_payment(request)
-        
+
         # Should return error or redirect
         self.assertIn(response.status_code, [302, 403])
 
@@ -128,13 +128,13 @@ class PaymentProcessingViewsTestCase(TestCase):
             'amount': 'invalid_amount',
             'payment_method': 'stripe'
         }
-        
+
         request = self.factory.post('/billing/invoices/1/pay/', post_data)
         request.user = self.user
         request = self.add_middleware_to_request(request)
-        
+
         response = process_payment(request, pk=self.invoice.pk)
-        
+
         # Should return error response
         self.assertIn(response.status_code, [400, 422])
 
@@ -144,14 +144,14 @@ class PaymentProcessingViewsTestCase(TestCase):
             'amount': '150.00',
             'payment_method': 'stripe'
         }
-        
+
         request = self.factory.post('/billing/invoices/1/pay/', post_data)
         request.user = self.user
         request = self.add_middleware_to_request(request)
-        
+
         # Call with non-existent invoice ID
         response = process_payment(request, pk=99999)
-        
+
         # Should return 404 or error response
         self.assertIn(response.status_code, [404, 400])
 
@@ -163,28 +163,28 @@ class PaymentListViewsTestCase(TestCase):
         """Setup test data"""
         self.factory = RequestFactory()
         self.currency, _ = Currency.objects.get_or_create(
-            code='RON', 
+            code='RON',
             defaults={'symbol': 'lei', 'decimals': 2}
         )
-        
+
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Payment List Test SRL',
             status='active'
         )
-        
+
         self.user = User.objects.create_user(
             email='payment_list@test.ro',
             password='testpass'
         )
-        self.user.staff_role = 'billing'  # Give billing staff privileges  
+        self.user.staff_role = 'billing'  # Give billing staff privileges
         self.user.save()
         CustomerMembership.objects.create(
             user=self.user,
             customer=self.customer,
             role='admin'
         )
-        
+
         # Create invoice for payments
         self.invoice = Invoice.objects.create(
             customer=self.customer,
@@ -193,7 +193,7 @@ class PaymentListViewsTestCase(TestCase):
             total_cents=10000,
             status='issued'
         )
-        
+
         # Create test payments
         self.payment1 = Payment.objects.create(
             customer=self.customer,
@@ -203,7 +203,7 @@ class PaymentListViewsTestCase(TestCase):
             status='succeeded',
             created_at=timezone.now() - timezone.timedelta(days=1)
         )
-        
+
         self.payment2 = Payment.objects.create(
             customer=self.customer,
             invoice=self.invoice,
@@ -212,7 +212,7 @@ class PaymentListViewsTestCase(TestCase):
             status='succeeded',
             created_at=timezone.now()
         )
-        
+
         self.payment3 = Payment.objects.create(
             customer=self.customer,
             invoice=self.invoice,
@@ -227,7 +227,7 @@ class PaymentListViewsTestCase(TestCase):
         middleware = SessionMiddleware(lambda req: HttpResponse())
         middleware.process_request(request)
         request.session.save()
-        
+
         middleware = MessageMiddleware(lambda req: HttpResponse())
         middleware.process_request(request)
         return request
@@ -237,10 +237,10 @@ class PaymentListViewsTestCase(TestCase):
         # Use Django test client for easier testing of list views
         self.client.force_login(self.user)
         response = self.client.get('/billing/payments/')
-        
+
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Payments')
-        
+
         # Should show all payments for the customer
         payments = response.context['payments']
         self.assertEqual(len(payments), 3)
@@ -249,9 +249,9 @@ class PaymentListViewsTestCase(TestCase):
         """Test payment list filtering by status"""
         self.client.force_login(self.user)
         response = self.client.get('/billing/payments/?status=succeeded')
-        
+
         self.assertEqual(response.status_code, 200)
-        
+
         # Should only show succeeded payments
         payments = response.context['payments']
         self.assertEqual(len(payments), 2)
@@ -262,9 +262,9 @@ class PaymentListViewsTestCase(TestCase):
         """Test payment list filtering by invoice"""
         self.client.force_login(self.user)
         response = self.client.get(f'/billing/payments/?invoice={self.invoice.pk}')
-        
+
         self.assertEqual(response.status_code, 200)
-        
+
         # Should show all payments for the specific invoice
         payments = response.context['payments']
         self.assertEqual(len(payments), 3)
@@ -277,12 +277,12 @@ class PaymentListViewsTestCase(TestCase):
             email='unauth_list@test.ro',
             password='testpass'
         )
-        
+
         self.client.force_login(unauthorized_user)
         response = self.client.get('/billing/payments/')
-        
+
         self.assertEqual(response.status_code, 200)
-        
+
         # Should show empty list for unauthorized user
         payments = response.context['payments']
         self.assertEqual(len(payments), 0)
@@ -291,9 +291,9 @@ class PaymentListViewsTestCase(TestCase):
         """Test payment list default ordering"""
         self.client.force_login(self.user)
         response = self.client.get('/billing/payments/')
-        
+
         self.assertEqual(response.status_code, 200)
-        
+
         payments = list(response.context['payments'])
         # Should be ordered by created_at desc (newest first)
         self.assertTrue(payments[0].created_at >= payments[1].created_at)
@@ -312,13 +312,13 @@ class PaymentListViewsTestCase(TestCase):
                 status='succeeded'
             )
             additional_payments.append(payment)
-        
+
         try:
             self.client.force_login(self.user)
             response = self.client.get('/billing/payments/')
-            
+
             self.assertEqual(response.status_code, 200)
-            
+
             # Should show paginated results
             payments = response.context['payments']
             # Pagination is set to 25 per page, we created 25 + 3 original = 28 total

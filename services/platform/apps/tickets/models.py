@@ -143,14 +143,10 @@ class Ticket(models.Model):
 
     # Resolution tracking
     resolution_code = models.CharField(
-        max_length=20, 
-        choices=RESOLUTION_CHOICES, 
-        blank=True, 
-        default='',
-        verbose_name=_("Resolution Code")
+        max_length=20, choices=RESOLUTION_CHOICES, blank=True, default="", verbose_name=_("Resolution Code")
     )
     closed_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Closed At"))
-    
+
     # Customer interaction tracking
     customer_replied_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Customer Last Reply"))
     has_customer_replied = models.BooleanField(default=False, verbose_name=_("Customer Replied"))
@@ -228,7 +224,7 @@ class Ticket(models.Model):
     def is_awaiting_customer(self) -> bool:
         """Check if ticket is waiting on customer response"""
         return self.status == "waiting_on_customer"
-    
+
     @property
     def customer_replied_recently(self) -> bool:
         """Check if customer has replied recently (for badge display)"""
@@ -291,17 +287,10 @@ class TicketComment(models.Model):
 
     # Agent reply actions (for support/internal comments)
     reply_action = models.CharField(
-        max_length=30, 
-        choices=REPLY_ACTION_CHOICES, 
-        default='',
-        blank=True, 
-        verbose_name=_("Reply Action")
+        max_length=30, choices=REPLY_ACTION_CHOICES, default="", blank=True, verbose_name=_("Reply Action")
     )
-    sets_waiting_on_customer = models.BooleanField(
-        default=False, 
-        verbose_name=_("Sets Waiting on Customer")
-    )
-    
+    sets_waiting_on_customer = models.BooleanField(default=False, verbose_name=_("Sets Waiting on Customer"))
+
     # Time tracking
     time_spent = models.DecimalField(max_digits=5, decimal_places=2, default=0, verbose_name=_("Time Spent (hours)"))
 

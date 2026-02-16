@@ -10,7 +10,7 @@
                 {{ reply.author_name|first|upper }}
             </div>
         </div>
-        
+
         <!-- Comment Content -->
         <div class="flex-1 min-w-0">
             <!-- Header -->
@@ -19,7 +19,7 @@
                     <p class="text-white font-medium">
                         {{ reply.author_name|default:"Unknown" }}
                     </p>
-                    
+
                     <!-- Role Badge -->
                     {% if reply.is_staff_reply %}
                         <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
@@ -37,20 +37,20 @@
                         </span>
                     {% endif %}
                 </div>
-                
+
                 <!-- Timestamp -->
                 <p class="text-slate-400 text-sm" title="{{ reply.created_at|date:'c' }}">
                     {{ reply.created_at|date:"d.m.Y H:i" }}
                 </p>
             </div>
-            
+
             <!-- Content -->
             <div class="prose prose-invert prose-sm max-w-none mt-3">
                 <div class="text-slate-300 leading-relaxed">
                     {{ reply.content|linebreaksbr }}
                 </div>
             </div>
-            
+
             <!-- Attachments -->
             {% if reply.attachments %}
             <div class="mt-3 space-y-2">
@@ -66,7 +66,7 @@
                 {% endfor %}
             </div>
             {% endif %}
-            
+
         </div>
     </div>
 </div>

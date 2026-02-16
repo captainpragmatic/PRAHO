@@ -345,9 +345,7 @@ class SSHKeyManager:
             return Ok(True)
 
         except EncryptedCredential.DoesNotExist:
-            logger.warning(
-                f"🔑 [SSH Manager] SSH key credential not found: {deployment.ssh_key_credential_id}"
-            )
+            logger.warning(f"🔑 [SSH Manager] SSH key credential not found: {deployment.ssh_key_credential_id}")
             return Ok(True)  # Already deleted
 
         except Exception as e:
@@ -468,9 +466,7 @@ class SSHKeyManager:
 
         # Fallback to master key if deployment key failed
         if self.has_master_key():
-            logger.warning(
-                f"🔑 [SSH Manager] Falling back to master key for: {deployment.hostname}"
-            )
+            logger.warning(f"🔑 [SSH Manager] Falling back to master key for: {deployment.hostname}")
             master_result = self.get_master_key()
             if master_result.is_ok():
                 return Ok(

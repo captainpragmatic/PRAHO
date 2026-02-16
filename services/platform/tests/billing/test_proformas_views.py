@@ -38,13 +38,13 @@ class ProformaViewsTestCase(TestCase):
         """Setup test data"""
         self.factory = RequestFactory()
         self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
-        
+
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Proforma Test Company SRL',
             primary_email='proforma@test.ro',
         )
-        
+
         # Create staff user
         self.staff_user = User.objects.create_user(
             email='proforma_staff@test.ro',
@@ -53,7 +53,7 @@ class ProformaViewsTestCase(TestCase):
         )
         self.staff_user.staff_role = 'billing'
         self.staff_user.save()
-        
+
         self.regular_user = User.objects.create_user(
             email='regular@test.ro',
             password='testpass'
@@ -69,11 +69,11 @@ class ProformaViewsTestCase(TestCase):
         from django.contrib.messages.middleware import MessageMiddleware
         from django.contrib.sessions.middleware import SessionMiddleware
         from django.http import HttpResponse
-        
+
         middleware = SessionMiddleware(lambda req: HttpResponse())
         middleware.process_request(request)
         request.session.save()
-        
+
         middleware = MessageMiddleware(lambda req: HttpResponse())
         middleware.process_request(request)
         return request
@@ -81,9 +81,9 @@ class ProformaViewsTestCase(TestCase):
     def test_create_proforma_with_sequence(self):
         """Test _create_proforma_with_sequence helper"""
         valid_until = timezone.now() + timezone.timedelta(days=30)
-        
+
         proforma = _create_proforma_with_sequence(self.customer, valid_until)
-        
+
         self.assertIsInstance(proforma, ProformaInvoice)
         self.assertEqual(proforma.customer, self.customer)
         self.assertTrue(proforma.number.startswith('PRO-'))
@@ -94,7 +94,7 @@ class ProformaViewsTestCase(TestCase):
         # Use Django test client for staff-required view
         self.client.force_login(self.staff_user)
         response = self.client.get('/billing/proformas/create/')
-        
+
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Create New Proforma')
         self.assertContains(response, 'Customer Information')
@@ -104,7 +104,7 @@ class ProformaViewsTestCase(TestCase):
         # Use Django test client for proper decorator testing
         self.client.force_login(self.regular_user)
         response = self.client.get('/billing/proformas/create/')
-        
+
         # Should redirect due to @billing_staff_required decorator
         self.assertEqual(response.status_code, 302)
 
@@ -120,15 +120,15 @@ class ProformaViewsTestCase(TestCase):
             'line_0_unit_price': '100.00',
             'line_0_vat_rate': '19',
         }
-        
+
         request = self.factory.post('/billing/proformas/create/', post_data)
         request.user = self.staff_user
         request = self.add_middleware_to_request(request)
-        
+
         response = _handle_proforma_create_post(request)
-        
+
         self.assertEqual(response.status_code, 302)
-        
+
         # Verify proforma was created
         proforma = ProformaInvoice.objects.get(customer=self.customer)
         self.assertEqual(proforma.bill_to_name, 'Test Company SRL')
@@ -142,12 +142,12 @@ class ProformaDetailViewTestCase(TestCase):
         """Setup test data"""
         self.factory = RequestFactory()
         self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
-        
+
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Proforma Detail Test SRL',
         )
-        
+
         self.user = User.objects.create_user(
             email='proforma_detail@test.ro',
             password='testpass'
@@ -157,7 +157,7 @@ class ProformaDetailViewTestCase(TestCase):
             customer=self.customer,
             role='admin'
         )
-        
+
         self.proforma = ProformaInvoice.objects.create(
             customer=self.customer,
             currency=self.currency,
@@ -165,7 +165,7 @@ class ProformaDetailViewTestCase(TestCase):
             total_cents=15000,
             valid_until=timezone.now().date()
         )
-        
+
         # Add proforma line
         ProformaLine.objects.create(
             proforma=self.proforma,
@@ -181,7 +181,7 @@ class ProformaDetailViewTestCase(TestCase):
         middleware = SessionMiddleware(lambda req: HttpResponse())
         middleware.process_request(request)
         request.session.save()
-        
+
         middleware = MessageMiddleware(lambda req: HttpResponse())
         middleware.process_request(request)
         return request
@@ -191,9 +191,9 @@ class ProformaDetailViewTestCase(TestCase):
         request = self.factory.get(f'/app/billing/proformas/{self.proforma.pk}/')
         request.user = self.user
         request = self.add_middleware_to_request(request)
-        
+
         response = proforma_detail(request, self.proforma.pk)
-        
+
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'PRO-DETAIL-001')
         self.assertContains(response, 'Detail Test Service')
@@ -204,13 +204,13 @@ class ProformaDetailViewTestCase(TestCase):
             email='unauth_detail@test.ro',
             password='testpass'
         )
-        
+
         request = self.factory.get(f'/app/billing/proformas/{self.proforma.pk}/')
         request.user = unauthorized_user
         request = self.add_middleware_to_request(request)
-        
+
         response = proforma_detail(request, self.proforma.pk)
-        
+
         self.assertEqual(response.status_code, 302)
 
     def test_proforma_detail_not_found(self):
@@ -218,24 +218,24 @@ class ProformaDetailViewTestCase(TestCase):
         request = self.factory.get('/app/billing/proformas/99999/')
         request.user = self.user
         request = self.add_middleware_to_request(request)
-        
+
         with self.assertRaises(Http404):
             proforma_detail(request, 99999)
 
 
 class ProformaEditViewsTestCase(TestCase):
     """Test proforma edit functionality"""
-    
+
     def setUp(self):
         """Setup test data"""
         self.factory = RequestFactory()
         self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
-        
+
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Proforma Edit Test SRL',
         )
-        
+
         self.user = User.objects.create_user(
             email='proforma_edit@test.ro',
             password='testpass'
@@ -245,7 +245,7 @@ class ProformaEditViewsTestCase(TestCase):
             customer=self.customer,
             role='admin'
         )
-        
+
         self.proforma = ProformaInvoice.objects.create(
             customer=self.customer,
             currency=self.currency,
@@ -259,7 +259,7 @@ class ProformaEditViewsTestCase(TestCase):
         middleware = SessionMiddleware(lambda req: HttpResponse())
         middleware.process_request(request)
         request.session.save()
-        
+
         middleware = MessageMiddleware(lambda req: HttpResponse())
         middleware.process_request(request)
         return request
@@ -269,7 +269,7 @@ class ProformaEditViewsTestCase(TestCase):
         request = self.factory.get(f'/app/billing/proformas/{self.proforma.pk}/edit/')
         request.user = self.user
         request = self.add_middleware_to_request(request)
-        
+
         result = _validate_proforma_edit_access(self.user, self.proforma, request)
         self.assertIsNone(result)  # None means access is allowed
 
@@ -279,7 +279,7 @@ class ProformaEditViewsTestCase(TestCase):
             customer_type='company',
             company_name='Other Edit Company SRL',
         )
-        
+
         other_proforma = ProformaInvoice.objects.create(
             customer=other_customer,
             currency=self.currency,
@@ -287,11 +287,11 @@ class ProformaEditViewsTestCase(TestCase):
             total_cents=10000,
             valid_until=timezone.now().date()
         )
-        
+
         request = self.factory.get(f'/app/billing/proformas/{other_proforma.pk}/edit/')
         request.user = self.user
         request = self.add_middleware_to_request(request)
-        
+
         # Should return error response, not None
         error_response = _validate_proforma_edit_access(self.user, other_proforma, request)
         self.assertIsNotNone(error_response)
@@ -300,18 +300,18 @@ class ProformaEditViewsTestCase(TestCase):
     def test_update_proforma_basic_info(self):
         """Test updating proforma basic information"""
         from apps.billing.proforma_service import ProformaService
-        
+
         update_data = {
             'bill_to_name': 'Updated Company Name',
             'bill_to_email': 'updated@test.ro',
             'notes': 'Updated notes'
         }
-        
+
         result = ProformaService.update_proforma(self.proforma, update_data, self.user)
-        
+
         if result.is_err():
             self.fail(f"ProformaService.update_proforma failed: {result.unwrap_err()}")
-        
+
         self.assertTrue(result.is_ok())
         self.proforma.refresh_from_db()
         self.assertEqual(self.proforma.bill_to_name, 'Updated Company Name')
@@ -321,18 +321,18 @@ class ProformaEditViewsTestCase(TestCase):
 
 class ProformaSendViewsTestCase(TestCase):
     """Test proforma sending functionality"""
-    
+
     def setUp(self):
         """Setup test data"""
         self.factory = RequestFactory()
         self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
-        
+
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Proforma Send Test SRL',
             primary_email='send@test.ro',
         )
-        
+
         self.user = User.objects.create_user(
             email='proforma_send@test.ro',
             password='testpass'
@@ -342,7 +342,7 @@ class ProformaSendViewsTestCase(TestCase):
             customer=self.customer,
             role='admin'
         )
-        
+
         self.proforma = ProformaInvoice.objects.create(
             customer=self.customer,
             currency=self.currency,
@@ -355,11 +355,11 @@ class ProformaSendViewsTestCase(TestCase):
     def test_proforma_send_success(self, mock_send_email):
         """Test successful proforma sending"""
         mock_send_email.return_value = True
-        
+
         # This is a placeholder test as we need to check the actual view implementation
         # The view function for sending proformas would be tested here
         self.assertTrue(True)  # Placeholder assertion
-        
+
     def test_proforma_send_validation(self):
         """Test proforma send validation"""
         # Test that only certain statuses allow sending
@@ -369,17 +369,17 @@ class ProformaSendViewsTestCase(TestCase):
 
 class ProformaPaymentProcessingTestCase(TestCase):
     """Test proforma payment processing views"""
-    
+
     def setUp(self):
         """Setup test data"""
         self.factory = RequestFactory()
         self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
-        
+
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Proforma Payment Test SRL',
         )
-        
+
         self.user = User.objects.create_user(
             email='proforma_payment@test.ro',
             password='testpass'
@@ -389,7 +389,7 @@ class ProformaPaymentProcessingTestCase(TestCase):
             customer=self.customer,
             role='admin'
         )
-        
+
         self.proforma = ProformaInvoice.objects.create(
             customer=self.customer,
             currency=self.currency,
@@ -404,7 +404,7 @@ class ProformaPaymentProcessingTestCase(TestCase):
         # Test that proforma is ready for payment processing
         self.assertEqual(self.proforma.status, 'sent')
         self.assertEqual(self.proforma.total_cents, 20000)
-        
+
     def test_proforma_payment_link_generation(self):
         """Test payment link generation for proforma"""
         # This would test the payment link generation functionality

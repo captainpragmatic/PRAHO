@@ -180,9 +180,7 @@ def require_infrastructure_view(view_func: Callable) -> Callable:
     @wraps(view_func)
     def wrapper(request: HttpRequest, *args, **kwargs) -> HttpResponse:
         if not can_view_infrastructure(request.user):
-            logger.warning(
-                f"[Permissions] Access denied: {request.user.email} tried to view infrastructure"
-            )
+            logger.warning(f"[Permissions] Access denied: {request.user.email} tried to view infrastructure")
             raise PermissionDenied("You do not have permission to view infrastructure.")
         return view_func(request, *args, **kwargs)
 
@@ -202,9 +200,7 @@ def require_deployment_management(view_func: Callable) -> Callable:
     @wraps(view_func)
     def wrapper(request: HttpRequest, *args, **kwargs) -> HttpResponse:
         if not can_manage_deployments(request.user):
-            logger.warning(
-                f"[Permissions] Access denied: {request.user.email} tried to manage deployment"
-            )
+            logger.warning(f"[Permissions] Access denied: {request.user.email} tried to manage deployment")
             raise PermissionDenied("You do not have permission to manage deployments.")
         return view_func(request, *args, **kwargs)
 
@@ -224,9 +220,7 @@ def require_deploy_permission(view_func: Callable) -> Callable:
     @wraps(view_func)
     def wrapper(request: HttpRequest, *args, **kwargs) -> HttpResponse:
         if not can_deploy_nodes(request.user):
-            logger.warning(
-                f"[Permissions] Access denied: {request.user.email} tried to deploy node"
-            )
+            logger.warning(f"[Permissions] Access denied: {request.user.email} tried to deploy node")
             raise PermissionDenied("You do not have permission to deploy nodes.")
         return view_func(request, *args, **kwargs)
 
@@ -246,9 +240,7 @@ def require_destroy_permission(view_func: Callable) -> Callable:
     @wraps(view_func)
     def wrapper(request: HttpRequest, *args, **kwargs) -> HttpResponse:
         if not can_destroy_nodes(request.user):
-            logger.warning(
-                f"[Permissions] Access denied: {request.user.email} tried to destroy node"
-            )
+            logger.warning(f"[Permissions] Access denied: {request.user.email} tried to destroy node")
             raise PermissionDenied("You do not have permission to destroy nodes.")
         return view_func(request, *args, **kwargs)
 
@@ -268,9 +260,7 @@ def require_provider_management(view_func: Callable) -> Callable:
     @wraps(view_func)
     def wrapper(request: HttpRequest, *args, **kwargs) -> HttpResponse:
         if not can_manage_providers(request.user):
-            logger.warning(
-                f"[Permissions] Access denied: {request.user.email} tried to manage providers"
-            )
+            logger.warning(f"[Permissions] Access denied: {request.user.email} tried to manage providers")
             raise PermissionDenied("You do not have permission to manage providers.")
         return view_func(request, *args, **kwargs)
 
@@ -290,9 +280,7 @@ def require_size_management(view_func: Callable) -> Callable:
     @wraps(view_func)
     def wrapper(request: HttpRequest, *args, **kwargs) -> HttpResponse:
         if not can_manage_sizes(request.user):
-            logger.warning(
-                f"[Permissions] Access denied: {request.user.email} tried to manage sizes"
-            )
+            logger.warning(f"[Permissions] Access denied: {request.user.email} tried to manage sizes")
             raise PermissionDenied("You do not have permission to manage sizes.")
         return view_func(request, *args, **kwargs)
 
@@ -312,9 +300,7 @@ def require_region_management(view_func: Callable) -> Callable:
     @wraps(view_func)
     def wrapper(request: HttpRequest, *args, **kwargs) -> HttpResponse:
         if not can_manage_regions(request.user):
-            logger.warning(
-                f"[Permissions] Access denied: {request.user.email} tried to manage regions"
-            )
+            logger.warning(f"[Permissions] Access denied: {request.user.email} tried to manage regions")
             raise PermissionDenied("You do not have permission to manage regions.")
         return view_func(request, *args, **kwargs)
 

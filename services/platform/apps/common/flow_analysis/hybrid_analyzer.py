@@ -199,11 +199,7 @@ class HybridFlowAnalyzer:
         files = list(dir_path.glob(pattern))
 
         # Apply exclude patterns
-        files = [
-            f
-            for f in files
-            if not any(f.match(exc) for exc in self.config.exclude_patterns)
-        ]
+        files = [f for f in files if not any(f.match(exc) for exc in self.config.exclude_patterns)]
 
         if not files:
             return AnalysisResult(
@@ -308,9 +304,7 @@ class HybridFlowAnalyzer:
 
         # Check for tainted data in potentially infinite loops
         infinite_loop_lines = {
-            i.location.line_number
-            for i in control_issues
-            if i.category == IssueCategory.INFINITE_LOOP
+            i.location.line_number for i in control_issues if i.category == IssueCategory.INFINITE_LOOP
         }
 
         for data_issue in data_issues:
@@ -320,15 +314,11 @@ class HybridFlowAnalyzer:
                     FlowIssue(
                         category=IssueCategory.TAINTED_DATA,
                         severity=AnalysisSeverity.CRITICAL,
-                        message=(
-                            f"AMPLIFIED: {data_issue.message} - occurs in potential infinite loop"
-                        ),
+                        message=(f"AMPLIFIED: {data_issue.message} - occurs in potential infinite loop"),
                         location=data_issue.location,
                         mode=AnalysisMode.HYBRID,
                         code_snippet=data_issue.code_snippet,
-                        remediation=(
-                            f"{data_issue.remediation} Additionally, fix the infinite loop."
-                        ),
+                        remediation=(f"{data_issue.remediation} Additionally, fix the infinite loop."),
                         cwe_id=data_issue.cwe_id,
                         metadata={
                             **data_issue.metadata,
@@ -339,9 +329,7 @@ class HybridFlowAnalyzer:
 
         # Check for security issues in unreachable code
         unreachable_lines = {
-            i.location.line_number
-            for i in control_issues
-            if i.category == IssueCategory.UNREACHABLE_CODE
+            i.location.line_number for i in control_issues if i.category == IssueCategory.UNREACHABLE_CODE
         }
 
         for data_issue in data_issues:
@@ -365,33 +353,22 @@ class HybridFlowAnalyzer:
                 )
 
         # Check for missing exception handlers with tainted data
-        exception_issues = [
-            i for i in control_issues
-            if i.category == IssueCategory.EXCEPTION_FLOW
-        ]
+        exception_issues = [i for i in control_issues if i.category == IssueCategory.EXCEPTION_FLOW]
 
         for exc_issue in exception_issues:
             # Look for nearby tainted data usage
             for data_issue in data_issues:
-                line_diff = abs(
-                    data_issue.location.line_number - exc_issue.location.line_number
-                )
+                line_diff = abs(data_issue.location.line_number - exc_issue.location.line_number)
                 if line_diff <= 5:  # Within 5 lines
                     cross_ref_issues.append(
                         FlowIssue(
                             category=IssueCategory.TAINTED_DATA,
                             severity=AnalysisSeverity.HIGH,
-                            message=(
-                                f"EXCEPTION CONTEXT: {data_issue.message} - "
-                                f"near improper exception handling"
-                            ),
+                            message=(f"EXCEPTION CONTEXT: {data_issue.message} - " f"near improper exception handling"),
                             location=data_issue.location,
                             mode=AnalysisMode.HYBRID,
                             code_snippet=data_issue.code_snippet,
-                            remediation=(
-                                f"{data_issue.remediation} "
-                                f"Also ensure proper exception handling."
-                            ),
+                            remediation=(f"{data_issue.remediation} " f"Also ensure proper exception handling."),
                             cwe_id=data_issue.cwe_id,
                             metadata={
                                 **data_issue.metadata,

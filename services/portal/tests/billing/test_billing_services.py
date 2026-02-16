@@ -55,4 +55,3 @@ class BillingServicesTests(unittest.TestCase):
         mock_post.assert_called_once()
         called_endpoint = mock_post.call_args.args[0]
         self.assertEqual(called_endpoint, '/billing/proformas/')
-

@@ -390,11 +390,11 @@ def get_terraform_provider_block(provider_type: str) -> str | None:
     # Extract provider name (e.g., "hcloud" from "hetznercloud/hcloud")
     provider_name = provider.split("/")[-1] if "/" in provider else provider
 
-    return f'''
+    return f"""
     {provider_name} = {{
       source  = "{provider}"
       version = "{version}"
-    }}'''
+    }}"""
 
 
 def get_terraform_variables_for_deployment(
@@ -422,9 +422,7 @@ def get_terraform_variables_for_deployment(
     tf_vars = config.get("terraform_vars", {})
 
     return {
-        tf_vars.get("api_token_var", "api_token"): credentials.get(
-            config.get("credential_key", "api_token"), ""
-        ),
+        tf_vars.get("api_token_var", "api_token"): credentials.get(config.get("credential_key", "api_token"), ""),
         "deployment_id": str(deployment.id),
         "hostname": deployment.hostname,
         "fqdn": deployment.fqdn,
@@ -433,9 +431,7 @@ def get_terraform_variables_for_deployment(
         tf_vars.get("server_type_var", "server_type"): (
             deployment.node_size.provider_type_id if deployment.node_size else ""
         ),
-        tf_vars.get("region_var", "region"): (
-            deployment.region.provider_region_id if deployment.region else ""
-        ),
+        tf_vars.get("region_var", "region"): (deployment.region.provider_region_id if deployment.region else ""),
         "server_image": tf_vars.get("image_default", "ubuntu-22.04"),
         "ssh_public_key": ssh_public_key,
     }
@@ -506,8 +502,7 @@ def validate_provider_prerequisites(
     cli_path = shutil.which(cli_tool) if cli_tool else None
     if not cli_path:
         return Err(
-            f"CLI tool '{cli_tool}' not found for provider '{provider_type}'. "
-            f"Please install it before deploying."
+            f"CLI tool '{cli_tool}' not found for provider '{provider_type}'. " f"Please install it before deploying."
         )
     details["cli_tool"] = cli_tool
     details["cli_path"] = cli_path
@@ -520,15 +515,11 @@ def validate_provider_prerequisites(
 
     # 4. Check terraform module directory exists
     if base_terraform_path is None:
-        base_terraform_path = str(
-            Path(__file__).parent.parent.parent / "infrastructure" / "terraform" / "modules"
-        )
+        base_terraform_path = str(Path(__file__).parent.parent.parent / "infrastructure" / "terraform" / "modules")
     module_name = config.get("terraform_module", provider_type)
     module_path = Path(base_terraform_path) / module_name
     if not module_path.is_dir():
-        return Err(
-            f"Terraform module not found at '{module_path}' for provider '{provider_type}'."
-        )
+        return Err(f"Terraform module not found at '{module_path}' for provider '{provider_type}'.")
     details["module_path"] = str(module_path)
 
     logger.info(f"✅ [Provider:{provider_type}] All prerequisites validated")

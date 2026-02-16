@@ -6,12 +6,12 @@
 {% block content %}
 <div class="min-h-screen bg-slate-900 py-8">
     <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-        
+
         <!-- Header -->
         <div class="mb-8">
             <h1 class="text-3xl font-bold text-white mb-2">{% trans "Company Profile" %}</h1>
             <p class="text-slate-400">{% trans "View and manage your company information and billing details" %}</p>
-            
+
             <!-- Current Customer Context -->
             {% if selected_customer_name %}
             <div class="mt-4 flex items-center space-x-3">
@@ -22,7 +22,7 @@
                 <span class="text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full">
                   {% if selected_customer_role == "owner" %}👑 {% trans "Owner" %}
                   {% elif selected_customer_role == "billing" %}💳 {% trans "Billing" %}
-                  {% elif selected_customer_role == "tech" %}⚙️ {% trans "Technical" %}  
+                  {% elif selected_customer_role == "tech" %}⚙️ {% trans "Technical" %}
                   {% elif selected_customer_role == "viewer" %}👁️ {% trans "Viewer" %}
                   {% else %}{{ selected_customer_role|title }}{% endif %}
                 </span>
@@ -33,16 +33,16 @@
 
         <!-- Action Bar -->
         <div class="mb-6 flex justify-between items-center">
-            <a href="{% url 'users:profile' %}" 
+            <a href="{% url 'users:profile' %}"
                class="inline-flex items-center px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors">
                 <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
                 </svg>
                 {% trans "Back to Profile" %}
             </a>
-            
+
             {% if can_edit_profile %}
-            <a href="{% url 'users:company_profile_edit' %}" 
+            <a href="{% url 'users:company_profile_edit' %}"
                class="inline-flex items-center px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900 transition-colors">
                 <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
@@ -71,7 +71,7 @@
             </div>
             <div class="p-6">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    
+
                     <!-- Company Name -->
                     <div>
                         <dt class="text-sm font-medium text-slate-400 mb-1">{% trans "Company Name" %}</dt>
@@ -137,7 +137,7 @@
             </div>
             <div class="p-6">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    
+
                     <!-- Street Address -->
                     <div class="md:col-span-2">
                         <dt class="text-sm font-medium text-slate-400 mb-1">{% trans "Street Address" %}</dt>
@@ -214,7 +214,7 @@
             </div>
             <div class="p-6">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    
+
                     <!-- Primary Email -->
                     <div>
                         <dt class="text-sm font-medium text-slate-400 mb-1">{% trans "Primary Email" %}</dt>
@@ -248,7 +248,7 @@
                         <dt class="text-sm font-medium text-slate-400 mb-1">{% trans "Website" %}</dt>
                         <dd class="text-lg text-white">
                             {% if company_data.contact.website %}
-                                <a href="{{ company_data.contact.website }}" target="_blank" rel="noopener noreferrer" 
+                                <a href="{{ company_data.contact.website }}" target="_blank" rel="noopener noreferrer"
                                    class="text-blue-400 hover:text-blue-300 transition-colors inline-flex items-center">
                                     {{ company_data.contact.website }}
                                     <svg class="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">

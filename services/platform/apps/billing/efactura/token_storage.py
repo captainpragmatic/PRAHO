@@ -298,10 +298,7 @@ class OAuthToken(models.Model):
             environment=environment,
         )
 
-        logger.info(
-            f"Stored new OAuth token for {cui} "
-            f"(expires: {expires_at.isoformat()}, env: {environment})"
-        )
+        logger.info(f"Stored new OAuth token for {cui} " f"(expires: {expires_at.isoformat()}, env: {environment})")
 
         return token
 

@@ -662,6 +662,6 @@ class CredentialVault:
 # Global vault instance using module-level caching
 def get_credential_vault() -> CredentialVault:
     """Get global credential vault instance with lazy initialization"""
-    if not hasattr(get_credential_vault, '_instance'):
+    if not hasattr(get_credential_vault, "_instance"):
         get_credential_vault._instance = CredentialVault()  # type: ignore[attr-defined]
     return get_credential_vault._instance  # type: ignore[attr-defined,no-any-return]

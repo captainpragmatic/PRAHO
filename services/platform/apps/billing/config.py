@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 # HELPER: SAFE VALUE PARSING
 # ===============================================================================
 
+
 def _get_positive_int(setting_name: str, default: int) -> int:
     """Get a positive integer from settings with validation."""
     value = getattr(settings, setting_name, default)
@@ -61,11 +62,37 @@ DEFAULT_CURRENCY_CODE = getattr(settings, "BILLING_DEFAULT_CURRENCY", "RON") or 
 DEFAULT_VAT_RATE = _get_decimal_rate("BILLING_DEFAULT_VAT_RATE", "0.21")
 
 # EU countries for VAT purposes
-EU_COUNTRY_CODES = frozenset({
-    "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR",
-    "DE", "GR", "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL",
-    "PL", "PT", "RO", "SE", "SI", "SK", "ES"
-})
+EU_COUNTRY_CODES = frozenset(
+    {
+        "AT",
+        "BE",
+        "BG",
+        "HR",
+        "CY",
+        "CZ",
+        "DK",
+        "EE",
+        "FI",
+        "FR",
+        "DE",
+        "GR",
+        "HU",
+        "IE",
+        "IT",
+        "LV",
+        "LT",
+        "LU",
+        "MT",
+        "NL",
+        "PL",
+        "PT",
+        "RO",
+        "SE",
+        "SI",
+        "SK",
+        "ES",
+    }
+)
 
 
 # ===============================================================================
@@ -77,6 +104,7 @@ def get_invoice_payment_terms_days() -> int:
     """Get invoice payment terms from SettingsService (ADR-0015 cascade)."""
     try:
         from apps.settings.services import SettingsService  # noqa: PLC0415
+
         value = SettingsService.get_integer_setting("billing.invoice_payment_terms_days", 14)
         return max(1, value)
     except Exception:
@@ -101,6 +129,7 @@ def get_event_grace_period_hours() -> int:
     """Get grace period for accepting late usage events (hours) from SettingsService."""
     try:
         from apps.settings.services import SettingsService  # noqa: PLC0415
+
         return max(1, SettingsService.get_integer_setting("billing.event_grace_period_hours", 24))
     except Exception:
         logger.warning("Failed to read event_grace_period_hours from SettingsService, using fallback", exc_info=True)
@@ -111,6 +140,7 @@ def get_future_event_drift_minutes() -> int:
     """Get max time drift allowed for future events (minutes) from SettingsService."""
     try:
         from apps.settings.services import SettingsService  # noqa: PLC0415
+
         return max(1, SettingsService.get_integer_setting("billing.future_event_drift_minutes", 5))
     except Exception:
         logger.warning("Failed to read future_event_drift_minutes from SettingsService, using fallback", exc_info=True)
@@ -155,6 +185,7 @@ def get_alert_cooldown_hours() -> int:
     """Get hours between repeat notifications for same threshold from SettingsService."""
     try:
         from apps.settings.services import SettingsService  # noqa: PLC0415
+
         return max(1, SettingsService.get_integer_setting("billing.alert_cooldown_hours", 24))
     except Exception:
         logger.warning("Failed to read alert_cooldown_hours from SettingsService, using fallback", exc_info=True)
@@ -177,9 +208,12 @@ def get_efactura_minimum_amount_cents() -> int:
     """Get minimum amount for mandatory e-Factura submission from SettingsService."""
     try:
         from apps.settings.services import SettingsService  # noqa: PLC0415
+
         return max(1, SettingsService.get_integer_setting("billing.efactura_minimum_amount_cents", 10000))
     except Exception:
-        logger.warning("Failed to read efactura_minimum_amount_cents from SettingsService, using fallback", exc_info=True)
+        logger.warning(
+            "Failed to read efactura_minimum_amount_cents from SettingsService, using fallback", exc_info=True
+        )
         return _get_positive_int("BILLING_EFACTURA_MINIMUM_CENTS", _DEFAULT_EFACTURA_MINIMUM_AMOUNT_CENTS)
 
 
@@ -190,6 +224,7 @@ E_FACTURA_MINIMUM_AMOUNT_CENTS = _DEFAULT_EFACTURA_MINIMUM_AMOUNT_CENTS
 # ===============================================================================
 # HELPER FUNCTIONS
 # ===============================================================================
+
 
 def get_vat_rate(country_code: str | None = None, fallback: bool = True) -> Decimal:
     """

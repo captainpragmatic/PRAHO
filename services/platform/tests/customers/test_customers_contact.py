@@ -34,7 +34,7 @@ class CustomerAddressTestCase(TestCase):
     def setUp(self):
         """Set up test data"""
         self.admin_user = create_test_user('address@test.ro', staff_role='admin')
-        
+
         self.customer = Customer.objects.create(
             name='Address Test SRL',
             customer_type='company',
@@ -54,7 +54,7 @@ class CustomerAddressTestCase(TestCase):
             postal_code='010067',
             country='România'
         )
-        
+
         self.assertEqual(address.address_type, 'billing')
         self.assertEqual(address.address_line1, 'Strada Victoriei, nr. 10')
         self.assertEqual(address.city, 'București')
@@ -71,7 +71,7 @@ class CustomerAddressTestCase(TestCase):
             postal_code='400117',
             country='România'
         )
-        
+
         self.assertEqual(address.postal_code, '400117')
 
     def test_address_types(self):
@@ -84,7 +84,7 @@ class CustomerAddressTestCase(TestCase):
             city='București',
             country='România'
         )
-        
+
         # Delivery address
         delivery_address = CustomerAddress.objects.create(
             customer=self.customer,
@@ -93,7 +93,7 @@ class CustomerAddressTestCase(TestCase):
             city='Timișoara',
             country='România'
         )
-        
+
         self.assertEqual(billing_address.address_type, 'billing')
         self.assertEqual(delivery_address.address_type, 'delivery')
 
@@ -106,7 +106,7 @@ class CustomerAddressTestCase(TestCase):
             city='București',
             country='România'
         )
-        
+
         expected = f"{self.customer.get_display_name()} - Adresa facturare"
         self.assertEqual(str(address), expected)
 
@@ -119,7 +119,7 @@ class CustomerAddressTestCase(TestCase):
             city='București',
             country='România'
         )
-        
+
         delivery_address = CustomerAddress.objects.create(
             customer=self.customer,
             address_type='delivery',
@@ -127,10 +127,10 @@ class CustomerAddressTestCase(TestCase):
             city='Cluj-Napoca',
             country='România'
         )
-        
+
         addresses = CustomerAddress.objects.filter(customer=self.customer)
         self.assertEqual(addresses.count(), 2)
-        
+
         # Test filtering by address type
         billing_addresses = addresses.filter(address_type='billing')
         self.assertEqual(billing_addresses.count(), 1)
@@ -147,7 +147,7 @@ class CustomerAddressTestCase(TestCase):
             country='România',
             is_current=True
         )
-        
+
         # Second address, not current
         second_address = CustomerAddress.objects.create(
             customer=self.customer,
@@ -157,10 +157,10 @@ class CustomerAddressTestCase(TestCase):
             country='România',
             is_current=False
         )
-        
+
         # Test current address retrieval
         current_addresses = CustomerAddress.objects.filter(
-            customer=self.customer, 
+            customer=self.customer,
             is_current=True
         )
         self.assertEqual(current_addresses.count(), 1)
@@ -178,7 +178,7 @@ class CustomerAddressTestCase(TestCase):
             postal_code='030833',
             country='România'
         )
-        
+
         # Test full address formatting
         formatted = address.get_full_address()
         self.assertIn('Bulevardul Unirii', formatted)
@@ -196,12 +196,12 @@ class CustomerAddressTestCase(TestCase):
             postal_code='700454',
             country='România'
         )
-        
+
         # Romanian addresses should have proper components
         self.assertEqual(address.country, 'România')
         self.assertEqual(address.city, 'Iași')
         self.assertEqual(address.county, 'Iași')
-        
+
         # Test Romanian city validation
         romanian_cities = ['București', 'Cluj-Napoca', 'Timișoara', 'Iași', 'Constanța']
         self.assertIn(address.city, romanian_cities)
@@ -214,7 +214,7 @@ class CustomerNoteTestCase(TestCase):
         """Set up test data"""
         self.support_user = create_test_user('support@test.ro', staff_role='support')
         self.admin_user = create_test_user('admin@test.ro', staff_role='admin')
-        
+
         self.customer = Customer.objects.create(
             name='Note Test SRL',
             customer_type='company',
@@ -232,7 +232,7 @@ class CustomerNoteTestCase(TestCase):
             title='Customer Support Request',
             content='Customer needs help with billing setup.'
         )
-        
+
         self.assertEqual(note.note_type, 'general')
         self.assertEqual(note.title, 'Customer Support Request')
         self.assertEqual(note.created_by, self.support_user)
@@ -248,7 +248,7 @@ class CustomerNoteTestCase(TestCase):
             title='Phone Call',
             content='Customer reported billing issue.'
         )
-        
+
         # General note
         general_note = CustomerNote.objects.create(
             customer=self.customer,
@@ -257,7 +257,7 @@ class CustomerNoteTestCase(TestCase):
             title='General Note',
             content='Customer approved for increased credit limit.'
         )
-        
+
         self.assertEqual(call_note.note_type, 'call')
         self.assertEqual(general_note.note_type, 'general')
 
@@ -271,7 +271,7 @@ class CustomerNoteTestCase(TestCase):
             title='First Note',
             content='This was created first.'
         )
-        
+
         second_note = CustomerNote.objects.create(
             customer=self.customer,
             created_by=self.admin_user,
@@ -279,7 +279,7 @@ class CustomerNoteTestCase(TestCase):
             title='Second Note',
             content='This was created second.'
         )
-        
+
         # Notes should be ordered by creation date (newest first)
         notes = CustomerNote.objects.filter(customer=self.customer).order_by('-created_at')
         self.assertEqual(notes.first(), second_note)
@@ -294,7 +294,7 @@ class CustomerNoteTestCase(TestCase):
             title='Test Note',
             content='Test content.'
         )
-        
+
         expected = f"Test Note - {self.customer.get_display_name()}"
         self.assertEqual(str(note), expected)
 
@@ -302,7 +302,7 @@ class CustomerNoteTestCase(TestCase):
         """Test note content is properly sanitized"""
         # Test with potentially unsafe content
         unsafe_content = "<script>alert('xss')</script>Normal content here."
-        
+
         note = CustomerNote.objects.create(
             customer=self.customer,
             created_by=self.support_user,
@@ -310,7 +310,7 @@ class CustomerNoteTestCase(TestCase):
             title='Security Test',
             content=unsafe_content
         )
-        
+
         # Content should be stored but script tags should be handled safely
         self.assertIn('Normal content here', note.content)
         # Actual XSS protection would be handled at the template/view level
@@ -326,7 +326,7 @@ class CustomerNoteTestCase(TestCase):
             content='Sensitive internal information.',
             is_private=True
         )
-        
+
         # Public note (visible to all staff)
         public_note = CustomerNote.objects.create(
             customer=self.customer,
@@ -336,17 +336,17 @@ class CustomerNoteTestCase(TestCase):
             content='Customer communication.',
             is_private=False
         )
-        
+
         # Test filtering notes by privacy for role-based access
         private_notes = CustomerNote.objects.filter(
-            customer=self.customer, 
+            customer=self.customer,
             is_private=True
         )
         public_notes = CustomerNote.objects.filter(
-            customer=self.customer, 
+            customer=self.customer,
             is_private=False
         )
-        
+
         self.assertEqual(private_notes.count(), 1)
         self.assertEqual(public_notes.count(), 1)
         self.assertEqual(private_notes.first(), private_note)

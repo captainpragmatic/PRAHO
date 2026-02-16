@@ -11,7 +11,7 @@
     <div class="hidden sm:flex items-center justify-between">
       <div class="flex items-center space-x-4">
         <h3 class="text-lg font-medium text-white">📦 {% trans 'Services' %}</h3>
-        
+
         <!-- Service Count Badge -->
         <div class="bg-blue-600/20 text-blue-400 px-3 py-1 rounded-full text-sm font-medium">
           {% if services.paginator.count == 1 %}
@@ -20,7 +20,7 @@
             {{ services.paginator.count }} {% trans 'services' %}
           {% endif %}
         </div>
-        
+
         {% if status_filter %}
         <div class="bg-purple-600/20 text-purple-400 px-3 py-1 rounded-full text-sm">
           {% trans 'Filter:' %} {{ status_filter|title }}
@@ -53,7 +53,7 @@
           {% endif %}
         </div>
       </div>
-      
+
       <div class="flex items-center justify-between">
         <div class="flex items-center space-x-3 text-sm">
           <div class="{% if display_status == 'active' %}text-green-400{% elif display_status == 'suspended' %}text-red-400{% elif display_status == 'pending' %}text-yellow-400{% elif display_status == 'provisioning' %}text-blue-400{% elif display_status == 'terminated' %}text-gray-400{% elif display_status == 'expired' %}text-orange-400{% else %}text-blue-400{% endif %}">
@@ -63,7 +63,7 @@
           </div>
           <div class="text-slate-400">📊 {{ total_count }} {% trans 'total' %}</div>
         </div>
-        
+
         {% if status_filter %}
         <div class="bg-purple-600/20 text-purple-400 px-2 py-1 rounded-full text-xs">
           {{ status_filter|title }}
@@ -106,7 +106,7 @@
       </thead>
       <tbody class="bg-slate-800 divide-y divide-slate-700">
         {% for service in services %}
-        <tr class="hover:bg-slate-700 transition-colors cursor-pointer" 
+        <tr class="hover:bg-slate-700 transition-colors cursor-pointer"
             onclick="window.location.href='{% url 'provisioning:service_detail' service.pk %}'">
           <td class="px-6 py-4 whitespace-nowrap">
             <div class="text-sm font-medium text-white">{{ service.service_name }}</div>
@@ -160,7 +160,7 @@
           {% if can_manage_services %}
           <td class="px-6 py-4 whitespace-nowrap text-sm font-medium" onclick="event.stopPropagation();">
             <div class="flex space-x-2">
-              <a href="{% url 'provisioning:service_edit' service.pk %}" 
+              <a href="{% url 'provisioning:service_edit' service.pk %}"
                  class="text-blue-400 hover:text-blue-300 transition-colors">
                 ✏️
               </a>
@@ -248,7 +248,7 @@
         </div>
         {% if can_manage_services %}
         <div class="flex space-x-2" onclick="event.stopPropagation();">
-          <a href="{% url 'provisioning:service_edit' service.pk %}" 
+          <a href="{% url 'provisioning:service_edit' service.pk %}"
              class="text-blue-400 hover:text-blue-300 transition-colors text-sm">
             ✏️
           </a>

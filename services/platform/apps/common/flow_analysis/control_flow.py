@@ -58,9 +58,7 @@ class ControlFlowGraph:
     exit_nodes: list[int] = field(default_factory=list)
     _node_counter: int = 0
 
-    def add_node(
-        self, node_type: str, ast_node: ast.AST, is_entry: bool = False, is_exit: bool = False
-    ) -> int:
+    def add_node(self, node_type: str, ast_node: ast.AST, is_entry: bool = False, is_exit: bool = False) -> int:
         """Add a new node to the graph."""
         node_id = self._node_counter
         self._node_counter += 1
@@ -521,9 +519,7 @@ class ControlFlowAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
             elif isinstance(stmt, ast.Try):
                 # All handlers plus main body must return
                 body_returns = self._all_paths_return(stmt.body)
-                all_handlers_return = all(
-                    self._all_paths_return(handler.body) for handler in stmt.handlers
-                )
+                all_handlers_return = all(self._all_paths_return(handler.body) for handler in stmt.handlers)
                 if body_returns or all_handlers_return:
                     return True
         return False

@@ -32,7 +32,7 @@ from .orders import urls as order_urls
 from .services import urls as services_urls
 from .tickets import urls as ticket_urls
 
-app_name = 'api'
+app_name = "api"
 
 # ===============================================================================
 # API ROUTING 📍
@@ -40,25 +40,19 @@ app_name = 'api'
 
 urlpatterns = [
     # Users & Authentication APIs (for portal service)
-    path('users/', include('apps.api.users.urls')),
-    
+    path("users/", include("apps.api.users.urls")),
     # Customer Management APIs
-    path('customers/', include((customer_urls, 'customers'))),
-    
+    path("customers/", include((customer_urls, "customers"))),
     # Billing & Invoicing APIs (Romanian VAT compliance)
-    path('billing/', include((billing_urls, 'billing'))),
-    
-    # Support Tickets & SLA APIs  
-    path('tickets/', include((ticket_urls, 'tickets'))),
-    
+    path("billing/", include((billing_urls, "billing"))),
+    # Support Tickets & SLA APIs
+    path("tickets/", include((ticket_urls, "tickets"))),
     # Services & Hosting APIs
-    path('services/', include((services_urls, 'services'))),
-    
+    path("services/", include((services_urls, "services"))),
     # Orders & Product Catalog APIs
-    path('orders/', include((order_urls, 'orders'))),
-    
+    path("orders/", include((order_urls, "orders"))),
     # GDPR compliance APIs (cookie consent, consent history, data export)
-    path('gdpr/', include('apps.api.gdpr.urls')),
+    path("gdpr/", include("apps.api.gdpr.urls")),
 ]
 
 # ===============================================================================

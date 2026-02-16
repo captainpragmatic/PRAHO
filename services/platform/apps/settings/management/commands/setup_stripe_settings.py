@@ -61,7 +61,7 @@ class Command(BaseCommand):
                 "description": "Third-party service integration settings",
                 "display_order": 8,
                 "is_active": True,
-            }
+            },
         )
 
         if created:
@@ -133,7 +133,7 @@ class Command(BaseCommand):
                         "help_text": setting_data["help_text"],
                         "is_public": False,  # All Stripe settings are internal
                         "is_active": True,
-                    }
+                    },
                 )
 
                 if created:
@@ -172,9 +172,7 @@ class Command(BaseCommand):
                     self.stdout.write(f"⏭️  {key}: already exists (use --force to update)")
 
             except Exception as e:
-                self.stdout.write(
-                    self.style.ERROR(f"❌ Failed to create setting {key}: {e}")
-                )
+                self.stdout.write(self.style.ERROR(f"❌ Failed to create setting {key}: {e}"))
 
         # Summary
         self.stdout.write("")

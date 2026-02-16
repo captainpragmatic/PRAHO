@@ -7,56 +7,56 @@
 {% block content %}
 <div class="min-h-screen flex items-center justify-center px-4 py-12">
   <div class="max-w-lg mx-auto text-center">
-    
+
     <!-- Server with Stop Sign SVG -->
     <div class="mb-8">
       <svg width="200" height="200" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg" class="mx-auto">
         <!-- Server Body -->
         <rect x="40" y="60" width="80" height="100" rx="8" fill="#374151" stroke="#6B7280" stroke-width="2"/>
-        
+
         <!-- Server Front Panel -->
         <rect x="45" y="65" width="70" height="90" rx="4" fill="#4B5563"/>
-        
+
         <!-- Server Lights (warning pattern) -->
         <circle cx="55" cy="75" r="3" fill="#F59E0B"/>
         <circle cx="65" cy="75" r="3" fill="#F59E0B"/>
         <circle cx="75" cy="75" r="3" fill="#EF4444"/>
-        
+
         <!-- Server Vents -->
         <rect x="50" y="90" width="60" height="2" fill="#6B7280"/>
         <rect x="50" y="95" width="60" height="2" fill="#6B7280"/>
         <rect x="50" y="100" width="60" height="2" fill="#6B7280"/>
-        
+
         <!-- Server Screen with lock icon -->
         <rect x="50" y="110" width="60" height="35" rx="4" fill="#1F2937" stroke="#6B7280"/>
-        
+
         <!-- Lock Icon on Screen -->
         <rect x="75" y="125" width="10" height="8" rx="1" fill="none" stroke="#F59E0B" stroke-width="1.5"/>
         <path d="M 77 125 L 77 122 Q 77 120 80 120 Q 83 120 83 122 L 83 125" stroke="#F59E0B" stroke-width="1.5" fill="none"/>
-        
+
         <!-- Error code -->
         <text x="80" y="150" text-anchor="middle" fill="#F59E0B" font-size="6" font-family="monospace">403</text>
-        
+
         <!-- Stop Sign -->
         <g transform="translate(130, 30)">
           <!-- Stop sign octagon -->
-          <polygon points="15,5 25,5 35,15 35,25 25,35 15,35 5,25 5,15" 
+          <polygon points="15,5 25,5 35,15 35,25 25,35 15,35 5,25 5,15"
                    fill="#EF4444" stroke="#DC2626" stroke-width="2"/>
-          
+
           <!-- STOP text -->
           <text x="20" y="23" text-anchor="middle" fill="white" font-size="8" font-weight="bold" font-family="sans-serif">STOP</text>
         </g>
-        
+
         <!-- Warning barriers around server -->
         <rect x="25" y="150" width="20" height="3" fill="#F59E0B" opacity="0.7"/>
         <rect x="135" y="150" width="20" height="3" fill="#F59E0B" opacity="0.7"/>
-        
+
         <!-- Access denied symbols -->
         <g transform="translate(20, 80)">
           <circle cx="8" cy="8" r="6" fill="none" stroke="#EF4444" stroke-width="2"/>
           <line x1="4" y1="12" x2="12" y2="4" stroke="#EF4444" stroke-width="2"/>
         </g>
-        
+
         <g transform="translate(155, 100)">
           <circle cx="8" cy="8" r="6" fill="none" stroke="#EF4444" stroke-width="2"/>
           <line x1="4" y1="12" x2="12" y2="4" stroke="#EF4444" stroke-width="2"/>
@@ -85,7 +85,7 @@
 
     <!-- Help Text -->
     <div class="mt-8 text-sm text-slate-500">
-      {% trans 'Think this is a mistake? Contact our support team at' %} 
+      {% trans 'Think this is a mistake? Contact our support team at' %}
       <a href="mailto:support@pragmatichost.com" class="text-blue-400 hover:text-blue-300">
         support@pragmatichost.com
       </a>

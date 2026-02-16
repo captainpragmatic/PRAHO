@@ -125,31 +125,29 @@ def gdpr_dashboard(request: HttpRequest) -> HttpResponse:
     return render(request, "audit/gdpr_dashboard.html", context)
 
 
-def _handle_immediate_download(request: HttpRequest, export_request: 'DataExport', user: Any) -> HttpResponse | None:
+def _handle_immediate_download(request: HttpRequest, export_request: "DataExport", user: Any) -> HttpResponse | None:
     """Handle immediate download for completed HTMX export requests"""
     if not request.headers.get("HX-Request"):
         return None
-        
+
     logger.info("🔍 [GDPR Export] HTMX request detected, offering immediate download")
     export_request.refresh_from_db()
-    
+
     if export_request.status != "completed" or not export_request.file_path:
         return None
-        
+
     try:
         # Read the file content
         file_content = default_storage.open(export_request.file_path).read()
-        
+
         # Create HTTP response with file download
         response = HttpResponse(file_content, content_type="application/json")
-        response["Content-Disposition"] = (
-            f'attachment; filename="gdpr-export-{export_request.id}.json"'
-        )
-        
+        response["Content-Disposition"] = f'attachment; filename="gdpr-export-{export_request.id}.json"'
+
         # Log the download
         export_request.download_count += 1
         export_request.save(update_fields=["download_count"])
-        
+
         # Log audit event for download
         compliance_request = ComplianceEventRequest(
             compliance_type="gdpr_data_portability",
@@ -169,9 +167,9 @@ def _handle_immediate_download(request: HttpRequest, export_request: 'DataExport
             },
         )
         AuditService.log_compliance_event(compliance_request)
-        
+
         return response
-        
+
     except Exception as e:
         logger.error(f"🔥 [GDPR Export] Error reading export file: {e}")
         return None
@@ -237,12 +235,14 @@ def request_data_export(request: HttpRequest) -> HttpResponse:
                         if download_response:
                             logger.info(f"✅ [GDPR Export] Immediate download served for export {export_request.id}")
                             return download_response
-                            
+
                         # Handle success messages based on request type
                         if request.headers.get("HX-Request"):
                             # HTMX request but not ready for download yet
                             if export_request.status == "completed":
-                                messages.warning(request, _("Export is still being processed. Please check back in a few minutes."))
+                                messages.warning(
+                                    request, _("Export is still being processed. Please check back in a few minutes.")
+                                )
                             else:
                                 messages.success(request, _("Your data export is being processed."))
                         else:
@@ -1032,9 +1032,9 @@ def download_user_export(request: HttpRequest, export_id: uuid.UUID) -> HttpResp
         # Serve file
         file_content = default_storage.open(export_request.file_path).read()
         response = HttpResponse(file_content, content_type="application/json")
-        response["Content-Disposition"] = (
-            f'attachment; filename="gdpr_export_{export_request.requested_by.id}_{export_request.id}.json"'
-        )
+        response[
+            "Content-Disposition"
+        ] = f'attachment; filename="gdpr_export_{export_request.requested_by.id}_{export_request.id}.json"'
         response["Content-Length"] = len(file_content)
 
         return response

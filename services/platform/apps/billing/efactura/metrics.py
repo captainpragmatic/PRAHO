@@ -96,6 +96,7 @@ def _create_info(name: str, description: str) -> Any:
 # METRICS DEFINITIONS
 # ===============================================================================
 
+
 class EFacturaMetrics:
     """
     e-Factura metrics collection.
@@ -257,12 +258,14 @@ class EFacturaMetrics:
 
     def set_info(self) -> None:
         """Set info metric with current configuration."""
-        self.info.info({
-            "cius_ro_version": CIUS_RO_VERSION,
-            "environment": efactura_settings.environment.value,
-            "b2b_enabled": str(efactura_settings.b2b_enabled),
-            "b2c_enabled": str(efactura_settings.b2c_enabled),
-        })
+        self.info.info(
+            {
+                "cius_ro_version": CIUS_RO_VERSION,
+                "environment": efactura_settings.environment.value,
+                "b2b_enabled": str(efactura_settings.b2b_enabled),
+                "b2c_enabled": str(efactura_settings.b2c_enabled),
+            }
+        )
 
     # ===== Convenience Methods =====
 

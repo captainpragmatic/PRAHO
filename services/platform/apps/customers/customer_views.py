@@ -151,19 +151,21 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
 
     # Get services for this customer (using services app)
     services = []
-    services_summary = {'total': 0, 'active': 0, 'suspended': 0}
+    services_summary = {"total": 0, "active": 0, "suspended": 0}
     try:
         # Import here to avoid circular imports
-        services_qs = Service.objects.filter(customer=customer).select_related('service_plan').order_by('-created_at')[:5]
+        services_qs = (
+            Service.objects.filter(customer=customer).select_related("service_plan").order_by("-created_at")[:5]
+        )
         services = list(services_qs)
-        
+
         # Calculate services summary
         all_services = Service.objects.filter(customer=customer)
         services_summary = {
-            'total': all_services.count(),
-            'active': all_services.filter(status='active').count(),
-            'suspended': all_services.filter(status='suspended').count(),
-            'pending': all_services.filter(status='pending').count(),
+            "total": all_services.count(),
+            "active": all_services.filter(status="active").count(),
+            "suspended": all_services.filter(status="suspended").count(),
+            "pending": all_services.filter(status="pending").count(),
         }
     except ImportError:
         # Services app not available
@@ -171,18 +173,18 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
 
     # Get recent invoices/orders for this customer (using billing app)
     invoices = []
-    invoices_summary = {'total': 0, 'paid': 0, 'unpaid': 0}
+    invoices_summary = {"total": 0, "paid": 0, "unpaid": 0}
     try:
-        invoices_qs = Invoice.objects.filter(customer=customer).order_by('-created_at')[:5]
+        invoices_qs = Invoice.objects.filter(customer=customer).order_by("-created_at")[:5]
         invoices = list(invoices_qs)
-        
+
         # Calculate invoices summary
         all_invoices = Invoice.objects.filter(customer=customer)
         invoices_summary = {
-            'total': all_invoices.count(),
-            'paid': all_invoices.filter(status='paid').count(),
-            'unpaid': all_invoices.filter(status__in=['pending', 'overdue']).count(),
-            'draft': all_invoices.filter(status='draft').count(),
+            "total": all_invoices.count(),
+            "paid": all_invoices.filter(status="paid").count(),
+            "unpaid": all_invoices.filter(status__in=["pending", "overdue"]).count(),
+            "draft": all_invoices.filter(status="draft").count(),
         }
     except ImportError:
         # Billing app not available
@@ -190,18 +192,18 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
 
     # Get recent tickets for this customer (using tickets app)
     tickets = []
-    tickets_summary = {'total': 0, 'open': 0, 'closed': 0}
+    tickets_summary = {"total": 0, "open": 0, "closed": 0}
     try:
-        tickets_qs = Ticket.objects.filter(customer=customer).order_by('-created_at')[:5]
+        tickets_qs = Ticket.objects.filter(customer=customer).order_by("-created_at")[:5]
         tickets = list(tickets_qs)
-        
+
         # Calculate tickets summary
         all_tickets = Ticket.objects.filter(customer=customer)
         tickets_summary = {
-            'total': all_tickets.count(),
-            'open': all_tickets.filter(status__in=['open', 'in_progress']).count(),
-            'closed': all_tickets.filter(status='closed').count(),
-            'pending': all_tickets.filter(status='pending').count(),
+            "total": all_tickets.count(),
+            "open": all_tickets.filter(status__in=["open", "in_progress"]).count(),
+            "closed": all_tickets.filter(status="closed").count(),
+            "pending": all_tickets.filter(status="pending").count(),
         }
     except ImportError:
         # Tickets app not available
@@ -210,7 +212,7 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
     # User management context for safeguards
     total_users = customer.memberships.count()
     owner_count = customer.memberships.filter(role="owner").count()
-    
+
     context = {
         "customer": customer,
         "tax_profile": customer.get_tax_profile(),
@@ -383,8 +385,7 @@ def customer_edit(request: HttpRequest, customer_id: int) -> HttpResponse:
     )
     # Prefetch related profiles for efficiency
     customer = get_object_or_404(
-        accessible_qs.select_related("tax_profile", "billing_profile").prefetch_related("addresses"),
-        id=customer_id
+        accessible_qs.select_related("tax_profile", "billing_profile").prefetch_related("addresses"), id=customer_id
     )
 
     if request.method == "POST":
@@ -393,10 +394,10 @@ def customer_edit(request: HttpRequest, customer_id: int) -> HttpResponse:
             if form.is_valid():
                 updated_customer = form.save(user=user)
                 messages.success(
-                    request, 
+                    request,
                     _('✅ Customer "{customer_name}" updated successfully').format(
                         customer_name=updated_customer.get_display_name()
-                    )
+                    ),
                 )
                 return redirect("customers:detail", customer_id=updated_customer.id)
             else:

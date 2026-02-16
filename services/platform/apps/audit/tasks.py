@@ -75,11 +75,7 @@ def run_integrity_check(
         "status": "healthy",
     }
 
-    check_types = (
-        ["hash_verification", "sequence_check", "gdpr_compliance"]
-        if check_type == "all"
-        else [check_type]
-    )
+    check_types = ["hash_verification", "sequence_check", "gdpr_compliance"] if check_type == "all" else [check_type]
 
     for ct in check_types:
         try:
@@ -106,25 +102,26 @@ def run_integrity_check(
                 elif check.status == "warning" and results["status"] == "healthy":
                     results["status"] = "warning"
 
-                logger.info(
-                    f"[Integrity Task] {ct} completed: {check.status} "
-                    f"({check.issues_found} issues)"
-                )
+                logger.info(f"[Integrity Task] {ct} completed: {check.status} " f"({check.issues_found} issues)")
             else:
                 logger.error(f"[Integrity Task] {ct} failed: {result.error}")
-                results["checks"].append({
-                    "type": ct,
-                    "status": "error",
-                    "error": result.error,
-                })
+                results["checks"].append(
+                    {
+                        "type": ct,
+                        "status": "error",
+                        "error": result.error,
+                    }
+                )
 
         except Exception as e:
             logger.exception(f"[Integrity Task] {ct} exception: {e}")
-            results["checks"].append({
-                "type": ct,
-                "status": "error",
-                "error": str(e),
-            })
+            results["checks"].append(
+                {
+                    "type": ct,
+                    "status": "error",
+                    "error": str(e),
+                }
+            )
 
     results["completed_at"] = timezone.now().isoformat()
 
@@ -197,29 +194,31 @@ def run_file_integrity_check() -> dict[str, Any]:
                 if stored_hash is None:
                     # First time seeing this file
                     cache.set(cache_key, current_hash, FILE_HASH_CACHE_TIMEOUT)
-                    results["new_files"].append({
-                        "path": relative_path,
-                        "hash": current_hash[:16] + "...",
-                        "detected_at": timezone.now().isoformat(),
-                    })
+                    results["new_files"].append(
+                        {
+                            "path": relative_path,
+                            "hash": current_hash[:16] + "...",
+                            "detected_at": timezone.now().isoformat(),
+                        }
+                    )
                     logger.info(f"[File Integrity] New file tracked: {relative_path}")
 
                 elif stored_hash != current_hash:
                     # File has changed
-                    results["changes_detected"].append({
-                        "path": relative_path,
-                        "previous_hash": stored_hash[:16] + "...",
-                        "current_hash": current_hash[:16] + "...",
-                        "detected_at": timezone.now().isoformat(),
-                    })
+                    results["changes_detected"].append(
+                        {
+                            "path": relative_path,
+                            "previous_hash": stored_hash[:16] + "...",
+                            "current_hash": current_hash[:16] + "...",
+                            "detected_at": timezone.now().isoformat(),
+                        }
+                    )
                     results["status"] = "warning"
 
                     # Update stored hash
                     cache.set(cache_key, current_hash, FILE_HASH_CACHE_TIMEOUT)
 
-                    logger.warning(
-                        f"[File Integrity] Change detected: {relative_path}"
-                    )
+                    logger.warning(f"[File Integrity] Change detected: {relative_path}")
 
             except Exception as e:
                 logger.error(f"[File Integrity] Error checking {relative_path}: {e}")
@@ -261,10 +260,7 @@ def _send_integrity_escalation_alert(results: dict[str, Any]) -> None:
             evidence={
                 "check_results": results,
                 "detection_time": timezone.now().isoformat(),
-                "affected_checks": [
-                    c["type"] for c in results["checks"]
-                    if c.get("status") == "compromised"
-                ],
+                "affected_checks": [c["type"] for c in results["checks"] if c.get("status") == "compromised"],
             },
             metadata={
                 "auto_generated": True,
@@ -273,10 +269,7 @@ def _send_integrity_escalation_alert(results: dict[str, Any]) -> None:
             },
         )
 
-        logger.critical(
-            f"[Integrity Alert] Created critical alert {alert.id} for "
-            f"compromised audit data"
-        )
+        logger.critical(f"[Integrity Alert] Created critical alert {alert.id} for " f"compromised audit data")
 
         # TODO: Integrate with notification system for email/SMS alerts
 
@@ -309,10 +302,7 @@ def _create_file_integrity_alert(results: dict[str, Any]) -> None:
             },
         )
 
-        logger.warning(
-            f"[File Integrity Alert] Created alert {alert.id} for "
-            f"{len(changed_files)} file changes"
-        )
+        logger.warning(f"[File Integrity Alert] Created alert {alert.id} for " f"{len(changed_files)} file changes")
 
     except Exception as e:
         logger.exception(f"[File Integrity Alert] Failed to create alert: {e}")
@@ -361,10 +351,7 @@ def cleanup_old_integrity_checks(days: int = 90) -> dict[str, Any]:
         checked_at__lt=cutoff,
     ).delete()[0]
 
-    logger.info(
-        f"[Integrity Cleanup] Deleted {deleted_count} old healthy checks "
-        f"(older than {days} days)"
-    )
+    logger.info(f"[Integrity Cleanup] Deleted {deleted_count} old healthy checks " f"(older than {days} days)")
 
     return {
         "deleted_count": deleted_count,

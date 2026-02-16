@@ -10,6 +10,7 @@ Usage:
 """
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -97,9 +98,16 @@ def run_mypy_on_files(files: list[str], verbose: bool = False) -> bool:
         for f in files_to_check:
             print(f"  • {f}")
 
-    # Run mypy
-    cmd = ["mypy", *files_to_check]
-    result = subprocess.run(cmd, check=False, capture_output=True, text=True)  # noqa: S603
+    repo_root = Path(__file__).resolve().parents[3]
+    service_root = repo_root / "services" / "platform"
+    normalized_files = [normalize_repo_path(f) for f in files_to_check]
+
+    # Run mypy from service root so plugin imports (e.g. config.settings.*) resolve consistently.
+    cmd = ["mypy", *normalized_files]
+    env = os.environ.copy()
+    env["PATH"] = f"{repo_root / '.venv' / 'bin'}:{env.get('PATH', '')}"
+    env["PYTHONPATH"] = f"{service_root}:{env.get('PYTHONPATH', '')}".rstrip(":")
+    result = subprocess.run(cmd, check=False, capture_output=True, text=True, cwd=service_root, env=env)  # noqa: S603
 
     if result.returncode == 0:
         print("✅ Type checking passed")

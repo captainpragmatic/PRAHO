@@ -59,9 +59,7 @@ class BillingAnalyticsService:
 
             # Update aggregate metrics based on event type
             if event_type == "paid":
-                metrics["payment_time_days"] = (
-                    (timezone.now() - invoice.created_at).days if invoice.created_at else 0
-                )
+                metrics["payment_time_days"] = (timezone.now() - invoice.created_at).days if invoice.created_at else 0
             elif event_type == "overdue":
                 metrics["overdue_amount"] = invoice.total_cents
 

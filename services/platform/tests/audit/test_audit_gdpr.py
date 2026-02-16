@@ -5,7 +5,7 @@ COMPREHENSIVE GDPR COMPLIANCE TESTS 🛡️
 
 Tests for GDPR compliance implementation covering:
 - Data export (Article 20 - Right to data portability)
-- Data deletion/anonymization (Article 17 - Right to erasure)  
+- Data deletion/anonymization (Article 17 - Right to erasure)
 - Consent management (Articles 6, 7 - Lawful basis and consent)
 - Romanian Law 190/2018 compliance
 - Security and access controls

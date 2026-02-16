@@ -63,8 +63,7 @@ class QuotaExceededError(Exception):
         self.reset_at = reset_at
 
         super().__init__(
-            f"Quota exceeded for {endpoint.value}: {current}/{limit} "
-            f"(CUI: {cui}, resets: {reset_at or 'tomorrow'})"
+            f"Quota exceeded for {endpoint.value}: {current}/{limit} " f"(CUI: {cui}, resets: {reset_at or 'tomorrow'})"
         )
 
 
@@ -174,9 +173,7 @@ class ANAFQuotaTracker:
         from .settings import ROMANIA_TIMEZONE
 
         now = timezone.now().astimezone(ROMANIA_TIMEZONE)
-        tomorrow = (now + timedelta(days=1)).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
+        tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
         return tomorrow.isoformat()
 
     def get_current_usage(
@@ -289,14 +286,9 @@ class ANAFQuotaTracker:
         try:
             cache.incr(global_key, count, version=self.CACHE_VERSION)
         except ValueError:
-            cache.set(
-                global_key, count, timeout=self.MINUTE_WINDOW_SECONDS, version=self.CACHE_VERSION
-            )
+            cache.set(global_key, count, timeout=self.MINUTE_WINDOW_SECONDS, version=self.CACHE_VERSION)
 
-        logger.debug(
-            f"Quota increment: {endpoint.value} for {cui} "
-            f"(message: {message_id}) = {new_value}"
-        )
+        logger.debug(f"Quota increment: {endpoint.value} for {cui} " f"(message: {message_id}) = {new_value}")
 
         return new_value
 
@@ -330,18 +322,13 @@ class ANAFQuotaTracker:
         from .settings import ROMANIA_TIMEZONE
 
         now = timezone.now().astimezone(ROMANIA_TIMEZONE)
-        tomorrow = (now + timedelta(days=1)).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
+        tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
         delta = tomorrow - now
         return int(delta.total_seconds())
 
     def get_all_quotas(self, cui: str) -> dict[str, QuotaStatus]:
         """Get status of all quotas for a CUI."""
-        return {
-            endpoint.value: self.get_status(endpoint, cui)
-            for endpoint in QuotaEndpoint
-        }
+        return {endpoint.value: self.get_status(endpoint, cui) for endpoint in QuotaEndpoint}
 
     def reset_quota(
         self,
@@ -382,6 +369,7 @@ class ANAFQuotaTracker:
                 if cui is None and args:
                     # Try to get from args based on function signature
                     import inspect
+
                     sig = inspect.signature(func)
                     params = list(sig.parameters.keys())
                     if cui_param in params:
@@ -395,11 +383,17 @@ class ANAFQuotaTracker:
 
                 # Extract message_id if applicable
                 message_id = kwargs.get(message_id_param)
-                if message_id is None and args and endpoint in (
-                    QuotaEndpoint.STATUS,
-                    QuotaEndpoint.DOWNLOAD,
+                if (
+                    message_id is None
+                    and args
+                    and endpoint
+                    in (
+                        QuotaEndpoint.STATUS,
+                        QuotaEndpoint.DOWNLOAD,
+                    )
                 ):
                     import inspect
+
                     sig = inspect.signature(func)
                     params = list(sig.parameters.keys())
                     if message_id_param in params:

@@ -48,10 +48,7 @@ def _get_subscription_item_for_meter(subscription: Any, meter: Any) -> Any | Non
 
     from .subscription_models import SubscriptionItem
 
-    items = SubscriptionItem.objects.filter(
-        subscription=subscription,
-        product__is_active=True
-    )
+    items = SubscriptionItem.objects.filter(subscription=subscription, product__is_active=True)
     if not items.exists():
         return None
 
@@ -111,6 +108,7 @@ def _get_allowance_from_service_plan(meter: Any, service_plan: Any | None) -> De
 @dataclass
 class Result:
     """Result pattern for operations that can fail"""
+
     _value: Any
     _error: str | None
 
@@ -148,6 +146,7 @@ class Result:
 @dataclass
 class UsageEventData:
     """Data for creating a usage event"""
+
     meter_name: str
     customer_id: str
     value: Decimal
@@ -191,6 +190,7 @@ class MeteringService:
 
             # Get customer
             from apps.customers.models import Customer
+
             try:
                 customer = Customer.objects.get(id=event_data.customer_id)
             except Customer.DoesNotExist:
@@ -200,14 +200,11 @@ class MeteringService:
             timestamp = event_data.timestamp or timezone.now()
             grace_period = timedelta(hours=meter.event_grace_period_hours)
             min_timestamp = timezone.now() - grace_period
-            max_timestamp = timezone.now() + timedelta(
-                minutes=billing_config.get_future_event_drift_minutes()
-            )
+            max_timestamp = timezone.now() + timedelta(minutes=billing_config.get_future_event_drift_minutes())
 
             if timestamp < min_timestamp:
                 return Result.err(
-                    f"Event timestamp too old: {timestamp}. "
-                    f"Grace period is {meter.event_grace_period_hours} hours."
+                    f"Event timestamp too old: {timestamp}. " f"Grace period is {meter.event_grace_period_hours} hours."
                 )
             if timestamp > max_timestamp:
                 return Result.err(f"Event timestamp in future: {timestamp}")
@@ -218,6 +215,7 @@ class MeteringService:
 
             if event_data.subscription_id:
                 from .subscription_models import Subscription
+
                 try:
                     subscription = Subscription.objects.get(id=event_data.subscription_id)
                 except Subscription.DoesNotExist:
@@ -225,6 +223,7 @@ class MeteringService:
 
             if event_data.service_id:
                 from apps.provisioning.models import Service
+
                 try:
                     service = Service.objects.get(id=event_data.service_id)
                 except Service.DoesNotExist:
@@ -252,22 +251,15 @@ class MeteringService:
                 # Duplicate idempotency key - return existing event
                 if event_data.idempotency_key:
                     existing = UsageEvent.objects.filter(
-                        meter=meter,
-                        customer=customer,
-                        idempotency_key=event_data.idempotency_key
+                        meter=meter, customer=customer, idempotency_key=event_data.idempotency_key
                     ).first()
                     if existing:
-                        logger.info(
-                            f"Duplicate event ignored (idempotency): {event_data.idempotency_key}"
-                        )
+                        logger.info(f"Duplicate event ignored (idempotency): {event_data.idempotency_key}")
                         return Result.ok(existing)
                 raise  # Re-raise if not an idempotency issue
 
             # Log the event
-            logger.info(
-                f"Usage event recorded: {meter.name} = {event_data.value} "
-                f"for customer {customer.id}"
-            )
+            logger.info(f"Usage event recorded: {meter.name} = {event_data.value} " f"for customer {customer.id}")
 
             # Trigger async aggregation update
             self._schedule_aggregation_update(event)
@@ -282,9 +274,7 @@ class MeteringService:
             return Result.err(str(e))
 
     def record_bulk_events(
-        self,
-        events: list[UsageEventData],
-        stop_on_error: bool = False
+        self, events: list[UsageEventData], stop_on_error: bool = False
     ) -> tuple[list[Result], int, int]:
         """
         Record multiple usage events efficiently.
@@ -306,9 +296,7 @@ class MeteringService:
                 if stop_on_error:
                     break
 
-        logger.info(
-            f"Bulk event recording: {success_count} succeeded, {error_count} failed"
-        )
+        logger.info(f"Bulk event recording: {success_count} succeeded, {error_count} failed")
 
         return results, success_count, error_count
 
@@ -316,11 +304,8 @@ class MeteringService:
         """Schedule async update of aggregation for this event"""
         try:
             from django_q.tasks import async_task
-            async_task(
-                "apps.billing.metering_tasks.update_aggregation_for_event",
-                str(event.id),
-                timeout=60
-            )
+
+            async_task("apps.billing.metering_tasks.update_aggregation_for_event", str(event.id), timeout=60)
         except Exception as e:
             logger.warning(f"Could not schedule aggregation update: {e}")
             # Fall back to sync update
@@ -337,8 +322,7 @@ class MeteringService:
             if not subscription:
                 # Try to find active subscription for customer
                 subscription = Subscription.objects.filter(
-                    customer=event.customer,
-                    status__in=["active", "trialing"]
+                    customer=event.customer, status__in=["active", "trialing"]
                 ).first()
 
             if not subscription:
@@ -351,9 +335,7 @@ class MeteringService:
             # Get or create billing cycle
             billing_cycle = subscription.get_current_billing_cycle()
             if not billing_cycle:
-                logger.warning(
-                    f"No billing cycle found for subscription {subscription.id}"
-                )
+                logger.warning(f"No billing cycle found for subscription {subscription.id}")
                 return
 
             # Get or create aggregation
@@ -366,7 +348,7 @@ class MeteringService:
                     "period_start": billing_cycle.period_start,
                     "period_end": billing_cycle.period_end,
                     "status": "accumulating",
-                }
+                },
             )
 
             # Update aggregation
@@ -409,21 +391,17 @@ class MeteringService:
             aggregation.save()
             aggregation.refresh_from_db()
 
-    def _check_thresholds_async(
-        self,
-        customer: Any,
-        meter: Any,
-        subscription: Any | None
-    ) -> None:
+    def _check_thresholds_async(self, customer: Any, meter: Any, subscription: Any | None) -> None:
         """Schedule async threshold check"""
         try:
             from django_q.tasks import async_task
+
             async_task(
                 "apps.billing.metering_tasks.check_usage_thresholds",
                 str(customer.id),
                 str(meter.id),
                 str(subscription.id) if subscription else None,
-                timeout=30
+                timeout=30,
             )
         except Exception as e:
             logger.warning(f"Could not schedule threshold check: {e}")
@@ -440,10 +418,7 @@ class AggregationService:
     """
 
     def process_pending_events(
-        self,
-        meter_id: str | None = None,
-        customer_id: str | None = None,
-        limit: int = 1000
+        self, meter_id: str | None = None, customer_id: str | None = None, limit: int = 1000
     ) -> tuple[int, int]:
         """
         Process pending usage events into aggregations.
@@ -488,19 +463,16 @@ class AggregationService:
             return Result.err(f"Billing cycle not found: {billing_cycle_id}")
 
         if billing_cycle.status not in ("active", "upcoming"):
-            return Result.err(
-                f"Billing cycle cannot be closed: status is {billing_cycle.status}"
-            )
+            return Result.err(f"Billing cycle cannot be closed: status is {billing_cycle.status}")
 
         with transaction.atomic():
             # Process any remaining pending events
             self.process_pending_events(customer_id=str(billing_cycle.subscription.customer_id))
 
             # Update all aggregations to pending_rating
-            UsageAggregation.objects.filter(
-                billing_cycle=billing_cycle,
-                status="accumulating"
-            ).update(status="pending_rating")
+            UsageAggregation.objects.filter(billing_cycle=billing_cycle, status="accumulating").update(
+                status="pending_rating"
+            )
 
             # Close the billing cycle
             billing_cycle.close()
@@ -523,10 +495,7 @@ class AggregationService:
         return Result.ok(billing_cycle)
 
     def get_customer_usage_summary(
-        self,
-        customer_id: str,
-        period_start: datetime | None = None,
-        period_end: datetime | None = None
+        self, customer_id: str, period_start: datetime | None = None, period_end: datetime | None = None
     ) -> dict[str, Any]:
         """
         Get a summary of customer usage for a period.
@@ -587,16 +556,14 @@ class RatingEngine:
         from .metering_models import PricingTier, UsageAggregation
 
         try:
-            aggregation = UsageAggregation.objects.select_related(
-                "meter", "subscription", "billing_cycle"
-            ).get(id=aggregation_id)
+            aggregation = UsageAggregation.objects.select_related("meter", "subscription", "billing_cycle").get(
+                id=aggregation_id
+            )
         except UsageAggregation.DoesNotExist:
             return Result.err(f"Aggregation not found: {aggregation_id}")
 
         if aggregation.status not in ("accumulating", "pending_rating"):
-            return Result.err(
-                f"Aggregation already rated or finalized: {aggregation.status}"
-            )
+            return Result.err(f"Aggregation already rated or finalized: {aggregation.status}")
 
         meter = aggregation.meter
         subscription = aggregation.subscription
@@ -619,11 +586,7 @@ class RatingEngine:
                 included_quantity = _get_allowance_from_service_plan(meter, service_plan)
 
         # Calculate billable value after rounding
-        billable_value = self._apply_rounding(
-            aggregation.total_value,
-            meter.rounding_mode,
-            meter.rounding_increment
-        )
+        billable_value = self._apply_rounding(aggregation.total_value, meter.rounding_mode, meter.rounding_increment)
 
         # Calculate overage
         overage_value = max(Decimal("0"), billable_value - included_quantity)
@@ -633,24 +596,14 @@ class RatingEngine:
 
         if overage_value > 0 and meter.is_billable:
             if pricing_tier:
-                charge_cents = self._calculate_tiered_charge(
-                    overage_value,
-                    pricing_tier
-                )
+                charge_cents = self._calculate_tiered_charge(overage_value, pricing_tier)
             elif unit_price_cents is not None:
                 charge_cents = int(overage_value * unit_price_cents)
             else:
                 # Try to find default pricing tier
-                default_tier = PricingTier.objects.filter(
-                    meter=meter,
-                    is_default=True,
-                    is_active=True
-                ).first()
+                default_tier = PricingTier.objects.filter(meter=meter, is_default=True, is_active=True).first()
                 if default_tier:
-                    charge_cents = self._calculate_tiered_charge(
-                        overage_value,
-                        default_tier
-                    )
+                    charge_cents = self._calculate_tiered_charge(overage_value, default_tier)
 
         # Update aggregation
         with transaction.atomic():
@@ -668,8 +621,7 @@ class RatingEngine:
                 user=None,
                 content_object=aggregation,
                 description=(
-                    f"Usage rated: {meter.name} = {billable_value} "
-                    f"({overage_value} overage) = {charge_cents} cents"
+                    f"Usage rated: {meter.name} = {billable_value} " f"({overage_value} overage) = {charge_cents} cents"
                 ),
                 actor_type="system",
                 metadata={
@@ -697,8 +649,7 @@ class RatingEngine:
             return Result.err(f"Billing cycle not found: {billing_cycle_id}")
 
         aggregations = UsageAggregation.objects.filter(
-            billing_cycle=billing_cycle,
-            status__in=("accumulating", "pending_rating")
+            billing_cycle=billing_cycle, status__in=("accumulating", "pending_rating")
         )
 
         total_usage_charge = 0
@@ -731,19 +682,16 @@ class RatingEngine:
             f"{rated_count} aggregations, {total_usage_charge} cents usage charge"
         )
 
-        return Result.ok({
-            "billing_cycle_id": str(billing_cycle_id),
-            "rated_count": rated_count,
-            "error_count": error_count,
-            "total_usage_charge_cents": total_usage_charge,
-        })
+        return Result.ok(
+            {
+                "billing_cycle_id": str(billing_cycle_id),
+                "rated_count": rated_count,
+                "error_count": error_count,
+                "total_usage_charge_cents": total_usage_charge,
+            }
+        )
 
-    def _apply_rounding(
-        self,
-        value: Decimal,
-        mode: str,
-        increment: Decimal
-    ) -> Decimal:
+    def _apply_rounding(self, value: Decimal, mode: str, increment: Decimal) -> Decimal:
         """Apply rounding to a usage value"""
         if mode == "none":
             return value
@@ -766,11 +714,7 @@ class RatingEngine:
 
         return value
 
-    def _calculate_tiered_charge(
-        self,
-        quantity: Decimal,
-        pricing_tier: Any
-    ) -> int:
+    def _calculate_tiered_charge(self, quantity: Decimal, pricing_tier: Any) -> int:
         """Calculate charge using tiered pricing"""
         from .metering_models import PricingTierBracket
 
@@ -783,9 +727,7 @@ class RatingEngine:
 
         if pricing_tier.pricing_model == "volume":
             # All units priced at the volume rate
-            brackets = PricingTierBracket.objects.filter(
-                pricing_tier=pricing_tier
-            ).order_by("from_quantity")
+            brackets = PricingTierBracket.objects.filter(pricing_tier=pricing_tier).order_by("from_quantity")
 
             applicable_bracket = None
             for bracket in brackets:
@@ -801,9 +743,7 @@ class RatingEngine:
 
         if pricing_tier.pricing_model == "graduated":
             # Each bracket charged at its own rate
-            brackets = PricingTierBracket.objects.filter(
-                pricing_tier=pricing_tier
-            ).order_by("from_quantity")
+            brackets = PricingTierBracket.objects.filter(pricing_tier=pricing_tier).order_by("from_quantity")
 
             total_charge = 0
             remaining_quantity = quantity
@@ -813,9 +753,7 @@ class RatingEngine:
                     break
 
                 bracket_size = (
-                    bracket.to_quantity - bracket.from_quantity
-                    if bracket.to_quantity
-                    else remaining_quantity
+                    bracket.to_quantity - bracket.from_quantity if bracket.to_quantity else remaining_quantity
                 )
                 quantity_in_bracket = min(remaining_quantity, bracket_size)
 
@@ -827,9 +765,7 @@ class RatingEngine:
 
         if pricing_tier.pricing_model == "package":
             # Fixed price for packages
-            brackets = PricingTierBracket.objects.filter(
-                pricing_tier=pricing_tier
-            ).order_by("from_quantity")
+            brackets = PricingTierBracket.objects.filter(pricing_tier=pricing_tier).order_by("from_quantity")
 
             for bracket in brackets:
                 if bracket.to_quantity is None or quantity <= bracket.to_quantity:
@@ -843,12 +779,7 @@ class UsageAlertService:
     Service for checking and sending usage alerts.
     """
 
-    def check_thresholds(
-        self,
-        customer_id: str,
-        meter_id: str,
-        subscription_id: str | None = None
-    ) -> list[Any]:
+    def check_thresholds(self, customer_id: str, meter_id: str, subscription_id: str | None = None) -> list[Any]:
         """
         Check if any usage thresholds have been breached.
 
@@ -870,9 +801,7 @@ class UsageAlertService:
 
         # Get current aggregation
         agg_query = UsageAggregation.objects.filter(
-            customer_id=customer_id,
-            meter_id=meter_id,
-            status__in=("accumulating", "pending_rating")
+            customer_id=customer_id, meter_id=meter_id, status__in=("accumulating", "pending_rating")
         )
 
         if subscription_id:
@@ -900,14 +829,9 @@ class UsageAlertService:
                 allowance = _get_allowance_from_service_plan(aggregation.meter, service_plan)
 
         # Get applicable thresholds
-        thresholds = UsageThreshold.objects.filter(
-            meter_id=meter_id,
-            is_active=True
-        )
+        thresholds = UsageThreshold.objects.filter(meter_id=meter_id, is_active=True)
         if service_plan:
-            thresholds = thresholds.filter(
-                Q(service_plan__isnull=True) | Q(service_plan=service_plan)
-            )
+            thresholds = thresholds.filter(Q(service_plan__isnull=True) | Q(service_plan=service_plan))
         else:
             thresholds = thresholds.filter(Q(service_plan__isnull=True))
 
@@ -929,10 +853,7 @@ class UsageAlertService:
 
             # Check if we already sent an alert for this threshold
             existing_alert = UsageAlert.objects.filter(
-                threshold=threshold,
-                customer=customer,
-                aggregation=aggregation,
-                status__in=("pending", "sent")
+                threshold=threshold, customer=customer, aggregation=aggregation, status__in=("pending", "sent")
             ).exists()
 
             if existing_alert and not threshold.repeat_notification:
@@ -981,11 +902,8 @@ class UsageAlertService:
         """Schedule async notification for an alert"""
         try:
             from django_q.tasks import async_task
-            async_task(
-                "apps.billing.metering_tasks.send_usage_alert_notification",
-                str(alert.id),
-                timeout=60
-            )
+
+            async_task("apps.billing.metering_tasks.send_usage_alert_notification", str(alert.id), timeout=60)
         except Exception as e:
             logger.warning(f"Could not schedule alert notification: {e}")
 
@@ -996,9 +914,7 @@ class UsageAlertService:
         from .metering_models import UsageAlert
 
         try:
-            alert = UsageAlert.objects.select_related(
-                "threshold", "customer", "threshold__meter"
-            ).get(id=alert_id)
+            alert = UsageAlert.objects.select_related("threshold", "customer", "threshold__meter").get(id=alert_id)
         except UsageAlert.DoesNotExist:
             return Result.err(f"Alert not found: {alert_id}")
 

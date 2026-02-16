@@ -129,7 +129,7 @@ class VirtualminAccountProtectionTestCase(TestCase):
         self.customer = create_test_customer('Test Customer', self.admin_user)
         self.service_plan = create_test_service_plan()
         self.virtualmin_server = create_test_virtualmin_server()
-        
+
         # Create a PRAHO service
         self.service = Service.objects.create(
             customer=self.customer,
@@ -141,7 +141,7 @@ class VirtualminAccountProtectionTestCase(TestCase):
             price=Decimal('50.00'),
             status='active'
         )
-        
+
         # Create Virtualmin account
         self.virtualmin_account = VirtualminAccount.objects.create(
             domain='test.example.com',
@@ -162,19 +162,19 @@ class VirtualminAccountProtectionTestCase(TestCase):
         # Verify account is protected
         self.assertTrue(self.virtualmin_account.protected_from_deletion)
         self.assertEqual(self.virtualmin_account.status, 'active')
-        
+
         # Create provisioning service
         provisioning_service = VirtualminProvisioningService(self.virtualmin_server)
-        
+
         # Attempt to delete protected account
         result = provisioning_service.delete_account(self.virtualmin_account)
-        
+
         # Verify deletion was blocked
         self.assertTrue(result.is_err())
         error_message = result.unwrap_err()
         self.assertIn('protected from deletion', error_message.lower())
         self.assertIn('disable protection first', error_message.lower())
-        
+
         # Verify account still exists and is unchanged
         self.virtualmin_account.refresh_from_db()
         self.assertEqual(self.virtualmin_account.status, 'active')
@@ -194,7 +194,7 @@ class VirtualminAccountProtectionTestCase(TestCase):
             price=Decimal('30.00'),
             status='active'
         )
-        
+
         # Create an unprotected account
         unprotected_account = VirtualminAccount.objects.create(
             domain='unprotected.example.com',
@@ -209,24 +209,24 @@ class VirtualminAccountProtectionTestCase(TestCase):
         )
         unprotected_account.set_password('test_password')
         unprotected_account.save()
-        
+
         # Verify account is initially unprotected
         self.assertFalse(unprotected_account.protected_from_deletion)
         self.assertTrue(unprotected_account.can_be_deleted)
-        
+
         # Enable protection
         unprotected_account.protected_from_deletion = True
         unprotected_account.save()
-        
+
         # Verify protection is now enabled
         unprotected_account.refresh_from_db()
         self.assertTrue(unprotected_account.protected_from_deletion)
         self.assertFalse(unprotected_account.can_be_deleted)
-        
+
         # Verify deletion is now blocked
         provisioning_service = VirtualminProvisioningService(self.virtualmin_server)
         result = provisioning_service.delete_account(unprotected_account)
-        
+
         self.assertTrue(result.is_err())
         error_message = result.unwrap_err()
         self.assertIn('protected from deletion', error_message.lower())
@@ -242,30 +242,30 @@ class VirtualminAccountProtectionTestCase(TestCase):
         mock_gateway.call.return_value.is_ok.return_value = True
         mock_gateway.call.return_value.unwrap.return_value = mock_response
         mock_gateway_class.return_value = mock_gateway
-        
+
         # Verify account starts protected
         self.assertTrue(self.virtualmin_account.protected_from_deletion)
         self.assertFalse(self.virtualmin_account.can_be_deleted)
-        
+
         # Disable protection
         self.virtualmin_account.protected_from_deletion = False
         self.virtualmin_account.save()
-        
+
         # Verify protection is now disabled
         self.virtualmin_account.refresh_from_db()
         self.assertFalse(self.virtualmin_account.protected_from_deletion)
         self.assertTrue(self.virtualmin_account.can_be_deleted)
-        
+
         # Set account to terminated status (required for deletion)
         self.virtualmin_account.status = 'terminated'
         self.virtualmin_account.save()
-        
+
         # Verify deletion is now allowed
         provisioning_service = VirtualminProvisioningService(self.virtualmin_server)
         result = provisioning_service.delete_account(self.virtualmin_account)
-        
+
         self.assertTrue(result.is_ok())
-        
+
         # Verify account was marked as terminated
         self.virtualmin_account.refresh_from_db()
         self.assertEqual(self.virtualmin_account.status, 'terminated')
@@ -276,11 +276,11 @@ class VirtualminAccountProtectionTestCase(TestCase):
         protected_account = self.virtualmin_account
         self.assertTrue(protected_account.protected_from_deletion)
         self.assertFalse(protected_account.can_be_deleted)
-        
+
         # Test can_be_deleted property with unprotected account
         protected_account.protected_from_deletion = False
         protected_account.save()
-        
+
         protected_account.refresh_from_db()
         self.assertFalse(protected_account.protected_from_deletion)
         self.assertTrue(protected_account.can_be_deleted)
@@ -290,11 +290,11 @@ class VirtualminAccountProtectionTestCase(TestCase):
         # Test protected account
         self.assertTrue(self.virtualmin_account.protected_from_deletion)
         self.assertEqual(self.virtualmin_account.delete_url, "")
-        
+
         # Test unprotected account
         self.virtualmin_account.protected_from_deletion = False
         self.virtualmin_account.save()
-        
+
         # Should now return actual delete URL
         delete_url = self.virtualmin_account.delete_url
         self.assertNotEqual(delete_url, "")
@@ -311,20 +311,20 @@ class VirtualminAccountProtectionTestCase(TestCase):
         # Test with suspended account
         self.virtualmin_account.status = 'suspended'
         self.virtualmin_account.save()
-        
+
         provisioning_service = VirtualminProvisioningService(self.virtualmin_server)
         result = provisioning_service.delete_account(self.virtualmin_account)
-        
+
         # Should still be protected regardless of status
         self.assertTrue(result.is_err())
         self.assertIn('protected from deletion', result.unwrap_err())
-        
+
         # Test with error status
         self.virtualmin_account.status = 'error'
         self.virtualmin_account.save()
-        
+
         result = provisioning_service.delete_account(self.virtualmin_account)
-        
+
         # Should still be protected
         self.assertTrue(result.is_err())
         self.assertIn('protected from deletion', result.unwrap_err())
@@ -342,7 +342,7 @@ class VirtualminAccountProtectionTestCase(TestCase):
             price=Decimal('25.00'),
             status='active'
         )
-        
+
         # Create new account without explicitly setting protection
         new_account = VirtualminAccount.objects.create(
             domain='new-test.example.com',
@@ -356,7 +356,7 @@ class VirtualminAccountProtectionTestCase(TestCase):
         )
         new_account.set_password('test_password')
         new_account.save()
-        
+
         # Should be protected by default
         self.assertTrue(new_account.protected_from_deletion)
         self.assertFalse(new_account.can_be_deleted)
@@ -366,13 +366,13 @@ class VirtualminAccountProtectionTestCase(TestCase):
         # Disable protection first
         self.virtualmin_account.protected_from_deletion = False
         self.virtualmin_account.save()
-        
+
         provisioning_service = VirtualminProvisioningService(self.virtualmin_server)
-        
+
         # Test with active account (should be blocked)
         self.virtualmin_account.status = 'active'
         self.virtualmin_account.save()
-        
+
         result = provisioning_service.delete_account(self.virtualmin_account)
         self.assertTrue(result.is_err())
         self.assertIn('must be terminated or in error state before deletion', result.unwrap_err())

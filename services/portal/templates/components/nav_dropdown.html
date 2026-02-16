@@ -6,20 +6,20 @@
     <button type="button" @click="open = !open"
       class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center transition-colors"
       :class="{ 'text-white bg-slate-700': open }"
-      aria-expanded="false" 
+      aria-expanded="false"
       aria-haspopup="true">
       {% if icon %}
         <span class="mr-2">{{ icon }}</span>
       {% endif %}
       {{ title }}
-      <svg class="ml-1 h-4 w-4 transition-transform duration-200" :class="{ 'rotate-180': open }" 
+      <svg class="ml-1 h-4 w-4 transition-transform duration-200" :class="{ 'rotate-180': open }"
            fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
       </svg>
     </button>
   </div>
 
-  <div x-show="open" 
+  <div x-show="open"
        x-transition:enter="transition ease-out duration-100"
        x-transition:enter-start="transform opacity-0 scale-95"
        x-transition:enter-end="transform opacity-100 scale-100"
@@ -27,14 +27,14 @@
        x-transition:leave-start="transform opacity-100 scale-100"
        x-transition:leave-end="transform opacity-0 scale-95"
        class="origin-top-right absolute left-0 mt-2 w-56 rounded-md shadow-lg bg-slate-800 border border-slate-700 z-50"
-       role="menu" 
+       role="menu"
        aria-orientation="vertical">
     <div class="py-1" role="none">
       {% for item in items %}
         {% if item.divider %}
           <div class="border-t border-slate-700 my-1"></div>
         {% else %}
-          <a href="{{ item.url }}" 
+          <a href="{{ item.url }}"
              class="group flex items-center px-4 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700 transition-colors"
              role="menuitem"
              @click="open = false">

@@ -128,7 +128,7 @@
                 <div class="text-3xl mb-3">📱</div>
                 <h5 class="font-medium text-white mb-2">{% trans 'Authenticator App' %}</h5>
                 <p class="text-xs text-slate-400 mb-4">{% trans 'Google Authenticator, Authy, Microsoft Authenticator' %}</p>
-                
+
                 <div class="text-left mb-4 space-y-1">
                   <div class="flex items-center text-green-400 text-xs">
                     <span class="mr-1">✅</span>
@@ -139,12 +139,12 @@
                     {% trans 'Very secure' %}
                   </div>
                 </div>
-                
+
                 <p class="text-center text-xs text-slate-400 mb-4">
                   {% trans 'Set up time-based codes with your favorite authenticator app.' %}
                 </p>
-                
-                <a href="{% url 'users:mfa_setup_totp' %}" 
+
+                <a href="{% url 'users:mfa_setup_totp' %}"
                    class="inline-block w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 px-4 rounded transition-colors text-center">
                   {% trans 'Set Up Authenticator App' %}
                 </a>
@@ -159,12 +159,12 @@
                   {% trans 'RECOMMENDED' %}
                 </span>
               </div>
-              
+
               <div class="text-center">
                 <div class="text-3xl mb-3">🔑</div>
                 <h5 class="font-medium text-white mb-2">{% trans 'Passkeys' %}</h5>
                 <p class="text-xs text-slate-400 mb-4">{% trans 'Face ID, Touch ID, fingerprint, hardware keys' %}</p>
-                
+
                 <div class="text-left mb-4 space-y-1">
                   <div class="flex items-center text-green-400 text-xs">
                     <span class="mr-1">✅</span>
@@ -175,11 +175,11 @@
                     {% trans 'Fastest login' %}
                   </div>
                 </div>
-                
+
                 <p class="text-center text-xs text-slate-400 mb-4">
                   {% trans 'Contact support to enable passkey MFA for your account.' %}
                 </p>
-                
+
                 <button disabled
                    class="inline-block w-full bg-slate-600 text-slate-400 text-sm font-medium py-2 px-4 rounded cursor-not-allowed">
                   {% trans 'Contact Support to Enable' %}
@@ -218,7 +218,7 @@
 
           <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
             <!-- Backup Codes -->
-            <a href="{% url 'users:mfa_backup_codes' %}" 
+            <a href="{% url 'users:mfa_backup_codes' %}"
                class="flex flex-col items-center p-4 bg-slate-700 hover:bg-slate-600 rounded-lg border border-slate-600 hover:border-blue-500 transition-colors">
               <span class="text-2xl mb-2">🔢</span>
               <span class="text-sm font-medium text-white">{% trans 'Backup Codes' %}</span>
@@ -234,7 +234,7 @@
             </a>
 
             <!-- Disable MFA -->
-            <form method="post" action="{% url 'users:mfa_disable' %}" 
+            <form method="post" action="{% url 'users:mfa_disable' %}"
                   onsubmit="return confirm('{% trans 'Are you sure you want to disable two-factor authentication? This will make your account less secure.' %}')"
                   class="flex flex-col items-center p-4 bg-red-900/30 hover:bg-red-900/50 rounded-lg border border-red-700 hover:border-red-500 transition-colors cursor-pointer">
               {% csrf_token %}
@@ -271,7 +271,7 @@
 
   <!-- Back Navigation -->
   <div class="mt-6 text-center">
-    <a href="{% url 'users:profile' %}" 
+    <a href="{% url 'users:profile' %}"
        class="text-blue-400 hover:text-blue-300 text-sm">
       ← {% trans 'Back to Profile' %}
     </a>

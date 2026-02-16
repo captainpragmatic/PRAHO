@@ -273,22 +273,17 @@ ANYMAIL = {
         "aws_secret_access_key": os.environ.get("AWS_SECRET_ACCESS_KEY"),
     },
     "AMAZON_SES_CONFIGURATION_SET": os.environ.get("AWS_SES_CONFIGURATION_SET"),
-
     # SendGrid configuration
     "SENDGRID_API_KEY": os.environ.get("SENDGRID_API_KEY"),
-
     # Mailgun configuration
     "MAILGUN_API_KEY": os.environ.get("MAILGUN_API_KEY"),
     "MAILGUN_SENDER_DOMAIN": os.environ.get("MAILGUN_SENDER_DOMAIN"),
     "MAILGUN_API_URL": os.environ.get("MAILGUN_API_URL", "https://api.eu.mailgun.net/v3"),
-
     # Webhook configuration
     "WEBHOOK_SECRET": os.environ.get("EMAIL_WEBHOOK_SECRET"),
-
     # Tracking settings
     "TRACK_OPENS": True,
     "TRACK_CLICKS": True,
-
     # Ignore unsupported features rather than raising errors
     "IGNORE_UNSUPPORTED_FEATURES": True,
 }
@@ -321,7 +316,7 @@ EMAIL_DELIVERABILITY = {
     "REQUIRE_DMARC": True,
     "SOFT_BOUNCE_THRESHOLD": int(os.environ.get("EMAIL_SOFT_BOUNCE_THRESHOLD", "3")),
     "HARD_BOUNCE_ACTION": "suppress",  # 'suppress' or 'warn'
-    "COMPLAINT_ACTION": "suppress",    # 'suppress' or 'warn'
+    "COMPLAINT_ACTION": "suppress",  # 'suppress' or 'warn'
 }
 
 # ===============================================================================
@@ -345,17 +340,16 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_THROTTLE_CLASSES": [
         "rest_framework.throttling.AnonRateThrottle",
-        "rest_framework.throttling.UserRateThrottle", 
+        "rest_framework.throttling.UserRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
-        "anon": "100/hour",     # Anonymous users (very limited)
-        "user": "1000/hour",    # Authenticated users (generous for portal)
-        "burst": "60/min",      # Search/autocomplete endpoints
-        
+        "anon": "100/hour",  # Anonymous users (very limited)
+        "user": "1000/hour",  # Authenticated users (generous for portal)
+        "burst": "60/min",  # Search/autocomplete endpoints
         # 🔒 SECURITY: Order-specific throttling to prevent abuse
-        "order_create": "10/min",      # Order creation (expensive operations)
-        "order_calculate": "30/min",   # Cart calculations (less expensive)
-        "order_list": "100/min",       # Order listing (read operations)
+        "order_create": "10/min",  # Order creation (expensive operations)
+        "order_calculate": "30/min",  # Cart calculations (less expensive)
+        "order_list": "100/min",  # Order listing (read operations)
         "product_catalog": "200/min",  # Product browsing (public-ish)
     },
 }
@@ -499,27 +493,24 @@ CREDENTIAL_VAULT_MAX_AGE_DAYS = int(os.environ.get("CREDENTIAL_VAULT_MAX_AGE_DAY
 # These values can be overridden by environment variables (VIRTUALMIN_*_TIMEOUT)
 VIRTUALMIN_TIMEOUTS = {
     # API request timeouts (seconds)
-    'API_REQUEST_TIMEOUT': int(os.environ.get('VIRTUALMIN_API_REQUEST_TIMEOUT', '30')),
-    'API_HEALTH_CHECK_TIMEOUT': int(os.environ.get('VIRTUALMIN_API_HEALTH_CHECK_TIMEOUT', '10')),
-    'API_BACKUP_TIMEOUT': int(os.environ.get('VIRTUALMIN_API_BACKUP_TIMEOUT', '300')),
-    'API_BULK_TIMEOUT': int(os.environ.get('VIRTUALMIN_API_BULK_TIMEOUT', '600')),
-    
+    "API_REQUEST_TIMEOUT": int(os.environ.get("VIRTUALMIN_API_REQUEST_TIMEOUT", "30")),
+    "API_HEALTH_CHECK_TIMEOUT": int(os.environ.get("VIRTUALMIN_API_HEALTH_CHECK_TIMEOUT", "10")),
+    "API_BACKUP_TIMEOUT": int(os.environ.get("VIRTUALMIN_API_BACKUP_TIMEOUT", "300")),
+    "API_BULK_TIMEOUT": int(os.environ.get("VIRTUALMIN_API_BULK_TIMEOUT", "600")),
     # Connection timeouts (seconds)
-    'CONNECTION_TIMEOUT': int(os.environ.get('VIRTUALMIN_CONNECTION_TIMEOUT', '15')),
-    'READ_TIMEOUT': int(os.environ.get('VIRTUALMIN_READ_TIMEOUT', '30')),
-    'WRITE_TIMEOUT': int(os.environ.get('VIRTUALMIN_WRITE_TIMEOUT', '30')),
-    
+    "CONNECTION_TIMEOUT": int(os.environ.get("VIRTUALMIN_CONNECTION_TIMEOUT", "15")),
+    "READ_TIMEOUT": int(os.environ.get("VIRTUALMIN_READ_TIMEOUT", "30")),
+    "WRITE_TIMEOUT": int(os.environ.get("VIRTUALMIN_WRITE_TIMEOUT", "30")),
     # Task-specific timeouts (seconds)
-    'PROVISIONING_TIMEOUT': int(os.environ.get('VIRTUALMIN_PROVISIONING_TIMEOUT', '180')),
-    'DOMAIN_SYNC_TIMEOUT': int(os.environ.get('VIRTUALMIN_DOMAIN_SYNC_TIMEOUT', '120')),
-    'USAGE_SYNC_TIMEOUT': int(os.environ.get('VIRTUALMIN_USAGE_SYNC_TIMEOUT', '60')),
-    
+    "PROVISIONING_TIMEOUT": int(os.environ.get("VIRTUALMIN_PROVISIONING_TIMEOUT", "180")),
+    "DOMAIN_SYNC_TIMEOUT": int(os.environ.get("VIRTUALMIN_DOMAIN_SYNC_TIMEOUT", "120")),
+    "USAGE_SYNC_TIMEOUT": int(os.environ.get("VIRTUALMIN_USAGE_SYNC_TIMEOUT", "60")),
     # Retry and rate limiting
-    'RETRY_DELAY': int(os.environ.get('VIRTUALMIN_RETRY_DELAY', '5')),
-    'MAX_RETRIES': int(os.environ.get('VIRTUALMIN_MAX_RETRIES', '3')),
-    'RATE_LIMIT_WINDOW': int(os.environ.get('VIRTUALMIN_RATE_LIMIT_WINDOW', '3600')),
-    'RATE_LIMIT_MAX_CALLS': int(os.environ.get('VIRTUALMIN_RATE_LIMIT_MAX_CALLS', '100')),
-    'CONNECTION_POOL_SIZE': int(os.environ.get('VIRTUALMIN_CONNECTION_POOL_SIZE', '10')),
+    "RETRY_DELAY": int(os.environ.get("VIRTUALMIN_RETRY_DELAY", "5")),
+    "MAX_RETRIES": int(os.environ.get("VIRTUALMIN_MAX_RETRIES", "3")),
+    "RATE_LIMIT_WINDOW": int(os.environ.get("VIRTUALMIN_RATE_LIMIT_WINDOW", "3600")),
+    "RATE_LIMIT_MAX_CALLS": int(os.environ.get("VIRTUALMIN_RATE_LIMIT_MAX_CALLS", "100")),
+    "CONNECTION_POOL_SIZE": int(os.environ.get("VIRTUALMIN_CONNECTION_POOL_SIZE", "10")),
 }
 
 # ===============================================================================
@@ -601,29 +592,23 @@ THROTTLE_RATES = {
     "login": "5/minute",
     "password_reset": "3/minute",
     "2fa_verify": "10/minute",
-
     # Customer-based rates (per customer account)
     "customer": os.environ.get("THROTTLE_RATE_CUSTOMER", "100/minute"),
     "customer_burst": "30/10s",
-
     # Anonymous rates
     "anon": "20/minute",
     "anon_burst": "10/10s",
-
     # Standard authenticated rates
     "user": "60/minute",
     "user_burst": "20/10s",
-
     # Service operations
     "provision": "10/minute",
     "backup": "5/minute",
     "sync": "30/minute",
-
     # Financial operations
     "payment": "30/minute",
     "invoice": "60/minute",
     "refund": "10/minute",
-
     # Sustained rates (hourly limits)
     "sustained": "1000/hour",
     "sustained_premium": "5000/hour",
@@ -756,17 +741,15 @@ DISTRIBUTED_LOCK_BLOCKING_TIMEOUT = int(os.environ.get("DISTRIBUTED_LOCK_BLOCKIN
 # These values can be overridden by environment variables (API_*_TIMEOUT)
 API_TIMEOUTS = {
     # General API request timeouts (seconds)
-    'REQUEST_TIMEOUT': int(os.environ.get('API_REQUEST_TIMEOUT', '30')),
-    'HEALTH_CHECK_TIMEOUT': int(os.environ.get('API_HEALTH_CHECK_TIMEOUT', '10')),
-
+    "REQUEST_TIMEOUT": int(os.environ.get("API_REQUEST_TIMEOUT", "30")),
+    "HEALTH_CHECK_TIMEOUT": int(os.environ.get("API_HEALTH_CHECK_TIMEOUT", "10")),
     # Retry configuration
-    'MAX_RETRIES': int(os.environ.get('API_MAX_RETRIES', '3')),
-    'RETRY_DELAY': int(os.environ.get('API_RETRY_DELAY', '2')),
-
+    "MAX_RETRIES": int(os.environ.get("API_MAX_RETRIES", "3")),
+    "RETRY_DELAY": int(os.environ.get("API_RETRY_DELAY", "2")),
     # Rate limiting
-    'RATE_LIMIT_WINDOW': int(os.environ.get('API_RATE_LIMIT_WINDOW', '3600')),  # 1 hour
-    'RATE_LIMIT_MAX_CALLS': int(os.environ.get('API_RATE_LIMIT_MAX_CALLS', '50')),
+    "RATE_LIMIT_WINDOW": int(os.environ.get("API_RATE_LIMIT_WINDOW", "3600")),  # 1 hour
+    "RATE_LIMIT_MAX_CALLS": int(os.environ.get("API_RATE_LIMIT_MAX_CALLS", "50")),
 }
 
 # Portal service specific timeout (can be overridden)
-PORTAL_API_TIMEOUT = int(os.environ.get('PORTAL_API_TIMEOUT', '30'))
+PORTAL_API_TIMEOUT = int(os.environ.get("PORTAL_API_TIMEOUT", "30"))

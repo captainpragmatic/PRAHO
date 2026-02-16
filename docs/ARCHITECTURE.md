@@ -1,8 +1,8 @@
 # PRAHO Platform Architecture
 
-**Version:** 1.0.0  
-**Last Updated:** September 5, 2025  
-**Status:** ✅ Services Architecture Complete  
+**Version:** 1.0.0
+**Last Updated:** September 5, 2025
+**Status:** ✅ Services Architecture Complete
 
 ## 🏗️ Architecture Overview
 
@@ -25,7 +25,7 @@ PRAHO/                          # 🚀 Romanian Hosting Provider PRAHO Platform
 ├─ services/                    # 🏗️ Services Architecture
 │  ├─ platform/                # 🏢 Main Django application (full database access)
 │  │  ├─ apps/users/           # Authentication & user management
-│  │  ├─ apps/customers/       # Customer organization management  
+│  │  ├─ apps/customers/       # Customer organization management
 │  │  ├─ apps/billing/         # Invoice & payment processing
 │  │  ├─ apps/tickets/         # Support ticket system
 │  │  ├─ apps/provisioning/    # Service provisioning
@@ -36,7 +36,7 @@ PRAHO/                          # 🚀 Romanian Hosting Provider PRAHO Platform
 │  │  ├─ manage.py             # Django management
 │  │  └─ requirements.txt      # Platform dependencies
 │  └─ portal/                  # 🌐 Customer API service (NO database access)
-│     ├─ apps/portal/          # Customer API endpoints  
+│     ├─ apps/portal/          # Customer API endpoints
 │     ├─ config/               # Minimal Django configuration
 ├─ deploy/                      # 🐳 Docker deployment configuration
 │  ├─ platform/                # Platform service Dockerfile
@@ -56,7 +56,7 @@ PRAHO/                          # 🚀 Romanian Hosting Provider PRAHO Platform
 
 ## 🏢 Platform Service Architecture
 
-**Location**: `services/platform/`  
+**Location**: `services/platform/`
 **Purpose**: Main Django application with full database access and business logic
 
 ### Business Domain Applications
@@ -66,7 +66,7 @@ PRAHO/                          # 🚀 Romanian Hosting Provider PRAHO Platform
 - **Services**: Registration, 2FA, password reset, role management
 - **Features**: Email-based authentication, TOTP 2FA, role-based access
 
-#### 🏢 customers/ - Business Organizations & Contacts  
+#### 🏢 customers/ - Business Organizations & Contacts
 - **Models**: Customer, CustomerTaxProfile, CustomerBillingProfile, CustomerAddress
 - **Services**: Customer CRUD, multi-tenant access, CUI validation
 - **Features**: Romanian business registration, VAT handling
@@ -81,7 +81,7 @@ PRAHO/                          # 🚀 Romanian Hosting Provider PRAHO Platform
 - **Services**: Ticket management, SLA tracking, escalation
 - **Features**: File attachments, time tracking, customer satisfaction
 
-#### 🖥️ provisioning/ - Hosting Services & Server Management  
+#### 🖥️ provisioning/ - Hosting Services & Server Management
 - **Models**: ServicePlan, Server, Service, ProvisioningTask
 - **Services**: Service provisioning, server management, resource allocation
 - **Features**: Automated provisioning, resource monitoring
@@ -93,7 +93,7 @@ PRAHO/                          # 🚀 Romanian Hosting Provider PRAHO Platform
 
 ## 🌐 Portal Service Architecture
 
-**Location**: `services/portal/`  
+**Location**: `services/portal/`
 **Purpose**: Customer-facing API service with **NO database access**
 
 ### API Endpoints
@@ -101,7 +101,7 @@ PRAHO/                          # 🚀 Romanian Hosting Provider PRAHO Platform
 #### 🔐 Authentication API
 ```
 POST /api/v1/auth/login/     # Customer login
-POST /api/v1/auth/logout/    # Session termination  
+POST /api/v1/auth/logout/    # Session termination
 POST /api/v1/auth/refresh/   # Token refresh
 ```
 
@@ -136,7 +136,7 @@ POST /api/v1/tickets/{id}/comments/ # Add comment
 -- Core business entities
 Users ←→ CustomerMembership ←→ Customers
 Customers ←→ Invoices ←→ InvoiceLines
-Customers ←→ Tickets ←→ TicketComments  
+Customers ←→ Tickets ←→ TicketComments
 Customers ←→ Services ←→ Servers
 
 -- Database cache table (replaces Redis)
@@ -175,7 +175,7 @@ def test_portal_isolation():
     # Portal cannot import platform models
     with pytest.raises(ImportError):
         from apps.billing.models import Invoice
-    
+
     # Portal cannot access database
     with pytest.raises(Exception):
         from django.db import connection
@@ -191,7 +191,7 @@ def test_portal_isolation():
 version: '3.8'
 services:
   platform:
-    build: 
+    build:
       context: .
       dockerfile: deploy/platform/Dockerfile
     environment:
@@ -199,7 +199,7 @@ services:
       - DJANGO_SETTINGS_MODULE=config.settings.prod
     networks:
       - platform-network
-      
+
   portal:
     build:
       context: .
@@ -209,7 +209,7 @@ services:
       - PLATFORM_API_KEY=secret-api-key
     networks:
       - api-network
-      
+
   nginx:
     image: nginx:alpine
     volumes:
@@ -219,7 +219,7 @@ services:
       - "443:443"
     networks:
       - api-network
-      
+
   db:
     image: postgres:16
     environment:
@@ -296,7 +296,7 @@ make fixtures         # Load sample data via platform
 ```python
 # Platform service health endpoints
 /health/database/     # Database connectivity
-/health/cache/        # Cache table operations  
+/health/cache/        # Cache table operations
 /health/migrations/   # Migration status
 
 # Portal service health endpoints

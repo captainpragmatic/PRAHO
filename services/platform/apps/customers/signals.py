@@ -14,7 +14,7 @@ Includes:
 """
 
 import logging
-from typing import Any
+from typing import Any, cast
 
 from django.conf import settings
 from django.db.models.signals import post_save, pre_delete, pre_save
@@ -30,14 +30,9 @@ from apps.audit.services import (
 from apps.common.validators import log_security_event
 from apps.settings.services import SettingsService
 
-from .models import (
-    Customer,
-    CustomerAddress,
-    CustomerBillingProfile,
-    CustomerNote,
-    CustomerPaymentMethod,
-    CustomerTaxProfile,
-)
+from .contact_models import CustomerAddress, CustomerNote, CustomerPaymentMethod
+from .customer_models import Customer
+from .profile_models import CustomerBillingProfile, CustomerTaxProfile
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +77,7 @@ def handle_customer_created_or_updated(
 
         # Enhanced customer audit logging
         if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
-            from apps.audit.services import CustomersAuditService  # noqa: PLC0415
+            from apps.audit.services import CustomersAuditService
 
             event_type = "customer_created" if created else "customer_updated"
 
@@ -218,7 +213,7 @@ def handle_tax_profile_changes(
 
         # Enhanced tax profile audit logging
         if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
-            from apps.audit.services import CustomersAuditService  # noqa: PLC0415
+            from apps.audit.services import CustomersAuditService
 
             CustomersAuditService.log_tax_profile_event(
                 event_type=event_type,
@@ -314,7 +309,7 @@ def handle_billing_profile_changes(
 
         # Enhanced billing profile audit logging
         if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
-            from apps.audit.services import CustomersAuditService  # noqa: PLC0415
+            from apps.audit.services import CustomersAuditService
 
             CustomersAuditService.log_billing_profile_event(
                 event_type=event_type,
@@ -390,7 +385,7 @@ def handle_address_changes(
 
         # Enhanced address audit logging
         if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
-            from apps.audit.services import CustomersAuditService  # noqa: PLC0415
+            from apps.audit.services import CustomersAuditService
 
             old_values = getattr(instance, "_original_address_values", {}) if not created else {}
             new_values = {
@@ -480,7 +475,7 @@ def handle_payment_method_changes(
 
         # Enhanced payment method audit logging
         if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
-            from apps.audit.services import CustomersAuditService  # noqa: PLC0415
+            from apps.audit.services import CustomersAuditService
 
             old_values = getattr(instance, "_original_payment_values", {}) if not created else {}
             new_values = {
@@ -603,7 +598,7 @@ def handle_customer_note_changes(
         if created:
             # Enhanced customer note audit logging
             if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
-                from apps.audit.services import CustomersAuditService  # noqa: PLC0415
+                from apps.audit.services import CustomersAuditService
 
                 CustomersAuditService.log_note_event(
                     event_type="customer_note_created",
@@ -635,19 +630,9 @@ def handle_customer_note_changes(
 def _handle_new_customer_creation(customer: Customer) -> None:
     """Handle new customer creation tasks"""
     try:
-        # Create default profiles if they don't exist
-        if not hasattr(customer, "tax_profile"):
-            CustomerTaxProfile.objects.create(
-                customer=customer,  # type: ignore[misc]
-                is_vat_payer=(getattr(customer, "customer_type", "") == "company"),
-            )
-
-        if not hasattr(customer, "billing_profile"):
-            CustomerBillingProfile.objects.create(
-                customer=customer,  # type: ignore[misc]
-                payment_terms=30,  # Standard 30-day terms  # type: ignore[misc]
-                preferred_currency="RON",  # Romanian hosting platform  # type: ignore[misc]
-            )
+        # Do not auto-create tax/billing profiles here.
+        # Profiles are created explicitly by dedicated workflows (registration/forms/API/services)
+        # and may legitimately be absent for newly created customers.
 
         # Send welcome email
         _send_customer_welcome_email(customer)
@@ -789,7 +774,7 @@ def _trigger_vat_validation(tax_profile: CustomerTaxProfile) -> None:
     """Trigger VAT number validation via VIES"""
     try:
         # Queue VAT validation task
-        from django_q.tasks import async_task  # noqa: PLC0415
+        from django_q.tasks import async_task
 
         async_task("apps.billing.tasks.validate_vat_number", str(tax_profile.id))
         logger.info(f"🏛️ [Customer] VAT validation queued: {tax_profile.vat_number}")
@@ -875,9 +860,10 @@ def _ensure_single_current_address(address: CustomerAddress) -> None:
     """Ensure only one current address per type per customer"""
     try:
         # Set all other addresses of same type to not current
-        CustomerAddress.objects.filter(
-            customer=address.customer, address_type=address.address_type, is_current=True
-        ).exclude(pk=address.pk).update(is_current=False)
+        address_manager = cast(Any, CustomerAddress.objects)
+        address_manager.filter(customer=address.customer, address_type=address.address_type, is_current=True).exclude(
+            pk=address.pk
+        ).update(is_current=False)
 
     except Exception as e:
         logger.exception(f"🔥 [Customer Signal] Address versioning failed: {e}")
@@ -910,7 +896,8 @@ def _ensure_single_default_payment_method(payment_method: CustomerPaymentMethod)
     """Ensure only one default payment method per customer"""
     try:
         # Set all other payment methods to not default
-        CustomerPaymentMethod.objects.filter(customer=payment_method.customer, is_default=True).exclude(
+        payment_method_manager = cast(Any, CustomerPaymentMethod.objects)
+        payment_method_manager.filter(customer=payment_method.customer, is_default=True).exclude(
             pk=payment_method.pk
         ).update(is_default=False)
 
@@ -948,7 +935,7 @@ def _handle_feedback_note(note: CustomerNote) -> None:
 
         # Queue feedback processing
         try:
-            from django_q.tasks import async_task  # noqa: PLC0415
+            from django_q.tasks import async_task
 
             async_task("apps.customers.tasks.process_customer_feedback", str(note.id))
         except (ImportError, AttributeError):
@@ -1012,7 +999,7 @@ def _handle_customer_deactivation(customer: Customer) -> None:
 def _send_customer_welcome_email(customer: Customer) -> None:
     """Send welcome email to new customers"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415
+        from apps.notifications.services import EmailService
 
         EmailService.send_template_email(
             template_key="customer_welcome",
@@ -1027,7 +1014,7 @@ def _send_customer_welcome_email(customer: Customer) -> None:
 def _send_customer_activation_email(customer: Customer) -> None:
     """Send activation confirmation email"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415
+        from apps.notifications.services import EmailService
 
         EmailService.send_template_email(
             template_key="customer_activated",
@@ -1042,7 +1029,7 @@ def _send_customer_activation_email(customer: Customer) -> None:
 def _send_customer_suspension_email(customer: Customer) -> None:
     """Send suspension notification email"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415
+        from apps.notifications.services import EmailService
 
         EmailService.send_template_email(
             template_key="customer_suspended",
@@ -1057,7 +1044,7 @@ def _send_customer_suspension_email(customer: Customer) -> None:
 def _send_customer_deactivation_email(customer: Customer) -> None:
     """Send deactivation notification email"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415
+        from apps.notifications.services import EmailService
 
         EmailService.send_template_email(
             template_key="customer_deactivated", recipient=customer.primary_email, context={"customer": customer}
@@ -1069,7 +1056,7 @@ def _send_customer_deactivation_email(customer: Customer) -> None:
 def _send_important_note_notification(note: CustomerNote) -> None:
     """Send notification about important customer note"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415
+        from apps.notifications.services import EmailService
 
         if note.customer.assigned_account_manager:
             EmailService.send_template_email(
@@ -1087,7 +1074,7 @@ def _trigger_customer_onboarding(customer: Customer) -> None:
     try:
         # Queue onboarding tasks
         try:
-            from django_q.tasks import async_task  # noqa: PLC0415
+            from django_q.tasks import async_task
 
             async_task("apps.customers.tasks.start_customer_onboarding", str(customer.id))
             logger.info(f"🚀 [Customer] Onboarding started: {customer.get_display_name()}")
@@ -1101,8 +1088,8 @@ def _activate_customer_services(customer: Customer) -> None:
     """Activate customer services when customer becomes active"""
     try:
         # Find all pending services for this customer and activate them
-        from apps.provisioning.models import Service  # noqa: PLC0415
-        from apps.provisioning.services import ServiceActivationService  # noqa: PLC0415
+        from apps.provisioning.models import Service
+        from apps.provisioning.services import ServiceActivationService
 
         pending_services = Service.objects.filter(customer=customer, status="pending")
 
@@ -1119,8 +1106,8 @@ def _suspend_customer_services(customer: Customer) -> None:
     """Suspend customer services when customer is suspended"""
     try:
         # Find all active services for this customer and suspend them
-        from apps.provisioning.models import Service  # noqa: PLC0415
-        from apps.provisioning.services import ServiceManagementService  # noqa: PLC0415
+        from apps.provisioning.models import Service
+        from apps.provisioning.services import ServiceManagementService
 
         active_services = Service.objects.filter(customer=customer, status="active")
 

@@ -43,10 +43,7 @@ class Command(BaseCommand):
             from apps.settings.models import SystemSetting
         except ImportError:
             self.stderr.write(
-                self.style.ERROR(
-                    "Settings app not available. "
-                    "Please ensure apps.settings is installed."
-                )
+                self.style.ERROR("Settings app not available. " "Please ensure apps.settings is installed.")
             )
             return
 
@@ -361,7 +358,5 @@ class Command(BaseCommand):
 
         self.stdout.write("")
         self.stdout.write(
-            self.style.SUCCESS(
-                f"Done! Created: {created_count}, Updated: {updated_count}, Skipped: {skipped_count}"
-            )
+            self.style.SUCCESS(f"Done! Created: {created_count}, Updated: {updated_count}, Skipped: {skipped_count}")
         )

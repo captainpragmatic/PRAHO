@@ -139,11 +139,7 @@ class NodeValidationService:
         passed_count = sum(1 for r in results if r.passed)
         total_count = len(results)
 
-        summary = (
-            f"All {total_count} checks passed"
-            if all_passed
-            else f"{passed_count}/{total_count} checks passed"
-        )
+        summary = f"All {total_count} checks passed" if all_passed else f"{passed_count}/{total_count} checks passed"
 
         report = NodeValidationReport(
             deployment_id=deployment.id,
@@ -206,7 +202,7 @@ class NodeValidationService:
             )
 
             # Test command execution
-            stdin, stdout, stderr = client.exec_command("hostname", timeout=self.timeout)
+            _stdin, stdout, _stderr = client.exec_command("hostname", timeout=self.timeout)
             output = stdout.read().decode().strip()
             client.close()
 
@@ -229,7 +225,7 @@ class NodeValidationService:
                 passed=False,
                 message=f"SSH connection failed: {e}",
             )
-        except socket.timeout:
+        except TimeoutError:
             return ValidationResult(
                 check_name="ssh",
                 passed=False,
@@ -274,8 +270,8 @@ class NodeValidationService:
 
     def _check_virtualmin(self, deployment: NodeDeployment) -> ValidationResult:
         """Check Virtualmin API is accessible"""
-        import urllib.request
         import urllib.error
+        import urllib.request
 
         url = f"https://{deployment.ipv4_address}:10000/"
 
@@ -327,7 +323,7 @@ class NodeValidationService:
                 passed=False,
                 message=f"Connection failed: {e.reason}",
             )
-        except socket.timeout:
+        except TimeoutError:
             return ValidationResult(
                 check_name="virtualmin",
                 passed=False,
@@ -347,9 +343,7 @@ class NodeValidationService:
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
 
-            with socket.create_connection(
-                (deployment.ipv4_address, 10000), timeout=self.timeout
-            ) as sock:
+            with socket.create_connection((deployment.ipv4_address, 10000), timeout=self.timeout) as sock:
                 with context.wrap_socket(sock) as ssock:
                     cert = ssock.getpeercert(binary_form=False)
 
@@ -377,7 +371,7 @@ class NodeValidationService:
                 passed=False,
                 message=f"SSL error: {e}",
             )
-        except socket.timeout:
+        except TimeoutError:
             return ValidationResult(
                 check_name="ssl",
                 passed=False,

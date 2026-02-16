@@ -252,25 +252,20 @@ class EFacturaClientError(Exception):
     """Base exception for e-Factura client errors."""
 
 
-
 class AuthenticationError(EFacturaClientError):
     """Authentication failed."""
-
 
 
 class NetworkError(EFacturaClientError):
     """Network communication failed."""
 
 
-
 class ValidationError(EFacturaClientError):
     """XML validation failed."""
 
 
-
 class RateLimitError(EFacturaClientError):
     """Rate limit exceeded."""
-
 
 
 class EFacturaClient:
@@ -303,10 +298,12 @@ class EFacturaClient:
         """Get or create HTTP session."""
         if self._session is None:
             self._session = requests.Session()
-            self._session.headers.update({
-                "Accept": "application/json",
-                "User-Agent": "PRAHO-EFactura/1.0",
-            })
+            self._session.headers.update(
+                {
+                    "Accept": "application/json",
+                    "User-Agent": "PRAHO-EFactura/1.0",
+                }
+            )
         return self._session
 
     def close(self) -> None:
@@ -436,9 +433,7 @@ class EFacturaClient:
         if manual_token:
             return manual_token
 
-        raise AuthenticationError(
-            "No valid access token. User must complete OAuth2 authorization flow."
-        )
+        raise AuthenticationError("No valid access token. User must complete OAuth2 authorization flow.")
 
     def _cache_token(self, token: TokenResponse) -> None:
         """Cache token with expiration."""

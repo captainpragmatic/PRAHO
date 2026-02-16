@@ -1084,9 +1084,7 @@ class ReferralCode(models.Model):
             RuntimeError: If unable to generate a unique code within max_attempts.
         """
         # Use customer name initials + random string
-        name_part = "".join(
-            word[0].upper() for word in str(customer.name).split()[:2] if word
-        )[:3]
+        name_part = "".join(word[0].upper() for word in str(customer.name).split()[:2] if word)[:3]
         if not name_part:
             name_part = "REF"
 
@@ -1304,8 +1302,7 @@ class GiftCard(models.Model):
         for attempt in range(max_attempts):
             # Format: XXXX-XXXX-XXXX-XXXX
             parts = [
-                "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(4))
-                for _ in range(4)
+                "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(4)) for _ in range(4)
             ]
             code = "-".join(parts)
             if not cls.objects.filter(code=code).exists():

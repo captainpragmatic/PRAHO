@@ -34,7 +34,7 @@ class HTTPSSecurityConfigurationTest(TestCase):
         ):
             errors = check_https_security_configuration(None)
             self.assertTrue(any(
-                isinstance(error, Error) and 
+                isinstance(error, Error) and
                 'SECURE_SSL_REDIRECT enabled but SECURE_PROXY_SSL_HEADER not configured' in str(error)
                 for error in errors
             ))
@@ -214,7 +214,7 @@ class HTTPSSecurityConfigurationTest(TestCase):
             CSRF_COOKIE_SECURE=True,
         ):
             errors = check_https_security_configuration(None)
-            
+
             session_warning = any(
                 'SESSION_COOKIE_SECURE enabled in development' in str(error)
                 for error in errors
@@ -223,7 +223,7 @@ class HTTPSSecurityConfigurationTest(TestCase):
                 'CSRF_COOKIE_SECURE enabled in development' in str(error)
                 for error in errors
             )
-            
+
             self.assertTrue(session_warning)
             self.assertTrue(csrf_warning)
 
@@ -240,8 +240,8 @@ class HTTPSSecurityConfigurationTest(TestCase):
             errors = check_https_security_configuration(None)
             # Should have minimal warnings for valid development config
             critical_warnings = [
-                e for e in errors 
-                if 'development environment' in str(e) 
+                e for e in errors
+                if 'development environment' in str(e)
                 and any(keyword in str(e) for keyword in ['SSL_REDIRECT', 'HSTS', 'SECURE'])
             ]
             self.assertEqual(len(critical_warnings), 0)
@@ -311,7 +311,7 @@ class SessionSecurityConfigurationTest(TestCase):
             errors = check_session_security_configuration(None)
             # Should have no warnings for secure configuration
             session_warnings = [
-                e for e in errors 
+                e for e in errors
                 if 'session' in str(e).lower()
             ]
             self.assertEqual(len(session_warnings), 0)
@@ -343,7 +343,7 @@ class SecurityMiddlewareTest(TestCase):
         """Test that security headers are properly added."""
         request = self.request_factory.get('/')
         response = self.middleware(request)
-        
+
         # Check for essential security headers
         self.assertIn('Content-Security-Policy', response)
         self.assertIn('X-Content-Type-Options', response)
@@ -355,7 +355,7 @@ class SecurityMiddlewareTest(TestCase):
         """Test that CSP allows trusted CDN domains."""
         request = self.request_factory.get('/')
         response = self.middleware(request)
-        
+
         csp_header = response.get('Content-Security-Policy', '')
         self.assertIn('unpkg.com', csp_header)
         self.assertIn('cdn.tailwindcss.com', csp_header)
@@ -364,7 +364,7 @@ class SecurityMiddlewareTest(TestCase):
         """Test specific security header values."""
         request = self.request_factory.get('/')
         response = self.middleware(request)
-        
+
         self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
         self.assertEqual(response['X-Frame-Options'], 'DENY')
         self.assertEqual(response['X-XSS-Protection'], '1; mode=block')
@@ -375,16 +375,16 @@ class SecurityMiddlewareTest(TestCase):
         """Test security headers in production mode."""
         request = self.request_factory.get('/')
         response = self.middleware(request)
-        
+
         # Production should have all security headers
         expected_headers = [
             'Content-Security-Policy',
-            'X-Content-Type-Options', 
+            'X-Content-Type-Options',
             'X-Frame-Options',
             'X-XSS-Protection',
             'Referrer-Policy',
         ]
-        
+
         for header in expected_headers:
             self.assertIn(header, response, f"Missing security header: {header}")
 
@@ -392,7 +392,7 @@ class SecurityMiddlewareTest(TestCase):
         """Test that CSP default-src is set to 'self'."""
         request = self.request_factory.get('/')
         response = self.middleware(request)
-        
+
         csp_header = response.get('Content-Security-Policy', '')
         self.assertIn("default-src 'self'", csp_header)
 
@@ -400,7 +400,7 @@ class SecurityMiddlewareTest(TestCase):
         """Test that CSP object-src is set to 'none' for security."""
         request = self.request_factory.get('/')
         response = self.middleware(request)
-        
+
         csp_header = response.get('Content-Security-Policy', '')
         self.assertIn("object-src 'none'", csp_header)
 
@@ -408,7 +408,7 @@ class SecurityMiddlewareTest(TestCase):
         """Test that CSP base-uri is set to 'self' to prevent base tag injection."""
         request = self.request_factory.get('/')
         response = self.middleware(request)
-        
+
         csp_header = response.get('Content-Security-Policy', '')
         self.assertIn("base-uri 'self'", csp_header)
 
@@ -447,22 +447,22 @@ class HTTPSIntegrationTest(TestCase):
                 'apps.common.middleware.SecurityHeadersMiddleware',
             ],
         }
-        
+
         with override_settings(**production_settings):
             # Check HTTPS configuration
             https_errors = check_https_security_configuration(None)
             critical_https_errors = [e for e in https_errors if isinstance(e, Error)]
-            
+
             # Check session configuration
             session_errors = check_session_security_configuration(None)
             critical_session_errors = [e for e in session_errors if isinstance(e, Error)]
-            
+
             # Check middleware configuration
             middleware_errors = check_security_middleware_configuration(None)
             critical_middleware_errors = [e for e in middleware_errors if isinstance(e, Error)]
-            
+
             # Should have no critical errors for proper production config
-            self.assertEqual(len(critical_https_errors), 0, 
+            self.assertEqual(len(critical_https_errors), 0,
                 f"HTTPS configuration errors: {critical_https_errors}")
             self.assertEqual(len(critical_session_errors), 0,
                 f"Session configuration errors: {critical_session_errors}")
@@ -483,24 +483,24 @@ class HTTPSIntegrationTest(TestCase):
             'X_FRAME_OPTIONS': 'SAMEORIGIN',
             'SESSION_COOKIE_AGE': 86400,  # 24 hours for development
         }
-        
+
         with override_settings(**development_settings):
             # Check HTTPS configuration
             https_errors = check_https_security_configuration(None)
-            
-            # Check session configuration  
+
+            # Check session configuration
             session_errors = check_session_security_configuration(None)
-            
+
             # Should have minimal warnings for development
             development_warnings = [
                 e for e in https_errors + session_errors
                 if 'development environment' in str(e)
             ]
-            
+
             # Valid development config should not trigger development warnings
             ssl_warnings = [w for w in development_warnings if 'SSL_REDIRECT' in str(w)]
             hsts_warnings = [w for w in development_warnings if 'HSTS' in str(w)]
-            
+
             self.assertEqual(len(ssl_warnings), 0, "Should not warn about disabled SSL in development")
             self.assertEqual(len(hsts_warnings), 0, "Should not warn about disabled HSTS in development")
 
@@ -518,14 +518,14 @@ class HTTPSIntegrationTest(TestCase):
             'SECURE_HSTS_INCLUDE_SUBDOMAINS': False,  # More flexible for staging
             'SESSION_COOKIE_AGE': 7200,  # 2 hours for staging
         }
-        
+
         with override_settings(**staging_settings):
             https_errors = check_https_security_configuration(None)
             session_errors = check_session_security_configuration(None)
-            
+
             # Should have no critical errors for staging
             all_errors = https_errors + session_errors
             critical_errors = [e for e in all_errors if isinstance(e, Error)]
-            
+
             self.assertEqual(len(critical_errors), 0,
                 f"Staging should have no critical errors: {critical_errors}")

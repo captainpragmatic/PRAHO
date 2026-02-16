@@ -311,9 +311,7 @@ class FileUploadSecurityService:
 
         # Get file size
         file_size = file.size if hasattr(file, "size") else 0
-        max_size_bytes = int(
-            (self.max_size_override_mb or file_type.max_size_mb) * 1024 * 1024
-        )
+        max_size_bytes = int((self.max_size_override_mb or file_type.max_size_mb) * 1024 * 1024)
 
         if file_size > max_size_bytes:
             logger.warning(
@@ -371,9 +369,7 @@ class FileUploadSecurityService:
 
         # Scan for malicious content
         if self.scan_content:
-            scan_result = self._scan_for_malicious_content(
-                content, extension, filename
-            )
+            scan_result = self._scan_for_malicious_content(content, extension, filename)
             if scan_result:
                 logger.error(
                     f"File upload rejected - malicious content detected",
@@ -415,20 +411,14 @@ class FileUploadSecurityService:
         mime_type, _ = mimetypes.guess_type(filename)
         return mime_type
 
-    def _is_compatible_mime(
-        self, detected: str, expected: tuple[str, ...]
-    ) -> bool:
+    def _is_compatible_mime(self, detected: str, expected: tuple[str, ...]) -> bool:
         """Check if detected MIME type is compatible with expected types."""
         # Handle text-based format variations
-        if detected.startswith("text/") and any(
-            exp.startswith("text/") for exp in expected
-        ):
+        if detected.startswith("text/") and any(exp.startswith("text/") for exp in expected):
             return True
         return detected in expected
 
-    def _validate_magic_bytes(
-        self, content: bytes, magic_bytes: tuple[bytes, ...]
-    ) -> bool:
+    def _validate_magic_bytes(self, content: bytes, magic_bytes: tuple[bytes, ...]) -> bool:
         """Validate that content starts with expected magic bytes."""
         return any(content.startswith(magic) for magic in magic_bytes)
 

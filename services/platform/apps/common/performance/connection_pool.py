@@ -59,9 +59,7 @@ class ConnectionPool:
         """Acquire a connection slot from the pool."""
         acquired = self._semaphore.acquire(timeout=self.connection_timeout)
         if not acquired:
-            raise ConnectionError(
-                f"Could not acquire connection within {self.connection_timeout}s timeout"
-            )
+            raise ConnectionError(f"Could not acquire connection within {self.connection_timeout}s timeout")
 
         try:
             yield
@@ -125,8 +123,7 @@ class HTTPConnectionPool:
         self.session.mount("https://", adapter)
 
         logger.debug(
-            f"HTTPConnectionPool initialized for {base_url} "
-            f"(pool_size={pool_maxsize}, retries={max_retries})"
+            f"HTTPConnectionPool initialized for {base_url} " f"(pool_size={pool_maxsize}, retries={max_retries})"
         )
 
     @classmethod
@@ -250,10 +247,7 @@ class ExternalServicePool:
     def get_stats(self) -> dict[str, Any]:
         """Get statistics for all pools."""
         with self._pool_lock:
-            return {
-                name: pool.session.adapters.get("https://", None)
-                for name, pool in self._pools.items()
-            }
+            return {name: pool.session.adapters.get("https://", None) for name, pool in self._pools.items()}
 
 
 def get_http_session(
@@ -284,6 +278,7 @@ def get_http_session(
 
 
 # Database connection pooling configuration helpers
+
 
 def get_database_pool_config(environment: str = "production") -> dict[str, Any]:
     """
@@ -331,6 +326,7 @@ def get_database_pool_config(environment: str = "production") -> dict[str, Any]:
 
 # Cleanup on application shutdown
 
+
 def cleanup_pools() -> None:
     """Clean up all connection pools on application shutdown."""
     try:
@@ -341,6 +337,7 @@ def cleanup_pools() -> None:
 
 
 # SSH connection pool for Virtualmin (optional)
+
 
 class SSHConnectionPool:
     """
@@ -355,6 +352,7 @@ class SSHConnectionPool:
     ) -> None:
         try:
             import paramiko
+
             self._paramiko = paramiko
         except ImportError:
             self._paramiko = None

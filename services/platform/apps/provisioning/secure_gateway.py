@@ -25,12 +25,16 @@ logger = logging.getLogger(__name__)
 
 def get_api_timeouts() -> dict[str, int]:
     """Get API timeout configuration from settings with fallbacks."""
-    return getattr(settings, 'API_TIMEOUTS', {
-        'REQUEST_TIMEOUT': 30,
-        'MAX_RETRIES': 3,
-        'RATE_LIMIT_WINDOW': 3600,
-        'RATE_LIMIT_MAX_CALLS': 50,
-    })
+    return getattr(
+        settings,
+        "API_TIMEOUTS",
+        {
+            "REQUEST_TIMEOUT": 30,
+            "MAX_RETRIES": 3,
+            "RATE_LIMIT_WINDOW": 3600,
+            "RATE_LIMIT_MAX_CALLS": 50,
+        },
+    )
 
 
 # HTTP status codes below this are considered successful
@@ -241,8 +245,8 @@ class SecureServerGateway:
         """⏱️ Check API rate limits per server"""
         cache_key = f"server_api_limit:{server.id}:{operation}"
         timeouts = get_api_timeouts()
-        rate_limit_max_calls = timeouts.get('RATE_LIMIT_MAX_CALLS', 50)
-        rate_limit_window = timeouts.get('RATE_LIMIT_WINDOW', 3600)
+        rate_limit_max_calls = timeouts.get("RATE_LIMIT_MAX_CALLS", 50)
+        rate_limit_window = timeouts.get("RATE_LIMIT_WINDOW", 3600)
 
         try:
             # Get current call count
@@ -309,8 +313,8 @@ class SecureServerGateway:
         full_url = f"{server.management_api_url.rstrip('/')}{endpoint}"
         api_key, api_secret = server.get_management_api_credentials()
         timeouts = get_api_timeouts()
-        request_timeout = timeouts.get('REQUEST_TIMEOUT', 30)
-        max_retries = timeouts.get('MAX_RETRIES', 3)
+        request_timeout = timeouts.get("REQUEST_TIMEOUT", 30)
+        max_retries = timeouts.get("MAX_RETRIES", 3)
 
         headers = {
             "User-Agent": "PRAHO-Platform/1.0",
@@ -371,7 +375,7 @@ class SecureServerGateway:
         )
         try:
             # Use timeout from request_kwargs (already set by caller from settings)
-            request_timeout = request_kwargs.get("timeout", get_api_timeouts().get('REQUEST_TIMEOUT', 30))
+            request_timeout = request_kwargs.get("timeout", get_api_timeouts().get("REQUEST_TIMEOUT", 30))
             response = requests.request(
                 method=request_kwargs["method"],
                 url=request_kwargs["url"],

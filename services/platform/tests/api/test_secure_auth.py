@@ -39,4 +39,3 @@ class SecureAuthValidationTests(TestCase):
         self.assertIsInstance(data, dict)
         self.assertEqual(data['user_id'], 42)
         self.assertEqual(data['customer_id'], 123)
-

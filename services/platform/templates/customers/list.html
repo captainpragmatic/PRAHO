@@ -201,7 +201,7 @@
             <a href="{% url 'customers:detail' customer.pk %}" class="text-white font-medium hover:text-blue-400 text-lg">
               {{ customer.get_display_name }}
             </a>
-            
+
             <!-- Customer Type Badge -->
             {% if customer.customer_type %}
               {% if customer.customer_type == "individual" %}

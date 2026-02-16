@@ -4,8 +4,9 @@ Handles the complete order lifecycle from cart to provisioning.
 Romanian hosting provider specific order processing and configuration.
 """
 
+import logging
 import uuid
-from decimal import Decimal
+from decimal import ROUND_HALF_EVEN, Decimal
 from typing import TYPE_CHECKING, Any, ClassVar, Optional
 
 if TYPE_CHECKING:
@@ -19,6 +20,8 @@ from django.utils.translation import gettext_lazy as _
 # ===============================================================================
 # ORDER MANAGEMENT MODELS
 # ===============================================================================
+
+logger = logging.getLogger(__name__)
 
 
 class Order(models.Model):
@@ -371,6 +374,40 @@ class OrderItem(models.Model):
             self.product_name = self.product.name
             self.product_type = self.product.product_type
 
+        # Apply default VAT when tax_rate was not explicitly set.
+        # This keeps direct model creation aligned with the authoritative VAT rules.
+        if self.tax_rate == Decimal("0.0000") and self.order_id:
+            try:
+                from .vat_rules import CustomerVATInfo, OrderVATCalculator
+
+                customer = self.order.customer
+                if not hasattr(customer, "tax_profile"):
+                    raise LookupError("No tax profile available for automatic VAT inference")
+
+                tax_profile = customer.tax_profile
+                vat_number = getattr(tax_profile, "vat_number", "")
+                customer_vat_info: CustomerVATInfo = {
+                    "country": getattr(customer, "country", "RO") or "RO",
+                    "is_business": bool(getattr(customer, "company_name", "")),
+                    "vat_number": vat_number,
+                    "customer_id": str(customer.id),
+                    "order_id": str(self.order.id),
+                }
+
+                customer_vat_info["is_vat_payer"] = tax_profile.is_vat_payer
+                customer_vat_info["reverse_charge_eligible"] = tax_profile.reverse_charge_eligible
+                if tax_profile.vat_rate is not None:
+                    customer_vat_info["custom_vat_rate"] = tax_profile.vat_rate
+
+                vat_result = OrderVATCalculator.calculate_vat(
+                    subtotal_cents=self.subtotal_cents,
+                    customer_info=customer_vat_info,
+                )
+                self.tax_rate = (vat_result.vat_rate / Decimal("100")).quantize(Decimal("0.0001"))
+            except Exception as exc:
+                # Fallback to explicit tax_rate provided by caller (or 0.0000 default).
+                logger.debug("Skipping automatic VAT inference for order item %s: %s", self.id, exc)
+
         # Calculate totals
         self.calculate_totals()
 
@@ -442,12 +479,10 @@ class OrderItem(models.Model):
 
     def calculate_totals(self) -> int:
         """Calculate tax and line total with proper banker's rounding for Romanian VAT compliance"""
-        from decimal import ROUND_HALF_EVEN, Decimal
-
         subtotal = self.subtotal_cents
         # Use banker's rounding for VAT compliance (same as OrderVATCalculator)
         vat_amount = Decimal(subtotal) * Decimal(str(self.tax_rate))
-        self.tax_cents = int(vat_amount.quantize(Decimal('1'), rounding=ROUND_HALF_EVEN))
+        self.tax_cents = int(vat_amount.quantize(Decimal("1"), rounding=ROUND_HALF_EVEN))
         self.line_total_cents = subtotal + self.tax_cents
         return self.line_total_cents
 
@@ -459,10 +494,10 @@ class OrderItem(models.Model):
             self.service = service
 
         # Update the linked service status to active when provisioning completes
-        if self.service and self.service.status == 'provisioning':
-            self.service.status = 'active'
+        if self.service and self.service.status == "provisioning":
+            self.service.status = "active"
             self.service.activated_at = timezone.now()
-            self.service.save(update_fields=['status', 'activated_at'])
+            self.service.save(update_fields=["status", "activated_at"])
 
         self.save(update_fields=["provisioning_status", "provisioned_at", "service"])
 

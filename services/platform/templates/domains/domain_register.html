@@ -38,7 +38,7 @@
             <!-- Domain Search -->
             <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-6 mb-6">
                 <h2 class="text-xl font-semibold text-slate-900 dark:text-white mb-4">🔍 {% trans "Domain Search" %}</h2>
-                
+
                 <form id="domain-search-form" class="space-y-4">
                     <div>
                         <label for="domain-search" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
@@ -75,7 +75,7 @@
             <!-- Featured TLDs -->
             <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-6">
                 <h2 class="text-xl font-semibold text-slate-900 dark:text-white mb-4">⭐ {% trans "Popular Extensions" %}</h2>
-                
+
                 <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
                     {% for tld_price in tld_pricing %}
                         <div class="border border-slate-200 dark:border-slate-700 rounded-lg p-4 hover:border-primary-300 dark:hover:border-primary-600 transition-colors">
@@ -98,7 +98,7 @@
             <!-- Registration Form -->
             <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-6 sticky top-6">
                 <h3 class="text-lg font-semibold text-slate-900 dark:text-white mb-4">📝 {% trans "Registration Details" %}</h3>
-                
+
                 <form method="post" id="registration-form" class="hidden">
                     {% csrf_token %}
                     <div class="space-y-4">
@@ -155,7 +155,7 @@
                         <!-- Domain Options -->
                         <div class="space-y-3">
                             <h4 class="text-sm font-medium text-slate-700 dark:text-slate-300">⚙️ {% trans "Domain Options" %}</h4>
-                            
+
                             <div class="flex items-center">
                                 <input
                                     id="whois_privacy"
@@ -236,7 +236,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Domain search
     searchForm.addEventListener('submit', async function(e) {
         e.preventDefault();
-        
+
         const domainName = searchInput.value.trim().toLowerCase();
         if (!domainName) return;
 
@@ -258,9 +258,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 method: 'POST',
                 body: formData
             });
-            
+
             const data = await response.json();
-            
+
             if (data.success) {
                 if (data.available) {
                     searchResults.innerHTML = `
@@ -320,7 +320,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         domainNameDisplay.textContent = domainName;
         domainNameInput.value = domainName;
-        
+
         initialState.classList.add('hidden');
         registrationForm.classList.remove('hidden');
         selectedDomainDiv.classList.remove('hidden');
@@ -334,9 +334,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const years = parseInt(yearsSelect.value);
         const whoisPrivacy = whoisPrivacyCheck.checked;
-        
+
         let totalCost = baseCost * years;
-        
+
         if (whoisPrivacy) {
             // TODO: Replace hardcoded WHOIS privacy price with value from settings context
             totalCost += 500 * years; // 5 RON (500 cents) per year for WHOIS privacy

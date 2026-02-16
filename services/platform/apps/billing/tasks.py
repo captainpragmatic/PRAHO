@@ -27,12 +27,14 @@ TASK_TIME_LIMIT = 600  # 10 minutes
 def _get_task_retry_delay() -> int:
     """Get task retry delay seconds from SettingsService."""
     from apps.settings.services import SettingsService  # noqa: PLC0415
+
     return SettingsService.get_integer_setting("billing.task_retry_delay_seconds", 300)
 
 
 def _get_task_max_retries() -> int:
     """Get task max retries from SettingsService."""
     from apps.settings.services import SettingsService  # noqa: PLC0415
+
     return SettingsService.get_integer_setting("billing.task_max_retries", 3)
 
 
@@ -661,8 +663,7 @@ def run_payment_collection() -> dict[str, Any]:
                 # Attempt payment
                 # TODO: Implement actual payment processing via Stripe
                 logger.info(
-                    f"💳 [Collection] Would retry payment {retry.payment_id} "
-                    f"(attempt {retry.attempt_number})"
+                    f"💳 [Collection] Would retry payment {retry.payment_id} " f"(attempt {retry.attempt_number})"
                 )
 
                 # For now, simulate success/failure
@@ -685,9 +686,7 @@ def run_payment_collection() -> dict[str, Any]:
 
                     # Schedule next retry if applicable
                     if retry.policy and retry.attempt_number < retry.policy.max_attempts:
-                        next_retry_date = retry.policy.get_next_retry_date(
-                            timezone.now(), retry.attempt_number
-                        )
+                        next_retry_date = retry.policy.get_next_retry_date(timezone.now(), retry.attempt_number)
                         if next_retry_date:
                             PaymentRetryAttempt.objects.create(
                                 payment=retry.payment,

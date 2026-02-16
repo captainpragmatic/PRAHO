@@ -47,15 +47,15 @@ class AccessControlSecurityTests(TestCase):
     def test_customer_detail_access_control_before_retrieval(self):
         """Test that access control happens before object retrieval"""
         self.client.force_login(self.user)
-        
+
         # Mock get_accessible_customers to return empty queryset
         with patch('apps.users.models.User.get_accessible_customers') as mock_accessible:
             mock_accessible.return_value = Customer.objects.none()
-            
+
             response = self.client.get(
                 reverse('customers:detail', kwargs={'customer_id': 999})
             )
-            
+
             # Should get 404 without revealing customer existence
             self.assertEqual(response.status_code, 404)
             mock_accessible.assert_called_once()
@@ -63,43 +63,43 @@ class AccessControlSecurityTests(TestCase):
     def test_customer_edit_access_control_before_retrieval(self):
         """Test that edit view checks access before retrieval"""
         self.client.force_login(self.staff_user)
-        
+
         with patch('apps.users.models.User.get_accessible_customers') as mock_accessible:
             mock_accessible.return_value = Customer.objects.none()
-            
+
             response = self.client.get(
                 reverse('customers:edit', kwargs={'customer_id': self.customer.id})
             )
-            
+
             self.assertEqual(response.status_code, 404)
             mock_accessible.assert_called_once()
 
     def test_customer_delete_access_control_before_retrieval(self):
         """Test that delete view checks access before retrieval"""
         self.client.force_login(self.staff_user)
-        
+
         with patch('apps.users.models.User.get_accessible_customers') as mock_accessible:
             mock_accessible.return_value = Customer.objects.none()
-            
+
             response = self.client.post(
                 reverse('customers:delete', kwargs={'customer_id': self.customer.id})
             )
-            
+
             self.assertEqual(response.status_code, 404)
             mock_accessible.assert_called_once()
 
     def test_accessible_customers_used_consistently(self):
         """Test that all views use get_accessible_customers consistently"""
         self.client.force_login(self.staff_user)
-        
+
         # Mock to return the customer
         with patch('apps.users.models.User.get_accessible_customers') as mock_accessible:
             mock_accessible.return_value = Customer.objects.filter(id=self.customer.id)
-            
+
             response = self.client.get(
                 reverse('customers:detail', kwargs={'customer_id': self.customer.id})
             )
-            
+
             self.assertEqual(response.status_code, 200)
             mock_accessible.assert_called_once()
 
@@ -113,9 +113,9 @@ class RegexSecurityTests(TestCase):
             'cui': 'RO' + '1' * 50,  # Very long CUI
         }
         form = CustomerTaxProfileForm(data=form_data)
-        
+
         is_valid = form.is_valid()
-        
+
         self.assertFalse(is_valid)
         self.assertIn('cui', form.errors)
         # Check for either our custom validation message or Django's field validation
@@ -132,9 +132,9 @@ class RegexSecurityTests(TestCase):
             'is_vat_payer': True
         }
         form = CustomerTaxProfileForm(data=form_data)
-        
+
         is_valid = form.is_valid()
-        
+
         self.assertFalse(is_valid)
         self.assertIn('vat_number', form.errors)
         # Check for either our custom validation message or Django's field validation
@@ -158,7 +158,7 @@ class RegexSecurityTests(TestCase):
         if not form.is_valid():
             print(f"CUI Form errors: {form.errors}")  # Debug output
         self.assertTrue(form.is_valid())
-        
+
         # Invalid CUI (too short)
         form_data = {
             'cui': 'RO12',
@@ -169,7 +169,7 @@ class RegexSecurityTests(TestCase):
         }
         form = CustomerTaxProfileForm(data=form_data)
         self.assertFalse(form.is_valid())
-        
+
         # Invalid CUI (too long)
         form_data = {
             'cui': 'RO12345678901',
@@ -185,7 +185,7 @@ class RegexSecurityTests(TestCase):
         """Test VAT pattern is more specific (6-10 digits)"""
         # Valid VAT with all required fields
         form_data = {
-            'vat_number': 'RO123456', 
+            'vat_number': 'RO123456',
             'is_vat_payer': True,
             'cui': 'RO123456',
             'registration_number': 'J12/123/2020',
@@ -196,10 +196,10 @@ class RegexSecurityTests(TestCase):
         if not form.is_valid():
             print(f"Form errors: {form.errors}")  # Debug output
         self.assertTrue(form.is_valid())
-        
+
         # Invalid VAT (too short)
         form_data = {
-            'vat_number': 'RO12', 
+            'vat_number': 'RO12',
             'is_vat_payer': True,
             'cui': 'RO123456',
             'registration_number': 'J12/123/2020',
@@ -238,7 +238,7 @@ class BankDetailsSecurityTests(TestCase):
             'iban': 'RO49AAAA1B31007593840000',
             'swift_code': 'TESTRO22'
         }
-        
+
         # Should not raise any exception
         try:
             validate_bank_details(valid_details)
@@ -251,10 +251,10 @@ class BankDetailsSecurityTests(TestCase):
             'malicious_field': 'some_value',
             'bank_name': 'Test Bank'
         }
-        
+
         with self.assertRaises(ValidationError) as cm:
             validate_bank_details(invalid_details)
-        
+
         self.assertIn('Invalid bank details field', str(cm.exception))
 
     def test_bank_details_field_length_limits(self):
@@ -264,10 +264,10 @@ class BankDetailsSecurityTests(TestCase):
             'bank_name': 'x' * 101,  # Exceeds 100 char limit
             'account_number': '1234567890'
         }
-        
+
         with self.assertRaises(ValidationError) as cm:
             validate_bank_details(long_name_details)
-        
+
         self.assertIn('exceeds maximum length', str(cm.exception))
 
     def test_bank_details_swift_code_limit(self):
@@ -276,10 +276,10 @@ class BankDetailsSecurityTests(TestCase):
             'swift_code': 'TOOLONGSWIFTCODE',  # Exceeds 11 char limit
             'bank_name': 'Test Bank'
         }
-        
+
         with self.assertRaises(ValidationError) as cm:
             validate_bank_details(invalid_swift_details)
-        
+
         self.assertIn('exceeds maximum length', str(cm.exception))
 
     def test_payment_method_clean_calls_validation(self):
@@ -290,7 +290,7 @@ class BankDetailsSecurityTests(TestCase):
             display_name='Test Payment',
             bank_details={'invalid_field': 'value'}
         )
-        
+
         with self.assertRaises(ValidationError):
             payment_method.clean()
 
@@ -301,9 +301,9 @@ class BankDetailsSecurityTests(TestCase):
             'bank_name': 'Test Bank',
             'account_number': '1234567890'
         }
-        
+
         validate_bank_details(valid_details)
-        
+
         mock_logger.info.assert_called_once()
         call_args = mock_logger.info.call_args
         self.assertIn('Bank details validation completed', call_args[0][0])
@@ -318,19 +318,19 @@ class EmailEnumerationSecurityTests(TestCase):
     def test_email_validation_consistent_timing(self, mock_sleep, mock_time):
         """Test that email validation has consistent timing"""
         mock_time.side_effect = [0.0, 0.05, 0.0, 0.05]  # start_time, current_time for each call
-        
+
         # Valid email
         try:
             SecureInputValidator.validate_email_secure('test@example.com')
         except Exception:
             pass
-        
+
         # Invalid email
         try:
             SecureInputValidator.validate_email_secure('invalid-email')
         except Exception:
             pass
-        
+
         # Should call sleep for timing normalization
         self.assertTrue(mock_sleep.called)
         # Verify consistent sleep duration
@@ -341,29 +341,29 @@ class EmailEnumerationSecurityTests(TestCase):
         """Test that email validation uses timing_safe_validator decorator"""
         # Check if the decorator is applied by looking at function attributes
         validate_func = SecureInputValidator.validate_email_secure
-        
+
         # The timing_safe_validator decorator should be applied
         # We can test this by ensuring the function behavior is consistent
         import time
-        
+
         start_time = time.time()
         try:
             validate_func('invalid')
         except ValidationError:
             pass
         duration1 = time.time() - start_time
-        
+
         start_time = time.time()
         try:
             validate_func('test@example.com')
         except ValidationError:
             pass
         duration2 = time.time() - start_time
-        
+
         # Both should take at least 100ms due to timing_safe_validator minimum time
         self.assertGreaterEqual(duration1, 0.09)  # Allow small variance for test environment
         self.assertGreaterEqual(duration2, 0.09)  # Allow small variance for test environment
-        
+
         # Timing difference should still be reasonable (within 200ms variance)
         self.assertLess(abs(duration1 - duration2), 0.2)
 
@@ -388,7 +388,7 @@ class SoftDeleteSecurityTests(TestCase):
     def test_soft_delete_security_logging(self, mock_logger):
         """Test that soft delete logs security events"""
         self.customer.soft_delete(self.user)
-        
+
         mock_logger.warning.assert_called_once()
         call_args = mock_logger.warning.call_args
         self.assertIn('Soft delete initiated', call_args[0][0])
@@ -400,10 +400,10 @@ class SoftDeleteSecurityTests(TestCase):
         # First soft delete
         self.customer.soft_delete(self.user)
         mock_logger.reset_mock()
-        
+
         # Then restore
         self.customer.restore()
-        
+
         mock_logger.info.assert_called_once()
         call_args = mock_logger.info.call_args
         self.assertIn('Soft restore initiated', call_args[0][0])
@@ -414,9 +414,9 @@ class SoftDeleteSecurityTests(TestCase):
         with patch('django.db.transaction.atomic') as mock_atomic:
             mock_atomic.return_value.__enter__ = Mock()
             mock_atomic.return_value.__exit__ = Mock()
-            
+
             self.customer.soft_delete(self.user)
-            
+
             mock_atomic.assert_called_once()
 
     def test_validation_methods_exist(self):
@@ -425,7 +425,7 @@ class SoftDeleteSecurityTests(TestCase):
         self.assertTrue(hasattr(self.customer, '_validate_deletion_allowed'))
         self.assertTrue(hasattr(self.customer, '_validate_restoration_allowed'))
         self.assertTrue(hasattr(self.customer, '_cascade_soft_delete'))
-        
+
         # Should not raise exceptions when called
         try:
             self.customer._validate_deletion_allowed()
@@ -448,10 +448,10 @@ class ErrorHandlingSecurityTests(TestCase):
     def test_secure_error_handler_validation_error(self):
         """Test that validation errors are handled securely"""
         request = self.factory.get('/')
-        
+
         with patch('django.contrib.messages.error') as mock_message:
             _handle_secure_error(request, ValidationError('Test error'), 'test_operation', self.user.id)
-            
+
             mock_message.assert_called_once()
             call_args = mock_message.call_args[0]
             # Should use generic message, not leak specific error details
@@ -461,11 +461,11 @@ class ErrorHandlingSecurityTests(TestCase):
     def test_secure_error_handler_integrity_error(self):
         """Test that integrity errors are handled securely"""
         request = self.factory.get('/')
-        
+
         with patch('django.contrib.messages.error') as mock_message:
             from django.db import IntegrityError
             _handle_secure_error(request, IntegrityError('DB constraint violation'), 'test_operation', self.user.id)
-            
+
             mock_message.assert_called_once()
             call_args = mock_message.call_args[0]
             # Should use generic message
@@ -475,10 +475,10 @@ class ErrorHandlingSecurityTests(TestCase):
     def test_secure_error_handler_permission_error(self):
         """Test that permission errors are handled securely"""
         request = self.factory.get('/')
-        
+
         with patch('django.contrib.messages.error') as mock_message:
             _handle_secure_error(request, PermissionDenied('Access denied details'), 'test_operation', self.user.id)
-            
+
             mock_message.assert_called_once()
             call_args = mock_message.call_args[0]
             # Should use generic message
@@ -489,9 +489,9 @@ class ErrorHandlingSecurityTests(TestCase):
     def test_secure_error_handler_unexpected_error_logging(self, mock_logger):
         """Test that unexpected errors are logged for security monitoring"""
         request = self.factory.get('/')
-        
+
         _handle_secure_error(request, Exception('Unexpected error'), 'test_operation', self.user.id)
-        
+
         mock_logger.exception.assert_called_once()
         call_args = mock_logger.exception.call_args
         self.assertIn('Unexpected error during test_operation', call_args[0][0])
@@ -508,10 +508,10 @@ class SSRFProtectionEnhancementTests(TestCase):
         mock_getaddrinfo.return_value = [
             (socket.AF_INET, socket.SOCK_STREAM, 6, '', ('192.168.1.1', 80))
         ]
-        
+
         with self.assertRaises(ValidationError) as cm:
             SecureInputValidator.validate_safe_url('http://malicious.example.com/path')
-        
+
         self.assertIn('blocked IP range', str(cm.exception))
         mock_getaddrinfo.assert_called_once()
 
@@ -521,10 +521,10 @@ class SSRFProtectionEnhancementTests(TestCase):
         # Mock DNS resolution failure
         import socket
         mock_getaddrinfo.side_effect = socket.gaierror('Name resolution failed')
-        
+
         with self.assertRaises(ValidationError) as cm:
             SecureInputValidator.validate_safe_url('http://nonexistent.example.com/')
-        
+
         self.assertIn('Unable to verify URL destination', str(cm.exception))
 
     @patch('socket.getaddrinfo')
@@ -534,17 +534,17 @@ class SSRFProtectionEnhancementTests(TestCase):
         mock_getaddrinfo.return_value = [
             (socket.AF_INET, socket.SOCK_STREAM, 6, '', ('8.8.8.8', 80))
         ]
-        
+
         dangerous_hostnames = [
             'http://10.0.0.1.example.com/',
             'http://192.168.1.1.example.com/',
             'http://172.16.0.1.example.com/'
         ]
-        
+
         for url in dangerous_hostnames:
             with self.assertRaises(ValidationError) as cm:
                 SecureInputValidator.validate_safe_url(url)
-            
+
             error_msg = str(cm.exception)
             # Check for either hostname blocking or IP resolution blocking
             self.assertTrue(
@@ -559,7 +559,7 @@ class SSRFProtectionEnhancementTests(TestCase):
         mock_getaddrinfo.return_value = [
             (socket.AF_INET, socket.SOCK_STREAM, 6, '', ('8.8.8.8', 80))
         ]
-        
+
         # Should not raise an exception
         try:
             result = SecureInputValidator.validate_safe_url('http://google.com/')

@@ -67,22 +67,22 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
         .select_related("customer")
         .order_by("-created_at")[:4]
     )
-    
+
     recent_proformas = (
         ProformaInvoice.objects.filter(customer__in=accessible_customers, created_at__gte=thirty_days_ago)
         .select_related("customer")
         .order_by("-created_at")[:4]
     )
-    
+
     # Combine and annotate document type, then sort by date and limit to 4
     recent_documents: list[Invoice | ProformaInvoice] = []
     for invoice in recent_invoices:
-        invoice.document_type = 'invoice'
+        invoice.document_type = "invoice"
         recent_documents.append(invoice)
     for proforma in recent_proformas:
-        proforma.document_type = 'proforma'
+        proforma.document_type = "proforma"
         recent_documents.append(proforma)
-    
+
     # Sort combined list by created_at and limit to 4
     recent_documents.sort(key=lambda x: x.created_at, reverse=True)
     recent_documents = recent_documents[:4]

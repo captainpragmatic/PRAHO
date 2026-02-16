@@ -69,10 +69,7 @@ def update_aggregation_for_event(event_id: str) -> dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
-def process_pending_usage_events(
-    limit: int = 1000,
-    meter_id: str | None = None
-) -> dict[str, Any]:
+def process_pending_usage_events(limit: int = 1000, meter_id: str | None = None) -> dict[str, Any]:
     """
     Batch process all pending usage events.
 
@@ -85,10 +82,7 @@ def process_pending_usage_events(
 
     try:
         service = AggregationService()
-        processed, errors = service.process_pending_events(
-            meter_id=meter_id,
-            limit=limit
-        )
+        processed, errors = service.process_pending_events(meter_id=meter_id, limit=limit)
 
         # Log the batch processing
         AuditService.log_simple_event(
@@ -302,11 +296,7 @@ def run_billing_cycle_workflow() -> dict[str, Any]:
 # ===============================================================================
 
 
-def check_usage_thresholds(
-    customer_id: str,
-    meter_id: str,
-    subscription_id: str | None = None
-) -> dict[str, Any]:
+def check_usage_thresholds(customer_id: str, meter_id: str, subscription_id: str | None = None) -> dict[str, Any]:
     """
     Check if usage thresholds have been breached.
 
@@ -367,16 +357,12 @@ def check_all_usage_thresholds() -> dict[str, Any]:
         total_alerts = 0
 
         # Get all active subscriptions with metered items
-        active_subs = Subscription.objects.filter(
-            status__in=("active", "trialing")
-        ).prefetch_related("items")
+        active_subs = Subscription.objects.filter(status__in=("active", "trialing")).prefetch_related("items")
 
         for subscription in active_subs:
             for item in subscription.items.all():
                 alerts = service.check_thresholds(
-                    str(subscription.customer_id),
-                    str(item.product_id),
-                    str(subscription.id)
+                    str(subscription.customer_id), str(item.product_id), str(subscription.id)
                 )
                 total_alerts += len(alerts)
 
@@ -453,19 +439,19 @@ def sync_pending_to_stripe() -> dict[str, Any]:
 
         # Find rated aggregations that haven't been synced
         # Use select_related to avoid N+1 queries
-        pending_qs = UsageAggregation.objects.filter(
-            status="rated",
-            stripe_synced_at__isnull=True,
-            meter__stripe_meter_event_name__isnull=False
-        ).exclude(
-            meter__stripe_meter_event_name=""
-        ).select_related("meter", "customer", "subscription")
+        pending_qs = (
+            UsageAggregation.objects.filter(
+                status="rated", stripe_synced_at__isnull=True, meter__stripe_meter_event_name__isnull=False
+            )
+            .exclude(meter__stripe_meter_event_name="")
+            .select_related("meter", "customer", "subscription")
+        )
 
         # Get count before processing (single query)
         total_pending = pending_qs.count()
 
         # Process batch using configured batch size
-        batch = list(pending_qs[:billing_config.BATCH_SIZE_STRIPE_SYNC])
+        batch = list(pending_qs[: billing_config.BATCH_SIZE_STRIPE_SYNC])
         success_count = 0
         error_count = 0
 
@@ -525,10 +511,10 @@ def collect_virtualmin_usage() -> dict[str, Any]:
         total_accounts = VirtualminAccount.objects.filter(status="active").count()
 
         # Use iterator() for memory-efficient processing
-        accounts = VirtualminAccount.objects.filter(
-            status="active"
-        ).select_related("service", "service__customer").iterator(
-            chunk_size=billing_config.ITERATOR_CHUNK_SIZE
+        accounts = (
+            VirtualminAccount.objects.filter(status="active")
+            .select_related("service", "service__customer")
+            .iterator(chunk_size=billing_config.ITERATOR_CHUNK_SIZE)
         )
 
         events_created = 0
@@ -546,17 +532,19 @@ def collect_virtualmin_usage() -> dict[str, Any]:
                 # Record disk usage
                 disk_gb = Decimal(account.current_disk_usage_gb or 0)
                 if disk_gb > 0:
-                    result = service.record_event(UsageEventData(
-                        meter_name="disk_usage_gb",
-                        customer_id=str(customer.id),
-                        value=disk_gb,
-                        service_id=str(account.service.id),
-                        source="virtualmin",
-                        properties={
-                            "virtualmin_account_id": str(account.id),
-                            "domain": account.domain,
-                        },
-                    ))
+                    result = service.record_event(
+                        UsageEventData(
+                            meter_name="disk_usage_gb",
+                            customer_id=str(customer.id),
+                            value=disk_gb,
+                            service_id=str(account.service.id),
+                            source="virtualmin",
+                            properties={
+                                "virtualmin_account_id": str(account.id),
+                                "domain": account.domain,
+                            },
+                        )
+                    )
                     if result.is_ok():
                         events_created += 1
                     else:
@@ -565,17 +553,19 @@ def collect_virtualmin_usage() -> dict[str, Any]:
                 # Record bandwidth usage
                 bandwidth_gb = Decimal(account.current_bandwidth_usage_gb or 0)
                 if bandwidth_gb > 0:
-                    result = service.record_event(UsageEventData(
-                        meter_name="bandwidth_gb",
-                        customer_id=str(customer.id),
-                        value=bandwidth_gb,
-                        service_id=str(account.service.id),
-                        source="virtualmin",
-                        properties={
-                            "virtualmin_account_id": str(account.id),
-                            "domain": account.domain,
-                        },
-                    ))
+                    result = service.record_event(
+                        UsageEventData(
+                            meter_name="bandwidth_gb",
+                            customer_id=str(customer.id),
+                            value=bandwidth_gb,
+                            service_id=str(account.service.id),
+                            source="virtualmin",
+                            properties={
+                                "virtualmin_account_id": str(account.id),
+                                "domain": account.domain,
+                            },
+                        )
+                    )
                     if result.is_ok():
                         events_created += 1
                     else:
@@ -631,10 +621,10 @@ def collect_service_usage() -> dict[str, Any]:
         logger.info("Collecting service usage data from %s active services", total_services)
 
         # Use iterator() for memory-efficient processing
-        services = Service.objects.filter(
-            status="active"
-        ).select_related("customer", "service_plan").iterator(
-            chunk_size=billing_config.ITERATOR_CHUNK_SIZE
+        services = (
+            Service.objects.filter(status="active")
+            .select_related("customer", "service_plan")
+            .iterator(chunk_size=billing_config.ITERATOR_CHUNK_SIZE)
         )
 
         events_created = 0
@@ -649,17 +639,19 @@ def collect_service_usage() -> dict[str, Any]:
                 # Record disk usage if tracked
                 if svc.disk_usage_mb and svc.disk_usage_mb > 0:
                     disk_gb = Decimal(svc.disk_usage_mb) / 1024
-                    result = metering_service.record_event(UsageEventData(
-                        meter_name="disk_usage_gb",
-                        customer_id=str(customer.id),
-                        value=disk_gb,
-                        service_id=str(svc.id),
-                        source="service_monitor",
-                        properties={
-                            "service_name": svc.service_name,
-                            "domain": svc.domain,
-                        },
-                    ))
+                    result = metering_service.record_event(
+                        UsageEventData(
+                            meter_name="disk_usage_gb",
+                            customer_id=str(customer.id),
+                            value=disk_gb,
+                            service_id=str(svc.id),
+                            source="service_monitor",
+                            properties={
+                                "service_name": svc.service_name,
+                                "domain": svc.domain,
+                            },
+                        )
+                    )
                     if result.is_ok():
                         events_created += 1
                     else:
@@ -668,17 +660,19 @@ def collect_service_usage() -> dict[str, Any]:
                 # Record bandwidth usage if tracked
                 if svc.bandwidth_usage_mb and svc.bandwidth_usage_mb > 0:
                     bw_gb = Decimal(svc.bandwidth_usage_mb) / 1024
-                    result = metering_service.record_event(UsageEventData(
-                        meter_name="bandwidth_gb",
-                        customer_id=str(customer.id),
-                        value=bw_gb,
-                        service_id=str(svc.id),
-                        source="service_monitor",
-                        properties={
-                            "service_name": svc.service_name,
-                            "domain": svc.domain,
-                        },
-                    ))
+                    result = metering_service.record_event(
+                        UsageEventData(
+                            meter_name="bandwidth_gb",
+                            customer_id=str(customer.id),
+                            value=bw_gb,
+                            service_id=str(svc.id),
+                            source="service_monitor",
+                            properties={
+                                "service_name": svc.service_name,
+                                "domain": svc.domain,
+                            },
+                        )
+                    )
                     if result.is_ok():
                         events_created += 1
                     else:
@@ -706,44 +700,28 @@ def collect_service_usage() -> dict[str, Any]:
 
 def update_aggregation_for_event_async(event_id: str) -> str:
     """Queue aggregation update task."""
-    return async_task(
-        "apps.billing.metering_tasks.update_aggregation_for_event",
-        event_id,
-        timeout=TASK_TIMEOUT
-    )
+    return async_task("apps.billing.metering_tasks.update_aggregation_for_event", event_id, timeout=TASK_TIMEOUT)
 
 
-def check_usage_thresholds_async(
-    customer_id: str,
-    meter_id: str,
-    subscription_id: str | None = None
-) -> str:
+def check_usage_thresholds_async(customer_id: str, meter_id: str, subscription_id: str | None = None) -> str:
     """Queue threshold check task."""
     return async_task(
         "apps.billing.metering_tasks.check_usage_thresholds",
         customer_id,
         meter_id,
         subscription_id,
-        timeout=TASK_TIMEOUT
+        timeout=TASK_TIMEOUT,
     )
 
 
 def send_usage_alert_notification_async(alert_id: str) -> str:
     """Queue alert notification task."""
-    return async_task(
-        "apps.billing.metering_tasks.send_usage_alert_notification",
-        alert_id,
-        timeout=TASK_TIMEOUT
-    )
+    return async_task("apps.billing.metering_tasks.send_usage_alert_notification", alert_id, timeout=TASK_TIMEOUT)
 
 
 def sync_aggregation_to_stripe_async(aggregation_id: str) -> str:
     """Queue Stripe sync task."""
-    return async_task(
-        "apps.billing.metering_tasks.sync_aggregation_to_stripe",
-        aggregation_id,
-        timeout=TASK_TIMEOUT
-    )
+    return async_task("apps.billing.metering_tasks.sync_aggregation_to_stripe", aggregation_id, timeout=TASK_TIMEOUT)
 
 
 # ===============================================================================
@@ -801,6 +779,6 @@ def register_scheduled_tasks() -> None:
                 "func": config["func"],
                 "schedule_type": config["schedule_type"],
                 "minutes": config.get("minutes"),
-            }
+            },
         )
         logger.info(f"Registered scheduled task: {config['name']}")

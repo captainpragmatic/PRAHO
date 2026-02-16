@@ -978,9 +978,7 @@ class CookieConsent(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     # User identification (one of these should be set)
-    user = models.ForeignKey(
-        User, on_delete=models.CASCADE, null=True, blank=True, related_name="cookie_consents"
-    )
+    user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True, related_name="cookie_consents")
     cookie_id = models.CharField(
         max_length=64, blank=True, db_index=True, help_text="Anonymous visitor identifier from cookie"
     )

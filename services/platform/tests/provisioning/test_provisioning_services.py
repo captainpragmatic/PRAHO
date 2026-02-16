@@ -110,7 +110,7 @@ class ServiceActivationServiceTestCase(TestCase):
         self.admin_user = create_test_user('admin@test.ro', staff_role='admin')
         self.customer = create_test_customer('Test Customer', self.admin_user)
         self.plan = create_test_service_plan()
-        
+
         # Create a mock invoice for testing
         self.mock_invoice = Mock(spec=Invoice)
         self.mock_invoice.number = 'INV-2025-001'
@@ -199,7 +199,7 @@ class ServiceActivationServiceTestCase(TestCase):
     def test_suspend_services_for_customer_handles_invalid_customer_id(self):
         """Test that suspend_services_for_customer handles invalid customer ID"""
         invalid_customer_id = 999999
-        
+
         # This should not raise an exception
         try:
             ServiceActivationService.suspend_services_for_customer(invalid_customer_id)
@@ -209,7 +209,7 @@ class ServiceActivationServiceTestCase(TestCase):
     def test_reactivate_services_for_customer_handles_invalid_customer_id(self):
         """Test that reactivate_services_for_customer handles invalid customer ID"""
         invalid_customer_id = 999999
-        
+
         # This should not raise an exception
         try:
             ServiceActivationService.reactivate_services_for_customer(invalid_customer_id)
@@ -220,12 +220,12 @@ class ServiceActivationServiceTestCase(TestCase):
         """Test that all methods are static and can be called without instance"""
         # Test that we can call methods without creating an instance
         customer_id = self.customer.id
-        
+
         # These should all work without creating a ServiceActivationService instance
         ServiceActivationService.activate_services_for_invoice(self.mock_invoice)
         ServiceActivationService.suspend_services_for_customer(customer_id)
         ServiceActivationService.reactivate_services_for_customer(customer_id)
-        
+
         # If we get here without exceptions, the static methods work correctly
         self.assertTrue(True)
 
@@ -233,7 +233,7 @@ class ServiceActivationServiceTestCase(TestCase):
         """Test service methods handle special characters in reason strings"""
         customer_id = self.customer.id
         special_reason = "Suspendare pentru întârziere la plată (30+ zile)"
-        
+
         # Should handle Romanian characters and special symbols
         try:
             ServiceActivationService.suspend_services_for_customer(customer_id, special_reason)
@@ -261,11 +261,11 @@ class ServiceActivationServiceTestCase(TestCase):
         # Test with correct types
         customer_id: int = self.customer.id
         reason: str = 'payment_overdue'
-        
+
         # These should work with type checkers
         ServiceActivationService.suspend_services_for_customer(customer_id, reason)
         ServiceActivationService.reactivate_services_for_customer(customer_id, reason)
-        
+
         # Test with None invoice (type hint allows this)
         invoice = None
         ServiceActivationService.activate_services_for_invoice(invoice)
@@ -283,7 +283,7 @@ class ServiceActivationIntegrationTestCase(TestCase):
         self.admin_user = create_test_user('admin@test.ro', staff_role='admin')
         self.customer = create_test_customer('Integration Test Customer', self.admin_user)
         self.plan = create_test_service_plan()
-        
+
         # Create real services for integration testing
         self.service1 = Service.objects.create(
             customer=self.customer,
@@ -295,7 +295,7 @@ class ServiceActivationIntegrationTestCase(TestCase):
             price=Decimal('50.00'),
             status='pending'
         )
-        
+
         self.service2 = Service.objects.create(
             customer=self.customer,
             service_plan=self.plan,
@@ -310,17 +310,17 @@ class ServiceActivationIntegrationTestCase(TestCase):
     def test_service_activation_with_real_customer_data(self):
         """Test service activation methods work with real customer data"""
         customer_id = self.customer.id
-        
+
         # Verify customer has services
         services_count = Service.objects.filter(customer=self.customer).count()
         self.assertEqual(services_count, 2)
-        
+
         # Test suspend operation with real customer ID
         ServiceActivationService.suspend_services_for_customer(customer_id, 'payment_test')
-        
+
         # Test reactivate operation
         ServiceActivationService.reactivate_services_for_customer(customer_id, 'payment_received')
-        
+
         # Services should still exist (placeholder implementation doesn't modify)
         services_after = Service.objects.filter(customer=self.customer).count()
         self.assertEqual(services_after, 2)
@@ -338,7 +338,7 @@ class ServiceActivationIntegrationTestCase(TestCase):
             price=Decimal('25.00'),
             status='suspended'
         )
-        
+
         expired_service = Service.objects.create(
             customer=self.customer,
             service_plan=self.plan,
@@ -349,9 +349,9 @@ class ServiceActivationIntegrationTestCase(TestCase):
             price=Decimal('15.00'),
             status='expired'
         )
-        
+
         customer_id = self.customer.id
-        
+
         # Should handle customer with services in various statuses
         try:
             ServiceActivationService.suspend_services_for_customer(customer_id)
@@ -362,11 +362,11 @@ class ServiceActivationIntegrationTestCase(TestCase):
     def test_service_activation_with_empty_customer(self):
         """Test service activation with customer that has no services"""
         empty_customer = create_test_customer('Empty Customer', self.admin_user)
-        
+
         # Verify customer has no services
         services_count = Service.objects.filter(customer=empty_customer).count()
         self.assertEqual(services_count, 0)
-        
+
         # Should handle customer with no services gracefully
         try:
             ServiceActivationService.suspend_services_for_customer(empty_customer.id)
@@ -379,15 +379,15 @@ class ServiceActivationIntegrationTestCase(TestCase):
         """Test logging works correctly with real customer data"""
         customer_id = self.customer.id
         customer_name = self.customer.get_display_name()
-        
+
         ServiceActivationService.suspend_services_for_customer(customer_id, 'integration_test')
-        
+
         # Verify log was called
         self.assertTrue(mock_logger.info.called)
-        
+
         # Get the log message
         log_message = mock_logger.info.call_args[0][0]
-        
+
         # Should contain customer ID
         self.assertIn(str(customer_id), log_message)
         self.assertIn('integration_test', log_message)

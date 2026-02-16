@@ -102,13 +102,13 @@ def create_test_server(**kwargs) -> Server:
     """Helper to create test servers"""
     import time
     import random
-    
+
     # Generate unique hostname if not provided
     if 'hostname' not in kwargs:
         suffix = int(time.time() * 1000000) + random.randint(1, 1000)
         hostname = f'test-server-{suffix}.example.com'
         kwargs['hostname'] = hostname
-    
+
     defaults = {
         'name': 'Test Server 01',
         'hostname': 'test-server-01.example.com',  # Will be overridden above
@@ -145,7 +145,7 @@ class ServiceListViewTestCase(TestCase):
         self.customer_user = create_test_user('customer@test.ro')
         self.customer = create_test_customer('Test Customer', self.admin_user)
         self.plan = create_test_service_plan()
-        
+
         # Create customer membership
         CustomerMembership.objects.create(
             user=self.customer_user,
@@ -179,7 +179,7 @@ class ServiceListViewTestCase(TestCase):
     def test_service_list_requires_login(self):
         """Test that service list view requires authentication"""
         response = self.client.get(reverse('provisioning:services'))
-        
+
         # Should redirect to login
         self.assertEqual(response.status_code, 302)
         self.assertIn('login', response.url)
@@ -191,7 +191,7 @@ class ServiceListViewTestCase(TestCase):
         """Test service list view for admin user"""
         self.client.force_login(self.admin_user)
         response = self.client.get(reverse('provisioning:services'))
-        
+
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Active Service')
         self.assertTrue(response.context['can_manage_services'])
@@ -215,7 +215,7 @@ class ServiceDetailViewTestCase(TestCase):
         self.customer_user = create_test_user('customer@test.ro')
         self.customer = create_test_customer('Test Customer', self.admin_user)
         self.plan = create_test_service_plan()
-        
+
         # Create customer membership
         CustomerMembership.objects.create(
             user=self.customer_user,
@@ -237,7 +237,7 @@ class ServiceDetailViewTestCase(TestCase):
     def test_service_detail_requires_login(self):
         """Test that service detail view requires authentication"""
         response = self.client.get(reverse('provisioning:service_detail', args=[self.service.pk]))
-        
+
         # Should redirect to login
         self.assertEqual(response.status_code, 302)
         self.assertIn('login', response.url)
@@ -248,7 +248,7 @@ class ServiceDetailViewTestCase(TestCase):
         """Test service detail view for admin user"""
         self.client.force_login(self.admin_user)
         response = self.client.get(reverse('provisioning:service_detail', args=[self.service.pk]))
-        
+
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Test Service')
         self.assertTrue(response.context['can_manage'])
@@ -285,7 +285,7 @@ class ServiceCreateViewTestCase(TestCase):
         """Test service create GET view for admin user"""
         self.client.force_login(self.admin_user)
         response = self.client.get(reverse('provisioning:service_create'))
-        
+
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'customers')
         self.assertContains(response, 'Test Hosting Plan')  # Check for the plan name in dropdown
@@ -293,18 +293,18 @@ class ServiceCreateViewTestCase(TestCase):
     def test_service_create_post_success(self):
         """Test successful service creation"""
         self.client.force_login(self.admin_user)
-        
+
         post_data = {
             'customer_id': self.customer.id,
             'plan_id': self.plan.id,
             'domain': 'newservice.example.com'
         }
-        
+
         response = self.client.post(reverse('provisioning:service_create'), post_data)
-        
+
         # Should create service and redirect
         self.assertEqual(response.status_code, 302)
-        
+
         # Verify service was created
         service = Service.objects.filter(domain='newservice.example.com').first()
         self.assertIsNotNone(service)
@@ -314,17 +314,17 @@ class ServiceCreateViewTestCase(TestCase):
     def test_service_create_post_missing_fields(self):
         """Test service creation with missing required fields"""
         self.client.force_login(self.admin_user)
-        
+
         post_data = {
             'customer_id': self.customer.id,
             # Missing plan_id and domain
         }
-        
+
         response = self.client.post(reverse('provisioning:service_create'), post_data)
-        
+
         # Should stay on form with error
         self.assertEqual(response.status_code, 200)
-        
+
         # Should not create service
         self.assertFalse(Service.objects.filter(customer=self.customer).exists())
 
@@ -332,17 +332,17 @@ class ServiceCreateViewTestCase(TestCase):
         """Test service creation for unauthorized customer"""
         # Create another customer that admin doesn't have access to
         other_customer = create_test_customer('Other Customer', self.admin_user)
-        
+
         self.client.force_login(self.admin_user)
-        
+
         post_data = {
             'customer_id': other_customer.id,
             'plan_id': self.plan.id,
             'domain': 'unauthorized.example.com'
         }
-        
+
         response = self.client.post(reverse('provisioning:service_create'), post_data)
-        
+
         # Should redirect with error message
         self.assertEqual(response.status_code, 302)
         self.assertIn('services', response.url)
@@ -398,7 +398,7 @@ class ServiceSuspendActivateViewTestCase(TestCase):
         """Test service suspend GET view"""
         self.client.force_login(self.admin_user)
         response = self.client.get(reverse('provisioning:service_suspend', args=[self.active_service.pk]))
-        
+
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Active Service')
 
@@ -406,11 +406,11 @@ class ServiceSuspendActivateViewTestCase(TestCase):
         """Test successful service suspension"""
         self.client.force_login(self.admin_user)
         response = self.client.post(reverse('provisioning:service_suspend', args=[self.active_service.pk]))
-        
+
         # Should redirect to service detail
         self.assertEqual(response.status_code, 302)
         self.assertIn(f'/provisioning/services/{self.active_service.pk}/', response.url)
-        
+
         # Verify service was suspended
         self.active_service.refresh_from_db()
         self.assertEqual(self.active_service.status, 'suspended')
@@ -419,11 +419,11 @@ class ServiceSuspendActivateViewTestCase(TestCase):
         """Test successful service activation"""
         self.client.force_login(self.admin_user)
         response = self.client.get(reverse('provisioning:service_activate', args=[self.suspended_service.pk]))
-        
+
         # Should redirect to service detail
         self.assertEqual(response.status_code, 302)
         self.assertIn(f'/provisioning/services/{self.suspended_service.pk}/', response.url)
-        
+
         # Verify service was activated
         self.suspended_service.refresh_from_db()
         self.assertEqual(self.suspended_service.status, 'active')
@@ -432,9 +432,9 @@ class ServiceSuspendActivateViewTestCase(TestCase):
         """Test service suspension for unauthorized customer"""
         other_user = create_test_user('other@test.ro', staff_role='admin', is_staff=True)
         self.client.force_login(other_user)
-        
+
         response = self.client.post(reverse('provisioning:service_suspend', args=[self.active_service.pk]))
-        
+
         # Should redirect with error
         self.assertEqual(response.status_code, 302)
         self.assertIn('services', response.url)
@@ -458,7 +458,7 @@ class PlanListViewTestCase(TestCase):
     def test_plan_list_requires_login(self):
         """Test that plan list view requires authentication"""
         response = self.client.get(reverse('provisioning:plans'))
-        
+
         # Should redirect to login
         self.assertEqual(response.status_code, 302)
         self.assertIn('login', response.url)
@@ -489,11 +489,11 @@ class ServerListViewTestCase(TestCase):
         """Test server list view for admin user"""
         self.client.force_login(self.admin_user)
         response = self.client.get(reverse('provisioning:servers'))
-        
+
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Server 1')
         self.assertContains(response, 'Server 2')
-        
+
         # Check context data
         self.assertEqual(response.context['active_servers'], 1)  # Only Server 1 is active
         self.assertEqual(response.context['total_servers'], 2)

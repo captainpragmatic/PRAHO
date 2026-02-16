@@ -177,7 +177,7 @@ curl -I https://yourdomain.com
 The platform automatically applies these security headers:
 
 - **HSTS**: HTTP Strict Transport Security (1 year)
-- **CSP**: Content Security Policy 
+- **CSP**: Content Security Policy
 - **X-Frame-Options**: DENY (prevents clickjacking)
 - **X-Content-Type-Options**: nosniff
 - **X-XSS-Protection**: 1; mode=block

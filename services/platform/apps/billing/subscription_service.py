@@ -384,7 +384,9 @@ class SubscriptionService:
                     new_billing_cycle=new_billing_cycle,
                     prorate=data.get("prorate", True),
                     apply_immediately=data.get("apply_immediately", True),
-                    effective_date=timezone.now() if data.get("apply_immediately", True) else subscription.current_period_end,
+                    effective_date=timezone.now()
+                    if data.get("apply_immediately", True)
+                    else subscription.current_period_end,
                     reason=data.get("reason", ""),
                     created_by=user,
                 )
@@ -795,13 +797,17 @@ class RecurringBillingService:
                         else:
                             result["payments_failed"] += 1
                             subscription.mark_payment_failed()
-                            result["errors"].append(f"Payment failed for {subscription.subscription_number}: {payment_result.error}")
+                            result["errors"].append(
+                                f"Payment failed for {subscription.subscription_number}: {payment_result.error}"
+                            )
                     else:
                         # No payment method, just renew (manual payment expected)
                         subscription.renew()
 
                 else:
-                    result["errors"].append(f"Invoice generation failed for {subscription.subscription_number}: {invoice_result.error}")
+                    result["errors"].append(
+                        f"Invoice generation failed for {subscription.subscription_number}: {invoice_result.error}"
+                    )
 
             except Exception as e:
                 logger.exception(f"Error processing subscription {subscription.id}: {e}")
@@ -827,7 +833,6 @@ class RecurringBillingService:
     def _generate_renewal_invoice(subscription: Subscription) -> Result[Invoice, str]:
         """Generate a renewal invoice for a subscription."""
         try:
-
             sequence, _ = InvoiceSequence.objects.get_or_create(scope="default")
 
             # Calculate amounts using centralized TaxService (ADR-0015)

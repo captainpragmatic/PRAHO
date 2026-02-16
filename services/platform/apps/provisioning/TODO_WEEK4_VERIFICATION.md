@@ -18,7 +18,7 @@
 #    - Alert escalation chain validation
 #    - Monitoring system resilience testing
 #
-# 3. **Recovery Time Validation** 
+# 3. **Recovery Time Validation**
 #    - Actual vs. target recovery times
 #    - Recovery procedure effectiveness
 #    - Data integrity post-recovery

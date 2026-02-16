@@ -157,7 +157,9 @@ def _create_pending_services_for_order(order: Order) -> None:
         if result.is_ok():
             services_created = result.unwrap()
             if services_created:
-                logger.info(f"✅ [Order Signal] Created {len(services_created)} pending services for order {order.order_number}")
+                logger.info(
+                    f"✅ [Order Signal] Created {len(services_created)} pending services for order {order.order_number}"
+                )
             else:
                 logger.info(f"💡 [Order Signal] No new services created for order {order.order_number}")
         else:

@@ -37,4 +37,3 @@ class PaymentAllocationTests(TestCase):
         self.invoice.mark_as_paid()
         self.invoice.refresh_from_db()
         self.assertEqual(self.invoice.status, 'paid')
-

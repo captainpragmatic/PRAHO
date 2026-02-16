@@ -331,7 +331,9 @@ def redemption_post_save(
             elif instance.status == "reversed":
                 action = "coupon_redemption_reversed"
                 severity = "medium"
-                description = f"Coupon '{instance.coupon.code}' redemption reversed on order {instance.order.order_number}"
+                description = (
+                    f"Coupon '{instance.coupon.code}' redemption reversed on order {instance.order.order_number}"
+                )
             else:
                 description = f"Coupon redemption status changed to {instance.status}"
 

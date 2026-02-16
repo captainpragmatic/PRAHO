@@ -27,7 +27,7 @@
               {% else %}
                 {% badge ticket.status|capfirst variant="default" %}
               {% endif %}
-              
+
               <!-- Customer replied badge -->
               {% if ticket.customer_replied_recently %}
                 <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">
@@ -89,7 +89,7 @@
             <span class="ml-2 text-sm font-normal text-slate-400" id="reply-count">({{ replies|length }} {% trans 'replies' %})</span>
         </h3>
     </div>
-    
+
     <div class="relative">
         <div class="px-6 py-4 max-h-96 overflow-y-auto" id="comments-container">
         {% comment %} replies will be inserted here {% endcomment %}
@@ -103,7 +103,7 @@
         </div>
 
         {% include 'tickets/partials/replies_list.html' with replies=replies %}
-        
+
         <!-- Subtle visual hint at bottom to indicate more content (scroll boundary) -->
         <div id="scroll-hint-bottom" class="h-8 bg-gradient-to-t from-slate-800/90 to-transparent flex items-end justify-center pointer-events-none opacity-0" aria-hidden="true">
             <svg class="w-4 h-4 mb-1 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -124,23 +124,23 @@
                         {{ request.user.first_name|first|upper }}{{ request.user.last_name|first|upper }}
                     </div>
                 </div>
-                
+
                 <!-- Reply Form -->
                 <div class="flex-1">
                     <div class="relative">
-                        <textarea 
-                            name="message" 
-                            rows="3" 
-                            class="block w-full rounded-lg border-0 bg-slate-700 py-3 px-4 text-white placeholder-slate-400 ring-1 ring-inset ring-slate-600 focus:ring-2 focus:ring-inset focus:ring-blue-500 resize-none" 
-                            placeholder="{% trans 'Write your reply...' %}" 
+                        <textarea
+                            name="message"
+                            rows="3"
+                            class="block w-full rounded-lg border-0 bg-slate-700 py-3 px-4 text-white placeholder-slate-400 ring-1 ring-inset ring-slate-600 focus:ring-2 focus:ring-inset focus:ring-blue-500 resize-none"
+                            placeholder="{% trans 'Write your reply...' %}"
                             required></textarea>
-                        
+
                         <!-- Character Counter -->
                         <div class="absolute bottom-2 right-2">
                             <span class="text-xs text-slate-400" id="char-counter">0</span>
                         </div>
                     </div>
-                    
+
                     <!-- Form Actions -->
                     <div class="mt-3 flex items-center justify-between">
                         <div class="flex items-center space-x-3">
@@ -152,11 +152,11 @@
                                 </svg>
                                 {% trans 'Attach' %}
                             </button>
-                            
+
                             <!-- File list display -->
                             <div id="file-list" class="hidden"></div>
                         </div>
-                        
+
                         <!-- Submit Button -->
                         <div class="flex items-center space-x-2">
                             <button type="button" class="px-3 py-2 text-sm text-slate-400 hover:text-slate-300" onclick="document.getElementById('reply-form').reset(); document.getElementById('char-counter').textContent = '0';">

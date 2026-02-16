@@ -1,7 +1,7 @@
 {% load i18n %}
 {% load ui_components %}
 
-<form method="POST" 
+<form method="POST"
       {% if action == 'create' %}
         action="{% url 'orders:order_item_create' pk=order.id %}"
       {% else %}
@@ -9,7 +9,7 @@
       {% endif %}
       class="space-y-6">
   {% csrf_token %}
-  
+
   <div class="px-6 pt-6 pb-4">
     <h3 class="text-lg font-medium text-white mb-4">
       {% if action == 'create' %}
@@ -18,7 +18,7 @@
         ✏️ {% trans "Edit Order Item" %}
       {% endif %}
     </h3>
-    
+
     <!-- Romanian Business Notice -->
     <div class="bg-blue-900 border border-blue-700 rounded-lg p-4 mb-6">
       <div class="flex items-start">
@@ -55,7 +55,7 @@
     <!-- Pricing Information -->
     <div class="bg-slate-900 rounded-lg border border-slate-700 p-4 mb-6">
       <h4 class="text-sm font-semibold text-slate-300 mb-4">💰 {% trans 'Pricing Information' %}</h4>
-      
+
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <!-- Unit Price -->
         <div>
@@ -128,7 +128,7 @@
       </div>
     </div>
   </div>
-  
+
   <!-- Form Actions -->
   <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
     <button type="button"
@@ -156,37 +156,37 @@ document.addEventListener('DOMContentLoaded', function() {
         const setupCents = parseInt(document.getElementById('id_setup_cents').value || '0');
         const quantity = parseInt(document.getElementById('id_quantity').value || '1');
         const currency = '{{ order.currency }}';
-        
+
         // Convert cents to currency
         const unitPrice = (unitPriceCents / 100).toFixed(2);
         const setupPrice = (setupCents / 100).toFixed(2);
         const totalPerUnit = ((unitPriceCents + setupCents) / 100).toFixed(2);
-        
+
         // Update displays
         document.getElementById('unit-price-display').textContent = `${currency} ${unitPrice}`;
         document.getElementById('setup-price-display').textContent = `${currency} ${setupPrice}`;
         document.getElementById('total-price-display').textContent = `${currency} ${totalPerUnit}`;
-        
+
         // Update tax preview
         const lineTotal = (unitPriceCents + setupCents) * quantity;
         const subtotal = lineTotal / 100;
         const vatAmount = subtotal * 0.21; // 21% VAT
         const total = subtotal + vatAmount;
-        
+
         document.getElementById('preview-subtotal').textContent = `${currency} ${subtotal.toFixed(2)}`;
         document.getElementById('preview-vat').textContent = `${currency} ${vatAmount.toFixed(2)}`;
         document.getElementById('preview-total').textContent = `${currency} ${total.toFixed(2)}`;
     }
-    
+
     // Show/hide domain section based on product selection
     function toggleDomainSection() {
         const productSelect = document.getElementById('id_product');
         const domainSection = document.getElementById('domain-section');
-        
+
         if (productSelect && domainSection) {
             const selectedOption = productSelect.options[productSelect.selectedIndex];
             const requiresDomain = selectedOption && selectedOption.dataset.requiresDomain === 'true';
-            
+
             if (requiresDomain) {
                 domainSection.style.display = 'block';
                 document.getElementById('id_domain_name').required = true;
@@ -196,40 +196,40 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
     }
-    
+
     // Auto-population function for main form
     function autoPopulateMainFormPricing() {
         const productSelect = document.getElementById('id_product');
         const billingPeriodSelect = document.getElementById('id_billing_period');
         const unitPriceInput = document.getElementById('id_unit_price_cents');
         const setupInput = document.getElementById('id_setup_cents');
-        
+
         if (!productSelect || !billingPeriodSelect || !unitPriceInput || !setupInput) {
             return;
         }
-        
+
         const selectedOption = productSelect.options[productSelect.selectedIndex];
         const billingPeriod = billingPeriodSelect.value;
-        
+
         if (!selectedOption || !selectedOption.value || !billingPeriod) {
             return;
         }
-        
+
         try {
             // Get pricing data from product option
             const pricesData = JSON.parse(selectedOption.dataset.prices || '{}');
             const priceForPeriod = pricesData[billingPeriod];
-            
+
             if (priceForPeriod) {
                 // Only auto-populate if user hasn't manually edited the field
                 if (!unitPriceInput.dataset.manualOverride) {
                     unitPriceInput.value = priceForPeriod.unit_cents;
                 }
-                
+
                 if (!setupInput.dataset.manualOverride) {
                     setupInput.value = priceForPeriod.setup_cents;
                 }
-                
+
                 // Update price displays
                 updatePriceDisplays();
             } else {
@@ -237,7 +237,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!unitPriceInput.dataset.manualOverride) {
                     unitPriceInput.value = '';
                 }
-                
+
                 if (!setupInput.dataset.manualOverride) {
                     setupInput.value = '0';
                 }
@@ -246,18 +246,18 @@ document.addEventListener('DOMContentLoaded', function() {
             // Ignore parsing errors
         }
     }
-    
+
     function markMainFormAsManualOverride(input) {
         input.dataset.manualOverride = 'true';
     }
-    
+
     // Attach event listeners
     const unitPriceInput = document.getElementById('id_unit_price_cents');
     const setupInput = document.getElementById('id_setup_cents');
     const quantityInput = document.getElementById('id_quantity');
     const productSelect = document.getElementById('id_product');
     const billingPeriodSelect = document.getElementById('id_billing_period');
-    
+
     if (unitPriceInput) {
         unitPriceInput.addEventListener('input', updatePriceDisplays);
         unitPriceInput.addEventListener('input', function() {
@@ -271,7 +271,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     if (quantityInput) quantityInput.addEventListener('input', updatePriceDisplays);
-    
+
     if (productSelect) {
         productSelect.addEventListener('change', function() {
             toggleDomainSection();
@@ -281,20 +281,20 @@ document.addEventListener('DOMContentLoaded', function() {
     if (billingPeriodSelect) {
         billingPeriodSelect.addEventListener('change', autoPopulateMainFormPricing);
     }
-    
+
     // Initial updates
     updatePriceDisplays();
     toggleDomainSection();
     autoPopulateMainFormPricing();
-    
+
     // Handle form submission
     const form = document.querySelector('form');
     if (form) {
         form.addEventListener('submit', function(e) {
             e.preventDefault();
-            
+
             const formData = new FormData(this);
-            
+
             fetch(this.action, {
                 method: 'POST',
                 body: formData,
@@ -312,7 +312,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 } else {
                     // Success - refresh the order items section and close modal
                     document.getElementById('order-items-section').outerHTML = html;
-                    
+
                     // Close appropriate modal
                     const addModal = document.getElementById('addItemModal');
                     const editModal = document.getElementById('editItemModal');
@@ -322,7 +322,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (editModal && !editModal.classList.contains('hidden')) {
                         editModal.classList.add('hidden');
                     }
-                    
+
                     // Refresh financial summary
                     if (typeof refreshFinancialSummary === 'function') {
                         refreshFinancialSummary();

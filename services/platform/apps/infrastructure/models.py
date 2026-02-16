@@ -642,9 +642,7 @@ class NodeDeployment(models.Model):
     def transition_to(self, new_status: str, message: str = "") -> None:
         """Transition to a new status with validation"""
         if not self.is_valid_transition(new_status):
-            raise ValidationError(
-                _(f"Cannot transition from '{self.status}' to '{new_status}'")
-            )
+            raise ValidationError(_(f"Cannot transition from '{self.status}' to '{new_status}'"))
         self.status = new_status
         if message:
             self.status_message = message

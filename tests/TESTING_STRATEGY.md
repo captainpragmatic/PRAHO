@@ -11,7 +11,7 @@ Tests mirror the `apps/` directory structure for clear organization:
 ```bash
 tests/
 ├── users/                    # User authentication, 2FA, roles
-├── billing/                  # Invoices, payments, credit ledger  
+├── billing/                  # Invoices, payments, credit ledger
 ├── customers/               # Customer management
 ├── audit/                   # Audit logging
 ├── common/                  # Shared utilities
@@ -50,7 +50,7 @@ make test-coverage      # Coverage analysis with HTML report
 
 # App-specific testing
 pytest tests/users/           # User management tests only
-pytest tests/billing/         # Billing functionality only  
+pytest tests/billing/         # Billing functionality only
 pytest tests/integration-tests/  # Cross-app workflows only
 
 # Advanced testing with markers

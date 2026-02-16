@@ -77,9 +77,8 @@ class EFacturaWebhookProcessor(BaseWebhookProcessor):
         this processor mainly serves as an audit/deduplication record.
         The actual document status transitions happen before the webhook is recorded.
         """
-        upload_index = (
-            webhook_event.payload.get("anaf_upload_index", "")
-            or webhook_event.payload.get("index_incarcare", "")
+        upload_index = webhook_event.payload.get("anaf_upload_index", "") or webhook_event.payload.get(
+            "index_incarcare", ""
         )
         status = webhook_event.payload.get("status", "unknown")
         document_id = webhook_event.payload.get("document_id", "")

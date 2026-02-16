@@ -36,6 +36,7 @@ _DEFAULT_MAX_FILE_SIZE_BYTES = 2097152  # 2MB
 @dataclass
 class TicketReplyData:
     """Data container for ticket reply validation"""
+
     reply_text: str
     reply_action: str
     resolution_code: str | None
@@ -48,24 +49,24 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     user = cast(User, request.user)  # Safe after @login_required
     accessible_customers = user.get_accessible_customers()
     customer_ids = [customer.id for customer in accessible_customers]
-    
+
     # Base queryset
     tickets = Ticket.objects.filter(customer_id__in=customer_ids).select_related("customer").order_by("-created_at")
-    
+
     # Get filter parameters
     search_query = request.GET.get("search", "").strip()
     status_filter = request.GET.get("status", "").strip()
-    
+
     # Apply search filter
     if search_query:
         tickets = tickets.filter(
-            Q(ticket_number__icontains=search_query) |
-            Q(title__icontains=search_query) |
-            Q(description__icontains=search_query) |
-            Q(customer__name__icontains=search_query) |
-            Q(contact_email__icontains=search_query)
+            Q(ticket_number__icontains=search_query)
+            | Q(title__icontains=search_query)
+            | Q(description__icontains=search_query)
+            | Q(customer__name__icontains=search_query)
+            | Q(contact_email__icontains=search_query)
         )
-    
+
     # Apply status filter
     if status_filter:
         tickets = tickets.filter(status=status_filter)
@@ -82,7 +83,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     if status_filter:
         url_params.append(f"status={status_filter}")
     url_params_str = "&".join(url_params)
-    
+
     context = {
         "tickets": tickets_page,
         "open_count": tickets.filter(status__in=["open", "in_progress"]).count(),
@@ -102,24 +103,24 @@ def ticket_search_htmx(request: HttpRequest) -> HttpResponse:
     user = cast(User, request.user)  # Safe after @login_required
     accessible_customers = user.get_accessible_customers()
     customer_ids = [customer.id for customer in accessible_customers]
-    
+
     # Base queryset
     tickets = Ticket.objects.filter(customer_id__in=customer_ids).select_related("customer").order_by("-created_at")
-    
+
     # Get filter parameters
     search_query = request.GET.get("q", "").strip()
     status_filter = request.GET.get("status", "").strip()
-    
+
     # Apply search filter
     if search_query:
         tickets = tickets.filter(
-            Q(ticket_number__icontains=search_query) |
-            Q(title__icontains=search_query) |
-            Q(description__icontains=search_query) |
-            Q(customer__name__icontains=search_query) |
-            Q(contact_email__icontains=search_query)
+            Q(ticket_number__icontains=search_query)
+            | Q(title__icontains=search_query)
+            | Q(description__icontains=search_query)
+            | Q(customer__name__icontains=search_query)
+            | Q(contact_email__icontains=search_query)
         )
-    
+
     # Apply status filter
     if status_filter:
         tickets = tickets.filter(status=status_filter)
@@ -257,9 +258,7 @@ def _is_file_size_valid(uploaded_file: UploadedFile) -> bool:
     """Check if uploaded file size is within limits."""
     if uploaded_file.size is None:
         return False
-    max_file_size = SettingsService.get_integer_setting(
-        "tickets.max_file_size_bytes", _DEFAULT_MAX_FILE_SIZE_BYTES
-    )
+    max_file_size = SettingsService.get_integer_setting("tickets.max_file_size_bytes", _DEFAULT_MAX_FILE_SIZE_BYTES)
     return uploaded_file.size <= max_file_size
 
 
@@ -316,7 +315,7 @@ def _process_ticket_attachments(request: HttpRequest, ticket: Ticket, comment: T
         #   3. Store files outside web-accessible directory
         #   4. Implement secure file serving with access controls
         #   5. Add file content validation beyond MIME type checking
-        
+
         # Create attachment with proper null handling
         file_size = uploaded_file.size or 0  # Default to 0 if None
         TicketAttachment.objects.create(
@@ -330,7 +329,9 @@ def _process_ticket_attachments(request: HttpRequest, ticket: Ticket, comment: T
         )
 
 
-def _validate_ticket_reply_data(request: HttpRequest, user: User, ticket: Ticket, reply_data: TicketReplyData) -> HttpResponse | None:
+def _validate_ticket_reply_data(
+    request: HttpRequest, user: User, ticket: Ticket, reply_data: TicketReplyData
+) -> HttpResponse | None:
     """Validate reply data and return error response if invalid"""
     # Validate internal note permission
     error_response = _validate_internal_note_permission(request, user, reply_data.is_internal, ticket.pk)
@@ -349,11 +350,13 @@ def _validate_ticket_reply_data(request: HttpRequest, user: User, ticket: Ticket
             return HttpResponse('<div class="text-red-500 text-sm">Resolution code required when closing ticket.</div>')
         messages.error(request, _("❌ Resolution code is required when closing the ticket."))
         return redirect("tickets:detail", pk=ticket.pk)
-    
+
     return None
 
 
-def _handle_ticket_status_update(request: HttpRequest, ticket: Ticket, user: User, reply_action: str, resolution_code: str | None) -> tuple[str, HttpResponse | None]:
+def _handle_ticket_status_update(
+    request: HttpRequest, ticket: Ticket, user: User, reply_action: str, resolution_code: str | None
+) -> tuple[str, HttpResponse | None]:
     """Handle ticket status updates and return success message and optional error response"""
     try:
         if user.is_staff_user:
@@ -361,18 +364,12 @@ def _handle_ticket_status_update(request: HttpRequest, ticket: Ticket, user: Use
             if ticket.assigned_to is None:
                 # First agent reply
                 TicketStatusService.handle_first_agent_reply(
-                    ticket=ticket,
-                    agent=user,
-                    reply_action=reply_action,
-                    resolution_code=resolution_code
+                    ticket=ticket, agent=user, reply_action=reply_action, resolution_code=resolution_code
                 )
             else:
-                # Subsequent agent reply  
+                # Subsequent agent reply
                 TicketStatusService.handle_agent_reply(
-                    ticket=ticket,
-                    agent=user,
-                    reply_action=reply_action,
-                    resolution_code=resolution_code
+                    ticket=ticket, agent=user, reply_action=reply_action, resolution_code=resolution_code
                 )
         else:
             # Customer reply
@@ -382,9 +379,11 @@ def _handle_ticket_status_update(request: HttpRequest, ticket: Ticket, user: Use
             "reply": _("✅ Your reply has been added!"),
             "reply_and_wait": _("✅ Reply added - ticket is now waiting for customer response."),
             "internal_note": _("✅ Internal note has been added."),
-            "close_with_resolution": _("✅ Ticket has been closed with resolution: {resolution}").format(resolution=resolution_code),
+            "close_with_resolution": _("✅ Ticket has been closed with resolution: {resolution}").format(
+                resolution=resolution_code
+            ),
         }
-        
+
         success_msg = success_messages.get(reply_action, _("✅ Your reply has been added!"))
         return success_msg, None
 
@@ -406,12 +405,9 @@ def _handle_ticket_reply_post(request: HttpRequest, ticket: Ticket) -> HttpRespo
 
     # Create reply data container
     reply_data = TicketReplyData(
-        reply_text=reply_text or "",
-        reply_action=reply_action,
-        resolution_code=resolution_code,
-        is_internal=is_internal
+        reply_text=reply_text or "", reply_action=reply_action, resolution_code=resolution_code, is_internal=is_internal
     )
-    
+
     # Validate reply data
     validation_error = _validate_ticket_reply_data(request, user, ticket, reply_data)
     if validation_error:
@@ -420,8 +416,10 @@ def _handle_ticket_reply_post(request: HttpRequest, ticket: Ticket) -> HttpRespo
     # Create comment with reply action
     comment_type = _determine_comment_type(user, reply_data.is_internal)
     is_public = not (reply_data.is_internal and (user.is_staff or getattr(user, "staff_role", None)))
-    
-    logger.debug(f"🔍 [Tickets] Reply processing: action={reply_data.reply_action}, is_internal={reply_data.is_internal}, comment_type={comment_type}, is_public={is_public}")
+
+    logger.debug(
+        f"🔍 [Tickets] Reply processing: action={reply_data.reply_action}, is_internal={reply_data.is_internal}, comment_type={comment_type}, is_public={is_public}"
+    )
 
     comment = TicketComment.objects.create(
         ticket=ticket,
@@ -528,18 +526,21 @@ def ticket_close(request: HttpRequest, pk: int) -> HttpResponse:
         if not resolution_code:
             messages.error(request, _("❌ Resolution code is required to close the ticket."))
             return redirect("tickets:detail", pk=pk)
-        
+
         try:
             # Use TicketStatusService for proper closing
             TicketStatusService.close_ticket(ticket, resolution_code)
-            messages.success(request, _("✅ Ticket #{ticket_pk} has been closed with resolution: {resolution}").format(
-                ticket_pk=ticket.pk, resolution=resolution_code
-            ))
+            messages.success(
+                request,
+                _("✅ Ticket #{ticket_pk} has been closed with resolution: {resolution}").format(
+                    ticket_pk=ticket.pk, resolution=resolution_code
+                ),
+            )
             return redirect("tickets:detail", pk=pk)
         except ValueError as e:
             messages.error(request, _("❌ Error closing ticket: {error}").format(error=str(e)))
             return redirect("tickets:detail", pk=pk)
-    
+
     # For GET request, show the close form (handled by template)
     return redirect("tickets:detail", pk=pk)
 

@@ -224,11 +224,7 @@ class StructuredLogAdapter(logging.LoggerAdapter):
         logger.info("Invoice created", invoice_id=123)
     """
 
-    def process(
-        self,
-        msg: str,
-        kwargs: dict[str, Any]
-    ) -> tuple[str, dict[str, Any]]:
+    def process(self, msg: str, kwargs: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         """Process log message and add structured context"""
         # Merge extra context
         extra = kwargs.get("extra", {})

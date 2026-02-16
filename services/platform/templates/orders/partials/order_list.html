@@ -1,6 +1,6 @@
 {% comment %}
 ===============================================================================
-📦 ORDERS LIST PARTIAL - PRAHO Platform  
+📦 ORDERS LIST PARTIAL - PRAHO Platform
 ===============================================================================
 HTMX-loaded partial for orders list with pagination.
 This template is dynamically loaded and contains only the results section.
@@ -26,7 +26,7 @@ This template is dynamically loaded and contains only the results section.
                       {{ order.order_number }}
                     </a>
                   </h3>
-                  
+
                   <!-- Order Status Badge -->
                   {% if order.status == "draft" %}
                     {% badge "📝 Draft" variant="secondary" %}
@@ -46,7 +46,7 @@ This template is dynamically loaded and contains only the results section.
                     {% badge "💸 Partially Refunded" variant="warning" %}
                   {% endif %}
                 </div>
-                
+
                 <!-- Customer Info -->
                 <div class="flex items-center space-x-4 text-sm text-slate-400 mb-3">
                   <div class="flex items-center">
@@ -68,13 +68,13 @@ This template is dynamically loaded and contains only the results section.
                   {{ order.total_amount|floatformat:2 }} {{ order.currency }}
                 </div>
               </div>
-              
+
               <!-- Quick Actions -->
               {% if is_staff %}
               <div class="flex items-center space-x-2">
                 {% url 'orders:order_detail' pk=order.id as detail_url %}
                 {% button "View" variant="secondary" size="sm" href=detail_url %}
-                
+
                 {% if order.status == 'draft' %}
                   {% url 'orders:order_edit' pk=order.id as edit_url %}
                   {% button "Edit" variant="primary" size="sm" href=edit_url %}
@@ -86,7 +86,7 @@ This template is dynamically loaded and contains only the results section.
         </div>
       {% endfor %}
     </div>
-    
+
     <!-- Enhanced Pagination with HTMX -->
     {% include 'components/pagination.html' with page_obj=orders extra_params=extra_params htmx_target='#orders-results' htmx_url='/app/orders/list/' %}
 
@@ -108,7 +108,7 @@ This template is dynamically loaded and contains only the results section.
           {% trans "Orders will appear here once customers start placing them" %}
         {% endif %}
       </p>
-      
+
       {% if is_staff and not search_query and not current_status %}
         {% url 'orders:order_create' as create_url %}
         {% button "📦 Create First Order" variant="primary" href=create_url %}

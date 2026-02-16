@@ -181,9 +181,12 @@ class AnsibleService:
             # Build command
             cmd = [
                 self._ansible_path,
-                "-i", str(inventory_file),
-                "--private-key", str(key_file),
-                "-e", vars_json,
+                "-i",
+                str(inventory_file),
+                "--private-key",
+                str(key_file),
+                "-e",
+                vars_json,
                 str(playbook_path),
             ]
 
@@ -214,24 +217,28 @@ class AnsibleService:
             # Parse stats if possible
             stats = self._parse_stats(result.stdout)
 
-            return Ok(AnsibleResult(
-                success=success,
-                playbook=playbook,
-                stdout=result.stdout,
-                stderr=result.stderr,
-                return_code=result.returncode,
-                stats=stats,
-            ))
+            return Ok(
+                AnsibleResult(
+                    success=success,
+                    playbook=playbook,
+                    stdout=result.stdout,
+                    stderr=result.stderr,
+                    return_code=result.returncode,
+                    stats=stats,
+                )
+            )
 
         except subprocess.TimeoutExpired:
             logger.error(f"🚨 [Ansible] Playbook {playbook} timed out after {self.timeout}s")
-            return Ok(AnsibleResult(
-                success=False,
-                playbook=playbook,
-                stdout="",
-                stderr=f"Playbook timed out after {self.timeout} seconds",
-                return_code=-1,
-            ))
+            return Ok(
+                AnsibleResult(
+                    success=False,
+                    playbook=playbook,
+                    stdout="",
+                    stderr=f"Playbook timed out after {self.timeout} seconds",
+                    return_code=-1,
+                )
+            )
         except Exception as e:
             logger.error(f"🚨 [Ansible] Playbook {playbook} failed: {e}")
             return Err(f"Playbook execution failed: {e}")
@@ -239,7 +246,7 @@ class AnsibleService:
             # Cleanup temporary files
             if key_file.exists():
                 key_file.unlink()
-            if 'inventory_file' in locals() and inventory_file.exists():
+            if "inventory_file" in locals() and inventory_file.exists():
                 inventory_file.unlink()
 
     def _generate_inventory(self, deployment: NodeDeployment) -> Path:
@@ -275,24 +282,24 @@ ansible_python_interpreter=/usr/bin/python3
             "deployment_id": str(deployment.id),
             "inventory_hostname": deployment.hostname,
             "inventory_hostname_short": deployment.hostname,
-
             # Backup settings
             "backup_enabled": backup_enabled,
             "backup_storage": backup_storage,
             "backup_retention_days": backup_retention,
             "backup_schedule": backup_schedule,
-
             # Force hostname setting
             "virtualmin_force_hostname": True,
         }
 
         # Add S3 backup settings when S3 storage is configured
         if backup_storage == "s3":
-            vars_dict.update({
-                "backup_s3_bucket": SettingsService.get_setting("node_deployment.backup_s3_bucket", ""),
-                "backup_s3_region": SettingsService.get_setting("node_deployment.backup_s3_region", "eu-central-1"),
-                "backup_s3_prefix": SettingsService.get_setting("node_deployment.backup_s3_prefix", "backups/"),
-            })
+            vars_dict.update(
+                {
+                    "backup_s3_bucket": SettingsService.get_setting("node_deployment.backup_s3_bucket", ""),
+                    "backup_s3_region": SettingsService.get_setting("node_deployment.backup_s3_region", "eu-central-1"),
+                    "backup_s3_prefix": SettingsService.get_setting("node_deployment.backup_s3_prefix", "backups/"),
+                }
+            )
 
         # Add FQDN if DNS zone is configured
         if deployment.dns_zone:
@@ -316,6 +323,7 @@ ansible_python_interpreter=/usr/bin/python3
             # Try to extract host stats
             # Format: hostname : ok=X changed=Y unreachable=Z failed=W
             import re
+
             match = re.search(
                 r"ok=(\d+)\s+changed=(\d+)\s+unreachable=(\d+)\s+failed=(\d+)",
                 recap_section,

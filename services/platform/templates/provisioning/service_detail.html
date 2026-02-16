@@ -7,7 +7,7 @@
 
 {% block content %}
 <div class="max-w-7xl mx-auto px-4 py-6">
-    
+
     <!-- 🚀 Hero Section with Status -->
     <div class="bg-gradient-to-r from-slate-800 to-slate-700 rounded-xl p-6 mb-6 border border-slate-600">
         <div class="flex flex-col md:flex-row md:items-center md:justify-between">
@@ -60,7 +60,7 @@
                     {% endif %}
                 </div>
             </div>
-            
+
             <!-- Action Bar -->
             <div class="flex flex-wrap gap-2 mt-4 md:mt-0 mobile-stacked">
                 {% if can_manage %}
@@ -120,7 +120,7 @@
 
     <!-- 📊 Main Content Grid -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
-        
+
         <!-- 🏢 Customer Information (Left Column) -->
         <div class="lg:col-span-1 space-y-6">
             <!-- Customer Card -->
@@ -133,13 +133,13 @@
                         🇷🇴 RO
                     </span>
                 </div>
-                
+
                 <div class="space-y-3">
                     <div>
                         <p class="text-sm text-slate-400">{% trans 'Company' %}</p>
                         <p class="font-medium text-white">{{ service.customer.company_name }}</p>
                     </div>
-                    
+
                     <div>
                         <p class="text-sm text-slate-400">{% trans 'CUI' %}</p>
                         <div class="flex items-center space-x-2">
@@ -149,7 +149,7 @@
                             </span>
                         </div>
                     </div>
-                    
+
                     <div>
                         <p class="text-sm text-slate-400">{% trans 'Contact' %}</p>
                         <p class="text-white">{{ service.customer.contact_name }}</p>
@@ -157,7 +157,7 @@
                             {{ service.customer.contact_email }}
                         </a>
                     </div>
-                    
+
                     {% if service.customer.primary_phone %}
                     <div>
                         <p class="text-sm text-slate-400">{% trans 'Phone' %}</p>
@@ -172,27 +172,27 @@
                 <h3 class="text-lg font-semibold text-white mb-4 flex items-center">
                     💰 {% trans 'Billing' %}
                 </h3>
-                
+
                 <div class="space-y-3">
                     <div class="flex justify-between items-center">
                         <span class="text-slate-400">{% trans 'Monthly Price' %}</span>
                         <span class="text-white font-semibold">{{ service.service_plan.price_monthly|romanian_currency }}</span>
                     </div>
-                    
+
                     {% if service.service_plan.price_quarterly %}
                     <div class="flex justify-between items-center">
                         <span class="text-slate-400">{% trans 'Quarterly Price' %}</span>
                         <span class="text-white">{{ service.service_plan.price_quarterly|romanian_currency }}</span>
                     </div>
                     {% endif %}
-                    
+
                     {% if service.service_plan.price_yearly %}
                     <div class="flex justify-between items-center">
                         <span class="text-slate-400">{% trans 'Yearly Price' %}</span>
                         <span class="text-white">{{ service.service_plan.price_yearly|romanian_currency }}</span>
                     </div>
                     {% endif %}
-                    
+
                     <div class="pt-3 border-t border-slate-700">
                         <div class="flex justify-between items-center">
                             <span class="text-slate-400">{% trans 'VAT (21%)' %}</span>
@@ -215,13 +215,13 @@
                         {{ service.service_plan.get_plan_type_display }}
                     </span>
                 </div>
-                
+
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
                     <div>
                         <h4 class="font-medium text-white mb-2">{{ service.service_plan.name }}</h4>
                         <p class="text-slate-300 text-sm">{{ service.service_plan.description|default:"No description available"|truncatewords:20 }}</p>
                     </div>
-                    
+
                     <div class="space-y-2">
                         {% if service.service_plan.disk_space_gb %}
                         <div class="flex justify-between text-sm">
@@ -229,21 +229,21 @@
                             <span class="text-white">{{ service.service_plan.disk_space_gb }} GB</span>
                         </div>
                         {% endif %}
-                        
+
                         {% if service.service_plan.bandwidth_gb %}
                         <div class="flex justify-between text-sm">
                             <span class="text-slate-400">{% trans 'Bandwidth' %}</span>
                             <span class="text-white">{{ service.service_plan.bandwidth_gb }} GB</span>
                         </div>
                         {% endif %}
-                        
+
                         {% if service.service_plan.ram_gb %}
                         <div class="flex justify-between text-sm">
                             <span class="text-slate-400">{% trans 'RAM' %}</span>
                             <span class="text-white">{{ service.service_plan.ram_gb }} GB</span>
                         </div>
                         {% endif %}
-                        
+
                         {% if service.service_plan.cpu_cores %}
                         <div class="flex justify-between text-sm">
                             <span class="text-slate-400">{% trans 'CPU Cores' %}</span>
@@ -259,7 +259,7 @@
                 <h3 class="text-lg font-semibold text-white mb-4 flex items-center">
                     ⚙️ {% trans 'Configuration' %}
                 </h3>
-                
+
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
                     <!-- Domain Configuration -->
                     <div class="space-y-3">
@@ -270,7 +270,7 @@
                                 <span class="text-white font-mono text-sm">{{ service.domain }}</span>
                             </div>
                         </div>
-                        
+
                         {% if service.primary_domain %}
                         <div class="bg-slate-700/50 rounded-lg p-3">
                             <div class="flex items-center justify-between">
@@ -280,7 +280,7 @@
                         </div>
                         {% endif %}
                     </div>
-                    
+
                     <!-- Server Details -->
                     <div class="space-y-3">
                         <h4 class="font-medium text-white text-sm uppercase tracking-wider">{% trans 'Server' %}</h4>
@@ -294,7 +294,7 @@
                                 {% endif %}
                             </div>
                         </div>
-                        
+
                         {% if service.server %}
                         <div class="bg-slate-700/50 rounded-lg p-3">
                             <div class="flex items-center justify-between">
@@ -305,7 +305,7 @@
                         {% endif %}
                     </div>
                 </div>
-                
+
             </div>
 
             <!-- Status Timeline -->
@@ -313,20 +313,20 @@
                 <h3 class="text-lg font-semibold text-white mb-4 flex items-center">
                     📈 {% trans 'Status Timeline' %}
                 </h3>
-                
+
                 <div class="space-y-4">
                     <!-- Current Status -->
                     <div class="flex items-start space-x-3">
-                        <div class="flex-shrink-0 w-8 h-8 rounded-full 
+                        <div class="flex-shrink-0 w-8 h-8 rounded-full
                             {% if service.status == 'active' %}bg-green-600
                             {% elif service.status == 'suspended' %}bg-red-600
                             {% elif service.status == 'cancelled' %}bg-gray-600
-                            {% else %}bg-yellow-600{% endif %} 
+                            {% else %}bg-yellow-600{% endif %}
                             flex items-center justify-center">
                             <div class="w-3 h-3 bg-white rounded-full"></div>
                         </div>
                         <div>
-                            <p class="text-white font-medium">{% trans 'Current Status' %}: 
+                            <p class="text-white font-medium">{% trans 'Current Status' %}:
                                 {% if service.status == 'active' %}{% trans 'Active' %}
                                 {% elif service.status == 'suspended' %}{% trans 'Suspended' %}
                                 {% elif service.status == 'cancelled' %}{% trans 'Cancelled' %}
@@ -335,7 +335,7 @@
                             <p class="text-slate-400 text-sm">{% trans 'Last updated' %} {{ service.updated_at|date:"d.m.Y H:i" }}</p>
                         </div>
                     </div>
-                    
+
                     <!-- Creation -->
                     <div class="flex items-start space-x-3">
                         <div class="flex-shrink-0 w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center">
@@ -409,7 +409,7 @@
         flex-direction: column;
         align-items: stretch;
     }
-    
+
     .mobile-full-width {
         width: 100%;
     }
@@ -457,7 +457,7 @@
     .mobile-nav-item {
         min-height: 44px;
     }
-    
+
     .mobile-nav-item:active {
         transform: scale(0.98);
         background-color: rgba(51, 65, 85, 0.7);
@@ -519,7 +519,7 @@
         flex-direction: column;
         padding: 1rem;
     }
-    
+
     .mobile-loading .skeleton {
         margin-bottom: 1rem;
     }

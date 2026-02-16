@@ -4,7 +4,7 @@
 ===============================================================================
 Modern, standardized enhanced table component with:
 - Clickable rows with navigation
-- Fixed column widths for consistency  
+- Fixed column widths for consistency
 - Badge and button component integration
 - HTMX pagination support
 - Romanian business compliance theming
@@ -31,7 +31,7 @@ Modern, standardized enhanced table component with:
           {% endif %}
         </th>
         {% endfor %}
-        
+
         {% if show_actions %}
         <th class="px-6 py-3 text-center text-xs font-medium text-slate-300 uppercase tracking-wider w-16">
           {{ action_column_label|default:_('Actions') }}
@@ -39,7 +39,7 @@ Modern, standardized enhanced table component with:
         {% endif %}
       </tr>
     </thead>
-    
+
     <!-- Table Body -->
     <tbody class="divide-y divide-slate-700">
       {% if rows %}
@@ -47,7 +47,7 @@ Modern, standardized enhanced table component with:
         <tr class="hover:bg-slate-700 {% if row.clickable %}cursor-pointer transition-colors{% endif %}"
             {% if row.clickable and row.click_url %}onclick="window.location.href='{{ row.click_url }}'"{% endif %}
             {% if row.click_js %}onclick="{{ row.click_js }}"{% endif %}>
-          
+
           {% for cell in row.cells %}
           <td class="px-6 py-4 {% if cell.no_wrap %}whitespace-nowrap{% endif %} text-{{ cell.align|default:'left' }} text-sm {% if cell.text_color %}{{ cell.text_color }}{% else %}text-slate-300{% endif %} {% if cell.font_class %}{{ cell.font_class }}{% endif %}">
             {% if cell.component == 'badge' %}
@@ -63,9 +63,9 @@ Modern, standardized enhanced table component with:
             {% endif %}
           </td>
           {% endfor %}
-          
+
           {% if show_actions %}
-          <td class="px-6 py-4 whitespace-nowrap text-center text-sm font-medium" 
+          <td class="px-6 py-4 whitespace-nowrap text-center text-sm font-medium"
               {% if row.clickable %}onclick="event.stopPropagation()"{% endif %}>
             {% for action in row.actions %}
               {% if action.component == 'button' %}

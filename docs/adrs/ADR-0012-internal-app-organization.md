@@ -31,7 +31,7 @@ apps/{app_name}/
 ```python
 apps/billing/
 ├── invoice_views.py        # Invoice-specific views
-├── proforma_views.py       # Proforma-specific views  
+├── proforma_views.py       # Proforma-specific views
 ├── payment_views.py        # Payment processing views
 ├── billing_views.py        # Main billing list, reports
 ├── invoice_models.py       # Invoice, InvoiceLine models
@@ -60,7 +60,7 @@ apps/customers/
 └── models.py               # Import all feature models for Django
 ```
 
-#### Users App Structure  
+#### Users App Structure
 ```python
 apps/users/
 ├── auth_views.py           # Login, registration, password reset views
@@ -95,7 +95,7 @@ class InvoiceService:
     @transaction.atomic
     def create_invoice_from_proforma(proforma: ProformaInvoice, user: User) -> Result[Invoice, str]:
         # Business logic here
-        
+
     @staticmethod
     def validate_invoice_access(user: User, invoice: Invoice) -> bool:
         # Access validation logic
@@ -142,7 +142,7 @@ python manage.py makemigrations --dry-run
 
 # ❌ Django IGNORES (safe to change):
 # - Which file contains the model class
-# - Import paths within the app  
+# - Import paths within the app
 # - File organization structure
 ```
 
@@ -237,7 +237,7 @@ class InvoiceService:
 class PaymentService:
     def process_payment(self): pass
 
-# apps/billing/views.py (1600+ lines)  
+# apps/billing/views.py (1600+ lines)
 def invoice_create(request): pass
 def payment_process(request): pass
 
@@ -265,7 +265,7 @@ from .proforma_service import ProformaService
 # Re-export for backward compatibility
 __all__ = [
     'InvoiceService',
-    'PaymentService', 
+    'PaymentService',
     'ProformaService',
 ]
 
@@ -282,13 +282,13 @@ def verify_all_imports_work():
         ('apps.billing.services', 'InvoiceService'),
         ('apps.billing.views', 'invoice_create'),
         ('apps.billing.models', 'Invoice'),
-        
+
         # New imports (direct) - Should work immediately
         ('apps.billing.invoice_service', 'InvoiceService'),
         ('apps.billing.invoice_views', 'invoice_create'),
         ('apps.billing.invoice_models', 'Invoice'),
     ]
-    
+
     for module_path, item_name in test_cases:
         try:
             module = importlib.import_module(module_path)
@@ -327,7 +327,7 @@ grep -r "from apps\.billing\.models import" apps/ tests/
 # 1. Create feature-specific service files
 apps/billing/
 ├── invoice_service.py      # Extract InvoiceService class
-├── payment_service.py      # Extract PaymentService class  
+├── payment_service.py      # Extract PaymentService class
 ├── proforma_service.py     # Extract ProformaService class
 └── services.py            # Becomes re-export hub
 
@@ -342,19 +342,19 @@ apps/billing/
 # scripts/verify_services_migration.py
 def verify_services_migration(app_name):
     """Verify service migration for specific app"""
-    
+
     # Test old imports still work
     old_imports = [
         f'apps.{app_name}.services.InvoiceService',
         f'apps.{app_name}.services.PaymentService',
     ]
-    
+
     # Test new imports work
     new_imports = [
-        f'apps.{app_name}.invoice_service.InvoiceService', 
+        f'apps.{app_name}.invoice_service.InvoiceService',
         f'apps.{app_name}.payment_service.PaymentService',
     ]
-    
+
     return verify_imports(old_imports + new_imports)
 
 # Run for each app
@@ -382,7 +382,7 @@ class InvoiceLine(models.Model):
     invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE)
     # ... field definitions
 
-# apps/billing/payment_models.py (NEW)  
+# apps/billing/payment_models.py (NEW)
 class Payment(models.Model):
     invoice = models.ForeignKey('invoice_models.Invoice', on_delete=models.CASCADE)
     # ... field definitions
@@ -412,7 +412,7 @@ admin.site.register(Payment)
 __all__ = [
     # Invoice models
     'Invoice', 'InvoiceLine',
-    # Payment models  
+    # Payment models
     'Payment', 'PaymentAllocation',
     # Proforma models
     'ProformaInvoice', 'ProformaLine',
@@ -428,31 +428,31 @@ __all__ = [
 # scripts/verify_models_migration.py
 def verify_models_migration(app_name):
     """Verify Django can find all models after migration"""
-    
+
     # Test Django can import models for migrations
     from django.apps import apps
     app_config = apps.get_app_config(app_name)
     models = app_config.get_models()
-    
+
     print(f"✅ Django found {len(models)} models in {app_name}")
-    
+
     # Test old imports still work
     old_import = f'apps.{app_name}.models.Invoice'
     new_import = f'apps.{app_name}.invoice_models.Invoice'
-    
+
     return verify_imports([old_import, new_import])
 
 # Test migration system still works
 def test_migration_system():
     """Verify Django migrations work after model split"""
     import subprocess
-    result = subprocess.run(['python', 'manage.py', 'makemigrations', '--dry-run'], 
+    result = subprocess.run(['python', 'manage.py', 'makemigrations', '--dry-run'],
                           capture_output=True, text=True)
     assert 'No changes detected' in result.stdout or 'Migrations for' in result.stdout
     print("✅ Migration system works after model split")
 ```
 
-### Phase 3: Views Migration (Week 5-6)  
+### Phase 3: Views Migration (Week 5-6)
 **Goal**: Split monolithic `views.py` files while maintaining URL routing
 
 #### Views Migration Pattern
@@ -494,7 +494,7 @@ from .proforma_views import proforma_create, proforma_detail
 __all__ = [
     # Invoice views
     'invoice_create', 'invoice_detail', 'invoice_list',
-    # Payment views  
+    # Payment views
     'payment_process', 'payment_detail',
     # Proforma views
     'proforma_create', 'proforma_detail',
@@ -537,7 +537,7 @@ from .proforma_models import ProformaInvoice
 class InvoiceAdmin(admin.ModelAdmin):
     list_display = ['number', 'customer', 'total_amount']
 
-@admin.register(Payment)  
+@admin.register(Payment)
 class PaymentAdmin(admin.ModelAdmin):
     list_display = ['invoice', 'amount', 'payment_date']
 ```
@@ -553,34 +553,34 @@ from pathlib import Path
 
 def update_imports_for_app(app_name, feature_mappings, dry_run=True):
     """Update imports from monolithic to feature-based"""
-    
+
     # Example feature mappings for billing app
     feature_mappings = {
         'InvoiceService': 'invoice_service',
-        'PaymentService': 'payment_service', 
+        'PaymentService': 'payment_service',
         'Invoice': 'invoice_models',
         'Payment': 'payment_models',
         'invoice_create': 'invoice_views',
         'payment_process': 'payment_views',
     }
-    
+
     files_to_update = []
-    
+
     # Find files importing from this app
     for py_file in Path('.').rglob('*.py'):
         if should_skip_file(py_file):
             continue
-            
+
         content = py_file.read_text()
-        
+
         # Look for imports from this app
         if f'from apps.{app_name}.' in content:
             files_to_update.append(py_file)
-            
+
     # Update imports file by file
     for file_path in files_to_update:
         update_file_imports(file_path, app_name, feature_mappings, dry_run)
-        
+
 def should_skip_file(file_path):
     """Skip certain files during import updates"""
     skip_patterns = ['.venv', '__pycache__', '.git', 'migrations']
@@ -598,7 +598,7 @@ update_imports_for_app('billing', billing_mappings, dry_run=True)
 # scripts/validate_migration.py
 def run_full_migration_validation():
     """Run comprehensive validation after each phase"""
-    
+
     checks = [
         verify_all_imports_work,
         test_django_migrations,
@@ -607,7 +607,7 @@ def run_full_migration_validation():
         run_test_suite,
         check_code_organization,
     ]
-    
+
     for check in checks:
         try:
             check()
@@ -615,13 +615,13 @@ def run_full_migration_validation():
         except Exception as e:
             print(f"❌ {check.__name__}: {e}")
             return False
-            
+
     return True
 
 def test_django_migrations():
     """Verify Django migrations work"""
     import subprocess
-    result = subprocess.run(['python', 'manage.py', 'check'], 
+    result = subprocess.run(['python', 'manage.py', 'check'],
                           capture_output=True, text=True)
     assert result.returncode == 0, f"Django check failed: {result.stderr}"
 
@@ -629,7 +629,7 @@ def test_admin_interface():
     """Verify admin interface loads"""
     from django.contrib import admin
     from django.apps import apps
-    
+
     for app_config in apps.get_app_configs():
         models = app_config.get_models()
         for model in models:
@@ -639,7 +639,7 @@ def test_admin_interface():
 def run_test_suite():
     """Verify all tests pass"""
     import subprocess
-    result = subprocess.run(['python', 'manage.py', 'test'], 
+    result = subprocess.run(['python', 'manage.py', 'test'],
                           capture_output=True, text=True)
     assert result.returncode == 0, f"Tests failed: {result.stderr}"
 ```
@@ -648,7 +648,7 @@ def run_test_suite():
 
 ### Phase 1: Services Migration ✅ COMPLETED
 - ✅ **Billing App**: Created `invoice_service.py`, `payment_service.py`, `proforma_service.py`
-- ✅ **Customers App**: Created `customer_service.py`, `profile_service.py`, `membership_service.py`  
+- ✅ **Customers App**: Created `customer_service.py`, `profile_service.py`, `membership_service.py`
 - ✅ **Users App**: Created `auth_service.py`, `mfa_service.py`, `profile_service.py`
 - ✅ **Provisioning App**: Created `provisioning_service.py`
 - ✅ **Re-export Pattern**: All apps maintain backward compatibility via `services.py`
@@ -662,7 +662,7 @@ def run_test_suite():
 - ✅ **Django Compatibility**: Main `models.py` imports all feature models for migrations
 - ✅ **Migration System**: Verified Django migrations work correctly
 
-### Phase 3: Views Migration ✅ COMPLETED  
+### Phase 3: Views Migration ✅ COMPLETED
 - ✅ **Billing App**: Split into `invoice_views.py`, `payment_views.py`, `proforma_views.py`, `billing_views.py`
 - ✅ **Customers App**: Split into `customer_views.py`, `profile_views.py`, `membership_views.py`
 - ✅ **Users App**: Split into `auth_views.py`, `mfa_views.py`, `profile_views.py`
@@ -676,7 +676,7 @@ def run_test_suite():
 - ✅ **Management Commands**: Updated to import from feature files
 
 ### Phase 5: Cross-App Import Updates 🔄 IN PROGRESS
-- ✅ **Import Analysis**: Identified all cross-app dependencies  
+- ✅ **Import Analysis**: Identified all cross-app dependencies
 - ✅ **Gradual Updates**: 60% of imports updated to use feature-specific files
 - 🔄 **Remaining Work**: 40% of imports still use re-export pattern (acceptable)
 - ✅ **Testing**: All functionality verified during gradual updates
@@ -700,7 +700,7 @@ To ensure safe and consistent migration, several automation scripts have been de
 python scripts/analyze_imports.py --app billing --type services
 # Output: Lists all files importing from billing.services with line numbers
 
-python scripts/analyze_imports.py --app customers --type models  
+python scripts/analyze_imports.py --app customers --type models
 # Output: Cross-app dependencies on customer models
 
 python scripts/analyze_imports.py --all-apps --generate-report
@@ -763,19 +763,19 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-      
+
       - name: Install dependencies
         run: pip install -r requirements.txt
-      
+
       - name: Verify all imports work
         run: python scripts/verify_migration_safety.py --all-phases --all-apps
-      
+
       - name: Test Django system checks
         run: python manage.py check --deploy
-      
+
       - name: Verify migrations
         run: python manage.py makemigrations --check --dry-run
-      
+
       - name: Run test suite
         run: python manage.py test
 ```
@@ -784,7 +784,7 @@ jobs:
 
 ### Import Breakage Prevention
 1. **Re-export Pattern**: Original files become import hubs during transition
-2. **Gradual Migration**: Update imports file-by-file, not all at once  
+2. **Gradual Migration**: Update imports file-by-file, not all at once
 3. **Verification Scripts**: Automated testing of both old and new import paths
 4. **Rollback Capability**: Ability to revert changes if issues arise
 5. **CI/CD Integration**: Automated verification in deployment pipeline
@@ -830,7 +830,7 @@ __all__ = ['InvoiceService', 'PaymentService', 'any_missing_items']
 # 1. Check what models Django can't find
 python manage.py check --deploy
 
-# 2. Verify models.py imports all feature models  
+# 2. Verify models.py imports all feature models
 python -c "from apps.billing.models import *; print('Models imported successfully')"
 
 # 3. Restore missing imports in main models.py
@@ -868,19 +868,19 @@ find tests/ -name "*.py" | wc -l  # Should match pre-migration count
 # monitoring/import_health_check.py
 def monitor_import_health():
     """Monitor for import-related issues in production"""
-    
+
     # Check for ImportError in logs
     import_errors = check_logs_for_import_errors()
     if import_errors:
         alert_development_team(import_errors)
-    
+
     # Verify critical imports work
     critical_imports = [
         'apps.billing.services.InvoiceService',
-        'apps.billing.models.Invoice', 
+        'apps.billing.models.Invoice',
         'apps.customers.services.CustomerService',
     ]
-    
+
     for import_path in critical_imports:
         if not test_import(import_path):
             alert_critical_import_failure(import_path)
@@ -895,7 +895,7 @@ def monitor_import_health():
 # monitoring/migration_performance.py
 def assess_migration_performance():
     """Measure performance impact of file structure changes"""
-    
+
     metrics = {
         'average_import_time': measure_import_times(),
         'memory_usage': measure_memory_impact(),
@@ -903,7 +903,7 @@ def assess_migration_performance():
         'merge_conflict_frequency': analyze_git_conflicts(),
         'file_size_distribution': analyze_file_sizes(),
     }
-    
+
     return metrics
 
 # Target improvements after migration:
@@ -937,7 +937,7 @@ def assess_migration_performance():
 {
     "python.analysis.extraPaths": [
         "./apps/billing",
-        "./apps/customers", 
+        "./apps/customers",
         "./apps/users"
     ],
     "files.associations": {

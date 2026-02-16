@@ -59,6 +59,7 @@ def get_subscription_grace_period_days() -> int:
     """Get grace period days from SettingsService (runtime)."""
     try:
         from apps.settings.services import SettingsService  # noqa: PLC0415
+
         return max(1, SettingsService.get_integer_setting("billing.subscription_grace_period_days", 7))
     except Exception:
         return _DEFAULT_GRACE_PERIOD_DAYS
@@ -68,6 +69,7 @@ def get_max_payment_retry_attempts() -> int:
     """Get max payment retry attempts from SettingsService (runtime)."""
     try:
         from apps.settings.services import SettingsService  # noqa: PLC0415
+
         return max(1, SettingsService.get_integer_setting("billing.max_payment_retry_attempts", 5))
     except Exception:
         return _DEFAULT_MAX_PAYMENT_RETRY_ATTEMPTS
@@ -660,7 +662,9 @@ class Subscription(models.Model):
                 details={
                     "subscription_id": str(self.id),
                     "failed_count": self.failed_payment_count,
-                    "grace_period_ends_at": self.grace_period_ends_at.isoformat() if self.grace_period_ends_at else None,
+                    "grace_period_ends_at": self.grace_period_ends_at.isoformat()
+                    if self.grace_period_ends_at
+                    else None,
                 },
             )
 

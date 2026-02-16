@@ -25,21 +25,21 @@
         <label for="start_date" class="block text-sm font-medium text-slate-400 mb-2">
           {% trans "Start Date" %}
         </label>
-        <input type="date" id="start_date" name="start_date" 
+        <input type="date" id="start_date" name="start_date"
                value="{{ request.GET.start_date }}"
                class="bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2">
       </div>
-      
+
       <div>
         <label for="end_date" class="block text-sm font-medium text-slate-400 mb-2">
           {% trans "End Date" %}
         </label>
-        <input type="date" id="end_date" name="end_date" 
+        <input type="date" id="end_date" name="end_date"
                value="{{ request.GET.end_date }}"
                class="bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2">
       </div>
-      
-      <button type="submit" 
+
+      <button type="submit"
               class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
         {% trans "Filter" %}
       </button>
@@ -54,14 +54,14 @@
         {{ total_sales|default:0|romanian_currency:"RON" }}
       </p>
     </div>
-    
+
     <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg p-6">
       <h3 class="text-lg font-medium text-white mb-2">{% trans "VAT Collected" %}</h3>
       <p class="text-2xl font-bold text-blue-400">
         {{ total_vat|default:0|romanian_currency:"RON" }}
       </p>
     </div>
-    
+
     <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg p-6">
       <h3 class="text-lg font-medium text-white mb-2">{% trans "Net Sales" %}</h3>
       <p class="text-2xl font-bold text-white">

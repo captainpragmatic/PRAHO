@@ -43,7 +43,7 @@ class FileSecurityScannerTest(TestCase):
 
     def setUp(self):
         self.scanner = FileSecurityScanner()
-        
+
     def test_valid_pdf_file_passes_scan(self):
         """✅ Valid PDF file should pass all security checks"""
         # Create a valid PDF file with proper magic numbers
@@ -53,9 +53,9 @@ class FileSecurityScannerTest(TestCase):
             pdf_content,
             content_type="application/pdf"
         )
-        
+
         is_safe, message = self.scanner.scan_uploaded_file(pdf_file, "test_document.pdf")
-        
+
         self.assertTrue(is_safe)
         self.assertEqual(message, "File security scan passed")
 
@@ -67,9 +67,9 @@ class FileSecurityScannerTest(TestCase):
             malicious_content,
             content_type="text/plain"
         )
-        
+
         is_safe, message = self.scanner.scan_uploaded_file(malicious_file, "malicious.txt")
-        
+
         self.assertFalse(is_safe)
         self.assertIn("Suspicious content patterns detected", message)
 
@@ -81,9 +81,9 @@ class FileSecurityScannerTest(TestCase):
             oversized_content,
             content_type="text/plain"
         )
-        
+
         is_safe, message = self.scanner.scan_uploaded_file(oversized_file, "huge_file.txt")
-        
+
         self.assertFalse(is_safe)
         self.assertIn("File too large", message)
 
@@ -96,9 +96,9 @@ class FileSecurityScannerTest(TestCase):
             fake_pdf_content,
             content_type="application/pdf"
         )
-        
+
         is_safe, message = self.scanner.scan_uploaded_file(fake_pdf_file, "fake.pdf")
-        
+
         self.assertFalse(is_safe)
         self.assertIn("Magic number mismatch", message)
 
@@ -110,7 +110,7 @@ class FileSecurityScannerTest(TestCase):
             "file<script>.txt",  # Malicious characters
             "file\x00.txt",  # Null byte injection
         ]
-        
+
         for filename in dangerous_filenames:
             with self.subTest(filename=filename):
                 safe_content = b'Safe content'
@@ -119,38 +119,38 @@ class FileSecurityScannerTest(TestCase):
                     safe_content,
                     content_type="text/plain"
                 )
-                
+
                 is_safe, message = self.scanner.scan_uploaded_file(dangerous_file, filename)
-                
+
                 self.assertFalse(is_safe)
 
     def test_scan_statistics_tracking(self):
         """📊 Scanner should track statistics correctly"""
         initial_stats = self.scanner.get_scan_statistics()
-        
+
         # Scan a valid file
         valid_file = SimpleUploadedFile("test.txt", b'Valid content', content_type="text/plain")
         self.scanner.scan_uploaded_file(valid_file, "test.txt")
-        
+
         # Scan an invalid file
         invalid_file = SimpleUploadedFile("test.exe", b'Invalid content', content_type="application/x-executable")
         self.scanner.scan_uploaded_file(invalid_file, "test.exe")
-        
+
         final_stats = self.scanner.get_scan_statistics()
-        
+
         self.assertEqual(final_stats['files_scanned'], initial_stats['files_scanned'] + 2)
         self.assertEqual(final_stats['files_rejected'], initial_stats['files_rejected'] + 1)
 
     def test_secure_filename_generation(self):
         """🔒 Secure filename generation should be unpredictable"""
         original_name = "test document.pdf"
-        
+
         # Generate multiple secure filenames
         filenames = [generate_secure_filename(original_name) for _ in range(10)]
-        
+
         # All should be unique
         self.assertEqual(len(set(filenames)), 10)
-        
+
         # All should have correct extension
         for filename in filenames:
             self.assertTrue(filename.endswith('.pdf'))
@@ -160,9 +160,9 @@ class FileSecurityScannerTest(TestCase):
         """🔒 Upload path should be secure and organized"""
         ticket_id = 123
         secure_filename = "ticket_20240101_120000_abcd1234.pdf"
-        
+
         upload_path = get_secure_upload_path(ticket_id, secure_filename)
-        
+
         # Should include year/month organization
         self.assertIn(str(timezone.now().year), upload_path)
         self.assertIn(str(ticket_id), upload_path)
@@ -198,18 +198,18 @@ class TicketNumberSecurityTest(TestCase):
                 created_by=self.user
             )
             tickets.append(ticket)
-        
+
         ticket_numbers = [t.ticket_number for t in tickets]
-        
+
         # All should be unique
         self.assertEqual(len(set(ticket_numbers)), 10)
-        
+
         # All should follow the format TK{YEAR}-{8_RANDOM_CHARS}
         current_year = str(timezone.now().year)
         for number in ticket_numbers:
             self.assertTrue(number.startswith(f'TK{current_year}-'))
             self.assertEqual(len(number), len(f'TK{current_year}-') + 8)
-        
+
         # Sequential creation should not result in sequential numbers
         numbers = [t.ticket_number.split('-')[1] for t in tickets]
         for i in range(1, len(numbers)):
@@ -219,7 +219,7 @@ class TicketNumberSecurityTest(TestCase):
         """🔒 Ticket number generation should handle collisions gracefully"""
         # Mock secrets.choice to return predictable values, then unique ones
         collision_sequence = ['A'] * 8 + ['B'] * 8  # First call collides, second succeeds
-        
+
         with patch('apps.tickets.models.secrets.choice', side_effect=collision_sequence):
             # Create first ticket (will use AAAAAAAA)
             ticket1 = Ticket.objects.create(
@@ -228,7 +228,7 @@ class TicketNumberSecurityTest(TestCase):
                 description="Test Description",
                 created_by=self.user
             )
-            
+
             # Create second ticket (will try AAAAAAAA, detect collision, use BBBBBBBB)
             ticket2 = Ticket.objects.create(
                 customer=self.customer,
@@ -236,7 +236,7 @@ class TicketNumberSecurityTest(TestCase):
                 description="Test Description",
                 created_by=self.user
             )
-        
+
         # Tickets should have different numbers despite collision attempt
         self.assertNotEqual(ticket1.ticket_number, ticket2.ticket_number)
 
@@ -251,8 +251,8 @@ class RateLimitingSecurityTest(TestCase):
         from django.conf import settings
         cls._original_ratelimit_enable = getattr(settings, 'RATELIMIT_ENABLE', False)
         settings.RATELIMIT_ENABLE = True
-    
-    @classmethod 
+
+    @classmethod
     def tearDownClass(cls):
         super().tearDownClass()
         # Restore original rate limiting setting after tests
@@ -262,7 +262,7 @@ class RateLimitingSecurityTest(TestCase):
     def setUp(self):
         self.customer = Customer.objects.create(
             name="Test Customer",
-            customer_type="business", 
+            customer_type="business",
             status="active",
             primary_email="test@customer.com"
         )
@@ -278,14 +278,14 @@ class RateLimitingSecurityTest(TestCase):
             customer=self.customer,
             role="admin"
         )
-        
+
         # Clear cache before each test
         cache.clear()
 
     def test_ticket_creation_rate_limiting(self):
         """🔒 Ticket creation should be rate limited"""
         self.client.login(email="test@example.com", password="testpass123")
-        
+
         # Make requests up to the limit (5 per minute)
         for i in range(5):
             response = self.client.post(reverse('tickets:create'), {
@@ -296,7 +296,7 @@ class RateLimitingSecurityTest(TestCase):
             })
             # Should succeed (not be rate limited)
             self.assertNotEqual(response.status_code, 429)
-        
+
         # Next request should be rate limited
         response = self.client.post(reverse('tickets:create'), {
             'customer_id': self.customer.id,
@@ -304,7 +304,7 @@ class RateLimitingSecurityTest(TestCase):
             'description': 'Test Description',
             'priority': 'normal'
         })
-        
+
         self.assertEqual(response.status_code, 429)
 
     def test_file_download_rate_limiting(self):
@@ -316,12 +316,12 @@ class RateLimitingSecurityTest(TestCase):
             description="Test Description",
             created_by=self.user
         )
-        
+
         # Create a temporary file for testing
         with tempfile.NamedTemporaryFile(mode='w+b', delete=False) as tmp_file:
             tmp_file.write(b'Test file content')
             tmp_file.flush()
-            
+
             attachment = TicketAttachment.objects.create(
                 ticket=ticket,
                 file=tmp_file.name,
@@ -330,19 +330,19 @@ class RateLimitingSecurityTest(TestCase):
                 content_type="text/plain",
                 uploaded_by=self.user
             )
-        
+
         self.client.login(email="test@example.com", password="testpass123")
-        
+
         # Make requests up to the limit (30 per minute)
         for i in range(30):
             response = self.client.get(reverse('tickets:download_attachment', args=[attachment.id]))
             if response.status_code != 200:  # File might not exist, but shouldn't be rate limited
                 self.assertNotEqual(response.status_code, 429)
-        
+
         # Next request should be rate limited
         response = self.client.get(reverse('tickets:download_attachment', args=[attachment.id]))
         self.assertEqual(response.status_code, 429)
-        
+
         # Cleanup
         try:
             os.unlink(tmp_file.name)
@@ -361,7 +361,7 @@ class FileAccessControlTest(TestCase):
         self.customer2 = Customer.objects.create(
             name="Customer 2", customer_type="business", status="active", primary_email="c2@test.com"
         )
-        
+
         # Create users
         self.user1 = User.objects.create_user(
             email="user1@example.com", password="testpass123", first_name="User", last_name="One"
@@ -373,11 +373,11 @@ class FileAccessControlTest(TestCase):
             email="staff@example.com", password="testpass123", first_name="Staff", last_name="User",
             is_staff=True, staff_role="support"
         )
-        
+
         # Create memberships
         CustomerMembership.objects.create(user=self.user1, customer=self.customer1, role="admin")
         CustomerMembership.objects.create(user=self.user2, customer=self.customer2, role="admin")
-        
+
         # Create tickets and attachments
         self.ticket1 = Ticket.objects.create(
             customer=self.customer1, title="Ticket 1", description="Description 1", created_by=self.user1
@@ -385,16 +385,16 @@ class FileAccessControlTest(TestCase):
         self.ticket2 = Ticket.objects.create(
             customer=self.customer2, title="Ticket 2", description="Description 2", created_by=self.user2
         )
-        
+
         # Create temporary files for testing
         self.temp_file1 = tempfile.NamedTemporaryFile(mode='w+b', delete=False)
         self.temp_file1.write(b'File 1 content')
         self.temp_file1.flush()
-        
+
         self.temp_file2 = tempfile.NamedTemporaryFile(mode='w+b', delete=False)
         self.temp_file2.write(b'File 2 content')
         self.temp_file2.flush()
-        
+
         self.attachment1 = TicketAttachment.objects.create(
             ticket=self.ticket1,
             file=self.temp_file1.name,
@@ -404,7 +404,7 @@ class FileAccessControlTest(TestCase):
             uploaded_by=self.user1,
             is_safe=True
         )
-        
+
         # Create internal attachment
         internal_comment = TicketComment.objects.create(
             ticket=self.ticket2,
@@ -413,7 +413,7 @@ class FileAccessControlTest(TestCase):
             author=self.staff_user,
             is_public=False
         )
-        
+
         self.internal_attachment = TicketAttachment.objects.create(
             ticket=self.ticket2,
             comment=internal_comment,
@@ -436,7 +436,7 @@ class FileAccessControlTest(TestCase):
     def test_user_can_access_own_customer_attachments(self):
         """✅ Users should be able to access attachments from their customers"""
         self.client.login(email="user1@example.com", password="testpass123")
-        
+
         response = self.client.get(reverse('tickets:download_attachment', args=[self.attachment1.id]))
         # Should not be forbidden (might be 404 if file doesn't exist, but not 403)
         self.assertNotEqual(response.status_code, 403)
@@ -444,7 +444,7 @@ class FileAccessControlTest(TestCase):
     def test_user_cannot_access_other_customer_attachments(self):
         """🚨 Users should not be able to access attachments from other customers"""
         self.client.login(email="user1@example.com", password="testpass123")
-        
+
         # Try to access attachment from customer2 (should be forbidden)
         response = self.client.get(reverse('tickets:download_attachment', args=[self.internal_attachment.id]))
         self.assertEqual(response.status_code, 403)
@@ -453,16 +453,16 @@ class FileAccessControlTest(TestCase):
         """🚨 Non-staff users should not be able to access internal attachments"""
         # Even if user2 could access customer2, they shouldn't access internal attachments
         CustomerMembership.objects.create(user=self.user1, customer=self.customer2, role="viewer")
-        
+
         self.client.login(email="user1@example.com", password="testpass123")
-        
+
         response = self.client.get(reverse('tickets:download_attachment', args=[self.internal_attachment.id]))
         self.assertEqual(response.status_code, 403)
 
     def test_staff_can_access_internal_attachments(self):
         """✅ Staff users should be able to access internal attachments"""
         self.client.login(email="staff@example.com", password="testpass123")
-        
+
         response = self.client.get(reverse('tickets:download_attachment', args=[self.internal_attachment.id]))
         # Should not be forbidden (might be 404 if file doesn't exist, but not 403)
         self.assertNotEqual(response.status_code, 403)
@@ -472,9 +472,9 @@ class FileAccessControlTest(TestCase):
         # Mark attachment as unsafe
         self.attachment1.is_safe = False
         self.attachment1.save()
-        
+
         self.client.login(email="user1@example.com", password="testpass123")
-        
+
         response = self.client.get(reverse('tickets:download_attachment', args=[self.attachment1.id]))
         self.assertEqual(response.status_code, 403)
 
@@ -499,7 +499,7 @@ class SecurityMonitoringTest(TestCase):
                 f'attachment_{i}',
                 'unauthorized_access'
             )
-        
+
         # Should have triggered an alert (check logs would be done in integration tests)
         # For unit test, verify the tracking logic works
         event_key = f"ticket_security_failed_access_{self.user.id}"
@@ -516,7 +516,7 @@ class SecurityMonitoringTest(TestCase):
                 1024 * 1024,  # 1MB each
                 'CLEAN_NO_SCAN'
             )
-        
+
         # Should have triggered suspicious volume alert
         event_key = f"ticket_security_uploads_{self.user.id}"
         uploads = cache.get(event_key, [])
@@ -530,7 +530,7 @@ class SecurityMonitoringTest(TestCase):
             'access_internal_attachment',
             'attachment_123'
         )
-        
+
         # In a real test, we'd check that an alert was logged/sent
         # For this unit test, we verify the method doesn't raise an exception
         self.assertTrue(True)  # Method completed successfully
@@ -540,9 +540,9 @@ class SecurityMonitoringTest(TestCase):
         # Generate some events
         self.tracker.track_failed_access(self.user.id, 'ticket', '1', 'unauthorized')
         self.tracker.track_file_upload(self.user.id, 'test.txt', 1024, 'CLEAN')
-        
+
         metrics = self.tracker.get_security_metrics(24)
-        
+
         self.assertIn('time_range_hours', metrics)
         self.assertEqual(metrics['time_range_hours'], 24)
         self.assertIn('failed_access_attempts', metrics)
@@ -552,13 +552,13 @@ class SecurityMonitoringTest(TestCase):
     def test_security_alert_logging(self, mock_logger):
         """🚨 Security alerts should be properly logged"""
         alert_data = {'test': 'data'}
-        
+
         self.tracker._trigger_security_alert(
             self.user.id,
             'test_alert_type',
             alert_data
         )
-        
+
         # Verify that a critical log was made
         mock_logger.critical.assert_called()
         call_args = mock_logger.critical.call_args[0][0]
@@ -581,7 +581,7 @@ class IntegrationSecurityTest(TransactionTestCase):
     def test_complete_secure_file_upload_workflow(self):
         """🔒 Test complete secure file upload from creation to download"""
         self.client.login(email="test@example.com", password="testpass123")
-        
+
         # Create ticket
         ticket = Ticket.objects.create(
             customer=self.customer,
@@ -589,7 +589,7 @@ class IntegrationSecurityTest(TransactionTestCase):
             description="Test Description",
             created_by=self.user
         )
-        
+
         # Upload secure file
         pdf_content = b'%PDF-1.4\nValid PDF content'
         secure_file = SimpleUploadedFile(
@@ -597,7 +597,7 @@ class IntegrationSecurityTest(TransactionTestCase):
             pdf_content,
             content_type="application/pdf"
         )
-        
+
         response = self.client.post(
             reverse('tickets:reply', args=[ticket.pk]),
             {
@@ -605,15 +605,15 @@ class IntegrationSecurityTest(TransactionTestCase):
                 'attachments': secure_file
             }
         )
-        
+
         # Should succeed
         self.assertNotEqual(response.status_code, 400)
-        
+
         # Verify attachment was created with security flags
         attachment = TicketAttachment.objects.filter(ticket=ticket).first()
         if attachment:  # Only test if attachment was created
             self.assertTrue(attachment.is_safe)
-            
+
             # Test secure download
             download_response = self.client.get(
                 reverse('tickets:download_attachment', args=[attachment.id])
@@ -624,15 +624,15 @@ class IntegrationSecurityTest(TransactionTestCase):
     def test_malicious_file_upload_blocked_end_to_end(self):
         """🚨 Test that malicious files are blocked through complete workflow"""
         self.client.login(email="test@example.com", password="testpass123")
-        
+
         # Create ticket
         ticket = Ticket.objects.create(
             customer=self.customer,
             title="Test Ticket",
-            description="Test Description", 
+            description="Test Description",
             created_by=self.user
         )
-        
+
         # Try to upload malicious file
         malicious_content = b'<script>alert("XSS")</script>'
         malicious_file = SimpleUploadedFile(
@@ -640,7 +640,7 @@ class IntegrationSecurityTest(TransactionTestCase):
             malicious_content,
             content_type="text/plain"
         )
-        
+
         response = self.client.post(
             reverse('tickets:reply', args=[ticket.pk]),
             {
@@ -648,17 +648,17 @@ class IntegrationSecurityTest(TransactionTestCase):
                 'attachments': malicious_file
             }
         )
-        
+
         # Request might succeed but file should not be saved
         # Verify no unsafe attachment was created
         unsafe_attachments = TicketAttachment.objects.filter(
-            ticket=ticket, 
+            ticket=ticket,
             is_safe=False
         )
         # In our implementation, unsafe files are not saved at all
         # so we should have no attachments
         all_attachments = TicketAttachment.objects.filter(ticket=ticket)
-        
+
         # Either no attachments created, or if any exist, they should be marked safe
         for attachment in all_attachments:
             self.assertTrue(attachment.is_safe)
@@ -673,7 +673,7 @@ class IntegrationSecurityTest(TransactionTestCase):
             email="user2@example.com", password="testpass123", first_name="User", last_name="Two"
         )
         CustomerMembership.objects.create(user=user2, customer=customer2, role="admin")
-        
+
         # Create ticket and attachment for customer2
         ticket2 = Ticket.objects.create(
             customer=customer2,
@@ -681,11 +681,11 @@ class IntegrationSecurityTest(TransactionTestCase):
             description="Description",
             created_by=user2
         )
-        
+
         with tempfile.NamedTemporaryFile(mode='w+b', delete=False) as tmp_file:
             tmp_file.write(b'Customer 2 confidential data')
             tmp_file.flush()
-            
+
             attachment2 = TicketAttachment.objects.create(
                 ticket=ticket2,
                 file=tmp_file.name,
@@ -695,17 +695,17 @@ class IntegrationSecurityTest(TransactionTestCase):
                 uploaded_by=user2,
                 is_safe=True
             )
-        
+
         # Login as user from customer1 and try to access customer2's attachment
         self.client.login(email="test@example.com", password="testpass123")
-        
+
         response = self.client.get(
             reverse('tickets:download_attachment', args=[attachment2.id])
         )
-        
+
         # Should be forbidden
         self.assertEqual(response.status_code, 403)
-        
+
         # Cleanup
         try:
             os.unlink(tmp_file.name)

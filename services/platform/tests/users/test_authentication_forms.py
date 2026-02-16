@@ -36,7 +36,7 @@ class MinimalLoginFormTestCase(TestCase):
         # Empty form
         form = LoginForm(data={})
         self.assertFalse(form.is_valid())
-        
+
         # Missing password
         form = LoginForm(data={'email': 'test@example.com'})
         self.assertFalse(form.is_valid())
@@ -71,7 +71,7 @@ class MinimalUserRegistrationFormTestCase(TestCase):
         form = UserRegistrationForm(data=form_data)
         # Just test that form processes without errors
         form.is_valid()  # May be True or False depending on other required fields
-        
+
     def test_registration_form_password_mismatch(self):
         """Test password mismatch validation"""
         form_data = {
@@ -139,7 +139,7 @@ class MinimalTwoFactorFormsTestCase(TestCase):
         """Test empty 2FA forms"""
         setup_form = TwoFactorSetupForm(data={})
         self.assertFalse(setup_form.is_valid())
-        
+
         verify_form = TwoFactorVerifyForm(data={})
         self.assertFalse(verify_form.is_valid())
 
@@ -219,16 +219,16 @@ class MinimalFormIntegrationTestCase(TestCase):
         # Test basic instantiation
         login_form = LoginForm()
         self.assertIsNotNone(login_form)
-        
+
         user_reg_form = UserRegistrationForm()
         self.assertIsNotNone(user_reg_form)
-        
+
         setup_form = TwoFactorSetupForm()
         self.assertIsNotNone(setup_form)
-        
+
         verify_form = TwoFactorVerifyForm()
         self.assertIsNotNone(verify_form)
-        
+
         onboarding_form = CustomerOnboardingRegistrationForm()
         self.assertIsNotNone(onboarding_form)
 
@@ -238,7 +238,7 @@ class MinimalFormIntegrationTestCase(TestCase):
             email='test@example.com',
             password='testpass123'
         )
-        
+
         # Test profile form with user profile instance
         profile_form = UserProfileForm(instance=user.profile)
         self.assertIsNotNone(profile_form)
@@ -246,7 +246,7 @@ class MinimalFormIntegrationTestCase(TestCase):
     def test_form_field_access(self):
         """Test accessing form fields"""
         form = LoginForm()
-        
+
         # Should have email and password fields (not username)
         self.assertIn('email', form.fields)
         self.assertIn('password', form.fields)
@@ -262,7 +262,7 @@ class MinimalFormIntegrationTestCase(TestCase):
             'password2': 'complex_password_123',
         }
         form = UserRegistrationForm(data=form_data)
-        
+
         if form.is_valid():
             try:
                 # Try to save if method exists
@@ -283,7 +283,7 @@ class MinimalFormIntegrationTestCase(TestCase):
             {'email': 'invalid-email'},  # Invalid email
             {'password1': '123', 'password2': '456'},  # Password mismatch
         ]
-        
+
         for invalid_data in invalid_data_sets:
             form = UserRegistrationForm(data=invalid_data)
             # Should be invalid
@@ -294,7 +294,7 @@ class MinimalFormIntegrationTestCase(TestCase):
     def test_customer_onboarding_validation_methods(self):
         """Test customer onboarding form validation methods"""
         form = CustomerOnboardingRegistrationForm()
-        
+
         # Test that form has expected fields related to customer creation
         expected_fields = ['customer_type', 'customer_name', 'email']
         for field in expected_fields:
@@ -305,11 +305,11 @@ class MinimalFormIntegrationTestCase(TestCase):
         """Test 2FA form validation logic"""
         # Test different token formats
         test_tokens = ['123456', '000000', 'abcdef', '']
-        
+
         for token in test_tokens:
             setup_form = TwoFactorSetupForm(data={'token': token})
             verify_form = TwoFactorVerifyForm(data={'token': token})
-            
+
             # Forms should process the data (may be valid or invalid)
             setup_form.is_valid()
             verify_form.is_valid()

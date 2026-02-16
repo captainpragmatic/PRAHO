@@ -25,7 +25,7 @@ from apps.users.models import User
 logger = logging.getLogger(__name__)
 
 
-@api_view(['POST'])
+@api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # No DRF permissions - auth handled by @require_portal_service_authentication
 @throttle_classes([])  # No DRF throttling - service-to-service HMAC auth, not user-facing
@@ -37,8 +37,8 @@ def cookie_consent_api(request: Request, request_data: dict[str, Any]) -> Respon
     Accepts: cookie_id, status, functional, analytics, marketing,
              ip_address, user_agent, user_id (optional)
     """
-    cookie_id = request_data.get('cookie_id', '')
-    status = request_data.get('status', '')
+    cookie_id = request_data.get("cookie_id", "")
+    status = request_data.get("status", "")
 
     if not cookie_id or not status:
         return _uniform_error_response("Missing required fields: cookie_id, status", 400)
@@ -46,23 +46,23 @@ def cookie_consent_api(request: Request, request_data: dict[str, Any]) -> Respon
     result = GDPRConsentService.record_cookie_consent(
         cookie_id=cookie_id,
         status=status,
-        functional=bool(request_data.get('functional', False)),
-        analytics=bool(request_data.get('analytics', False)),
-        marketing=bool(request_data.get('marketing', False)),
-        ip_address=request_data.get('ip_address'),
-        user_agent=request_data.get('user_agent', ''),
-        user_id=request_data.get('user_id'),
+        functional=bool(request_data.get("functional", False)),
+        analytics=bool(request_data.get("analytics", False)),
+        marketing=bool(request_data.get("marketing", False)),
+        ip_address=request_data.get("ip_address"),
+        user_agent=request_data.get("user_agent", ""),
+        user_id=request_data.get("user_id"),
     )
 
     if result.is_err():
         logger.error(f"🔥 [GDPR API] Cookie consent failed: {result.error}")
-        return Response({'success': False, 'error': 'Failed to record consent'}, status=500)
+        return Response({"success": False, "error": "Failed to record consent"}, status=500)
 
     consent = result.unwrap()
-    return Response({'success': True, 'consent_id': str(consent.id)})
+    return Response({"success": True, "consent_id": str(consent.id)})
 
 
-@api_view(['POST'])
+@api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # No DRF permissions - auth handled by @require_portal_service_authentication
 @throttle_classes([])  # No DRF throttling - service-to-service HMAC auth, not user-facing
@@ -72,7 +72,7 @@ def consent_history_api(request: Request, request_data: dict[str, Any]) -> Respo
     Get consent history for an authenticated user.
     Returns both ComplianceLog entries and CookieConsent records.
     """
-    user_id = request_data.get('user_id')
+    user_id = request_data.get("user_id")
     if user_id is None:
         return _uniform_error_response("user_id is required", 400)
 
@@ -84,14 +84,16 @@ def consent_history_api(request: Request, request_data: dict[str, Any]) -> Respo
     consent_history = GDPRConsentService.get_consent_history(user)
     cookie_history = GDPRConsentService.get_cookie_consent_history(user)
 
-    return Response({
-        'success': True,
-        'consent_history': consent_history,
-        'cookie_consent_history': cookie_history,
-    })
+    return Response(
+        {
+            "success": True,
+            "consent_history": consent_history,
+            "cookie_consent_history": cookie_history,
+        }
+    )
 
 
-@api_view(['POST'])
+@api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # No DRF permissions - auth handled by @require_portal_service_authentication
 @throttle_classes([])  # No DRF throttling - service-to-service HMAC auth, not user-facing
@@ -103,7 +105,7 @@ def data_export_api(request: Request, request_data: dict[str, Any]) -> Response:
     action="status": return recent exports for user.
     action="request" (default): create a new export request.
     """
-    user_id = request_data.get('user_id')
+    user_id = request_data.get("user_id")
     if user_id is None:
         return _uniform_error_response("user_id is required", 400)
 
@@ -112,22 +114,24 @@ def data_export_api(request: Request, request_data: dict[str, Any]) -> Response:
     except (User.DoesNotExist, ValueError, TypeError):
         return _uniform_error_response()
 
-    action = request_data.get('action', 'request')
+    action = request_data.get("action", "request")
 
-    if action == 'status':
+    if action == "status":
         exports = GDPRExportService.get_user_exports(user)
-        return Response({'success': True, 'exports': exports})
+        return Response({"success": True, "exports": exports})
 
-    ip_address = request_data.get('ip_address')
+    ip_address = request_data.get("ip_address")
     result = GDPRExportService.create_data_export_request(user, request_ip=ip_address)
 
     if result.is_err():
         logger.error(f"🔥 [GDPR API] Data export request failed: {result.error}")
-        return Response({'success': False, 'error': 'Failed to create export request'}, status=500)
+        return Response({"success": False, "error": "Failed to create export request"}, status=500)
 
     export_request = result.unwrap()
-    return Response({
-        'success': True,
-        'export_id': str(export_request.id),
-        'status': export_request.status,
-    })
+    return Response(
+        {
+            "success": True,
+            "export_id": str(export_request.id),
+            "status": export_request.status,
+        }
+    )

@@ -398,11 +398,7 @@ def product_prices(request: HttpRequest, slug: str) -> HttpResponse:
     """💰 Manage product pricing - Romanian RON focus"""
     try:
         product = get_object_or_404(Product, slug=slug)
-        prices = (
-            product.prices.filter(is_active=True)
-            .select_related("currency")
-            .order_by("currency__code")
-        )
+        prices = product.prices.filter(is_active=True).select_related("currency").order_by("currency__code")
 
         # Get available currencies (with RON first for Romanian business)
         currencies = Currency.objects.order_by(models.Case(models.When(code="RON", then=0), default=1), "code")

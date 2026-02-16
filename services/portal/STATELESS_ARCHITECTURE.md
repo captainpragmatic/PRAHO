@@ -7,7 +7,7 @@
 ## ❌ What Portal Should NOT Have
 
 - ❌ **No Real Database**: Portal uses dummy in-memory SQLite (lost on restart)
-- ❌ **No Models**: Portal apps should not define any Django models  
+- ❌ **No Models**: Portal apps should not define any Django models
 - ❌ **No Migrations**: Database router prevents all migrations
 - ❌ **No Sessions**: No session middleware or session storage
 - ❌ **No User Authentication**: No `django.contrib.auth` or user models
@@ -32,7 +32,7 @@
 Customer Browser → Portal Service → Platform API → Platform Database
                       ↓
                  Templates + Views
-                      ↓  
+                      ↓
                  Rendered HTML
 ```
 
@@ -79,7 +79,7 @@ Django **requires** a `DATABASES` setting to function, even if you never use it.
 ```python
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.sqlite3", 
+        "ENGINE": "django.db.backends.sqlite3",
         "NAME": ":memory:",  # In-memory, disappears on restart
     }
 }
@@ -100,7 +100,7 @@ DATABASES = {
 ## 🎯 Benefits of Stateless Design
 
 1. **Scalability**: Portal instances can be load balanced easily
-2. **Security**: No local data to compromise or leak between customers  
+2. **Security**: No local data to compromise or leak between customers
 3. **Consistency**: Single source of truth (Platform database)
 4. **Deployment**: Portal can restart without data loss
 5. **Development**: Clear separation of concerns

@@ -150,7 +150,9 @@ class InfrastructureAuditService:
             new_values={
                 "ipv4_address": deployment.ipv4_address,
                 "ipv6_address": deployment.ipv6_address,
-                "virtualmin_server_id": str(deployment.virtualmin_server_id) if deployment.virtualmin_server_id else None,
+                "virtualmin_server_id": str(deployment.virtualmin_server_id)
+                if deployment.virtualmin_server_id
+                else None,
             },
             metadata={
                 **context.metadata,

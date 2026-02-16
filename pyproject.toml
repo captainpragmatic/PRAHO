@@ -276,36 +276,36 @@ exclude = [
 select = [
     # ✅ CRITICAL - Runtime Errors (ALWAYS ENFORCE)
     "E",      # pycodestyle errors (syntax, indentation)
-    "F",      # Pyflakes (undefined names, unused imports) 
+    "F",      # Pyflakes (undefined names, unused imports)
     "W",      # pycodestyle warnings
-    
-    # ⚡ PERFORMANCE - O(N²) Detection & Optimization  
+
+    # ⚡ PERFORMANCE - O(N²) Detection & Optimization
     "PERF",   # Performance anti-patterns (NEW!)
     "C90",    # McCabe complexity (prevent spaghetti code)
     "PIE",    # flake8-pie (performance improvements)
     "SIM",    # flake8-simplify (simpler = faster + fewer bugs)
-    
+
     # 🔒 SECURITY - WARNING ONLY (Manual Review Required)
     "S",      # bandit security issues (WARN, don't ignore)
     "B",      # flake8-bugbear (likely bugs)
-    
+
     # 🐍 DJANGO EXCELLENCE
-    "DJ",     # flake8-django (Django best practices) 
+    "DJ",     # flake8-django (Django best practices)
     "A",      # flake8-builtins (prevent shadowing)
-    
+
     # 🤖 AI/LLM READABILITY - Help Claude/Copilot
     "I",      # isort (organized imports)
     "N",      # pep8-naming (consistent naming)
     "UP",     # pyupgrade (modern Python syntax)
     "ANN",    # flake8-annotations (type hints for AI)
-    
+
     # 📦 CODE QUALITY
     "C4",     # flake8-comprehensions
     "TID",    # flake8-tidy-imports
     "RUF",    # Ruff-specific rules
     "ERA",    # eradicate (remove commented code)
-    
-    # 🧹 MAINTENANCE 
+
+    # 🧹 MAINTENANCE
     "PL",     # Pylint subset (errors/warnings only)
 ]
 
@@ -318,36 +318,36 @@ ignore = [
     "E501",   # Line too long (modern screens handle 120+)
     "W291",   # Trailing whitespace (auto-fixable)
     "W293",   # Blank line with whitespace (cosmetic)
-    
+
     # ❌ DEVELOPMENT HELPERS (Useful in Debug)
     "T201",   # print statements (useful for debugging)
     "T203",   # pprint statements
-    
+
     # ❌ TEST-SPECIFIC ALLOWANCES
     "S101",   # Use of assert (standard in tests)
     # "S105", # Hardcoded password string - WARN EVERYWHERE
     # "S106", # Hardcoded password funcarg - WARN EVERYWHERE
-    
+
     # ❌ DJANGO PATTERNS (Framework Conventions)
     "DTZ005", # timezone-naive datetime (Django handles this)
     "S104",   # Hardcoded bind all interfaces (dev server)
     "DJ008",  # Model meta ordering (style preference)
     "F405",   # undefined-local-with-import-star (Django settings pattern)
-    
+
     # ❌ TYPE HINT EDGE CASES
     # "ANN101", # Missing type annotation for self (REMOVED IN NEWER RUFF)
     # "ANN102", # Missing type annotation for cls (REMOVED IN NEWER RUFF)
     "ANN401", # Dynamically typed expressions (Django magic)
-    
+
     # ❌ TODO/FIXME COMMENTS (Development Process)
     "TD002",  # Missing author in TODO
     "TD003",  # Missing issue link in TODO
     "FIX002", # Line contains TODO
-    
+
     # ❌ QUOTE STYLE (Preference, Not Functional)
     "Q000",   # Single vs double quotes
     "COM812", # Trailing comma in Python 3.6+
-    
+
     # ❌ DOCSTRING REQUIREMENTS (Important but not blocking)
     "D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107",
 ]
@@ -359,7 +359,7 @@ ignore = [
 
 # Test files - Focus on functionality over style
 "test_*.py" = [
-    "S101",     # Allow assert statements  
+    "S101",     # Allow assert statements
     "S105", "S106", # Test credentials are acceptable
     "ANN",      # Skip type hints in tests
     "D",        # Skip docstrings in tests
@@ -392,7 +392,7 @@ ignore = [
 
 # Audit event generation - Allow pseudo-random for test data
 "**/management/commands/generate_audit_events.py" = [
-    "T201", "T203",     # Print statements for progress  
+    "T201", "T203",     # Print statements for progress
     "S311",             # Pseudo-random generators (test data generation)
     "PLR2004",          # Magic numbers (test data)
     "ANN"               # Type hints (utility script)
@@ -414,7 +414,7 @@ ignore = [
 # Django admin files - Allow admin patterns and ClassVar conflicts
 "**/admin.py" = [
     "RUF012",      # Django admin attributes don't need ClassVar (conflicts with MyPy)
-    "PLR0911",     # Admin methods can have many returns 
+    "PLR0911",     # Admin methods can have many returns
     "PLR0912",     # Admin methods can have many branches
     "S105", "S106" # Admin may have sample data
 ]
@@ -462,7 +462,7 @@ ignore = [
 ]
 
 
-# Example files - Allow demonstration patterns  
+# Example files - Allow demonstration patterns
 "examples/**/*.py" = [
     "T201", "T203",     # Print statements for examples
     "F841",             # Unused variables in examples
@@ -487,7 +487,7 @@ ignore = [
 known-first-party = ["apps", "config", "ui"]
 section-order = [
     "future",
-    "standard-library", 
+    "standard-library",
     "third-party",
     "first-party",
     "local-folder"
@@ -647,53 +647,7 @@ disable_error_code = ["misc"]
 # ignore_missing_imports = true
 
 # ===============================================================================
-# TEST CONFIGURATION
-# ===============================================================================
-
-[tool.pytest.ini_options]
-# ===============================================================================
-# ROOT-LEVEL PYTEST CONFIGURATION - Integration & E2E Tests Only
-# ===============================================================================
-# Service-specific tests are in services/platform/pytest.ini and services/portal/pytest.ini
-# This config is for cross-service black-box testing only
-
-# NO Django settings at root - tests should be framework-agnostic
-# DJANGO_SETTINGS_MODULE should NOT be set here
-
-addopts = [
-    "--verbose",
-    "--tb=short",
-    "--strict-markers",
-    "--disable-warnings",
-    "-p no:django",  # Disable Django plugin for integration tests
-]
-
-# Only integration and E2E tests at root
-testpaths = [
-    "tests/integration_tests",
-    "tests/e2e",
-]
-
-markers = [
-    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
-    "integration: marks tests as integration tests (API-level cross-service)",
-    "e2e: marks tests as end-to-end tests (browser-level)",
-    "e2e_platform: Platform E2E tests (staff backend :8700)",
-    "e2e_portal: Portal E2E tests (customer frontend :8701)",
-    "e2e_orm: ORM-based E2E tests (no browser)",
-    "security: marks security-related tests",
-    "smoke: marks smoke tests for quick validation",
-    "requires_platform: marks tests requiring platform service running",
-    "requires_portal: marks tests requiring portal service running",
-]
-
-filterwarnings = [
-    "ignore::DeprecationWarning",
-    "ignore::PendingDeprecationWarning",
-]
-
-# ===============================================================================
-# COVERAGE CONFIGURATION  
+# COVERAGE CONFIGURATION
 # ===============================================================================
 
 [tool.coverage.run]
@@ -701,7 +655,7 @@ filterwarnings = [
 source = ["apps", "config", "ui"]
 omit = [
     "*/migrations/*",
-    "*/tests/*", 
+    "*/tests/*",
     "*/venv/*",
     "*/env/*",
     "*/.venv/*",

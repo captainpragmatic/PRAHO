@@ -100,9 +100,7 @@ class AES256Cipher:
         3. Derived from DJANGO_SECRET_KEY using PBKDF2 (fallback)
         """
         # Try direct AES-256 key first
-        aes_key = os.environ.get("DJANGO_AES256_KEY") or getattr(
-            settings, "AES256_ENCRYPTION_KEY", None
-        )
+        aes_key = os.environ.get("DJANGO_AES256_KEY") or getattr(settings, "AES256_ENCRYPTION_KEY", None)
         if aes_key:
             try:
                 key_bytes = base64.urlsafe_b64decode(aes_key)
@@ -123,8 +121,8 @@ class AES256Cipher:
             raise ImproperlyConfigured(
                 "AES-256 encryption requires DJANGO_AES256_KEY or "
                 "CREDENTIAL_VAULT_MASTER_KEY environment variable. "
-                "Generate with: python -c \"import secrets, base64; "
-                "print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())\""
+                'Generate with: python -c "import secrets, base64; '
+                'print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"'
             )
 
         return self._derive_key(master_key.encode() if isinstance(master_key, str) else master_key)
@@ -164,11 +162,7 @@ class AES256Cipher:
                 f"Got {len(self._key) if self._key else 0} bytes."
             )
 
-    def encrypt(
-        self,
-        plaintext: str | bytes,
-        associated_data: bytes | None = None
-    ) -> str:
+    def encrypt(self, plaintext: str | bytes, associated_data: bytes | None = None) -> str:
         """
         Encrypt data using AES-256-GCM.
 
@@ -204,11 +198,7 @@ class AES256Cipher:
             logger.error(f"AES-256 encryption failed: {type(e).__name__}")
             raise AES256EncryptionError(f"Encryption failed: {e}") from e
 
-    def decrypt(
-        self,
-        ciphertext: str,
-        associated_data: bytes | None = None
-    ) -> str:
+    def decrypt(self, ciphertext: str, associated_data: bytes | None = None) -> str:
         """
         Decrypt AES-256-GCM encrypted data.
 
@@ -233,8 +223,8 @@ class AES256Cipher:
 
             if version == VERSION_AES256_GCM:
                 # AES-256-GCM decryption
-                nonce = encrypted[1:1 + NONCE_SIZE]
-                ct = encrypted[1 + NONCE_SIZE:]
+                nonce = encrypted[1 : 1 + NONCE_SIZE]
+                ct = encrypted[1 + NONCE_SIZE :]
 
                 plaintext = self._aesgcm.decrypt(nonce, ct, associated_data)
                 return plaintext.decode("utf-8")
@@ -261,9 +251,7 @@ class AES256Cipher:
     def _decrypt_fernet_legacy(self, ciphertext: str) -> str:
         """Decrypt legacy Fernet-encrypted data."""
         if not self._fernet:
-            raise AES256DecryptionError(
-                "Cannot decrypt legacy data: DJANGO_ENCRYPTION_KEY not configured"
-            )
+            raise AES256DecryptionError("Cannot decrypt legacy data: DJANGO_ENCRYPTION_KEY not configured")
 
         try:
             # Handle double-base64 encoding from old encryption
@@ -336,6 +324,7 @@ def generate_aes256_key() -> str:
     Returns base64-encoded 32-byte key suitable for DJANGO_AES256_KEY.
     """
     import secrets
+
     key = secrets.token_bytes(AES_KEY_SIZE)
     return base64.urlsafe_b64encode(key).decode("utf-8")
 

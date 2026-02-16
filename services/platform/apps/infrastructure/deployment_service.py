@@ -288,7 +288,11 @@ class NodeDeploymentService:
             # Stage 7-10: Run Ansible playbooks (panel-aware)
             panel_type = "virtualmin"
             if hasattr(deployment, "panel_type") and deployment.panel_type:
-                panel_type = deployment.panel_type.panel_type if hasattr(deployment.panel_type, "panel_type") else str(deployment.panel_type)
+                panel_type = (
+                    deployment.panel_type.panel_type
+                    if hasattr(deployment.panel_type, "panel_type")
+                    else str(deployment.panel_type)
+                )
 
             playbook_names = self._ansible.get_playbook_order(panel_type)
             stage_keys = ["ansible_base", "ansible_panel", "ansible_harden", "ansible_backup"]
@@ -350,8 +354,7 @@ class NodeDeploymentService:
             import string
 
             admin_password = "".join(
-                secrets.choice(string.ascii_letters + string.digits + "!@#$%^&*")
-                for _ in range(24)
+                secrets.choice(string.ascii_letters + string.digits + "!@#$%^&*") for _ in range(24)
             )
 
             registration_result = self._registration.register_node(

@@ -136,9 +136,7 @@ class CouponService:
         """Get coupon by code (case-insensitive)."""
         normalized_code = cls.normalize_code(code)
         try:
-            return Coupon.objects.select_related("campaign", "currency", "assigned_customer").get(
-                code=normalized_code
-            )
+            return Coupon.objects.select_related("campaign", "currency", "assigned_customer").get(code=normalized_code)
         except Coupon.DoesNotExist:
             return None
 
@@ -372,10 +370,7 @@ class CouponService:
             return DiscountResult()
 
         # Calculate base amount to apply discount to
-        base_amount_cents = sum(
-            item.quantity * item.unit_price_cents + item.setup_cents
-            for item in items
-        )
+        base_amount_cents = sum(item.quantity * item.unit_price_cents + item.setup_cents for item in items)
 
         discount_cents = 0
         discount_description = ""
@@ -638,19 +633,14 @@ class CouponService:
             is_active=True,
             status="active",
             valid_from__lte=now,
-        ).filter(
-            models.Q(valid_until__isnull=True) | models.Q(valid_until__gte=now)
-        )
+        ).filter(models.Q(valid_until__isnull=True) | models.Q(valid_until__gte=now))
 
         if not include_private:
             queryset = queryset.filter(is_public=True)
 
         # Include personal coupons for this customer
         if customer:
-            queryset = queryset.filter(
-                models.Q(assigned_customer__isnull=True) |
-                models.Q(assigned_customer=customer)
-            )
+            queryset = queryset.filter(models.Q(assigned_customer__isnull=True) | models.Q(assigned_customer=customer))
         else:
             queryset = queryset.filter(assigned_customer__isnull=True)
 
@@ -702,12 +692,15 @@ class PromotionRuleService:
         if cached_items is None:
             cached_items = list(order.items.select_related("product").all())
 
-        queryset = PromotionRule.objects.filter(
-            is_active=True,
-            valid_from__lte=now,
-        ).filter(
-            models.Q(valid_until__isnull=True) | models.Q(valid_until__gte=now)
-        ).select_related("campaign", "currency").order_by("priority")
+        queryset = (
+            PromotionRule.objects.filter(
+                is_active=True,
+                valid_from__lte=now,
+            )
+            .filter(models.Q(valid_until__isnull=True) | models.Q(valid_until__gte=now))
+            .select_related("campaign", "currency")
+            .order_by("priority")
+        )
 
         applicable = []
         for rule in queryset:
@@ -789,10 +782,7 @@ class PromotionRuleService:
         if not items:
             return DiscountResult()
 
-        base_amount_cents = sum(
-            item.quantity * item.unit_price_cents + item.setup_cents
-            for item in items
-        )
+        base_amount_cents = sum(item.quantity * item.unit_price_cents + item.setup_cents for item in items)
 
         discount_cents = 0
         breakdown: dict[str, Any] = {}
@@ -807,9 +797,7 @@ class PromotionRuleService:
             breakdown = {"type": "fixed", "amount": discount_cents}
 
         elif rule.discount_type in ("tiered_percent", "tiered_fixed"):
-            discount_cents = cls._calculate_tiered_discount(
-                rule, cached_items, base_amount_cents
-            )
+            discount_cents = cls._calculate_tiered_discount(rule, cached_items, base_amount_cents)
             breakdown = {"type": "tiered", "tiers": rule.tiers}
 
         # Apply cap
@@ -1086,9 +1074,7 @@ class ReferralService:
         )
 
         # Update referral code stats atomically to prevent race conditions
-        ReferralCode.objects.filter(pk=referral_code.pk).update(
-            total_referrals=F("total_referrals") + 1
-        )
+        ReferralCode.objects.filter(pk=referral_code.pk).update(total_referrals=F("total_referrals") + 1)
         referral_code.refresh_from_db()
 
         return referral
@@ -1186,10 +1172,14 @@ class LoyaltyService:
         """Assign initial tier to new member."""
         from .models import LoyaltyTier
 
-        initial_tier = LoyaltyTier.objects.filter(
-            program=membership.program,
-            min_points_lifetime=0,
-        ).order_by("sort_order").first()
+        initial_tier = (
+            LoyaltyTier.objects.filter(
+                program=membership.program,
+                min_points_lifetime=0,
+            )
+            .order_by("sort_order")
+            .first()
+        )
 
         if initial_tier:
             membership.current_tier = initial_tier
@@ -1307,11 +1297,15 @@ class LoyaltyService:
 
         current_tier_order = membership.current_tier.sort_order if membership.current_tier else -1
 
-        eligible_tier = LoyaltyTier.objects.filter(
-            program=membership.program,
-            min_points_lifetime__lte=membership.points_lifetime,
-            sort_order__gt=current_tier_order,
-        ).order_by("-sort_order").first()
+        eligible_tier = (
+            LoyaltyTier.objects.filter(
+                program=membership.program,
+                min_points_lifetime__lte=membership.points_lifetime,
+                sort_order__gt=current_tier_order,
+            )
+            .order_by("-sort_order")
+            .first()
+        )
 
         if eligible_tier:
             membership.current_tier = eligible_tier

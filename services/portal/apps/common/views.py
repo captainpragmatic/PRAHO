@@ -30,46 +30,46 @@ def cookie_consent_view(request: HttpRequest) -> HttpResponse:
     try:
         data = json.loads(request.body)
     except json.JSONDecodeError:
-        return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
+        return JsonResponse({"success": False, "error": "Invalid JSON"}, status=400)
 
     # Read or generate cookie_id for anonymous visitors
-    cookie_id = request.COOKIES.get('cookie_consent_id', '')
+    cookie_id = request.COOKIES.get("cookie_consent_id", "")
     if not cookie_id:
         cookie_id = str(uuid.uuid4())
 
     # Build payload for Platform GDPR API
     consent_data = {
-        'cookie_id': cookie_id,
-        'status': data.get('status', 'customized'),
-        'functional': bool(data.get('functional', False)),
-        'analytics': bool(data.get('analytics', False)),
-        'marketing': bool(data.get('marketing', False)),
-        'ip_address': get_safe_client_ip(request),
-        'user_agent': request.META.get('HTTP_USER_AGENT', '')[:500],
+        "cookie_id": cookie_id,
+        "status": data.get("status", "customized"),
+        "functional": bool(data.get("functional", False)),
+        "analytics": bool(data.get("analytics", False)),
+        "marketing": bool(data.get("marketing", False)),
+        "ip_address": get_safe_client_ip(request),
+        "user_agent": request.META.get("HTTP_USER_AGENT", "")[:500],
     }
 
     # Include user_id from session if authenticated
-    user_id = request.session.get('user_id')
+    user_id = request.session.get("user_id")
     if user_id:
-        consent_data['user_id'] = user_id
+        consent_data["user_id"] = user_id
 
     try:
         result = api_client.submit_cookie_consent(consent_data)
-        success = result.get('success', False)
+        success = result.get("success", False)
     except PlatformAPIError:
         logger.warning("⚠️ [Portal Cookie] Platform API unavailable, consent saved client-side only")
         success = False
 
-    response = JsonResponse({'success': success})
+    response = JsonResponse({"success": success})
 
     # Set cookie_consent_id for anonymous tracking across sessions
-    if not request.COOKIES.get('cookie_consent_id'):
+    if not request.COOKIES.get("cookie_consent_id"):
         response.set_cookie(
-            'cookie_consent_id',
+            "cookie_consent_id",
             cookie_id,
             max_age=365 * 24 * 60 * 60,
             httponly=True,
-            samesite='Lax',
+            samesite="Lax",
         )
 
     return response
@@ -80,4 +80,4 @@ def cookie_policy_view(request: HttpRequest) -> HttpResponse:
     Cookie policy page - public, no auth required.
     Lists all cookie categories with name, purpose, duration, provider.
     """
-    return render(request, 'legal/cookie_policy.html')
+    return render(request, "legal/cookie_policy.html")

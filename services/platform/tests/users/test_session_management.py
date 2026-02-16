@@ -137,18 +137,18 @@ class SessionSecurityServiceTestCase(TestCase):
     def test_detect_suspicious_activity_multiple_ips(self, mock_cache, mock_log):
         """Test detection of suspicious activity with multiple IPs"""
         request = self._get_authenticated_request()
-        
+
         # Mock cache to simulate storing/retrieving IP history
         stored_ips = []
         def mock_cache_get(key, default=None):
             if key.startswith('recent_ips:'):
                 return stored_ips.copy()
             return default
-            
+
         def mock_cache_set(key, value, timeout=None):
             if key.startswith('recent_ips:'):
                 stored_ips[:] = value  # Update the stored list in place
-                
+
         mock_cache.get.side_effect = mock_cache_get
         mock_cache.set.side_effect = mock_cache_set
 

@@ -140,7 +140,6 @@ class SIEMJSONFormatter(logging.Formatter):
             # Timestamp (ISO 8601 format for SIEM compatibility)
             "@timestamp": timestamp,
             "timestamp": timestamp,
-
             # Event identification
             "event": {
                 "created": timestamp,
@@ -149,13 +148,11 @@ class SIEMJSONFormatter(logging.Formatter):
                 "type": [self._get_event_type(record)],
                 "severity": self.SEVERITY_MAP.get(record.levelname, 6),
             },
-
             # Log metadata
             "log": {
                 "level": record.levelname.lower(),
                 "logger": record.name,
             },
-
             # Source code location
             "log.origin": {
                 "file": {
@@ -164,21 +161,17 @@ class SIEMJSONFormatter(logging.Formatter):
                 },
                 "function": record.funcName,
             },
-
             # Host information
             "host": {
                 "name": self.hostname,
             },
-
             # Service information
             "service": {
                 "name": self.application,
                 "type": "django",
             },
-
             # Message
             "message": record.getMessage(),
-
             # Process/thread information
             "process": {
                 "pid": record.process,
@@ -187,7 +180,6 @@ class SIEMJSONFormatter(logging.Formatter):
                     "name": record.threadName,
                 },
             },
-
             # Request context (if available)
             "trace": {
                 "id": getattr(record, "request_id", None),
@@ -202,7 +194,6 @@ class SIEMJSONFormatter(logging.Formatter):
             "session": {
                 "id": getattr(record, "session_id", None),
             },
-
             # PRAHO-specific fields
             "praho": {
                 "customer_id": getattr(record, "customer_id", None),
@@ -261,12 +252,35 @@ class SIEMJSONFormatter(logging.Formatter):
     def _extract_extra_fields(self, record: logging.LogRecord) -> dict[str, Any]:
         """Extract extra fields added to the log record"""
         standard_attrs = {
-            "name", "msg", "args", "created", "filename", "funcName",
-            "levelname", "levelno", "lineno", "module", "msecs",
-            "pathname", "process", "processName", "relativeCreated",
-            "stack_info", "exc_info", "exc_text", "thread", "threadName",
-            "message", "request_id", "user_id", "user_email", "ip_address",
-            "session_id", "customer_id", "hostname", "environment",
+            "name",
+            "msg",
+            "args",
+            "created",
+            "filename",
+            "funcName",
+            "levelname",
+            "levelno",
+            "lineno",
+            "module",
+            "msecs",
+            "pathname",
+            "process",
+            "processName",
+            "relativeCreated",
+            "stack_info",
+            "exc_info",
+            "exc_text",
+            "thread",
+            "threadName",
+            "message",
+            "request_id",
+            "user_id",
+            "user_email",
+            "ip_address",
+            "session_id",
+            "customer_id",
+            "hostname",
+            "environment",
         }
 
         extra = {}
@@ -476,7 +490,17 @@ class ComplianceLogFormatter(logging.Formatter):
         """Check if log contains sensitive data indicators"""
         message = record.getMessage().lower()
         sensitive_indicators = [
-            "password", "credit", "card", "ssn", "tax", "cui",
-            "bank", "account", "secret", "token", "key", "credential",
+            "password",
+            "credit",
+            "card",
+            "ssn",
+            "tax",
+            "cui",
+            "bank",
+            "account",
+            "secret",
+            "token",
+            "key",
+            "credential",
         ]
         return any(indicator in message for indicator in sensitive_indicators)

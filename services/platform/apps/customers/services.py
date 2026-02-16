@@ -331,10 +331,12 @@ class CustomerStatsService:
                     if update_result.get("success"):
                         results["updated"] += 1
                     else:
-                        results["errors"].append({
-                            "customer_id": str(customer.id),
-                            "error": update_result.get("error"),
-                        })
+                        results["errors"].append(
+                            {
+                                "customer_id": str(customer.id),
+                                "error": update_result.get("error"),
+                            }
+                        )
                 except Exception as e:
                     results["errors"].append({"customer_id": str(customer.id), "error": str(e)})
 

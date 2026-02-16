@@ -121,8 +121,7 @@ class InvoiceService:
                 except Currency.DoesNotExist:
                     # Use get_or_create inside atomic block to handle concurrent creation
                     currency, _ = Currency.objects.get_or_create(
-                        code="RON",
-                        defaults={"name": "Romanian Leu", "symbol": "lei", "is_active": True}
+                        code="RON", defaults={"name": "Romanian Leu", "symbol": "lei", "is_active": True}
                     )
 
                 # Get invoice sequence with lock to prevent race conditions
@@ -139,7 +138,8 @@ class InvoiceService:
 
                 # Calculate totals using current Romanian VAT rate
                 from apps.common.tax_service import TaxService
-                vat_rate = TaxService.get_vat_rate('RO', as_decimal=True)
+
+                vat_rate = TaxService.get_vat_rate("RO", as_decimal=True)
                 subtotal_amount = Decimal(order.total_cents) / 100
                 tax_amount = subtotal_amount * vat_rate
                 total_amount = subtotal_amount + tax_amount

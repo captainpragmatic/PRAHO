@@ -297,6 +297,6 @@ class ProformaLine(models.Model):
         subtotal = self.subtotal_cents
         # Use banker's rounding for VAT compliance (same as OrderItem)
         vat_amount = Decimal(subtotal) * Decimal(str(self.tax_rate))
-        self.tax_cents = int(vat_amount.quantize(Decimal('1'), rounding=ROUND_HALF_EVEN))
+        self.tax_cents = int(vat_amount.quantize(Decimal("1"), rounding=ROUND_HALF_EVEN))
         self.line_total_cents = subtotal + self.tax_cents
         return self.line_total_cents

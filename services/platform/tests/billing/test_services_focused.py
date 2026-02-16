@@ -35,13 +35,13 @@ class RefundServiceFocusedTestCase(TestCase):
             symbol='RON',
             decimals=2
         )
-        
+
         self.customer = Customer.objects.create(
             name='Test SRL',
             customer_type='company',
             status='active'
         )
-        
+
         self.user = User.objects.create_user(
             email='admin@example.com',
             password='testpass123'
@@ -73,7 +73,7 @@ class RefundServiceFocusedTestCase(TestCase):
             'external_refund_id': None,
             'process_payment_refund': False,
         }
-        
+
         # Basic type checking - should not raise TypeError
         self.assertEqual(refund_data['refund_type'], RefundType.FULL)
         self.assertEqual(refund_data['reason'], RefundReason.CUSTOMER_REQUEST)
@@ -82,7 +82,7 @@ class RefundServiceFocusedTestCase(TestCase):
     def test_refund_order_order_not_found_error_path(self, mock_select_related: Mock) -> None:
         """Test error path when order is not found"""
         mock_select_related.return_value.get.side_effect = Exception("Order matching query does not exist")
-        
+
         refund_data: RefundData = {
             'refund_type': RefundType.FULL,
             'amount_cents': 0,
@@ -92,11 +92,11 @@ class RefundServiceFocusedTestCase(TestCase):
             'external_refund_id': None,
             'process_payment_refund': False,
         }
-        
+
         import uuid
         order_id = uuid.uuid4()
         result = RefundService.refund_order(order_id, refund_data)
-        
+
         # Should return error result
         self.assertTrue(result.is_err())
 
@@ -122,11 +122,11 @@ class RefundServiceFocusedTestCase(TestCase):
             date_from=str(date.today()),
             date_to=str(date.today())
         )
-        
+
         # Should return Ok result
         self.assertTrue(result.is_ok())
         stats = result.unwrap()
-        
+
         # Should return dict with expected keys
         self.assertIn('total_refunds', stats)
         self.assertIn('total_amount_refunded_cents', stats)
@@ -135,12 +135,12 @@ class RefundServiceFocusedTestCase(TestCase):
     def test_refund_eligibility_invalid_entity_type(self) -> None:
         """Test refund eligibility check with invalid entity type using RefundService"""
         import uuid
-        
+
         result = RefundService.get_refund_eligibility(
             entity_type='invalid_type',
             entity_id=uuid.uuid4()
         )
-        
+
         self.assertTrue(result.is_err())
         error_message = result.error if hasattr(result, 'error') else str(result)
         self.assertIn('Invalid entity type', str(error_message))
@@ -148,7 +148,7 @@ class RefundServiceFocusedTestCase(TestCase):
 
 class RefundServiceImportCoverageTestCase(TestCase):
     """Additional test class to ensure all imports are covered"""
-    
+
     def test_import_coverage_for_service_types(self) -> None:
         """Test that all service types can be imported and instantiated"""
         from apps.billing.services import (
@@ -157,20 +157,20 @@ class RefundServiceImportCoverageTestCase(TestCase):
             RefundResult,
             RefundStatus,
         )
-        
+
         # Basic coverage of type definitions
         self.assertTrue(RefundStatus.PENDING)
         self.assertTrue(RefundStatus.COMPLETED)
-        
+
         # Test that TypedDict structures can be referenced
         refund_data_keys = RefundData.__annotations__.keys()
         self.assertIn('refund_type', refund_data_keys)
         self.assertIn('amount_cents', refund_data_keys)
-        
+
         refund_result_keys = RefundResult.__annotations__.keys()
         self.assertIn('refund_id', refund_result_keys)
         self.assertIn('amount_refunded_cents', refund_result_keys)
-        
+
         refund_eligibility_keys = RefundEligibility.__annotations__.keys()
         self.assertIn('is_eligible', refund_eligibility_keys)
         self.assertIn('max_refund_amount_cents', refund_eligibility_keys)

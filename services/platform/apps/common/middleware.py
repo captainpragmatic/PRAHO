@@ -296,39 +296,37 @@ class GDPRComplianceMiddleware:
 class PortalServiceAuthMiddleware:
     """
     🔐 Authentication middleware for portal service API requests.
-    
+
     Validates shared secret and sets up user context for API endpoints.
     Only applies to /api/ endpoints.
     """
-    
+
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
         self.get_response = get_response
-    
+
     def __call__(self, request: HttpRequest) -> HttpResponse:
         # Only process API requests
-        if request.path.startswith('/api/'):
+        if request.path.startswith("/api/"):
             # Check for service authentication header
-            service_auth = request.META.get('HTTP_X_SERVICE_AUTH')
-            
+            service_auth = request.META.get("HTTP_X_SERVICE_AUTH")
+
             if not service_auth:
                 return HttpResponse(
-                    json.dumps({'error': 'Service authentication required'}),
+                    json.dumps({"error": "Service authentication required"}),
                     status=401,
-                    content_type='application/json'
+                    content_type="application/json",
                 )
-            
+
             # Validate shared secret
-            expected_secret = getattr(settings, 'PLATFORM_API_SECRET', None)
+            expected_secret = getattr(settings, "PLATFORM_API_SECRET", None)
             if not expected_secret or service_auth != expected_secret:
                 logger.warning(f"🔥 [Portal Auth] Invalid service auth from {get_safe_client_ip(request)}")
                 return HttpResponse(
-                    json.dumps({'error': 'Invalid service authentication'}),
-                    status=403,
-                    content_type='application/json'
+                    json.dumps({"error": "Invalid service authentication"}), status=403, content_type="application/json"
                 )
-            
+
             # Extract user context from portal service
-            user_id = request.META.get('HTTP_X_USER_ID')
+            user_id = request.META.get("HTTP_X_USER_ID")
             if user_id:
                 try:
                     user_id = int(user_id)
@@ -337,27 +335,25 @@ class PortalServiceAuthMiddleware:
                     # Set user context for API request (don't actually log them in)
                     request.user = user
                     request._portal_authenticated = True  # Mark as portal-authenticated
-                    
+
                     logger.debug(f"✅ [Portal Auth] User context set for API request: {user.email}")
-                    
+
                 except (ValueError, User.DoesNotExist):
                     logger.warning(f"🔥 [Portal Auth] Invalid user ID in API request: {user_id}")
                     return HttpResponse(
-                        json.dumps({'error': 'Invalid user context'}),
-                        status=400,
-                        content_type='application/json'
+                        json.dumps({"error": "Invalid user context"}), status=400, content_type="application/json"
                     )
-            
+
             # Log successful portal service authentication
             logger.info(f"✅ [Portal Auth] API request authenticated from {get_safe_client_ip(request)}")
-        
+
         response = self.get_response(request)
-        
+
         # Add service identification header
-        if request.path.startswith('/api/'):
-            response['X-Service'] = 'platform'
-            response['X-Portal-Auth'] = 'verified' if hasattr(request, '_portal_authenticated') else 'none'
-        
+        if request.path.startswith("/api/"):
+            response["X-Service"] = "platform"
+            response["X-Portal-Auth"] = "verified" if hasattr(request, "_portal_authenticated") else "none"
+
         return response
 
 
@@ -369,16 +365,16 @@ class PortalServiceAuthMiddleware:
 class PortalServiceHMACMiddleware:
     """
     🔐 HMAC authentication middleware for portal service API requests.
-    
+
     Validates HMAC signatures with nonce deduplication and timestamp validation.
     Only applies to /api/ endpoints. Replaces simple shared secret authentication.
     """
-    
+
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
         self.get_response = get_response
         # Rate limit config (fallbacks if not in settings)
-        self._rl_window = int(getattr(settings, 'HMAC_RATE_LIMIT_WINDOW', 60))
-        self._rl_max_calls = int(getattr(settings, 'HMAC_RATE_LIMIT_MAX_CALLS', 300))
+        self._rl_window = int(getattr(settings, "HMAC_RATE_LIMIT_WINDOW", 60))
+        self._rl_max_calls = int(getattr(settings, "HMAC_RATE_LIMIT_MAX_CALLS", 300))
 
     def _rate_limited(self, portal_id: str, client_ip: str) -> bool:
         """Simple rate limiting keyed by portal_id and client IP using Django cache."""
@@ -393,24 +389,24 @@ class PortalServiceHMACMiddleware:
             current = (cache.get(key) or 0) + 1
             cache.set(key, current, timeout=self._rl_window)
         return current > self._rl_max_calls
-    
+
     def _validate_hmac_signature(self, request: HttpRequest) -> tuple[bool, str]:  # noqa: C901,PLR0912,PLR0915
         """
         Validate HMAC signature from portal service.
         Returns (is_valid, error_message)
-        
+
         NOTE: High complexity is justified for security-critical HMAC validation.
         Each branch addresses a specific attack vector (replay, tampering, etc.)
         """
         error_msg = ""
         try:
             # Extract HMAC headers
-            portal_id = request.META.get('HTTP_X_PORTAL_ID', '')
-            nonce = request.META.get('HTTP_X_NONCE', '')
-            timestamp = request.META.get('HTTP_X_TIMESTAMP', '')
-            body_hash = request.META.get('HTTP_X_BODY_HASH', '')
-            signature = request.META.get('HTTP_X_SIGNATURE', '')
-            raw_content_type = request.META.get('CONTENT_TYPE', '')
+            portal_id = request.META.get("HTTP_X_PORTAL_ID", "")
+            nonce = request.META.get("HTTP_X_NONCE", "")
+            timestamp = request.META.get("HTTP_X_TIMESTAMP", "")
+            body_hash = request.META.get("HTTP_X_BODY_HASH", "")
+            signature = request.META.get("HTTP_X_SIGNATURE", "")
+            raw_content_type = request.META.get("CONTENT_TYPE", "")
 
             # Check required headers
             if not all([portal_id, nonce, timestamp, body_hash, signature]):
@@ -438,14 +434,14 @@ class PortalServiceHMACMiddleware:
             # Verify body hash
             if not error_msg:
                 request_body = request.body
-                computed_body_hash = base64.b64encode(hashlib.sha256(request_body).digest()).decode('ascii')
+                computed_body_hash = base64.b64encode(hashlib.sha256(request_body).digest()).decode("ascii")
                 if body_hash != computed_body_hash:
                     error_msg = "Body hash mismatch"
 
             # Get portal secret for this portal ID
             expected_secret = None
             if not error_msg:
-                expected_secret = getattr(settings, 'PLATFORM_API_SECRET', None)
+                expected_secret = getattr(settings, "PLATFORM_API_SECRET", None)
                 if not expected_secret:
                     error_msg = "Portal authentication not configured"
 
@@ -461,15 +457,17 @@ class PortalServiceHMACMiddleware:
 
                 content_type_main = raw_content_type.split(";")[0].strip().lower()
 
-                canonical_new = "\n".join([
-                    method,
-                    normalized_path,
-                    content_type_main,
-                    body_hash,
-                    portal_id,
-                    nonce,
-                    timestamp,
-                ])
+                canonical_new = "\n".join(
+                    [
+                        method,
+                        normalized_path,
+                        content_type_main,
+                        body_hash,
+                        portal_id,
+                        nonce,
+                        timestamp,
+                    ]
+                )
 
                 expected_signature_new = hmac.new(
                     expected_secret.encode(),  # type: ignore[union-attr]
@@ -482,8 +480,8 @@ class PortalServiceHMACMiddleware:
             # Enforce timestamp consistency between header and signed body
             if not error_msg:
                 try:
-                    body_json = json.loads(request_body.decode('utf-8') or '{}')
-                    body_ts = body_json.get('timestamp')
+                    body_json = json.loads(request_body.decode("utf-8") or "{}")
+                    body_ts = body_json.get("timestamp")
                     if body_ts is None or str(body_ts) != str(timestamp):
                         error_msg = "Timestamp mismatch between body and headers"
                 except Exception:
@@ -497,80 +495,80 @@ class PortalServiceHMACMiddleware:
             error_msg = f"Signature validation error: {e!s}"
 
         return False, error_msg
-    
+
     def __call__(self, request: HttpRequest) -> HttpResponse:
         # Only process API requests
-        if request.path.startswith('/api/'):
+        if request.path.startswith("/api/"):
             # Skip HMAC validation for authentication endpoints (can't be pre-authenticated)
             auth_exempt_paths = [
-                '/api/users/login/',
-                '/api/users/register/',  
-                '/api/users/password/reset/',
-                '/api/users/health/',
-                '/api/orders/products/'  # Public product catalog access
+                "/api/users/login/",
+                "/api/users/register/",
+                "/api/users/password/reset/",
+                "/api/users/health/",
+                "/api/orders/products/",  # Public product catalog access
             ]
-            
+
             if any(request.path.startswith(path) for path in auth_exempt_paths):
                 logger.debug(f"🔓 [HMAC Auth] Skipping HMAC validation for auth endpoint: {request.path}")
                 return self.get_response(request)
-            
+
             # Global rate limiting keyed by portal and IP (respects RATELIMIT_ENABLE env var)
-            portal_id_for_rl = request.META.get('HTTP_X_PORTAL_ID', 'unknown')
+            portal_id_for_rl = request.META.get("HTTP_X_PORTAL_ID", "unknown")
             client_ip = get_safe_client_ip(request)
-            if os.environ.get("RATELIMIT_ENABLE", "true").lower() != "false" and self._rate_limited(portal_id_for_rl, client_ip):
-                logger.warning(
-                    f"🚨 [HMAC Auth] Rate limit exceeded for portal={portal_id_for_rl} ip={client_ip}"
-                )
+            if os.environ.get("RATELIMIT_ENABLE", "true").lower() != "false" and self._rate_limited(
+                portal_id_for_rl, client_ip
+            ):
+                logger.warning(f"🚨 [HMAC Auth] Rate limit exceeded for portal={portal_id_for_rl} ip={client_ip}")
                 return HttpResponse(
-                    json.dumps({'error': 'Too Many Requests'}),
-                    status=429,
-                    content_type='application/json'
+                    json.dumps({"error": "Too Many Requests"}), status=429, content_type="application/json"
                 )
 
             # Validate HMAC signature
             is_valid, error_msg = self._validate_hmac_signature(request)
-            
+
             if not is_valid:
                 # Allow session-authenticated staff users to access specific API paths
                 # that platform templates call via browser fetch() (no HMAC headers).
                 # Restricted to an explicit allowlist to prevent broad bypass.
                 STAFF_SESSION_ALLOWED_PREFIXES = [
-                    '/api/customers/',  # Ticket form: fetch customer services
+                    "/api/customers/",  # Ticket form: fetch customer services
                 ]
                 if (
-                    getattr(request, 'user', None)
-                    and getattr(request.user, 'is_authenticated', False)
-                    and getattr(request.user, 'is_staff', False)
+                    getattr(request, "user", None)
+                    and getattr(request.user, "is_authenticated", False)
+                    and getattr(request.user, "is_staff", False)
                     and any(request.path.startswith(p) for p in STAFF_SESSION_ALLOWED_PREFIXES)
                 ):
-                    logger.debug(f"🔓 [HMAC Auth] Allowing session-authenticated staff user {request.user.email} for {request.path}")
+                    logger.debug(
+                        f"🔓 [HMAC Auth] Allowing session-authenticated staff user {request.user.email} for {request.path}"
+                    )
                     return self.get_response(request)
 
                 logger.warning(f"🔥 [HMAC Auth] Authentication failed from {get_safe_client_ip(request)}: {error_msg}")
                 return HttpResponse(
-                    json.dumps({'error': 'HMAC authentication failed'}),
-                    status=401,
-                    content_type='application/json'
+                    json.dumps({"error": "HMAC authentication failed"}), status=401, content_type="application/json"
                 )
-            
+
             # Mark as portal-authenticated after successful HMAC validation
             request._portal_authenticated = True
-            
+
             # Identity now comes from signed body in API layer; ignore any X-User-Id header
-            
+
             # Mark portal ID for logging
-            request._portal_id = request.META.get('HTTP_X_PORTAL_ID', 'unknown')
-            
+            request._portal_id = request.META.get("HTTP_X_PORTAL_ID", "unknown")
+
             # Log successful portal service authentication
-            logger.info(f"✅ [HMAC Auth] API request authenticated from portal {request._portal_id} at {get_safe_client_ip(request)}")
-        
+            logger.info(
+                f"✅ [HMAC Auth] API request authenticated from portal {request._portal_id} at {get_safe_client_ip(request)}"
+            )
+
         response = self.get_response(request)
-        
+
         # Add service identification header
-        if request.path.startswith('/api/'):
-            response['X-Service'] = 'platform'
-            response['X-Portal-Auth'] = 'hmac-verified' if hasattr(request, '_portal_authenticated') else 'none'
-        
+        if request.path.startswith("/api/"):
+            response["X-Service"] = "platform"
+            response["X-Portal-Auth"] = "hmac-verified" if hasattr(request, "_portal_authenticated") else "none"
+
         return response
 
 
@@ -685,18 +683,18 @@ class SessionSecurityMiddleware:
 
 
 # ===============================================================================
-# STAFF-ONLY PLATFORM ACCESS MIDDLEWARE  
+# STAFF-ONLY PLATFORM ACCESS MIDDLEWARE
 # ===============================================================================
 
 
 class StaffOnlyPlatformMiddleware:
     """
     🛡️ Middleware to ensure only staff users can access the platform.
-    
+
     - Staff users: Full access to platform
     - Customer users: Logged out and redirected with error message
     - Unauthenticated: Normal login flow continues
-    
+
     Platform = Staff admin interface
     Portal = Customer self-service interface
     """
@@ -708,35 +706,33 @@ class StaffOnlyPlatformMiddleware:
         # Skip middleware for public paths that need to be accessible
         public_paths = {
             "/auth/login/",
-            "/auth/logout/", 
+            "/auth/logout/",
             "/users/login/",
             "/users/logout/",
-            "/admin/",      # Django admin has its own authentication
-            "/api/",        # API has its own authentication via portal service
-            "/i18n/",       # Language switching
+            "/admin/",  # Django admin has its own authentication
+            "/api/",  # API has its own authentication via portal service
+            "/i18n/",  # Language switching
         }
-        
+
         # Skip for public paths
         if any(request.path.startswith(path) for path in public_paths):
             return self.get_response(request)
-        
+
         # Skip for unauthenticated users (let them reach login page)
         if not request.user.is_authenticated:
             return self.get_response(request)
-        
+
         # Allow staff users full access
         if request.user.is_staff or getattr(request.user, "staff_role", None):
             return self.get_response(request)
-        
+
         # Block customer users - they should use portal
         if request.user.is_authenticated:
-            
             logout(request)
             messages.error(
-                request, 
-                _("❌ Customers cannot access the platform. Please use the customer portal instead.")
+                request, _("❌ Customers cannot access the platform. Please use the customer portal instead.")
             )
             return redirect("users:login")
-        
-        # Fallback - continue with request  
+
+        # Fallback - continue with request
         return self.get_response(request)

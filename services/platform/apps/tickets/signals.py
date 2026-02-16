@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 def capture_ticket_status_change(sender: type[Ticket], instance: Ticket, **kwargs: Any) -> None:
     """
     Capture ticket status changes for audit logging.
-    
+
     This pre_save signal captures the old status so we can compare it in post_save.
     """
     try:
@@ -44,7 +44,7 @@ def capture_ticket_status_change(sender: type[Ticket], instance: Ticket, **kwarg
 def log_ticket_lifecycle_events(sender: type[Ticket], instance: Ticket, created: bool, **kwargs: Any) -> None:
     """
     Log ticket lifecycle events focusing on status transitions.
-    
+
     Events tracked:
     - Ticket creation
     - Status changes
@@ -144,7 +144,9 @@ def _log_status_change(ticket: Ticket, old_status: str, new_status: str) -> None
         change_key = (old_status, new_status)
         if change_key in significant_changes:
             event_type = significant_changes[change_key]
-            logger.info(f"📝 [Tickets] Status change for {ticket.ticket_number}: {old_status} -> {new_status} ({event_type})")
+            logger.info(
+                f"📝 [Tickets] Status change for {ticket.ticket_number}: {old_status} -> {new_status} ({event_type})"
+            )
 
             AuditService.log_simple_event(
                 event_type=f"ticket_status_{event_type}",

@@ -30,14 +30,14 @@ Dark theme interface for staff/admin audit log monitoring
         <!-- Filter Section -->
         <div class="bg-slate-800 border border-slate-700 rounded-lg p-4 mb-6">
             <h2 class="text-lg font-medium text-white mb-4">🔧 {% trans "Filters" %}</h2>
-            
+
             <!-- Filter Form -->
-            <form id="audit-filters" 
+            <form id="audit-filters"
                   hx-get="{% url 'audit:logs_list' %}"
                   hx-trigger="change, keyup delay:500ms"
                   hx-target="#audit-results"
                   hx-indicator="#loading-spinner">
-                
+
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     <!-- Date Range Picker -->
                     <div class="lg:col-span-1">
@@ -163,16 +163,16 @@ document.addEventListener('DOMContentLoaded', function() {
 function resetFilters() {
     const form = document.getElementById('audit-filters');
     const resetBtn = event.target;
-    
+
     if (form) {
         // Add loading state
         const originalText = resetBtn.innerHTML;
         resetBtn.innerHTML = '⏳ {% trans "Resetting..." %}';
         resetBtn.disabled = true;
-        
+
         // Reset all form fields
         form.reset();
-        
+
         // Trigger HTMX request to reload with empty filters
         htmx.ajax('GET', '{% url 'audit:logs_list' %}', {
             target: '#audit-results',
@@ -190,20 +190,20 @@ function resetFilters() {
 function exportCSV() {
     const form = document.getElementById('audit-filters');
     const exportBtn = event.target;
-    
+
     if (form) {
         // Add loading state
         const originalText = exportBtn.innerHTML;
         exportBtn.innerHTML = '⏳ {% trans "Exporting..." %}';
         exportBtn.disabled = true;
-        
+
         // Get form data
         const formData = new FormData(form);
         const params = new URLSearchParams(formData);
-        
+
         // Create download URL with current filters
         const exportUrl = '{% url 'audit:export_logs_csv' %}?' + params.toString();
-        
+
         // Trigger download
         const link = document.createElement('a');
         link.href = exportUrl;
@@ -212,7 +212,7 @@ function exportCSV() {
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        
+
         // Restore button state after a short delay
         setTimeout(() => {
             exportBtn.innerHTML = originalText;

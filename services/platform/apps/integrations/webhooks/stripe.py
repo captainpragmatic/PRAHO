@@ -78,7 +78,9 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             # SECURITY: Use raw body from request, NOT re-serialized JSON
             if raw_body is None:
                 # Fallback for backwards compatibility, but log warning
-                logger.warning("⚠️ No raw body available for signature verification - using re-serialized JSON (less secure)")
+                logger.warning(
+                    "⚠️ No raw body available for signature verification - using re-serialized JSON (less secure)"
+                )
                 payload_body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
             else:
                 payload_body = raw_body if isinstance(raw_body, bytes) else raw_body.encode("utf-8")
@@ -89,6 +91,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         except Exception as e:
             logger.error(f"🔥 Error verifying Stripe webhook signature: {e}")
             return False
+
     def __init__(self) -> None:
         super().__init__()
         # Event handler registry - maps event prefixes to handler methods
@@ -290,11 +293,13 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                 payment = Payment.objects.filter(gateway_txn_id=charge_id).first()
                 if payment:
                     payment.status = "disputed"
-                    payment.meta.update({
-                        "dispute_id": charge.get("dispute", {}).get("id"),
-                        "dispute_reason": charge.get("dispute", {}).get("reason"),
-                        "dispute_created_at": timezone.now().isoformat(),
-                    })
+                    payment.meta.update(
+                        {
+                            "dispute_id": charge.get("dispute", {}).get("id"),
+                            "dispute_reason": charge.get("dispute", {}).get("reason"),
+                            "dispute_created_at": timezone.now().isoformat(),
+                        }
+                    )
                     payment.save(update_fields=["status", "meta"])
                     logger.info(f"📝 Updated payment {payment.id} with dispute flag")
             except Exception as update_error:
@@ -340,26 +345,26 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         """
         try:
             # Extract order ID from payment metadata
-            order_id = payment.meta.get('order_id')
+            order_id = payment.meta.get("order_id")
             if not order_id:
                 logger.warning("⚠️ No order_id in payment metadata - skipping Portal notification")
                 return
 
             # Check if this payment was created via Portal
-            created_via = payment.meta.get('created_via')
-            if created_via != 'portal_checkout':
+            created_via = payment.meta.get("created_via")
+            if created_via != "portal_checkout":
                 logger.info("⏭️ Payment not from Portal checkout - skipping notification")
                 return
 
             # Prepare notification data
             notification_data = {
-                'order_id': order_id,
-                'payment_id': str(payment.id),
-                'status': 'succeeded',
-                'stripe_payment_intent_id': payment_intent.get('id'),
-                'amount_received': payment_intent.get('amount_received'),
-                'currency': payment_intent.get('currency', 'ron').upper(),
-                'timestamp': timezone.now().isoformat()
+                "order_id": order_id,
+                "payment_id": str(payment.id),
+                "status": "succeeded",
+                "stripe_payment_intent_id": payment_intent.get("id"),
+                "amount_received": payment_intent.get("amount_received"),
+                "currency": payment_intent.get("currency", "ron").upper(),
+                "timestamp": timezone.now().isoformat(),
             }
 
             # Send notification to Portal
@@ -380,7 +385,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             from django.conf import settings
 
             # Get Portal webhook URL from settings
-            portal_webhook_url = getattr(settings, 'PORTAL_PAYMENT_WEBHOOK_URL', None)
+            portal_webhook_url = getattr(settings, "PORTAL_PAYMENT_WEBHOOK_URL", None)
             if not portal_webhook_url:
                 logger.warning("⚠️ PORTAL_PAYMENT_WEBHOOK_URL not configured - skipping notification")
                 return
@@ -390,10 +395,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                 portal_webhook_url,
                 json=data,
                 timeout=10,
-                headers={
-                    'Content-Type': 'application/json',
-                    'User-Agent': 'PRAHO-Platform/1.0'
-                }
+                headers={"Content-Type": "application/json", "User-Agent": "PRAHO-Platform/1.0"},
             )
 
             if response.status_code == 200:

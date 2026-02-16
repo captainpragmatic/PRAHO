@@ -252,10 +252,7 @@ class QuotaEnforcer:
         cache.set(cache_key, limit, None)  # No timeout for custom limits
         self._custom_quotas[(customer_id, quota_type)] = limit
 
-        logger.info(
-            f"Custom quota set: customer={customer_id}, "
-            f"type={quota_type.value}, limit={limit}"
-        )
+        logger.info(f"Custom quota set: customer={customer_id}, " f"type={quota_type.value}, limit={limit}")
 
     def reset_usage(
         self,
@@ -282,6 +279,7 @@ class QuotaEnforcer:
         try:
             if quota_type == QuotaType.SERVICES:
                 from apps.provisioning.models import Service
+
                 return Service.objects.filter(
                     customer_id=customer_id,
                     status__in=["active", "pending", "provisioning"],
@@ -289,12 +287,14 @@ class QuotaEnforcer:
 
             elif quota_type == QuotaType.DOMAINS:
                 from apps.provisioning.models import ServiceDomain
+
                 return ServiceDomain.objects.filter(
                     service__customer_id=customer_id,
                 ).count()
 
             elif quota_type == QuotaType.STORAGE_MB:
                 from apps.provisioning.models import Service
+
                 total = Service.objects.filter(
                     customer_id=customer_id,
                     status="active",
@@ -303,6 +303,7 @@ class QuotaEnforcer:
 
             elif quota_type == QuotaType.BANDWIDTH_MB:
                 from apps.provisioning.models import Service
+
                 total = Service.objects.filter(
                     customer_id=customer_id,
                     status="active",
@@ -311,6 +312,7 @@ class QuotaEnforcer:
 
             elif quota_type == QuotaType.EMAIL_ACCOUNTS:
                 from apps.provisioning.models import Service
+
                 total = Service.objects.filter(
                     customer_id=customer_id,
                     status="active",
@@ -319,6 +321,7 @@ class QuotaEnforcer:
 
             elif quota_type == QuotaType.DATABASES:
                 from apps.provisioning.models import Service
+
                 total = Service.objects.filter(
                     customer_id=customer_id,
                     status="active",
@@ -331,6 +334,7 @@ class QuotaEnforcer:
 
             elif quota_type == QuotaType.USERS:
                 from apps.users.models import CustomerMembership
+
                 return CustomerMembership.objects.filter(
                     customer_id=customer_id,
                 ).count()
@@ -380,9 +384,7 @@ def check_quota(
     tier: str = "basic",
 ) -> tuple[bool, CustomerQuota]:
     """Check if a customer has sufficient quota."""
-    return get_quota_enforcer().check_quota(
-        customer_id, quota_type, required_amount, tier
-    )
+    return get_quota_enforcer().check_quota(customer_id, quota_type, required_amount, tier)
 
 
 def get_customer_usage(customer_id: int, tier: str = "basic") -> list[CustomerQuota]:
@@ -391,6 +393,7 @@ def get_customer_usage(customer_id: int, tier: str = "basic") -> list[CustomerQu
 
 
 # Decorators for quota enforcement
+
 
 def enforce_quota(
     quota_type: QuotaType,
@@ -409,6 +412,7 @@ def enforce_quota(
         def create_service(request):
             ...
     """
+
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @functools.wraps(func)
         def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> Any:
@@ -447,6 +451,7 @@ def enforce_quota(
             return func(request, *args, **kwargs)
 
         return wrapper
+
     return decorator
 
 
@@ -455,6 +460,7 @@ def track_api_usage(func: Callable[..., T]) -> Callable[..., T]:
     Decorator to track API request usage for quota purposes.
     Lighter weight than enforce_quota - just tracks, doesn't block.
     """
+
     @functools.wraps(func)
     def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> Any:
         # Get customer ID
@@ -464,9 +470,7 @@ def track_api_usage(func: Callable[..., T]) -> Callable[..., T]:
 
         # Track usage
         if customer_id:
-            get_quota_enforcer().increment_usage(
-                customer_id, QuotaType.API_REQUESTS, 1
-            )
+            get_quota_enforcer().increment_usage(customer_id, QuotaType.API_REQUESTS, 1)
 
         return func(request, *args, **kwargs)
 
@@ -474,6 +478,7 @@ def track_api_usage(func: Callable[..., T]) -> Callable[..., T]:
 
 
 # Customer isolation utilities
+
 
 class CustomerIsolationMixin:
     """

@@ -151,9 +151,7 @@ class Command(BaseCommand):
 
                 if created:
                     created_count += 1
-                    self.stdout.write(
-                        f"  ✅ Created category: {category_data['key']} - {category_data['name']}"
-                    )
+                    self.stdout.write(f"  ✅ Created category: {category_data['key']} - {category_data['name']}")
                 elif force:
                     # Update existing category
                     category.name = category_data["name"]
@@ -161,17 +159,13 @@ class Command(BaseCommand):
                     category.display_order = category_data["display_order"]
                     category.save(update_fields=["name", "description", "display_order", "updated_at"])
                     updated_count += 1
-                    self.stdout.write(
-                        f"  🔄 Updated category: {category_data['key']} - {category_data['name']}"
-                    )
+                    self.stdout.write(f"  🔄 Updated category: {category_data['key']} - {category_data['name']}")
                 else:
                     skipped_count += 1
                     self.stdout.write(f"  ⏭️  Skipped existing: {category_data['key']} (use --force to update)")
 
             except Exception as e:
-                self.stdout.write(
-                    self.style.ERROR(f"  🔥 Error setting up category {category_data['key']}: {e}")
-                )
+                self.stdout.write(self.style.ERROR(f"  🔥 Error setting up category {category_data['key']}: {e}"))
                 continue
 
         # Summary

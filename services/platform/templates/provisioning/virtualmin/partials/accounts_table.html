@@ -14,7 +14,7 @@
             </div>
         </div>
     </div>
-    
+
     <div class="overflow-x-auto">
         <table class="w-full">
             <thead class="bg-slate-900">
@@ -89,7 +89,7 @@
                         {% if account.disk_quota and account.disk_usage %}
                         <div class="w-full bg-slate-700 rounded-full h-1 mt-1">
                             {% widthratio account.disk_usage account.disk_quota 100 as usage_percent %}
-                            <div class="{% if usage_percent > 90 %}bg-red-600{% elif usage_percent > 75 %}bg-yellow-600{% else %}bg-green-600{% endif %} h-1 rounded-full" 
+                            <div class="{% if usage_percent > 90 %}bg-red-600{% elif usage_percent > 75 %}bg-yellow-600{% else %}bg-green-600{% endif %} h-1 rounded-full"
                                  style="width: {{ usage_percent }}%"></div>
                         </div>
                         {% endif %}
@@ -107,7 +107,7 @@
             </tbody>
         </table>
     </div>
-    
+
     <!-- Pagination -->
     {% if is_paginated %}
     <div class="bg-slate-900 px-4 py-3 border-t border-slate-700 sm:px-6">
@@ -135,27 +135,27 @@
                 <div>
                     <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
                         {% if page_obj.has_previous %}
-                            <a href="?page={{ page_obj.previous_page_number }}" 
+                            <a href="?page={{ page_obj.previous_page_number }}"
                                class="relative inline-flex items-center px-2 py-2 rounded-l-md border border-slate-600 bg-slate-800 text-sm font-medium text-slate-400 hover:bg-slate-700 transition-colors">
                                 ‹
                             </a>
                         {% endif %}
-                        
+
                         {% for num in page_obj.paginator.page_range %}
                             {% if page_obj.number == num %}
                                 <span class="relative inline-flex items-center px-4 py-2 border border-blue-500 bg-blue-600 text-sm font-medium text-white">
                                     {{ num }}
                                 </span>
                             {% else %}
-                                <a href="?page={{ num }}" 
+                                <a href="?page={{ num }}"
                                    class="relative inline-flex items-center px-4 py-2 border border-slate-600 bg-slate-800 text-sm font-medium text-slate-400 hover:bg-slate-700 transition-colors">
                                     {{ num }}
                                 </a>
                             {% endif %}
                         {% endfor %}
-                        
+
                         {% if page_obj.has_next %}
-                            <a href="?page={{ page_obj.next_page_number }}" 
+                            <a href="?page={{ page_obj.next_page_number }}"
                                class="relative inline-flex items-center px-2 py-2 rounded-r-md border border-slate-600 bg-slate-800 text-sm font-medium text-slate-400 hover:bg-slate-700 transition-colors">
                                 ›
                             </a>

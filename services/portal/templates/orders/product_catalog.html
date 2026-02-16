@@ -5,10 +5,10 @@
 
 {% block content %}
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-  
+
   <!-- Breadcrumbs -->
   {% include "orders/partials/order_breadcrumbs.html" with current_step="products" %}
-  
+
   <!-- Page Header with Trust Signals -->
   <div class="mb-6 sm:mb-8">
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 sm:mb-6">
@@ -50,11 +50,11 @@
         </div>
       </div>
     </div>
-    
+
     <!-- Trust Signals -->
     {% include "orders/partials/trust_signals.html" %}
   </div>
-  
+
   <!-- Product Type Filters -->
   <div class="mb-6 sm:mb-8">
     <div class="border-b border-slate-700">
@@ -68,7 +68,7 @@
       </nav>
     </div>
   </div>
-  
+
   <!-- Products Grid -->
   {% if products %}
   <div class="grid gap-4 sm:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -142,7 +142,7 @@
           </div>
           {% endfor %}
         {% endif %}
-        
+
         <!-- Features Preview -->
         {% if product.meta.features %}
         <ul class="space-y-2 mb-6 text-sm">
@@ -160,7 +160,7 @@
         </ul>
         {% endif %}
       </div>
-      
+
       <!-- Actions -->
       <div class="px-4 sm:px-6 pb-6 flex flex-col space-y-2">
         <!-- Add to Cart Form -->
@@ -219,7 +219,7 @@
     <p class="text-slate-400 mb-6">
       {% trans "Please try modifying the filters or check back later." %}
     </p>
-    
+
     {% if product_type_filter %}
     <a href="{% url 'orders:catalog' %}" class="inline-flex items-center px-4 py-2 text-sm font-medium text-slate-300 bg-slate-700 border border-slate-600 rounded-lg hover:bg-slate-600 transition-colors">
       📋 {% trans "View all products" %}
@@ -227,7 +227,7 @@
     {% endif %}
   </div>
   {% endif %}
-  
+
   <!-- Continue to Cart (if items exist) -->
   {% if cart_count > 0 %}
   <div class="mt-12 text-center">
@@ -262,7 +262,7 @@ function toggleMiniCart() {
 document.addEventListener('click', function(event) {
   const cartWidget = document.getElementById('cart-widget');
   const miniCart = document.getElementById('mini-cart');
-  
+
   if (!cartWidget.contains(event.target)) {
     miniCart.classList.add('hidden');
   }
@@ -275,10 +275,10 @@ function showSuccessToast(message) {
   toast.className = 'fixed top-4 right-4 bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg z-50 transform transition-transform duration-300 translate-x-full';
   toast.textContent = message;
   document.body.appendChild(toast);
-  
+
   // Slide in
   setTimeout(() => toast.classList.remove('translate-x-full'), 100);
-  
+
   // Auto dismiss
   setTimeout(() => {
     toast.classList.add('translate-x-full');

@@ -1,7 +1,7 @@
 # ADR-0006: Security Warning Configuration Strategy
 
-**Date**: 2025-08-26  
-**Status**: Accepted  
+**Date**: 2025-08-26
+**Status**: Accepted
 **Context**: PRAHO Platform security linting configuration
 
 ## Context and Problem Statement
@@ -28,7 +28,7 @@ The PRAHO Platform uses `ruff` with security rules (bandit S105/S106) to detect 
 password='testpass123'  # noqa: S106
 ```
 
-**Pros**: Granular control, explicit acknowledgment per instance  
+**Pros**: Granular control, explicit acknowledgment per instance
 **Cons**: 1200+ comments needed, code clutter, high maintenance burden
 
 ### Option 2: Disable S105/S106 globally
@@ -36,7 +36,7 @@ password='testpass123'  # noqa: S106
 ignore = ["S105", "S106"]
 ```
 
-**Pros**: Simple, no clutter  
+**Pros**: Simple, no clutter
 **Cons**: Completely disables security detection, misses real production secrets
 
 ### Option 3: File-level ignores with strategic exceptions
@@ -44,7 +44,7 @@ ignore = ["S105", "S106"]
 "tests/**/*.py" = ["S105", "S106"]  # Test credentials acceptable
 ```
 
-**Pros**: Clean separation, maintains production security, follows Django patterns  
+**Pros**: Clean separation, maintains production security, follows Django patterns
 **Cons**: Slightly less granular than per-line
 
 ## Decision
@@ -103,7 +103,7 @@ validate_production_secret_key()  # Prevents production deployment
 ### Positive:
 - **Clean lint output**: Reduced from 1233 to 1 security warning
 - **Focused security**: Real production secrets still detected
-- **Developer efficiency**: `make lint` shows actionable issues only  
+- **Developer efficiency**: `make lint` shows actionable issues only
 - **Django alignment**: Follows community patterns for test fixtures
 - **Maintenance reduced**: No per-line comment management needed
 
@@ -115,7 +115,7 @@ validate_production_secret_key()  # Prevents production deployment
 
 ### Files where S105/S106 are ignored (acceptable):
 - `tests/**/*.py` - Test fixtures and credentials
-- `config/settings/dev.py` - Development SECRET_KEY only  
+- `config/settings/dev.py` - Development SECRET_KEY only
 - `config/settings/test.py` - Test credentials and fake API keys
 - `apps/common/management/commands/*.py` - Sample data generation utilities
 - `tests/e2e/**/*.py` - E2E test credentials
@@ -138,5 +138,5 @@ validate_production_secret_key()  # Prevents production deployment
 
 ---
 
-**Tags**: security, linting, django, development-experience  
+**Tags**: security, linting, django, development-experience
 **Updated**: Initial version

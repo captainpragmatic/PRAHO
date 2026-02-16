@@ -350,7 +350,7 @@ def process_email_queue() -> dict[str, Any]:
     stuck_emails = EmailLog.objects.filter(
         status="queued",
         sent_at__lt=cutoff,  # sent_at = creation time for queued emails
-    ).order_by("sent_at")[:min(500, max(1, SettingsService.get_integer_setting("notifications.email_batch_size", 50)))]
+    ).order_by("sent_at")[: min(500, max(1, SettingsService.get_integer_setting("notifications.email_batch_size", 50)))]
 
     processed = 0
     failed = 0
@@ -401,7 +401,7 @@ def retry_failed_emails(max_age_hours: int = 24) -> dict[str, Any]:
     failed_emails = EmailLog.objects.filter(
         status="failed",
         sent_at__gte=cutoff,
-    ).order_by("sent_at")[:min(500, max(1, SettingsService.get_integer_setting("notifications.email_batch_size", 50)))]
+    ).order_by("sent_at")[: min(500, max(1, SettingsService.get_integer_setting("notifications.email_batch_size", 50)))]
 
     retried = 0
     skipped = 0
@@ -493,25 +493,27 @@ def cleanup_old_email_logs(retention_days: int = 90) -> dict[str, Any]:
 
 # Whitelist of allowed filter fields for campaign audience
 # This prevents SQL injection via audience_filter JSON
-ALLOWED_CAMPAIGN_FILTER_FIELDS = frozenset({
-    # Basic customer fields
-    "status",
-    "customer_type",
-    "created_at",
-    "created_at__gte",
-    "created_at__lte",
-    "created_at__gt",
-    "created_at__lt",
-    # Location fields
-    "country",
-    "city",
-    # Business fields
-    "marketing_consent",
-    "newsletter_consent",
-    # Relationship fields (safe lookups)
-    "services__status",
-    "services__service_type",
-})
+ALLOWED_CAMPAIGN_FILTER_FIELDS = frozenset(
+    {
+        # Basic customer fields
+        "status",
+        "customer_type",
+        "created_at",
+        "created_at__gte",
+        "created_at__lte",
+        "created_at__gt",
+        "created_at__lt",
+        # Location fields
+        "country",
+        "city",
+        # Business fields
+        "marketing_consent",
+        "newsletter_consent",
+        # Relationship fields (safe lookups)
+        "services__status",
+        "services__service_type",
+    }
+)
 
 
 def _apply_safe_customer_filter(queryset, custom_filter: dict[str, Any]):
@@ -613,7 +615,7 @@ def _get_campaign_recipients(campaign) -> list[tuple[str, dict[str, Any]]]:
         customers = customers.filter(marketing_consent=True)
 
     # Build recipient list with personalized context
-    for customer in customers[:campaign.total_recipients or 10000]:
+    for customer in customers[: campaign.total_recipients or 10000]:
         context = {
             "customer_name": customer.get_display_name(),
             "customer_email": customer.primary_email,

@@ -126,9 +126,7 @@ def deployment_dashboard(request: HttpRequest) -> HttpResponse:
     ).order_by("-created_at")[:5]
 
     # Provider statistics
-    providers = CloudProvider.objects.filter(is_active=True).annotate(
-        deployment_count=models.Count("deployments")
-    )
+    providers = CloudProvider.objects.filter(is_active=True).annotate(deployment_count=models.Count("deployments"))
 
     breadcrumb_items = [
         {"text": "Management", "url": "/dashboard/"},
@@ -202,7 +200,9 @@ def deployment_list(request: HttpRequest) -> HttpResponse:
             "node_type": deployment.get_node_type_display(),
             "node_type_code": deployment.node_type,
             "provider": deployment.provider.name if deployment.provider else "N/A",
-            "region": f"{deployment.region.country_code.upper()} / {deployment.region.normalized_code}" if deployment.region else "N/A",
+            "region": f"{deployment.region.country_code.upper()} / {deployment.region.normalized_code}"
+            if deployment.region
+            else "N/A",
             "status": {
                 "text": deployment.get_status_display(),
                 "variant": _get_status_variant(deployment.status),
@@ -402,7 +402,8 @@ def deployment_detail(request: HttpRequest, pk) -> HttpResponse:
         "can_retry": deployment.status == "failed",
         "can_destroy": deployment.status in ("completed", "failed", "stopped"),
         "can_manage": can_manage_deployments(request.user),
-        "is_in_progress": deployment.status in (
+        "is_in_progress": deployment.status
+        in (
             "pending",
             "provisioning_node",
             "configuring_dns",
@@ -510,7 +511,9 @@ def deployment_destroy(request: HttpRequest, pk) -> HttpResponse:
             )
 
             messages.success(request, f"Destruction queued for deployment '{deployment.hostname}'.")
-            logger.info(f"[Deployment] Destroy queued for {deployment.hostname} by {request.user.email}, task_id={task_id}")
+            logger.info(
+                f"[Deployment] Destroy queued for {deployment.hostname} by {request.user.email}, task_id={task_id}"
+            )
 
             return redirect("infrastructure:deployment_detail", pk=deployment.id)
     else:
@@ -554,10 +557,14 @@ def deployment_upgrade(request: HttpRequest, pk) -> HttpResponse:
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     # Get available sizes for this provider (larger than current)
-    available_sizes = NodeSize.objects.filter(
-        provider=deployment.provider,
-        is_active=True,
-    ).exclude(id=deployment.node_size_id).order_by("monthly_cost_eur")
+    available_sizes = (
+        NodeSize.objects.filter(
+            provider=deployment.provider,
+            is_active=True,
+        )
+        .exclude(id=deployment.node_size_id)
+        .order_by("monthly_cost_eur")
+    )
 
     if request.method == "POST":
         new_size_id = request.POST.get("new_size")
@@ -729,7 +736,11 @@ def deployment_maintenance(request: HttpRequest, pk) -> HttpResponse:
     playbook_options = [
         {"id": "update", "name": "System Update", "description": "Update system packages and security patches"},
         {"id": "security", "name": "Security Hardening", "description": "Apply security hardening configurations"},
-        {"id": "ssl_renew", "name": "SSL Certificate Renewal", "description": "Renew SSL certificates via Let's Encrypt"},
+        {
+            "id": "ssl_renew",
+            "name": "SSL Certificate Renewal",
+            "description": "Renew SSL certificates via Let's Encrypt",
+        },
         {"id": "backup", "name": "Backup Now", "description": "Trigger immediate backup"},
         {"id": "cleanup", "name": "Disk Cleanup", "description": "Clean up temporary files and logs"},
     ]
@@ -809,7 +820,8 @@ def deployment_status_partial(request: HttpRequest, pk) -> HttpResponse:
         "progress_percentage": progress_stages.get(deployment.status, 0),
         "status_variant": _get_status_variant(deployment.status),
         "status_icon": _get_status_icon(deployment.status),
-        "is_in_progress": deployment.status in (
+        "is_in_progress": deployment.status
+        in (
             "pending",
             "provisioning_node",
             "configuring_dns",
@@ -874,11 +886,13 @@ def hostname_preview_api(request: HttpRequest) -> JsonResponse:
         dns_zone = SettingsService.get_setting("node_deployment.dns_default_zone", "")
         fqdn = f"{hostname}.{dns_zone}" if dns_zone else hostname
 
-        return JsonResponse({
-            "hostname": hostname,
-            "fqdn": fqdn,
-            "next_number": next_number,
-        })
+        return JsonResponse(
+            {
+                "hostname": hostname,
+                "fqdn": fqdn,
+                "next_number": next_number,
+            }
+        )
 
     except (CloudProvider.DoesNotExist, NodeRegion.DoesNotExist) as e:
         return JsonResponse({"hostname": "---", "error": str(e)})
@@ -1181,9 +1195,7 @@ def cost_dashboard(request: HttpRequest) -> HttpResponse:
     # Calculate month-over-month change
     if prev_month_summary.total_eur > 0:
         mom_change = (
-            (current_month_summary.total_eur - prev_month_summary.total_eur)
-            / prev_month_summary.total_eur
-            * 100
+            (current_month_summary.total_eur - prev_month_summary.total_eur) / prev_month_summary.total_eur * 100
         )
     else:
         mom_change = Decimal("0")
@@ -1252,12 +1264,14 @@ def cost_history(request: HttpRequest) -> HttpResponse:
             month = 12 + (now.month - i)
 
         summary = service.get_monthly_summary(year, month)
-        history.append({
-            "year": year,
-            "month": month,
-            "month_name": month_name[month],
-            "summary": summary,
-        })
+        history.append(
+            {
+                "year": year,
+                "month": month,
+                "month_name": month_name[month],
+                "summary": summary,
+            }
+        )
 
     breadcrumb_items = [
         {"text": "Management", "url": "/dashboard/"},
@@ -1296,12 +1310,14 @@ def cost_api_summary(request: HttpRequest) -> JsonResponse:
     service = get_cost_tracking_service()
     summary = service.get_monthly_summary(year, month)
 
-    return JsonResponse({
-        "year": year,
-        "month": month,
-        "total_eur": str(summary.total_eur),
-        "compute_eur": str(summary.compute_eur),
-        "bandwidth_eur": str(summary.bandwidth_eur),
-        "storage_eur": str(summary.storage_eur),
-        "node_count": summary.node_count,
-    })
+    return JsonResponse(
+        {
+            "year": year,
+            "month": month,
+            "total_eur": str(summary.total_eur),
+            "compute_eur": str(summary.compute_eur),
+            "bandwidth_eur": str(summary.bandwidth_eur),
+            "storage_eur": str(summary.storage_eur),
+            "node_count": summary.node_count,
+        }
+    )

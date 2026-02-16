@@ -278,6 +278,7 @@ class WriteOperationThrottle(SimpleRateThrottle):
 
 # Rate limit header utilities
 
+
 def get_rate_limit_headers(request: Request) -> dict[str, str]:
     """
     Generate rate limit headers for API responses.
@@ -314,22 +315,18 @@ ENDPOINT_THROTTLE_RATES = {
     "login": "5/minute",
     "password_reset": "3/minute",
     "2fa_verify": "10/minute",
-
     # Financial operations - moderately restrictive
     "payment": "30/minute",
     "invoice": "60/minute",
     "refund": "10/minute",
-
     # Provisioning - resource-intensive
     "provision": "10/minute",
     "backup": "5/minute",
-
     # Standard CRUD - less restrictive
     "list": "100/minute",
     "detail": "200/minute",
     "create": "50/minute",
     "update": "100/minute",
-
     # Read-heavy operations - permissive
     "search": "60/minute",
     "export": "10/minute",

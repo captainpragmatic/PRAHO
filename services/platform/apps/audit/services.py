@@ -1717,7 +1717,8 @@ class GDPRConsentService:
                 defaults["user"] = user
 
             consent, _created = CookieConsent.objects.update_or_create(
-                cookie_id=cookie_id, defaults=defaults,
+                cookie_id=cookie_id,
+                defaults=defaults,
             )
 
             # Emit signal → triggers dual audit trail:
