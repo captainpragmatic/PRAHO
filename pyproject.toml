@@ -409,7 +409,19 @@ ignore = [
     "N806",     # Variable naming (Django generates these)
     "D",        # No docstrings needed
     "ANN",      # No type hints needed
+    "RUF012",   # Django Migration class attributes are generated mutable lists
 ]
+
+# Django app wiring and signal modules - runtime imports are intentional
+"services/platform/apps/**/apps.py" = ["PLC0415", "I001"]
+"services/platform/apps/billing/signals.py" = ["PLC0415"]
+"services/platform/apps/customers/signals.py" = ["PLC0415"]
+"services/platform/apps/customers/profile_service.py" = ["PLC0415"]
+"services/platform/apps/orders/models.py" = ["PLC0415"]
+
+# Signal wiring audit tests rely on local imports after app registry initialization
+"services/platform/tests/audit/test_audit_e2e.py" = ["PLC0415"]
+"services/platform/tests/audit/test_audit_signal_registration.py" = ["PLC0415"]
 
 # Django admin files - Allow admin patterns and ClassVar conflicts
 "**/admin.py" = [
