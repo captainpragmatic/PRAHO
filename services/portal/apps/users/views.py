@@ -75,19 +75,18 @@ def _get_user_customer_memberships(request: HttpRequest) -> list[dict] | None:
 
         if response and response.get("success") and "results" in response:
             # Transform the response to match expected format
-            memberships = []
-            for customer in response["results"]:
-                memberships.append(
-                    {
-                        "customer_id": customer.get("id"),
-                        "customer_name": customer.get(
-                            "name", customer.get("company_name", f"Customer {customer.get('id')}")
-                        ),
-                        "role": customer.get("role", "viewer"),  # Use actual role from Platform API
-                        "company_name": customer.get("company_name", ""),
-                        "is_primary": customer.get("is_primary", False),
-                    }
-                )
+            memberships = [
+                {
+                    "customer_id": customer.get("id"),
+                    "customer_name": customer.get(
+                        "name", customer.get("company_name", f"Customer {customer.get('id')}")
+                    ),
+                    "role": customer.get("role", "viewer"),  # Use actual role from Platform API
+                    "company_name": customer.get("company_name", ""),
+                    "is_primary": customer.get("is_primary", False),
+                }
+                for customer in response["results"]
+            ]
             return memberships
         return None
 

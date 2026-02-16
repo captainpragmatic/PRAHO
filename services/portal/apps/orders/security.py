@@ -4,7 +4,7 @@ DoS protection and uniform response timing for order endpoints.
 """
 
 import logging
-import random
+import secrets
 import time
 
 from django.core.cache import cache
@@ -23,6 +23,7 @@ class OrderSecurityHardening:
 
     # Cache failure handling
     CACHE_FAILURE_BLOCK_TIME = 300  # 5 minutes when cache fails
+    MAX_POST_FIELDS = 50
 
     @staticmethod
     def uniform_response_delay() -> None:
@@ -30,7 +31,10 @@ class OrderSecurityHardening:
         🔒 SECURITY: Add uniform delay to prevent timing-based information disclosure.
         Reduces probing signal by making all responses take similar time.
         """
-        delay = random.uniform(OrderSecurityHardening.MIN_RESPONSE_TIME, OrderSecurityHardening.MAX_RESPONSE_TIME)
+        delay_span_ms = int(
+            (OrderSecurityHardening.MAX_RESPONSE_TIME - OrderSecurityHardening.MIN_RESPONSE_TIME) * 1000
+        )
+        delay = OrderSecurityHardening.MIN_RESPONSE_TIME + (secrets.randbelow(delay_span_ms + 1) / 1000)
         time.sleep(delay)
 
     @staticmethod
@@ -119,7 +123,7 @@ class OrderSecurityHardening:
             JsonResponse with 400 error if suspicious, None if clean
         """
         # Check for suspiciously large number of form fields
-        if hasattr(request, "POST") and len(request.POST) > 50:
+        if hasattr(request, "POST") and len(request.POST) > OrderSecurityHardening.MAX_POST_FIELDS:
             logger.warning(f"🚨 [Security] Suspicious number of POST fields: {len(request.POST)}")
 
             OrderSecurityHardening.uniform_response_delay()

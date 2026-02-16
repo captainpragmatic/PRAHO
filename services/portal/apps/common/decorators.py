@@ -56,17 +56,16 @@ def _fetch_user_memberships(request: HttpRequest) -> list[dict]:
         )
         logger.debug("🔍 [Decorator] Membership API raw response: %s", response)
         if response and success and results:
-            memberships = []
-            for customer in results:
-                memberships.append(
-                    {
-                        "customer_id": customer.get("id"),
-                        "customer_name": customer.get("name", customer.get("company_name", "")),
-                        "role": customer.get("role", "viewer"),
-                        "company_name": customer.get("company_name", ""),
-                        "is_primary": customer.get("is_primary", False),
-                    }
-                )
+            memberships = [
+                {
+                    "customer_id": customer.get("id"),
+                    "customer_name": customer.get("name", customer.get("company_name", "")),
+                    "role": customer.get("role", "viewer"),
+                    "company_name": customer.get("company_name", ""),
+                    "is_primary": customer.get("is_primary", False),
+                }
+                for customer in results
+            ]
             # Always overwrite — including empty list — so revoked memberships
             # don't linger in the session cache.
             request.session["user_memberships"] = memberships

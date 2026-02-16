@@ -4,6 +4,7 @@ PRAHO Portal - Customer-Facing Service Settings
 Portal apps use NO models or ORM - pure API-only communication with platform.
 """
 import os
+import secrets
 from pathlib import Path
 
 # ===============================================================================
@@ -64,9 +65,10 @@ if not _secret_key:
 
         warnings.warn(
             "DJANGO_SECRET_KEY not set! Using insecure default. " "This is only acceptable in development.",
-            RuntimeWarning, stacklevel=2,
+            RuntimeWarning,
+            stacklevel=2,
         )
-        _secret_key = "django-insecure-dev-only-not-for-production"
+        _secret_key = secrets.token_urlsafe(50)
     else:
         raise ValueError(
             "DJANGO_SECRET_KEY environment variable is required in production. "
@@ -148,9 +150,10 @@ if not _api_token:
 
         warnings.warn(
             "PLATFORM_API_TOKEN not set! Using insecure default. " "This is only acceptable in development.",
-            RuntimeWarning, stacklevel=2,
+            RuntimeWarning,
+            stacklevel=2,
         )
-        _api_token = "dev-token-insecure-debug-only"
+        _api_token = secrets.token_urlsafe(32)
     else:
         raise ValueError("PLATFORM_API_TOKEN environment variable is required in production.")
 PLATFORM_API_TOKEN = _api_token

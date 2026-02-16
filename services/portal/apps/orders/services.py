@@ -72,7 +72,7 @@ class HMACPriceSealer:
         }
 
     @staticmethod
-    def verify_seal(
+    def verify_seal(  # noqa: PLR0911 - guard clauses keep security validation checks explicit and fail-fast
         sealed_data: dict[str, Any], price_data: dict[str, Any], client_ip: str = "127.0.0.1", max_age_seconds: int = 61
     ) -> bool:
         """

@@ -28,6 +28,7 @@ from .services import (
 )
 
 logger = logging.getLogger(__name__)
+MINI_CART_MAX_ITEMS = 3
 
 
 def _coerce_security_response(result: HttpResponse | object | None) -> HttpResponse | None:
@@ -1076,9 +1077,9 @@ def mini_cart_content(request: HttpRequest) -> HttpResponse:
 
     context = {
         "cart": cart,
-        "cart_items": cart.get_items()[:3],  # Show only first 3 items
+        "cart_items": cart.get_items()[:MINI_CART_MAX_ITEMS],
         "total_items": cart.get_item_count(),
-        "show_view_all": cart.get_item_count() > 3,
+        "show_view_all": cart.get_item_count() > MINI_CART_MAX_ITEMS,
     }
 
     return render(request, "orders/partials/mini_cart_content.html", context)

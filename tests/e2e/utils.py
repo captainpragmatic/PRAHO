@@ -16,7 +16,7 @@ import os
 import time
 from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 from playwright.sync_api import Page, ViewportSize
@@ -1630,8 +1630,8 @@ class E2EUserManager:
 
     __test__ = False
 
-    _created_users: set[str] = set()
-    _created_customers: set[int] = set()
+    _created_users: ClassVar[set[str]] = set()
+    _created_customers: ClassVar[set[int]] = set()
     _cleanup_registered = False
     _lock = threading.Lock()
 

@@ -5,7 +5,7 @@ Comprehensive validation for order inputs with Romanian compliance.
 
 import logging
 import re
-from typing import Any
+from typing import Any, ClassVar
 
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext as _
@@ -17,7 +17,10 @@ class OrderInputValidator:
     """Centralized validation for order inputs with security focus"""
 
     # Romanian hosting provider specific configurations
-    ALLOWED_BILLING_PERIODS = {"monthly", "quarterly", "semiannual", "annual", "yearly", "biennial", "triennial"}
+    ALLOWED_BILLING_PERIODS: ClassVar[frozenset[str]] = frozenset(
+        {"monthly", "quarterly", "semiannual", "annual", "yearly", "biennial", "triennial"}
+    )
+    MAX_CONFIG_STRING_LENGTH = 100
 
     # Domain validation with international support
     DOMAIN_PATTERN = re.compile(r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$")
@@ -134,7 +137,9 @@ class OrderInputValidator:
                         continue
                 elif isinstance(value, str):
                     # General string validation - prevent injection
-                    if len(value) > 100 or any(char in value for char in ["<", ">", '"', "'"]):
+                    if len(value) > OrderInputValidator.MAX_CONFIG_STRING_LENGTH or any(
+                        char in value for char in ["<", ">", '"', "'"]
+                    ):
                         continue  # Skip potentially dangerous values
 
                 validated_config[key] = value
