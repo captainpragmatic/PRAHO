@@ -4,7 +4,9 @@ DRF views for product catalog, order management, and cart calculations.
 """
 
 import logging
+import uuid
 from decimal import Decimal
+from typing import Any
 
 # Constants
 ISO_COUNTRY_CODE_LENGTH = 2
@@ -747,6 +749,75 @@ def order_detail(request: Request, customer, order_id: str) -> Response:
         return Response({"error": "Failed to load order"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+def _get_server_for_product_type(product_type: str, server_model: Any) -> tuple[Any | None, bool]:
+    """Resolve the best active provisioning server for a product type."""
+    server_type_map = {
+        "shared_hosting": "shared_hosting",
+        "vps": "vps_host",
+    }
+    mapped_server_type = server_type_map.get(product_type)
+    if mapped_server_type:
+        server = server_model.objects.filter(server_type=mapped_server_type, status="active").first()
+        if server:
+            return server, False
+
+    fallback_server = server_model.objects.filter(status="active").first()
+    return fallback_server, fallback_server is not None
+
+
+def _provision_confirmed_order_item(item: Any, customer: Any, order: Any) -> dict[str, Any]:
+    """Provision one confirmed order item and return API-safe result data."""
+    try:
+        from apps.provisioning.models import Service  # noqa: PLC0415
+        from apps.provisioning.service_models import Server  # noqa: PLC0415
+        from apps.provisioning.tasks import queue_service_provisioning  # noqa: PLC0415
+
+        if not item.product.default_service_plan:
+            logger.error(f"❌ Product {item.product.name} has no default_service_plan configured")
+            return {
+                "product": item.product.name,
+                "error": "Product has no default service plan configured",
+            }
+
+        username_suffix = str(uuid.uuid4()).replace("-", "")[:8]
+        username = f"{customer.id}_{username_suffix}"
+
+        server, used_fallback = _get_server_for_product_type(item.product.product_type, Server)
+        if server and used_fallback:
+            logger.warning(f"⚠️ Using fallback server {server.name} for {item.product_name}")
+
+        service = Service.objects.create(
+            customer=customer,
+            service_plan=item.product.default_service_plan,
+            status="pending",
+            service_name=item.product_name,
+            domain=item.domain_name or "",
+            username=username,
+            billing_cycle="monthly",
+            price=Decimal(str(item.unit_price_cents / 100)),
+            setup_fee_paid=item.setup_cents > 0,
+            server=server,
+            provisioning_data={
+                "order_id": str(order.id),
+                "order_number": order.order_number,
+                "order_item_id": str(item.id),
+                "config": item.config or {},
+            },
+        )
+
+        task_id = queue_service_provisioning(service)
+        logger.info(f"🚀 Service provisioning initiated for {item.product.name}")
+        return {
+            "product": item.product.name,
+            "service_id": str(service.id),
+            "status": "queued",
+            "task_id": task_id,
+        }
+    except Exception as e:
+        logger.error(f"❌ Failed to provision service for {item.product.name}: {e}")
+        return {"product": item.product.name, "error": str(e)}
+
+
 @api_view(["POST"])
 @permission_classes([AllowAny])
 @throttle_classes([OrderListThrottle])
@@ -756,7 +827,6 @@ def confirm_order(request: Request, customer, order_id: str) -> Response:
     Confirm order after successful payment and trigger service provisioning.
     """
     try:
-
         from apps.audit.services import AuditService
         from apps.orders.models import Order
 
@@ -807,85 +877,11 @@ def confirm_order(request: Request, customer, order_id: str) -> Response:
             )
 
             # Trigger service provisioning for each order item
-            provisioning_results = []
-            for item in order.items.all():
-                if item.product.product_type in ["shared_hosting", "vps", "dedicated_server"]:
-                    try:
-                        # Create service instance for the customer
-                        from apps.provisioning.models import Service
-
-                        # Check if product has a default service plan
-                        if not item.product.default_service_plan:
-                            logger.error(f"❌ Product {item.product.name} has no default_service_plan configured")
-                            provisioning_results.append(
-                                {
-                                    "product": item.product.name,
-                                    "error": "Product has no default service plan configured",
-                                }
-                            )
-                            continue
-
-                        # Generate unique username
-                        import uuid
-
-                        username_suffix = str(uuid.uuid4()).replace("-", "")[:8]
-                        username = f"{customer.id}_{username_suffix}"
-
-                        # Auto-assign appropriate server
-                        from apps.provisioning.service_models import Server
-
-                        server = None
-
-                        # For shared hosting, assign a shared hosting server
-                        if item.product.product_type == "shared_hosting":
-                            server = Server.objects.filter(server_type="shared_hosting", status="active").first()
-                        # For VPS, assign VPS host server
-                        elif item.product.product_type == "vps":
-                            server = Server.objects.filter(server_type="vps_host", status="active").first()
-
-                        if not server:
-                            # Fallback to any active server
-                            server = Server.objects.filter(status="active").first()
-                            if server:
-                                logger.warning(f"⚠️ Using fallback server {server.name} for {item.product_name}")
-
-                        service = Service.objects.create(
-                            customer=customer,
-                            service_plan=item.product.default_service_plan,  # Use product's default service plan
-                            status="pending",
-                            service_name=item.product_name,
-                            domain=item.domain_name or "",
-                            username=username,
-                            billing_cycle="monthly",  # Default to monthly, can be enhanced later
-                            price=Decimal(str(item.unit_price_cents / 100)),  # Convert cents to decimal
-                            setup_fee_paid=item.setup_cents > 0,  # Mark as paid if there was a setup fee
-                            server=server,  # Assign the auto-selected server
-                            provisioning_data={
-                                "order_id": str(order.id),
-                                "order_number": order.order_number,
-                                "order_item_id": str(item.id),
-                                "config": item.config or {},
-                            },
-                        )
-
-                        # Queue provisioning task
-                        from apps.provisioning.tasks import queue_service_provisioning
-
-                        task_id = queue_service_provisioning(service)
-                        provisioning_results.append(
-                            {
-                                "product": item.product.name,
-                                "service_id": str(service.id),
-                                "status": "queued",
-                                "task_id": task_id,
-                            }
-                        )
-
-                        logger.info(f"🚀 Service provisioning initiated for {item.product.name}")
-
-                    except Exception as e:
-                        logger.error(f"❌ Failed to provision service for {item.product.name}: {e}")
-                        provisioning_results.append({"product": item.product.name, "error": str(e)})
+            provisioning_results = [
+                _provision_confirmed_order_item(item, customer, order)
+                for item in order.items.all()
+                if item.product.product_type in {"shared_hosting", "vps", "dedicated_server"}
+            ]
 
         return Response(
             {

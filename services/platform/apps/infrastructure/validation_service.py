@@ -343,27 +343,28 @@ class NodeValidationService:
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
 
-            with socket.create_connection((deployment.ipv4_address, 10000), timeout=self.timeout) as sock:
-                with context.wrap_socket(sock) as ssock:
-                    cert = ssock.getpeercert(binary_form=False)
+            with (
+                socket.create_connection((deployment.ipv4_address, 10000), timeout=self.timeout) as sock,
+                context.wrap_socket(sock) as ssock,
+            ):
+                cert = ssock.getpeercert(binary_form=False)
 
-                    # Even with self-signed, we want SSL working
-                    if cert or ssock.version():
-                        return ValidationResult(
-                            check_name="ssl",
-                            passed=True,
-                            message=f"SSL/TLS enabled ({ssock.version()})",
-                            details={
-                                "protocol": ssock.version(),
-                                "cipher": ssock.cipher(),
-                            },
-                        )
-                    else:
-                        return ValidationResult(
-                            check_name="ssl",
-                            passed=True,
-                            message="SSL/TLS enabled (self-signed certificate)",
-                        )
+                # Even with self-signed, we want SSL working
+                if cert or ssock.version():
+                    return ValidationResult(
+                        check_name="ssl",
+                        passed=True,
+                        message=f"SSL/TLS enabled ({ssock.version()})",
+                        details={
+                            "protocol": ssock.version(),
+                            "cipher": ssock.cipher(),
+                        },
+                    )
+                return ValidationResult(
+                    check_name="ssl",
+                    passed=True,
+                    message="SSL/TLS enabled (self-signed certificate)",
+                )
 
         except ssl.SSLError as e:
             return ValidationResult(

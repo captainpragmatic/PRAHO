@@ -22,7 +22,7 @@ class BillingConfig(AppConfig):
         # Schedule e-Factura recurring tasks if enabled
         if getattr(settings, "EFACTURA_ENABLED", False):
             try:
-                from apps.billing.efactura.tasks import schedule_efactura_tasks  # noqa: PLC0415
+                from apps.billing.efactura.tasks import schedule_efactura_tasks
 
                 schedule_efactura_tasks()
             except Exception:

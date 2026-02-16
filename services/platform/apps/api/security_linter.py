@@ -34,6 +34,8 @@ class APISecurityLinter:
     - Inconsistent error responses
     """
 
+    DECORATOR_RESET_MIN_FUNCTION_LINES = 10
+
     def __init__(self, api_root: str = "/apps/api/"):
         self.api_root = Path(api_root)
         self.violations: list[SecurityViolation] = []
@@ -231,7 +233,11 @@ class APISecurityLinter:
             # Reset when we reach next function or decorator
             if line.strip().startswith("def ") and not in_api_endpoint:
                 pass
-            elif line.strip().startswith("@") and in_api_endpoint and len(function_lines) > 10:
+            elif (
+                line.strip().startswith("@")
+                and in_api_endpoint
+                and len(function_lines) > self.DECORATOR_RESET_MIN_FUNCTION_LINES
+            ):
                 in_api_endpoint = False
                 current_methods = set()
                 function_lines = []

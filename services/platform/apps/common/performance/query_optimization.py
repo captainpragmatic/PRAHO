@@ -370,14 +370,12 @@ def get_missing_indexes() -> list[dict[str, Any]]:
     """
     # This would need to be implemented based on database introspection
     # For now, return the recommendations
-    recommendations = []
-    for model_path, indexes in INDEX_RECOMMENDATIONS.items():
-        for index_fields in indexes:
-            recommendations.append(
-                {
-                    "model": model_path,
-                    "fields": index_fields,
-                    "recommendation": "Consider adding composite index",
-                }
-            )
-    return recommendations
+    return [
+        {
+            "model": model_path,
+            "fields": index_fields,
+            "recommendation": "Consider adding composite index",
+        }
+        for model_path, indexes in INDEX_RECOMMENDATIONS.items()
+        for index_fields in indexes
+    ]

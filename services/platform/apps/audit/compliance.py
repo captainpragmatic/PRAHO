@@ -169,31 +169,28 @@ class PasswordPolicyRule(ComplianceRule):
     def check(
         self, events: list[Any], period_start: datetime, period_end: datetime
     ) -> tuple[bool, list[ComplianceViolation]]:
-        violations = []
-
         # Check for weak password events
         weak_password_events = [
             e
             for e in events
             if e.action in ("password_strength_weak", "password_compromised", "password_policy_violation")
         ]
-
-        for event in weak_password_events:
-            violations.append(
-                ComplianceViolation(
-                    framework=self.framework.value,
-                    control_id=self.control_id,
-                    description=f"Password policy violation: {event.action}",
-                    severity=self.severity,
-                    detected_at=event.timestamp,
-                    evidence={
-                        "event_id": str(event.id),
-                        "user_id": str(event.user_id) if event.user_id else None,
-                        "action": event.action,
-                    },
-                    remediation="Enforce stronger password requirements",
-                )
+        violations = [
+            ComplianceViolation(
+                framework=self.framework.value,
+                control_id=self.control_id,
+                description=f"Password policy violation: {event.action}",
+                severity=self.severity,
+                detected_at=event.timestamp,
+                evidence={
+                    "event_id": str(event.id),
+                    "user_id": str(event.user_id) if event.user_id else None,
+                    "action": event.action,
+                },
+                remediation="Enforce stronger password requirements",
             )
+            for event in weak_password_events
+        ]
 
         return len(violations) == 0, violations
 
@@ -209,26 +206,23 @@ class MFAEnforcementRule(ComplianceRule):
     def check(
         self, events: list[Any], period_start: datetime, period_end: datetime
     ) -> tuple[bool, list[ComplianceViolation]]:
-        violations = []
-
         # Check for 2FA disabled events (especially for privileged users)
         mfa_disabled_events = [e for e in events if e.action == "2fa_disabled"]
-
-        for event in mfa_disabled_events:
-            violations.append(
-                ComplianceViolation(
-                    framework=self.framework.value,
-                    control_id=self.control_id,
-                    description="Multi-factor authentication disabled",
-                    severity=self.severity,
-                    detected_at=event.timestamp,
-                    evidence={
-                        "event_id": str(event.id),
-                        "user_id": str(event.user_id) if event.user_id else None,
-                    },
-                    remediation="Re-enable MFA for affected accounts",
-                )
+        violations = [
+            ComplianceViolation(
+                framework=self.framework.value,
+                control_id=self.control_id,
+                description="Multi-factor authentication disabled",
+                severity=self.severity,
+                detected_at=event.timestamp,
+                evidence={
+                    "event_id": str(event.id),
+                    "user_id": str(event.user_id) if event.user_id else None,
+                },
+                remediation="Re-enable MFA for affected accounts",
             )
+            for event in mfa_disabled_events
+        ]
 
         return len(violations) == 0, violations
 
@@ -244,27 +238,24 @@ class AccessControlRule(ComplianceRule):
     def check(
         self, events: list[Any], period_start: datetime, period_end: datetime
     ) -> tuple[bool, list[ComplianceViolation]]:
-        violations = []
-
         # Check for privilege escalation attempts
         escalation_events = [e for e in events if e.action == "privilege_escalation_attempt"]
-
-        for event in escalation_events:
-            violations.append(
-                ComplianceViolation(
-                    framework=self.framework.value,
-                    control_id=self.control_id,
-                    description="Privilege escalation attempt detected",
-                    severity="critical",
-                    detected_at=event.timestamp,
-                    evidence={
-                        "event_id": str(event.id),
-                        "user_id": str(event.user_id) if event.user_id else None,
-                        "ip_address": event.ip_address,
-                    },
-                    remediation="Investigate and block unauthorized access attempts",
-                )
+        violations = [
+            ComplianceViolation(
+                framework=self.framework.value,
+                control_id=self.control_id,
+                description="Privilege escalation attempt detected",
+                severity="critical",
+                detected_at=event.timestamp,
+                evidence={
+                    "event_id": str(event.id),
+                    "user_id": str(event.user_id) if event.user_id else None,
+                    "ip_address": event.ip_address,
+                },
+                remediation="Investigate and block unauthorized access attempts",
             )
+            for event in escalation_events
+        ]
 
         return len(violations) == 0, violations
 
@@ -280,26 +271,23 @@ class DataProtectionRule(ComplianceRule):
     def check(
         self, events: list[Any], period_start: datetime, period_end: datetime
     ) -> tuple[bool, list[ComplianceViolation]]:
-        violations = []
-
         # Check for data breach events
         breach_events = [e for e in events if e.action in ("data_breach_detected", "data_breach_reported")]
-
-        for event in breach_events:
-            violations.append(
-                ComplianceViolation(
-                    framework=self.framework.value,
-                    control_id=self.control_id,
-                    description="Data breach detected",
-                    severity="critical",
-                    detected_at=event.timestamp,
-                    evidence={
-                        "event_id": str(event.id),
-                        "description": event.description,
-                    },
-                    remediation="Follow data breach notification procedures (72 hours)",
-                )
+        violations = [
+            ComplianceViolation(
+                framework=self.framework.value,
+                control_id=self.control_id,
+                description="Data breach detected",
+                severity="critical",
+                detected_at=event.timestamp,
+                evidence={
+                    "event_id": str(event.id),
+                    "description": event.description,
+                },
+                remediation="Follow data breach notification procedures (72 hours)",
             )
+            for event in breach_events
+        ]
 
         return len(violations) == 0, violations
 

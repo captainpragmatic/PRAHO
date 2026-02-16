@@ -714,64 +714,66 @@ class RatingEngine:
 
         return value
 
-    def _calculate_tiered_charge(self, quantity: Decimal, pricing_tier: Any) -> int:
-        """Calculate charge using tiered pricing"""
+    def _get_pricing_brackets(self, pricing_tier: Any) -> Any:
         from .metering_models import PricingTierBracket
 
-        if pricing_tier.pricing_model == "per_unit":
-            # Simple per-unit pricing
-            if pricing_tier.unit_price_cents:
-                charge = int(quantity * pricing_tier.unit_price_cents)
-                return max(charge, pricing_tier.minimum_charge_cents)
+        return PricingTierBracket.objects.filter(pricing_tier=pricing_tier).order_by("from_quantity")
+
+    def _calculate_per_unit_charge(self, quantity: Decimal, pricing_tier: Any) -> int:
+        if not pricing_tier.unit_price_cents:
+            return pricing_tier.minimum_charge_cents
+        charge = int(quantity * pricing_tier.unit_price_cents)
+        return max(charge, pricing_tier.minimum_charge_cents)
+
+    def _calculate_volume_charge(self, quantity: Decimal, pricing_tier: Any) -> int:
+        applicable_bracket = next(
+            (
+                bracket
+                for bracket in self._get_pricing_brackets(pricing_tier)
+                if quantity >= bracket.from_quantity
+                and (bracket.to_quantity is None or quantity <= bracket.to_quantity)
+            ),
+            None,
+        )
+        if not applicable_bracket:
             return pricing_tier.minimum_charge_cents
 
-        if pricing_tier.pricing_model == "volume":
-            # All units priced at the volume rate
-            brackets = PricingTierBracket.objects.filter(pricing_tier=pricing_tier).order_by("from_quantity")
+        charge = int(quantity * applicable_bracket.unit_price_cents) + applicable_bracket.flat_fee_cents
+        return max(charge, pricing_tier.minimum_charge_cents)
 
-            applicable_bracket = None
-            for bracket in brackets:
-                if bracket.to_quantity is None or quantity <= bracket.to_quantity:
-                    if quantity >= bracket.from_quantity:
-                        applicable_bracket = bracket
-                        break
+    def _calculate_graduated_charge(self, quantity: Decimal, pricing_tier: Any) -> int:
+        total_charge = 0
+        remaining_quantity = quantity
 
-            if applicable_bracket:
-                charge = int(quantity * applicable_bracket.unit_price_cents)
-                charge += applicable_bracket.flat_fee_cents
-                return max(charge, pricing_tier.minimum_charge_cents)
+        for bracket in self._get_pricing_brackets(pricing_tier):
+            if remaining_quantity <= 0:
+                break
 
-        if pricing_tier.pricing_model == "graduated":
-            # Each bracket charged at its own rate
-            brackets = PricingTierBracket.objects.filter(pricing_tier=pricing_tier).order_by("from_quantity")
+            bracket_size = bracket.to_quantity - bracket.from_quantity if bracket.to_quantity else remaining_quantity
+            quantity_in_bracket = min(remaining_quantity, bracket_size)
+            total_charge += int(quantity_in_bracket * bracket.unit_price_cents) + bracket.flat_fee_cents
+            remaining_quantity -= quantity_in_bracket
 
-            total_charge = 0
-            remaining_quantity = quantity
+        return max(total_charge, pricing_tier.minimum_charge_cents)
 
-            for bracket in brackets:
-                if remaining_quantity <= 0:
-                    break
-
-                bracket_size = (
-                    bracket.to_quantity - bracket.from_quantity if bracket.to_quantity else remaining_quantity
-                )
-                quantity_in_bracket = min(remaining_quantity, bracket_size)
-
-                total_charge += int(quantity_in_bracket * bracket.unit_price_cents)
-                total_charge += bracket.flat_fee_cents
-                remaining_quantity -= quantity_in_bracket
-
-            return max(total_charge, pricing_tier.minimum_charge_cents)
-
-        if pricing_tier.pricing_model == "package":
-            # Fixed price for packages
-            brackets = PricingTierBracket.objects.filter(pricing_tier=pricing_tier).order_by("from_quantity")
-
-            for bracket in brackets:
-                if bracket.to_quantity is None or quantity <= bracket.to_quantity:
-                    return bracket.flat_fee_cents
-
+    def _calculate_package_charge(self, quantity: Decimal, pricing_tier: Any) -> int:
+        for bracket in self._get_pricing_brackets(pricing_tier):
+            if bracket.to_quantity is None or quantity <= bracket.to_quantity:
+                return bracket.flat_fee_cents
         return pricing_tier.minimum_charge_cents
+
+    def _calculate_tiered_charge(self, quantity: Decimal, pricing_tier: Any) -> int:
+        """Calculate charge using tiered pricing"""
+        calculators = {
+            "per_unit": self._calculate_per_unit_charge,
+            "volume": self._calculate_volume_charge,
+            "graduated": self._calculate_graduated_charge,
+            "package": self._calculate_package_charge,
+        }
+        calculator = calculators.get(pricing_tier.pricing_model)
+        if not calculator:
+            return pricing_tier.minimum_charge_cents
+        return calculator(quantity, pricing_tier)
 
 
 class UsageAlertService:
@@ -793,25 +795,65 @@ class UsageAlertService:
             UsageThreshold,
         )
 
-        try:
-            customer = Customer.objects.get(id=customer_id)
-        except Customer.DoesNotExist:
+        customer = self._get_customer(Customer, customer_id)
+        if customer is None:
             logger.error(f"Customer not found: {customer_id}")
             return []
 
-        # Get current aggregation
-        agg_query = UsageAggregation.objects.filter(
-            customer_id=customer_id, meter_id=meter_id, status__in=("accumulating", "pending_rating")
-        )
-
-        if subscription_id:
-            agg_query = agg_query.filter(subscription_id=subscription_id)
-
-        aggregation = agg_query.order_by("-period_start").first()
+        aggregation = self._get_latest_aggregation(UsageAggregation, customer_id, meter_id, subscription_id)
         if not aggregation:
             return []
 
-        # Get included allowance
+        allowance, subscription, service_plan = self._resolve_allowance_and_plan(aggregation)
+        thresholds = self._get_applicable_thresholds(UsageThreshold, meter_id, service_plan)
+
+        created_alerts = []
+
+        for threshold in thresholds:
+            is_breached, usage_percentage = self._threshold_breach_status(threshold, aggregation, allowance)
+            if not is_breached:
+                continue
+
+            if (
+                self._alert_already_exists(UsageAlert, threshold, customer, aggregation)
+                and not threshold.repeat_notification
+            ):
+                continue
+
+            alert = UsageAlert.objects.create(
+                threshold=threshold,
+                customer=customer,
+                subscription=subscription,
+                aggregation=aggregation,
+                usage_value=aggregation.total_value,
+                usage_percentage=usage_percentage,
+                allowance_value=allowance if allowance > 0 else None,
+            )
+            created_alerts.append(alert)
+            self._log_threshold_alert(alert, threshold, customer, aggregation, usage_percentage)
+            self._schedule_alert_notification(alert)
+
+        return created_alerts
+
+    def _get_customer(self, customer_model: Any, customer_id: str) -> Any | None:
+        try:
+            return customer_model.objects.get(id=customer_id)
+        except customer_model.DoesNotExist:
+            return None
+
+    def _get_latest_aggregation(
+        self, usage_aggregation_model: Any, customer_id: str, meter_id: str, subscription_id: str | None
+    ) -> Any | None:
+        agg_query = usage_aggregation_model.objects.filter(
+            customer_id=customer_id,
+            meter_id=meter_id,
+            status__in=("accumulating", "pending_rating"),
+        )
+        if subscription_id:
+            agg_query = agg_query.filter(subscription_id=subscription_id)
+        return agg_query.order_by("-period_start").first()
+
+    def _resolve_allowance_and_plan(self, aggregation: Any) -> tuple[Decimal, Any | None, Any | None]:
         allowance = Decimal("0")
         subscription = aggregation.subscription
 
@@ -828,75 +870,56 @@ class UsageAlertService:
             if allowance <= 0:
                 allowance = _get_allowance_from_service_plan(aggregation.meter, service_plan)
 
-        # Get applicable thresholds
-        thresholds = UsageThreshold.objects.filter(meter_id=meter_id, is_active=True)
+        return allowance, subscription, service_plan
+
+    def _get_applicable_thresholds(self, usage_threshold_model: Any, meter_id: str, service_plan: Any | None) -> Any:
+        thresholds = usage_threshold_model.objects.filter(meter_id=meter_id, is_active=True)
         if service_plan:
-            thresholds = thresholds.filter(Q(service_plan__isnull=True) | Q(service_plan=service_plan))
-        else:
-            thresholds = thresholds.filter(Q(service_plan__isnull=True))
+            return thresholds.filter(Q(service_plan__isnull=True) | Q(service_plan=service_plan))
+        return thresholds.filter(Q(service_plan__isnull=True))
 
-        created_alerts = []
+    def _threshold_breach_status(self, threshold: Any, aggregation: Any, allowance: Decimal) -> tuple[bool, Any | None]:
+        if threshold.threshold_type == "percentage" and allowance > 0:
+            usage_percentage = (aggregation.total_value / allowance) * 100
+            return usage_percentage >= threshold.threshold_value, usage_percentage
+        if threshold.threshold_type == "absolute":
+            return aggregation.total_value >= threshold.threshold_value, None
+        return False, None
 
-        for threshold in thresholds:
-            # Check if threshold is breached
-            is_breached = False
-            usage_percentage = None
+    def _alert_already_exists(self, usage_alert_model: Any, threshold: Any, customer: Any, aggregation: Any) -> bool:
+        return usage_alert_model.objects.filter(
+            threshold=threshold,
+            customer=customer,
+            aggregation=aggregation,
+            status__in=("pending", "sent"),
+        ).exists()
 
-            if threshold.threshold_type == "percentage" and allowance > 0:
-                usage_percentage = (aggregation.total_value / allowance) * 100
-                is_breached = usage_percentage >= threshold.threshold_value
-            elif threshold.threshold_type == "absolute":
-                is_breached = aggregation.total_value >= threshold.threshold_value
-
-            if not is_breached:
-                continue
-
-            # Check if we already sent an alert for this threshold
-            existing_alert = UsageAlert.objects.filter(
-                threshold=threshold, customer=customer, aggregation=aggregation, status__in=("pending", "sent")
-            ).exists()
-
-            if existing_alert and not threshold.repeat_notification:
-                continue
-
-            # Create alert
-            alert = UsageAlert.objects.create(
-                threshold=threshold,
-                customer=customer,
-                subscription=subscription,
-                aggregation=aggregation,
-                usage_value=aggregation.total_value,
-                usage_percentage=usage_percentage,
-                allowance_value=allowance if allowance > 0 else None,
-            )
-
-            created_alerts.append(alert)
-
-            # Log the alert
-            AuditService.log_simple_event(
-                event_type="usage_alert_created",
-                user=None,
-                content_object=alert,
-                description=(
-                    f"Usage alert triggered: {threshold.meter.name} at "
-                    f"{usage_percentage or aggregation.total_value}"
-                ),
-                actor_type="system",
-                metadata={
-                    "alert_id": str(alert.id),
-                    "threshold_id": str(threshold.id),
-                    "customer_id": str(customer.id),
-                    "meter_name": threshold.meter.name,
-                    "usage_value": str(aggregation.total_value),
-                    "threshold_value": str(threshold.threshold_value),
-                    "threshold_type": threshold.threshold_type,
-                },
-            )
-
-            # Schedule notification
-            self._schedule_alert_notification(alert)
-
-        return created_alerts
+    def _log_threshold_alert(
+        self,
+        alert: Any,
+        threshold: Any,
+        customer: Any,
+        aggregation: Any,
+        usage_percentage: Decimal | None,
+    ) -> None:
+        AuditService.log_simple_event(
+            event_type="usage_alert_created",
+            user=None,
+            content_object=alert,
+            description=(
+                f"Usage alert triggered: {threshold.meter.name} at " f"{usage_percentage or aggregation.total_value}"
+            ),
+            actor_type="system",
+            metadata={
+                "alert_id": str(alert.id),
+                "threshold_id": str(threshold.id),
+                "customer_id": str(customer.id),
+                "meter_name": threshold.meter.name,
+                "usage_value": str(aggregation.total_value),
+                "threshold_value": str(threshold.threshold_value),
+                "threshold_type": threshold.threshold_type,
+            },
+        )
 
     def _schedule_alert_notification(self, alert: Any) -> None:
         """Schedule async notification for an alert"""

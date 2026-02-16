@@ -9,10 +9,13 @@ import hmac
 import json
 import time
 import uuid
-from typing import Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+
+if TYPE_CHECKING:
+    from apps.products.models import ProductPrice
 
 # Security constants
 MIN_SECRET_LENGTH = 32  # Minimum characters for cryptographic security
@@ -304,7 +307,9 @@ class PriceSealingService:
             raise ValidationError(f"Price validation failed: {e}") from e
 
 
-def create_sealed_price_for_product_price(product_price, client_ip: str, billing_period: str = "monthly") -> str:
+def create_sealed_price_for_product_price(
+    product_price: "ProductPrice", client_ip: str, billing_period: str = "monthly"
+) -> str:
     """
     🔒 Convenience function to create sealed price token from ProductPrice instance.
     Updated for simplified pricing model.

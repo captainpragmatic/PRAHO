@@ -722,7 +722,7 @@ class InteractiveTypeAdder:
             import subprocess  # noqa: PLC0415
 
             result = subprocess.run(  # noqa: S603
-                ["ruff", "format", str(self.file_path)],
+                [sys.executable, "-m", "ruff", "format", str(self.file_path)],
                 capture_output=True,
                 text=True,
                 check=False,
